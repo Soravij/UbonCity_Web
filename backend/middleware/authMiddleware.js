@@ -1,27 +1,37 @@
-import jwt from "jsonwebtoken";
+﻿import jwt from "jsonwebtoken";
 
-export const protect = (req,res,next)=>{
+const JWT_SECRET = process.env.JWT_SECRET || "uboncity_secret";
 
- const authHeader = req.headers.authorization;
+function extractBearerToken(authHeader) {
+  const header = String(authHeader || "").trim();
+  if (!header) return "";
 
- if(!authHeader){
-  return res.status(401).json({message:"Not authorized"});
- }
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) return "";
 
- const token = authHeader.split(" ")[1];
+  return String(match[1] || "").trim();
+}
 
- try{
+export const protect = (req, res, next) => {
+  const token = extractBearerToken(req.headers.authorization);
 
-  const decoded = jwt.verify(token,"uboncity_secret");
+  if (!token) {
+    return res.status(401).json({ message: "Not authorized" });
+  }
 
-  req.user = decoded;
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch {
+    return res.status(401).json({ message: "Invalid token" });
+  }
+};
+
+export const authorizeAdmin = (req, res, next) => {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ message: "Admin only" });
+  }
 
   next();
-
- }catch(err){
-
-  res.status(401).json({message:"Invalid token"});
-
- }
-
-}
+};

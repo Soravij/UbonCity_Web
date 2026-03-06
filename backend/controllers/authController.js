@@ -1,18 +1,41 @@
 import pool from "../config/db.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { ensureUserRoleColumn } from "../services/userRoleService.js";
+
+const JWT_SECRET = process.env.JWT_SECRET || "uboncity_secret";
+
+function isAdminEmail(email) {
+  const adminEmails = (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean);
+
+  return adminEmails.includes(String(email).toLowerCase());
+}
+
+function resolveRole(email, dbRole) {
+  if (isAdminEmail(email)) {
+    return "admin";
+  }
+
+  return dbRole === "admin" ? "admin" : "user";
+}
 
 export const register = async (req,res)=>{
 
- const {email,password} = req.body;
+ const {email,password,role} = req.body;
 
  try{
 
+  await ensureUserRoleColumn();
+
   const hash = await bcrypt.hash(password,10);
+  const safeRole = role === "admin" ? "admin" : "user";
 
   await pool.query(
-   "INSERT INTO users (email,password) VALUES (?,?)",
-   [email,hash]
+   "INSERT INTO users (email,password,role) VALUES (?,?,?)",
+   [email,hash,safeRole]
   );
 
   res.json({message:"User created"});
@@ -31,8 +54,10 @@ export const login = async (req,res)=>{
 
  try{
 
+  await ensureUserRoleColumn();
+
   const [rows] = await pool.query(
-   "SELECT * FROM users WHERE email=?",
+   "SELECT id,email,password,role FROM users WHERE email=?",
    [email]
   );
 
@@ -48,13 +73,15 @@ export const login = async (req,res)=>{
    return res.status(401).json({error:"Wrong password"});
   }
 
+  const role = resolveRole(user.email, user.role);
+
   const token = jwt.sign(
-   {id:user.id},
-   "SECRET",
+   {id:user.id,email:user.email,role},
+   JWT_SECRET,
    {expiresIn:"7d"}
   );
 
-  res.json({token});
+  res.json({token,role,email:user.email});
 
  }catch(err){
 

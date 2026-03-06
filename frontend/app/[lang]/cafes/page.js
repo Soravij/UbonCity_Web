@@ -1,24 +1,6 @@
-import { getPlaces } from "@/lib/api";
-import Card from "@/components/Card";
+import CategoryPage from "@/components/CategoryPage";
 
-export default async function cafes({ params }) {
-
- const { lang } = params;
-
- const data = await getPlaces("cafes", lang);
-
- return (
-
-  <div>
-
-   <h1>cafes</h1>
-
-   {data.items.map(place => (
-     <Card key={place.id} place={place} />
-   ))}
-
-  </div>
-
- );
-
+export default async function Cafes({ params }) {
+  const { lang } = await params;
+  return <CategoryPage lang={lang} category="cafes" />;
 }
