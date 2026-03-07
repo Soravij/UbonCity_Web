@@ -386,7 +386,7 @@ function parseModelJson(rawText) {
 
 async function translateFromThai(title, description, targetLang) {
   const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: "gpt-5-mini",
     response_format: { type: "json_object" },
     messages: [
       {
@@ -521,6 +521,7 @@ export const deletePlace = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
 
 
 

@@ -68,7 +68,7 @@ async function requestTranslation({ title, description, sourceLang, targetLang, 
     : "";
 
   const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: "gpt-5-mini",
     response_format: { type: "json_object" },
     messages: [
       {
@@ -434,6 +434,7 @@ export const deleteEvent = async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 };
+
 
 
 
