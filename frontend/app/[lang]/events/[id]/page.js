@@ -28,7 +28,7 @@ export default async function EventDetailPage({ params }) {
   const { lang, id } = await params;
   const activeLang = normalizeLang(lang);
   const copy = getLangContent(activeLang);
-  const event = await getEventDetail(id);
+  const event = await getEventDetail(id, activeLang);
 
   if (!event) {
     return (
@@ -77,3 +77,4 @@ export default async function EventDetailPage({ params }) {
     </section>
   );
 }
+

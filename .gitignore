@@ -1,5 +1,14 @@
-
+﻿
 # Local secrets
 backend/.env
 .env
 
+# Local runtime artifacts
+backend/*-test.log
+backend/*-test.err.log
+frontend/*-test.log
+frontend/*-test.err.log
+frontend/*-start.log
+frontend/*-start.err.log
+admin/*-test.log
+admin/*-test.err.log

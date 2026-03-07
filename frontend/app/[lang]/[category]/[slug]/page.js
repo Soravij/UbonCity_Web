@@ -83,11 +83,12 @@ export default async function PlaceDetailPage({ params }) {
     getPlaceDetail(category, slug, lang),
     Promise.resolve(getLangContent(lang)),
   ]);
+  const categoryLabel = copy?.nav?.[category] || category || "-";
 
   if (!place) {
     return (
       <section className="mx-auto max-w-3xl space-y-3 md:space-y-4">
-        <p className="text-sm text-[color:var(--muted)]">{copy.nav?.[category] || category}</p>
+        <p className="text-sm text-[color:var(--muted)]">{categoryLabel}</p>
         <h1 className="text-2xl font-bold tracking-tight md:text-4xl">ไม่พบเนื้อหา</h1>
         <p className="text-[15px] leading-7 text-slate-700 md:text-base">
           ลิงก์นี้อาจถูกเปลี่ยน slug หรือเนื้อหายังไม่ได้อนุมัติให้แสดงผล
@@ -124,7 +125,7 @@ export default async function PlaceDetailPage({ params }) {
 
   return (
     <section className="mx-auto max-w-3xl">
-      <p className="mb-1 text-sm text-[color:var(--muted)]">{copy.nav[category]}</p>
+      <p className="mb-1 text-sm text-[color:var(--muted)]">{categoryLabel}</p>
       <h1 className="mb-1 text-2xl font-bold tracking-tight md:text-4xl">{place.title}</h1>
 
       <div className="mt-3 text-[15px] leading-7 text-slate-700 md:text-base">

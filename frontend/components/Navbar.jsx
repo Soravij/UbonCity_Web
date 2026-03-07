@@ -22,25 +22,25 @@ export default function Navbar({ lang }) {
         <Link
           href={`/${lang}`}
           aria-label="Home"
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#4B0150]/20 bg-white/55 text-[#4B0150] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/90 hover:shadow-[0_10px_20px_rgba(75,1,80,0.2)]"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#4B0150]/20 bg-white/55 text-[#4B0150] shadow-sm transition-all duration-300 hover:bg-white/90 hover:shadow-[0_10px_20px_rgba(75,1,80,0.2)]"
         >
           <HomeIcon />
         </Link>
 
         <Link
           href={`/${lang}`}
-          className="shrink-0 whitespace-nowrap text-base font-bold tracking-[0.04em] text-[#4B0150] transition-all duration-300 hover:-translate-y-0.5 hover:text-[#6a2a70] md:text-lg"
+          className="shrink-0 whitespace-nowrap text-base font-bold tracking-[0.04em] text-[#4B0150] transition-all duration-300 hover:text-[#6a2a70] md:text-lg"
         >
           UbonCity.com
         </Link>
 
-        <div className="mx-2 flex-1 overflow-x-auto">
+        <div className="mx-2 flex-1 overflow-x-auto py-1">
           <div className="flex min-w-max items-center justify-center gap-2">
             {CATEGORY_KEYS.map((key) => (
               <Link
                 key={key}
                 href={`/${lang}/${key}`}
-                className="shrink-0 whitespace-nowrap rounded-full border border-[#4B0150]/15 bg-white/45 px-3 py-1.5 font-medium text-[#4B0150] shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/90 hover:shadow-[0_10px_18px_rgba(75,1,80,0.2)]"
+                className="shrink-0 whitespace-nowrap rounded-full border border-[#4B0150]/15 bg-white/45 px-3 py-1.5 font-medium text-[#4B0150] shadow-sm transition-all duration-300 hover:bg-white/90 hover:shadow-[0_10px_18px_rgba(75,1,80,0.2)]"
               >
                 {copy.nav[key]}
               </Link>

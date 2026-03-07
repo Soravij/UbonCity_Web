@@ -16,6 +16,7 @@ router.get("/events/:id", getEventDetail);
 router.post("/events", protect, createEvent);
 router.put("/events/:id", protect, updateEvent);
 router.patch("/events/:id/approve", protect, authorizeAdmin, approveEvent);
-router.delete("/events/:id", protect, deleteEvent);
+router.delete("/events/:id", protect, authorizeAdmin, deleteEvent);
 
 export default router;
+

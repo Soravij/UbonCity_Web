@@ -17,6 +17,7 @@ router.get("/places/:category/:slug", getPlaceDetail);
 router.post("/places", protect, createPlace);
 router.put("/places/:id", protect, updatePlace);
 router.patch("/places/:id/approve", protect, authorizeAdmin, approvePlace);
-router.delete("/places/:id", protect, deletePlace);
+router.delete("/places/:id", protect, authorizeAdmin, deletePlace);
 
 export default router;
+

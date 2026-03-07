@@ -98,11 +98,14 @@ export default function Approvals({ token, onPendingChanged }) {
   const [loading, setLoading] = useState(false);
   const [approvingId, setApprovingId] = useState("");
   const [message, setMessage] = useState("");
+  const [approvalLogs, setApprovalLogs] = useState([]);
   const [previewItem, setPreviewItem] = useState(null);
+  const [notice, setNotice] = useState(null);
 
   const loadPending = useCallback(async () => {
     setLoading(true);
     setMessage("");
+    setApprovalLogs([]);
 
     try {
       const headers = authHeaders(token);
@@ -151,26 +154,14 @@ export default function Approvals({ token, onPendingChanged }) {
     return items.filter((it) => it.pending_type === "place" && it.category === filter);
   }, [items, filter]);
 
-  const previewBlocks = useMemo(
-    () => splitContentBlocks(previewItem?.description || ""),
-    [previewItem?.description]
-  );
-
-  const previewFirstImageIndex = useMemo(
-    () => previewBlocks.findIndex((b) => b.type === "image"),
-    [previewBlocks]
-  );
-
+  const previewBlocks = useMemo(() => splitContentBlocks(previewItem?.description || ""), [previewItem?.description]);
+  const previewFirstImageIndex = useMemo(() => previewBlocks.findIndex((b) => b.type === "image"), [previewBlocks]);
   const previewFirstImage = useMemo(
     () => (previewFirstImageIndex >= 0 ? previewBlocks[previewFirstImageIndex] : null),
     [previewBlocks, previewFirstImageIndex]
   );
 
-  const parsedCover = useMemo(
-    () => parseCoverImageValue(previewItem?.image),
-    [previewItem?.image]
-  );
-
+  const parsedCover = useMemo(() => parseCoverImageValue(previewItem?.image), [previewItem?.image]);
   const previewCoverUrl = parsedCover.url || previewFirstImage?.src || "";
   const previewCoverRotation = parsedCover.url ? parsedCover.rotation : previewFirstImage?.rotation || 0;
 
@@ -185,14 +176,21 @@ export default function Approvals({ token, onPendingChanged }) {
     const key = `${item.pending_type}-${item.id}`;
     setApprovingId(key);
     setMessage("");
+    setApprovalLogs([]);
 
     try {
       if (item.pending_type === "event") {
-        await api.patch(`/events/${item.id}/approve`, {}, { headers: authHeaders(token) });
-        setMessage(`อนุมัติ Event ID ${item.id} แล้ว`);
+        const res = await api.patch(`/events/${item.id}/approve`, {}, { headers: authHeaders(token) });
+        const successMessage = `อนุมัติ Event ID ${item.id} แล้ว`;
+        setMessage(successMessage);
+        setNotice({ type: "success", text: successMessage });
+        setApprovalLogs(Array.isArray(res?.data?.logs) ? res.data.logs : []);
       } else {
-        await api.patch(`/places/${item.id}/approve`, {}, { headers: authHeaders(token) });
-        setMessage(`อนุมัติเนื้อหา ID ${item.id} แล้ว`);
+        const res = await api.patch(`/places/${item.id}/approve`, {}, { headers: authHeaders(token) });
+        const successMessage = `อนุมัติเนื้อหา ID ${item.id} แล้ว`;
+        setMessage(successMessage);
+        setNotice({ type: "success", text: successMessage });
+        setApprovalLogs(Array.isArray(res?.data?.logs) ? res.data.logs : []);
       }
 
       const next = items.filter((it) => !(it.pending_type === item.pending_type && it.id === item.id));
@@ -202,7 +200,10 @@ export default function Approvals({ token, onPendingChanged }) {
         setPreviewItem(null);
       }
     } catch (err) {
-      setMessage(err?.response?.data?.error || err?.message || "อนุมัติไม่สำเร็จ");
+      const errorMessage = err?.response?.data?.error || err?.message || "อนุมัติไม่สำเร็จ";
+      setMessage(errorMessage);
+      setNotice({ type: "error", text: `อนุมัติไม่สำเร็จ: ${errorMessage}` });
+      setApprovalLogs(Array.isArray(err?.response?.data?.logs) ? err.response.data.logs : []);
     } finally {
       setApprovingId("");
     }
@@ -210,6 +211,20 @@ export default function Approvals({ token, onPendingChanged }) {
 
   return (
     <>
+      {notice ? (
+        <div className="notice-backdrop" onClick={() => setNotice(null)}>
+          <div className={`notice-card ${notice.type}`} onClick={(e) => e.stopPropagation()}>
+            <div className="card-title-row">
+              <h2>{notice.type === "success" ? "ดำเนินการสำเร็จ" : "เกิดข้อผิดพลาด"}</h2>
+              <button type="button" className="ghost" onClick={() => setNotice(null)}>
+                ปิด
+              </button>
+            </div>
+            <p className="notice-text">{notice.text}</p>
+          </div>
+        </div>
+      ) : null}
+
       <section className="admin-card">
         <div className="card-title-row">
           <h2>รอตรวจสอบ (Admin)</h2>
@@ -349,6 +364,37 @@ export default function Approvals({ token, onPendingChanged }) {
           </div>
         </div>
       ) : null}
+
+      <section className="admin-card">
+        <div className="card-title-row">
+          <h2>Approval Logs</h2>
+        </div>
+        {approvalLogs.length ? (
+          <pre
+            style={{
+              whiteSpace: "pre-wrap",
+              margin: 0,
+              padding: "10px 12px",
+              borderRadius: 8,
+              border: "1px solid #e5e7eb",
+              background: "#fffaf5",
+              fontSize: 12,
+              lineHeight: 1.55,
+              maxHeight: 260,
+              overflow: "auto",
+            }}
+          >
+            {approvalLogs.map((line, idx) => `${idx + 1}. ${line}`).join("\n")}
+          </pre>
+        ) : (
+          <p className="muted">ยังไม่มี log</p>
+        )}
+      </section>
     </>
   );
 }
+
+
+
+
+

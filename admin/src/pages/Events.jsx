@@ -92,7 +92,7 @@ function formatDateTime(value) {
   return d.toLocaleString("th-TH");
 }
 
-export default function Events({ token }) {
+export default function Events({ token, role = "user" }) {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(EMPTY);
   const [editingId, setEditingId] = useState(null);
@@ -324,9 +324,11 @@ export default function Events({ token }) {
                   <button type="button" className="ghost" onClick={() => startEdit(item)}>
                     แก้ไข
                   </button>
-                  <button type="button" className="danger" onClick={() => onDelete(item)}>
-                    ลบ
-                  </button>
+                  {role === "admin" ? (
+                    <button type="button" className="danger" onClick={() => onDelete(item)}>
+                      ลบ
+                    </button>
+                  ) : null}
                 </td>
               </tr>
             ))}
@@ -339,3 +341,5 @@ export default function Events({ token }) {
     </section>
   );
 }
+
+

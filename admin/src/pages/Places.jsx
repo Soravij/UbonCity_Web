@@ -319,6 +319,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
   const [message, setMessage] = useState("");
 
   const [translateModalOpen, setTranslateModalOpen] = useState(false);
@@ -369,7 +370,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
     setMessage("");
     try {
       const res = await api.get("/places", {
-        params: { category: form.category, lang: "th" },
+        params: { category: form.category, lang: "th", include_unapproved: 1 },
         headers: authHeaders(token),
       });
       setItems(Array.isArray(res.data?.items) ? res.data.items : []);
@@ -445,35 +446,14 @@ export default function Places({ token, role = "user", mode = "create" }) {
       const placeId = await saveLanguageVersion(thBody);
       if (!placeId) throw new Error("ไม่พบ place_id หลังบันทึกภาษาไทย");
 
-      const translateResult = await runTranslation();
-      if (translateResult) {
-        const targets = ["en", "zh", "lo"];
-        for (const lang of targets) {
-          const t = translateResult[lang];
-          if (!t?.title || !t?.description) continue;
-
-          await saveLanguageVersion({
-            group_id: placeId,
-            category: form.category,
-            lang,
-            slug: "",
-            title: t.title,
-            description: t.description,
-            meta_title: t.title,
-            meta_description: t.description,
-            image: form.image || null,
-          });
-        }
-      }
-
       if (isEdit) {
-        setMessage(`อัปเดตเนื้อหา ID ${placeId} สำเร็จ และอัปเดตภาษาอื่นให้อัตโนมัติแล้ว`);
+        setMessage(`อัปเดตเนื้อหา ID ${placeId} สำเร็จ (ภาษาอื่นจะสร้างตอนอนุมัติ)`);
         setEditingId(null);
         setForm((prev) => ({ ...EMPTY, category: prev.category }));
         await loadPlaces();
         window.scrollTo({ top: 0, behavior: "smooth" });
       } else {
-        setMessage("บันทึกสำเร็จ และอัปเดตภาษาอื่นให้อัตโนมัติแล้ว");
+        setMessage("บันทึกสำเร็จ (ภาษาอื่นจะสร้างตอนอนุมัติ)");
         setForm(EMPTY);
       }
 
@@ -485,6 +465,31 @@ export default function Places({ token, role = "user", mode = "create" }) {
     }
   }
 
+  async function onDeletePlace(item) {
+    if (role !== "admin") return;
+
+    const ok = window.confirm(`ต้องการลบเนื้อหา ID ${item.id} ใช่หรือไม่?`);
+    if (!ok) return;
+
+    setDeletingId(item.id);
+    setMessage("");
+
+    try {
+      await api.delete(`/places/${item.id}`, { headers: authHeaders(token) });
+      setMessage(`ลบเนื้อหา ID ${item.id} แล้ว (ลบทุกภาษาที่เกี่ยวข้อง)`);
+
+      if (editingId === item.id) {
+        setEditingId(null);
+        setForm((prev) => ({ ...EMPTY, category: prev.category }));
+      }
+
+      await loadPlaces();
+    } catch (e) {
+      setMessage(e?.response?.data?.error || e?.message || "ลบเนื้อหาไม่สำเร็จ");
+    } finally {
+      setDeletingId(null);
+    }
+  }
   function startEdit(item) {
     setEditingId(item.id);
     setForm({
@@ -735,7 +740,16 @@ export default function Places({ token, role = "user", mode = "create" }) {
                       <button type="button" className="ghost" onClick={() => startEdit(item)}>
                         เข้าแก้ไข
                       </button>
-
+                      {role === "admin" ? (
+                        <button
+                          type="button"
+                          className="danger"
+                          onClick={() => onDeletePlace(item)}
+                          disabled={deletingId === item.id}
+                        >
+                          {deletingId === item.id ? "กำลังลบ..." : "ลบ"}
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 ))}
@@ -1104,6 +1118,11 @@ export default function Places({ token, role = "user", mode = "create" }) {
     </>
   );
 }
+
+
+
+
+
 
 
 

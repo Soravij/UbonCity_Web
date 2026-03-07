@@ -19,7 +19,7 @@ app.use(express.json({ limit: "10mb" }));
 app.use("/uploads", express.static(path.resolve(__dirname, "uploads")));
 
 // Translate routes
-app.use("/api/translate", translateRoutes);
+app.use("/api", translateRoutes);
 
 // routes
 app.use("/api", authRoutes);
@@ -31,3 +31,4 @@ app.use("/api", eventRoutes);
 app.listen(5000, () => {
   console.log("Server running on port 5000");
 });
+
