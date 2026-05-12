@@ -30,3 +30,12 @@ coverage
 tmp-*
 .vscode
 *.zip
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Runtime artifacts
+runtime/
+uploads/
+backend_run.err

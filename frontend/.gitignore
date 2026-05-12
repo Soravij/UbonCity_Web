@@ -40,3 +40,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Runtime logs
+*-start.log
+*-start.err.log
+*-test.log
+*-test.err.log
