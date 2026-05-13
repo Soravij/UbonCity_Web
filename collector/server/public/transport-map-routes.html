@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Transport Map</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+            <p>Transport process · Public Transport Map สำหรับจัดการเส้นทางรถ มอบหมายงาน และติดตาม workflow</p>
+          </div>
+        </div>
+        <p class="muted" id="workspace-auth-status"></p>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+
+      <div class="card page-actions-strip">
+        <div class="toolbar">
+    <button id="btn-back-home" class="utility-action">Home</button>
+          <button id="btn-process-home" class="utility-action">กลับหน้าแรก</button>
+        </div>
+      </div>
+
+      <section class="card article-work-card">
+        <div class="article-section-head">
+          <div>
+            <h2 class="section-title">สร้างเส้นทางใหม่</h2>
+            <p class="muted">สร้าง route เปล่าแล้วค่อยเข้า workspace เพื่อวางเส้นและจุดจอด</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div>
+            <label>ชื่อสาย</label>
+            <input id="transport-create-name" placeholder="เช่น สายสนามบิน - บขส." />
+          </div>
+          <div>
+            <label>เลขสาย</label>
+            <input id="transport-create-number" placeholder="เช่น A1" />
+          </div>
+          <div>
+            <label>Assign ผู้ลงงาน</label>
+            <select id="transport-create-assignee">
+              <option value="">-- ยังไม่ assign --</option>
+            </select>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="btn-create-transport-route" class="primary">Create Route</button>
+          <span id="create-status" class="status"></span>
+        </div>
+      </section>
+
+      <section class="card article-work-card">
+        <div class="article-section-head">
+          <div>
+            <h2 class="section-title">Route ทั้งหมด</h2>
+            <p class="muted">owner/admin ใช้หน้านี้เพื่อ assign เปิด workspace และเปิด review</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="basic-table" id="transport-map-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>สายรถ</th>
+                <th>สถานะ</th>
+                <th>ผู้ลงงาน</th>
+                <th>มอบหมาย</th>
+                <th>การทำงาน</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/transport-map-routes-page.js"></script>
+  </body>
+</html>

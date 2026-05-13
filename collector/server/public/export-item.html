@@ -1,0 +1,68 @@
+﻿<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - ส่งออกไปเว็บไซต์หลัก</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+  <div class="auth-row">
+    <div class="auth-intro">
+      <span class="auth-badge">Collector Workspace</span>
+      <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+      <p>ส่งออกไปเว็บไซต์หลัก สำหรับตรวจสอบขั้นสุดท้ายก่อนส่งคอนเทนต์เข้าสู่ระบบเว็บไซต์หลัก</p>
+    </div>
+  </div>
+  <p class="muted" id="export-auth-status">กำลังตรวจสอบเซสชัน...</p>
+  <div class="result-banner hidden" id="export-status" role="status" aria-live="polite"></div>
+</header>
+<div class="card page-actions-strip">
+  <div class="toolbar">
+    <button id="btn-back-home" class="utility-action">Home</button>
+    <button id="btn-back-edit" class="utility-action">กลับหน้าแรก</button>
+    <button id="btn-recheck-export" class="utility-action">ตรวจความพร้อมอีกครั้ง</button>
+    <button class="ok nav-next" id="btn-send-main">ส่งไปเว็บไซต์หลัก</button>
+  </div>
+</div>
+<div class="progress-steps" aria-label="workflow progress">
+  <div class="step completed"><span class="dot">1</span><span class="label">รับข้อมูลดิบ</span></div>
+  <div class="step completed"><span class="dot">2</span><span class="label">Clean</span></div>
+  <div class="step completed"><span class="dot">3</span><span class="label">AI Draft</span></div>
+  <div class="step completed"><span class="dot">4</span><span class="label">Human Edit</span></div>
+  <div class="step active"><span class="dot">5</span><span class="label">ส่งออกไปเว็บไซต์หลัก</span></div>
+</div>
+
+      <div class="card">
+        <h2 class="section-title">สถานะงาน</h2>
+        <div id="workflow-status" class="readiness-summary hidden"></div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">ความพร้อมก่อนส่งออก</h2>
+        <div id="export-readiness" class="readiness-summary hidden"></div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">ผลการ Sync ไป Admin Backend</h2>
+        <div id="sync-backend-summary" class="readiness-summary hidden"></div>
+      </div>
+
+      <div class="card frontend-preview-card">
+        <h2 class="section-title">ตัวอย่างหน้าแสดงผล</h2>
+        <p class="muted">ตัวอย่างคอนเทนต์ที่จะถูกส่งเข้าสู่ระบบเว็บไซต์หลัก</p>
+        <div id="frontend-preview" class="frontend-preview"></div>
+      </div>
+    </main>
+
+    <script type="module" src="/export-item.js"></script>
+  </body>
+</html>
+
+
+
+

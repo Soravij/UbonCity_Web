@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Transport</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+    <style>
+      .transport-hub-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+      .transport-hub-card { display: grid; gap: 14px; }
+      .transport-hub-card p { margin: 0; }
+      .transport-hub-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    </style>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+            <p>Transport process home สำหรับจัดการ Transport Map และ Other Transport</p>
+          </div>
+        </div>
+        <p class="muted" id="workspace-auth-status"></p>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+
+      <div class="card page-actions-strip">
+        <div class="toolbar">
+    <button id="btn-back-home" class="utility-action">Home</button>
+        </div>
+      </div>
+
+      <section class="transport-hub-grid">
+        <article class="card article-work-card transport-hub-card">
+          <div class="article-section-head">
+            <div>
+              <h2 class="section-title">Transport Map</h2>
+              <p class="muted">จัดการสายรถ เส้นทาง การมอบหมายงาน และ review ของ public transport map</p>
+            </div>
+          </div>
+          <div class="transport-hub-actions">
+            <button id="btn-open-transport-map-manager" class="primary">เปิด Transport Map</button>
+            <button id="btn-open-transport-base-maps" class="utility-action hidden">Base Maps</button>
+          </div>
+        </article>
+
+        <article class="card article-work-card transport-hub-card">
+          <div class="article-section-head">
+            <div>
+              <h2 class="section-title">Other Transport</h2>
+              <p class="muted">จัดการคอนเทนต์ transport อื่น เช่น taxi รถเช่า shuttle และรายการทั่วไปในหมวด transport</p>
+            </div>
+          </div>
+          <div class="transport-hub-actions">
+            <button id="btn-open-other-transport-manager" class="primary">เปิด Other Transport</button>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="/transport-page.js"></script>
+  </body>
+</html>

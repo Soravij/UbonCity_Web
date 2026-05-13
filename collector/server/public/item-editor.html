@@ -1,0 +1,345 @@
+﻿<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - จัดชุดสั่งงาน</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+            <div class="auth-points">
+              <div class="auth-point">
+                <strong>จัดชุดสั่งงาน</strong>
+                <span>ตรวจและแก้ field pack ให้พร้อมก่อนส่งต่อ Handoff เพื่อเปิดใบสั่งงาน</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="muted" id="editor-auth-status"></p>
+        <p class="status" id="editor-status"></p>
+      </header>
+<div class="card page-actions-strip raw-process-actions">
+  <div class="toolbar">
+    <button id="btn-back" class="utility-action">Home</button>
+    <button id="btn-prev-step" class="utility-action">กลับหน้าคัดข้อมูล</button>
+    <button class="utility-action" id="btn-open-field-brief">เปิดสรุปหน้างาน (พิมพ์ / PDF)</button>
+    <button class="primary utility-action" id="btn-save">บันทึก</button>
+    <button class="ok nav-next" id="btn-next-export">ไปหน้ามอบหมายงาน</button>
+  </div>
+</div>
+<div class="progress-steps raw-process-progress" aria-label="preparation workflow progress">
+  <div class="step completed"><span class="dot">1</span><span class="label">รับข้อมูลดิบ</span></div>
+  <div class="step completed"><span class="dot">2</span><span class="label">คัดข้อมูลส่งเข้า AI</span></div>
+  <div class="step completed"><span class="dot">3</span><span class="label">AI สร้างชุดสั่งงาน</span></div>
+  <div class="step active"><span class="dot">4</span><span class="label">ตรวจชุดสั่งงาน</span></div>
+</div>
+<div id="item-claim-banner" class="claim-banner">
+  <div class="claim-banner-copy">
+    <div class="claim-banner-title">สถานะการรับงาน</div>
+    <p id="item-claim-status" class="muted"></p>
+  </div>
+  <div class="toolbar claim-banner-actions">
+    <button id="btn-item-claim" type="button">รับงานนี้</button>
+    <button id="btn-item-release" type="button" class="utility-action">ปล่อยงาน</button>
+    <button id="btn-item-takeover" type="button" class="fail">Take over</button>
+  </div>
+</div>
+
+      <div class="card">
+        <h2 class="section-title">ข้อมูลหลักของงาน</h2>
+        <p class="muted">ตรวจและแก้ข้อมูลสำคัญให้ครบถ้วนก่อนส่งต่องาน</p>
+        <div class="grid">
+          <div>
+            <label>ID</label>
+            <input id="e-id" readonly />
+          </div>
+          <div>
+            <label>ประเภท</label>
+            <select id="e-type">
+              <option value="place">สถานที่</option>
+              <option value="event">อีเวนต์</option>
+            </select>
+          </div>
+          <div>
+            <label>หมวดหมู่</label>
+            <select id="e-category">
+              <option value="attractions">ที่เที่ยว</option>
+              <option value="activities">กิจกรรม</option>
+              <option value="hotels">ที่พัก</option>
+              <option value="cafes">คาเฟ่</option>
+              <option value="restaurants">ร้านอาหาร</option>
+              <option value="transport">การเดินทาง</option>
+            </select>
+          </div>
+          <div>
+            <label>ภาษา</label>
+            <select id="e-lang">
+              <option value="th">th</option>
+              <option value="en">en</option>
+              <option value="zh">zh</option>
+              <option value="lo">lo</option>
+            </select>
+          </div>
+          <div>
+            <label>ชื่อคอนเทนต์</label>
+            <input id="e-title" />
+          </div>
+          <div>
+            <label>แท็ก (คั่นด้วย |)</label>
+            <input id="e-tags" placeholder="cafe|ubon|local" />
+          </div>
+          <input id="e-source-name" type="hidden" />
+          <input id="e-source-url" type="hidden" />
+          <div class="full-span">
+            <label>แหล่งอ้างอิงที่ดึงมาแล้ว</label>
+            <div id="editor-source-summary" class="secondary-panel"></div>
+            <div class="field-help">ระบบสรุปแหล่งอ้างอิงให้แบบย่อ เช่น Google Maps หรือ Wongnai ถ้าจะเพิ่มหรือแก้ ให้แก้ผ่าน references หรือ evidence</div>
+          </div>
+          <div>
+            <label>ละติจูด</label>
+            <input id="e-lat" />
+          </div>
+          <div>
+            <label>ลองจิจูด</label>
+            <input id="e-lng" />
+          </div>
+          <input id="e-image" type="hidden" />
+          <img id="e-cover-preview" class="cover-preview hidden" alt="cover preview" hidden />
+          <textarea id="e-description" hidden></textarea>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">รายละเอียดงานภาคสนาม</h2>
+        <p class="muted">สรุปข้อมูลที่ทีมต้องใช้หน้างานให้ชัดและพร้อมใช้งาน</p>
+        <div class="grid">
+          <input id="fp-id" type="hidden" />
+          <div>
+            <label>สถานะการเตรียมมอบหมาย</label>
+            <div id="fp-progress-control" class="field-progress-control"></div>
+            <select id="fp-status" hidden>
+              <option value="draft">ฉบับร่าง</option>
+              <option value="ready_for_field">พร้อมมอบหมาย</option>
+              <option value="field_in_progress">กำลังลงหน้างาน</option>
+              <option value="field_done">ลงหน้างานแล้ว</option>
+              <option value="on_hold">พักไว้</option>
+            </select>
+            <div class="field-help">ใช้บอกว่าชุดงานนี้ยังจัด brief อยู่หรือพร้อมมอบหมายแล้ว</div>
+          </div>
+          <div>
+            <label><input id="fp-writer-ready" type="checkbox" /> เตรียมส่งต่อทีมเขียนแล้ว</label>
+            <div class="field-help">ใช้เมื่ออยากจัดข้อมูลต่อให้ทีมเขียนหลังจบงานภาคสนาม ส่วนนี้ไม่บังคับในขั้นนี้</div>
+          </div>
+          <div class="full-span">
+            <div id="step4-next-panel" class="secondary-panel"></div>
+          </div>
+          <div class="full-span secondary-panel field-pack-regenerate-panel">
+            <strong>ให้ Agent สร้างหรือปรับชุดสั่งงานใหม่</strong>
+            <div class="field-help">ใช้เมื่อยังไม่มี field pack หรือ field pack ยังไม่ตรงงานจริง ระบบจะใช้ clean context และคำสั่งด้านล่าง โดยไม่ให้ Agent เขียนบทความหรือแก้ description_clean</div>
+            <label for="fp-regenerate-note">สิ่งที่ต้องการให้ปรับ</label>
+            <textarea id="fp-regenerate-note" placeholder="เช่น เพิ่มคำถามสำหรับเจ้าหน้าที่ ลดภาษาเชิงบทความ เน้น shot list และข้อมูลที่ต้องยืนยันหน้างาน"></textarea>
+            <div class="toolbar compact-toolbar">
+              <button id="btn-regenerate-field-pack" type="button" class="warn">สร้างชุดสั่งงานใหม่</button>
+              <span id="fp-regenerate-status" class="status"></span>
+            </div>
+          </div>
+          <div class="full-span">
+            <label>สรุปชุดสั่งงานจาก AI</label>
+            <textarea id="fp-ai-summary" placeholder="สรุปภาพรวมสำหรับทีมลงหน้างาน"></textarea>
+          </div>
+          <div>
+            <label>ประเด็นเด่น (1 บรรทัดต่อ 1 รายการ)</label>
+            <textarea id="fp-ai-highlights" placeholder="จุดเด่นที่ AI มองเห็น"></textarea>
+          </div>
+          <div>
+            <label>จุดที่ยังไม่ชัด (1 บรรทัดต่อ 1 รายการ)</label>
+            <textarea id="fp-ai-unknowns" placeholder="สิ่งที่ AI ยังไม่ชัวร์"></textarea>
+          </div>
+          <div class="full-span">
+            <label>สรุปหลังตรวจแก้</label>
+            <textarea id="fp-editor-summary" placeholder="สรุปที่คนตรวจแก้แล้ว"></textarea>
+          </div>
+          <div>
+            <label>ข้อมูลที่ยืนยันแล้ว (1 บรรทัดต่อ 1 รายการ)</label>
+            <textarea id="fp-verified-facts" placeholder="ข้อเท็จจริงที่พอเชื่อถือได้"></textarea>
+          </div>
+          <div>
+            <label>ข้อมูลที่ยังไม่ชัวร์ (1 บรรทัดต่อ 1 รายการ)</label>
+            <textarea id="fp-uncertain-facts" placeholder="ข้อเท็จจริงที่ยังต้องระวัง"></textarea>
+          </div>
+          <div class="full-span">
+            <label>มุมเล่าเรื่อง</label>
+            <textarea id="fp-story-angle" placeholder="มุมเล่าหลักของงานนี้"></textarea>
+          </div>
+          <div class="full-span">
+            <label>หมายเหตุหน้างาน</label>
+            <textarea id="fp-field-notes" placeholder="หมายเหตุเพิ่มเติมสำหรับทีมลงหน้างาน"></textarea>
+          </div>
+          <div>
+            <label>ข้อมูลที่ต้องยืนยันหน้างาน (1 บรรทัดต่อ 1 รายการ)</label>
+            <textarea id="fp-must-verify-facts" placeholder="สิ่งที่ต้องยืนยันหน้างาน"></textarea>
+          </div>
+          <div>
+            <label>Shot List (1 บรรทัดต่อ 1 รายการ)</label>
+            <textarea id="fp-must-capture-shots" placeholder="shot ที่ต้องถ่าย"></textarea>
+            <div class="field-help">ลิสต์ภาพหรือมุมที่ต้องมีให้ครบเมื่อไปถึงหน้างาน</div>
+          </div>
+          <div class="full-span">
+            <label>คำถามที่ต้องถาม (1 บรรทัดต่อ 1 รายการ)</label>
+            <textarea id="fp-must-ask-questions" placeholder="คำถามที่ต้องถามหน้างาน"></textarea>
+          </div>
+          <div>
+            <label>Hook</label>
+            <textarea id="fp-social-hook" placeholder="hook สำหรับคอนเทนต์"></textarea>
+            <div class="field-help">ประโยคเปิดหรือประเด็นดึงความสนใจที่อยากใช้เป็นตัวนำ</div>
+          </div>
+          <div>
+            <label>Shot ที่ควรเน้น (1 บรรทัดต่อ 1 รายการ)</label>
+            <textarea id="fp-social-shot-emphasis" placeholder="shot ที่ควรเน้นเป็นพิเศษ"></textarea>
+            <div class="field-help">เลือกเฉพาะ shot ที่อยากให้เด่นกว่าภาพอื่นในคอนเทนต์</div>
+          </div>
+          <div>
+            <label>ประเด็นที่พูดหน้ากล้อง (1 บรรทัดต่อ 1 รายการ)</label>
+            <textarea id="fp-social-on-camera-points" placeholder="ประเด็นที่ควรพูดหน้ากล้อง"></textarea>
+            <div class="field-help">สิ่งที่คนเล่าควรพูดให้ครบเมื่อถ่ายคลิปหรือเก็บเสียงหน้างาน</div>
+          </div>
+          <div>
+            <label>แนวทาง Caption</label>
+            <textarea id="fp-social-caption-angle" placeholder="แนว caption/post copy"></textarea>
+            <div class="field-help">โทนหรือมุมของข้อความประกอบโพสต์ ไม่ต้องเขียนยาวทั้งชิ้นก็ได้</div>
+          </div>
+          <div class="full-span">
+            <label>แหล่งอ้างอิง (1 บรรทัดต่อ 1 รายการ: label | url | source_family | note)</label>
+            <textarea id="fp-references" placeholder="แหล่งอ้างอิงทั่วไปของชุดลงหน้างาน"></textarea>
+          </div>
+          <div class="full-span secondary-panel">
+            <strong>การเตรียมส่งต่อทีมเขียน</strong>
+            <div class="field-help">ใช้ส่วนนี้เมื่ออยากแนบข้อมูลต่อให้ทีมเขียนหรือเตรียมงานเขียนล่วงหน้า ถ้ายังไม่ใช้ให้เว้นไว้ได้</div>
+          </div>
+          <div class="full-span">
+            <label>แหล่งอ้างอิงสำหรับทีมเขียน (ถ้ามี) (1 บรรทัดต่อ 1 รายการ: label | url | source_family | note)</label>
+            <textarea id="fp-writer-references" placeholder="แหล่งอ้างอิงที่อยากส่งต่อให้ทีมเขียน"></textarea>
+          </div>
+          <div class="full-span">
+            <label>ภาพอ้างอิงจาก assets ที่เลือกไว้</label>
+            <div id="fp-media-hints-editor" class="secondary-panel"></div>
+            <div class="field-help">ใช้เฉพาะรูปที่ถูกเลือกส่งเข้า Agent เป็นตัวอย่างหรือแนวทางสำหรับทีมหน้างาน</div>
+          </div>
+          <div class="full-span">
+            <label>ภาพอ้างอิงจากลิงก์ภายนอก (1 บรรทัดต่อ 1 รายการ: caption | url | kind)</label>
+            <textarea id="fp-external-media-hints" placeholder="ภาพอ้างอิงจาก URL ภายนอก ถ้ามี"></textarea>
+            <div class="field-help">ใส่เมื่อมีภาพอ้างอิงจากเว็บภายนอกที่อยากแนบไปด้วย</div>
+          </div>
+          <div class="full-span secondary-panel">
+            <strong>Handoff อยู่ขั้นถัดไป</strong>
+            <div class="field-help">หน้านี้ใช้ตรวจ field pack เท่านั้น การสร้าง assignment จริงทำในหน้า Handoff หลังจากกดไปกระบวนการส่งงานไปทำ</div>
+          </div>
+          <div class="hidden">
+            <label>มอบหมายงานภาคสนาม: ลิงก์งานเดิม</label>
+            <input id="fp-field-assignment-id" type="number" min="1" placeholder="เชื่อมกับ content_assignment เดิม ถ้ามี" />
+            <div class="field-help">ถ้างานนี้เคยถูกมอบหมายไว้แล้ว ให้ผูกกับ assignment เดิมได้</div>
+          </div>
+          <div class="hidden">
+            <label>มอบหมายงานภาคสนาม: ผู้รับงาน</label>
+            <input id="fp-field-assigned-name" placeholder="ชื่อผู้รับงานภาคสนาม" />
+          </div>
+          <div class="hidden">
+            <label>มอบหมายงานภาคสนาม: บทบาท</label>
+            <input id="fp-field-assigned-role" placeholder="เช่น field, camera, creator" />
+          </div>
+          <div class="hidden">
+            <label>มอบหมายงานภาคสนาม: กำหนดส่ง</label>
+            <input id="fp-field-due-at" type="datetime-local" />
+          </div>
+          <div class="full-span hidden">
+            <label>หมายเหตุการมอบหมายภาคสนาม</label>
+            <textarea id="fp-field-assignment-note" placeholder="หมายเหตุสำหรับงานภาคสนาม"></textarea>
+          </div>
+          <div class="hidden">
+            <label>เตรียมมอบหมายงานเขียน: ลิงก์งานเดิม</label>
+            <input id="fp-writer-assignment-id" type="number" min="1" placeholder="เชื่อมกับ content_assignment เดิม ถ้ามี" />
+            <div class="field-help">ใช้เมื่ออยากเชื่อมชุดนี้กับงานเขียนที่มีอยู่แล้ว</div>
+          </div>
+          <div class="hidden">
+            <label>เตรียมมอบหมายงานเขียน: ผู้รับงาน</label>
+            <input id="fp-writer-assigned-name" placeholder="ชื่อผู้รับงานเขียน" />
+          </div>
+          <div class="hidden">
+            <label>เตรียมมอบหมายงานเขียน: บทบาท</label>
+            <input id="fp-writer-assigned-role" placeholder="เช่น writer, editor" />
+          </div>
+          <div class="hidden">
+            <label>เตรียมมอบหมายงานเขียน: กำหนดส่ง</label>
+            <input id="fp-writer-due-at" type="datetime-local" />
+          </div>
+          <div class="full-span hidden">
+            <label>หมายเหตุสำหรับทีมเขียน</label>
+            <textarea id="fp-writer-assignment-note" placeholder="หมายเหตุสำหรับงานเขียน"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">สถานะงานภาคสนาม</h2>
+        <p class="muted">สรุปความพร้อมของชุดลงหน้างานจากข้อมูลปัจจุบัน ว่ายังขาดอะไรและควรเดินต่ออย่างไร</p>
+        <div id="packaging-summary" class="readiness-summary"></div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">สรุปจาก AI</h2>
+        <p class="muted">สรุปตั้งต้นจาก AI เพื่อให้เห็นภาพรวม จุดเด่น และจุดที่ยังไม่ชัวร์ก่อนจัดงานภาคสนาม</p>
+        <div id="ai-summary-preview" class="preview-grid"></div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">จุดที่ต้องตรวจ</h2>
+        <p class="muted">แยกข้อเท็จจริงตั้งต้นที่มีอยู่แล้วออกจากสิ่งที่ยังต้องไปยืนยันหน้างาน</p>
+        <div id="fact-check-preview" class="preview-grid"></div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">ชุดลงหน้างาน</h2>
+        <p class="muted">ใช้เป็น brief ตั้งต้นสำหรับผู้ลงหน้างาน โดยแยกสิ่งที่ต้องยืนยัน สิ่งที่ต้องถ่าย สิ่งที่ต้องถาม และแนวเล่า social</p>
+        <div id="field-brief-preview" class="preview-grid"></div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">ไฟล์จากงานนี้</h2>
+        <p class="muted">แสดงเฉพาะไฟล์ที่อยู่ในชุด selected_for_ai เพื่อให้คนตรวจแก้เห็นของที่อยู่ใน flow หลักเดียวกัน</p>
+        <p class="status" id="asset-status"></p>
+        <div class="table-wrap">
+          <table id="table-assets">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>รายการ</th>
+                <th>สถานะ</th>
+                <th>ไฟล์</th>
+                <th>ตัวอย่าง</th>
+                <th>จัดการ</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+    </main>
+
+    <script type="module" src="/item-editor.js"></script>
+  </body>
+</html>
+
+
+
+
+
+

@@ -1,0 +1,47 @@
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Event Review Preview</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+  </head>
+  <body>
+    <main class="container article-preview-page-shell">
+      <div class="article-preview-mode-controls toolbar compact-toolbar" aria-label="preview viewport controls">
+          <button id="btn-preview-page-desktop" type="button" class="active">Desktop</button>
+          <button id="btn-preview-page-mobile" type="button">Mobile</button>
+      </div>
+      <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+
+      <section class="article-preview-stage">
+        <div class="article-shell-placeholder article-shell-placeholder-nav" aria-hidden="true">
+          <div class="article-shell-placeholder-inner">
+            <span class="article-shell-chip is-brand"></span>
+            <div class="article-shell-nav-group">
+              <span class="article-shell-chip is-nav"></span>
+              <span class="article-shell-chip is-nav"></span>
+              <span class="article-shell-chip is-nav"></span>
+            </div>
+            <span class="article-shell-chip is-mobile"></span>
+            <span class="article-shell-chip is-lang"></span>
+          </div>
+        </div>
+
+        <div id="article-preview-shell" class="article-preview-shell article-preview-shell-route">
+          <div id="article-preview" class="frontend-preview"></div>
+        </div>
+
+        <div class="article-shell-placeholder article-shell-placeholder-footer" aria-hidden="true">
+          <div class="article-shell-placeholder-inner is-footer">
+            <span class="article-shell-chip is-footer-copy"></span>
+            <span class="article-shell-chip is-footer-link"></span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/event-preview-page.js"></script>
+  </body>
+</html>

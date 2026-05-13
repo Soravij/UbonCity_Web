@@ -1,0 +1,1295 @@
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Transport V2 Base Maps</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+    <style>
+      .base-map-editor-card {
+        display: grid;
+        gap: 16px;
+      }
+      .base-map-editor-statusbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .base-map-editor-shell {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .base-map-editor-main,
+      .base-map-editor-sidebar,
+      .base-map-editor-action-rail,
+      .base-map-editor-form-grid,
+      .base-map-placement-sidebar,
+      .base-map-label-style-grid,
+      .base-map-label-controls {
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+      .base-map-editor-stage-card {
+        display: grid;
+        gap: 12px;
+      }
+      .base-map-placement-launcher {
+        display: grid;
+        gap: 12px;
+      }
+      .base-map-placement-launcher-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+      }
+      .base-map-placement-launcher-summary {
+        display: grid;
+        gap: 4px;
+      }
+      .base-map-editor-stage-tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: end;
+      }
+      .base-map-placement-grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: minmax(280px, 1.1fr) minmax(220px, 0.9fr);
+      }
+      .generated-base-map-summary {
+        display: grid;
+        gap: 12px;
+      }
+      .generated-base-map-summary > summary {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 12px;
+        cursor: pointer;
+        list-style: none;
+      }
+      .generated-base-map-summary > summary::-webkit-details-marker {
+        display: none;
+      }
+      .generated-base-map-summary-meta {
+        display: grid;
+        gap: 6px;
+      }
+      .generated-base-map-summary-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .base-map-hidden-panel[hidden] {
+        display: none !important;
+      }
+      .base-map-secondary-tools {
+        display: grid;
+        gap: 12px;
+      }
+      .base-map-secondary-tools > summary {
+        cursor: pointer;
+      }
+      .base-map-label-picker {
+        display: grid;
+        gap: 10px;
+      }
+      .base-map-label-picker-help {
+        margin: 0;
+      }
+      .base-map-label-picker-control {
+        display: grid;
+        gap: 6px;
+      }
+      .base-map-label-picker-control label {
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .base-map-label-picker-control select {
+        width: 100%;
+        min-width: 0;
+      }
+      .base-map-label-content-grid {
+        display: grid;
+        gap: 10px;
+      }
+      .base-map-style-swatch {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        margin-right: 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(109, 84, 56, 0.22);
+        vertical-align: -1px;
+      }
+      .base-map-label-style-preview {
+        display: grid;
+        gap: 4px;
+        padding: 10px 12px;
+        border: 1px solid rgba(20, 26, 43, 0.08);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.62);
+      }
+      .base-map-label-style-preview-sample {
+        color: #243041;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.15;
+      }
+      .base-map-label-style-preview-meta {
+        display: grid;
+        gap: 3px;
+        font-size: 12px;
+        color: rgba(20, 26, 43, 0.72);
+      }
+      .base-map-label-content-grid textarea {
+        width: 100%;
+        min-height: 88px;
+        resize: vertical;
+      }
+      .base-map-label-content-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .base-map-label-content-locale-row {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+      }
+      .base-map-label-content-meta {
+        display: grid;
+        gap: 4px;
+      }
+      .base-map-label-set-editor {
+        display: grid;
+        gap: 10px;
+      }
+      .base-map-label-table-shell {
+        border: 1px solid rgba(20, 26, 43, 0.12);
+        border-radius: 10px;
+        background: rgba(252, 248, 241, 0.76);
+        overflow: hidden;
+      }
+      .base-map-label-table-shell summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 12px;
+        cursor: pointer;
+        font-weight: 600;
+        list-style: none;
+        background: rgba(250, 245, 237, 0.88);
+      }
+      .base-map-label-table-summary-title {
+        color: rgba(95, 67, 38, 0.9);
+        letter-spacing: 0.01em;
+      }
+      .base-map-label-table-summary-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .base-map-label-table-count {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 4px 10px;
+        border: 1px solid rgba(109, 84, 56, 0.16);
+        border-radius: 999px;
+        background: rgba(165, 137, 101, 0.08);
+        color: rgba(127, 92, 57, 0.82);
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.2;
+      }
+      .base-map-label-table-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 58px;
+        padding: 4px 10px;
+        border: 1px solid rgba(109, 84, 56, 0.22);
+        border-radius: 999px;
+        background: rgba(109, 84, 56, 0.1);
+        color: rgba(95, 67, 38, 0.88);
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .base-map-label-table-shell[open] .base-map-label-table-toggle::before {
+        content: "ย่อ";
+      }
+      .base-map-label-table-shell:not([open]) .base-map-label-table-toggle::before {
+        content: "เปิด";
+      }
+      .base-map-label-table-shell summary::-webkit-details-marker {
+        display: none;
+      }
+      .base-map-label-table-scroll {
+        overflow: auto;
+        border-top: 1px solid rgba(109, 84, 56, 0.12);
+      }
+      .base-map-label-table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+      }
+      .base-map-label-table th,
+      .base-map-label-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid rgba(20, 26, 43, 0.08);
+        vertical-align: top;
+        text-align: left;
+      }
+      .base-map-label-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: rgba(132, 107, 81, 0.88);
+        font-size: 12px;
+        font-weight: 600;
+        color: rgba(255, 248, 237, 0.94);
+        letter-spacing: 0.02em;
+      }
+      .base-map-label-table-key {
+        min-width: 220px;
+        background: rgba(255, 251, 245, 0.52);
+      }
+      .base-map-label-table-cell {
+        min-width: 180px;
+      }
+      .base-map-label-table-value {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.35;
+      }
+      .base-map-label-table-value.is-empty {
+        color: rgba(20, 26, 43, 0.46);
+      }
+      .base-map-label-table-status {
+        flex: 0 0 auto;
+        font-weight: 800;
+        line-height: 1.2;
+      }
+      .base-map-label-table-status.is-filled {
+        color: #166534;
+      }
+      .base-map-label-table-status.is-missing {
+        color: #b45309;
+      }
+      .base-map-label-set-head,
+      .base-map-label-set-row {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.1fr) minmax(0, 1.1fr);
+        align-items: start;
+      }
+      .base-map-label-set-head {
+        font-size: 12px;
+        font-weight: 700;
+        color: rgba(20, 26, 43, 0.72);
+      }
+      .base-map-label-set-row {
+        padding: 10px 12px;
+        border: 1px solid rgba(20, 26, 43, 0.12);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.7);
+      }
+      .base-map-label-set-key {
+        display: grid;
+        gap: 4px;
+      }
+      .base-map-label-set-cell {
+        display: grid;
+        gap: 6px;
+      }
+      .base-map-label-set-cell textarea {
+        min-height: 76px;
+      }
+      .base-map-label-set-missing {
+        color: #b45309;
+        font-weight: 700;
+      }
+      .base-map-label-set-complete {
+        color: #166534;
+        font-weight: 700;
+      }
+      .base-map-label-button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .base-map-label-button-row button {
+        min-height: 40px;
+        padding: 8px 16px;
+        border-radius: 14px;
+        font-size: 14px;
+        line-height: 1.1;
+      }
+      .base-map-label-button-row.is-primary button:first-child {
+        min-width: 124px;
+      }
+      .base-map-label-button-row.is-direction {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+      .base-map-label-button-row.is-direction button,
+      .base-map-label-button-row.is-align button {
+        justify-content: center;
+        min-width: 0;
+      }
+      .base-map-label-button-row.is-align {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        max-width: 260px;
+      }
+      .base-map-stage {
+        position: relative;
+        min-height: 560px;
+        border: 1px solid rgba(20, 26, 43, 0.12);
+        border-radius: 16px;
+        overflow: hidden;
+        background:
+          linear-gradient(180deg, rgba(248, 245, 239, 0.95), rgba(241, 236, 226, 0.95)),
+          repeating-linear-gradient(0deg, rgba(20, 26, 43, 0.04), rgba(20, 26, 43, 0.04) 1px, transparent 1px, transparent 48px),
+          repeating-linear-gradient(90deg, rgba(20, 26, 43, 0.04), rgba(20, 26, 43, 0.04) 1px, transparent 1px, transparent 48px);
+        cursor: crosshair;
+      }
+      .base-map-stage.is-fullscreen {
+        min-height: 100vh;
+        border-radius: 0;
+        border: 0;
+      }
+      .base-map-stage img {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: contain;
+      }
+      .base-map-viewport {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        transform-origin: center center;
+      }
+      .base-map-viewport.is-dragging {
+        cursor: grabbing;
+        will-change: transform;
+      }
+      .base-map-viewport img {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        transform: translate(-50%, -50%);
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+      .base-map-stage-empty {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        text-align: center;
+        color: rgba(20, 26, 43, 0.62);
+        font-size: 14px;
+      }
+      .base-map-markers {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .base-map-overlays {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        pointer-events: none;
+      }
+      .base-map-overlay {
+        appearance: none;
+        position: absolute;
+        transform: translateY(-100%) scale(var(--base-map-overlay-scale, 1));
+        transform-origin: left bottom;
+        border: 0 !important;
+        border-radius: 0;
+        min-width: 0;
+        min-height: 0;
+        padding: 0;
+        margin: 0;
+        box-shadow: none !important;
+        outline: none;
+        background: transparent !important;
+        font: inherit;
+        line-height: 0;
+        color: inherit;
+        cursor: move;
+        pointer-events: auto;
+      }
+      .base-map-overlay:hover,
+      .base-map-overlay:focus,
+      .base-map-overlay:active {
+        background: transparent !important;
+        box-shadow: none !important;
+      }
+      .base-map-overlay img {
+        display: block;
+        max-width: none;
+        user-select: none;
+        -webkit-user-drag: none;
+        pointer-events: none;
+      }
+      .base-map-overlay.is-selected img {
+        outline: 2px solid rgba(25, 84, 209, 0.8);
+        outline-offset: 2px;
+      }
+      .base-map-text-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        pointer-events: none;
+      }
+      .base-map-text-label {
+        position: absolute;
+        transform: translateY(-100%) scale(var(--base-map-label-scale, 1));
+        transform-origin: left bottom;
+        display: inline-flex;
+        align-items: center;
+        max-width: 220px;
+        padding: 4px 6px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.18);
+        color: #243041;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.15;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+        cursor: grab;
+        text-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.96),
+          0 -1px 0 rgba(255, 255, 255, 0.96),
+          1px 0 0 rgba(255, 255, 255, 0.96),
+          -1px 0 0 rgba(255, 255, 255, 0.96),
+          0 0 8px rgba(255, 255, 255, 0.72);
+        pointer-events: auto;
+        user-select: none;
+      }
+      .base-map-text-label::after {
+        content: none;
+      }
+      .base-map-text-label.is-selected {
+        color: #b93817;
+        border-color: rgba(185, 56, 23, 0.48);
+        background: rgba(255, 244, 237, 0.84);
+        box-shadow: 0 0 0 2px rgba(255, 244, 237, 0.4);
+        text-shadow:
+          0 1px 0 rgba(255, 248, 244, 0.98),
+          0 -1px 0 rgba(255, 248, 244, 0.98),
+          1px 0 0 rgba(255, 248, 244, 0.98),
+          -1px 0 0 rgba(255, 248, 244, 0.98),
+          0 0 10px rgba(255, 244, 237, 0.82);
+      }
+      .base-map-viewport.is-dragging .base-map-text-label,
+      .base-map-viewport.is-dragging .base-map-text-label.is-selected {
+        box-shadow: none;
+        text-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.88),
+          0 0 4px rgba(255, 255, 255, 0.42);
+      }
+      .base-map-text-label.is-dragging {
+        cursor: grabbing;
+      }
+      .base-map-text-label-text {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .base-map-label-list {
+        display: grid;
+        gap: 8px;
+        max-height: 320px;
+        overflow: auto;
+      }
+      .base-map-label-item {
+        display: grid;
+        gap: 4px;
+        border: 1px solid rgba(20, 26, 43, 0.12);
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: rgba(255, 255, 255, 0.66);
+      }
+      .base-map-label-item.is-selected {
+        border-color: rgba(25, 84, 209, 0.52);
+        background: rgba(25, 84, 209, 0.08);
+      }
+      .base-map-label-item button {
+        justify-self: start;
+      }
+      .base-map-overlay-item {
+        display: grid;
+        gap: 4px;
+        border: 1px solid rgba(20, 26, 43, 0.12);
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: rgba(255, 255, 255, 0.66);
+      }
+      .base-map-overlay-item.is-selected {
+        border-color: rgba(25, 84, 209, 0.52);
+        background: rgba(25, 84, 209, 0.08);
+      }
+      .base-map-inline-grid,
+      .base-map-form-meta {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .base-map-form-meta .full-span {
+        grid-column: 1 / -1;
+      }
+      .base-map-stage-note {
+        margin: 0;
+      }
+      .base-map-editor-card {
+        --base-map-fullscreen-toolbar-height: 136px;
+      }
+      .base-map-editor-card:not(.is-placement-open):not(:fullscreen) .base-map-editor-stage-card,
+      .base-map-editor-card:not(.is-placement-open):not(:fullscreen) .base-map-fullscreen-pad-dock {
+        display: none !important;
+      }
+      .base-map-editor-card:fullscreen {
+        position: relative;
+        padding: 0;
+        background: #f3efe7;
+        overflow: hidden;
+      }
+      .base-map-editor-card:fullscreen > .article-section-head,
+      .base-map-editor-card:fullscreen > .base-map-editor-statusbar {
+        display: none;
+      }
+      .base-map-editor-card:fullscreen .base-map-editor-shell {
+        grid-template-columns: 1fr;
+        gap: 0;
+      }
+      .base-map-editor-card:fullscreen .base-map-editor-main {
+        min-height: 100vh;
+      }
+      .base-map-editor-card:fullscreen .base-map-editor-stage-card {
+        gap: 0;
+        padding-bottom: var(--base-map-fullscreen-toolbar-height);
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+      }
+      .base-map-editor-card:fullscreen .base-map-editor-stage-tools,
+      .base-map-editor-card:fullscreen .base-map-stage-note,
+      .base-map-editor-card:fullscreen .base-map-placement-status,
+      .base-map-editor-card:fullscreen .base-map-secondary-tools,
+      .base-map-editor-card:fullscreen .base-map-editor-action-rail,
+      .base-map-editor-card:fullscreen .base-map-placement-launcher,
+      .base-map-editor-card:fullscreen #base-map-preview-summary,
+      .base-map-editor-card:fullscreen .base-map-hidden-panel,
+      .base-map-editor-card:fullscreen .base-map-label-content-card {
+        display: none !important;
+      }
+      .base-map-editor-card:fullscreen .base-map-editor-sidebar {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        display: block;
+        pointer-events: none;
+      }
+      .base-map-editor-card:fullscreen .base-map-editor-sidebar > .card {
+        margin: 0;
+        pointer-events: auto;
+      }
+      .base-map-editor-card:fullscreen .base-map-overlay-card,
+      .base-map-editor-card:fullscreen .base-map-label-picker {
+        display: grid;
+        align-content: center;
+        border-radius: 12px;
+        border: 1px solid rgba(214, 183, 150, 0.18);
+        padding: 5px 7px;
+        background: rgba(29, 24, 19, 0.54);
+        box-shadow: none;
+      }
+      .base-map-editor-card:fullscreen .base-map-overlay-card {
+        position: fixed;
+        right: calc(env(safe-area-inset-right) + 12px);
+        bottom: calc(env(safe-area-inset-bottom) + 12px);
+        min-width: 220px;
+        max-width: min(320px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+      }
+      .base-map-editor-card:fullscreen .base-map-label-picker {
+        position: fixed;
+        left: calc(env(safe-area-inset-left) + 12px);
+        bottom: calc(env(safe-area-inset-bottom) + 12px);
+        width: min(340px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+      }
+      .base-map-editor-card:fullscreen .base-map-label-card {
+        display: none !important;
+      }
+      .base-map-editor-card:fullscreen .base-map-label-style-card {
+        display: none !important;
+      }
+      .base-map-editor-card:fullscreen .base-map-overlay-card .article-section-head p,
+      .base-map-editor-card:fullscreen .base-map-label-card .article-section-head p {
+        display: none;
+      }
+      .base-map-editor-card:fullscreen .base-map-overlay-card .article-section-head,
+      .base-map-editor-card:fullscreen .base-map-label-card .article-section-head {
+        display: none;
+      }
+      .base-map-editor-card:fullscreen .base-map-overlay-card .base-map-label-controls,
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-label-controls {
+        gap: 4px;
+      }
+      .base-map-editor-card:fullscreen .base-map-overlay-card .base-map-inline-grid,
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-inline-grid {
+        gap: 4px;
+      }
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-label-button-row.is-direction,
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-label-button-row.is-align,
+      .base-map-editor-card.is-fullscreen-mode .base-map-label-card .base-map-label-button-row.is-direction,
+      .base-map-editor-card.is-fullscreen-mode .base-map-label-card .base-map-label-button-row.is-align {
+        display: none !important;
+      }
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-inline-grid {
+        grid-template-columns: minmax(180px, 1.35fr) minmax(116px, 0.85fr);
+      }
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-inline-grid > div:nth-child(n + 3) {
+        display: none;
+      }
+      .base-map-editor-card:fullscreen .base-map-overlay-card label,
+      .base-map-editor-card:fullscreen .base-map-label-card label {
+        font-size: 10px;
+      }
+      .base-map-editor-card:fullscreen .base-map-overlay-card input,
+      .base-map-editor-card:fullscreen .base-map-overlay-card select,
+      .base-map-editor-card:fullscreen .base-map-label-card input,
+      .base-map-editor-card:fullscreen .base-map-label-card select {
+        min-height: 28px;
+        padding: 3px 8px;
+        font-size: 11px;
+      }
+      .base-map-editor-card:fullscreen .base-map-overlay-card .toolbar button,
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-label-button-row button {
+        min-height: 26px;
+        padding: 3px 8px;
+        font-size: 11px;
+        border-radius: 10px;
+      }
+      .base-map-editor-card:fullscreen .base-map-overlay-card .toolbar,
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-label-button-row {
+        gap: 4px;
+      }
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-label-button-row.is-primary,
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-label-button-row.is-direction,
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-label-button-row.is-align {
+        display: flex;
+        flex-wrap: wrap;
+        max-width: none;
+      }
+      .base-map-editor-card:fullscreen .base-map-label-card .base-map-label-button-row.is-primary button:first-child {
+        min-width: 84px;
+      }
+      .base-map-editor-card:fullscreen #base-map-overlay-list,
+      .base-map-editor-card:fullscreen #base-map-overlay-status {
+        display: none;
+      }
+      .base-map-editor-card:fullscreen .base-map-stage {
+        min-height: calc(100vh - var(--base-map-fullscreen-toolbar-height));
+      }
+      .base-map-fullscreen-pad-dock {
+        display: none;
+      }
+      .base-map-editor-card:fullscreen .base-map-fullscreen-pad-dock,
+      .base-map-editor-card.is-fullscreen-mode .base-map-fullscreen-pad-dock {
+        position: fixed;
+        right: calc(env(safe-area-inset-right) + 12px);
+        bottom: calc(env(safe-area-inset-bottom) + 96px);
+        z-index: 25;
+        display: grid;
+        gap: 4px;
+        padding: 5px;
+        border: 1px solid rgba(214, 183, 150, 0.16);
+        border-radius: 12px;
+        background: rgba(29, 24, 19, 0.76);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+      }
+      .base-map-editor-card:fullscreen .base-map-fullscreen-pad-dock .base-map-label-button-row,
+      .base-map-editor-card.is-fullscreen-mode .base-map-fullscreen-pad-dock .base-map-label-button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .base-map-editor-card:fullscreen .base-map-fullscreen-pad-dock button,
+      .base-map-editor-card.is-fullscreen-mode .base-map-fullscreen-pad-dock button {
+        min-height: 26px;
+        min-width: 42px;
+        padding: 3px 8px;
+        font-size: 11px;
+        border-radius: 10px;
+      }
+      .base-map-editor-card:fullscreen .base-map-label-picker,
+      .base-map-editor-card.is-fullscreen-mode .base-map-label-picker {
+        min-width: 220px;
+        padding: 5px 7px;
+      }
+      .base-map-editor-card:fullscreen .base-map-label-picker .article-section-head,
+      .base-map-editor-card:fullscreen .base-map-label-picker .base-map-label-picker-help,
+      .base-map-editor-card.is-fullscreen-mode .base-map-label-picker .article-section-head,
+      .base-map-editor-card.is-fullscreen-mode .base-map-label-picker .base-map-label-picker-help {
+        display: none;
+      }
+      .base-map-editor-card:fullscreen .base-map-label-picker #base-map-label-list,
+      .base-map-editor-card.is-fullscreen-mode .base-map-label-picker #base-map-label-list {
+        display: grid;
+        gap: 6px;
+        max-height: 132px;
+        overflow: auto;
+      }
+      @media (max-width: 960px) {
+        .base-map-editor-shell,
+        .base-map-placement-grid,
+        .base-map-form-meta,
+        .base-map-inline-grid,
+        .base-map-placement-launcher-grid,
+        .base-map-label-content-locale-row,
+        .base-map-label-set-head,
+        .base-map-label-set-row {
+          grid-template-columns: 1fr;
+        }
+        .base-map-label-button-row.is-direction,
+        .base-map-label-button-row.is-align {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          max-width: none;
+        }
+        .base-map-editor-card:fullscreen .base-map-editor-sidebar,
+        .base-map-editor-card:fullscreen .base-map-label-card .base-map-inline-grid {
+          grid-template-columns: 1fr;
+        }
+        .base-map-editor-card:fullscreen .base-map-editor-sidebar {
+          display: block;
+        }
+        .base-map-editor-card:fullscreen .base-map-editor-stage-card {
+          padding-bottom: var(--base-map-fullscreen-toolbar-height);
+        }
+        .base-map-editor-card:fullscreen .base-map-stage {
+          min-height: calc(100vh - var(--base-map-fullscreen-toolbar-height));
+        }
+        .base-map-editor-card:fullscreen .base-map-label-picker,
+        .base-map-editor-card.is-fullscreen-mode .base-map-label-picker {
+          left: calc(env(safe-area-inset-left) + 10px);
+          right: calc(env(safe-area-inset-right) + 10px);
+          bottom: calc(env(safe-area-inset-bottom) + 10px);
+          width: auto;
+          max-width: none;
+        }
+        .base-map-editor-card:fullscreen .base-map-overlay-card,
+        .base-map-editor-card.is-fullscreen-mode .base-map-overlay-card {
+          right: calc(env(safe-area-inset-right) + 10px);
+          left: auto;
+          bottom: calc(env(safe-area-inset-bottom) + 150px);
+          min-width: 188px;
+          max-width: min(280px, calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+        }
+        .base-map-editor-card:fullscreen .base-map-fullscreen-pad-dock,
+        .base-map-editor-card.is-fullscreen-mode .base-map-fullscreen-pad-dock {
+          right: calc(env(safe-area-inset-right) + 10px);
+          bottom: calc(env(safe-area-inset-bottom) + 232px);
+        }
+        .base-map-stage {
+          min-height: 420px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>Transport V2 Base Maps</h1>
+            <p>Owner workspace for base map records, label placement, and locale previews.</p>
+          </div>
+        </div>
+        <p class="muted" id="workspace-auth-status"></p>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+
+      <div class="card page-actions-strip">
+        <div class="toolbar">
+          <button id="btn-back-home" class="utility-action">Home</button>
+          <button id="btn-process-home" class="utility-action">Transport</button>
+          <button id="btn-open-routes" class="utility-action">Routes</button>
+        </div>
+      </div>
+
+      <details id="generated-base-map-summary" class="card article-work-card generated-base-map-summary">
+        <summary id="generated-base-map-summary-head">
+          <div>
+            <h2 class="section-title">Generated Base Map Candidate</h2>
+            <p class="muted">Input map for Base Map Annotation Workspace. Save keeps draft data, render creates the annotation output used by routes.</p>
+          </div>
+          <button id="btn-toggle-generated-base-map-summary" type="button" class="utility-action">Expand</button>
+        </summary>
+        <div class="generated-base-map-summary-meta">
+          <div class="muted">Key: <strong>ubon-city-base-map-v1</strong></div>
+          <div class="muted">Revision: <strong>r1</strong></div>
+          <div class="muted">Bounds: <strong>15.1083, 104.8068 to 15.3117, 104.9720</strong></div>
+          <div class="muted">ViewBox: <strong>0 0 4000 5600</strong></div>
+          <div class="muted">Projection: <strong>linear-bbox-fit</strong></div>
+        </div>
+        <div class="generated-base-map-summary-actions">
+          <button id="btn-load-generated-base-map-r1" type="button" class="primary">Open Registered V1</button>
+          <a id="generated-base-map-open-link" class="utility-action" href="#" target="_blank" rel="noreferrer">Open Candidate Map</a>
+        </div>
+        <div class="base-map-placement-grid">
+          <div class="card article-work-card">
+            <div id="generated-base-map-stage" class="base-map-stage" style="cursor: default;">
+              <div id="generated-base-map-viewport" class="base-map-viewport">
+                <img
+                  id="generated-base-map-image"
+                  alt="generated base map candidate"
+                  hidden
+                />
+              </div>
+            </div>
+            <div class="toolbar">
+              <button id="btn-generated-base-map-zoom-out" type="button">Zoom Out</button>
+              <button id="btn-generated-base-map-zoom-in" type="button">Zoom In</button>
+              <button id="btn-generated-base-map-reset-view" type="button" class="utility-action">Reset View</button>
+              <button id="btn-generated-base-map-fullscreen" type="button" class="utility-action">Full Screen</button>
+              <span id="generated-base-map-zoom-status" class="status"></span>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <section class="card article-work-card base-map-editor-card" id="base-map-editor-card">
+        <div class="article-section-head">
+          <div>
+            <h2 class="section-title">Base Map Annotation Workspace</h2>
+            <p class="muted">Load the current base map source, place labels and uploaded logo/pic overlays, save the workspace, then continue from the same state later.</p>
+          </div>
+        </div>
+        <div class="base-map-editor-statusbar">
+          <span id="base-map-editor-selection" class="status"></span>
+          <span id="base-map-editor-dirty" class="status"></span>
+        </div>
+        <div class="base-map-editor-shell">
+          <div class="base-map-editor-main">
+            <div class="card article-work-card base-map-placement-launcher">
+              <div class="article-section-head">
+                <div>
+                  <h3 class="section-title">Placement Entry</h3>
+                  <p class="muted">เลือกภาษาแสดงผลก่อน แล้วค่อยเข้า fullscreen เพื่อวาง label และ logo/picture บน map</p>
+                </div>
+              </div>
+              <div class="base-map-placement-launcher-grid">
+                <div>
+                  <label>Display Locale</label>
+                  <select id="placement-preview-locale">
+                    <option value="th">th</option>
+                    <option value="en">en</option>
+                    <option value="zh">zh</option>
+                    <option value="lo">lo</option>
+                  </select>
+                </div>
+                <button id="btn-open-base-map-placement" type="button" class="primary">Open Fullscreen Placement</button>
+              </div>
+              <div id="base-map-placement-entry-summary" class="muted base-map-placement-launcher-summary"></div>
+            </div>
+            <div class="base-map-editor-action-rail">
+              <button id="btn-create-base-map" class="primary" hidden aria-hidden="true">Create Base Map</button>
+              <button id="btn-save-base-map" type="button" class="primary">Save Base Map</button>
+              <button id="btn-render-base-map-annotation" type="button" class="utility-action">Render Annotation Map</button>
+              <button id="btn-save-base-map-labels" type="button" hidden aria-hidden="true">Save Labels</button>
+              <button id="btn-new-base-map-draft" type="button" class="utility-action" hidden aria-hidden="true">New Draft</button>
+              <span id="base-map-status" class="status"></span>
+            </div>
+
+            <div class="card article-work-card base-map-editor-stage-card">
+              <div class="base-map-editor-stage-tools">
+                <button id="btn-base-map-zoom-out" type="button">Zoom Out</button>
+                <button id="btn-base-map-zoom-in" type="button">Zoom In</button>
+                <button id="btn-base-map-fit-view" type="button" class="utility-action">Fit Annotations</button>
+                <button id="btn-base-map-reset-view" type="button" class="utility-action">Reset View</button>
+                <button id="btn-base-map-fullscreen" type="button" class="utility-action">Full Screen</button>
+                <span id="base-map-zoom-status" class="status"></span>
+              </div>
+              <p class="muted base-map-stage-note">Use this stage to place labels and uploaded logo/pic overlays on the generated candidate map. Save stores the draft. Render Annotation Map creates the output used by routes.</p>
+              <div id="base-map-stage" class="base-map-stage">
+                <div id="base-map-stage-empty" class="base-map-stage-empty">Select a base map with a generated candidate map before placing labels.</div>
+                <div id="base-map-viewport" class="base-map-viewport">
+                  <img id="base-map-stage-image" alt="base map candidate" hidden />
+                  <div id="base-map-text-layer" class="base-map-text-layer"></div>
+                  <div id="base-map-overlay-layer" class="base-map-overlays"></div>
+                  <div id="base-map-markers" class="base-map-markers"></div>
+                </div>
+              </div>
+              <div class="toolbar">
+                <span id="base-map-placement-status" class="status"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="base-map-editor-sidebar">
+            <div class="card article-work-card base-map-hidden-panel" hidden aria-hidden="true">
+              <div class="article-section-head">
+                <div>
+                  <h3 class="section-title">Map Metadata</h3>
+                  <p class="muted">Hidden metadata fields kept for the existing save flow.</p>
+                </div>
+              </div>
+              <div class="base-map-editor-form-grid">
+                <div>
+                  <label>ID</label>
+                  <input id="selected-base-map-id" readonly placeholder="Create new or select from table" />
+                </div>
+                <div>
+                  <label>Status</label>
+                  <select id="base-map-status-select">
+                    <option value="draft">draft</option>
+                    <option value="active">active</option>
+                    <option value="archived">archived</option>
+                  </select>
+                </div>
+                <div class="base-map-form-meta">
+                  <div>
+                    <label>Key</label>
+                    <input id="base-map-key" placeholder="ubon-city-v1" />
+                  </div>
+                  <div>
+                    <label>Title</label>
+                    <input id="base-map-title" placeholder="Ubon City Base Map" />
+                  </div>
+                  <div>
+                    <label>Projection</label>
+                    <input id="base-map-projection-type" value="linear-bbox-fit" />
+                  </div>
+                  <div>
+                    <label>Base SVG Asset ID</label>
+                    <input id="base-map-base-svg-asset-id" placeholder="e.g. 123" />
+                  </div>
+                  <div>
+                    <label>Preview Asset ID</label>
+                    <input id="base-map-preview-asset-id" placeholder="e.g. 124" />
+                  </div>
+                  <div>
+                    <label>North</label>
+                    <input id="base-map-max-lat" value="15.3117" />
+                  </div>
+                  <div>
+                    <label>West</label>
+                    <input id="base-map-min-lng" value="104.8068" />
+                  </div>
+                  <div>
+                    <label>South</label>
+                    <input id="base-map-min-lat" value="15.1083" />
+                  </div>
+                  <div>
+                    <label>East</label>
+                    <input id="base-map-max-lng" value="104.9720" />
+                  </div>
+                  <div>
+                    <label>ViewBox X</label>
+                    <input id="base-map-viewbox-x" value="0" />
+                  </div>
+                  <div>
+                    <label>ViewBox Y</label>
+                    <input id="base-map-viewbox-y" value="0" />
+                  </div>
+                  <div>
+                    <label>ViewBox Width</label>
+                    <input id="base-map-viewbox-width" value="4000" />
+                  </div>
+                  <div>
+                    <label>ViewBox Height</label>
+                    <input id="base-map-viewbox-height" value="5600" />
+                  </div>
+                  <div class="full-span" hidden>
+                    <label>Active Label Layout ID</label>
+                    <input id="base-map-active-label-layout-id" readonly placeholder="Managed automatically" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card article-work-card base-map-label-layout-card" hidden>
+              <div class="article-section-head">
+                <div>
+                  <h3 class="section-title">Map Labels</h3>
+                  <p class="muted">Label placement, translations, and style are managed automatically for this map. The same placement can still be reused across map versions behind the scenes.</p>
+                </div>
+              </div>
+              <div class="base-map-label-controls">
+                <div class="base-map-inline-grid" hidden>
+                  <div>
+                    <label>Selected Layout ID</label>
+                    <input id="selected-label-layout-id" readonly placeholder="Create new or select existing" />
+                  </div>
+                  <div>
+                    <label>Active Layout</label>
+                    <select id="label-layout-select"></select>
+                  </div>
+                  <div>
+                    <label>Layout Key</label>
+                    <input id="label-layout-key" placeholder="ubon-core-layout-v1" />
+                  </div>
+                  <div>
+                    <label>Layout Title</label>
+                    <input id="label-layout-title" placeholder="Ubon Core Layout V1" />
+                  </div>
+                  <div>
+                    <label>Layout Status</label>
+                    <select id="label-layout-status-select">
+                      <option value="draft">draft</option>
+                      <option value="active">active</option>
+                      <option value="archived">archived</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="base-map-label-button-row is-primary" hidden>
+                  <button id="btn-create-label-layout" type="button">Create Label Layout</button>
+                  <button id="btn-save-label-layout" type="button" class="primary">Save Label Layout</button>
+                  <span id="label-layout-status" class="status"></span>
+                </div>
+                <div class="muted">Placement ownership is handled automatically. Use the main save button after editing labels or style.</div>
+                <div class="full-span">
+                  <label>Label Dictionary JSON</label>
+                  <textarea id="base-map-label-dictionary" rows="8" placeholder='{"th":{"landmark.bus_terminal":"Bus Terminal"}}'></textarea>
+                </div>
+                <div class="full-span">
+                  <label>Label Translation JSON</label>
+                  <textarea id="base-map-label-translation-meta" rows="6" placeholder='{"source_locale":"th","target_locales":["en","zh","lo"],"locale_statuses":{"th":{"status":"source"},"en":{"status":"missing"}}}'></textarea>
+                </div>
+                <div class="full-span">
+                  <label>Labels JSON</label>
+                  <textarea id="base-map-label-items" rows="10" placeholder='[{"label_key":"landmark.bus_terminal","label_category":"landmark","anchor_x":1200,"anchor_y":840,"priority":10}]'></textarea>
+                </div>
+              </div>
+            </div>
+
+            <div class="card article-work-card base-map-label-card">
+              <div class="article-section-head">
+                <div>
+                  <h3 class="section-title">Labels</h3>
+                  <p class="muted">Add labels, place them on the map, and fine-tune the position with drag, nudge, or center tools.</p>
+                </div>
+              </div>
+              <div class="base-map-label-controls">
+                <div class="base-map-inline-grid">
+                  <div>
+                    <label>Label Key</label>
+                    <input id="placement-label-key" placeholder="landmark.bus_terminal" />
+                  </div>
+                  <div>
+                    <label>Category</label>
+                    <select id="placement-label-category">
+                      <option value="landmark">landmark</option>
+                      <option value="district">district</option>
+                      <option value="terminal">terminal</option>
+                      <option value="stop">stop</option>
+                      <option value="pier">pier</option>
+                      <option value="warning">warning</option>
+                      <option value="custom">custom</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Thai Text</label>
+                    <input id="placement-label-text-th" placeholder="ข้อความหลักภาษาไทย" />
+                  </div>
+                  <div>
+                    <label>Priority</label>
+                    <select id="placement-label-priority">
+                      <option value="3" selected>สูง</option>
+                      <option value="2">กลาง</option>
+                      <option value="1">ต่ำ</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="base-map-label-button-row is-primary">
+                  <button id="btn-add-placement-label" type="button">Add Label</button>
+                  <button id="btn-remove-placement-label" type="button" class="utility-action">Remove Selected</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card article-work-card base-map-label-picker">
+              <div class="article-section-head">
+                <div>
+                  <h3 class="section-title">Label List</h3>
+                </div>
+              </div>
+              <div class="muted base-map-label-picker-help">Select a label from the list or from the stage markers.</div>
+              <div id="base-map-label-list" class="base-map-label-list"></div>
+            </div>
+
+            <div class="card article-work-card base-map-overlay-card">
+              <div class="article-section-head">
+                <div>
+                  <h3 class="section-title">Logo / Picture</h3>
+                  <p class="muted">Upload a logo or picture, place it on the map, then adjust width with aspect ratio locked.</p>
+                </div>
+              </div>
+              <div class="base-map-label-controls">
+                <input id="base-map-overlay-upload-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+                <div class="toolbar">
+                  <button id="btn-upload-base-map-overlay" type="button">Upload Image</button>
+                  <button id="btn-remove-base-map-overlay" type="button" class="utility-action">Remove Selected</button>
+                </div>
+                <div class="base-map-inline-grid">
+                  <div>
+                    <label>Overlay Width</label>
+                    <input id="base-map-overlay-width" type="number" min="1" step="1" placeholder="e.g. 160" />
+                  </div>
+                  <div>
+                    <label>Overlay Height</label>
+                    <input id="base-map-overlay-height" readonly placeholder="auto" />
+                  </div>
+                </div>
+                <div id="base-map-overlay-status" class="status"></div>
+                <div id="base-map-overlay-list" class="base-map-label-list"></div>
+              </div>
+            </div>
+
+            <div class="card article-work-card base-map-label-content-card">
+              <div class="article-section-head">
+                <div>
+                  <h3 class="section-title">Label Content</h3>
+                  <p class="muted">Write Thai first, translate the whole set, then review each locale before downstream use.</p>
+                </div>
+              </div>
+              <div class="base-map-label-content-grid">
+                <div class="base-map-label-content-toolbar">
+                  <button id="btn-translate-base-map-labels" type="button">Translate Missing</button>
+                  <button id="btn-mark-label-locale-reviewed" type="button" class="utility-action">Mark Locale Reviewed</button>
+                  <span id="label-translation-status" class="status"></span>
+                </div>
+                <div class="base-map-label-content-locale-row">
+                  <div>
+                    <label>Review Locale</label>
+                    <select id="label-review-locale">
+                      <option value="en">en</option>
+                      <option value="zh">zh</option>
+                      <option value="lo">lo</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label>Whole Label Set</label>
+                  <div id="label-content-set-editor" class="base-map-label-set-editor"></div>
+                </div>
+                <div id="label-content-meta" class="muted base-map-label-content-meta"></div>
+              </div>
+            </div>
+
+            <div class="card article-work-card base-map-label-style-card">
+              <div class="article-section-head">
+                <div>
+                  <h3 class="section-title">Label Style</h3>
+                  <p class="muted">Global label appearance for the active placement set. Category overrides stay off for now.</p>
+                </div>
+              </div>
+              <div class="base-map-label-style-grid">
+                <div class="base-map-inline-grid">
+                  <div>
+                    <label>Font</label>
+                    <select id="label-style-font-family">
+                      <option value="'Noto Sans Thai', 'Sarabun', sans-serif">Noto Sans Thai</option>
+                      <option value="'Sarabun', 'Noto Sans Thai', sans-serif">Sarabun</option>
+                      <option value="'IBM Plex Sans Thai', 'Noto Sans Thai', sans-serif">IBM Plex Sans Thai</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Text Color</label>
+                    <select id="label-style-text-color">
+                      <option value="#243041">Slate Dark</option>
+                      <option value="#475569">Slate Mid</option>
+                      <option value="#1d4ed8">Blue</option>
+                      <option value="#166534">Green</option>
+                      <option value="#b93817">Orange Red</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="base-map-inline-grid">
+                  <div>
+                    <label>Base Size</label>
+                    <select id="label-style-size-preset">
+                      <option value="s">S</option>
+                      <option value="m">M</option>
+                      <option value="l">L</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Zoom Behavior</label>
+                    <select id="label-style-scale-with-zoom">
+                      <option value="true">Auto scale by zoom</option>
+                      <option value="false">Keep screen size stable</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="label-style-preview-summary" class="base-map-label-style-preview">
+                  <div id="label-style-preview-sample" class="base-map-label-style-preview-sample">สถานีรถไฟ</div>
+                  <div id="label-style-preview-meta" class="base-map-label-style-preview-meta"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card article-work-card" id="base-map-preview-summary"></div>
+
+            <details class="card article-work-card base-map-secondary-tools">
+              <summary>Source / Version</summary>
+              <div>
+                <label>Open Another Saved Workspace</label>
+                <select id="base-map-editor-select"></select>
+              </div>
+              <div class="table-wrap">
+                <table class="basic-table" id="base-map-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Map</th>
+                      <th>Status</th>
+                      <th>Bounds</th>
+                      <th>Labels</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/transport-v2-base-maps-page.js"></script>
+  </body>
+</html>

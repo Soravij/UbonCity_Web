@@ -1,0 +1,176 @@
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Place</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+    <style>
+      .place-hub-grid {
+        display: grid;
+        gap: 12px;
+        width: 100%;
+        max-width: 100%;
+      }
+
+      .place-hub-card {
+        display: grid;
+        gap: 10px;
+        padding: 14px 16px;
+      }
+
+      .place-hub-card p {
+        margin: 0;
+      }
+
+      .place-hub-head {
+        display: grid;
+        gap: 10px;
+        align-items: start;
+      }
+
+      .place-process-badge {
+        display: inline-flex;
+        width: 44px;
+        height: 44px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        border: 1px solid var(--theme-border);
+        background: var(--theme-surface-soft);
+        color: var(--theme-primary-strong);
+        font-size: 0.95rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      .place-hub-copy {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .place-hub-kicker {
+        margin: 0;
+        color: var(--theme-primary-strong);
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .place-hub-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .place-hub-copy .section-title {
+        margin: 0;
+      }
+
+      .place-hub-copy .muted {
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+
+      @media (min-width: 720px) {
+        .place-hub-head {
+          grid-template-columns: auto minmax(0, 1fr);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+            <div class="auth-points">
+              <div class="auth-point">
+                <strong>Place Process Home</strong>
+                <span>ใช้หน้านี้เป็นจุดเริ่มของ flow place เพื่อเลือกเข้ากระบวนการตามลำดับงาน ตั้งแต่เตรียมคอนเทนต์ ส่งงาน ไปจนถึงเขียนงานก่อนส่งตรวจ</span>
+              </div>
+            </div>
+          </div>
+          <div class="auth-box">
+            <div class="auth-box-head">
+              <h2>เข้าสู่ระบบ</h2>
+              <p>ระบบจะพาไปทำงานตามสิทธิ์โดยอัตโนมัติ</p>
+            </div>
+            <label class="auth-field">
+              <span>อีเมล</span>
+              <input id="auth-email" placeholder="อีเมลบัญชีที่ตั้งไว้ในระบบ" />
+            </label>
+            <label class="auth-field">
+              <span>รหัสผ่าน</span>
+              <input id="auth-password" type="password" placeholder="รหัสผ่าน" />
+            </label>
+            <div class="auth-actions">
+              <button class="primary" id="btn-login">เข้าสู่ระบบ</button>
+              <button id="btn-logout">ออกจากระบบ</button>
+            </div>
+            <p class="auth-note">ถ้ามีลิงก์ที่ต้องการเปิด ระบบจะกลับไปหน้าปลายทางหลังเข้าสู่ระบบ และต้องใช้อีเมล/รหัสผ่านของบัญชีที่ถูกตั้งไว้ใน collector instance นี้</p>
+          </div>
+        </div>
+        <p class="muted" id="workspace-auth-status"></p>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+
+      <div class="card page-actions-strip">
+        <div class="toolbar">
+          <button id="btn-back-home" class="utility-action">Home</button>
+        </div>
+      </div>
+
+      <section class="place-hub-grid" aria-label="Place workflow">
+        <article class="card article-work-card place-hub-card">
+          <div class="place-hub-head">
+            <span class="place-process-badge" aria-hidden="true">01</span>
+            <div class="place-hub-copy">
+              <p class="place-hub-kicker">Process 1</p>
+              <h2 class="section-title">เตรียมคอนเทนต์</h2>
+              <p class="muted">เริ่มจาก raw data collect แล้วคัดข้อมูล clean สร้าง AI draft และจัดชุดสั่งงานให้พร้อมก่อนแตกไปขั้นถัดไป</p>
+            </div>
+          </div>
+          <div class="place-hub-actions">
+            <button id="btn-open-place-raw" class="primary">เปิดงานเตรียมคอนเทนต์</button>
+          </div>
+        </article>
+
+        <article class="card article-work-card place-hub-card">
+          <div class="place-hub-head">
+            <span class="place-process-badge" aria-hidden="true">02</span>
+            <div class="place-hub-copy">
+              <p class="place-hub-kicker">Process 2</p>
+              <h2 class="section-title">ส่งงานไปทำ</h2>
+              <p class="muted">ใช้เมื่อชุดงานพร้อมมอบหมายแล้ว เพื่อเลือกผู้รับงาน สรุป deliverables และส่งออกไปดำเนินงาน</p>
+            </div>
+          </div>
+          <div class="place-hub-actions">
+            <button id="btn-open-place-assignments" class="primary">เปิดคิวส่งงาน</button>
+          </div>
+        </article>
+
+        <article class="card article-work-card place-hub-card">
+          <div class="place-hub-head">
+            <span class="place-process-badge" aria-hidden="true">03</span>
+            <div class="place-hub-copy">
+              <p class="place-hub-kicker">Process 3</p>
+              <h2 class="section-title">เขียนงาน</h2>
+              <p class="muted">ใช้สำหรับผู้รับผิดชอบเขียนเนื้อหาตาม brief หรือต้นฉบับที่เตรียมไว้ ก่อนส่งตรวจสอบเชิงคุณภาพ</p>
+            </div>
+          </div>
+          <div class="place-hub-actions">
+            <button id="btn-open-place-write" class="primary">เปิดคิวเขียนงาน</button>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="/place-page.js"></script>
+  </body>
+</html>

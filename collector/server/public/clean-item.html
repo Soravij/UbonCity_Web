@@ -1,0 +1,389 @@
+﻿<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Clean</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+            <div class="auth-points">
+              <div class="auth-point">
+                <strong>Clean</strong>
+                <span>คัดและจัดข้อมูลตั้งต้นให้พร้อมก่อนส่งเข้า Agent และส่งต่อไปขั้นตรวจแก้เนื้อหา</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="muted" id="editor-auth-status"></p>
+        <p class="status" id="editor-status"></p>
+      </header>
+<div class="card page-actions-strip raw-process-actions">
+  <div class="toolbar">
+    <button id="btn-back" class="utility-action">Home</button>
+    <button id="btn-prev-step" class="utility-action">กลับหน้ารับข้อมูลดิบ</button>
+    <button class="primary utility-action" id="btn-save">บันทึก</button>
+    <button class="ok nav-next" id="btn-next-ai">ถัดไป: ประมวลผลด้วย Agent</button>
+  </div>
+</div>
+<div class="progress-steps raw-process-progress" aria-label="preparation workflow progress">
+  <div class="step completed"><span class="dot">1</span><span class="label">รับข้อมูลดิบ</span></div>
+  <div class="step active"><span class="dot">2</span><span class="label">คัดข้อมูลส่งเข้า Agent</span></div>
+  <div class="step"><span class="dot">3</span><span class="label">ประมวลผลด้วย Agent</span></div>
+  <div class="step"><span class="dot">4</span><span class="label">ตรวจแก้เนื้อหา</span></div>
+</div>
+<div id="item-claim-banner" class="claim-banner">
+  <div class="claim-banner-copy">
+    <div class="claim-banner-title">สถานะการรับงาน</div>
+    <p id="item-claim-status" class="muted"></p>
+  </div>
+  <div class="toolbar claim-banner-actions">
+    <button id="btn-item-claim" type="button">รับงานนี้</button>
+    <button id="btn-item-release" type="button" class="utility-action">ปล่อยงาน</button>
+    <button id="btn-item-takeover" type="button" class="fail">Take over</button>
+  </div>
+</div>
+<p class="muted">ต้องเลือกรูปอย่างน้อย 1 รูป และตั้งรูปปกให้เหลือเพียง 1 รูปก่อนไปขั้นถัดไป</p>
+<div id="clean-ai-guard" class="readiness-alert hidden"></div>
+
+      <div class="card">
+        <h2 class="section-title">ข้อมูลหลักของงาน</h2>
+        <p class="muted">แก้เฉพาะข้อมูลสำคัญของงาน ส่วนเครื่องมือเสริมอยู่ด้านล่าง</p>
+        <div class="grid">
+          <div>
+            <label>ประเภท</label>
+            <select id="e-type">
+              <option value="place">Place</option>
+              <option value="event">Event</option>
+            </select>
+          </div>
+          <div>
+            <label>หมวดหมู่</label>
+            <select id="e-category">
+              <option value="attractions">Attractions</option>
+              <option value="activities">Activities</option>
+              <option value="hotels">Hotels</option>
+              <option value="cafes">Cafes</option>
+              <option value="restaurants">Restaurants</option>
+              <option value="transport">Transport</option>
+            </select>
+          </div>
+          <div>
+            <label>ภาษา</label>
+            <select id="e-lang">
+              <option value="th">th</option>
+              <option value="en">en</option>
+              <option value="zh">zh</option>
+              <option value="lo">lo</option>
+            </select>
+          </div>
+          <div>
+            <label>ชื่อเรื่อง</label>
+            <input id="e-title" />
+          </div>
+          <div>
+            <label>แท็ก (คั่นด้วย |)</label>
+            <input id="e-tags" placeholder="คาเฟ่|อุบล|ท้องถิ่น" />
+          </div>
+          <div>
+            <label>ชื่อแหล่งข้อมูล</label>
+            <input id="e-source-name" />
+          </div>
+          <div>
+            <label>ลิงก์แหล่งข้อมูล</label>
+            <input id="e-source-url" />
+          </div>
+          <input id="e-id" type="hidden" />
+          <input id="e-lat" type="hidden" />
+          <input id="e-lng" type="hidden" />
+          <input id="e-image" type="hidden" />
+          <div style="grid-column: 1 / -1;">
+            <label>รูปปก</label>
+            <p class="muted">เลือกและเปลี่ยนรูปปกจากส่วนจัดการรูปด้านล่าง ไม่จำเป็นต้องแก้ URL ด้วยมือในขั้นนี้</p>
+            <img id="e-cover-preview" class="cover-preview hidden" alt="cover preview" />
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label>คำอธิบาย</label>
+            <p class="muted">ในขั้นตอนนี้ยังไม่ควรแทรกรูปในเนื้อหา ให้เพิ่มในขั้นตรวจแก้เนื้อหา</p>
+            <textarea id="e-description" style="min-height:280px;"></textarea>
+          </div>
+        </div>
+        <details class="raw-json-toggle">
+          <summary>ข้อมูลเทคนิค</summary>
+          <div class="secondary-panel">
+            <div class="grid">
+              <div>
+                <label>ID</label>
+                <input id="e-id-readonly" readonly />
+              </div>
+              <div>
+                <label>ละติจูด</label>
+                <input id="e-lat-readonly" readonly />
+              </div>
+              <div>
+                <label>ลองจิจูด</label>
+                <input id="e-lng-readonly" readonly />
+              </div>
+              <div style="grid-column: 1 / -1;">
+                <label>ลิงก์รูปปก</label>
+                <input id="e-image-readonly" readonly />
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">รูปของรายการ</h2>
+        <p class="muted">ใช้ส่วนนี้เมื่อจำเป็นต้องเปลี่ยนรูปปกหรือจัดการไฟล์รูปเพิ่มเติมเท่านั้น</p>
+        <details class="raw-json-toggle">
+          <summary>จัดการรูปเพิ่มเติม</summary>
+          <div class="secondary-panel">
+            <div class="grid">
+              <div>
+                <label>Content Item ID</label>
+                <input id="asset-item-id" readonly />
+              </div>
+              <div>
+                <label>บทบาทรูป</label>
+                <select id="asset-role">
+                  <option value="cover">cover</option>
+                  <option value="gallery" selected>gallery</option>
+                  <option value="inline">inline</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid">
+              <div>
+                <label>อัปโหลดรูปใหม่</label>
+                <input id="asset-file" type="file" accept="image/*" multiple />
+                <p class="muted" id="asset-file-help">สามารถเลือกหลายรูปได้ ระบบจะอัปโหลดตามลำดับที่เลือก</p>
+                <div class="toolbar">
+                  <button id="btn-upload-asset">อัปโหลดรูปที่เลือก</button>
+                </div>
+              </div>
+              <div>
+                <label>ลงทะเบียนพาธไฟล์หรือ URL ที่มีอยู่แล้ว</label>
+                <input id="asset-path" placeholder="ตัวอย่าง: uploads/2026/03/a.jpg หรือ https://..." />
+                <label>ชื่อไฟล์ (ไม่บังคับ)</label>
+                <input id="asset-filename" placeholder="ชื่อไฟล์.jpg" />
+                <div class="toolbar">
+                  <button id="btn-register-asset">ลงทะเบียนไฟล์รูป</button>
+                </div>
+              </div>
+            </div>
+            <p class="status" id="asset-status"></p>
+
+            <div class="table-wrap">
+              <table id="table-assets">
+                <thead>
+                  <tr>
+                    <th>Asset ID</th>
+                    <th>Item ID</th>
+                    <th>บทบาท</th>
+                    <th>ไฟล์</th>
+                    <th>ตัวอย่าง</th>
+                    <th>การทำงาน</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+      </div>
+      <div class="card">
+        <h2 class="section-title">ข้อมูลอ้างอิงที่รวบรวมมา</h2>
+        <p class="muted">ตรวจข้อมูลต้นทางและเลือกเฉพาะที่เชื่อถือได้</p>
+        <div class="toolbar">
+          <button id="btn-toggle-manual-evidence" type="button" class="utility-action">เพิ่มข้อมูลอ้างอิงเอง</button>
+        </div>
+        <div id="manual-evidence-panel" class="secondary-panel hidden">
+          <p class="muted">ใช้เมื่อข้อมูลจากเว็บยังไม่ครบ สามารถวางข้อความเพิ่มเติมเพื่ออ้างอิงได้</p>
+          <div class="grid">
+            <div>
+              <label>ลิงก์แหล่งข้อมูล</label>
+              <input id="evidence-source-url" placeholder="https://..." />
+            </div>
+            <div>
+              <label>ข้อความอ้างอิงแหล่งที่มา (ไม่บังคับ)</label>
+              <input id="evidence-attribution" placeholder="เช่น คัดลอกจากเว็บไซต์หน่วยงาน" />
+            </div>
+            <div style="grid-column: 1 / -1;">
+              <label>ข้อความ/บทความที่ต้องการเพิ่มเข้า Raw Evidence</label>
+              <textarea id="evidence-batch-text" class="evidence-batch-textarea" placeholder="วางข้อความหรือบทความที่ต้องการเพิ่มเข้า Raw Evidence"></textarea>
+            </div>
+            <div style="grid-column: 1 / -1;">
+              <label class="checkbox-inline">
+                <input id="evidence-split-paragraphs" type="checkbox" checked />
+                <span>แยกตามย่อหน้าอัตโนมัติ</span>
+              </label>
+            </div>
+          </div>
+          <div class="toolbar">
+            <button id="btn-add-evidence">เพิ่มเข้า Raw Evidence</button>
+          </div>
+          <details class="raw-json-toggle">
+            <summary>ตัวเลือกขั้นสูง</summary>
+            <p class="muted">ใช้เฉพาะกรณีที่ต้องเพิ่ม evidence แบบกำหนด field เอง</p>
+            <div class="grid">
+              <div>
+                <label>ประเภทบล็อก</label>
+                <select id="evidence-block-type">
+                  <option value="fact">fact</option>
+                  <option value="social_proof">social_proof</option>
+                  <option value="review_snippet">review_snippet</option>
+                  <option value="media">media</option>
+                  <option value="mention">mention</option>
+                  <option value="editor_note">editor_note</option>
+                </select>
+              </div>
+              <div>
+                <label>ชนิดแหล่งข้อมูล</label>
+                <input id="evidence-source-type" placeholder="manual / google_maps / editor" />
+              </div>
+              <div style="grid-column: 1 / -1;">
+                <label>ข้อความหลัก</label>
+                <textarea id="evidence-text-value" style="min-height:100px;" placeholder="ข้อความหลักของ evidence"></textarea>
+              </div>
+              <div>
+                <label>ค่าตัวเลข (ไม่บังคับ)</label>
+                <input id="evidence-numeric-value" placeholder="4.5" />
+              </div>
+              <div>
+                <label>ค่าแบบรายการ (คั่นด้วย comma, ไม่บังคับ)</label>
+                <input id="evidence-list-value" placeholder="open_now=true,review_count=12" />
+              </div>
+            </div>
+            <div class="toolbar">
+              <button id="btn-add-evidence-advanced" type="button">เพิ่ม Evidence แบบกำหนดเอง</button>
+            </div>
+          </details>
+        </div>
+        <p class="status" id="evidence-status"></p>
+        <div class="evidence-toolbar-row">
+                  <span id="evidence-table-summary" class="muted"></span>
+          <div class="evidence-filter-row">
+            <div class="evidence-filter-control">
+              <span class="muted">ประเภท</span>
+              <select id="evidence-filter-block-type" aria-label="ประเภท">
+                <option value="all">ทั้งหมด</option>
+                <option value="fact">ข้อเท็จจริง</option>
+                <option value="mention">ข้อความอ้างอิง</option>
+                <option value="media">รูปภาพ</option>
+                <option value="review_snippet">รีวิวย่อ</option>
+                <option value="social_proof">สัญญาณความนิยม</option>
+                <option value="editor_note">บันทึกเพิ่มเติม</option>
+              </select>
+            </div>
+            <div class="evidence-filter-control">
+              <span class="muted">แหล่งข้อมูล</span>
+              <select id="evidence-filter-source-family" aria-label="แหล่งข้อมูล">
+                <option value="all">ทั้งหมด</option>
+                <option value="official">Official Web สถานที่</option>
+                <option value="institutional">เว็บหน่วยงาน</option>
+                <option value="google_maps">Google Maps</option>
+                <option value="wongnai">Wongnai</option>
+                <option value="manual">เพิ่มเอง</option>
+                <option value="system">ระบบ</option>
+              </select>
+            </div>
+            <div class="evidence-filter-control">
+              <span class="muted">จัดลำดับ</span>
+              <select id="evidence-sort" aria-label="จัดลำดับ">
+                <option value="source_priority">แหล่งสำคัญก่อน</option>
+                <option value="latest">ล่าสุด</option>
+                <option value="oldest">เก่าสุด</option>
+                <option value="block_type">ประเภท block</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="table-evidence">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>ประเภท</th>
+                <th>แหล่งข้อมูล</th>
+                <th>ค่า</th>
+                <th>สถานะ</th>
+                <th>การตัดสินใจ</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">ข้อมูลที่เลือกส่งเข้า Agent (Approved Context)</h2>
+        <p class="muted">มีเฉพาะบล็อกที่สถานะ active ในส่วนนี้เท่านั้นที่จะถูกส่งเข้า Agent</p>
+        <p class="muted">เลือกส่งเข้า Agent = สร้าง approved context ใหม่จาก evidence, เปิดใช้งานอีกครั้ง = เปิด context เดิมที่เคย inactive</p>
+        <p class="status" id="context-status"></p>
+        <div class="table-wrap">
+          <table id="table-approved-context">
+            <thead>
+              <tr>
+                <th>Context ID</th>
+                <th>Evidence ID</th>
+                <th>ประเภท</th>
+                <th>ข้อมูลที่เลือก</th>
+                <th>ที่มา</th>
+                <th>สถานะ</th>
+                <th>การตัดสินใจ</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">ตัวอย่างข้อมูลที่ Agent จะได้รับ</h2>
+        <div class="toolbar">
+          <button id="btn-refresh-draft-preview">รีเฟรชตัวอย่าง</button>
+          <button class="ok" id="btn-run-ai-context">ประมวลผลด้วย Agent จาก Approved Context</button>
+        </div>
+        <p class="status" id="draft-preview-status"></p>
+        <div id="draft-input-preview-readable" class="preview-blocks"></div>
+        <details class="raw-json-toggle">
+          <summary>Raw JSON (สำหรับตรวจสอบ)</summary>
+          <pre id="draft-input-preview" class="json-preview">{}</pre>
+        </details>
+      </div>
+    </main>
+
+    <div id="evidence-value-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card evidence-value-modal-card">
+        <div class="modal-header">
+          <h3 id="evidence-value-modal-title">ค่า Evidence</h3>
+          <button id="btn-close-evidence-value-modal" type="button" class="utility-action">ปิด</button>
+        </div>
+        <div id="evidence-value-modal-body" class="evidence-value-modal-body"></div>
+      </div>
+    </div>
+    <script type="module" src="/item-editor.js"></script>
+  </body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+

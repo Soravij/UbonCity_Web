@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Freelance Portal</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Freelance Portal</span>
+            <h1>ทางเข้างาน Freelance</h1>
+            <div class="auth-points">
+              <div class="auth-point">
+                <strong>หน้านี้เป็น launcher เท่านั้น</strong>
+                <span>เข้าไปทำงานใน work page ของตัวเอง แล้วเลือกงานจากรายการของคุณในหน้านั้น</span>
+              </div>
+            </div>
+          </div>
+          <div class="auth-box">
+            <div class="auth-box-head">
+              <h2>เข้าสู่ระบบ</h2>
+              <p>ระบบจะพาไปทำงานตามสิทธิ์ โดยอัตโนมัติ</p>
+            </div>
+            <label class="auth-field">
+              <span>อีเมล</span>
+              <input id="auth-email" placeholder="อีเมลบัญชีที่ตั้งไว้ในระบบ" />
+            </label>
+            <label class="auth-field">
+              <span>รหัสผ่าน</span>
+              <input id="auth-password" type="password" placeholder="รหัสผ่าน" />
+            </label>
+            <div class="auth-actions">
+              <button class="primary" id="btn-login">เข้าสู่ระบบ</button>
+              <button id="btn-logout">ออกจากระบบ</button>
+            </div>
+            <p class="auth-note">ถ้ามีลิงก์ที่ต้องการเปิด ระบบจะกลับไปหน้าปลายทางหลังเข้าสู่ระบบ และต้องใช้อีเมล/รหัสผ่านของบัญชีที่ถูกตั้งไว้ใน collector instance นี้</p>
+          </div>
+        </div>
+        <p class="muted" id="portal-auth-status">กำลังตรวจสิทธิ์...</p>
+      </header>
+
+      <section class="card article-work-card">
+        <div class="article-section-head">
+          <div>
+            <h3 class="section-title">Assignments / Work</h3>
+            <p class="muted">เปิด work page ของตัวเองเพื่อทำงาน แนบไฟล์ และส่งงานกลับ</p>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="btn-open-work" class="primary" type="button">เปิดงานของฉัน</button>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/freelance-home.js"></script>
+  </body>
+</html>

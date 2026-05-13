@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Events Manager</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+            <p>Events manager สำหรับสร้าง มอบหมาย และติดตาม event editorial</p>
+          </div>
+        </div>
+        <p class="muted" id="workspace-auth-status"></p>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+
+      <div class="card page-actions-strip">
+        <div class="toolbar">
+    <button id="btn-back-home" class="utility-action">Home</button>
+          <button id="btn-process-home" class="utility-action">กลับหน้าแรก</button>
+        </div>
+      </div>
+
+      <section class="card article-work-card">
+        <div class="article-section-head">
+          <div>
+            <h2 class="section-title">สร้าง Event</h2>
+            <p class="muted">สร้างงานใหม่แล้ว assign ผู้เขียนได้ทันที</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="full-span">
+            <label>Title</label>
+            <input id="event-create-title" placeholder="เช่น สงกรานต์อุบล 2569" />
+          </div>
+          <div>
+            <label>Assign writer (optional)</label>
+            <select id="event-create-assignee">
+              <option value="">-- ยังไม่ assign --</option>
+            </select>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="btn-create-event" class="primary">Create Event</button>
+          <span id="create-status" class="status"></span>
+        </div>
+      </section>
+
+      <section class="card article-work-card">
+        <div class="article-section-head">
+          <div>
+            <h2 class="section-title">Event ทั้งหมด</h2>
+            <p class="muted">owner/admin จัดการงานจากหน้านี้ ส่วนผู้เขียนจะรับงานในคิวบทความเดิม</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="basic-table" id="events-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>งาน</th>
+                <th>สถานะ</th>
+                <th>ผู้เขียน</th>
+                <th>มอบหมาย</th>
+                <th>การทำงาน</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/events-manager-page.js"></script>
+  </body>
+</html>

@@ -1,0 +1,92 @@
+﻿<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - สรุปหน้างาน</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+  </head>
+  <body class="field-brief-page">
+    <main class="container field-brief-container">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+            <p>สรุปหน้างาน สำหรับพิมพ์หรือส่งต่อเป็น brief ให้ทีมภาคสนาม</p>
+          </div>
+        </div>
+        <p class="muted" id="brief-auth-status"></p>
+        <p class="status" id="brief-status"></p>
+      </header>
+      <div class="card page-actions-strip print-hidden">
+        <div class="toolbar">
+          <button id="btn-back-home" class="utility-action">Home</button>
+          <button id="btn-back-editor" class="utility-action">กลับหน้าแรก</button>
+          <button id="btn-print-brief" class="ok nav-next">พิมพ์ / บันทึกเป็น PDF</button>
+        </div>
+      </div>
+
+      <section class="card field-brief-card field-brief-card-header">
+        <div class="field-brief-titlebar">
+          <div>
+            <div class="field-brief-kicker">สรุปหน้างาน</div>
+            <h2 id="brief-title">-</h2>
+            <p class="muted" id="brief-meta-line">-</p>
+          </div>
+          <div class="field-brief-meta-grid">
+            <div><strong>สถานะภาคสนาม</strong><span id="brief-status-label">-</span></div>
+            <div><strong>พิกัด</strong><span id="brief-location">-</span></div>
+            <div><strong>สร้างเมื่อ</strong><span id="brief-generated-at">-</span></div>
+            <div><strong>ผู้จัดเตรียม</strong><span id="brief-generated-by">-</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card field-brief-card field-brief-card-summary">
+        <h2 class="section-title">สรุปโจทย์หน้างาน</h2>
+        <div id="brief-summary" class="brief-block-text"></div>
+      </section>
+
+      <section class="card field-brief-card">
+        <h2 class="section-title">สิ่งที่ต้องยืนยัน</h2>
+        <div id="brief-verify" class="brief-list-block"></div>
+      </section>
+
+      <section class="card field-brief-card">
+        <h2 class="section-title">ช็อตที่ต้องเก็บ</h2>
+        <div id="brief-shots" class="brief-list-block"></div>
+      </section>
+
+      <section class="card field-brief-card">
+        <h2 class="section-title">คำถามที่ต้องถาม</h2>
+        <div id="brief-questions" class="brief-list-block"></div>
+      </section>
+
+      <section class="card field-brief-card">
+        <h2 class="section-title">แนวเล่าเวลาเก็บคลิปหรือเสียง</h2>
+        <div id="brief-social" class="brief-grid"></div>
+      </section>
+
+      <section class="card field-brief-card">
+        <h2 class="section-title">ภาพอ้างอิง / Media hints</h2>
+        <div id="brief-media-hints" class="brief-media-grid"></div>
+      </section>
+
+      <section class="card field-brief-card">
+        <h2 class="section-title">แหล่งอ้างอิง</h2>
+        <div id="brief-references" class="brief-list-block"></div>
+      </section>
+
+      <section class="card field-brief-card">
+        <h2 class="section-title">ข้อมูลการมอบหมาย</h2>
+        <div id="brief-assignment" class="brief-grid"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/field-brief.js?v=20260508-1"></script>
+  </body>
+</html>
+

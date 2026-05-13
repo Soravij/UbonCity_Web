@@ -1,0 +1,105 @@
+﻿<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - My Writing Queue</title>
+    <script src="/theme-bootstrap.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="/theme-control.js"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+  <div class="auth-row">
+    <div class="auth-intro">
+      <span class="auth-badge">Collector Workspace</span>
+      <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+      <p>My Writing Queue สำหรับเปิดบทความที่รับผิดชอบและทำงานต่อจากคิวนี้</p>
+    </div>
+  </div>
+  <p class="muted" id="workspace-auth-status">Checking session...</p>
+  <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+</header>
+<div class="card page-actions-strip">
+  <div class="toolbar">
+    <button id="btn-back-home" class="utility-action">Home</button>
+    <button id="btn-open-selected-workspace" class="utility-action">เปิดหน้าทำงาน</button>
+  </div>
+</div>
+<div id="article-process-bar" class="progress-steps article-progress" aria-label="article workflow progress"></div>
+
+      <div class="article-workspace-grid article-intake-grid article-intake-layout">
+        <section class="article-workspace-main article-intake-main">
+          <div class="article-intake-top-grid">
+            <div class="card article-overview-card article-card-status">
+              <h2 class="section-title">Status and Access</h2>
+              <div id="article-process-summary" class="readiness-summary hidden"></div>
+            </div>
+
+            <div class="card article-overview-card article-card-assignment">
+              <div class="article-section-head">
+                <div>
+                  <h2 class="section-title">Assign Editor</h2>
+                  <p class="muted">Choose the writing owner before moving into the workspace.</p>
+                </div>
+              </div>
+              <div id="assignment-status" class="status"></div>
+              <div class="grid">
+                <div class="full-span">
+                  <label>Owner</label>
+                  <select id="editor-assignee-select">
+                    <option value="">Select owner</option>
+                  </select>
+                </div>
+                <div>
+                  <label>External Editor</label>
+                  <input id="editor-external-name" placeholder="External editor name" />
+                </div>
+                <div>
+                  <label>Contact</label>
+                  <input id="editor-external-contact" placeholder="LINE / phone / email" />
+                </div>
+                <div>
+                  <label>Due At</label>
+                  <input id="editor-assignee-due-at" type="datetime-local" />
+                </div>
+                <div>
+                  <label>Internal Note</label>
+                  <input id="editor-assignee-note" placeholder="Optional internal note" />
+                </div>
+              </div>
+              <div class="toolbar compact-toolbar">
+                <button id="btn-assign-editor" type="button">Assign Writing</button>
+              </div>
+              <div id="editorial-assignment-list" class="secondary-panel"></div>
+            </div>
+          </div>
+
+          <section class="card article-work-card article-intake-queue-card">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Queue</h2>
+                <p class="muted" id="article-intake-summary">Loading items...</p>
+              </div>
+            </div>
+            <div id="article-intake-groups" class="article-intake-groups"></div>
+          </section>
+
+          <section class="card article-overview-card article-card-activity article-intake-activity-card">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Recent Activity</h2>
+                <p class="muted">Latest transitions and notes for the selected item.</p>
+              </div>
+            </div>
+            <div id="article-activity-log" class="secondary-panel"></div>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <script type="module" src="/article-intake.js"></script>
+  </body>
+</html>
+
