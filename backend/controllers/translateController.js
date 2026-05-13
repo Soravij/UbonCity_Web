@@ -1,124 +1,79 @@
-﻿import OpenAI from "openai";
+import { SUPPORTED_CONTENT_LANGS, LANGUAGE_LABELS, normalizeContentLang } from "../constants/languages.js";
+import { previewTranslateWithRetry } from "../services/translationService.js";
+import { LIMITS, cleanPlainText, cleanRichText } from "../validators/inputSanitizer.js";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-function parseModelJson(rawText) {
-  const text = String(rawText || "").trim();
-
-  // Handle markdown code fences like ```json ... ```
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  const fencedBody = fenceMatch ? fenceMatch[1].trim() : text;
-
+// Manual preview endpoint only.
+// This endpoint does not persist data and is not part of draft/review/approve/publish lifecycle.
+export const previewTranslateManual = async (req, res) => {
   try {
-    return JSON.parse(fencedBody);
-  } catch {
-    const start = fencedBody.indexOf("{");
-    const end = fencedBody.lastIndexOf("}");
+    const sourceLang = normalizeContentLang(req.body?.sourceLang, "th");
 
-    if (start >= 0 && end > start) {
-      const maybeJson = fencedBody.slice(start, end + 1);
-      return JSON.parse(maybeJson);
+    let title = "";
+    let description = "";
+    try {
+      title = cleanPlainText(req.body?.title, { required: true, max: LIMITS.TITLE_MAX, field: "title" });
+      description = cleanRichText(req.body?.description, {
+        required: true,
+        max: LIMITS.DESCRIPTION_MAX,
+        field: "description",
+      });
+    } catch (validationErr) {
+      return res.status(400).json({
+        error: String(validationErr?.message || "Invalid input"),
+        preview_only: true,
+        manual_only: true,
+        lifecycle_participation: "none",
+      });
     }
 
-    throw new Error("Model response is not valid JSON");
-  }
-}
+    if (!title || !description) {
+      return res.status(400).json({
+        error: "title and description are required",
+        preview_only: true,
+        manual_only: true,
+        lifecycle_participation: "none",
+      });
+    }
 
-function looksCorruptedTranslation(value) {
-  const text = String(value || "").trim();
-  if (!text) return true;
-
-  const qmarks = (text.match(/\?/g) || []).length;
-  if (qmarks >= 3 && qmarks / Math.max(text.length, 1) >= 0.3) return true;
-
-  return false;
-}
-
-function isInvalidTranslationPayload(payload) {
-  const title = String(payload?.title || "").trim();
-  const description = String(payload?.description || "").trim();
-  if (!title || !description) return true;
-
-  return looksCorruptedTranslation(title) || looksCorruptedTranslation(description);
-}
-
-async function requestTranslation({ title, description, sourceLang, targetLang, languageLabels, strict = false }) {
-  const strictLine = strict
-    ? "If output contains question-mark placeholders like ???, regenerate proper target-language text."
-    : "";
-
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are a professional tourism translator. Translate naturally for travel content. Return only JSON with keys title and description.",
-      },
-      {
-        role: "user",
-        content:
-          `Source language: ${languageLabels[sourceLang] || sourceLang} (${sourceLang})\n` +
-          `Target language: ${languageLabels[targetLang] || targetLang} (${targetLang})\n` +
-          "Do not keep the original source text. The output must be fully in the target language.\n" +
-          "For target lo, output must be in Lao language (not Thai).\n" +
-          `${strictLine}\n\n` +
-          `Title: ${title}\n` +
-          `Description: ${description}`,
-      },
-    ],
-  });
-
-  const text = response.choices?.[0]?.message?.content;
-  return parseModelJson(text);
-}
-
-export const autoTranslate = async (req, res) => {
-  try {
-    const { title, description, sourceLang } = req.body;
-
-    const languages = ["th", "en", "zh", "lo"];
-    const languageLabels = {
-      th: "Thai",
-      en: "English",
-      zh: "Chinese (Simplified)",
-      lo: "Lao",
-    };
-    const targets = languages.filter((l) => l !== sourceLang);
-
+    const targets = SUPPORTED_CONTENT_LANGS.filter((lang) => lang !== sourceLang);
     const result = {};
 
     for (const lang of targets) {
-      let parsed = await requestTranslation({
+      const translated = await previewTranslateWithRetry({
         title,
         description,
         sourceLang,
         targetLang: lang,
-        languageLabels,
+        languageLabels: LANGUAGE_LABELS,
       });
 
-      if (isInvalidTranslationPayload(parsed)) {
-        parsed = await requestTranslation({
-          title,
-          description,
-          sourceLang,
-          targetLang: lang,
-          languageLabels,
-          strict: true,
-        });
-      }
-
       result[lang] = {
-        title: parsed?.title || "",
-        description: parsed?.description || "",
+        title: translated.title,
+        description: translated.description,
       };
     }
 
-    res.json(result);
+    return res.json({
+      ...result,
+      preview_only: true,
+      manual_only: true,
+      lifecycle_participation: "none",
+      note:
+        "Manual translation preview only. This endpoint is not used by draft/review/approve/publish/export lifecycle.",
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({
+      error: err.message?.includes("OPENAI_API_KEY")
+        ? "Translation unavailable: OPENAI_API_KEY is not configured. Please set your OpenAI API key in the backend environment variables."
+        : "Internal server error",
+      preview_only: true,
+      manual_only: true,
+      lifecycle_participation: "none",
+      hint: "If you're the admin, set OPENAI_API_KEY in your backend .env or hosting environment variables.",
+    });
   }
 };
+
+// Backward-compatible alias for legacy imports.
+export const autoTranslate = previewTranslateManual;
+

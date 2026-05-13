@@ -1,157 +1,220 @@
-﻿import pool from "../config/db.js";
+import pool from "../config/db.js";
 import jwt from "jsonwebtoken";
-import OpenAI from "openai";
+import { SUPPORTED_CONTENT_LANGS, normalizeContentLang } from "../constants/languages.js";
+import { validateEventPayload } from "../validators/eventValidator.js";
+import { markCollectorImportReviewApprovedByEntity } from "../services/collectorImportReviewService.js";
+import { assertNoEmerConflictForPublish } from "../services/publishGuardService.js";
+import { purgeEvent as purgeEventEntity } from "../services/purgeContentService.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "uboncity_secret";
-const EVENT_LANGS = ["th", "en", "zh", "lo"];
-const LANGUAGE_LABELS = {
-  th: "Thai",
-  en: "English",
-  zh: "Chinese (Simplified)",
-  lo: "Lao",
-};
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const JWT_SECRET = String(process.env.JWT_SECRET || "").trim();
+const EVENT_LANGS = SUPPORTED_CONTENT_LANGS;
 
 let ensuredEventsTable = false;
+function extractPlainTextForMeta(value) {
+  return String(value || "")
+    .replace(/!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-function isAuthenticatedRequest(req) {
+function resolveMetaDescription(description) {
+  const source = extractPlainTextForMeta(description);
+  if (!source) return null;
+  if (source.length <= 160) return source;
+
+  return source.slice(0, 157).trimEnd() + "...";
+}
+
+function buildMediaPublicUrl(req, asset) {
+  const storageDisk = String(asset?.storage_disk || "").trim().toLowerCase();
+  const sourceUrl = String(asset?.source_url || "").trim();
+  const fileName = String(asset?.file_name || "").trim();
+  const storagePath = String(asset?.storage_path || "").trim().replace(/^\/+/, "");
+  const configuredBase = String(process.env.BACKEND_PUBLIC_URL || "").trim();
+  const base = configuredBase || `${req.protocol}://${req.get("host")}`;
+
+  if (storageDisk === "external") return sourceUrl;
+  if (fileName) return `${base}/uploads/${fileName}`;
+  if (storagePath) return `${base}/${storagePath}`;
+  return sourceUrl || "";
+}
+
+function resolveRequestBaseUrl(req) {
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+function rewriteSelfHostedMediaUrl(req, value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (!/^https?:\/\//i.test(raw)) return raw;
+  try {
+    const parsed = new URL(raw);
+    const host = String(parsed.hostname || "").trim().toLowerCase();
+    if (host !== "localhost" && host !== "127.0.0.1") return raw;
+    return `${resolveRequestBaseUrl(req)}${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return raw;
+  }
+}
+
+function rewriteSelfHostedHtmlMediaUrls(req, html) {
+  const markup = String(html || "").trim();
+  if (!markup) return markup;
+  return markup.replace(
+    /\b(src|href)\s*=\s*(["'])([^"'<>]+)\2/gi,
+    (_match, attrName, quote, rawUrl) => {
+      const rewritten = rewriteSelfHostedMediaUrl(req, rawUrl) || rawUrl;
+      return `${attrName}=${quote}${rewritten}${quote}`;
+    }
+  );
+}
+
+async function loadApprovedEventMediaMap(req, eventIds) {
+  const normalizedIds = Array.from(
+    new Set((Array.isArray(eventIds) ? eventIds : []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))
+  );
+  if (!normalizedIds.length) return new Map();
+
+  const placeholders = normalizedIds.map(() => "?").join(",");
+  try {
+    const [rows] = await pool.query(
+      `SELECT
+         ciu.entity_id AS event_id,
+         ciu.usage_type,
+         ciu.position,
+         ma.source_url,
+         ma.storage_disk,
+         ma.file_name,
+         ma.storage_path
+       FROM content_image_usages ciu
+       JOIN media_assets ma ON ma.id=ciu.asset_id
+       WHERE ciu.entity_type='event'
+         AND ciu.entity_id IN (${placeholders})
+         AND ma.status='approved'
+       ORDER BY ciu.entity_id ASC, ciu.usage_type ASC, ciu.position ASC, ciu.id ASC`,
+      normalizedIds
+    );
+
+    const out = new Map();
+    for (const row of rows) {
+      const eventId = Number(row?.event_id || 0);
+      if (!eventId) continue;
+
+      const mediaUrl = buildMediaPublicUrl(req, row);
+      if (!mediaUrl) continue;
+
+      const usageType = String(row?.usage_type || "").trim().toLowerCase();
+      const current = out.get(eventId) || { cover: null, gallery: [], inline: [] };
+
+      if (usageType === "cover" && !current.cover) current.cover = mediaUrl;
+      if (usageType === "gallery") current.gallery.push(mediaUrl);
+      if (usageType === "inline") current.inline.push(mediaUrl);
+
+      out.set(eventId, current);
+    }
+
+    return out;
+  } catch (err) {
+    const code = String(err?.code || "").toUpperCase();
+    if (code === "ER_NO_SUCH_TABLE") return new Map();
+    throw err;
+  }
+}
+
+function parseTagList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+}
+
+function normalizeEventDecisionAndMedia(row, media = { cover: null, gallery: [], inline: [] }) {
+  const decisionFeaturedScore = Number(row?.decision_featured_score);
+  const scenarioList = parseTagList(row?.decision_scenario_tags);
+  const trendList = parseTagList(row?.decision_trend_flags);
+  const momentList = parseTagList(row?.decision_moment_tags);
+  const insightList = parseTagList(row?.decision_insight_flags);
+
+  const mediaCoverImage = media?.cover || null;
+  const mediaGalleryImages = Array.isArray(media?.gallery) ? media.gallery : [];
+  const mediaInlineImages = Array.isArray(media?.inline) ? media.inline : [];
+
+  const effectiveCover = row?.decision_cover_image || mediaCoverImage || row?.image || null;
+  const effectiveThumb =
+    row?.decision_thumbnail_image ||
+    mediaGalleryImages[0] ||
+    effectiveCover ||
+    row?.image ||
+    null;
+
+  return {
+    ...row,
+    decision_featured_score: Number.isFinite(decisionFeaturedScore) ? decisionFeaturedScore : null,
+    decision_scenario_tags_list: scenarioList,
+    decision_trend_flags_list: trendList,
+    decision_moment_tags_list: momentList,
+    decision_insight_flags_list: insightList,
+    media_cover_image: mediaCoverImage,
+    media_gallery_images: mediaGalleryImages,
+    media_inline_images: mediaInlineImages,
+    effective_cover_image: effectiveCover,
+    effective_thumbnail_image: effectiveThumb,
+  };
+}
+
+function normalizeEventForResponse(req, row, media) {
+  const normalized = normalizeEventDecisionAndMedia(row, media);
+  return {
+    ...normalized,
+    image: rewriteSelfHostedMediaUrl(req, normalized.image),
+    description: rewriteSelfHostedHtmlMediaUrls(req, normalized.description),
+    decision_cover_image: rewriteSelfHostedMediaUrl(req, normalized.decision_cover_image),
+    decision_thumbnail_image: rewriteSelfHostedMediaUrl(req, normalized.decision_thumbnail_image),
+    media_cover_image: rewriteSelfHostedMediaUrl(req, normalized.media_cover_image),
+    media_gallery_images: (Array.isArray(normalized.media_gallery_images) ? normalized.media_gallery_images : [])
+      .map((entry) => rewriteSelfHostedMediaUrl(req, entry))
+      .filter(Boolean),
+    media_inline_images: (Array.isArray(normalized.media_inline_images) ? normalized.media_inline_images : [])
+      .map((entry) => rewriteSelfHostedMediaUrl(req, entry))
+      .filter(Boolean),
+    effective_cover_image: rewriteSelfHostedMediaUrl(req, normalized.effective_cover_image),
+    effective_thumbnail_image: rewriteSelfHostedMediaUrl(req, normalized.effective_thumbnail_image),
+  };
+}
+
+function hasPrivilegedPreviewAccess(req) {
   try {
     const authHeader = String(req.headers?.authorization || "").trim();
     const match = authHeader.match(/^Bearer\s+(.+)$/i);
     if (!match) return false;
 
     const decoded = jwt.verify(match[1], JWT_SECRET);
-    return Boolean(decoded?.id);
+    const role = String(decoded?.role || "").toLowerCase();
+    return role === "owner" || role === "admin";
   } catch {
     return false;
   }
 }
 
-function parseModelJson(rawText) {
-  const text = String(rawText || "").trim();
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  const fencedBody = fenceMatch ? fenceMatch[1].trim() : text;
-
-  try {
-    return JSON.parse(fencedBody);
-  } catch {
-    const start = fencedBody.indexOf("{");
-    const end = fencedBody.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      return JSON.parse(fencedBody.slice(start, end + 1));
-    }
-    throw new Error("Model response is not valid JSON");
-  }
-}
-
-function looksCorruptedTranslation(value) {
-  const text = String(value || "").trim();
-  if (!text) return true;
-
-  const qmarks = (text.match(/\?/g) || []).length;
-  return qmarks >= 3 && qmarks / Math.max(text.length, 1) >= 0.3;
-}
-
-function isInvalidTranslationPayload(payload) {
-  const title = String(payload?.title || "").trim();
-  const description = String(payload?.description || "").trim();
-  if (!title || !description) return true;
-  return looksCorruptedTranslation(title) || looksCorruptedTranslation(description);
-}
-
-async function requestTranslation({ title, description, sourceLang, targetLang, strict = false }) {
-  const strictLine = strict
-    ? "If output contains question-mark placeholders like ???, regenerate proper target-language text."
-    : "";
-
-  const response = await openai.chat.completions.create({
-    model: "gpt-5-mini",
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are a professional tourism translator. Translate naturally for travel content. Return only JSON with keys title and description.",
-      },
-      {
-        role: "user",
-        content:
-          `Source language: ${LANGUAGE_LABELS[sourceLang] || sourceLang} (${sourceLang})\n` +
-          `Target language: ${LANGUAGE_LABELS[targetLang] || targetLang} (${targetLang})\n` +
-          "Do not keep the original source text. The output must be fully in the target language.\n" +
-          "For target lo, output must be in Lao language (not Thai).\n" +
-          `${strictLine}\n\n` +
-          `Title: ${title}\n` +
-          `Description: ${description}`,
-      },
-    ],
-  });
-
-  const text = response.choices?.[0]?.message?.content;
-  return parseModelJson(text);
-}
-
-async function buildEventTranslations(title, description) {
-  const sourceTitle = String(title || "").trim();
-  const sourceDescription = String(description || "").trim();
-  const hasDescription = Boolean(sourceDescription);
-
-  const map = {
-    th: {
-      title: sourceTitle,
-      description: sourceDescription,
-    },
-  };
-
-  for (const lang of EVENT_LANGS) {
-    if (lang === "th") continue;
-
-    let parsed = await requestTranslation({
-      title: sourceTitle,
-      description: hasDescription ? sourceDescription : sourceTitle,
-      sourceLang: "th",
-      targetLang: lang,
-    });
-
-    if (isInvalidTranslationPayload(parsed)) {
-      parsed = await requestTranslation({
-        title: sourceTitle,
-        description: hasDescription ? sourceDescription : sourceTitle,
-        sourceLang: "th",
-        targetLang: lang,
-        strict: true,
-      });
-    }
-
-    const outTitle = String(parsed?.title || "").trim();
-    const outDescription = hasDescription ? String(parsed?.description || "").trim() : "";
-
-    if (!outTitle || looksCorruptedTranslation(outTitle)) {
-      throw new Error(`Translation failed for ${lang}`);
-    }
-
-    if (hasDescription && (!outDescription || looksCorruptedTranslation(outDescription))) {
-      throw new Error(`Translation failed for ${lang}`);
-    }
-
-    map[lang] = { title: outTitle, description: outDescription };
-  }
-
-  return map;
-}
-
-async function upsertEventTranslation(eventId, lang, title, description) {
+async function upsertEventTranslation(eventId, lang, title, description, metaTitle = null, metaDescription = null) {
   await pool.query(
-    `INSERT INTO event_translations (event_id,lang,title,description)
-     VALUES (?,?,?,?)
-     ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description)`,
-    [Number(eventId), lang, String(title || "").trim() || null, String(description || "").trim() || null]
+    `INSERT INTO event_translations (event_id,lang,title,description,meta_title,meta_description)
+     VALUES (?,?,?,?,?,?)
+     ON DUPLICATE KEY UPDATE
+       title=VALUES(title),
+       description=VALUES(description),
+       meta_title=VALUES(meta_title),
+       meta_description=VALUES(meta_description)`,
+    [
+      Number(eventId),
+      lang,
+      String(title || "").trim() || null,
+      String(description || "").trim() || null,
+      String(metaTitle || "").trim() || null,
+      String(metaDescription || "").trim() || null,
+    ]
   );
 }
-
 async function ensureEventsTable() {
   if (ensuredEventsTable) return;
 
@@ -161,6 +224,9 @@ async function ensureEventsTable() {
       title VARCHAR(255) NOT NULL,
       description TEXT NULL,
       image VARCHAR(1024) NULL,
+      event_period_text TEXT NULL,
+      location_text TEXT NULL,
+      map_url VARCHAR(1024) NULL,
       is_approved TINYINT(1) NOT NULL DEFAULT 0,
       approved_at TIMESTAMP NULL DEFAULT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -176,6 +242,8 @@ async function ensureEventsTable() {
       lang VARCHAR(8) NOT NULL,
       title VARCHAR(255) NOT NULL,
       description TEXT NULL,
+      meta_title VARCHAR(255) NULL,
+      meta_description VARCHAR(320) NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
@@ -200,6 +268,44 @@ async function ensureEventsTable() {
     );
   }
 
+  const [metaTitleCol] = await pool.query("SHOW COLUMNS FROM event_translations LIKE 'meta_title'");
+  if (!metaTitleCol.length) {
+    await pool.query("ALTER TABLE event_translations ADD COLUMN meta_title VARCHAR(255) NULL");
+  }
+
+  const [metaDescriptionCol] = await pool.query("SHOW COLUMNS FROM event_translations LIKE 'meta_description'");
+  if (!metaDescriptionCol.length) {
+    await pool.query("ALTER TABLE event_translations ADD COLUMN meta_description VARCHAR(320) NULL");
+  }
+
+  const eventColumns = [
+    ["event_period_text", "TEXT NULL"],
+    ["location_text", "TEXT NULL"],
+    ["map_url", "VARCHAR(1024) NULL"],
+  ];
+  for (const [name, definition] of eventColumns) {
+    const [column] = await pool.query("SHOW COLUMNS FROM events LIKE ?", [name]);
+    if (!column.length) {
+      await pool.query(`ALTER TABLE events ADD COLUMN ${name} ${definition}`);
+    }
+  }
+
+  const eventDecisionColumns = [
+    ["decision_featured_score", "INT NULL DEFAULT NULL"],
+    ["decision_scenario_tags", "VARCHAR(500) NULL"],
+    ["decision_trend_flags", "VARCHAR(500) NULL"],
+    ["decision_moment_tags", "VARCHAR(500) NULL"],
+    ["decision_insight_flags", "VARCHAR(500) NULL"],
+    ["decision_cover_image", "VARCHAR(1024) NULL"],
+    ["decision_thumbnail_image", "VARCHAR(1024) NULL"],
+  ];
+  for (const [name, definition] of eventDecisionColumns) {
+    const [column] = await pool.query("SHOW COLUMNS FROM events LIKE ?", [name]);
+    if (!column.length) {
+      await pool.query(`ALTER TABLE events ADD COLUMN ${name} ${definition}`);
+    }
+  }
+
   // Backfill TH translation for legacy rows.
   await pool.query(
     `INSERT INTO event_translations (event_id,lang,title,description)
@@ -209,51 +315,63 @@ async function ensureEventsTable() {
      WHERE et.id IS NULL`
   );
 
-  // Ensure all supported languages exist at least with TH fallback.
-  for (const lang of ["en", "zh", "lo"]) {
-    await pool.query(
-      `INSERT INTO event_translations (event_id,lang,title,description)
-       SELECT th.event_id, ?, th.title, th.description
-       FROM event_translations th
-       LEFT JOIN event_translations target ON target.event_id=th.event_id AND target.lang=?
-       WHERE th.lang='th' AND target.id IS NULL`,
-      [lang, lang]
-    );
-  }
-
   ensuredEventsTable = true;
+
 }
 
 export const getEvents = async (req, res) => {
   try {
     await ensureEventsTable();
 
-    const lang = EVENT_LANGS.includes(String(req.query?.lang || "")) ? String(req.query.lang) : "th";
+    const lang = normalizeContentLang(req.query?.lang, "th");
     const includeUnapproved =
-      String(req.query?.include_unapproved || "") === "1" && isAuthenticatedRequest(req);
+      String(req.query?.include_unapproved || "") === "1" && hasPrivilegedPreviewAccess(req);
+    const emerFilterRaw = String(req.query?.is_emer || "").trim();
+    const emerFilter = emerFilterRaw === "1" ? 1 : emerFilterRaw === "0" ? 0 : null;
+    const emerWhereClause =
+      emerFilter === null ? "" : includeUnapproved ? "WHERE e.is_emer=?" : "AND e.is_emer=?";
+    const queryParams = emerFilter === null ? [lang, lang] : [lang, lang, emerFilter];
 
     const [rows] = await pool.query(
       `SELECT
          e.id,
          e.image,
+         e.event_period_text,
+         e.location_text,
+         e.map_url,
          e.is_approved,
+         e.is_emer,
          e.approved_at,
          e.created_at,
          e.updated_at,
          ? AS lang,
          COALESCE(et_req.title, et_th.title, e.title) AS title,
-         COALESCE(et_req.description, et_th.description, e.description) AS description
+         COALESCE(et_req.description, et_th.description, e.description) AS description,
+         COALESCE(et_req.meta_title, et_th.meta_title, COALESCE(et_req.title, et_th.title, e.title)) AS meta_title,
+         COALESCE(et_req.meta_description, et_th.meta_description, NULL) AS meta_description,
+         e.decision_featured_score,
+         e.decision_scenario_tags,
+         e.decision_trend_flags,
+         e.decision_moment_tags,
+         e.decision_insight_flags,
+         e.decision_cover_image,
+         e.decision_thumbnail_image
        FROM events e
        LEFT JOIN event_translations et_req ON et_req.event_id=e.id AND et_req.lang=?
        LEFT JOIN event_translations et_th ON et_th.event_id=e.id AND et_th.lang='th'
-       ${includeUnapproved ? "" : "WHERE e.is_approved=1"}
+        ${includeUnapproved ? "" : "WHERE e.is_approved=1"}
+        ${emerWhereClause}
        ORDER BY COALESCE(e.approved_at, e.updated_at) DESC, e.id DESC`,
-      [lang, lang]
+      queryParams
     );
 
-    return res.json({ items: rows });
+    const mediaMap = await loadApprovedEventMediaMap(req, rows.map((row) => Number(row.id)));
+    return res.json({ items: rows.map((row) => normalizeEventForResponse(req, row, mediaMap.get(Number(row.id)))) });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    if (String(err?.code || "") === "EMER_CONFLICT") {
+      return res.status(409).json(err.payload || { error: "emer_conflict" });
+    }
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -262,62 +380,116 @@ export const getEventDetail = async (req, res) => {
     await ensureEventsTable();
 
     const includeUnapproved =
-      String(req.query?.include_unapproved || "") === "1" && isAuthenticatedRequest(req);
+      String(req.query?.include_unapproved || "") === "1" && hasPrivilegedPreviewAccess(req);
 
-    const { id } = req.params;
-    const lang = EVENT_LANGS.includes(String(req.query?.lang || "")) ? String(req.query.lang) : "th";
+    const eventId = Number(req.params?.id);
+    if (!Number.isFinite(eventId) || eventId <= 0) {
+      return res.status(400).json({ error: "Invalid event id" });
+    }
+
+    const lang = normalizeContentLang(req.query?.lang, "th");
 
     const [rows] = await pool.query(
       `SELECT
          e.id,
          e.image,
+         e.event_period_text,
+         e.location_text,
+         e.map_url,
          e.is_approved,
          e.approved_at,
          e.created_at,
          e.updated_at,
          ? AS lang,
          COALESCE(et_req.title, et_th.title, e.title) AS title,
-         COALESCE(et_req.description, et_th.description, e.description) AS description
+         COALESCE(et_req.description, et_th.description, e.description) AS description,
+         COALESCE(et_req.meta_title, et_th.meta_title, COALESCE(et_req.title, et_th.title, e.title)) AS meta_title,
+         COALESCE(et_req.meta_description, et_th.meta_description, NULL) AS meta_description,
+         e.decision_featured_score,
+         e.decision_scenario_tags,
+         e.decision_trend_flags,
+         e.decision_moment_tags,
+         e.decision_insight_flags,
+         e.decision_cover_image,
+         e.decision_thumbnail_image
        FROM events e
        LEFT JOIN event_translations et_req ON et_req.event_id=e.id AND et_req.lang=?
        LEFT JOIN event_translations et_th ON et_th.event_id=e.id AND et_th.lang='th'
        WHERE e.id=? ${includeUnapproved ? "" : "AND e.is_approved=1"}
        LIMIT 1`,
-      [lang, lang, Number(id)]
+      [lang, lang, eventId]
     );
 
     if (!rows.length) {
       return res.status(404).json({ error: "Event not found" });
     }
 
-    return res.json({ item: rows[0] });
+    const mediaMap = await loadApprovedEventMediaMap(req, [eventId]);
+    return res.json({ item: normalizeEventForResponse(req, rows[0], mediaMap.get(eventId)) });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    if (String(err?.code || "") === "EMER_CONFLICT") {
+      return res.status(409).json(err.payload || { error: "emer_conflict" });
+    }
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
-
 export const createEvent = async (req, res) => {
   try {
     await ensureEventsTable();
 
-    const { title, description, image } = req.body || {};
-    const cleanTitle = String(title || "").trim();
-    const cleanDescription = String(description || "").trim();
+    const validated = validateEventPayload(req.body || {});
 
-    if (!cleanTitle) {
-      return res.status(400).json({ error: "title is required" });
+    if (!validated.ok) {
+      return res.status(400).json({ error: validated.error });
+    }
+
+    const cleanTitle = validated.value.title;
+    const cleanDescription = validated.value.description;
+    const cleanImage = validated.value.image;
+    const metaTitle = validated.value.meta_title || cleanTitle;
+    const metaDescription = validated.value.meta_description || resolveMetaDescription(cleanDescription);
+    const isEmer = Number(req.body?.is_emer || 0) === 1 ? 1 : 0;
+    if (!isEmer) {
+      await assertNoEmerConflictForPublish({
+        entityType: "event",
+        title: cleanTitle,
+      });
     }
 
     const [result] = await pool.query(
-      "INSERT INTO events (title,description,image,is_approved,approved_at) VALUES (?,?,?,0,NULL)",
-      [cleanTitle, cleanDescription || null, String(image || "").trim() || null]
+       `INSERT INTO events (
+         title, description, image, event_period_text, location_text, map_url, is_approved, approved_at, is_emer,
+         decision_featured_score, decision_scenario_tags, decision_trend_flags,
+         decision_moment_tags, decision_insight_flags, decision_cover_image, decision_thumbnail_image
+       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        cleanTitle,
+        cleanDescription || null,
+        cleanImage || null,
+        validated.value.event_period_text || null,
+        validated.value.location_text || null,
+        validated.value.map_url || null,
+        isEmer ? 1 : 0,
+        isEmer ? new Date() : null,
+        isEmer,
+        validated.value.decision_featured_score,
+        validated.value.decision_scenario_tags || null,
+        validated.value.decision_trend_flags || null,
+        validated.value.decision_moment_tags || null,
+        validated.value.decision_insight_flags || null,
+        validated.value.decision_cover_image || null,
+        validated.value.decision_thumbnail_image || null,
+      ]
     );
 
-    await upsertEventTranslation(result.insertId, "th", cleanTitle, cleanDescription);
+    await upsertEventTranslation(result.insertId, "th", cleanTitle, cleanDescription, metaTitle, metaDescription);
 
-    return res.json({ message: "Created (pending approval)", id: result.insertId });
+    return res.json({ message: isEmer ? "Created" : "Created (pending approval)", id: result.insertId });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    if (String(err?.code || "") === "EMER_CONFLICT") {
+      return res.status(409).json(err.payload || { error: "emer_conflict" });
+    }
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -325,34 +497,79 @@ export const updateEvent = async (req, res) => {
   try {
     await ensureEventsTable();
 
-    const { id } = req.params;
-    const { title, description, image } = req.body || {};
-    const cleanTitle = String(title || "").trim();
-    const cleanDescription = String(description || "").trim();
+    const eventId = Number(req.params?.id);
+    if (!Number.isFinite(eventId) || eventId <= 0) {
+      return res.status(400).json({ error: "Invalid event id" });
+    }
 
-    if (!cleanTitle) {
-      return res.status(400).json({ error: "title is required" });
+    const validated = validateEventPayload(req.body || {});
+
+    if (!validated.ok) {
+      return res.status(400).json({ error: validated.error });
+    }
+
+    const cleanTitle = validated.value.title;
+    const cleanDescription = validated.value.description;
+    const cleanImage = validated.value.image;
+    const metaTitle = validated.value.meta_title || cleanTitle;
+    const metaDescription = validated.value.meta_description || resolveMetaDescription(cleanDescription);
+    const isEmer = Number(req.body?.is_emer || 0) === 1 ? 1 : 0;
+    if (!isEmer) {
+      await assertNoEmerConflictForPublish({
+        entityType: "event",
+        title: cleanTitle,
+        excludeEntityId: eventId,
+      });
     }
 
     const [result] = await pool.query(
       `UPDATE events
-       SET title=?, description=?, image=?, is_approved=0, approved_at=NULL
+       SET title=?, description=?, image=?, event_period_text=?, location_text=?, map_url=?, is_approved=?, approved_at=?, is_emer=?,
+           decision_featured_score=?, decision_scenario_tags=?, decision_trend_flags=?,
+           decision_moment_tags=?, decision_insight_flags=?, decision_cover_image=?, decision_thumbnail_image=?
        WHERE id=?`,
-      [cleanTitle, cleanDescription || null, String(image || "").trim() || null, Number(id)]
+      [
+        cleanTitle,
+        cleanDescription || null,
+        cleanImage || null,
+        validated.value.event_period_text || null,
+        validated.value.location_text || null,
+        validated.value.map_url || null,
+        isEmer ? 1 : 0,
+        isEmer ? new Date() : null,
+        isEmer,
+        validated.value.decision_featured_score,
+        validated.value.decision_scenario_tags || null,
+        validated.value.decision_trend_flags || null,
+        validated.value.decision_moment_tags || null,
+        validated.value.decision_insight_flags || null,
+        validated.value.decision_cover_image || null,
+        validated.value.decision_thumbnail_image || null,
+        eventId,
+      ]
     );
 
     if (!result.affectedRows) {
       return res.status(404).json({ error: "Event not found" });
     }
 
-    await upsertEventTranslation(Number(id), "th", cleanTitle, cleanDescription);
+    await upsertEventTranslation(
+      eventId,
+      "th",
+      cleanTitle,
+      cleanDescription,
+      metaTitle,
+      metaDescription
+    );
 
-    return res.json({ message: "Updated (pending approval)" });
+    return res.json({ message: isEmer ? "Updated" : "Updated (pending approval)" });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    if (String(err?.code || "") === "EMER_CONFLICT") {
+      return res.status(409).json(err.payload || { error: "emer_conflict" });
+    }
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
-
 export const approveEvent = async (req, res) => {
   const logs = [];
   try {
@@ -373,31 +590,24 @@ export const approveEvent = async (req, res) => {
       return res.status(404).json({ error: "Event not found", logs });
     }
 
-    const source = rows[0];
-    let translations = null;
-    try {
-      translations = await buildEventTranslations(source.title || "", source.description || "");
-      logs.push("ai translation completed for en/zh/lo");
-    } catch (err) {
-      logs.push(`ai translation failed -> fallback thai (${err?.message || "unknown"})`);
-      translations = {
-        th: { title: source.title || "", description: source.description || "" },
-        en: { title: source.title || "", description: source.description || "" },
-        zh: { title: source.title || "", description: source.description || "" },
-        lo: { title: source.title || "", description: source.description || "" },
-      };
+    const [identityRows] = await pool.query("SELECT is_emer FROM events WHERE id=? LIMIT 1", [eventId]);
+    if (!identityRows.length) {
+      logs.push("event row not found before approve");
+      return res.status(404).json({ error: "Event not found", logs });
+    }
+    const isEmer = Number(identityRows[0]?.is_emer || 0) === 1;
+    if (!isEmer) {
+      await assertNoEmerConflictForPublish({
+        entityType: "event",
+        title: String(rows[0]?.title || "").trim(),
+        excludeEntityId: eventId,
+      });
+      logs.push("emer conflict guard passed");
+    } else {
+      logs.push("emer content bypassed conflict guard");
     }
 
-    for (const lang of ["en", "zh", "lo"]) {
-      const t =
-        translations?.[lang] ||
-        translations?.th || {
-          title: source.title || "",
-          description: source.description || "",
-        };
-      await upsertEventTranslation(eventId, lang, t.title || source.title || "", t.description || source.description || "");
-      logs.push(`[${lang}] upsert translation`);
-    }
+    logs.push("translation side effects skipped (approval is source-only)");
 
     const [result] = await pool.query(
       "UPDATE events SET is_approved=1, approved_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -410,10 +620,25 @@ export const approveEvent = async (req, res) => {
     }
 
     logs.push("approved flag set");
+    const reviewerId = Number(req.user?.id || 0) || null;
+    if (reviewerId) {
+      const linkedReviewRows = await markCollectorImportReviewApprovedByEntity({
+        reviewId: req.body?.review_id,
+        localEntityType: "event",
+        localEntityId: eventId,
+        reviewedByUserId: reviewerId,
+        reviewNote: req.body?.review_note,
+      });
+      logs.push(`collector import review rows approved=${linkedReviewRows}`);
+    }
     return res.json({ message: "Approved", logs });
   } catch (err) {
-    logs.push(`fatal: ${err.message}`);
-    return res.status(500).json({ error: err.message, logs });
+    if (String(err?.code || "") === "EMER_CONFLICT") {
+      return res.status(409).json(err.payload || { error: "emer_conflict" });
+    }
+    logs.push("fatal: internal error");
+    console.error("approval failed", err);
+    return res.status(500).json({ error: "Internal server error", logs });
   }
 };
 
@@ -421,19 +646,43 @@ export const deleteEvent = async (req, res) => {
   try {
     await ensureEventsTable();
 
-    const { id } = req.params;
-    await pool.query("DELETE FROM event_translations WHERE event_id=?", [Number(id)]);
-    const [result] = await pool.query("DELETE FROM events WHERE id=?", [Number(id)]);
+    const eventId = Number(req.params?.id || 0) || 0;
+    const password = String(req.body?.password || "");
+    const purgeNote = req.body?.purge_note ?? null;
+    if (!eventId) return res.status(400).json({ error: "Invalid event id" });
+    if (!password) return res.status(400).json({ error: "password is required" });
 
-    if (!result.affectedRows) {
-      return res.status(404).json({ error: "Event not found" });
-    }
+    const item = await purgeEventEntity({
+      eventId,
+      actorUserId: Number(req.user?.id || 0) || 0,
+      password,
+      purgeNote,
+    });
 
-    return res.json({ message: "Deleted" });
+    return res.json({ message: "Purged", item });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    const msg = String(err?.message || "").toLowerCase();
+    if (msg.includes("invalid password")) return res.status(401).json({ error: "Invalid password" });
+    if (msg.includes("not found")) return res.status(404).json({ error: "Event not found" });
+    if (msg.includes("password is required")) return res.status(400).json({ error: "password is required" });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

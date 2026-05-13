@@ -1,7 +1,8 @@
-﻿import fs from "fs";
+import fs from "fs";
 import path from "path";
+import { LIMITS, validateBase64ImageInput } from "../validators/inputSanitizer.js";
 
-const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_FILE_SIZE_BYTES = LIMITS.BASE64_MAX_BYTES_5MB;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 function ensureUploadsDir() {
@@ -25,6 +26,40 @@ function safeExtFromMime(mimeType) {
     default:
       return "";
   }
+}
+
+function isSupportedImageSignature(buffer, mimeType) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return false;
+
+  if (mimeType === "image/jpeg") {
+    return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  }
+
+  if (mimeType === "image/png") {
+    return (
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47 &&
+      buffer[4] === 0x0d &&
+      buffer[5] === 0x0a &&
+      buffer[6] === 0x1a &&
+      buffer[7] === 0x0a
+    );
+  }
+
+  if (mimeType === "image/gif") {
+    const sig = buffer.subarray(0, 6).toString("ascii");
+    return sig === "GIF87a" || sig === "GIF89a";
+  }
+
+  if (mimeType === "image/webp") {
+    const riff = buffer.subarray(0, 4).toString("ascii");
+    const webp = buffer.subarray(8, 12).toString("ascii");
+    return riff === "RIFF" && webp === "WEBP";
+  }
+
+  return false;
 }
 
 function buildPublicUrl(req, fileName) {
@@ -63,7 +98,8 @@ function extractUploadsFileName(rawUrl) {
 
 export const uploadImage = async (req, res) => {
   try {
-    const { dataBase64, mimeType } = req.body || {};
+    const mimeType = String(req.body?.mimeType || "").trim().toLowerCase();
+    const dataBase64 = req.body?.dataBase64;
 
     if (!dataBase64 || !mimeType) {
       return res.status(400).json({ error: "dataBase64 and mimeType are required" });
@@ -73,7 +109,8 @@ export const uploadImage = async (req, res) => {
       return res.status(400).json({ error: "Unsupported image type" });
     }
 
-    const buffer = Buffer.from(String(dataBase64), "base64");
+    const normalizedBase64 = validateBase64ImageInput(dataBase64, MAX_FILE_SIZE_BYTES);
+    const buffer = Buffer.from(normalizedBase64, "base64");
     if (!buffer.length) {
       return res.status(400).json({ error: "Invalid image data" });
     }
@@ -82,8 +119,16 @@ export const uploadImage = async (req, res) => {
       return res.status(400).json({ error: "File too large (max 5MB)" });
     }
 
+    if (!isSupportedImageSignature(buffer, mimeType)) {
+      return res.status(400).json({ error: "Image signature does not match mimeType" });
+    }
+
     const uploadsDir = ensureUploadsDir();
     const ext = safeExtFromMime(mimeType);
+    if (!ext) {
+      return res.status(400).json({ error: "Unsupported image type" });
+    }
+
     const fileName = `img-${Date.now()}-${Math.random().toString(36).slice(2, 10)}${ext}`;
     const filePath = path.join(uploadsDir, fileName);
 
@@ -95,7 +140,13 @@ export const uploadImage = async (req, res) => {
       url: buildPublicUrl(req, fileName),
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    const msg = String(err?.message || "");
+    if (msg.includes("dataBase64") || msg.includes("File too large")) {
+      return res.status(400).json({ error: msg });
+    }
+
+    console.error("uploadImage failed", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -124,6 +175,7 @@ export const deleteImage = async (req, res) => {
     await fs.promises.unlink(resolvedFile);
     return res.json({ message: "Deleted", fileName });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error("deleteImage failed", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
