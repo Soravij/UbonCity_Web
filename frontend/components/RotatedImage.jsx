@@ -96,7 +96,7 @@ export default function RotatedImage({
       src={finalSrc}
       alt={alt}
       loading={loading}
-      className="mx-auto block h-auto w-full rounded-xl bg-[#fffaf2] object-contain p-1 shadow-[0_0_22px_rgba(226,168,109,0.18)]"
+      className="rotated-image-frame mx-auto block h-auto w-full rounded-xl object-contain p-1"
       style={{ width }}
     />
   );

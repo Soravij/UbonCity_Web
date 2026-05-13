@@ -1,50 +1,139 @@
-﻿import Link from "next/link";
+"use client";
+
+import Image from "next/image";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORY_KEYS, getLangContent } from "@/lib/site";
 import LanguageSwitch from "./LanguageSwitch";
 
-function HomeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4">
-      <path
-        fill="currentColor"
-        d="M12 3.2 3 10.7l1.3 1.5L5.5 11v9.8h5.7v-5.6h1.6v5.6h5.7V11l1.2 1.2 1.3-1.5z"
-      />
-    </svg>
-  );
-}
-
 export default function Navbar({ lang }) {
   const copy = getLangContent(lang);
+  const pathname = usePathname();
+  const desktopMenuRef = useRef(null);
+  const itemRefs = useRef(new Map());
+  const [indicator, setIndicator] = useState({ left: 0, width: 0, visible: false });
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const activeKey = useMemo(() => {
+    const parts = String(pathname || "").split("/").filter(Boolean);
+    if (parts[0] !== lang) return "";
+    const category = parts[1] || "";
+    return CATEGORY_KEYS.includes(category) ? category : "";
+  }, [lang, pathname]);
+
+  function updateIndicator(key) {
+    const menuNode = desktopMenuRef.current;
+    const itemNode = itemRefs.current.get(key);
+
+    if (!menuNode || !itemNode) {
+      setIndicator((prev) => ({ ...prev, visible: false }));
+      return;
+    }
+
+    setIndicator({
+      left: itemNode.offsetLeft,
+      width: itemNode.offsetWidth,
+      visible: true,
+    });
+  }
+
+  useEffect(() => {
+    updateIndicator(activeKey);
+  }, [activeKey]);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    function handleResize() {
+      updateIndicator(activeKey);
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [activeKey]);
 
   return (
-    <header className="sticky top-0 z-30 border-b border-[#a66667] bg-[#C08081]/95 shadow-[0_6px_16px_rgba(120,70,71,0.22)] backdrop-blur">
-      <nav className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3 text-sm text-[#4B0150] md:px-8">
+    <header className="site-navbar sticky top-0 z-30 border-b backdrop-blur">
+      <nav className="site-navbar-inner mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3 text-sm md:px-8 md:py-4">
+        <button
+          type="button"
+          aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
+          aria-expanded={mobileOpen}
+          onClick={() => setMobileOpen((prev) => !prev)}
+          className={`site-mobile-toggle inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border transition-all duration-300 md:hidden ${
+            mobileOpen ? "is-active" : ""
+          }`}
+        >
+          <span className="site-mobile-toggle-icon" aria-hidden="true" />
+        </button>
+
         <Link
           href={`/${lang}`}
           aria-label="Home"
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#4B0150]/20 bg-white/55 text-[#4B0150] shadow-sm transition-all duration-300 hover:bg-white/90 hover:shadow-[0_10px_20px_rgba(75,1,80,0.2)]"
+          className="site-home-link hidden shrink-0 items-center gap-3 rounded-[10px] border px-4 py-3 transition-all duration-300 md:inline-flex"
         >
-          <HomeIcon />
+          <span className="site-home-icon" aria-hidden="true">
+            <Image src="/home.png" alt="" width={26} height={26} className="h-[26px] w-[26px] object-contain" />
+          </span>
+          <span className="site-brand whitespace-nowrap text-base font-black transition-all duration-300 md:text-xl">
+            UbonCity.com
+          </span>
         </Link>
 
-        <Link
-          href={`/${lang}`}
-          className="shrink-0 whitespace-nowrap text-base font-bold tracking-[0.04em] text-[#4B0150] transition-all duration-300 hover:text-[#6a2a70] md:text-lg"
-        >
-          UbonCity.com
-        </Link>
+        <div className="site-mobile-menu-shell md:hidden">
+          <div className={`site-mobile-menu ${mobileOpen ? "is-open" : ""}`}>
+            <div className="site-mobile-menu-inner">
+              {CATEGORY_KEYS.map((key) => (
+                <Link
+                  key={key}
+                  href={`/${lang}/${key}`}
+                  className={`site-mobile-menu-link ${activeKey === key ? "is-active" : ""}`}
+                >
+                  {copy.nav[key]}
+                </Link>
+              ))}
+              <div className="site-mobile-menu-divider" aria-hidden="true" />
+              <Link href={`/${lang}/contact`} className="site-mobile-menu-link site-mobile-menu-link--utility site-contact-link">
+                {copy.contactUs}
+              </Link>
+            </div>
+          </div>
+        </div>
 
-        <div className="mx-2 flex-1 overflow-x-auto py-1">
-          <div className="flex min-w-max items-center justify-center gap-2">
+        <div className="mx-3 hidden flex-1 md:block">
+          <div
+            ref={desktopMenuRef}
+            className="site-desktop-menu relative mx-auto flex w-fit items-center justify-center"
+            onMouseLeave={() => updateIndicator(activeKey)}
+          >
             {CATEGORY_KEYS.map((key) => (
               <Link
                 key={key}
                 href={`/${lang}/${key}`}
-                className="shrink-0 whitespace-nowrap rounded-full border border-[#4B0150]/15 bg-white/45 px-3 py-1.5 font-medium text-[#4B0150] shadow-sm transition-all duration-300 hover:bg-white/90 hover:shadow-[0_10px_18px_rgba(75,1,80,0.2)]"
+                ref={(node) => {
+                  if (node) itemRefs.current.set(key, node);
+                  else itemRefs.current.delete(key);
+                }}
+                onMouseEnter={() => updateIndicator(key)}
+                className={`site-desktop-menu-link relative inline-flex items-center px-4 py-3 text-[14px] font-semibold transition-colors duration-300 ${
+                  activeKey === key ? "is-active" : ""
+                }`}
               >
                 {copy.nav[key]}
               </Link>
             ))}
+            <span
+              className="site-desktop-menu-indicator"
+              style={{
+                width: indicator.visible ? `${indicator.width}px` : "0px",
+                transform: `translateX(${indicator.left}px)`,
+                opacity: indicator.visible ? 1 : 0,
+              }}
+              aria-hidden="true"
+            />
           </div>
         </div>
 

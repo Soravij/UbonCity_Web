@@ -1,0 +1,37 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+  <title id="title">Default Bus Card</title>
+  <desc id="desc">Illustration of a city bus for transport category card.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#ffdcb4"/>
+      <stop offset="100%" stop-color="#ffc58f"/>
+    </linearGradient>
+    <linearGradient id="bus" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#ff9f43"/>
+      <stop offset="100%" stop-color="#f0771c"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="700" fill="url(#bg)"/>
+  <circle cx="1050" cy="120" r="70" fill="#fff2de"/>
+
+  <rect x="70" y="560" width="1060" height="28" rx="14" fill="#d9a16f" opacity="0.45"/>
+
+  <rect x="170" y="220" width="860" height="300" rx="42" fill="url(#bus)"/>
+  <rect x="230" y="265" width="680" height="128" rx="20" fill="#fff4e6" opacity="0.95"/>
+
+  <rect x="250" y="288" width="150" height="82" rx="10" fill="#83bde6"/>
+  <rect x="420" y="288" width="150" height="82" rx="10" fill="#83bde6"/>
+  <rect x="590" y="288" width="150" height="82" rx="10" fill="#83bde6"/>
+  <rect x="760" y="288" width="130" height="82" rx="10" fill="#83bde6"/>
+
+  <rect x="850" y="410" width="120" height="85" rx="10" fill="#ffe1c6"/>
+  <rect x="810" y="415" width="35" height="68" rx="8" fill="#fff4e6" opacity="0.9"/>
+
+  <circle cx="330" cy="520" r="52" fill="#3a2d2a"/>
+  <circle cx="330" cy="520" r="24" fill="#e8e8e8"/>
+  <circle cx="860" cy="520" r="52" fill="#3a2d2a"/>
+  <circle cx="860" cy="520" r="24" fill="#e8e8e8"/>
+
+  <text x="220" y="465" font-family="Segoe UI, Arial, sans-serif" font-size="58" font-weight="700" fill="#fff7eb" letter-spacing="2">UBON CITY BUS</text>
+</svg>

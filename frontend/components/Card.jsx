@@ -1,4 +1,5 @@
 ﻿import Link from "next/link";
+import { resolveCardCoverVisual } from "@/lib/phase56-decision-helpers.mjs";
 import { getLangContent } from "@/lib/site";
 
 function normalizeRotation(rotation) {
@@ -30,6 +31,11 @@ function parseAltRotation(rawAlt) {
     alt: String(match?.[1] || "").trim(),
     rotation: normalizeRotation(match?.[2] ?? 0),
   };
+}
+
+function cleanMediaUrl(value) {
+  const url = String(value || "").trim();
+  return url || "";
 }
 
 function parseDescriptionBlocks(text) {
@@ -82,39 +88,34 @@ function getSummary(place, copy) {
 
 export default function Card({ place, lang = "th" }) {
   const copy = getLangContent(lang);
-  const blocks = parseDescriptionBlocks(place?.description || "");
-  const firstContentImage = blocks.find((block) => block.type === "image");
-  const parsedCover = parseCoverImageValue(place?.image);
-  const matchedCoverImage = blocks.find(
-    (block) => block.type === "image" && parsedCover.url && block.url === parsedCover.url
-  );
-
-  const coverImage = parsedCover.url || firstContentImage?.url || "/default-lotus.svg";
-  const coverAlt = place?.title || firstContentImage?.alt || "Lotus image";
-  const coverRotation = parsedCover.url
-    ? parsedCover.rotation || matchedCoverImage?.rotation || 0
-    : firstContentImage?.rotation || 0;
+  const { coverImage, coverAlt, coverRotation } = resolveCardCoverVisual(place);
   const href = place?.category && place?.slug ? `/${lang}/${place.category}/${place.slug}` : null;
+  const categoryLabel = copy?.nav?.[place?.category] || place?.category || "";
 
   const cardClassName =
-    "group overflow-hidden rounded-2xl border border-orange-200 bg-white shadow-[0_8px_20px_rgba(75,1,80,0.08)] transition-all duration-300 ease-out hover:-translate-y-1.5 hover:border-orange-300 hover:bg-gray-50 hover:shadow-[0_16px_34px_rgba(75,1,80,0.22)]";
+    "interactive-tile group overflow-hidden rounded-[26px] transition-all duration-300 ease-out hover:-translate-y-1.5";
 
   const cardContent = (
     <>
-      <div className="h-40 w-full overflow-hidden sm:h-44">
+      <div className="h-44 w-full overflow-hidden sm:h-48">
         <img
           src={coverImage}
           alt={coverAlt}
-          className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.05]"
+          className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04]"
           style={{ transform: rotationTransform(coverRotation), transformOrigin: "center center" }}
           loading="lazy"
         />
       </div>
 
-      <div className="space-y-3 p-4 md:p-5">
-        <h2 className="text-base font-semibold leading-6 md:text-lg">{place?.title || "Untitled"}</h2>
-        <p className="text-sm leading-6 text-[color:var(--muted)]">{getSummary(place, copy)}</p>
-        <span className="inline-flex rounded-lg border border-orange-300 px-3 py-1.5 text-sm font-medium transition group-hover:bg-white">
+      <div className="space-y-3 px-4 py-4 md:px-5 md:py-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            {categoryLabel ? <p className="eyebrow-label mb-2">{categoryLabel}</p> : null}
+            <h2 className="text-lg font-semibold leading-7 tracking-[-0.02em]">{place?.title || "Untitled"}</h2>
+          </div>
+        </div>
+        <p className="text-sm leading-7 text-[color:var(--muted)]">{getSummary(place, copy)}</p>
+        <span className="inline-flex rounded-full border border-orange-300 px-3.5 py-2 text-sm font-medium transition group-hover:bg-white">
           {copy.readMore}
         </span>
       </div>

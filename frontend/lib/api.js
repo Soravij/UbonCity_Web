@@ -21,8 +21,28 @@ function aqiLevelKey(aqiValue) {
   return "hazardous";
 }
 
+function getApiUrl() {
+  const raw = String(process.env.NEXT_PUBLIC_API_URL || "").trim();
+  const env = String(process.env.NODE_ENV || "development").toLowerCase();
+
+  if (raw && !raw.includes("your-backend-domain")) {
+    return raw;
+  }
+
+  if (env === "production") {
+    // Prefer reverse-proxy routing in production when env is missing.
+    return "/api";
+  }
+
+  const hostname = typeof window !== "undefined" ? String(window.location.hostname || "").trim().toLowerCase() : "";
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return "http://localhost:5000/api";
+  }
+  throw new Error("NEXT_PUBLIC_API_URL is not configured for non-local access");
+}
+
 export async function getPlaces(category, lang) {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+  const apiUrl = getApiUrl();
 
   try {
     const res = await fetch(
@@ -42,7 +62,7 @@ export async function getPlaces(category, lang) {
 }
 
 export async function getPlaceDetail(category, slug, lang) {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+  const apiUrl = getApiUrl();
 
   try {
     const res = await fetch(
@@ -61,8 +81,31 @@ export async function getPlaceDetail(category, slug, lang) {
   }
 }
 
+export async function getNearbyPlaces(category, slug, lang, limit = 4) {
+  const apiUrl = getApiUrl();
+
+  try {
+    const res = await fetch(
+      `${apiUrl}/places/${encodeURIComponent(category)}/${encodeURIComponent(slug)}/nearby?lang=${encodeURIComponent(lang)}&limit=${encodeURIComponent(limit)}`,
+      { cache: "no-store" }
+    );
+
+    if (!res.ok) {
+      return { items: [], rangeKey: "none" };
+    }
+
+    const data = await res.json();
+    return {
+      items: Array.isArray(data.items) ? data.items : [],
+      rangeKey: String(data?.range_key || "none"),
+    };
+  } catch {
+    return { items: [], rangeKey: "none" };
+  }
+}
+
 export async function getEvents(lang = "th") {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+  const apiUrl = getApiUrl();
 
   try {
     const res = await fetch(`${apiUrl}/events?lang=${encodeURIComponent(lang)}`, { cache: "no-store" });
@@ -78,11 +121,14 @@ export async function getEvents(lang = "th") {
   }
 }
 
-export async function getEventDetail(id, lang = "th") {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+export async function getHomepageLayout(lang = "th", layoutKey = "home") {
+  const apiUrl = getApiUrl();
 
   try {
-    const res = await fetch(`${apiUrl}/events/${encodeURIComponent(id)}?lang=${encodeURIComponent(lang)}`, { cache: "no-store" });
+    const res = await fetch(
+      `${apiUrl}/homepage-layout?layout_key=${encodeURIComponent(layoutKey)}&lang=${encodeURIComponent(lang)}`,
+      { cache: "no-store" }
+    );
 
     if (!res.ok) {
       return null;
@@ -92,6 +138,75 @@ export async function getEventDetail(id, lang = "th") {
     return data?.item || null;
   } catch {
     return null;
+  }
+}
+
+export async function getEventDetail(id, lang = "th") {
+  const apiUrl = getApiUrl();
+
+  try {
+    const res = await fetch(`${apiUrl}/events/${encodeURIComponent(id)}?lang=${encodeURIComponent(lang)}`, {
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      return null;
+    }
+
+    const data = await res.json();
+    return data?.item || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getReviewContentDetail(reviewId, token) {
+  const apiUrl = getApiUrl();
+  const id = Number(reviewId || 0);
+  const authToken = String(token || "").trim();
+  if (!id || !authToken) return null;
+
+  try {
+    const res = await fetch(`${apiUrl}/review-content/${encodeURIComponent(id)}`, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.item || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getTransportRoutes(options = {}) {
+  const apiUrl = getApiUrl();
+  const includePath = options?.includePath ? "1" : "0";
+  const includeStops = options?.includeStops ? "1" : "0";
+
+  try {
+    const res = await fetch(
+      `${apiUrl}/transport-routes?include_path=${includePath}&include_stops=${includeStops}`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.items) ? data.items : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getTransportMapsConfig() {
+  const apiUrl = getApiUrl();
+
+  try {
+    const res = await fetch(`${apiUrl}/transport/config`, { cache: "no-store" });
+    if (!res.ok) return { mapsApiKey: "" };
+    const data = await res.json();
+    return { mapsApiKey: String(data?.mapsApiKey || "") };
+  } catch {
+    return { mapsApiKey: "" };
   }
 }
 
