@@ -1,5 +1,6 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, authHeaders } from "../api/api";
+import MediaPickerModal from "../components/MediaPickerModal";
 
 const CATEGORIES = ["attractions", "activities", "hotels", "cafes", "restaurants", "transport"];
 const CATEGORY_LABEL = {
@@ -11,7 +12,21 @@ const CATEGORY_LABEL = {
   transport: "การเดินทาง",
 };
 
-const EMPTY = { category: "attractions", title: "", description: "", meta_title: "", meta_description: "", image: "" };
+const EMPTY = {
+  category: "attractions",
+  title: "",
+  description: "",
+  meta_title: "",
+  meta_description: "",
+  image: "",
+  decision_featured_score: "",
+  decision_scenario_tags: "",
+  decision_trend_flags: "",
+  decision_moment_tags: "",
+  decision_insight_flags: "",
+  decision_cover_image: "",
+  decision_thumbnail_image: "",
+};
 
 function normalizeRotation(rotation) {
   const n = Number(rotation);
@@ -55,7 +70,7 @@ function splitContentBlocks(text) {
       blocks.push({
         type: "image",
         src: url,
-        alt: parsedAlt.alt || "🖼️ รูปประกอบ",
+        alt: parsedAlt.alt || "ตัวอย่างรูปภาพ",
         rotation: parsedAlt.rotation,
         imageOrder,
       });
@@ -147,7 +162,7 @@ function InlineThumb({ src, alt, rotation }) {
     };
   }, [src, rotation]);
 
-  return <img src={previewSrc || src} alt={alt || "🖼️ รูปประกอบ"} className="inline-image-thumb" />;
+  return <img src={previewSrc || src} alt={alt || "ตัวอย่างรูปภาพ"} className="inline-image-thumb" />;
 }
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -225,7 +240,7 @@ async function compressImageForUpload(file) {
 
 function buildImageMarkdown(url, alt, rotation) {
   const cleanUrl = String(url || "").trim();
-  const cleanAlt = String(alt || "🖼️ รูปประกอบลำดับ 1").trim() || "🖼️ รูปประกอบลำดับ 1";
+  const cleanAlt = String(alt || "รูปแทรก 1").trim() || "รูปแทรก 1";
   const rot = normalizeRotation(rotation);
   const altWithRotation = rot ? `${cleanAlt}|r=${rot}` : cleanAlt;
   return `\n![${altWithRotation}](${cleanUrl})\n`;
@@ -308,18 +323,22 @@ function renumberImageMarkdownLabels(text) {
 
   return source.replace(regex, (_full, rawAlt, url) => {
     const parsed = parseAltRotation(rawAlt);
-    const nextAlt = withRotationInAlt(`🖼️ รูปประกอบลำดับ ${order + 1}`, parsed.rotation);
+    const nextAlt = withRotationInAlt(`รูปแทรก ${order + 1}`, parsed.rotation);
     order += 1;
     return `![${nextAlt}](${String(url || "").trim()})`;
   });
 }
-export default function Places({ token, role = "user", mode = "create" }) {
+export default function Places({ token, role = "user", mode = "create", channel = "normal" }) {
   const [form, setForm] = useState(EMPTY);
   const [items, setItems] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [purgeModalOpen, setPurgeModalOpen] = useState(false);
+  const [purgeTarget, setPurgeTarget] = useState(null);
+  const [purgePassword, setPurgePassword] = useState("");
+  const [purgeNote, setPurgeNote] = useState("");
   const [message, setMessage] = useState("");
 
   const [translateModalOpen, setTranslateModalOpen] = useState(false);
@@ -329,18 +348,21 @@ export default function Places({ token, role = "user", mode = "create" }) {
 
   const [insertImageModalOpen, setInsertImageModalOpen] = useState(false);
   const [insertImageUrl, setInsertImageUrl] = useState("");
-  const [insertImageAlt, setInsertImageAlt] = useState("🖼️ รูปประกอบลำดับ 1");
+  const [insertImageAlt, setInsertImageAlt] = useState("รูปแทรก 1");
   const [insertImageRotation, setInsertImageRotation] = useState(0);
   const [uploadingInline, setUploadingInline] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
   const [coverImageModalOpen, setCoverImageModalOpen] = useState(false);
   const [coverImageUrl, setCoverImageUrl] = useState("");
   const [coverImageRotation, setCoverImageRotation] = useState(0);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [pendingMediaUsages, setPendingMediaUsages] = useState([]);
 
   const descriptionRef = useRef(null);
 
   const isEdit = mode === "edit";
   const isEditing = useMemo(() => editingId !== null, [editingId]);
+  const isEmerChannel = String(channel || "").trim().toLowerCase() === "emer";
   const descriptionBlocks = useMemo(() => splitContentBlocks(form.description), [form.description]);
   const coverPreview = useMemo(() => parseCoverImageValue(form.image), [form.image]);
 
@@ -370,7 +392,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
     setMessage("");
     try {
       const res = await api.get("/places", {
-        params: { category: form.category, lang: "th", include_unapproved: 1 },
+        params: { category: form.category, lang: "th", include_unapproved: 1, is_emer: isEmerChannel ? 1 : 0 },
         headers: authHeaders(token),
       });
       setItems(Array.isArray(res.data?.items) ? res.data.items : []);
@@ -379,7 +401,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
     } finally {
       setLoading(false);
     }
-  }, [form.category, isEdit, token]);
+  }, [form.category, isEdit, isEmerChannel, token]);
 
   useEffect(() => {
     loadPlaces();
@@ -387,13 +409,13 @@ export default function Places({ token, role = "user", mode = "create" }) {
 
   async function runTranslation() {
     if (!form.title || !form.description) {
-      setMessage("กรอกชื่อสถานที่และรายละเอียดก่อนแปลภาษา");
+      setMessage("กรุณาใส่ชื่อและรายละเอียดก่อนแปลภาษา");
       return null;
     }
 
     setTranslating(true);
     try {
-      const res = await api.post("/translate", {
+      const res = await api.post("/translate/preview", {
         title: form.title,
         description: form.description,
         sourceLang: "th",
@@ -414,17 +436,69 @@ export default function Places({ token, role = "user", mode = "create" }) {
     const res = await api.post("/places", payload, { headers: authHeaders(token) });
     return Number(res?.data?.place_id || payload.group_id || 0);
   }
+  async function attachPendingMediaUsages(placeId) {
+    if (!placeId || !pendingMediaUsages.length) return;
+
+    for (let i = 0; i < pendingMediaUsages.length; i += 1) {
+      const usage = pendingMediaUsages[i];
+      await api.post(
+        "/media-usages",
+        {
+          asset_id: usage.asset_id,
+          entity_type: "place",
+          entity_id: Number(placeId),
+          usage_type: usage.usage_type,
+          position: i,
+          caption: usage.caption || "",
+          apply_legacy_cover: usage.usage_type === "cover",
+        },
+        { headers: authHeaders(token) }
+      );
+    }
+  }
+
+  function onSelectFromMediaLibrary(asset, usageType) {
+    const nextUsage = {
+      asset_id: Number(asset?.id || 0),
+      usage_type: usageType || "cover",
+      caption: String(asset?.alt_text || asset?.title || "").trim(),
+      public_url: String(asset?.public_url || "").trim(),
+    };
+
+    if (!nextUsage.asset_id || !nextUsage.public_url) {
+      setMessage("ไม่พบไฟล์จากคลังสื่อ");
+      return;
+    }
+
+    if (nextUsage.usage_type === "inline") {
+      insertTextAtCursor(`\n![${nextUsage.caption || "รูปจากคลังสื่อ"}](${nextUsage.public_url})\n`);
+      setPendingMediaUsages((prev) => [...prev, nextUsage]);
+      setMediaPickerOpen(false);
+      return;
+    }
+
+    if (nextUsage.usage_type === "cover") {
+      setForm((prev) => ({ ...prev, image: nextUsage.public_url }));
+      setPendingMediaUsages((prev) => [...prev.filter((x) => x.usage_type !== "cover"), nextUsage]);
+      setMediaPickerOpen(false);
+      return;
+    }
+
+    setPendingMediaUsages((prev) => [...prev, nextUsage]);
+    setMessage(`เพิ่มการใช้งานสื่อแล้ว (${nextUsage.usage_type})`);
+    setMediaPickerOpen(false);
+  }
 
   async function onSubmit(e) {
     e.preventDefault();
 
     if (!form.title || !form.description) {
-      setMessage("กรอกชื่อสถานที่และรายละเอียดให้ครบ");
+      setMessage("กรุณาใส่ชื่อและรายละเอียดก่อนบันทึก");
       return;
     }
 
     if (isEdit && !editingId) {
-      setMessage("กรุณาเลือกรายการจากลิสต์ก่อนเข้าแก้ไข");
+      setMessage("ไม่พบรายการที่ต้องการแก้ไข");
       return;
     }
 
@@ -436,47 +510,79 @@ export default function Places({ token, role = "user", mode = "create" }) {
         category: form.category,
         lang: "th",
         slug: "",
+        is_emer: isEmerChannel ? 1 : 0,
         title: form.title,
         description: form.description,
         meta_title: form.meta_title || form.title,
         meta_description: form.meta_description || form.description,
         image: form.image || null,
+        decision_featured_score:
+          form.decision_featured_score === "" ? null : Number(form.decision_featured_score),
+        decision_scenario_tags: String(form.decision_scenario_tags || "").trim() || null,
+        decision_trend_flags: String(form.decision_trend_flags || "").trim() || null,
+        decision_moment_tags: String(form.decision_moment_tags || "").trim() || null,
+        decision_insight_flags: String(form.decision_insight_flags || "").trim() || null,
+        decision_cover_image: String(form.decision_cover_image || "").trim() || null,
+        decision_thumbnail_image: String(form.decision_thumbnail_image || "").trim() || null,
       };
 
       const placeId = await saveLanguageVersion(thBody);
-      if (!placeId) throw new Error("ไม่พบ place_id หลังบันทึกภาษาไทย");
+      if (!placeId) throw new Error("ไม่พบ place_id จาก API");
+
+      await attachPendingMediaUsages(placeId);
 
       if (isEdit) {
-        setMessage(`อัปเดตเนื้อหา ID ${placeId} สำเร็จ (ภาษาอื่นจะสร้างตอนอนุมัติ)`);
+        setMessage(`บันทึกฉบับร่างแล้ว (ID ${placeId})`);
         setEditingId(null);
         setForm((prev) => ({ ...EMPTY, category: prev.category }));
         await loadPlaces();
         window.scrollTo({ top: 0, behavior: "smooth" });
       } else {
-        setMessage("บันทึกสำเร็จ (ภาษาอื่นจะสร้างตอนอนุมัติ)");
+        setMessage("บันทึกฉบับร่างแล้ว");
         setForm(EMPTY);
       }
 
       setTranslated({});
+      setPendingMediaUsages([]);
     } catch (e) {
-      setMessage(e?.response?.data?.error || e?.message || "บันทึกไม่สำเร็จ");
+      const emerConflict = e?.response?.data?.error === "emer_conflict" ? e?.response?.data?.conflict : null;
+      const conflictHint = emerConflict
+        ? `Emergency content exists (#${emerConflict.entity_id}${emerConflict.slug ? `, slug: ${emerConflict.slug}` : ""}). Purge it first.`
+        : "";
+      setMessage(conflictHint || e?.response?.data?.error || e?.message || "Save failed");
     } finally {
       setSaving(false);
     }
   }
 
   async function onDeletePlace(item) {
-    if (role !== "admin") return;
+    if (role !== "owner") return;
 
-    const ok = window.confirm(`ต้องการลบเนื้อหา ID ${item.id} ใช่หรือไม่?`);
+    const ok = window.confirm(`Confirm purge place ID ${item.id}?`);
     if (!ok) return;
+    setPurgeTarget(item);
+    setPurgePassword("");
+    setPurgeNote("");
+    setPurgeModalOpen(true);
+  }
+
+  async function confirmPurgePlace() {
+    const item = purgeTarget;
+    if (!item?.id) return;
+    const normalizedPassword = String(purgePassword || "").trim();
+    if (!normalizedPassword) return setMessage("Owner password is required");
 
     setDeletingId(item.id);
     setMessage("");
 
     try {
-      await api.delete(`/places/${item.id}`, { headers: authHeaders(token) });
-      setMessage(`ลบเนื้อหา ID ${item.id} แล้ว (ลบทุกภาษาที่เกี่ยวข้อง)`);
+      await api.delete(`/places/${item.id}`, {
+        headers: authHeaders(token),
+        data: { password: normalizedPassword, purge_note: String(purgeNote || "").trim() || null },
+      });
+      setMessage(`Purged place ID ${item.id}`);
+      setPurgeModalOpen(false);
+      setPurgeTarget(null);
 
       if (editingId === item.id) {
         setEditingId(null);
@@ -485,7 +591,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
 
       await loadPlaces();
     } catch (e) {
-      setMessage(e?.response?.data?.error || e?.message || "ลบเนื้อหาไม่สำเร็จ");
+      setMessage(e?.response?.data?.error || e?.message || "Purge failed");
     } finally {
       setDeletingId(null);
     }
@@ -499,17 +605,24 @@ export default function Places({ token, role = "user", mode = "create" }) {
       meta_title: item.meta_title || "",
       meta_description: item.meta_description || "",
       image: item.image || "",
+      decision_featured_score: item.decision_featured_score ?? "",
+      decision_scenario_tags: item.decision_scenario_tags || "",
+      decision_trend_flags: item.decision_trend_flags || "",
+      decision_moment_tags: item.decision_moment_tags || "",
+      decision_insight_flags: item.decision_insight_flags || "",
+      decision_cover_image: item.decision_cover_image || "",
+      decision_thumbnail_image: item.decision_thumbnail_image || "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function backToList() {
-    const confirmed = window.confirm("การแก้ไขยังไม่ได้บันทึก ต้องการกลับไปหน้ารายการหรือไม่?");
+    const confirmed = window.confirm("กลับไปหน้ารายการและยกเลิกการแก้ไขใช่หรือไม่?");
     if (!confirmed) return;
 
     setEditingId(null);
     setForm((prev) => ({ ...EMPTY, category: prev.category }));
-    setMessage("ยกเลิกการแก้ไขแล้ว (ยังไม่ได้บันทึก)");
+    setMessage("ยกเลิกการแก้ไขแล้ว");
   }
 
   function insertTextAtCursor(textToInsert) {
@@ -601,7 +714,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
       const url = await uploadImageFile(file);
       setInsertImageUrl(url);
     } catch (err) {
-      setMessage(err?.response?.data?.error || err?.message || "อัปโหลดรูปไม่สำเร็จ");
+      setMessage(err?.response?.data?.error || err?.message || "อัปโหลดรูปแทรกไม่สำเร็จ");
     } finally {
       setUploadingInline(false);
       e.target.value = "";
@@ -611,24 +724,24 @@ export default function Places({ token, role = "user", mode = "create" }) {
   function onInsertImageAtCursor() {
     const cleanUrl = String(insertImageUrl || "").trim();
     if (!cleanUrl) {
-      setMessage("กรุณาใส่ URL รูปภาพหรืออัปโหลดไฟล์ก่อน");
+      setMessage("กรุณาใส่ลิงก์รูปภาพก่อน");
       return;
     }
 
     const nextOrder = descriptionBlocks.filter((b) => b.type === "image").length + 1;
-    const defaultAlt = `🖼️ รูปประกอบลำดับ ${nextOrder}`;
+    const defaultAlt = `รูปแทรก ${nextOrder}`;
     const markdown = buildImageMarkdown(cleanUrl, insertImageAlt || defaultAlt, insertImageRotation);
     insertTextAtCursor(markdown);
     setInsertImageUrl("");
-    setInsertImageAlt(`🖼️ รูปประกอบลำดับ ${nextOrder + 1}`);
+    setInsertImageAlt(`รูปแทรก ${nextOrder + 1}`);
     setInsertImageRotation(0);
     setInsertImageModalOpen(false);
   }
 
-  async function onOpenTranslateModal() {
+  function onOpenTranslateModal() {
     setTranslateModalOpen(true);
     setTranslated({});
-    await runTranslation();
+    setMessage("หน้าต่างแปลภาษาเปิดแล้ว");
   }
   function onOpenCoverModal() {
     const parsed = parseCoverImageValue(form.image);
@@ -640,7 +753,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
   function onApplyCoverImage() {
     const cleanUrl = String(coverImageUrl || "").trim();
     if (!cleanUrl) {
-      setMessage("กรุณาใส่ URL รูปปกหรืออัปโหลดไฟล์ก่อน");
+      setMessage("กรุณาใส่ลิงก์รูปภาพก่อน");
       return;
     }
 
@@ -655,15 +768,15 @@ export default function Places({ token, role = "user", mode = "create" }) {
   useEffect(() => {
     if (!insertImageModalOpen) return;
     const nextOrder = descriptionBlocks.filter((b) => b.type === "image").length + 1;
-    setInsertImageAlt(`🖼️ รูปประกอบลำดับ ${nextOrder}`);
+    setInsertImageAlt(`รูปแทรก ${nextOrder}`);
   }, [insertImageModalOpen, descriptionBlocks]);
 
   async function onRemoveInlineImage(imageOrder, imageUrl) {
-    const prevDescription = String(form.description || "");
-    const nextDescription = renumberImageMarkdownLabels(removeImageMarkdownByOrder(prevDescription, imageOrder));
+    const prevDetails = String(form.description || "");
+    const nextDetails = renumberImageMarkdownLabels(removeImageMarkdownByOrder(prevDetails, imageOrder));
     const coverUrl = parseCoverImageValue(form.image).url;
-    const currentCount = countImageUrlOccurrences(prevDescription, imageUrl);
-    const nextCount = countImageUrlOccurrences(nextDescription, imageUrl);
+    const currentCount = countImageUrlOccurrences(prevDetails, imageUrl);
+    const nextCount = countImageUrlOccurrences(nextDetails, imageUrl);
     const shouldDeleteFile =
       currentCount > 0 && nextCount === 0 && String(coverUrl || "").trim() !== String(imageUrl || "").trim();
 
@@ -671,16 +784,16 @@ export default function Places({ token, role = "user", mode = "create" }) {
       try {
         await deleteUploadedFile(imageUrl);
       } catch (err) {
-        setMessage(err?.response?.data?.error || err?.message || "ลบไฟล์รูปภาพไม่สำเร็จ");
+        setMessage(err?.response?.data?.error || err?.message || "ลบรูปแทรกไม่สำเร็จ");
         return;
       }
     }
 
-    setForm((prev) => ({ ...prev, description: nextDescription }));
+    setForm((prev) => ({ ...prev, description: nextDetails }));
     setMessage(
       shouldDeleteFile
-        ? "ลบรูปประกอบและลบไฟล์ออกจากเซิร์ฟเวอร์แล้ว กดบันทึกเพื่ออัปเดต"
-        : "ลบรูปประกอบออกจากเนื้อหาแล้ว กดบันทึกเพื่ออัปเดต"
+        ? "ลบรูปแทรกและลบไฟล์ต้นทางแล้ว"
+        : "ลบรูปแทรกแล้ว"
     );
   }
 
@@ -690,12 +803,12 @@ export default function Places({ token, role = "user", mode = "create" }) {
     try {
       await deleteUploadedFile(targetUrl);
     } catch (err) {
-      setMessage(err?.response?.data?.error || err?.message || "ลบไฟล์รูปปกไม่สำเร็จ");
+      setMessage(err?.response?.data?.error || err?.message || "ลบรูปปกไม่สำเร็จ");
       return;
     }
 
     setForm((prev) => ({ ...prev, image: "" }));
-    setMessage("ลบรูปปกและลบไฟล์ออกจากเซิร์ฟเวอร์แล้ว กดบันทึกเพื่ออัปเดต");
+    setMessage("ลบรูปปกแล้ว");
   }
 
   return (
@@ -703,7 +816,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
       {isEdit && !isEditing ? (
         <section className="admin-card">
           <div className="card-title-row">
-            <h2>เลือกรายการเนื้อหาที่ต้องการแก้ไข (TH)</h2>
+            <h2>รายการสถานที่ (ภาษาไทย)</h2>
             <button type="button" className="ghost" onClick={loadPlaces} disabled={loading}>
               {loading ? "กำลังโหลด..." : "รีเฟรช"}
             </button>
@@ -717,7 +830,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
                 </option>
               ))}
             </select>
-            <input value="ภาษาไทย (TH)" disabled />
+            <input value="ภาษา: ไทย" disabled />
           </div>
 
           <div className="table-wrap">
@@ -725,7 +838,8 @@ export default function Places({ token, role = "user", mode = "create" }) {
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>ชื่อ</th>
+                  <th></th>
+                  <th>Flow</th>
                   <th>สถานะ</th>
                   <th>จัดการ</th>
                 </tr>
@@ -735,12 +849,17 @@ export default function Places({ token, role = "user", mode = "create" }) {
                   <tr key={item.id}>
                     <td>{item.id}</td>
                     <td>{item.title}</td>
-                    <td>{item.is_approved ? "อนุมัติแล้ว" : "รออนุมัติ"}</td>
+                    <td>
+                      <span className={`content-channel-chip ${Number(item.is_emer) === 1 ? "emer" : "normal"}`}>
+                        {Number(item.is_emer) === 1 ? "Emergency" : "Normal"}
+                      </span>
+                    </td>
+                    <td>{item.is_approved ? "อนุมัติแล้ว" : "ฉบับร่าง"}</td>
                     <td className="actions">
                       <button type="button" className="ghost" onClick={() => startEdit(item)}>
-                        เข้าแก้ไข
+                        แก้ไข
                       </button>
-                      {role === "admin" ? (
+                      {role === "owner" ? (
                         <button
                           type="button"
                           className="danger"
@@ -757,7 +876,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
             </table>
           </div>
 
-          {!loading && items.length === 0 ? <p className="muted">ไม่พบรายการในหมวดนี้</p> : null}
+          {!loading && items.length === 0 ? <p className="muted">ยังไม่มีรายการในหมวดนี้</p> : null}
         </section>
       ) : null}
 
@@ -766,8 +885,8 @@ export default function Places({ token, role = "user", mode = "create" }) {
           <div className="card-title-row">
             <h2>
               {isEdit
-                ? `หน้าแก้ไขเนื้อหา | ID: ${editingId} | ชื่อ: ${form.title || "-"}`
-                : "สร้างเนื้อหา (TH)"}
+                ? `แก้ไขสถานที่ | ID: ${editingId} | ${form.title || "-"}`
+                : "สร้างสถานที่ใหม่ (ภาษาไทย)"}
             </h2>
 
           </div>
@@ -780,7 +899,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
                 </option>
               ))}
             </select>
-            <input value="ภาษาไทย (TH)" disabled />
+            <input value="ภาษา: ไทย" disabled />
 
             <input
               className="full"
@@ -792,13 +911,13 @@ export default function Places({ token, role = "user", mode = "create" }) {
 
             <div className="full content-toolbar">
               <button type="button" className="ghost" onClick={() => setInsertImageModalOpen(true)}>
-                แทรกรูปที่ตำแหน่งเคอร์เซอร์
+                เพิ่มรูปแทรก
               </button>
               <button type="button" className="ghost" onClick={onOpenTranslateModal} disabled={translating}>
-                {translating ? "กำลังแปล..." : "ตรวจสอบแปลภาษา"}
+                {translating ? "กำลังแปล..." : "แปลภาษา (พรีวิว)"}
               </button>
               <button type="button" className="ghost" onClick={() => setPreviewWindowOpen(true)}>
-                รีวิวหน้าสุดท้าย
+                ดูตัวอย่างหน้าเว็บ
               </button>
             </div>
 
@@ -806,7 +925,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
               ref={descriptionRef}
               className="full"
               rows={10}
-              placeholder="รายละเอียด"
+              placeholder="รายละเอียดสถานที่"
               value={form.description}
               onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
               required
@@ -814,27 +933,27 @@ export default function Places({ token, role = "user", mode = "create" }) {
 
             <div className="full inline-image-manager">
               <div className="card-title-row">
-                <h3>รูปประกอบในเนื้อหา</h3>
+                <h3>รูปแทรกในเนื้อหา</h3>
               </div>
               {descriptionBlocks.filter((b) => b.type === "image").length === 0 ? (
-                <p className="muted">ยังไม่มีรูปประกอบในเนื้อหา</p>
+                <p className="muted">ยังไม่มีรูปแทรก</p>
               ) : (
                 <div className="inline-image-list">
                   {descriptionBlocks
                     .filter((b) => b.type === "image")
                     .map((img) => (
                       <div key={`inline-image-${img.imageOrder}-${img.src}`} className="inline-image-row">
-                        <InlineThumb src={img.src} alt={img.alt || "🖼️ รูปประกอบ"} rotation={img.rotation || 0} />
+                        <InlineThumb src={img.src} alt={img.alt || "ตัวอย่างรูปภาพ"} rotation={img.rotation || 0} />
                         <div className="inline-image-meta">
-                          <p>ลำดับรูป: {Number(img.imageOrder) + 1}</p>
-                          <p>มุมหมุน: {normalizeRotation(img.rotation || 0)}°</p>
+                          <p>ลำดับ: {Number(img.imageOrder) + 1}</p>
+                          <p>หมุน: {normalizeRotation(img.rotation || 0)} องศา</p>
                         </div>
                         <button
                           type="button"
                           className="danger"
                           onClick={() => onRemoveInlineImage(img.imageOrder, img.src)}
                         >
-                          ลบรูปประกอบ
+                          ลบรูป
                         </button>
                       </div>
                     ))}
@@ -843,20 +962,23 @@ export default function Places({ token, role = "user", mode = "create" }) {
             </div>
 
             <input
-              placeholder="เมตาไตเติล (SEO)"
+              placeholder="หัวข้อสำหรับค้นหา"
               value={form.meta_title}
               onChange={(e) => setForm((p) => ({ ...p, meta_title: e.target.value }))}
             />
 
             <div className="cover-input-wrap">
               <input
-                placeholder="ลิงก์รูปภาพปก"
+                placeholder="ลิงก์รูปปก"
                 value={coverPreview.url}
                 onChange={(e) => setForm((p) => ({ ...p, image: buildCoverImageValue(e.target.value, 0) }))}
               />
               <div className="cover-actions">
                 <button type="button" className="ghost" onClick={onOpenCoverModal}>
-                  ใส่รูปปก (แบบ popup)
+                  จัดการรูปปก
+                </button>
+                <button type="button" className="ghost" onClick={() => setMediaPickerOpen(true)}>
+                  เลือกจากคลังสื่อ
                 </button>
                 {form.image ? (
                   <button type="button" className="danger" onClick={onRemoveCoverImage}>
@@ -869,57 +991,121 @@ export default function Places({ token, role = "user", mode = "create" }) {
             <textarea
               className="full"
               rows={3}
-              placeholder="เมตาคำอธิบาย (SEO)"
+              placeholder="คำอธิบายสำหรับค้นหา"
               value={form.meta_description}
               onChange={(e) => setForm((p) => ({ ...p, meta_description: e.target.value }))}
+            />
+
+            <div className="full content-toolbar">
+              <span className="muted">เมทาดาต้าสำหรับระบบตัดสินใจ (สาธารณะ)</span>
+            </div>
+
+            <input
+              type="number"
+              min={0}
+              max={1000}
+              placeholder="คะแนนแนะนำ (0-1000)"
+              value={form.decision_featured_score}
+              onChange={(e) => setForm((p) => ({ ...p, decision_featured_score: e.target.value }))}
+            />
+
+            <input
+              placeholder="แท็กสถานการณ์ (คั่นด้วย ,)"
+              value={form.decision_scenario_tags}
+              onChange={(e) => setForm((p) => ({ ...p, decision_scenario_tags: e.target.value }))}
+            />
+
+            <input
+              className="full"
+              placeholder="แท็กเทรนด์ (คั่นด้วย ,)"
+              value={form.decision_trend_flags}
+              onChange={(e) => setForm((p) => ({ ...p, decision_trend_flags: e.target.value }))}
+            />
+
+            <input
+              className="full"
+              placeholder="แท็กช่วงเวลา (คั่นด้วย ,)"
+              value={form.decision_moment_tags}
+              onChange={(e) => setForm((p) => ({ ...p, decision_moment_tags: e.target.value }))}
+            />
+
+            <input
+              className="full"
+              placeholder="แท็กอินไซต์ (คั่นด้วย ,)"
+              value={form.decision_insight_flags}
+              onChange={(e) => setForm((p) => ({ ...p, decision_insight_flags: e.target.value }))}
+            />
+
+            <input
+              className="full"
+              placeholder="ลิงก์รูปปกสำหรับระบบตัดสินใจ (ไม่บังคับ)"
+              value={form.decision_cover_image}
+              onChange={(e) => setForm((p) => ({ ...p, decision_cover_image: e.target.value }))}
+            />
+
+            <input
+              className="full"
+              placeholder="ลิงก์รูปย่อสำหรับระบบตัดสินใจ (ไม่บังคับ)"
+              value={form.decision_thumbnail_image}
+              onChange={(e) => setForm((p) => ({ ...p, decision_thumbnail_image: e.target.value }))}
             />
 
             {isEdit ? (
               <div className="full form-action-row">
                 <button type="button" className="ghost form-back-btn" onClick={backToList}>
-                  กลับ (ยังไม่บันทึก)
+                  กลับหน้ารายการ
                 </button>
                 <button type="submit" className="primary form-save-btn" disabled={saving}>
-                  {saving ? "กำลังบันทึก..." : "ยืนยันบันทึกการแก้ไข"}
+                  {saving ? "กำลังบันทึก..." : "บันทึก"}
                 </button>
               </div>
             ) : (
               <button type="submit" className="primary full" disabled={saving}>
-                {saving ? "กำลังบันทึก..." : "สร้าง"}
+                {saving ? "กำลังบันทึก..." : "บันทึก"}
               </button>
             )}
           </form>
         </section>
       ) : null}
 
+      
+      {mediaPickerOpen ? (
+        <MediaPickerModal
+          token={token}
+          defaultUsageType="cover"
+          onClose={() => setMediaPickerOpen(false)}
+          onSelect={onSelectFromMediaLibrary}
+        />
+      ) : null}
+
       {translateModalOpen ? (
         <div className="modal-backdrop" onClick={() => setTranslateModalOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="card-title-row">
-              <h2>ตรวจสอบคำแปล</h2>
+              <h2>พรีวิวการแปลภาษา</h2>
               <button type="button" className="ghost" onClick={() => setTranslateModalOpen(false)}>
-                ปิด
+                
               </button>
             </div>
 
             <div className="translate-grid">
               <div>
-                <p className="muted">ไทย (ต้นฉบับ)</p>
+                <p className="muted">ต้นฉบับ (ไทย)</p>
                 <input value={form.title} readOnly />
                 <textarea rows={4} value={form.description} readOnly />
               </div>
               <div>
-                <p className="muted">English</p>
+                <p className="muted">อังกฤษ</p>
                 <input value={translated.en?.title || ""} readOnly />
                 <textarea rows={4} value={translated.en?.description || ""} readOnly />
               </div>
               <div>
-                <p className="muted">中文</p>
+                <p className="muted">จีน</p>
                 <input value={translated.zh?.title || ""} readOnly />
                 <textarea rows={4} value={translated.zh?.description || ""} readOnly />
               </div>
               <div>
-                <p className="muted">ລາວ</p>
+                <p className="muted">ลาว</p>
                 <input value={translated.lo?.title || ""} readOnly />
                 <textarea rows={4} value={translated.lo?.description || ""} readOnly />
               </div>
@@ -938,15 +1124,15 @@ export default function Places({ token, role = "user", mode = "create" }) {
         <div className="modal-backdrop" onClick={() => setInsertImageModalOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="card-title-row">
-              <h2>แทรกรูปภาพ</h2>
+              <h2>เพิ่มรูปแทรก</h2>
               <button type="button" className="ghost" onClick={() => setInsertImageModalOpen(false)}>
-                ปิด
+                
               </button>
             </div>
 
             <div className="grid">
               <input
-                placeholder="วาง URL รูปภาพ"
+                placeholder="วางลิงก์รูปภาพ"
                 value={insertImageUrl}
                 onChange={(e) => setInsertImageUrl(e.target.value)}
               />
@@ -958,24 +1144,24 @@ export default function Places({ token, role = "user", mode = "create" }) {
               />
 
               <label className="upload-btn inline-upload-btn">
-                {uploadingInline ? "กำลังอัปโหลด..." : "อัปโหลดไฟล์รูปภาพ"}
+                {uploadingInline ? "กำลังอัปโหลด..." : "อัปโหลดรูป"}
                 <input type="file" accept="image/*" onChange={onInlineFileChange} disabled={uploadingInline} />
               </label>
 
               <div className="content-toolbar">
                 <button type="button" className="ghost" onClick={() => rotateInsertPreview(-90)}>
-                  หมุนซ้าย 90°
+                  หมุนซ้าย 90 องศา
                 </button>
                 <button type="button" className="ghost" onClick={() => rotateInsertPreview(90)}>
-                  หมุนขวา 90°
+                  หมุนขวา 90 องศา
                 </button>
-                <span className="muted">มุมหมุนปัจจุบัน: {insertImageRotation}°</span>
+                <span className="muted">มุมหมุน: {insertImageRotation} องศา</span>
               </div>
 
               {insertImageUrl ? (
                 <img
                   src={insertImageUrl}
-                  alt="preview"
+                  alt="ตัวอย่างรูปภาพ"
                   className="insert-preview"
                   style={{ transform: previewRotationTransform(insertImageRotation), transformOrigin: "center center" }}
                 />
@@ -996,38 +1182,38 @@ export default function Places({ token, role = "user", mode = "create" }) {
         <div className="modal-backdrop" onClick={() => setCoverImageModalOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="card-title-row">
-              <h2>ใส่รูปปก</h2>
+              <h2>จัดการรูปปก</h2>
               <button type="button" className="ghost" onClick={() => setCoverImageModalOpen(false)}>
-                ปิด
+                
               </button>
             </div>
 
             <div className="grid">
               <input
-                placeholder="วาง URL รูปภาพปก"
+                placeholder="วางลิงก์รูปภาพ"
                 value={coverImageUrl}
                 onChange={(e) => setCoverImageUrl(e.target.value)}
               />
 
               <label className="upload-btn inline-upload-btn">
-                {uploadingCover ? "กำลังอัปโหลด..." : "อัปโหลดไฟล์รูปปก"}
+                {uploadingCover ? "กำลังอัปโหลด..." : "อัปโหลดรูป"}
                 <input type="file" accept="image/*" onChange={onCoverModalFileChange} disabled={uploadingCover} />
               </label>
 
               <div className="content-toolbar">
                 <button type="button" className="ghost" onClick={() => setCoverImageRotation((prev) => normalizeRotation(prev - 90))}>
-                  หมุนซ้าย 90°
+                  หมุนซ้าย 90 องศา
                 </button>
                 <button type="button" className="ghost" onClick={() => setCoverImageRotation((prev) => normalizeRotation(prev + 90))}>
-                  หมุนขวา 90°
+                  หมุนขวา 90 องศา
                 </button>
-                <span className="muted">มุมหมุนปัจจุบัน: {coverImageRotation}°</span>
+                <span className="muted">มุมหมุน: {coverImageRotation} องศา</span>
               </div>
 
               {coverImageUrl ? (
                 <img
                   src={coverImageUrl}
-                  alt="cover-preview"
+                  alt="ตัวอย่างรูปปก"
                   className="insert-preview"
                   style={{ transform: previewRotationTransform(coverImageRotation), transformOrigin: "center center" }}
                 />
@@ -1047,22 +1233,22 @@ export default function Places({ token, role = "user", mode = "create" }) {
         <div className="modal-backdrop" onClick={() => setPreviewWindowOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="card-title-row">
-              <h2>รีวิวหน้าสุดท้าย (เหมือนหน้า frontend)</h2>
+              <h2>ตัวอย่างหน้าแสดงผล</h2>
               <button type="button" className="ghost" onClick={() => setPreviewWindowOpen(false)}>
-                ปิด
+                
               </button>
             </div>
 
             <section className="space-y-4" style={{ maxWidth: 900, margin: "0 auto" }}>
               <p className="muted">{CATEGORY_LABEL[form.category]}</p>
-              <h1 style={{ margin: 0, fontSize: "1.9rem", lineHeight: 1.2 }}>{form.title || "(ยังไม่ใส่ชื่อ)"}</h1>
+              <h1 style={{ margin: 0, fontSize: "1.9rem", lineHeight: 1.2 }}>{form.title || "(ยังไม่ได้ตั้งชื่อ)"}</h1>
 
               {previewCoverUrl ? (
                 <div style={{ width: "min(50vw, 100%)", marginInline: "auto" }}>
                   <div style={{ overflow: "hidden", borderRadius: 14 }}>
                     <img
                       src={previewCoverUrl}
-                      alt="cover-preview"
+                      alt="ตัวอย่างรูปปก"
                       style={{
                         display: "block",
                         width: "100%",
@@ -1078,7 +1264,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
 
               <article style={{ fontSize: 16, lineHeight: 1.9 }}>
                 {previewContentBlocks.length === 0 ? (
-                  <p className="muted">ยังไม่มีเนื้อหา</p>
+                  <p className="muted">ยังไม่มีเนื้อหาแสดงผล</p>
                 ) : (
                   previewContentBlocks.map((block, index) => {
                     if (block.type === "image") {
@@ -1087,7 +1273,7 @@ export default function Places({ token, role = "user", mode = "create" }) {
                           <div style={{ overflow: "hidden", borderRadius: 12 }}>
                             <img
                               src={block.src}
-                              alt={block.alt || "preview"}
+                              alt={block.alt || "ตัวอย่างรูปภาพ"}
                               style={{
                                 display: "block",
                                 width: "100%",
@@ -1114,10 +1300,43 @@ export default function Places({ token, role = "user", mode = "create" }) {
           </div>
         </div>
       ) : null}
+      {purgeModalOpen ? (
+        <div className="modal-backdrop" onClick={() => setPurgeModalOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="card-title-row">
+              <h2>Purge Content</h2>
+              <button type="button" className="ghost" onClick={() => setPurgeModalOpen(false)}>Close</button>
+            </div>
+            <p className="muted">Target ID: {purgeTarget?.id || "-"}</p>
+            <label>Password</label>
+            <input type="password" value={purgePassword} onChange={(e) => setPurgePassword(e.target.value)} placeholder="Owner password" />
+            <label>Note (optional)</label>
+            <textarea rows={3} value={purgeNote} onChange={(e) => setPurgeNote(e.target.value)} placeholder="Reason for purge" />
+            <div className="modal-actions">
+              <button type="button" className="ghost" onClick={() => setPurgeModalOpen(false)}>Cancel</button>
+              <button type="button" className="danger" onClick={confirmPurgePlace} disabled={deletingId === purgeTarget?.id}>
+                {deletingId === purgeTarget?.id ? "Purging..." : "Confirm Purge"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {message ? <p className="status">{message}</p> : null}
     </>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

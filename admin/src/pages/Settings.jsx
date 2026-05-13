@@ -1,3 +1,5 @@
+import { API_BASE_URL } from "../api/api";
+
 export default function Settings({ session }) {
   return (
     <section className="admin-card">
@@ -5,7 +7,7 @@ export default function Settings({ session }) {
       <div className="settings-grid">
         <div>
           <p className="muted">API Base URL</p>
-          <p>http://localhost:5000/api</p>
+          <p>{API_BASE_URL}</p>
         </div>
         <div>
           <p className="muted">Role</p>
