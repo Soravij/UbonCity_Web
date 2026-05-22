@@ -873,8 +873,13 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
         continue;
       }
 
-      const defaultTranslatorEngine = aiConfig?.enabled ? "openai" : "deterministic";
-      const defaultTranslatorModel = aiConfig?.model || "deterministic";
+      const translationConfig = aiConfig?.features?.translation || aiConfig || {};
+      const preferredProvider = String(translationConfig?.provider || aiConfig?.translationProvider || aiConfig?.provider || "").trim().toLowerCase();
+      const hasOpenAi = Boolean(String(aiConfig?.openAiApiKey || "").trim());
+      const hasGoogle = Boolean(String(aiConfig?.googleApiKey || "").trim());
+      const hasProviderConfig = preferredProvider === "google" ? hasGoogle : preferredProvider === "openai" ? hasOpenAi : false;
+      const defaultTranslatorEngine = hasProviderConfig ? preferredProvider : "deterministic";
+      const defaultTranslatorModel = String(translationConfig?.model || aiConfig?.translationModel || aiConfig?.model || "deterministic").trim() || "deterministic";
 
       try {
         const translated = await translator.translate(sourceToTranslationInput(article), lang);
@@ -1188,9 +1193,14 @@ function normalizeAgentFieldPackMediaHints(value) {
 function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = null) {
   const source = fieldPack && typeof fieldPack === "object" ? fieldPack : {};
   const existingId = Number(existingFieldPack?.id || 0) || 0;
-  const normalizedStatus = String(source.status || "ready_for_field").trim().toLowerCase() === "ready_for_handoff"
-    ? "ready_for_field"
-    : (String(source.status || "ready_for_field").trim().toLowerCase() || "ready_for_field");
+  const requestedStatus = String(source.status || "").trim().toLowerCase();
+  let normalizedStatus = requestedStatus || "draft";
+  if (normalizedStatus === "ready_for_handoff" || normalizedStatus === "ready_for_field") {
+    normalizedStatus = "draft";
+  }
+  if (!["draft", "field_in_progress", "field_done", "on_hold"].includes(normalizedStatus)) {
+    normalizedStatus = "draft";
+  }
   return {
     ...(existingId ? { id: existingId } : {}),
     status: normalizedStatus,
@@ -1226,11 +1236,23 @@ function assertAgentFieldPackContract(fieldPack) {
     throw new Error("Agent field pack must include ai_summary, story_angle, or social_hook");
   }
   const mustVerifyCount = countFieldPackChecklist(fieldPack, "must_verify_fact");
-  const mustCaptureCount = countFieldPackChecklist(fieldPack, "must_capture_shot");
+  const mustCaptureCount = countFieldPackChecklist(fieldPack, "must_capture");
   const mustAskCount = countFieldPackChecklist(fieldPack, "must_ask_question");
   if (mustVerifyCount < 1) throw new Error("Agent field pack must include at least one must_verify_fact checklist item");
-  if (mustCaptureCount < 1) throw new Error("Agent field pack must include at least one must_capture_shot checklist item");
+  if (mustCaptureCount < 1) throw new Error("Agent field pack must include at least one must_capture checklist item");
   if (mustAskCount < 1) throw new Error("Agent field pack must include at least one must_ask_question checklist item");
+
+  // Validate capture_type on each must_capture item
+  if (Array.isArray(fieldPack?.field_pack_checklists)) {
+    for (const row of fieldPack.field_pack_checklists) {
+      if (String(row?.checklist_type || "").trim().toLowerCase() === "must_capture") {
+        const captureType = String(row?.capture_type || "").trim().toLowerCase();
+        if (!["photo", "video", "both"].includes(captureType)) {
+          throw new Error(`Each must_capture item must have valid capture_type (photo/video/both). Got: ${captureType}`);
+        }
+      }
+    }
+  }
 }
 
 function saveAgentFieldPack(repo, item, fieldPack, actorEmail) {
@@ -1391,7 +1413,19 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
         assertAgentFieldPackContract(finalFieldPack);
         traceAiDraft("field_pack.generate.ok", { item_id: Number(item?.id || 0) || null });
         finalItem = { ...item, visual_context: visualContext };
-        generatedBy = `${String(aiConfig?.agentEngine || "internal").toLowerCase() === "external" ? "external-agent" : (aiConfig?.provider || "openai")}:${aiConfig?.model || "unknown"}`;
+        const fieldPackProvider = String(
+          aiConfig?.features?.fieldPack?.provider
+          || aiConfig?.fieldPackProvider
+          || aiConfig?.provider
+          || "openai"
+        ).trim().toLowerCase();
+        const fieldPackModel = String(
+          aiConfig?.features?.fieldPack?.model
+          || aiConfig?.fieldPackModel
+          || aiConfig?.model
+          || "unknown"
+        ).trim();
+        generatedBy = `${String(aiConfig?.agentEngine || "internal").toLowerCase() === "external" ? "external-agent" : fieldPackProvider}:${fieldPackModel || "unknown"}`;
         aiSuccessCount += 1;
       } catch (err) {
         errorCount += 1;
@@ -1704,6 +1738,21 @@ export function applyReviewAction(repo, actorEmail, payload) {
   });
 
   return { ok: true, content_item_id: contentItemId, action };
+}
+
+export function returnFieldPackToClean(repo, actorEmail, payload) {
+  const contentItemId = Number(payload?.content_item_id || 0);
+  const notes = String(payload?.notes || "").trim() || null;
+  const actorRole = String(payload?.actor_role || "admin").trim().toLowerCase() || "admin";
+  if (!contentItemId) {
+    throw new Error("content_item_id is required");
+  }
+  if (!notes) {
+    throw new Error("notes/reason is required");
+  }
+  return repo.returnFieldPackToCleanAtomic(contentItemId, notes, actorEmail, {
+    actor_role: actorRole,
+  });
 }
 
 export function reopenReviewDecision(repo, actorEmail, payload) {
@@ -2151,13 +2200,53 @@ export async function releaseItemToMainSite(repo, dirs, actorEmail, options = {}
   };
 }
 
+export function compensateReleaseAfterSyncFailure(repo, actorEmail, options = {}) {
+  const contentItemId = Number(options?.contentItemId || options?.content_item_id || 0) || 0;
+  if (!contentItemId) {
+    throw new Error("content_item_id is required for compensation");
+  }
+  const workflowBefore = options?.workflowBefore || options?.workflow_before || null;
+  if (!workflowBefore || typeof workflowBefore !== "object") {
+    throw new Error("workflow_before snapshot is required for compensation");
+  }
+  const actor = String(actorEmail || "").trim() || "system@local";
+  const actorRole = String(options?.actor_role || "admin").trim().toLowerCase() || "admin";
+  const reasonCode = String(options?.reason_code || "").trim().toLowerCase() || "publish_sync_compensation";
+  const note = String(options?.note || "compensate publish after backend sync failure").trim();
+  const publishedArticleBefore = options?.publishedArticleBefore || options?.published_article_before || null;
 
+  const patch = {
+    production_state: String(workflowBefore?.production_state || "").trim().toLowerCase() || "ready_for_publish",
+    publication_state: String(workflowBefore?.publication_state || "").trim().toLowerCase() || "approved",
+    last_transition_note: note,
+  };
+  const workflowAfter = repo.upsertWorkflowModel(contentItemId, patch, actor, {
+    actor_role: actorRole,
+    reason_code: reasonCode,
+    bump_state_version: true,
+    skip_production_transition_validation: true,
+    skip_publication_transition_validation: true,
+  });
 
+  const publishedArticle = repo.getPublishedArticleByItem(contentItemId);
+  let articleStatusAfter = null;
+  if (publishedArticle) {
+    if (publishedArticleBefore && typeof publishedArticleBefore === "object") {
+      const restored = repo.restorePublishedArticleByItem(publishedArticleBefore);
+      articleStatusAfter = String(restored?.status || "").trim().toLowerCase() || null;
+    } else {
+      repo.deletePublishedArticleByItem(contentItemId);
+      articleStatusAfter = null;
+    }
+  }
 
-
-
-
-
+  return {
+    ok: true,
+    content_item_id: contentItemId,
+    workflow_after: workflowAfter,
+    published_article_status: articleStatusAfter,
+  };
+}
 
 
 

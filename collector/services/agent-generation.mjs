@@ -159,13 +159,15 @@ function normalizeFieldPack(input) {
   }
 
   const checklists = root.checklists && typeof root.checklists === "object" ? root.checklists : {};
-  const normalizedStatus = toText(root.status).toLowerCase() === "ready_for_handoff"
-    ? "ready_for_field"
-    : toText(root.status).toLowerCase();
+  const requestedStatus = toText(root.status).toLowerCase();
+  let normalizedStatus = requestedStatus || "draft";
+  if (normalizedStatus === "ready_for_handoff" || normalizedStatus === "ready_for_field") {
+    normalizedStatus = "draft";
+  }
   const fieldPack = {
-    status: ["draft", "ready_for_field", "field_in_progress", "field_done", "on_hold"].includes(normalizedStatus)
+    status: ["draft", "field_in_progress", "field_done", "on_hold"].includes(normalizedStatus)
       ? normalizedStatus
-      : "ready_for_field",
+      : "draft",
     writer_ready: Boolean(root.writer_ready),
     ai_summary: toText(root.ai_summary || root.summary || root.brief_summary),
     ai_highlights: normalizeStringList(root.ai_highlights || root.highlights, 8),
@@ -456,6 +458,9 @@ function buildFieldPackPrompt(item) {
     "ai_summary should be a short work brief, not an article opening.",
     "must_verify_fact should contain facts the person must confirm on-site or from official source.",
     "must_capture should contain an array of objects with capture_type (photo/video/both) and item_text for concrete shots to collect.",
+    "For must_capture: each item must describe exactly one concrete shot. Do not combine multiple shots, angles, or locations in one item.",
+    "If capture_type is video, item_text must be an executable video shot instruction (for example pan, walk-through, push-in, tilt, tracking).",
+    "Do not output broad topic-style video items. Every video item must be directly shootable by a field team.",
     "must_ask_question should contain questions to ask staff/local people/visitors where appropriate.",
     "social_hook and social_caption_angle are directional notes, not final copy.",
     "Keep each list item short and directly usable.",
@@ -484,6 +489,10 @@ function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote
     "Never output description_clean, description_raw, body, article, meta_title, or meta_description.",
     "Use approved_context as the PRIMARY source of truth.",
     "Use previous_field_pack as the starting point, then apply revision_note.",
+    "Keep must_capture as structured objects with capture_type (photo/video/both) and one concrete shot per item.",
+    "Do not combine multiple shots, angles, or locations in one must_capture item.",
+    "For capture_type=video, ensure each item is an executable video shot, not a broad topic.",
+    "Do not output broad topic-style video items. Every video item must be directly shootable by a field team.",
     "If revision_note conflicts with approved_context, keep approved_context and put the conflict into ai_unknowns or must_verify_fact.",
     "Keep the revised pack action-oriented and directly usable in Place Step 4 and Handoff.",
     "Do not paste raw URLs into text fields.",

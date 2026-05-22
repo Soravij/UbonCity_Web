@@ -30,6 +30,7 @@ function countChecklist(fieldPack = {}, checklistType) {
 }
 
 function summarizeFieldPack(fieldPack = {}) {
+  const mustCaptureCount = countChecklist(fieldPack, "must_capture_shot") + countChecklist(fieldPack, "must_capture");
   return {
     id: Number(fieldPack?.id || 0) || null,
     status: String(fieldPack?.status || "").trim(),
@@ -37,7 +38,7 @@ function summarizeFieldPack(fieldPack = {}) {
     story_angle: String(fieldPack?.story_angle || "").trim(),
     social_hook: String(fieldPack?.social_hook || "").trim(),
     must_verify_fact_count: countChecklist(fieldPack, "must_verify_fact"),
-    must_capture_shot_count: countChecklist(fieldPack, "must_capture_shot"),
+    must_capture_shot_count: mustCaptureCount,
     must_ask_question_count: countChecklist(fieldPack, "must_ask_question"),
   };
 }
@@ -116,7 +117,7 @@ async function main() {
     assert(fieldPackRes.ok, `GET /api/items/${contentItemId}/field-pack/current failed: ${JSON.stringify(fieldPackRes.body)}`);
     const fieldPackContract = summarizeFieldPack(fieldPackRes.body?.field_pack || {});
     assert(fieldPackContract.id, `field pack id missing: ${JSON.stringify(fieldPackContract)}`);
-    assert(fieldPackContract.status === "ready_for_field", `field pack status mismatch: ${JSON.stringify(fieldPackContract)}`);
+    assert(fieldPackContract.status === "draft", `field pack status mismatch: ${JSON.stringify(fieldPackContract)}`);
     assert(fieldPackContract.ai_summary || fieldPackContract.story_angle || fieldPackContract.social_hook, `field pack summary/direction missing: ${JSON.stringify(fieldPackContract)}`);
     assert(fieldPackContract.must_verify_fact_count > 0, `must_verify_fact checklist missing: ${JSON.stringify(fieldPackContract)}`);
     assert(fieldPackContract.must_capture_shot_count > 0, `must_capture_shot checklist missing: ${JSON.stringify(fieldPackContract)}`);

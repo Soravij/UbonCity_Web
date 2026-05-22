@@ -193,6 +193,8 @@ const state = {
     rawShowAll: true,
     rawLimit: 8,
     rawTableCollapsed: false,
+    rawIntakeCollapsed: false,
+    rawReviewCollapsed: false,
     rawSort: "interestingness",
     rawStageFilter: "all",
     rawSelectedIds: new Set(),
@@ -680,11 +682,57 @@ function getItemWorkflowSnapshot(item) {
   };
 }
 
+function resolveQueueBucket(itemSnapshot) {
+  const source = itemSnapshot && typeof itemSnapshot === "object" ? itemSnapshot : {};
+  const snapshot = source && Object.prototype.hasOwnProperty.call(source, "productionState")
+    ? itemSnapshot
+    : getItemWorkflowSnapshot(itemSnapshot);
+  const productionState = String(snapshot?.productionState || "").trim().toLowerCase();
+  const publicationState = String(snapshot?.publicationState || "").trim().toLowerCase();
+  const assignmentState = String(snapshot?.assignmentState || "").trim().toLowerCase();
+  const hasFieldPack = Number(source?.current_field_pack_id || source?.field_pack_id || snapshot?.current_field_pack_id || snapshot?.field_pack_id || 0) > 0;
+  const fieldPackStatus = String(source?.current_field_pack_status || source?.field_pack_status || snapshot?.current_field_pack_status || snapshot?.field_pack_status || "").trim().toLowerCase();
+
+  if (publicationState === "published" || productionState === "completed") {
+    return "published";
+  }
+  if (assignmentState) {
+    return "assignment";
+  }
+  if (
+    publicationState === "approved"
+    || publicationState === "unpublished"
+    || productionState === "ready_for_publish"
+    || productionState === "in_review"
+    || productionState === "needs_revision"
+    || productionState === "content_in_progress"
+    || productionState === "submitted_for_admin_review"
+  ) {
+    return "published";
+  }
+  if (hasFieldPack && isAssignmentContextReady(fieldPackStatus)) {
+    return "handoff";
+  }
+  if (hasFieldPack) {
+    return "field_pack_review";
+  }
+  return "raw_prep";
+}
+
 function getEditorialSurfaceUrlForItem(item, preferredStatus = "") {
   const normalizedItemId = parsePositiveInt(item?.id, 0);
   if (!normalizedItemId) return "";
   const status = String(preferredStatus || getItemWorkflowSnapshot(item).compatibilityStatus || "").trim().toLowerCase();
-  const isReviewStage = status === "in_review" || status === "approved" || status === "published" || status === "unpublished";
+  const bucket = resolveQueueBucket(item);
+  const isReviewStage = status === "in_review"
+    || status === "approved"
+    || status === "published"
+    || status === "unpublished"
+    || status === "ready_for_review"
+    || status === "ready_for_sync"
+    || status === "synced_to_admin"
+    || status === "submitted_for_admin_review"
+    || bucket === "published";
 
   if (isTransportMapContentItem(item)) {
     if (isReviewStage) {
@@ -713,12 +761,18 @@ function getEditorialSurfaceUrlForItem(item, preferredStatus = "") {
 async function resolveEditorialSurfaceUrlByItemId(itemId, fallbackUrl = "") {
   const normalizedItemId = parsePositiveInt(itemId, 0);
   if (!normalizedItemId) return fallbackUrl;
-  const localItem = findLoadedItemById(normalizedItemId);
-  if (localItem) return getEditorialSurfaceUrlForItem(localItem, getItemWorkflowSnapshot(localItem).compatibilityStatus);
   try {
-    const item = await api(`/api/items/${normalizedItemId}`);
-    return getEditorialSurfaceUrlForItem(item, getItemWorkflowSnapshot(item).compatibilityStatus);
+    const [item, processPayload] = await Promise.all([
+      api(`/api/items/${normalizedItemId}`),
+      api(`/api/items/${normalizedItemId}/article-process`).catch(() => null),
+    ]);
+    const processStatus = String(processPayload?.current_status || "").trim().toLowerCase();
+    return getEditorialSurfaceUrlForItem(item, processStatus || getItemWorkflowSnapshot(item).compatibilityStatus);
   } catch {
+    const localItem = findLoadedItemById(normalizedItemId);
+    if (localItem) {
+      return getEditorialSurfaceUrlForItem(localItem, getItemWorkflowSnapshot(localItem).compatibilityStatus);
+    }
     return fallbackUrl;
   }
 }
@@ -819,9 +873,7 @@ function isAssignmentContextReady(status) {
 
 function isHandoffEligibleItem(item) {
   if (!item || typeof item !== "object") return false;
-  if (!(Number(item?.current_field_pack_id || item?.field_pack_id || 0) > 0)) return false;
-  if (!isAssignmentContextReady(item?.current_field_pack_status || item?.field_pack_status)) return false;
-  return !String(getItemWorkflowSnapshot(item).assignmentState || "").trim();
+  return resolveQueueBucket(item) === "handoff";
 }
 
 function hasAssignmentBriefPrepared(fieldPack) {
@@ -4088,15 +4140,8 @@ function getDashboardStageFilterLabel(value) {
 function getPreparationQueueItems(items = state.items) {
   const list = Array.isArray(items) ? items : [];
   return list.filter((item) => {
-    const snapshot = getItemWorkflowSnapshot(item);
-    const rawStatus = snapshot.compatibilityStatus;
-    if (rawStatus === "content_in_progress" || rawStatus === "in_review" || rawStatus === "needs_revision" || rawStatus === "approved" || rawStatus === "published" || rawStatus === "unpublished") {
-      return false;
-    }
-    const stage = normalizeDashboardWorkflowStage(item);
-    if (snapshot.assignmentState) return false;
-    if (stage === "published") return false;
-    return stage === "raw" || stage === "cleaned" || stage === "generated";
+    const bucket = resolveQueueBucket(item);
+    return bucket === "raw_prep" || bucket === "field_pack_review";
   });
 }
 
@@ -4106,10 +4151,17 @@ function renderRawStageFilters(items = state.items) {
 
   const rows = getPreparationQueueItems(items);
   const counts = rows.reduce((acc, item) => {
-    const stage = normalizeDashboardWorkflowStage(item);
+    const bucket = resolveQueueBucket(item);
     acc.all += 1;
-    if (Object.prototype.hasOwnProperty.call(acc, stage)) {
-      acc[stage] += 1;
+    if (bucket === "field_pack_review") {
+      acc.generated += 1;
+      return acc;
+    }
+    const isRaw = getItemWorkflowSnapshot(item).productionState === "collected";
+    if (isRaw) {
+      acc.raw += 1;
+    } else {
+      acc.cleaned += 1;
     }
     return acc;
   }, {
@@ -4130,34 +4182,132 @@ function getDashboardPrimaryEntryAction(item) {
   const id = Number(item?.id || 0) || 0;
   if (!id) return null;
 
-  const rawStatus = getItemWorkflowSnapshot(item).compatibilityStatus;
-  if (rawStatus === "content_in_progress" || rawStatus === "in_review" || rawStatus === "needs_revision" || rawStatus === "approved" || rawStatus === "published" || rawStatus === "unpublished") {
+  const bucket = resolveQueueBucket(item);
+  if (bucket === "published") {
     return getArticleSurfaceEntry(item);
   }
-
-  const stage = normalizeDashboardWorkflowStage(item);
-  if (stage === "published") {
+  if (bucket === "assignment" || bucket === "handoff") {
     return {
       label: "ไปส่งงานไปทำ",
       url: `/?tab=handoff&item_id=${id}`,
     };
   }
-  if (stage === "generated") {
+  if (bucket === "field_pack_review") {
     return {
       label: "ตรวจชุดสั่งงาน",
       url: `/item-editor.html?id=${id}`,
-    };
-  }
-  if (stage === "cleaned") {
-    return {
-      label: "คัดข้อมูล",
-      url: `/clean-item.html?id=${id}`,
     };
   }
   return {
     label: "Clean",
     url: `/clean-item.html?id=${id}`,
   };
+}
+
+function splitRawQueueByFieldPack(items = []) {
+  const intake = [];
+  const review = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    const bucket = resolveQueueBucket(item);
+    if (bucket === "field_pack_review") {
+      review.push(item);
+    } else if (bucket === "raw_prep") {
+      intake.push(item);
+    }
+  }
+  return { intake, review };
+}
+
+function buildRawQueueStatusLabel(item, queueType) {
+  const bucket = resolveQueueBucket(item);
+  if (queueType === "review") {
+    return bucket === "handoff" ? "พร้อมส่งต่อ" : "รอตรวจชุดสั่งงาน";
+  }
+  if (bucket === "raw_prep") return "รอคัดเข้า AI";
+  return "กำลังคัดข้อมูล";
+}
+
+function renderRawQueueTable({
+  tableId,
+  items = [],
+  canManage = false,
+  showInterestingness = true,
+  queueType = "intake",
+  emptyText = "ยังไม่มีรายการ",
+}) {
+  const table = qs(tableId);
+  if (!table) return;
+  const tbody = table.querySelector("tbody");
+  const headRow = table.querySelector("thead tr");
+  if (!tbody || !headRow) return;
+
+  headRow.innerHTML = `
+    ${canManage && queueType === "intake" ? '<th class="raw-select-cell"><input type="checkbox" id="raw-select-all" aria-label="เลือกทั้งหมดในตาราง" /></th>' : ""}
+    <th>ID</th>
+    <th>ประเภท</th>
+    <th>หมวดหมู่</th>
+    <th class="raw-title-column">ชื่อเรื่อง</th>
+    ${showInterestingness ? "<th>น่าสนใจ</th>" : ""}
+    <th>สถานะ</th>
+    <th>ผู้รับงาน</th>
+    <th>การทำงาน</th>
+  `;
+  tbody.innerHTML = "";
+
+  if (!items.length) {
+    const tr = document.createElement("tr");
+    const colspan = (canManage && queueType === "intake")
+      ? (showInterestingness ? 9 : 8)
+      : (showInterestingness ? 8 : 7);
+    tr.innerHTML = `<td colspan="${colspan}" class="muted">${emptyText}</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+
+  items.forEach((item) => {
+    const tr = document.createElement("tr");
+    const id = Number(item.id) || 0;
+    const isJustExported = state.justExportedItemId === id;
+    const isSelected = getRawSelectedIds().has(id);
+    const interestingness = item?.interestingness || {};
+    const interestingnessReasons = Array.isArray(interestingness?.reasons) ? interestingness.reasons.filter(Boolean) : [];
+    const statusLabel = buildRawQueueStatusLabel(item, queueType);
+    const readyForHandoff = isHandoffEligibleItem(item);
+    const primaryUrl = queueType === "review"
+      ? `/item-editor.html?id=${id}`
+      : `/clean-item.html?id=${id}`;
+    const primaryLabel = queueType === "review"
+      ? (readyForHandoff ? "พร้อมส่งต่อ" : "ตรวจชุดสั่งงาน")
+      : "คัดข้อมูล";
+
+    tr.dataset.itemId = String(id);
+    tr.className = isJustExported ? "row-highlight" : "";
+    tr.innerHTML = `
+      ${canManage && queueType === "intake" ? `<td class="raw-select-cell"><input type="checkbox" data-action="select" data-id="${id}" ${isSelected ? "checked" : ""} aria-label="เลือกรายการ ${id}" /></td>` : ""}
+      <td>${id}</td>
+      <td>${escapeHtml(item.type || "-")}</td>
+      <td>${escapeHtml(item.category || "-")}</td>
+      <td class="raw-title-cell">
+        <div class="raw-main-text">${escapeHtml(item.title || "")}</div>
+      </td>
+      ${showInterestingness ? `
+      <td>
+        <div class="raw-interest-wrap" title="${escapeHtml(interestingnessReasons.join(" | "))}">
+          <span class="intake-badge ${interestingnessBadgeClass(interestingness.label)}">${escapeHtml((interestingness.label || "ข้อมูลยังบาง") + " #" + Number(interestingness.score || 0))}</span>
+        </div>
+      </td>` : ""}
+      <td><span class="workflow-badge workflow-badge-cleaned">${escapeHtml(statusLabel)}</span></td>
+      <td>${formatPreparationClaimBadge(item)}</td>
+      <td class="raw-actions-cell">
+        <button type="button" data-action="open-state-entry" data-id="${id}" data-url="${escapeHtml(primaryUrl)}">${escapeHtml(primaryLabel)}</button>
+        ${canClaimPreparationItem(item) ? `<button type="button" data-action="claim-item" data-id="${id}">รับงานนี้</button>` : ""}
+        ${canReleasePreparationItem(item) ? `<button type="button" data-action="release-item" data-id="${id}" class="utility-action">ปล่อยงาน</button>` : ""}
+        ${canTakeOverPreparationItem(item) ? `<button type="button" data-action="takeover-item" data-id="${id}" class="fail">Take over</button>` : ""}
+        ${canManage ? `<button data-action="delete" data-id="${id}" class="fail">ลบ</button>` : ""}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
 }
 
 function focusAssignmentsTab() {
@@ -4424,12 +4574,12 @@ function applyPreferredLandingTab() {
 }
 
 function renderRawTable(items) {
-  const table = qs("table-raw");
-  if (!table) return;
-
+  const tableWrap = qs("raw-table-wrap");
+  if (!tableWrap) return;
   const list = sortRawItems(getPreparationQueueItems(items));
-  pruneRawSelection(list);
+  const split = splitRawQueueByFieldPack(list);
   renderRawStageFilters(list);
+
   const canManage = canManageBulkContentItems();
   const requestedStageFilter = String(state.dashboard.rawStageFilter || "all").trim().toLowerCase() || "all";
   const activeStageFilter = DASHBOARD_STAGE_FILTERS.some((filter) => filter.value === requestedStageFilter)
@@ -4438,100 +4588,109 @@ function renderRawTable(items) {
   if (activeStageFilter !== requestedStageFilter) {
     state.dashboard.rawStageFilter = activeStageFilter;
   }
-  const filteredList = activeStageFilter === "all"
-    ? list
-    : list.filter((item) => normalizeDashboardWorkflowStage(item) === activeStageFilter);
-  const visible = state.dashboard.rawShowAll ? filteredList : filteredList.slice(0, state.dashboard.rawLimit);
-  const tbody = table.querySelector("tbody");
-  const headRow = table.querySelector("thead tr");
-  if (headRow) {
-    headRow.innerHTML = `
-      ${canManage ? '<th class="raw-select-cell"><input type="checkbox" id="raw-select-all" aria-label="เลือกทั้งหมดในตาราง" /></th>' : ""}
-      <th>ID</th>
-      <th>ประเภท</th>
-      <th>หมวดหมู่</th>
-      <th class="raw-title-column">ชื่อเรื่อง</th>
-      <th>น่าสนใจ</th>
-      <th>สถานะ</th>
-      <th>ผู้รับงาน</th>
-      <th>การทำงาน</th>
-    `;
-  }
-  tbody.innerHTML = "";
+  const filteredIntake = activeStageFilter === "all"
+    ? split.intake
+    : split.intake.filter((item) => {
+      if (activeStageFilter === "generated") return false;
+      const snapshot = getItemWorkflowSnapshot(item);
+      const isRaw = snapshot.productionState === "collected";
+      if (activeStageFilter === "raw") return isRaw;
+      if (activeStageFilter === "cleaned") return !isRaw;
+      return true;
+    });
+  const filteredReview = activeStageFilter === "all" || activeStageFilter === "generated"
+    ? split.review
+    : [];
+  const visibleIntake = state.dashboard.rawShowAll ? filteredIntake : filteredIntake.slice(0, state.dashboard.rawLimit);
+  const visibleReview = filteredReview;
+  pruneRawSelection(filteredIntake);
 
-  if (!visible.length) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="${canManage ? 9 : 8}" class="muted">ยังไม่มีรายการ</td>`;
-    tbody.appendChild(tr);
-  }
+  tableWrap.innerHTML = `
+    <div class="card">
+      <div class="toolbar compact-toolbar">
+        <h3 class="section-title" style="margin:0;">Raw Intake / Clean Prep</h3>
+        <button id="btn-toggle-raw-intake" type="button">${state.dashboard.rawIntakeCollapsed ? "แสดงตาราง" : "ซ่อนตาราง"}</button>
+      </div>
+      <div class="table-wrap${state.dashboard.rawIntakeCollapsed ? " hidden" : ""}" id="raw-intake-table-wrap">
+        <table id="table-raw-intake">
+          <thead><tr></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <div class="toolbar compact-toolbar">
+        <h3 class="section-title" style="margin:0;">Field Pack Review</h3>
+        <button id="btn-toggle-raw-review" type="button">${state.dashboard.rawReviewCollapsed ? "แสดงตาราง" : "ซ่อนตาราง"}</button>
+      </div>
+      <div class="table-wrap${state.dashboard.rawReviewCollapsed ? " hidden" : ""}" id="raw-review-table-wrap">
+        <table id="table-raw-review">
+          <thead><tr></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  `;
 
-  visible.forEach((item) => {
-    const tr = document.createElement("tr");
-    const id = Number(item.id) || 0;
-    const isJustExported = state.justExportedItemId === id;
-    const isSelected = getRawSelectedIds().has(id);
-    const interestingness = item?.interestingness || {};
-    const interestingnessReasons = Array.isArray(interestingness?.reasons) ? interestingness.reasons.filter(Boolean) : [];
-    const sourceLabels = Array.isArray(interestingness?.source_labels) ? interestingness.source_labels.filter(Boolean) : [];
-    const entryAction = getDashboardPrimaryEntryAction(item);
-    tr.dataset.itemId = String(id);
-    tr.className = isJustExported ? "row-highlight" : "";
-    tr.innerHTML = `
-      ${canManage ? `<td class="raw-select-cell"><input type="checkbox" data-action="select" data-id="${id}" ${isSelected ? "checked" : ""} aria-label="เลือกรายการ ${id}" /></td>` : ""}
-      <td>${id}</td>
-      <td>${escapeHtml(item.type || "-")}</td>
-      <td>${escapeHtml(item.category || "-")}</td>
-      <td class="raw-title-cell">
-        <div class="raw-main-text">${escapeHtml(item.title || "")}</div>
-      </td>
-      <td>
-        <div class="raw-interest-wrap" title="${escapeHtml(interestingnessReasons.join(' | '))}">
-          <span class="intake-badge ${interestingnessBadgeClass(interestingness.label)}">${escapeHtml(interestingness.label || "ข้อมูลยังบาง")}</span>
-          <div class="muted">#${Number(interestingness.score || 0)}</div>
-        </div>
-      </td>
-      <td>${workflowBadge(item)}</td>
-      <td>${formatPreparationClaimBadge(item)}</td>
-      <td class="raw-actions-cell">
-        ${entryAction ? `<button type="button" data-action="open-state-entry" data-id="${id}" data-url="${escapeHtml(entryAction.url)}">${escapeHtml(entryAction.label)}</button>` : ""}
-        ${canClaimPreparationItem(item) ? `<button type="button" data-action="claim-item" data-id="${id}">รับงานนี้</button>` : ""}
-        ${canReleasePreparationItem(item) ? `<button type="button" data-action="release-item" data-id="${id}" class="utility-action">ปล่อยงาน</button>` : ""}
-        ${canTakeOverPreparationItem(item) ? `<button type="button" data-action="takeover-item" data-id="${id}" class="fail">Take over</button>` : ""}
-        ${canManage ? `<button data-action="delete" data-id="${id}" class="fail">ลบ</button>` : ""}
-      </td>
-    `;
-    tbody.appendChild(tr);
+  renderRawQueueTable({
+    tableId: "table-raw-intake",
+    items: visibleIntake,
+    canManage,
+    showInterestingness: true,
+    queueType: "intake",
+    emptyText: "ยังไม่มีรายการในช่วงคัดข้อมูล",
+  });
+  renderRawQueueTable({
+    tableId: "table-raw-review",
+    items: visibleReview,
+    canManage,
+    showInterestingness: false,
+    queueType: "review",
+    emptyText: "ยังไม่มีรายการรอตรวจชุดสั่งงาน",
   });
 
   const summaryNode = qs("raw-summary");
   if (summaryNode) {
-    const suffix = state.dashboard.rawShowAll || filteredList.length <= state.dashboard.rawLimit
+    const suffix = state.dashboard.rawShowAll || filteredIntake.length <= state.dashboard.rawLimit
       ? ""
-      : ` | กำลังแสดง ${visible.length}/${filteredList.length}`;
+      : ` | กำลังแสดง intake ${visibleIntake.length}/${filteredIntake.length}`;
     const filterLabel = getDashboardStageFilterLabel(activeStageFilter);
     const loadedCount = Array.isArray(state.items) ? state.items.length : 0;
-    summaryNode.textContent = `กำลังดู: ${filterLabel} | loaded=${loadedCount} | eligible=${list.length} | filtered=${filteredList.length}${suffix}`;
+    summaryNode.textContent = `กำลังดู: ${filterLabel} | loaded=${loadedCount} | intake=${filteredIntake.length} | review=${filteredReview.length}${suffix}`;
   }
 
   const showAllBtn = qs("btn-show-all-raw");
   if (showAllBtn) {
-    const canExpand = filteredList.length > state.dashboard.rawLimit;
+    const canExpand = filteredIntake.length > state.dashboard.rawLimit;
     showAllBtn.classList.toggle("hidden", !canExpand);
     showAllBtn.textContent = state.dashboard.rawShowAll ? "แสดงเฉพาะล่าสุด" : "แสดงทั้งหมด";
   }
 
-  const tableWrap = qs("raw-table-wrap");
   const toggleBtn = qs("btn-toggle-raw-table");
   if (tableWrap && toggleBtn) {
     tableWrap.classList.toggle("hidden", state.dashboard.rawTableCollapsed);
     toggleBtn.textContent = state.dashboard.rawTableCollapsed ? "แสดงตารางรายการ" : "ซ่อนตารางรายการ";
   }
+  const intakeToggleBtn = qs("btn-toggle-raw-intake");
+  if (intakeToggleBtn) {
+    intakeToggleBtn.onclick = () => {
+      state.dashboard.rawIntakeCollapsed = !state.dashboard.rawIntakeCollapsed;
+      renderRawTable(items);
+    };
+  }
+  const reviewToggleBtn = qs("btn-toggle-raw-review");
+  if (reviewToggleBtn) {
+    reviewToggleBtn.onclick = () => {
+      state.dashboard.rawReviewCollapsed = !state.dashboard.rawReviewCollapsed;
+      renderRawTable(items);
+    };
+  }
 
-  renderRawBulkToolbar(filteredList);
+  renderRawBulkToolbar(filteredIntake);
 
   const selectAll = qs("raw-select-all");
   if (selectAll) {
-    const selectableIds = visible.map((item) => Number(item?.id || 0)).filter(Boolean);
+    const selectableIds = visibleIntake.map((item) => Number(item?.id || 0)).filter(Boolean);
     const selectedIds = getRawSelectedIds();
     selectAll.checked = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
     selectAll.indeterminate = selectableIds.some((id) => selectedIds.has(id)) && !selectAll.checked;
@@ -4544,11 +4703,13 @@ function renderRawTable(items) {
           selectedIds.delete(id);
         }
       }
-      renderRawTable(list);
+      renderRawTable(items);
     };
   }
 
-  tbody.onchange = (event) => {
+  const intakeTbody = document.querySelector("#table-raw-intake tbody");
+  const reviewTbody = document.querySelector("#table-raw-review tbody");
+  if (intakeTbody) intakeTbody.onchange = (event) => {
     const checkbox = event.target.closest('input[data-action="select"]');
     if (!checkbox) return;
     const id = Number(checkbox.dataset.id || 0);
@@ -4559,10 +4720,10 @@ function renderRawTable(items) {
     } else {
       selectedIds.delete(id);
     }
-    renderRawTable(list);
+    renderRawTable(items);
   };
 
-  tbody.onclick = async (event) => {
+  const handleRowAction = async (event) => {
     const btn = event.target.closest("button[data-action]");
     if (!btn) return;
 
@@ -4615,6 +4776,8 @@ function renderRawTable(items) {
       await refreshAll();
     }
   };
+  if (intakeTbody) intakeTbody.onclick = handleRowAction;
+  if (reviewTbody) reviewTbody.onclick = handleRowAction;
 }
 
 function setSourceIntakeOpen(open) {
