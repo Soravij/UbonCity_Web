@@ -53,6 +53,7 @@ async function appendJsonl(logFile, payload) {
 function summarizeRequest(body = {}) {
   const context = body.structured_context || {};
   const item = context.item || body.prompt_input?.item || {};
+  const agentProfileText = toText(body.agent_profile?.profile_text || body.prompt_input?.agent_profile?.profile_text);
   return {
     task: toText(body.task),
     schema_version: toText(body.schema_version),
@@ -64,12 +65,20 @@ function summarizeRequest(body = {}) {
     selected_image_count: Number(context.image_context?.selected_count || 0) || 0,
     received_image_inputs: Array.isArray(body.images) ? body.images.length : 0,
     has_visual_context: Boolean(body.visual_context?.visual_summary),
+    has_agent_profile: Boolean(agentProfileText),
+    agent_profile_preview: agentProfileText ? agentProfileText.slice(0, 80) : "",
   };
 }
 
 function buildAgentItem(body = {}) {
   const context = body.structured_context && typeof body.structured_context === "object" ? body.structured_context : {};
   const inputItem = body.prompt_input?.item || context.item || {};
+  const inputAgentProfile = body.prompt_input?.agent_profile && typeof body.prompt_input.agent_profile === "object"
+    ? body.prompt_input.agent_profile
+    : null;
+  const agentProfile = body.agent_profile && typeof body.agent_profile === "object"
+    ? body.agent_profile
+    : inputAgentProfile;
   return {
     id: Number(body.content_item_id || context.content_item_id || inputItem.id || 0) || null,
     title: toText(inputItem.title || context.item?.title),
@@ -77,6 +86,8 @@ function buildAgentItem(body = {}) {
     category: toText(inputItem.category || context.item?.category),
     lang: toText(inputItem.lang || context.item?.lang || "th") || "th",
     slug: toText(inputItem.slug || context.item?.slug),
+    agent_profile: agentProfile,
+    agent_profile_text: toText(agentProfile?.profile_text),
     structured_context: context,
     visual_context: body.visual_context || null,
   };
@@ -95,18 +106,18 @@ function hasVisualContext(value) {
 }
 
 function resolveOpenAiConfig() {
-  const apiKey = String(process.env.EXTERNAL_AGENT_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "").trim();
-  const baseUrl = String(process.env.EXTERNAL_AGENT_OPENAI_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").trim().replace(/\/+$/, "");
-  const model = String(process.env.EXTERNAL_AGENT_OPENAI_MODEL || process.env.AI_MODEL || "gpt-5-mini").trim();
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  const baseUrl = String(process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").trim().replace(/\/+$/, "");
+  const model = "gpt-5.4-mini";
   if (!apiKey) {
-    throw new Error("OPENAI_API_KEY or EXTERNAL_AGENT_OPENAI_API_KEY is missing");
+    throw new Error("OPENAI_API_KEY is missing");
   }
   return { apiKey, baseUrl, model };
 }
 
 async function fetchOpenAiResponses(payload, traceMeta = {}) {
   const config = resolveOpenAiConfig();
-  const timeoutMs = Number(process.env.EXTERNAL_AGENT_OPENAI_TIMEOUT_MS || process.env.OPENAI_TIMEOUT_MS || 90000) || 90000;
+  const timeoutMs = Number(process.env.OPENAI_TIMEOUT_MS || 90000) || 90000;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(new Error(`openai timeout after ${timeoutMs}ms`)), timeoutMs);
   const url = `${config.baseUrl}/chat/completions`;

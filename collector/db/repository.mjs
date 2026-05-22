@@ -56,6 +56,47 @@ const SOCIAL_PLATFORMS = new Set(["facebook", "tiktok"]);
 const SOCIAL_INGESTION_MODES = new Set(["manual", "future_provider"]);
 const DIRECTION_PRIORITY_BANDS = new Set(["high", "medium", "low"]);
 const DIRECTION_STATUSES = new Set(["ready", "monitor", "needs_more_data", "weak_signal"]);
+const REFERENCE_CLEANUP_CANDIDATE_DEFS = Object.freeze([
+  { key: "source_records", label_th: "แหล่งข้อมูลต้นทาง", table: "source_records", where: "content_item_id=?" },
+  { key: "content_assets", label_th: "ไฟล์หรือรูปที่ผูกกับรายการนี้", table: "content_assets", where: "content_item_id=?" },
+  { key: "reviews_raw", label_th: "รีวิวดิบ", table: "reviews_raw", where: "content_item_id=?" },
+  { key: "drafts", label_th: "AI drafts", table: "content_drafts", where: "content_item_id=?" },
+  { key: "quality_checks", label_th: "ผลตรวจคุณภาพ", table: "quality_checks", where: "content_item_id=?" },
+  { key: "review_reports", label_th: "review reports", table: "review_reports", where: "content_item_id=?" },
+  { key: "staging_items", label_th: "staging/export", table: "staging_items", where: "content_item_id=?" },
+  { key: "content_versions", label_th: "ประวัติเวอร์ชันคอนเทนต์", table: "content_versions", where: "content_item_id=?" },
+  { key: "evidence_blocks", label_th: "evidence blocks", table: "evidence_blocks", where: "content_item_id=?" },
+  { key: "approved_context_blocks", label_th: "approved context", table: "approved_context_blocks", where: "content_item_id=?" },
+  { key: "draft_input_snapshots", label_th: "draft input snapshots", table: "draft_input_snapshots", where: "content_item_id=?" },
+  { key: "field_packs", label_th: "field packs", table: "field_packs", where: "content_item_id=?" },
+  { key: "content_workflow_models", label_th: "workflow models", table: "content_workflow_models", where: "content_item_id=?" },
+  { key: "content_workflow_transitions", label_th: "workflow transitions", table: "content_workflow_transitions", where: "content_item_id=?" },
+  { key: "content_readiness_briefs", label_th: "readiness briefs", table: "content_readiness_briefs", where: "content_item_id=?" },
+  { key: "content_execution_controls", label_th: "execution controls", table: "content_execution_controls", where: "content_item_id=?" },
+  { key: "content_execution_channels", label_th: "execution channels", table: "content_execution_channels", where: "content_item_id=?" },
+  { key: "search_enrichment_records", label_th: "search enrichment", table: "search_enrichment_records", where: "content_item_id=?" },
+  { key: "place_intelligence_scores", label_th: "place intelligence", table: "place_intelligence_scores", where: "content_item_id=?" },
+  { key: "social_signal_sources", label_th: "social signals", table: "social_signal_sources", where: "content_item_id=?" },
+  { key: "social_momentum_snapshots", label_th: "social momentum snapshots", table: "social_momentum_snapshots", where: "content_item_id=?" },
+  { key: "content_direction_reports", label_th: "content direction reports", table: "content_direction_reports", where: "content_item_id=?" },
+  { key: "content_intelligence_models", label_th: "intelligence models", table: "content_intelligence_models", where: "content_item_id=?" },
+  { key: "internal_link_sources", label_th: "internal link ต้นทาง", table: "internal_link_suggestions", where: "content_item_id=?" },
+  { key: "internal_link_targets", label_th: "internal link ปลายทาง", table: "internal_link_suggestions", where: "target_content_item_id=?" },
+]);
+const REFERENCE_CLEANUP_CANDIDATE_KEYS = new Set(REFERENCE_CLEANUP_CANDIDATE_DEFS.map((entry) => entry.key));
+const REFERENCE_HARD_BLOCKER_DEFS = Object.freeze([
+  { key: "assignments", label_th: "มี assignment งานอยู่", sql: "SELECT COUNT(*) AS c FROM content_assignments WHERE content_item_id=?", hint: "ต้องปิด assignment ก่อนผ่านหน้าส่งงาน" },
+  { key: "published_articles", label_th: "เผยแพร่ขึ้นเว็บแล้ว", sql: "SELECT COUNT(*) AS c FROM published_articles WHERE content_item_id=?", hint: "ต้อง unpublish จาก backend ก่อน" },
+  { key: "content_assignment_submissions", label_th: "มีงานส่งกลับจาก assignment อยู่", sql: "SELECT COUNT(*) AS c FROM content_assignment_submissions WHERE content_item_id=?", hint: "ต้องปิดการตรวจงานก่อน" },
+  { key: "content_assignment_submission_deliverables", label_th: "มีไฟล์หรือข้อมูลส่งงานจาก assignment อยู่", sql: "SELECT COUNT(*) AS c FROM content_assignment_submission_deliverables WHERE content_item_id=?", hint: "ต้องปิดการตรวจงานก่อน" },
+  { key: "content_assignment_handoff_snapshots", label_th: "มี snapshot การส่งงานอยู่", sql: "SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots WHERE content_item_id=?", hint: "ผูกกับวงจร assignment" },
+  { key: "review_actions", label_th: "มีประวัติ action จาก review อยู่", sql: "SELECT COUNT(*) AS c FROM review_actions WHERE content_item_id=?", hint: "ประวัติ audit ห้ามลบ" },
+  { key: "translations", label_th: "มีงานแปลที่ผูกอยู่", sql: "SELECT COUNT(*) AS c FROM content_translations WHERE source_content_item_id=?", hint: "มีงานแปลผูกข้ามรายการ" },
+]);
+const REFERENCE_ALL_GROUP_KEYS = new Set([
+  ...REFERENCE_CLEANUP_CANDIDATE_DEFS.map((entry) => entry.key),
+  ...REFERENCE_HARD_BLOCKER_DEFS.map((entry) => entry.key),
+]);
 const DIRECTION_NEXT_ACTIONS = new Set(["collect_now", "enrich_search", "watch_social", "hold", "skip"]);
 const PRODUCTION_STATES = new Set([
   "collected",
@@ -95,13 +136,13 @@ const TRANSITION_RULES = Object.freeze({
   production: Object.freeze({
     collected: new Set(["analyzed", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "rejected"]),
     analyzed: new Set(["brief_generated", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "rejected"]),
-    brief_generated: new Set(["ready_for_content", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "rejected"]),
+    brief_generated: new Set(["analyzed", "ready_for_content", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "rejected"]),
     ready_for_content: new Set(["content_in_progress", "generated", "rejected"]),
     content_in_progress: new Set(["generated", "in_review", "needs_revision", "rejected"]),
     generated: new Set(["content_in_progress", "in_review", "needs_revision", "rejected"]),
     in_review: new Set(["needs_revision", "ready_for_publish", "rejected"]),
     needs_revision: new Set(["content_in_progress", "generated", "in_review", "rejected"]),
-    ready_for_publish: new Set(["submitted_for_admin_review", "completed", "rejected"]),
+    ready_for_publish: new Set(["submitted_for_admin_review", "completed", "needs_revision", "rejected"]),
     submitted_for_admin_review: new Set(["needs_revision", "rejected", "completed"]),
     rejected: new Set(["analyzed", "brief_generated", "ready_for_content"]),
     completed: new Set(["needs_revision"]),
@@ -1200,7 +1241,7 @@ function normalizeFieldPackStatus(value) {
 
 function normalizeFieldPackChecklistType(value) {
   const normalized = String(value || "").trim().toLowerCase();
-  return ["must_verify_fact", "must_capture_shot", "must_ask_question"].includes(normalized)
+  return ["must_verify_fact", "must_capture", "must_ask_question"].includes(normalized)
     ? normalized
     : "";
 }
@@ -1388,9 +1429,17 @@ function normalizeFieldPackChecklistInputs(value) {
     if (!itemText) throw new Error(`field_pack_checklists[${index}].item_text is required`);
     const status = normalizeFieldPackChecklistStatus(row.status ?? "todo");
     if (!status) throw new Error(`field_pack_checklists[${index}].status is invalid`);
+    let captureType = null;
+    if (checklistType === "must_capture") {
+      captureType = String(row.capture_type || "").trim().toLowerCase();
+      if (!["photo", "video", "both"].includes(captureType)) {
+        throw new Error(`field_pack_checklists[${index}].capture_type is required and must be photo/video/both. Got: ${captureType}`);
+      }
+    }
     return {
       checklist_type: checklistType,
       item_text: itemText,
+      capture_type: captureType,
       item_order: row.item_order == null || row.item_order === "" ? index : toNullableNonNegativeInt(row.item_order, `field_pack_checklists[${index}].item_order`),
       status,
       note: row.note == null ? null : String(row.note || "").trim() || null,
@@ -1868,8 +1917,10 @@ function ensureFieldPackTables(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       field_pack_id INTEGER NOT NULL,
       checklist_type TEXT NOT NULL
-        CHECK (checklist_type IN ('must_verify_fact', 'must_capture_shot', 'must_ask_question')),
+        CHECK (checklist_type IN ('must_verify_fact', 'must_capture', 'must_ask_question')),
       item_text TEXT NOT NULL,
+      capture_type TEXT
+        CHECK (capture_type IS NULL OR capture_type IN ('photo', 'video', 'both')),
       item_order INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'todo'
         CHECK (status IN ('todo', 'doing', 'done', 'skip')),
@@ -1956,6 +2007,74 @@ function ensureFieldPackTables(db) {
       WHERE asset_id IS NOT NULL
   `);
   }
+
+  const checklistTable = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='field_pack_checklists' LIMIT 1").get();
+  const checklistSql = String(checklistTable?.sql || "").trim().toLowerCase();
+  const requiresChecklistMigration =
+    checklistSql.includes("must_capture_shot")
+    || !checklistSql.includes("capture_type");
+
+  if (requiresChecklistMigration) {
+    db.exec("PRAGMA foreign_keys = OFF;");
+    try {
+      db.exec("BEGIN IMMEDIATE;");
+      db.exec("ALTER TABLE field_pack_checklists RENAME TO field_pack_checklists_legacy_must_capture;");
+      db.exec(`
+        CREATE TABLE field_pack_checklists (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          field_pack_id INTEGER NOT NULL,
+          checklist_type TEXT NOT NULL
+            CHECK (checklist_type IN ('must_verify_fact', 'must_capture', 'must_ask_question')),
+          item_text TEXT NOT NULL,
+          capture_type TEXT
+            CHECK (capture_type IS NULL OR capture_type IN ('photo', 'video', 'both')),
+          item_order INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'todo'
+            CHECK (status IN ('todo', 'doing', 'done', 'skip')),
+          note TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(field_pack_id) REFERENCES field_packs(id) ON DELETE CASCADE
+        );
+      `);
+      db.exec(`
+        INSERT INTO field_pack_checklists (
+          id, field_pack_id, checklist_type, item_text, capture_type, item_order, status, note, created_at, updated_at
+        )
+        SELECT
+          id,
+          field_pack_id,
+          CASE
+            WHEN checklist_type='must_capture_shot' THEN 'must_capture'
+            ELSE checklist_type
+          END,
+          item_text,
+          CASE
+            WHEN checklist_type='must_capture_shot' THEN 'both'
+            ELSE NULL
+          END,
+          item_order,
+          status,
+          note,
+          created_at,
+          updated_at
+        FROM field_pack_checklists_legacy_must_capture;
+      `);
+      db.exec("DROP TABLE field_pack_checklists_legacy_must_capture;");
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_field_pack_checklists_pack_type
+          ON field_pack_checklists(field_pack_id, checklist_type, item_order, id);
+      `);
+      db.exec("COMMIT;");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK;");
+      } catch {}
+      throw error;
+    } finally {
+      db.exec("PRAGMA foreign_keys = ON;");
+    }
+  }
 }
 
 function ensureAgentProfileTables(db) {
@@ -1970,6 +2089,19 @@ function ensureAgentProfileTables(db) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+  `);
+}
+
+function ensureAiFeaturePolicyTables(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ai_feature_policies (
+      feature_key TEXT PRIMARY KEY,
+      policy_key TEXT NOT NULL,
+      updated_by TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_feature_policies_updated_at ON ai_feature_policies(updated_at DESC);
   `);
 }
 
@@ -2012,6 +2144,17 @@ function normalizeAgentProfileRow(row) {
   return {
     ...row,
     is_enabled: Boolean(row.is_enabled),
+  };
+}
+
+function normalizeAiFeaturePolicyRow(row) {
+  if (!row) return null;
+  return {
+    feature_key: String(row.feature_key || "").trim(),
+    policy_key: String(row.policy_key || "").trim(),
+    updated_by: row.updated_by || null,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
   };
 }
 
@@ -2377,6 +2520,7 @@ export function createRepository(db) {
   ensureFieldPackTables(db);
   ensureWorkflowHeadColumns(db);
   ensureAgentProfileTables(db);
+  ensureAiFeaturePolicyTables(db);
   ensureUsersProfileSupport(db);
   ensureItemClaimSupport(db);
   ensureAssignmentTableSupport(db);
@@ -2817,6 +2961,29 @@ export function createRepository(db) {
       updated_at=CURRENT_TIMESTAMP
   `);
 
+  const listAiFeaturePoliciesStmt = db.prepare(`
+    SELECT *
+    FROM ai_feature_policies
+    ORDER BY feature_key ASC
+  `);
+
+  const getAiFeaturePolicyStmt = db.prepare(`
+    SELECT *
+    FROM ai_feature_policies
+    WHERE feature_key=?
+    LIMIT 1
+  `);
+
+  const upsertAiFeaturePolicyStmt = db.prepare(`
+    INSERT INTO ai_feature_policies (
+      feature_key, policy_key, updated_by, updated_at
+    ) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(feature_key) DO UPDATE SET
+      policy_key=excluded.policy_key,
+      updated_by=excluded.updated_by,
+      updated_at=CURRENT_TIMESTAMP
+  `);
+
   const listFieldPackChecklistsByPackStmt = db.prepare(`
     SELECT *
     FROM field_pack_checklists
@@ -2830,9 +2997,9 @@ export function createRepository(db) {
   `);
 
   const insertFieldPackChecklistStmt = db.prepare(`
-    INSERT INTO field_pack_checklists (
-      field_pack_id, checklist_type, item_text, item_order, status, note, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  INSERT INTO field_pack_checklists (
+    field_pack_id, checklist_type, item_text, capture_type, item_order, status, note, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
   `);
 
   const listFieldPackReferencesByPackStmt = db.prepare(`
@@ -2909,6 +3076,11 @@ export function createRepository(db) {
   const deleteFieldPackAssignmentsByPackStmt = db.prepare(`
     DELETE FROM field_pack_assignments
     WHERE field_pack_id=?
+  `);
+
+  const deleteFieldPackByIdStmt = db.prepare(`
+    DELETE FROM field_packs
+    WHERE id=?
   `);
 
   const insertFieldPackAssignmentStmt = db.prepare(`
@@ -3060,6 +3232,36 @@ export function createRepository(db) {
     UPDATE published_articles
     SET status=?, published_at=CASE WHEN ?='published' THEN CURRENT_TIMESTAMP ELSE published_at END
     WHERE content_item_id=?
+  `);
+  const deletePublishedArticleByItemStmt = db.prepare(`
+    DELETE FROM published_articles
+    WHERE content_item_id=?
+  `);
+  const restorePublishedArticleByItemStmt = db.prepare(`
+    INSERT INTO published_articles (
+      content_item_id, draft_id, review_report_id, slug, title, excerpt, body,
+      meta_title, meta_description, event_period_text, location_text, latitude, longitude, map_url, google_place_id,
+      related_json, internal_links_json, status, published_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(content_item_id) DO UPDATE SET
+      draft_id=excluded.draft_id,
+      review_report_id=excluded.review_report_id,
+      slug=excluded.slug,
+      title=excluded.title,
+      excerpt=excluded.excerpt,
+      body=excluded.body,
+      meta_title=excluded.meta_title,
+      meta_description=excluded.meta_description,
+      event_period_text=excluded.event_period_text,
+      location_text=excluded.location_text,
+      latitude=excluded.latitude,
+      longitude=excluded.longitude,
+      map_url=excluded.map_url,
+      google_place_id=excluded.google_place_id,
+      related_json=excluded.related_json,
+      internal_links_json=excluded.internal_links_json,
+      status=excluded.status,
+      published_at=excluded.published_at
   `);
 
   const upsertWorkflowModelStmt = db.prepare(`
@@ -3853,6 +4055,13 @@ function normalizeStateValue(value, stateGroup) {
   }
 
   function buildWorkflowHeadPayload(previous, payload = {}, actor = "system@local", metadata = {}) {
+    const hasOwn = (key) => Object.prototype.hasOwnProperty.call(payload || {}, key);
+    const resolvePointer = (key, previousValue) => {
+      if (!hasOwn(key)) return Number(previousValue || 0) || null;
+      const value = payload[key];
+      if (value == null || value === "") return null;
+      return Number(value || 0) || null;
+    };
     const contentVersion = payload.content_version == null || payload.content_version === ""
       ? Math.max(0, Number(previous?.content_version || 0) || 0)
       : Math.max(0, Number(payload.content_version || 0) || 0);
@@ -3869,15 +4078,9 @@ function normalizeStateValue(value, stateGroup) {
       production_state: payload.production_state,
       publication_state: payload.publication_state,
       assignment_state: payload.assignment_state,
-      current_draft_id: payload.current_draft_id == null || payload.current_draft_id === ""
-        ? Number(previous?.current_draft_id || 0) || null
-        : Number(payload.current_draft_id || 0) || null,
-      current_review_report_id: payload.current_review_report_id == null || payload.current_review_report_id === ""
-        ? Number(previous?.current_review_report_id || 0) || null
-        : Number(payload.current_review_report_id || 0) || null,
-      current_field_pack_id: payload.current_field_pack_id == null || payload.current_field_pack_id === ""
-        ? Number(previous?.current_field_pack_id || 0) || null
-        : Number(payload.current_field_pack_id || 0) || null,
+      current_draft_id: resolvePointer("current_draft_id", previous?.current_draft_id),
+      current_review_report_id: resolvePointer("current_review_report_id", previous?.current_review_report_id),
+      current_field_pack_id: resolvePointer("current_field_pack_id", previous?.current_field_pack_id),
       state_version: stateVersion,
       content_version: contentVersion,
       last_actor_email: lastActorEmail,
@@ -4008,11 +4211,13 @@ function normalizeStateValue(value, stateGroup) {
     const actorRole = normalizeWorkflowActorRole(metadata.actor_role);
     const reasonCode = String(metadata.reason_code || "").trim().toLowerCase() || null;
     const skipAssignmentTransitionValidation = metadata?.skip_assignment_transition_validation === true;
+    const skipProductionTransitionValidation = metadata?.skip_production_transition_validation === true;
+    const skipPublicationTransitionValidation = metadata?.skip_publication_transition_validation === true;
 
-    if (productionState !== previous.production_state) {
+    if (productionState !== previous.production_state && !skipProductionTransitionValidation) {
       assertValidTransition("production", previous.production_state, productionState);
     }
-    if (publicationState !== previous.publication_state) {
+    if (publicationState !== previous.publication_state && !skipPublicationTransitionValidation) {
       assertValidTransition("publication", previous.publication_state, publicationState);
     }
     if ((assignmentState || null) !== (previous.assignment_state || null) && assignmentState != null && !skipAssignmentTransitionValidation) {
@@ -7183,7 +7388,7 @@ function normalizeStateValue(value, stateGroup) {
       ...(Array.isArray(fieldPack?.ai_unknowns_json) ? fieldPack.ai_unknowns_json : []),
     ], 12);
     const mustVerifyFacts = listFieldPackChecklistTexts(fieldPack, "must_verify_fact", 12);
-    const mustCaptureShots = listFieldPackChecklistTexts(fieldPack, "must_capture_shot", 12);
+    const mustCaptureShots = listFieldPackChecklistTexts(fieldPack, "must_capture", 12);
     const mustAskQuestions = listFieldPackChecklistTexts(fieldPack, "must_ask_question", 12);
     const socialShotEmphasis = uniqueTextList(fieldPack?.social_shot_emphasis_json || [], 12);
     const socialOnCameraPoints = uniqueTextList(fieldPack?.social_on_camera_points_json || [], 12);
@@ -7862,11 +8067,33 @@ function normalizeStateValue(value, stateGroup) {
     const key = String(agentKey || "").trim().toLowerCase();
     if (!key) throw new Error("agent_key is required");
     const displayName = String(payload?.display_name || key).trim() || key;
-    const profileText = String(payload?.profile_text || "").trim();
+    const profileText = payload && Object.prototype.hasOwnProperty.call(payload, "profile_text")
+      ? String(payload.profile_text ?? "")
+      : "";
     const isEnabled = toBooleanInt(payload?.is_enabled ?? 1, "is_enabled");
     const updatedBy = payload?.updated_by == null ? null : String(payload.updated_by || "").trim() || null;
     upsertAgentProfileStmt.run(key, displayName, profileText, isEnabled, updatedBy);
     return getAgentProfile(key);
+  }
+
+  function listAiFeaturePolicies() {
+    return listAiFeaturePoliciesStmt.all().map(normalizeAiFeaturePolicyRow).filter(Boolean);
+  }
+
+  function getAiFeaturePolicy(featureKey) {
+    const key = String(featureKey || "").trim();
+    if (!key) return null;
+    return normalizeAiFeaturePolicyRow(getAiFeaturePolicyStmt.get(key));
+  }
+
+  function upsertAiFeaturePolicy(featureKey, payload = {}) {
+    const key = String(featureKey || "").trim();
+    if (!key) throw new Error("feature_key is required");
+    const policyKey = String(payload?.policy_key || "").trim();
+    if (!policyKey) throw new Error("policy_key is required");
+    const updatedBy = payload?.updated_by == null ? null : String(payload.updated_by || "").trim() || null;
+    upsertAiFeaturePolicyStmt.run(key, policyKey, updatedBy);
+    return getAiFeaturePolicy(key);
   }
 
   function replaceFieldPackChecklists(fieldPackId, items = []) {
@@ -7881,6 +8108,7 @@ function normalizeStateValue(value, stateGroup) {
           id,
           item.checklist_type,
           item.item_text,
+          item.capture_type,
           item.item_order,
           item.status,
           item.note
@@ -8003,6 +8231,7 @@ function normalizeStateValue(value, stateGroup) {
           fieldPackId,
           itemRow.checklist_type,
           itemRow.item_text,
+          itemRow.capture_type,
           itemRow.item_order,
           itemRow.status,
           itemRow.note
@@ -8057,6 +8286,100 @@ function normalizeStateValue(value, stateGroup) {
     }
 
     return getFieldPackBundleById(fieldPackId);
+  }
+
+  function deleteFieldPackById(fieldPackId) {
+    const id = Number(fieldPackId || 0);
+    if (!id) throw new Error("field_pack_id is required");
+    const pack = getFieldPackByIdStmt.get(id);
+    if (!pack) throw new Error("field pack not found");
+    const result = runInTransaction(db, () => {
+      deleteFieldPackChecklistsByPackStmt.run(id);
+      deleteFieldPackReferencesByPackStmt.run(id);
+      deleteFieldPackMediaHintsByPackStmt.run(id);
+      deleteFieldPackAssignmentsByPackStmt.run(id);
+      deleteFieldPackByIdStmt.run(id);
+      return { deleted: true, field_pack_id: id, content_item_id: Number(pack.content_item_id || 0) || null };
+    });
+    return result;
+  }
+
+  function returnFieldPackToCleanAtomic(contentItemId, notes, actorEmail = "system@local", metadata = {}) {
+    const itemId = Number(contentItemId || 0) || 0;
+    const reasonNote = String(notes || "").trim() || null;
+    const actor = String(actorEmail || "").trim() || "system@local";
+    const actorRole = normalizeWorkflowActorRole(metadata?.actor_role);
+    if (!itemId) throw new Error("content_item_id is required");
+    if (!reasonNote) throw new Error("notes/reason is required");
+
+    return runInTransaction(db, () => {
+      const currentFieldPack = normalizeFieldPackRow(getCurrentFieldPackByItemStmt.get(itemId));
+      if (!currentFieldPack?.id) {
+        throw new Error("current field pack not found");
+      }
+
+      const workflowBefore = ensureWorkflowModel(itemId);
+      const productionStateBefore = String(workflowBefore?.production_state || "").trim().toLowerCase();
+      const publicationStateBefore = String(workflowBefore?.publication_state || "").trim().toLowerCase();
+      if (["ready_for_publish", "completed"].includes(productionStateBefore) || publicationStateBefore === "published") {
+        throw new Error("cannot return to clean from publish-ready or published state");
+      }
+
+      const activeAssignmentStates = new Set(["assigned", "in_progress", "submitted", "resubmitted", "revision_requested", "accepted"]);
+      const activeAssignments = listAssignmentsByItem(itemId)
+        .filter((assignment) => activeAssignmentStates.has(String(assignment?.state || "").trim().toLowerCase()));
+      if (activeAssignments.length > 0) {
+        throw new Error("cannot return to clean: item has active assignment or handoff");
+      }
+
+      // Validate the transition before deleting the field pack so business-rule failures
+      // are caught before we mutate child data, while the whole operation still stays atomic.
+      if (productionStateBefore !== "analyzed") {
+        assertValidTransition("production", workflowBefore?.production_state, "analyzed");
+      }
+
+      deleteFieldPackChecklistsByPackStmt.run(Number(currentFieldPack.id || 0) || 0);
+      deleteFieldPackReferencesByPackStmt.run(Number(currentFieldPack.id || 0) || 0);
+      deleteFieldPackMediaHintsByPackStmt.run(Number(currentFieldPack.id || 0) || 0);
+      deleteFieldPackAssignmentsByPackStmt.run(Number(currentFieldPack.id || 0) || 0);
+      deleteFieldPackByIdStmt.run(Number(currentFieldPack.id || 0) || 0);
+
+      const workflowAfter = upsertWorkflowModel(
+        itemId,
+        {
+          production_state: "analyzed",
+          current_field_pack_id: null,
+          last_transition_note: reasonNote,
+        },
+        actor,
+        {
+          actor_role: actorRole,
+          reason_code: "field_pack_return_to_clean",
+          bump_state_version: true,
+          bump_content_version: true,
+        }
+      );
+
+      logAudit(actor, "field_pack.return_to_clean", "content_item", String(itemId), {
+        content_item_id: itemId,
+        field_pack_id: Number(currentFieldPack.id || 0) || null,
+        notes: reasonNote,
+        from_production_state: workflowBefore?.production_state || null,
+        to_production_state: workflowAfter?.production_state || null,
+        from_publication_state: workflowBefore?.publication_state || null,
+        to_publication_state: workflowAfter?.publication_state || null,
+      });
+
+      return {
+        ok: true,
+        content_item_id: itemId,
+        deleted_field_pack_id: Number(currentFieldPack.id || 0) || null,
+        action: "return_to_clean",
+        redirect_url: `/clean-item.html?id=${itemId}`,
+        previous_state: workflowBefore?.production_state || null,
+        next_state: workflowAfter?.production_state || "analyzed",
+      };
+    });
   }
 
   function createFieldPack(payload = {}) {
@@ -8115,6 +8438,7 @@ function normalizeStateValue(value, stateGroup) {
           id,
           itemRow.checklist_type,
           itemRow.item_text,
+          itemRow.capture_type,
           itemRow.item_order,
           itemRow.status,
           itemRow.note
@@ -8403,6 +8727,40 @@ function normalizeStateValue(value, stateGroup) {
     if (!existing) throw new Error("published article not found");
     updatePublishedArticleStatusByItemStmt.run(nextStatus, nextStatus, id);
     return getPublishedArticleByItem(id);
+  }
+
+  function deletePublishedArticleByItem(contentItemId) {
+    const id = Number(contentItemId || 0);
+    if (!id) throw new Error("content_item_id is required");
+    deletePublishedArticleByItemStmt.run(id);
+    return { ok: true, content_item_id: id };
+  }
+
+  function restorePublishedArticleByItem(snapshot) {
+    const contentItemId = Number(snapshot?.content_item_id || 0) || 0;
+    if (!contentItemId) throw new Error("published article snapshot content_item_id is required");
+    restorePublishedArticleByItemStmt.run(
+      contentItemId,
+      snapshot?.draft_id ?? null,
+      snapshot?.review_report_id ?? null,
+      String(snapshot?.slug || "").trim(),
+      String(snapshot?.title || "").trim(),
+      String(snapshot?.excerpt || "").trim() || null,
+      String(snapshot?.body || "").trim(),
+      String(snapshot?.meta_title || "").trim() || null,
+      String(snapshot?.meta_description || "").trim() || null,
+      String(snapshot?.event_period_text || "").trim() || null,
+      String(snapshot?.location_text || "").trim() || null,
+      Number.isFinite(Number(snapshot?.latitude)) ? Number(snapshot.latitude) : null,
+      Number.isFinite(Number(snapshot?.longitude)) ? Number(snapshot.longitude) : null,
+      String(snapshot?.map_url || "").trim() || null,
+      String(snapshot?.google_place_id || "").trim() || null,
+      JSON.stringify(Array.isArray(snapshot?.related) ? snapshot.related : []),
+      JSON.stringify(Array.isArray(snapshot?.internal_links) ? snapshot.internal_links : []),
+      String(snapshot?.status || "published").trim().toLowerCase() || "published",
+      String(snapshot?.published_at || "").trim() || new Date().toISOString()
+    );
+    return getPublishedArticleByItem(contentItemId);
   }
 
   function getTranslation(sourceContentItemId, lang) {
@@ -9552,6 +9910,192 @@ function normalizeStateValue(value, stateGroup) {
       category: row.category,
     }));
   }
+
+  function getDeletedItemReferenceGroups(itemId) {
+    const id = Number(itemId || 0) || 0;
+    if (!id) {
+      const err = new Error("invalid item id");
+      err.statusCode = 400;
+      throw err;
+    }
+    const item = db.prepare(`
+      SELECT id, item_uid, type, category, title, slug, is_deleted
+      FROM content_items
+      WHERE id=?
+      LIMIT 1
+    `).get(id);
+    if (!item || Number(item.is_deleted || 0) !== 1) {
+      const err = new Error("deleted item not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const groups = [];
+    for (const def of REFERENCE_CLEANUP_CANDIDATE_DEFS) {
+      const row = db.prepare(`SELECT COUNT(*) AS c FROM ${def.table} WHERE ${def.where}`).get(id);
+      const count = Number(row?.c || 0) || 0;
+      if (count < 1) continue;
+      const group = {
+        key: def.key,
+        label_th: def.label_th,
+        count,
+        category: "cleanup_candidate",
+        cleanup_action: def.key === "content_assets" ? "delete_assets" : "delete_rows",
+      };
+      if (def.key === "content_assets") {
+        const assetRows = db
+          .prepare("SELECT asset_id FROM content_assets WHERE content_item_id=? ORDER BY id ASC LIMIT 25")
+          .all(id);
+        group.asset_ids = assetRows
+          .map((entry) => Number(entry?.asset_id || 0) || 0)
+          .filter((value) => value > 0);
+      }
+      groups.push(group);
+    }
+
+    for (const def of REFERENCE_HARD_BLOCKER_DEFS) {
+      const row = db.prepare(def.sql).get(id);
+      const count = Number(row?.c || 0) || 0;
+      if (count < 1) continue;
+      groups.push({
+        key: def.key,
+        label_th: def.label_th,
+        count,
+        category: "hard_blocker",
+        cleanup_action: null,
+        resolution_hint: def.hint,
+      });
+    }
+
+    const cleanupCandidateCount = groups
+      .filter((entry) => entry.category === "cleanup_candidate")
+      .reduce((sum, entry) => sum + (Number(entry.count || 0) || 0), 0);
+    const hardBlockerCount = groups
+      .filter((entry) => entry.category === "hard_blocker")
+      .reduce((sum, entry) => sum + (Number(entry.count || 0) || 0), 0);
+
+    return {
+      item: {
+        id: Number(item.id || 0) || 0,
+        item_uid: item.item_uid || null,
+        type: item.type || null,
+        category: item.category || null,
+        title: item.title || null,
+        slug: item.slug || null,
+        is_deleted: Number(item.is_deleted || 0) || 0,
+      },
+      groups,
+      summary: {
+        total_references: cleanupCandidateCount + hardBlockerCount,
+        cleanup_candidate_count: cleanupCandidateCount,
+        hard_blocker_count: hardBlockerCount,
+      },
+    };
+  }
+
+  function cleanupDeletedItemReferenceGroups({ itemId, groups, actorEmail, reason }) {
+    const id = Number(itemId || 0) || 0;
+    if (!id) {
+      const err = new Error("invalid item id");
+      err.statusCode = 400;
+      throw err;
+    }
+    const item = db.prepare("SELECT id, is_deleted FROM content_items WHERE id=? LIMIT 1").get(id);
+    if (!item || Number(item.is_deleted || 0) !== 1) {
+      const err = new Error("deleted item not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const selectedGroups = Array.isArray(groups)
+      ? [...new Set(groups.map((entry) => String(entry || "").trim().toLowerCase()).filter(Boolean))]
+      : [];
+    if (!selectedGroups.length) {
+      const err = new Error("groups is required");
+      err.statusCode = 400;
+      throw err;
+    }
+    for (const key of selectedGroups) {
+      if (!REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key)) {
+        const err = new Error("group not eligible for cleanup");
+        err.statusCode = 400;
+        err.group = key;
+        err.category = REFERENCE_ALL_GROUP_KEYS.has(key) ? "hard_blocker" : "invalid_group";
+        throw err;
+      }
+    }
+
+    const cleaned = {};
+    const deletedAssetIds = [];
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const key of selectedGroups) {
+        if (key === "drafts") {
+          db.prepare(`
+            UPDATE content_workflow_models
+            SET current_draft_id=NULL
+            WHERE content_item_id=?
+              AND current_draft_id IN (
+                SELECT id FROM content_drafts WHERE content_item_id=?
+              )
+          `).run(id, id);
+        } else if (key === "review_reports") {
+          db.prepare(`
+            UPDATE content_workflow_models
+            SET current_review_report_id=NULL
+            WHERE content_item_id=?
+              AND current_review_report_id IN (
+                SELECT id FROM review_reports WHERE content_item_id=?
+              )
+          `).run(id, id);
+        } else if (key === "field_packs") {
+          db.prepare(`
+            UPDATE content_workflow_models
+            SET current_field_pack_id=NULL
+            WHERE content_item_id=?
+              AND current_field_pack_id IN (
+                SELECT id FROM field_packs WHERE content_item_id=?
+              )
+          `).run(id, id);
+        }
+        if (key === "content_assets") {
+          const rows = db.prepare("SELECT id, asset_id FROM content_assets WHERE content_item_id=?").all(id);
+          for (const row of rows) {
+            const assetId = Number(row?.asset_id || 0) || 0;
+            if (assetId > 0) deletedAssetIds.push(assetId);
+          }
+          const result = db.prepare("DELETE FROM content_assets WHERE content_item_id=?").run(id);
+          cleaned[key] = Number(result?.changes || 0) || 0;
+          continue;
+        }
+        const def = REFERENCE_CLEANUP_CANDIDATE_DEFS.find((entry) => entry.key === key);
+        if (!def) continue;
+        const result = db.prepare(`DELETE FROM ${def.table} WHERE ${def.where}`).run(id);
+        cleaned[key] = Number(result?.changes || 0) || 0;
+      }
+
+      logAudit(actorEmail, "item.reference.cleanup", "content_item", String(id), {
+        groups: selectedGroups,
+        reason: String(reason || "").trim() || null,
+        counts: cleaned,
+        content_assets_removed: cleaned.content_assets || 0,
+      });
+      db.exec("COMMIT");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {}
+      throw error;
+    }
+
+    return {
+      ok: true,
+      item_id: id,
+      cleaned,
+      deleted_asset_ids: [...new Set(deletedAssetIds)],
+    };
+  }
+
   function logAudit(actorEmail, action, targetType, targetId, details, metadata = {}) {
     const assignmentId = metadata?.assignment_id == null ? null : Number(metadata.assignment_id || 0) || null;
     const createdAt = toBangkokSqlTimestamp();
@@ -9670,9 +10214,14 @@ function normalizeStateValue(value, stateGroup) {
     getFieldPackBundleById,
     getCurrentFieldPackByItem,
     listFieldPacksByItem,
+    deleteFieldPackById,
+    returnFieldPackToCleanAtomic,
     listAgentProfiles,
     getAgentProfile,
     upsertAgentProfile,
+    listAiFeaturePolicies,
+    getAiFeaturePolicy,
+    upsertAiFeaturePolicy,
     replaceFieldPackChecklists,
     replaceFieldPackReferences,
     replaceFieldPackMediaHints,
@@ -9690,6 +10239,8 @@ function normalizeStateValue(value, stateGroup) {
     listPublishedArticles,
     getPublishedArticleByItem,
     setPublishedArticleStatusByItem,
+    deletePublishedArticleByItem,
+    restorePublishedArticleByItem,
     getTranslation,
     upsertTranslation,
     listTranslations,
@@ -9710,6 +10261,8 @@ function normalizeStateValue(value, stateGroup) {
     setContentAssetSelected,
     listApprovedImageContext,
     evaluateContentAssetCleanupEligibility,
+    getDeletedItemReferenceGroups,
+    cleanupDeletedItemReferenceGroups,
     addSearchEnrichmentRecord,
     listSearchEnrichmentByItem,
     latestSearchEnrichmentByItem,
@@ -9806,34 +10359,6 @@ function deriveExpectedDeliverablesFromHandoff(handoffPackage) {
   }
   return normalizeAssignmentDeliverableTypeList(derived);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

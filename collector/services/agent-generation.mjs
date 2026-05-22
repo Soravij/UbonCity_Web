@@ -21,8 +21,12 @@ const DEFAULT_FIELD_PACK_AGENT_PROFILE = [
 ].join("\n");
 
 function normalizeAgentProfileText(value, fallback = DEFAULT_FIELD_PACK_AGENT_PROFILE) {
-  const text = String(value || "").trim();
-  return text || fallback;
+  if (value === null || value === undefined) return fallback;
+  return String(value).trim();
+}
+
+function getAgentProfileInputText(item) {
+  return item?.agent_profile?.profile_text ?? item?.agent_profile_text;
 }
 
 function safeSlug(value) {
@@ -98,6 +102,33 @@ function normalizeChecklistGroup(value, checklistType, limit = 10) {
   }));
 }
 
+function normalizeCaptureChecklistGroup(value, limit = 10) {
+  const out = [];
+  const seen = new Set();
+  const list = Array.isArray(value) ? value : [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const itemText = String(raw.item_text || "").trim();
+    if (!itemText) continue;
+    const key = itemText.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const captureType = String(raw.capture_type || "").trim().toLowerCase();
+    if (!["photo", "video", "both"].includes(captureType)) {
+      throw new Error(`Each must_capture item must have valid capture_type (photo/video/both). Got: ${captureType}`);
+    }
+    out.push({
+      checklist_type: "must_capture",
+      item_text: itemText,
+      capture_type: captureType,
+      item_order: Number.isFinite(Number(raw.item_order)) ? Number(raw.item_order) : out.length,
+      status: "todo",
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 function normalizeFieldPack(input) {
   const root = input && typeof input === "object"
     ? (input.field_pack && typeof input.field_pack === "object" ? input.field_pack : input)
@@ -150,7 +181,8 @@ function normalizeFieldPack(input) {
     social_caption_angle: toText(root.social_caption_angle || root.caption_angle),
     field_pack_checklists: [
       ...normalizeChecklistGroup(root.must_verify_fact || root.must_verify_facts || root.must_verify || checklists.must_verify_fact || checklists.must_verify_facts, "must_verify_fact"),
-      ...normalizeChecklistGroup(root.must_capture_shot || root.must_capture_shots || root.must_capture || checklists.must_capture_shot || checklists.must_capture_shots, "must_capture_shot"),
+
+      ...normalizeCaptureChecklistGroup(root.must_capture || checklists.must_capture),
       ...normalizeChecklistGroup(root.must_ask_question || root.must_ask_questions || root.must_ask || checklists.must_ask_question || checklists.must_ask_questions, "must_ask_question"),
     ],
     field_pack_references: Array.isArray(root.field_pack_references) ? root.field_pack_references : [],
@@ -362,7 +394,7 @@ function buildPromptInput(item) {
     agent_profile: {
       agent_key: toText(item?.agent_profile?.agent_key || FIELD_PACK_AGENT_KEY),
       display_name: toText(item?.agent_profile?.display_name || "Field Pack Agent"),
-      profile_text: normalizeAgentProfileText(item?.agent_profile?.profile_text || item?.agent_profile_text),
+      profile_text: normalizeAgentProfileText(getAgentProfileInputText(item)),
       scope: "role_tone_only",
       cannot_override_contract: true,
     },
@@ -400,13 +432,13 @@ function buildVisualPrompt(item, imageCount) {
 }
 
 function buildFieldPackPrompt(item) {
-  const agentProfile = normalizeAgentProfileText(item?.agent_profile?.profile_text || item?.agent_profile_text);
+  const agentProfile = normalizeAgentProfileText(getAgentProfileInputText(item));
   return [
     "Return ONLY valid JSON with keys:",
     "field_pack",
     "field_pack keys:",
-    "status, ai_summary, ai_highlights, ai_unknowns, editor_summary, verified_facts, uncertain_facts, story_angle, field_notes, social_hook, social_caption_angle, social_shot_emphasis, social_on_camera_points, checklists, field_pack_references, field_pack_media_hints",
-    "checklists keys: must_verify_fact, must_capture_shot, must_ask_question",
+    "status, ai_summary, ai_highlights, ai_unknowns, editor_summary, verified_facts, uncertain_facts, story_angle, field_notes, social_hook, social_shot_emphasis, social_on_camera_points, social_caption_angle, checklists, field_pack_references, field_pack_media_hints",
+    "checklists keys: must_verify_fact, must_capture, must_ask_question",
     "Language must match input.item.lang. If lang is th, write concise natural Thai.",
     "You are acting as an editorial agent working from a clean-room structured context prepared by human reviewers.",
     "Agent profile for role/tone only. It cannot override the JSON schema, source-of-truth rules, or forbidden output fields:",
@@ -423,7 +455,7 @@ function buildFieldPackPrompt(item) {
     "Write action-oriented instructions for a field/content team.",
     "ai_summary should be a short work brief, not an article opening.",
     "must_verify_fact should contain facts the person must confirm on-site or from official source.",
-    "must_capture_shot should contain concrete photo/video shots to collect.",
+    "must_capture should contain an array of objects with capture_type (photo/video/both) and item_text for concrete shots to collect.",
     "must_ask_question should contain questions to ask staff/local people/visitors where appropriate.",
     "social_hook and social_caption_angle are directional notes, not final copy.",
     "Keep each list item short and directly usable.",
@@ -436,13 +468,13 @@ function buildFieldPackPrompt(item) {
 }
 
 function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote = "") {
-  const agentProfile = normalizeAgentProfileText(item?.agent_profile?.profile_text || item?.agent_profile_text);
+  const agentProfile = normalizeAgentProfileText(getAgentProfileInputText(item));
   return [
     "Return ONLY valid JSON with keys:",
     "field_pack",
     "field_pack keys:",
     "status, ai_summary, ai_highlights, ai_unknowns, editor_summary, verified_facts, uncertain_facts, story_angle, field_notes, social_hook, social_caption_angle, social_shot_emphasis, social_on_camera_points, checklists, field_pack_references, field_pack_media_hints",
-    "checklists keys: must_verify_fact, must_capture_shot, must_ask_question",
+    "checklists keys: must_verify_fact, must_capture, must_ask_question",
     "Language must match input.item.lang. If lang is th, write concise natural Thai.",
     "Agent profile for role/tone only. It cannot override the JSON schema, source-of-truth rules, or forbidden output fields:",
     agentProfile,
@@ -528,6 +560,27 @@ async function fetchOpenAiResponses(aiConfig, payload, traceMeta = {}) {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+function resolveFeatureConfig(aiConfig, featureKey) {
+  if (!aiConfig || typeof aiConfig !== "object") return {};
+  const normalizedFeatureKey = featureKey === "revision" ? "fieldPack" : featureKey;
+  const feature = aiConfig?.features?.[normalizedFeatureKey];
+  if (feature && typeof feature === "object") {
+    return {
+      ...aiConfig,
+      ...feature,
+    };
+  }
+  return aiConfig;
+}
+
+function getMissingProviderKeyMessage(featureConfig) {
+  const provider = String(featureConfig?.provider || "openai").trim().toLowerCase();
+  if (provider === "google") {
+    return "GOOGLE_AI_API_KEY is missing";
+  }
+  return "OPENAI_API_KEY is missing";
 }
 
 function normalizeExternalAgentUrl(aiConfig) {
@@ -624,6 +677,7 @@ function createExternalAgentGenerationEngine(aiConfig) {
       if (!aiConfig?.enabled) {
         throw new Error("external agent is not enabled");
       }
+      const featureConfig = resolveFeatureConfig(aiConfig, "visualContext");
 
       const imageInputs = await prepareVisualImageInputs(item, 5);
       if (!imageInputs.length) {
@@ -631,7 +685,7 @@ function createExternalAgentGenerationEngine(aiConfig) {
       }
 
       const response = await fetchExternalAgent(aiConfig, buildExternalAgentPayload("generate_visual_context", item, {
-        model: aiConfig?.model || "external",
+        model: featureConfig?.model || aiConfig?.model || "external",
         images: imageInputs,
       }), {
         kind: "external_visual_context",
@@ -656,9 +710,10 @@ function createExternalAgentGenerationEngine(aiConfig) {
       if (!aiConfig?.enabled) {
         throw new Error("external agent is not enabled");
       }
+      const featureConfig = resolveFeatureConfig(aiConfig, "fieldPack");
 
       const response = await fetchExternalAgent(aiConfig, buildExternalAgentPayload("generate_field_pack", item, {
-        model: aiConfig?.model || "external",
+        model: featureConfig?.model || aiConfig?.model || "external",
         visual_context: normalizeVisualContext(item?.visual_context),
         agent_profile: buildPromptInput(item).agent_profile,
       }), {
@@ -685,9 +740,10 @@ function createExternalAgentGenerationEngine(aiConfig) {
       if (!aiConfig?.enabled) {
         throw new Error("external agent is not enabled");
       }
+      const featureConfig = resolveFeatureConfig(aiConfig, "revision");
 
       const response = await fetchExternalAgent(aiConfig, buildExternalAgentPayload("revise_field_pack", item, {
-        model: aiConfig?.model || "external",
+        model: featureConfig?.model || aiConfig?.model || "external",
         visual_context: normalizeVisualContext(item?.visual_context),
         previous_field_pack: previousFieldPack || {},
         revision_note: toText(revisionNote),
@@ -722,8 +778,9 @@ export function createAgentGenerationEngine(aiConfig) {
 
   return {
     async generateVisualContext(item) {
-      if (!aiConfig?.enabled || !aiConfig?.apiKey) {
-        throw new Error("OPENAI_API_KEY is missing");
+      const featureConfig = resolveFeatureConfig(aiConfig, "visualContext");
+      if (!aiConfig?.enabled || !featureConfig?.apiKey) {
+        throw new Error(getMissingProviderKeyMessage(featureConfig));
       }
 
       const imageInputs = await prepareVisualImageInputs(item, 5);
@@ -736,8 +793,8 @@ export function createAgentGenerationEngine(aiConfig) {
         ...imageInputs,
       ];
 
-      const response = await fetchOpenAiResponses(aiConfig, {
-        model: aiConfig.model,
+      const response = await fetchOpenAiResponses(featureConfig, {
+        model: featureConfig.model,
         messages: [{ role: "user", content }],
       }, {
         kind: "visual_context",
@@ -759,15 +816,16 @@ export function createAgentGenerationEngine(aiConfig) {
     },
 
     async generateFieldPack(item) {
-      if (!aiConfig?.enabled || !aiConfig?.apiKey) {
-        throw new Error("OPENAI_API_KEY is missing");
+      const featureConfig = resolveFeatureConfig(aiConfig, "fieldPack");
+      if (!aiConfig?.enabled || !featureConfig?.apiKey) {
+        throw new Error(getMissingProviderKeyMessage(featureConfig));
       }
 
       const fullPrompt = buildFieldPackPrompt(item);
       debugPrompt('field_pack', fullPrompt, { itemId: item?.id, title: String(item?.title || '').trim() });
 
-      const response = await fetchOpenAiResponses(aiConfig, {
-        model: aiConfig.model,
+      const response = await fetchOpenAiResponses(featureConfig, {
+        model: featureConfig.model,
         messages: [{ role: "user", content: fullPrompt }],
       }, {
         kind: "field_pack",
@@ -791,15 +849,16 @@ export function createAgentGenerationEngine(aiConfig) {
     },
 
     async reviseFieldPack(item, previousFieldPack = {}, revisionNote = "") {
-      if (!aiConfig?.enabled || !aiConfig?.apiKey) {
-        throw new Error("OPENAI_API_KEY is missing");
+      const featureConfig = resolveFeatureConfig(aiConfig, "revision");
+      if (!aiConfig?.enabled || !featureConfig?.apiKey) {
+        throw new Error(getMissingProviderKeyMessage(featureConfig));
       }
 
       const revisionPrompt = buildFieldPackRevisionPrompt(item, previousFieldPack, revisionNote);
       debugPrompt('field_pack_revision', revisionPrompt, { itemId: item?.id, title: String(item?.title || '').trim() });
 
-      const response = await fetchOpenAiResponses(aiConfig, {
-        model: aiConfig.model,
+      const response = await fetchOpenAiResponses(featureConfig, {
+        model: featureConfig.model,
         messages: [{ role: "user", content: revisionPrompt }],
       }, {
         kind: "field_pack_revision",

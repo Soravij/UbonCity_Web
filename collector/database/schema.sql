@@ -1118,3 +1118,12 @@ CREATE TABLE IF NOT EXISTS content_assignment_handoff_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_assignment_handoff_assignment ON content_assignment_handoff_snapshots(assignment_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_assignment_handoff_item ON content_assignment_handoff_snapshots(content_item_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_feature_policies (
+  feature_key TEXT PRIMARY KEY,
+  policy_key TEXT NOT NULL,
+  updated_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ai_feature_policies_updated_at ON ai_feature_policies(updated_at DESC);

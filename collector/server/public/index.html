@@ -161,7 +161,7 @@
           <h2 class="section-title">เตรียมคอนเทนต์</h2>
           <div class="card page-actions-strip raw-process-actions">
             <div class="toolbar">
-              <button id="btn-raw-home" class="utility-action">Home</button>
+              <button id="btn-raw-home" class="utility-action btn-home">Home</button>
               <button id="btn-raw-process-home" class="utility-action">กลับหน้าแรก</button>
             </div>
           </div>
@@ -291,7 +291,7 @@
         <section id="panel-assignments" class="panel hidden">
           <div class="card page-actions-strip raw-process-actions">
             <div class="toolbar">
-              <button id="btn-assignments-home" class="utility-action">Home</button>
+              <button id="btn-assignments-home" class="utility-action btn-home">Home</button>
             </div>
           </div>
           <h2 id="assignment-panel-title" class="section-title">กระบวนการ 2 · ขั้น 1: ส่งงานไปทำ</h2>
@@ -684,7 +684,7 @@
         <section id="panel-users" class="panel hidden">
           <div class="card page-actions-strip raw-process-actions">
             <div class="toolbar">
-              <button id="btn-users-home" class="utility-action">Home</button>
+              <button id="btn-users-home" class="utility-action btn-home">Home</button>
             </div>
           </div>
           <h2 class="section-title" id="users-panel-title">ระบบและผู้ใช้</h2>
@@ -723,6 +723,39 @@
                 <button id="btn-agent-profile-save" class="primary" type="button">บันทึก Agent Profile</button>
                 <button id="btn-agent-profile-reset" type="button">Reset ค่าเริ่มต้น</button>
                 <span id="agent-profile-status" class="status"></span>
+              </div>
+            </div>
+          </div>
+
+          <div id="ai-policy-panel" class="card hidden">
+            <div class="article-section-head">
+              <div>
+                <h3 class="section-title">AI Feature Policy</h3>
+                <p class="muted">owner เท่านั้น: ตั้ง model policy ต่อ feature ด้วย dropdown เดียว โดย articleGenerator แสดงเป็น reserved</p>
+              </div>
+              <div class="toolbar compact-toolbar">
+                <button id="btn-ai-policy-toggle" type="button">เปิดตั้งค่า</button>
+              </div>
+            </div>
+            <div id="ai-policy-body" class="hidden">
+              <div class="toolbar compact-toolbar">
+                <button id="btn-ai-policy-load" type="button">โหลดรายการ</button>
+                <span id="ai-policy-status" class="status"></span>
+              </div>
+              <div class="table-wrap">
+                <table id="table-ai-policy">
+                  <thead>
+                    <tr>
+                      <th>Feature</th>
+                      <th>Description</th>
+                      <th>Policy</th>
+                      <th>Status</th>
+                      <th>Updated</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
               </div>
             </div>
           </div>

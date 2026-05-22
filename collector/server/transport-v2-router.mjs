@@ -3,7 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import express from "express";
 import multer from "multer";
-import { resolveAiConfig } from "../config/ai.mjs";
+import { resolveAiConfig, resolveAiFeatureConfig } from "../config/ai.mjs";
 import { assertCollectorIntegrationReadiness } from "./integration-readiness.mjs";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
 const DEFAULT_COLOR = "#ff6600";
@@ -452,7 +452,8 @@ function extractResponseText(data) {
 }
 
 async function translateLabelEntries(aiConfig, entries, targetLang) {
-  if (!aiConfig?.enabled || !aiConfig?.apiKey) {
+  const translationConfig = resolveAiFeatureConfig(aiConfig, "translation");
+  if (!translationConfig?.enabled || !translationConfig?.apiKey) {
     throw new Error("translation AI is not configured");
   }
   const sourceEntries = Object.fromEntries(
@@ -471,14 +472,14 @@ async function translateLabelEntries(aiConfig, entries, targetLang) {
     "Input JSON:",
     JSON.stringify(sourceEntries, null, 2),
   ].join("\n");
-  const response = await fetch(`${aiConfig.baseUrl}/chat/completions`, {
+  const response = await fetch(`${translationConfig.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${aiConfig.apiKey}`,
+      Authorization: `Bearer ${translationConfig.apiKey}`,
     },
     body: JSON.stringify({
-      model: aiConfig.model,
+      model: translationConfig.model,
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -737,8 +738,14 @@ function escapeSvgText(value) {
     .replace(/'/g, "&#39;");
 }
 
-export function createTransportV2Router({ db, dirs, logAudit = () => {} }) {
+export function createTransportV2Router({ db, dirs, logAudit = () => {}, getAiConfig = null }) {
   const router = express.Router();
+  const resolveEffectiveAiConfig = () => {
+    if (typeof getAiConfig === "function") {
+      return getAiConfig();
+    }
+    return resolveAiConfig();
+  };
   const upload = multer({
     storage: multer.memoryStorage(),
     limits: {
@@ -1516,7 +1523,7 @@ const collectorIntegrationConfig = () => ({
     if (!targetLocales.length) {
       return res.status(400).json({ error: "target locales are required" });
     }
-    const aiConfig = resolveAiConfig();
+    const aiConfig = resolveEffectiveAiConfig();
     if (!aiConfig?.enabled || !aiConfig?.apiKey) {
       return res.status(503).json({ error: "translation AI is not configured" });
     }
@@ -1678,7 +1685,7 @@ const collectorIntegrationConfig = () => ({
     if (!targetLocales.length) {
       return res.status(400).json({ error: "target locales are required" });
     }
-    const aiConfig = resolveAiConfig();
+    const aiConfig = resolveEffectiveAiConfig();
     if (!aiConfig?.enabled || !aiConfig?.apiKey) {
       return res.status(503).json({ error: "translation AI is not configured" });
     }

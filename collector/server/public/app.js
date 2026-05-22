@@ -133,6 +133,34 @@ const CONTENT_CATEGORY_OPTIONS = Object.freeze([
   Object.freeze({ value: "transport", label: "การเดินทาง" }),
 ]);
 
+const REFERENCE_CLEANUP_CANDIDATE_KEYS = new Set([
+  "source_records",
+  "content_assets",
+  "reviews_raw",
+  "drafts",
+  "quality_checks",
+  "review_reports",
+  "staging_items",
+  "content_versions",
+  "evidence_blocks",
+  "approved_context_blocks",
+  "draft_input_snapshots",
+  "field_packs",
+  "content_workflow_models",
+  "content_workflow_transitions",
+  "content_readiness_briefs",
+  "content_execution_controls",
+  "content_execution_channels",
+  "search_enrichment_records",
+  "place_intelligence_scores",
+  "social_signal_sources",
+  "social_momentum_snapshots",
+  "content_direction_reports",
+  "content_intelligence_models",
+  "internal_link_sources",
+  "internal_link_targets",
+]);
+
 const state = {
   token: sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "",
   loginAt: sessionStorage.getItem("collector_login_at") || localStorage.getItem("collector_login_at") || "",
@@ -142,7 +170,17 @@ const state = {
   agentProfiles: [],
   selectedAgentProfileKey: "field_pack_agent",
   agentProfilePanelOpen: false,
+  aiPolicyPanelOpen: false,
+  aiPolicyRows: [],
+  aiPolicyCatalog: [],
+  aiPolicyLoaded: false,
+  aiPolicyError: "",
   dataCleanupPanelOpen: false,
+  referenceCleanupPanelOpen: false,
+  referenceCleanupDeletedItems: [],
+  referenceCleanupSelectedItemId: 0,
+  referenceCleanupReferences: null,
+  referenceCleanupSelectedGroups: new Set(),
   cleanup: {
     rows: [],
     loaded: false,
@@ -440,7 +478,9 @@ function canAccessPreferredTabForRole(rawTabValue, role = currentRole()) {
     return getDefaultLandingTabForRole(normalizedRole);
   }
   if (normalizedTab === "raw") {
-    return isAssignmentWorkOnlyRole(normalizedRole) ? getDefaultLandingTabForRole(normalizedRole) : normalizedTab;
+    return canAccessInternalStaffWorkspaces(normalizedRole)
+      ? normalizedTab
+      : getDefaultLandingTabForRole(normalizedRole);
   }
   return getDefaultLandingTabForRole(normalizedRole);
 }
@@ -517,6 +557,16 @@ function editorWorkspaceUrl(itemId) {
 function editorEventWorkspaceUrl(itemId) {
   const normalizedItemId = parsePositiveInt(itemId, 0);
   return normalizedItemId > 0 ? `/event-workspace.html?id=${normalizedItemId}` : "/event-workspace.html";
+}
+
+function editorSubmitUrl(itemId) {
+  const normalizedItemId = parsePositiveInt(itemId, 0);
+  return normalizedItemId > 0 ? `/article-submit.html?id=${normalizedItemId}` : "/article-submit.html";
+}
+
+function editorEventSubmitUrl(itemId) {
+  const normalizedItemId = parsePositiveInt(itemId, 0);
+  return normalizedItemId > 0 ? `/event-submit.html?id=${normalizedItemId}` : "/event-submit.html";
 }
 
 function transportMapWorkspaceUrl(itemId) {
@@ -633,16 +683,31 @@ function getItemWorkflowSnapshot(item) {
 function getEditorialSurfaceUrlForItem(item, preferredStatus = "") {
   const normalizedItemId = parsePositiveInt(item?.id, 0);
   if (!normalizedItemId) return "";
+  const status = String(preferredStatus || getItemWorkflowSnapshot(item).compatibilityStatus || "").trim().toLowerCase();
+  const isReviewStage = status === "in_review" || status === "approved" || status === "published" || status === "unpublished";
+
   if (isTransportMapContentItem(item)) {
-    const status = String(preferredStatus || getItemWorkflowSnapshot(item).compatibilityStatus || "").trim().toLowerCase();
-    if (status === "in_review" || status === "approved" || status === "published" || status === "unpublished") {
+    if (isReviewStage) {
       return transportMapReviewUrl(normalizedItemId);
     }
     return transportMapWorkspaceUrl(normalizedItemId);
   }
-  return String(item?.type || "").trim().toLowerCase() === "event"
+
+  const isEvent = String(item?.type || "").trim().toLowerCase() === "event";
+  const workspaceUrl = isEvent
     ? editorEventWorkspaceUrl(normalizedItemId)
     : editorWorkspaceUrl(normalizedItemId);
+  const reviewUrl = isEvent
+    ? editorEventSubmitUrl(normalizedItemId)
+    : editorSubmitUrl(normalizedItemId);
+
+  if (isEditorUser()) {
+    return workspaceUrl;
+  }
+  if (isReviewStage) {
+    return reviewUrl;
+  }
+  return workspaceUrl;
 }
 
 async function resolveEditorialSurfaceUrlByItemId(itemId, fallbackUrl = "") {
@@ -1870,6 +1935,7 @@ function syncIndexShellChrome(preferredTab = state.preferredTab) {
   if (shell) {
     shell.classList.toggle("home-dashboard-mode", normalizedPreferredTab === "home");
     shell.classList.toggle("raw-process-mode", normalizedPreferredTab === "raw");
+    shell.classList.toggle("users-management-mode", normalizedPreferredTab === "users");
     shell.classList.toggle(
       "assignment-process-mode",
       ["handoff", "work", "review", "assignments"].includes(normalizedPreferredTab)
@@ -1880,20 +1946,21 @@ function syncIndexShellChrome(preferredTab = state.preferredTab) {
 function syncUsersContextTopTabs(preferredTab = state.preferredTab) {
   const normalizedPreferredTab = String(preferredTab || "").trim().toLowerCase();
   const inUsersTab = normalizedPreferredTab === "users";
-  const usersContextTabIds = ["tab-place", "tab-assignments", "tab-events", "tab-transport", "tab-users"];
-  usersContextTabIds.forEach((id) => {
-    const node = qs(id);
-    if (!node) return;
+  const topTabs = Array.from(document.querySelectorAll(".tabs .tab"));
+  topTabs.forEach((node) => {
+    const id = String(node.id || "").trim();
+    if (!id) return;
     if (inUsersTab) {
-      if (!node.classList.contains("hidden")) {
-        node.dataset.usersContextHidden = "1";
-        node.classList.add("hidden");
+      if (id === "tab-users") {
+        node.removeAttribute("data-users-context-hidden");
+        node.classList.remove("hidden");
+      } else {
+        node.setAttribute("data-users-context-hidden", "1");
       }
       return;
     }
-    if (node.dataset.usersContextHidden === "1") {
-      node.classList.remove("hidden");
-      delete node.dataset.usersContextHidden;
+    if (node.getAttribute("data-users-context-hidden") === "1") {
+      node.removeAttribute("data-users-context-hidden");
     }
   });
 }
@@ -2132,10 +2199,105 @@ function renderAgentProfilePanel() {
   }
 
   const profile = getSelectedAgentProfile();
-  if (textarea) textarea.value = String(profile?.profile_text || profile?.default_profile_text || "");
+  if (textarea) textarea.value = String(profile?.profile_text ?? profile?.default_profile_text ?? "");
   if (summary) {
     const isDefault = profile?.is_default === true ? "ใช้ค่าเริ่มต้น" : "ปรับเอง";
     summary.value = profile ? `${isDefault}${profile.updated_at ? ` / ${profile.updated_at}` : ""}` : "ยังโหลดข้อมูลไม่ได้";
+  }
+}
+
+async function loadAiFeaturePolicies() {
+  if (!isOwnerUser()) throw new Error("owner เท่านั้นที่แก้ AI policy ได้");
+  const result = await api("/api/ai-feature-policies");
+  state.aiPolicyRows = Array.isArray(result?.items) ? result.items : [];
+  state.aiPolicyCatalog = Array.isArray(result?.policy_catalog) ? result.policy_catalog : [];
+  state.aiPolicyLoaded = true;
+  state.aiPolicyError = "";
+  renderAiPolicyPanel();
+}
+
+async function saveAiFeaturePolicy(featureKey, policyKey) {
+  if (!isOwnerUser()) throw new Error("owner เท่านั้นที่แก้ AI policy ได้");
+  const key = String(featureKey || "").trim();
+  const nextPolicy = String(policyKey || "").trim();
+  if (!key) throw new Error("feature key is required");
+  if (!nextPolicy) throw new Error("policy key is required");
+  const result = await api(`/api/ai-feature-policies/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    body: JSON.stringify({ policy_key: nextPolicy }),
+  });
+  const item = result?.item || null;
+  if (!item) throw new Error("Save AI policy failed");
+  const idKey = String(item.feature_key || "").trim();
+  state.aiPolicyRows = (Array.isArray(state.aiPolicyRows) ? state.aiPolicyRows : []).map((row) =>
+    String(row?.feature_key || "").trim() === idKey ? item : row
+  );
+  state.aiPolicyLoaded = true;
+  state.aiPolicyError = "";
+  renderAiPolicyPanel();
+}
+
+function renderAiPolicyPanel() {
+  const panel = qs("ai-policy-panel");
+  if (!panel) return;
+  const visible = isOwnerUser();
+  panel.classList.toggle("hidden", !visible);
+  if (!visible) return;
+  qs("ai-policy-body")?.classList.toggle("hidden", !state.aiPolicyPanelOpen);
+  const toggleBtn = qs("btn-ai-policy-toggle");
+  if (toggleBtn) toggleBtn.textContent = state.aiPolicyPanelOpen ? "ซ่อนตั้งค่า" : "เปิดตั้งค่า";
+  if (!state.aiPolicyPanelOpen) return;
+
+  const table = qs("table-ai-policy");
+  const tbody = table?.querySelector("tbody");
+  if (!tbody) return;
+  const rows = Array.isArray(state.aiPolicyRows) ? state.aiPolicyRows : [];
+  const catalog = Array.isArray(state.aiPolicyCatalog) ? state.aiPolicyCatalog : [];
+  tbody.innerHTML = "";
+
+  if (!state.aiPolicyLoaded) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6" class="muted">กด "โหลดรายการ" เพื่อดึง AI feature policy ล่าสุด</td>';
+    tbody.appendChild(tr);
+    return;
+  }
+
+  if (state.aiPolicyError) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="6" class="muted">${escapeHtml(`โหลด AI feature policy ไม่สำเร็จ: ${state.aiPolicyError}`)}</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6" class="muted">ยังไม่มีข้อมูล AI policy</td>';
+    tbody.appendChild(tr);
+    return;
+  }
+
+  for (const row of rows) {
+    const featureKey = String(row?.feature_key || "").trim();
+    const selectedPolicy = String(row?.policy_key || "").trim();
+    const disabled = row?.feature_active === false ? " disabled" : "";
+    const options = catalog.map((policy) => {
+      const policyKey = String(policy?.key || "").trim();
+      const selected = policyKey === selectedPolicy ? " selected" : "";
+      const label = String(policy?.label || policyKey).trim() || policyKey;
+      return `<option value="${escapeHtml(policyKey)}"${selected}>${escapeHtml(label)}</option>`;
+    }).join("");
+    const statusText = row?.feature_active === false ? "reserved" : String(row?.feature_status || "active");
+    const updatedText = String(row?.updated_at || "").trim() || "-";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(String(row?.feature_label || featureKey))}<div class="muted">${escapeHtml(featureKey)}</div></td>
+      <td>${escapeHtml(String(row?.feature_description || "-"))}</td>
+      <td><select data-ai-policy-feature="${escapeHtml(featureKey)}"${disabled}>${options}</select></td>
+      <td>${escapeHtml(statusText)}</td>
+      <td>${escapeHtml(updatedText)}</td>
+      <td><button type="button" data-ai-policy-save="${escapeHtml(featureKey)}"${disabled}>บันทึก</button></td>
+    `;
+    tbody.appendChild(tr);
   }
 }
 
@@ -2211,12 +2373,181 @@ function renderDataCleanupPanel() {
   }
 }
 
+function updateReferenceCleanupExecuteButton() {
+  const btn = qs("btn-reference-cleanup-execute");
+  if (!btn) return;
+  const selectedCount = state.referenceCleanupSelectedGroups instanceof Set ? state.referenceCleanupSelectedGroups.size : 0;
+  const hasItem = Number(state.referenceCleanupSelectedItemId || 0) > 0;
+  btn.disabled = !hasItem || selectedCount < 1;
+}
+
+function renderReferenceCleanupPanel() {
+  const panel = qs("reference-cleanup-panel");
+  if (!panel) return;
+  const visible = isOwnerUser();
+  panel.classList.toggle("hidden", !visible);
+  if (!visible) return;
+
+  const body = qs("reference-cleanup-body");
+  body?.classList.toggle("hidden", !state.referenceCleanupPanelOpen);
+  const toggleBtn = qs("btn-reference-cleanup-toggle");
+  if (toggleBtn) toggleBtn.textContent = state.referenceCleanupPanelOpen ? "ซ่อนตั้งค่า" : "เปิดตั้งค่า";
+  if (!state.referenceCleanupPanelOpen) return;
+
+  const items = Array.isArray(state.referenceCleanupDeletedItems) ? state.referenceCleanupDeletedItems : [];
+  const selector = qs("reference-cleanup-item-id");
+  if (selector) {
+    if (!items.length) {
+      selector.innerHTML = '<option value="">-</option>';
+      state.referenceCleanupSelectedItemId = 0;
+    } else {
+      selector.innerHTML = items
+        .map((row) => {
+          const id = Number(row?.id || 0) || 0;
+          const title = String(row?.title || "").trim() || "(ไม่มีชื่อ)";
+          return `<option value="${id}">#${id} ${escapeHtml(title)}</option>`;
+        })
+        .join("");
+      const hasSelected = items.some((row) => (Number(row?.id || 0) || 0) === Number(state.referenceCleanupSelectedItemId || 0));
+      if (!hasSelected) {
+        state.referenceCleanupSelectedItemId = Number(items[0]?.id || 0) || 0;
+      }
+      selector.value = String(state.referenceCleanupSelectedItemId || "");
+    }
+  }
+
+  const refs = state.referenceCleanupReferences;
+  const groups = Array.isArray(refs?.groups) ? refs.groups : [];
+  const candidates = groups.filter((group) =>
+    String(group?.category || "").trim().toLowerCase() === "cleanup_candidate"
+    && REFERENCE_CLEANUP_CANDIDATE_KEYS.has(String(group?.key || "").trim().toLowerCase())
+  );
+  const blockers = groups.filter((group) => {
+    const category = String(group?.category || "").trim().toLowerCase();
+    const key = String(group?.key || "").trim().toLowerCase();
+    if (category === "hard_blocker") return true;
+    if (category === "cleanup_candidate" && !REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key)) return true;
+    return false;
+  });
+
+  const selected = new Set();
+  for (const key of state.referenceCleanupSelectedGroups || []) {
+    if (candidates.some((group) => String(group?.key || "").trim().toLowerCase() === key)) {
+      selected.add(key);
+    }
+  }
+  state.referenceCleanupSelectedGroups = selected;
+
+  const candidatesNode = qs("reference-cleanup-candidates");
+  if (candidatesNode) {
+    if (!state.referenceCleanupSelectedItemId) {
+      candidatesNode.innerHTML = '<div class="assignment-brief-empty">ยังไม่มีรายการ soft delete ให้เลือก</div>';
+    } else if (!refs) {
+      candidatesNode.innerHTML = '<div class="assignment-brief-empty">กด "โหลดข้อมูลอ้างอิง" เพื่อเริ่มตรวจ</div>';
+    } else if (!candidates.length) {
+      candidatesNode.innerHTML = '<div class="assignment-brief-empty">ไม่พบกลุ่มข้อมูลที่ล้างได้จากหน้านี้</div>';
+    } else {
+      candidatesNode.innerHTML = candidates.map((group) => {
+        const key = String(group?.key || "").trim().toLowerCase();
+        const count = Number(group?.count || 0) || 0;
+        const label = String(group?.label_th || key).trim() || key;
+        const checked = state.referenceCleanupSelectedGroups.has(key) ? " checked" : "";
+        return `
+          <label class="assignment-brief-text">
+            <input type="checkbox" data-reference-cleanup-group="${escapeHtml(key)}"${checked} />
+            ${escapeHtml(`${label} (${count})`)}
+          </label>
+        `;
+      }).join("");
+    }
+  }
+
+  const blockersNode = qs("reference-cleanup-blockers");
+  if (blockersNode) {
+    if (!state.referenceCleanupSelectedItemId) {
+      blockersNode.innerHTML = '<div class="assignment-brief-empty">ยังไม่มีรายการ soft delete ให้เลือก</div>';
+    } else if (!refs) {
+      blockersNode.innerHTML = '<div class="assignment-brief-empty">ยังไม่ได้โหลดข้อมูล blocker</div>';
+    } else if (!blockers.length) {
+      blockersNode.innerHTML = '<div class="assignment-brief-empty">ไม่มี hard blocker</div>';
+    } else {
+      blockersNode.innerHTML = blockers.map((group) => {
+        const key = String(group?.key || "").trim().toLowerCase();
+        const count = Number(group?.count || 0) || 0;
+        const label = String(group?.label_th || key).trim() || key;
+        const hint = String(group?.resolution_hint || "ต้องจัดการผ่าน workflow ปกติก่อน").trim();
+        return `<div class="assignment-brief-text">[LOCK] ${escapeHtml(`${label} (${count})`)} - ${escapeHtml(hint)}</div>`;
+      }).join("");
+    }
+  }
+
+  updateReferenceCleanupExecuteButton();
+}
+
 function applyCleanupRowsResponse(response, errorMessage = "") {
   state.cleanup = {
     rows: Array.isArray(response?.items) ? response.items : [],
     loaded: true,
     lastError: String(errorMessage || "").trim(),
   };
+  state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
+  if (!state.referenceCleanupDeletedItems.some((row) => (Number(row?.id || 0) || 0) === Number(state.referenceCleanupSelectedItemId || 0))) {
+    state.referenceCleanupSelectedItemId = Number(state.referenceCleanupDeletedItems[0]?.id || 0) || 0;
+    state.referenceCleanupReferences = null;
+    state.referenceCleanupSelectedGroups = new Set();
+  }
+}
+
+async function loadReferenceCleanupItems() {
+  if (!isOwnerUser()) {
+    state.referenceCleanupDeletedItems = [];
+    state.referenceCleanupSelectedItemId = 0;
+    state.referenceCleanupReferences = null;
+    state.referenceCleanupSelectedGroups = new Set();
+    renderReferenceCleanupPanel();
+    return [];
+  }
+
+  let rows = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
+  if (!state.cleanup?.loaded) {
+    rows = await loadDataCleanupRows();
+  }
+  state.referenceCleanupDeletedItems = Array.isArray(rows) ? rows : [];
+  if (!state.referenceCleanupDeletedItems.some((row) => (Number(row?.id || 0) || 0) === Number(state.referenceCleanupSelectedItemId || 0))) {
+    state.referenceCleanupSelectedItemId = Number(state.referenceCleanupDeletedItems[0]?.id || 0) || 0;
+    state.referenceCleanupReferences = null;
+    state.referenceCleanupSelectedGroups = new Set();
+  }
+  renderReferenceCleanupPanel();
+  return state.referenceCleanupDeletedItems;
+}
+
+async function loadReferencesForItem(itemId) {
+  if (!isOwnerUser()) throw new Error("owner เท่านั้นที่ใช้งาน Reference Cleanup ได้");
+  const id = Number(itemId || 0) || 0;
+  if (!id) throw new Error("กรุณาเลือกรายการก่อน");
+  const response = await api(`/api/admin/deleted-items/${id}/references`);
+  state.referenceCleanupSelectedItemId = id;
+  state.referenceCleanupReferences = response || null;
+  state.referenceCleanupSelectedGroups = new Set();
+  renderReferenceCleanupPanel();
+  return response;
+}
+
+async function executeReferenceCleanup() {
+  if (!isOwnerUser()) throw new Error("owner เท่านั้นที่ใช้งาน Reference Cleanup ได้");
+  const itemId = Number(state.referenceCleanupSelectedItemId || 0) || 0;
+  if (!itemId) throw new Error("กรุณาเลือกรายการก่อน");
+  const groups = Array.from(state.referenceCleanupSelectedGroups || []);
+  if (!groups.length) throw new Error("กรุณาเลือกกลุ่มข้อมูลที่ต้องการล้าง");
+  const reason = String(window.prompt("เหตุผลในการล้างข้อมูลอ้างอิง (ไม่บังคับ)", "") || "").trim();
+  const result = await api(`/api/admin/deleted-items/${itemId}/references/cleanup`, {
+    method: "POST",
+    body: JSON.stringify({ groups, reason }),
+  });
+  await loadReferencesForItem(itemId);
+  await loadDataCleanupRows();
+  return result;
 }
 
 async function loadDataCleanupRows({ showSuccessStatus = false } = {}) {
@@ -2229,6 +2560,7 @@ async function loadDataCleanupRows({ showSuccessStatus = false } = {}) {
     const response = await api("/api/admin/deleted-items?limit=100");
     applyCleanupRowsResponse(response, "");
     renderDataCleanupPanel();
+    renderReferenceCleanupPanel();
     if (showSuccessStatus) {
       const rows = Array.isArray(response?.items) ? response.items : [];
       const purgeable = rows.filter((row) => row?.can_purge).length;
@@ -2238,6 +2570,7 @@ async function loadDataCleanupRows({ showSuccessStatus = false } = {}) {
   } catch (err) {
     applyCleanupRowsResponse({ items: [] }, err?.message || "โหลดรายการ cleanup ไม่สำเร็จ");
     renderDataCleanupPanel();
+    renderReferenceCleanupPanel();
     throw err;
   }
 }
@@ -2245,9 +2578,8 @@ async function loadDataCleanupRows({ showSuccessStatus = false } = {}) {
 async function saveSelectedAgentProfile() {
   if (!isOwnerUser()) throw new Error("owner เท่านั้นที่แก้ Agent Profile ได้");
   const key = String(qs("agent-profile-select")?.value || state.selectedAgentProfileKey || "").trim().toLowerCase();
-  const profileText = String(qs("agent-profile-text")?.value || "").trim();
+  const profileText = String(qs("agent-profile-text")?.value ?? "");
   if (!key) throw new Error("กรุณาเลือก Agent");
-  if (!profileText) throw new Error("Agent Profile ต้องไม่ว่าง");
   const result = await api(`/api/agent-profiles/${encodeURIComponent(key)}`, {
     method: "PUT",
     body: JSON.stringify({ profile_text: profileText }),
@@ -2284,6 +2616,7 @@ function updateUserManagementUI() {
   const note = qs("users-panel-note");
   renderAgentProfilePanel();
   renderDataCleanupPanel();
+  renderReferenceCleanupPanel();
 
   if (title) {
     title.textContent = "ระบบและผู้ใช้";
@@ -3227,6 +3560,44 @@ function syncAssignmentPageMode(assignment) {
   renderManagedAssignmentsTable(state.assignments.managedRows);
   renderAssignmentsTable(state.assignments.rows);
   renderSubmittedAssignmentsTable(state.assignments.submittedRows);
+  applyAssignmentModernClasses();
+}
+
+function applyAssignmentModernClasses() {
+  const panel = qs("panel-assignments");
+  if (!panel) return;
+  panel.classList.add("as-scope");
+
+  const addClassById = (id, className) => qs(id)?.classList.add(className);
+  addClassById("assignment-page-summary", "as-alert-box");
+  addClassById("assignment-subnav", "as-subnav");
+  addClassById("assignment-list-panel", "as-list-panel");
+  addClassById("assignment-detail-panel", "as-card-raised");
+  addClassById("assignment-process-steps", "as-progress-steps");
+  addClassById("assignment-state-workspace", "as-section");
+  addClassById("assignment-submission-workspace", "as-section");
+  addClassById("assignment-review-workspace", "as-section");
+  addClassById("assignment-review-summary-card", "as-card-flat");
+  addClassById("assignment-review-submission-card", "as-card-flat");
+  addClassById("assignment-submission-verified-fields", "as-fieldset");
+  addClassById("assignment-submission-question-fields", "as-fieldset");
+  addClassById("assignment-submission-capture-guide", "as-fieldset");
+
+  qs("assignment-next-action")?.closest(".assignment-guide")?.classList.add("as-guide");
+  qs("assignment-context-brief")?.closest(".assignment-brief-card")?.classList.add("as-card");
+  qs("assignment-next-step-content")?.closest(".assignment-brief-card")?.classList.add("as-card");
+  qs("assignment-work-monitor")?.classList.add("as-card");
+  qs("assignment-managed-list-wrap")?.classList.add("as-card");
+  panel.querySelector(".assignment-submit-toolbar")?.classList.add("as-toolbar-actions");
+
+  panel.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]), select, textarea').forEach((node) => node.classList.add("as-input"));
+  panel.querySelectorAll("label").forEach((node) => node.classList.add("as-label"));
+  panel.querySelectorAll("button").forEach((node) => node.classList.add("as-btn-md"));
+  panel.querySelectorAll("#assignment-subnav button").forEach((node) => node.classList.add("as-btn-sm"));
+  panel.querySelectorAll(".assignment-step-toolbar .step-main, #btn-assignment-submit, #btn-assignment-request-revision, #btn-assignment-accept-submission")
+    .forEach((node) => node.classList.add("as-btn-lg"));
+  panel.querySelectorAll(".assignment-brief-empty, .assignment-deliverables-empty").forEach((node) => node.classList.add("as-empty-state"));
+  panel.querySelectorAll(".workflow-badge").forEach((node) => node.classList.add("as-badge"));
 }
 
 function syncAssignmentWorkflowLayout(assignment) {
@@ -3947,13 +4318,30 @@ function syncPreferredTabUrl() {
   window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
 }
 
+function resetIndexPanelState() {
+  const panels = Array.from(document.querySelectorAll(".panel"));
+  panels.forEach((panel) => {
+    panel.classList.remove("active");
+    panel.classList.remove("hidden");
+  });
+  panels.forEach((panel) => panel.classList.add("hidden"));
+}
+
+function enforceExclusivePrimaryPanel(targetPanelId = "home") {
+  const primaryPanelIds = ["home", "place", "raw", "assignments", "events", "users"];
+  primaryPanelIds.forEach((id) => {
+    const node = qs(`panel-${id}`);
+    if (!node) return;
+    const isTarget = id === targetPanelId;
+    node.classList.toggle("hidden", !isTarget);
+    node.classList.toggle("active", isTarget);
+  });
+}
+
 function activateIndexPanelForPreferredTab() {
   const tabs = Array.from(document.querySelectorAll(".tab"));
   tabs.forEach((tab) => tab.classList.remove("active"));
-  document.querySelectorAll(".panel").forEach((panel) => {
-    panel.classList.remove("active");
-    panel.classList.add("hidden");
-  });
+  resetIndexPanelState();
   const normalizedPreferredTab = String(state.preferredTab || "").trim().toLowerCase();
   syncIndexShellChrome(normalizedPreferredTab);
   syncUsersContextTopTabs(normalizedPreferredTab);
@@ -3969,6 +4357,7 @@ function activateIndexPanelForPreferredTab() {
     targetPanel.classList.remove("hidden");
     targetPanel.classList.add("active");
   }
+  enforceExclusivePrimaryPanel(targetPanelId);
   syncAssignmentPageMode(getAssignmentById(state.assignments.selectedId));
   renderLandingDebugState("activate-panel");
   return { normalizedPreferredTab, targetPanelId };
@@ -4697,7 +5086,7 @@ function deriveExpectedDeliverablesFromFieldPack(fieldPack) {
   const checklists = Array.isArray(source.checklists) ? source.checklists : [];
   const hasChecklist = (type) => checklists.some((row) => String(row?.checklist_type || "").trim().toLowerCase() === type && String(row?.item_text || "").trim());
 
-  if (hasChecklist("must_capture_shot")) {
+  if (hasChecklist("must_capture")) {
     derived.push("photos", "videos");
   }
   if (hasChecklist("must_verify_fact") || hasChecklist("must_ask_question")) {
@@ -5279,6 +5668,7 @@ function renderAssignmentSubmissionForm(assignment = null) {
       ? "ต้องกด อัปโหลด/ซิงก์ไฟล์ ก่อน แล้วจึงส่งงานกลับ"
       : "เมื่อกรอกข้อมูลและแนบไฟล์ครบแล้ว ให้ส่งงานกลับเพื่อเข้าคิวตรวจงาน";
   }
+  applyAssignmentModernClasses();
 }
 
 function readAssignmentSubmissionPromptAnswers(groupName) {
@@ -5424,7 +5814,7 @@ function getFieldPackPromptGroups(fieldPack = null) {
       .map((row) => String(row?.item_text || "").trim())
       .filter(Boolean),
     mustCapture: checklists
-      .filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_capture_shot")
+      .filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_capture")
       .map((row) => String(row?.item_text || "").trim())
       .filter(Boolean),
     mustAsk: checklists
@@ -5842,6 +6232,13 @@ function resetAssignmentExpectedDeliverablesTouched() {
   state.assignments.expectedDeliverablesTouched = false;
 }
 
+function renderAssignmentStateBadge(stateValue) {
+  const raw = String(stateValue || "").trim();
+  const text = raw || "-";
+  const tone = raw.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  return `<span class="as-status-badge as-status-${escapeHtml(tone || "unknown")}">${escapeHtml(text)}</span>`;
+}
+
 function renderManagedAssignmentsTable(rows) {
   const wrap = qs("assignment-managed-list-wrap");
   const titleNode = qs("assignment-managed-list-title");
@@ -5899,7 +6296,7 @@ function renderManagedAssignmentsTable(rows) {
       <td>${itemId || "-"}</td>
       <td>${escapeHtml(title)}</td>
       <td>${escapeHtml(getAssignmentAssigneeLabel(row))}</td>
-      <td>${escapeHtml(row.state || "-")}</td>
+      <td>${renderAssignmentStateBadge(row.state)}</td>
       <td>${escapeHtml(formatAssignmentDueAtLabel(row.due_at))}</td>
       <td class="action-stack">
         <a href="${escapeHtml(buildAssignmentBriefUrl(itemId, id))}">ดูใบสั่งงาน</a>
@@ -5964,7 +6361,7 @@ function renderSubmittedAssignmentsTable(rows) {
       <td>${itemId || "-"}</td>
       <td>${escapeHtml(title)}</td>
       <td>${escapeHtml(getAssignmentAssigneeLabel(row))}</td>
-      <td>${escapeHtml(row?.state || "-")}</td>
+      <td>${renderAssignmentStateBadge(row?.state)}</td>
       <td>${escapeHtml(formatAssignmentDueAtLabel(row?.due_at))}</td>
       <td class="action-stack">
         <button type="button" data-action="open-submitted-assignment" data-id="${id}">ดูงานที่ส่งแล้ว</button>
@@ -6141,7 +6538,7 @@ function renderAssignmentsTable(rows) {
       <td>${itemId || "-"}</td>
       <td>${escapeHtml(title)}</td>
       <td>${escapeHtml(assigneeLabel)}</td>
-      <td>${escapeHtml(row.state || "-")}</td>
+      <td>${renderAssignmentStateBadge(row.state)}</td>
       <td>${escapeHtml(formatAssignmentDueAtLabel(row.due_at))}</td>
       <td class="action-stack">
         <button type="button" data-action="open-assignment" data-id="${id}">เปิดงาน</button>
@@ -7062,6 +7459,7 @@ async function refreshAll() {
   const ingestionsPromise = isExternalContributorUser() ? Promise.resolve([]) : api("/api/source-ingestions");
   const usersPromise = canAccessUserManagement() ? api("/api/users") : Promise.resolve({ items: [] });
   const agentProfilesPromise = isOwnerUser() ? api("/api/agent-profiles") : Promise.resolve({ items: [] });
+  const aiPoliciesPromise = isOwnerUser() ? api("/api/ai-feature-policies") : Promise.resolve({ items: [], policy_catalog: [] });
   const cleanupItemsPromise = canAccessSystemPage()
     ? api("/api/admin/deleted-items?limit=100")
         .then((response) => ({ ok: true, response }))
@@ -7088,22 +7486,35 @@ async function refreshAll() {
   }
   renderSourceIngestions(ingestions);
 
-  const [usersResponse, agentProfilesResponse, cleanupResult] = await Promise.all([
+  const [usersResponse, agentProfilesResponse, aiPoliciesResponse, cleanupResult] = await Promise.all([
     usersPromise.catch(() => ({ items: [] })),
     agentProfilesPromise.catch(() => ({ items: [] })),
+    aiPoliciesPromise.catch((error) => ({ items: [], policy_catalog: [], _error: error?.message || "โหลด AI policy ไม่สำเร็จ" })),
     cleanupItemsPromise,
   ]);
 
   state.visibleUsers = Array.isArray(usersResponse?.items) ? usersResponse.items : [];
   state.freelanceUsers = (usersResponse?.items || []).filter((row) => String(row?.role || "").toLowerCase() === "freelance");
   state.agentProfiles = Array.isArray(agentProfilesResponse?.items) ? agentProfilesResponse.items : [];
+  state.aiPolicyRows = Array.isArray(aiPoliciesResponse?.items) ? aiPoliciesResponse.items : [];
+  state.aiPolicyCatalog = Array.isArray(aiPoliciesResponse?.policy_catalog) ? aiPoliciesResponse.policy_catalog : [];
+  state.aiPolicyLoaded = !String(aiPoliciesResponse?._error || "").trim();
+  state.aiPolicyError = String(aiPoliciesResponse?._error || "").trim();
   applyCleanupRowsResponse(
     cleanupResult?.ok === false ? { items: [] } : cleanupResult?.response,
     cleanupResult?.ok === false ? cleanupResult?.error?.message || "โหลดรายการ cleanup ไม่สำเร็จ" : ""
   );
+  state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
+  if (!state.referenceCleanupDeletedItems.some((row) => (Number(row?.id || 0) || 0) === Number(state.referenceCleanupSelectedItemId || 0))) {
+    state.referenceCleanupSelectedItemId = Number(state.referenceCleanupDeletedItems[0]?.id || 0) || 0;
+    state.referenceCleanupReferences = null;
+    state.referenceCleanupSelectedGroups = new Set();
+  }
   updateUserManagementUI();
   renderAgentProfilePanel();
+  renderAiPolicyPanel();
   renderDataCleanupPanel();
+  renderReferenceCleanupPanel();
   renderUsersTable(usersResponse?.items || []);
   renderAssignmentAssigneeOptions();
   renderManagedAssignmentsTable(state.assignments.managedRows);
@@ -7640,14 +8051,58 @@ function wireUserSettings() {
     if (!window.confirm("Reset Agent Profile กลับเป็นค่าเริ่มต้นใช่หรือไม่?")) return;
     try {
       await resetSelectedAgentProfile();
-      setStatus("agent-profile-status", "Reset Agent Profile แล้ว");
+      setStatus("agent-profile-status", "คืนค่า Agent Profile เริ่มต้นแล้ว");
     } catch (err) {
       setStatus("agent-profile-status", err.message, true);
+    }
+  });
+  qs("btn-ai-policy-toggle")?.addEventListener("click", () => {
+    state.aiPolicyPanelOpen = !state.aiPolicyPanelOpen;
+    renderAiPolicyPanel();
+  });
+  qs("btn-ai-policy-load")?.addEventListener("click", async (event) => {
+    const btn = event.currentTarget;
+    try {
+      await withButtonLoading(btn, "กำลังโหลด...", async () => {
+        await loadAiFeaturePolicies();
+      });
+      setStatus("ai-policy-status", "โหลด AI feature policy แล้ว");
+    } catch (err) {
+      setStatus("ai-policy-status", err.message, true);
+    }
+  });
+  qs("table-ai-policy")?.querySelector("tbody")?.addEventListener("click", async (event) => {
+    const btn = event.target.closest("button[data-ai-policy-save]");
+    if (!btn) return;
+    const featureKey = String(btn.dataset.aiPolicySave || "").trim();
+    if (!featureKey) return;
+    const select = qs("table-ai-policy")?.querySelector(`select[data-ai-policy-feature="${featureKey}"]`);
+    const policyKey = String(select?.value || "").trim();
+    try {
+      await withButtonLoading(btn, "กำลังบันทึก...", async () => {
+        await saveAiFeaturePolicy(featureKey, policyKey);
+      });
+      setStatus("ai-policy-status", `บันทึก policy ของ ${featureKey} แล้ว`);
+    } catch (err) {
+      setStatus("ai-policy-status", err.message, true);
     }
   });
   qs("btn-data-cleanup-toggle")?.addEventListener("click", () => {
     state.dataCleanupPanelOpen = !state.dataCleanupPanelOpen;
     renderDataCleanupPanel();
+  });
+  qs("btn-reference-cleanup-toggle")?.addEventListener("click", async () => {
+    state.referenceCleanupPanelOpen = !state.referenceCleanupPanelOpen;
+    if (state.referenceCleanupPanelOpen) {
+      try {
+        await loadReferenceCleanupItems();
+      } catch (err) {
+        renderReferenceCleanupPanel();
+        setStatus("reference-cleanup-status", err.message, true);
+      }
+    } else {
+      renderReferenceCleanupPanel();
+    }
   });
 
   qs("btn-data-cleanup-load")?.addEventListener("click", async (event) => {
@@ -7675,7 +8130,9 @@ function wireUserSettings() {
           state.cleanup.rows = Array.isArray(state.cleanup?.rows)
             ? state.cleanup.rows.map((row) => (Number(row?.id || 0) === id ? item : row)).filter(Boolean)
             : [];
+          state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
           renderDataCleanupPanel();
+          renderReferenceCleanupPanel();
           setStatus("data-cleanup-status", `ตรวจรายการ #${id} แล้ว`);
         });
         return;
@@ -7689,6 +8146,7 @@ function wireUserSettings() {
               body: JSON.stringify({ reason }),
             });
             await loadDataCleanupRows();
+            renderReferenceCleanupPanel();
             setStatus("data-cleanup-status", `purge รายการ #${id} แล้ว`);
           });
         }
@@ -7700,12 +8158,71 @@ function wireUserSettings() {
           state.cleanup.rows = Array.isArray(state.cleanup?.rows)
             ? state.cleanup.rows.map((row) => (Number(row?.id || 0) === id ? item : row)).filter(Boolean)
             : [];
+          state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
           renderDataCleanupPanel();
+          renderReferenceCleanupPanel();
         } catch {
           // ignore follow-up refresh failure and show original purge error
         }
       }
       setStatus("data-cleanup-status", err.message, true);
+    }
+  });
+  qs("reference-cleanup-item-id")?.addEventListener("change", (event) => {
+    state.referenceCleanupSelectedItemId = Number(event.target?.value || 0) || 0;
+    state.referenceCleanupReferences = null;
+    state.referenceCleanupSelectedGroups = new Set();
+    renderReferenceCleanupPanel();
+  });
+  qs("btn-reference-cleanup-load")?.addEventListener("click", async (event) => {
+    const btn = event.currentTarget;
+    try {
+      await withButtonLoading(btn, "กำลังโหลด...", async () => {
+        const id = Number(qs("reference-cleanup-item-id")?.value || state.referenceCleanupSelectedItemId || 0) || 0;
+        await loadReferencesForItem(id);
+        setStatus("reference-cleanup-status", `โหลดข้อมูลอ้างอิง #${id} แล้ว`);
+      });
+    } catch (err) {
+      setStatus("reference-cleanup-status", err.message, true);
+    }
+  });
+  qs("reference-cleanup-candidates")?.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (target.type !== "checkbox") return;
+    const key = String(target.dataset.referenceCleanupGroup || "").trim().toLowerCase();
+    if (!key) return;
+    if (!REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key)) return;
+    if (target.checked) {
+      state.referenceCleanupSelectedGroups.add(key);
+    } else {
+      state.referenceCleanupSelectedGroups.delete(key);
+    }
+    updateReferenceCleanupExecuteButton();
+  });
+  qs("btn-reference-cleanup-execute")?.addEventListener("click", async (event) => {
+    const btn = event.currentTarget;
+    try {
+      await withButtonLoading(btn, "กำลังล้าง...", async () => {
+        const result = await executeReferenceCleanup();
+        const cleaned = result?.cleaned && typeof result.cleaned === "object" ? result.cleaned : {};
+        const summary = Object.entries(cleaned)
+          .map(([key, count]) => `${key}:${Number(count || 0) || 0}`)
+          .join(" | ");
+        const remainingBlockers = Array.isArray(result?.remaining_blockers) ? result.remaining_blockers : [];
+        const skippedAssets = Array.isArray(result?.skipped_assets) ? result.skipped_assets : [];
+        const statusParts = [];
+        statusParts.push(summary ? `ล้างข้อมูลแล้ว ${summary}` : "ล้างข้อมูลอ้างอิงแล้ว");
+        if (remainingBlockers.length) {
+          statusParts.push(`ยังมี hard blocker ${remainingBlockers.length} กลุ่ม`);
+        }
+        if (skippedAssets.length) {
+          statusParts.push(`asset ลบต่อไม่ได้ ${skippedAssets.length} รายการ`);
+        }
+        setStatus("reference-cleanup-status", statusParts.join(" | "));
+      });
+    } catch (err) {
+      setStatus("reference-cleanup-status", err.message, true);
     }
   });
 }

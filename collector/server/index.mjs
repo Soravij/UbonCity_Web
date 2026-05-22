@@ -15,16 +15,24 @@ import {
   getCollectorRequiredIntegrationKeys,
 } from "./integration-readiness.mjs";
 import { resolvePaths } from "../config/paths.mjs";
-import { resolveAiConfig } from "../config/ai.mjs";
+import {
+  buildFeaturePolicyMap,
+  listAiFeatureCatalog,
+  listAiPolicyCatalog,
+  resolveAiFeatureConfig,
+  resolveAiConfig,
+} from "../config/ai.mjs";
 import { openDatabase } from "../db/client.mjs";
 import { createRepository, hasRecognizedEvaluationOverrideInput } from "../db/repository.mjs";
 import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/index.mjs";
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import {
   applyReviewAction,
+  compensateReleaseAfterSyncFailure,
   parseImportText,
   releaseItemToMainSite,
   reopenReviewDecision,
+  returnFieldPackToClean,
   reviewInternalLink,
   rerunProblemTranslations,
   runAiDraftStage,
@@ -43,7 +51,6 @@ const app = express();
 const port = Number(process.env.PORT || 5060);
 const bindHost = String(process.env.COLLECTOR_BIND_HOST || "127.0.0.1").trim() || "127.0.0.1";
 const dirs = resolvePaths(path.resolve(process.cwd()));
-const aiConfig = resolveAiConfig();
 const backendApiBase = String(
   process.env.COLLECTOR_SYNC_BACKEND_API || process.env.BACKEND_API_BASE_URL || process.env.BACKEND_URL || ""
 ).trim();
@@ -58,6 +65,10 @@ const collectorPublicBaseUrl = String(process.env.COLLECTOR_PUBLIC_BASE_URL || p
 const schemaPath = path.join(dirs.rootDir, "database", "schema.sql");
 const db = openDatabase(dirs.dbPath, schemaPath);
 const repo = createRepository(db);
+const AI_POLICY_CATALOG = listAiPolicyCatalog();
+const AI_POLICY_BY_KEY = new Map(AI_POLICY_CATALOG.map((row) => [String(row.key || "").trim(), row]));
+const AI_FEATURE_CATALOG = listAiFeatureCatalog();
+const AI_FEATURE_BY_KEY = new Map(AI_FEATURE_CATALOG.map((row) => [String(row.key || "").trim(), row]));
 const slugBackfillResult = typeof repo.backfillInvalidSlugs === "function"
   ? repo.backfillInvalidSlugs()
   : null;
@@ -110,6 +121,60 @@ const AGENT_PROFILE_DEFINITIONS = Object.freeze({
 });
 const AGENT_PROFILE_MAX_LENGTH = 8000;
 
+function normalizeAiFeaturePolicyForResponse(row) {
+  if (!row) return null;
+  const featureKey = String(row.feature_key || "").trim();
+  const feature = AI_FEATURE_BY_KEY.get(featureKey);
+  if (!feature) return null;
+  const policyKey = String(row.policy_key || "").trim();
+  const policy = AI_POLICY_BY_KEY.get(policyKey) || null;
+  return {
+    feature_key: featureKey,
+    policy_key: policyKey,
+    feature_label: feature.label,
+    feature_description: feature.description,
+    feature_status: feature.status,
+    feature_active: Boolean(feature.active),
+    policy_label: policy?.label || null,
+    provider: policy?.provider || null,
+    model: policy?.model || null,
+    updated_by: row.updated_by || null,
+    updated_at: row.updated_at || null,
+  };
+}
+
+function listStoredAiFeaturePolicyMap() {
+  const rawRows = Array.isArray(repo.listAiFeaturePolicies()) ? repo.listAiFeaturePolicies() : [];
+  const map = {};
+  for (const row of rawRows) {
+    const key = String(row?.feature_key || "").trim();
+    const value = String(row?.policy_key || "").trim();
+    if (!AI_FEATURE_BY_KEY.has(key)) continue;
+    if (!AI_POLICY_BY_KEY.has(value)) continue;
+    map[key] = value;
+  }
+  return map;
+}
+
+function getEffectiveAiConfig() {
+  return resolveAiConfig({ policyByFeature: listStoredAiFeaturePolicyMap() });
+}
+
+function listAiFeaturePolicyRowsForOwner() {
+  const effectiveMap = buildFeaturePolicyMap(listStoredAiFeaturePolicyMap());
+  return AI_FEATURE_CATALOG.map((feature) => {
+    const key = String(feature.key || "").trim();
+    const policy = effectiveMap[key] || null;
+    const stored = repo.getAiFeaturePolicy(key);
+    return normalizeAiFeaturePolicyForResponse({
+      feature_key: key,
+      policy_key: policy?.policy_key || "",
+      updated_by: stored?.updated_by || null,
+      updated_at: stored?.updated_at || null,
+    });
+  }).filter(Boolean);
+}
+
 function isPlaceholderSecret(value) {
   const normalized = String(value || "").trim().toUpperCase();
   if (!normalized) return true;
@@ -131,6 +196,19 @@ function collectorIntegrationConfig() {
     webReviewSyncToken,
     collectorPublicBaseUrl,
   };
+}
+
+function canUseLocalReleaseSyncSimulation() {
+  if (String(process.env.COLLECTOR_ALLOW_RELEASE_SYNC_SIMULATION || "").trim() === "1") {
+    return true;
+  }
+  try {
+    const url = new URL(String(backendApiBase || "").trim());
+    const host = String(url.hostname || "").trim().toLowerCase();
+    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+  } catch {
+    return false;
+  }
 }
 
 function isValidWebReviewSyncToken(candidate) {
@@ -2937,24 +3015,6 @@ function applyArticleNeedsRevisionWorkflowTransition(contentItemId, options = {}
   const reasonCode = String(options.reasonCode || "").trim().toLowerCase() || "article_revision_requested";
   const note = String(options.note || "").trim() || null;
   const workflowBefore = repo.ensureWorkflowModel(itemId);
-  const currentProductionState = String(workflowBefore?.production_state || "").trim().toLowerCase();
-  const currentPublicationState = String(workflowBefore?.publication_state || "").trim().toLowerCase() || "draft";
-
-  if (currentProductionState === "ready_for_publish") {
-    repo.upsertWorkflowModel(
-      itemId,
-      {
-        production_state: "completed",
-        publication_state: currentPublicationState || "approved",
-        last_transition_note: note,
-      },
-      actor,
-      {
-        actor_role: actorRole,
-        reason_code: `${reasonCode}_intermediate`,
-      }
-    );
-  }
 
   return repo.upsertWorkflowModel(
     itemId,
@@ -3389,6 +3449,15 @@ function readUserAuthSyncProjection(profileJson) {
   };
 }
 
+function isActiveDirectoryUserProjection(row) {
+  const profile = parseObjectJson(row?.profile_json);
+  const authSync = parseObjectJson(profile?._auth_sync);
+  const isBackendProjection = String(authSync?.provider || "").trim().toLowerCase() === "backend"
+    && Number(authSync?.user_id || 0) > 0;
+  if (!isBackendProjection) return true;
+  return authSync?.directory_active === true;
+}
+
 function isPlaceholderUserEmail(value) {
   const email = String(value || "").trim().toLowerCase();
   return !email || email.endsWith("@example.com") || email.includes("your-admin-email");
@@ -3402,6 +3471,7 @@ function listLocalUsersByProjectedBackendUserId(backendUserId) {
     .all();
   const matches = [];
   for (const row of candidates) {
+    if (!isActiveDirectoryUserProjection(row)) continue;
     if (extractProjectedBackendUserId(row?.profile_json) === targetBackendUserId) {
       matches.push({
         id: Number(row?.id || 0) || null,
@@ -4382,6 +4452,7 @@ function parseJsonLike(raw) {
 async function buildAiCollectQueries(topic, category, lang = "th", maxQueries = 5) {
   const safeTopic = String(topic || "").trim();
   if (!safeTopic) return [];
+  const aiConfig = resolveAiFeatureConfig(getEffectiveAiConfig(), "aiDiscovery");
   if (!aiConfig?.enabled || !aiConfig?.apiKey) return [];
 
   const prompt = [
@@ -5441,6 +5512,7 @@ app.use("/api/v2/transport", createTransportV2Router({
   db,
   dirs,
   logAudit: (...args) => repo.logAudit(...args),
+  getAiConfig: () => getEffectiveAiConfig(),
 }));
 app.use("/api/mcp", createCollectorMcpRouter({
   repo,
@@ -5648,6 +5720,7 @@ app.get("/api/users", requireAuth, safeAsync(async (req, res) => {
     return;
   }
 
+  rows = rows.filter((row) => isActiveDirectoryUserProjection(row));
   const avatarUrlByAssetId = buildUserAvatarUrlMap(rows);
   res.json({ items: rows.map((row) => stripUserSecret(row, avatarUrlByAssetId)) });
 }));
@@ -5715,12 +5788,7 @@ app.get("/api/users/assignable", requireRole("owner", "admin", "user"), safeAsyn
   rows = rows.filter((row) => {
     const normalizedRole = String(row?.role || "").trim().toLowerCase();
     if (!allowedRoles.has(normalizedRole)) return false;
-    const profile = parseObjectJson(row?.profile_json);
-    const authSync = parseObjectJson(profile?._auth_sync);
-    const isBackendProjection = String(authSync?.provider || "").trim().toLowerCase() === "backend"
-      && Number(authSync?.user_id || 0) > 0;
-    if (!isBackendProjection) return true;
-    return authSync?.directory_active === true;
+    return isActiveDirectoryUserProjection(row);
   });
   const avatarUrlByAssetId = buildUserAvatarUrlMap(rows);
   res.json({
@@ -5868,27 +5936,71 @@ app.delete("/api/users/:id", requireRole("owner"), (req, res) => {
 });
 
 app.get("/api/config", requireRole("owner"), (_req, res) => {
+  const featureRows = listAiFeaturePolicyRowsForOwner();
   res.json({
     ai: {
-      provider: aiConfig.provider,
-      model: aiConfig.model,
-      enabled: aiConfig.enabled,
+      provider: null,
+      model: null,
+      policy_mode: "feature_based",
+      enabled: featureRows.some((row) => Boolean(row?.provider) && Boolean(row?.model)),
+      policies: featureRows,
     },
     storage_mode: "local",
+  });
+});
+
+app.get("/api/ai-feature-policies", requireRole("owner"), (_req, res) => {
+  const items = listAiFeaturePolicyRowsForOwner();
+  res.json({
+    items,
+    policy_catalog: AI_POLICY_CATALOG.map((row) => ({
+      key: row.key,
+      label: row.label,
+      provider: row.provider,
+      model: row.model,
+    })),
+  });
+});
+
+app.put("/api/ai-feature-policies/:featureKey", requireRole("owner"), (req, res) => {
+  const featureKey = String(req.params.featureKey || "").trim();
+  const featureDef = AI_FEATURE_BY_KEY.get(featureKey);
+  if (!featureDef) {
+    res.status(404).json({ error: "Unknown AI feature" });
+    return;
+  }
+  const policyKey = String(req.body?.policy_key || "").trim();
+  if (!AI_POLICY_BY_KEY.has(policyKey)) {
+    res.status(400).json({ error: "Unknown AI policy" });
+    return;
+  }
+  const oldRow = repo.getAiFeaturePolicy(featureKey);
+  const saved = repo.upsertAiFeaturePolicy(featureKey, {
+    policy_key: policyKey,
+    updated_by: actorEmail(req),
+  });
+  repo.logAudit(actorEmail(req), "ai_feature_policy.update", "ai_feature_policy", featureKey, {
+    feature_key: featureKey,
+    old_policy_key: oldRow?.policy_key || null,
+    new_policy_key: policyKey,
+  });
+  res.json({
+    ok: true,
+    item: normalizeAiFeaturePolicyForResponse(saved),
   });
 });
 
 function normalizeAgentProfileForResponse(row, definition) {
   const def = definition || AGENT_PROFILE_DEFINITIONS[String(row?.agent_key || "").trim().toLowerCase()] || null;
   if (!def) return null;
-  const savedText = String(row?.profile_text || "").trim();
-  const profileText = savedText || def.default_profile_text;
+    // savedText: null means no DB row exists; empty string means owner intentionally cleared the profile
+  const savedText = (row && typeof row.profile_text === "string") ? row.profile_text : null;
   return {
     agent_key: def.agent_key,
     display_name: String(row?.display_name || def.display_name).trim() || def.display_name,
-    profile_text: profileText,
+    profile_text: savedText ?? def.default_profile_text,
     default_profile_text: def.default_profile_text,
-    is_default: !savedText,
+    is_default: savedText == null,
     is_enabled: row?.is_enabled == null ? true : Boolean(row.is_enabled),
     updated_by: row?.updated_by || null,
     updated_at: row?.updated_at || null,
@@ -5929,11 +6041,10 @@ app.put("/api/agent-profiles/:agentKey", requireRole("owner"), (req, res) => {
     res.status(404).json({ error: "Unknown agent profile" });
     return;
   }
-  const profileText = String(req.body?.profile_text || "").trim();
-  if (!profileText) {
-    res.status(400).json({ error: "profile_text is required" });
-    return;
-  }
+    // Accept raw profile_text including empty string (owner intentionally clears)
+    const profileText = req.body && typeof req.body.profile_text === "string"
+      ? req.body.profile_text
+      : "";
   if (profileText.length > AGENT_PROFILE_MAX_LENGTH) {
     res.status(400).json({ error: `profile_text must be ${AGENT_PROFILE_MAX_LENGTH} characters or fewer` });
     return;
@@ -5957,9 +6068,9 @@ app.post("/api/agent-profiles/:agentKey/reset", requireRole("owner"), (req, res)
     res.status(404).json({ error: "Unknown agent profile" });
     return;
   }
-  const saved = repo.upsertAgentProfile(def.agent_key, {
+    const saved = repo.upsertAgentProfile(def.agent_key, {
     display_name: def.display_name,
-    profile_text: "",
+    profile_text: def.default_profile_text,
     is_enabled: true,
     updated_by: actorEmail(req),
   });
@@ -7484,6 +7595,7 @@ app.post("/api/items/:id/execution-channels/:channel/generate", requireRole("adm
     return;
   }
   try {
+    const aiConfig = getEffectiveAiConfig();
     const result = await generateExecutionChannelForItem(repo, id, channel, {
       actorEmail: actorEmail(req),
       actorRole: actorPolicyRole(req),
@@ -9863,6 +9975,7 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
   const currentFieldPack = repo.getCurrentFieldPackByItem(id);
 
   try {
+    const aiConfig = getEffectiveAiConfig();
     const agentEngine = createAgentGenerationEngine(aiConfig);
     const fieldPackAgentProfile = getEffectiveAgentProfile(FIELD_PACK_AGENT_KEY);
     const agentInput = {
@@ -10134,6 +10247,9 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
   }
 
   try {
+    const aiConfig = getEffectiveAiConfig();
+    const workflowBeforeRelease = repo.ensureWorkflowModel(id);
+    const publishedArticleBefore = repo.getPublishedArticleByItem(id);
     const autoSync = String(req.query?.sync_backend || "1") !== "0";
     if (autoSync && !hasExplicitCollectorPublicBaseUrl()) {
       res.status(409).json({
@@ -10155,19 +10271,41 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
     if (autoSync) {
       assertCollectorIntegrationReadiness(collectorIntegrationConfig(), ["publish_sync_to_backend"]);
       const payload = buildBackendSyncPayload({ contentItemId: id });
-      const syncRes = await fetch(`${backendApiBase}/lifecycle/import-published`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-lifecycle-token": backendSyncToken,
-        },
-        body: JSON.stringify(payload),
-      });
+      const simulateSyncFailure = String(req.query?.simulate_sync_failure || "0") === "1";
+      const simulateSyncSuccess = String(req.query?.simulate_sync_success || "0") === "1";
+      if ((simulateSyncFailure || simulateSyncSuccess) && !canUseLocalReleaseSyncSimulation()) {
+        res.status(403).json({ error: "release sync simulation is not allowed in this environment" });
+        return;
+      }
+      let syncStatus = 0;
+      let syncOk = false;
+      let body = { error: "Invalid backend sync response" };
 
-      const body = await syncRes.json().catch(() => ({ error: "Invalid backend sync response" }));
+      if (simulateSyncFailure) {
+        syncStatus = 502;
+        syncOk = false;
+        body = { error: "Simulated backend sync failure" };
+      } else if (simulateSyncSuccess) {
+        syncStatus = 200;
+        syncOk = true;
+        body = { ok: true, simulated: true, message: "Simulated backend sync success" };
+      } else {
+        const syncRes = await fetch(`${backendApiBase}/lifecycle/import-published`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-lifecycle-token": backendSyncToken,
+          },
+          body: JSON.stringify(payload),
+        });
+        syncStatus = Number(syncRes.status || 0) || 500;
+        syncOk = Boolean(syncRes.ok);
+        body = await syncRes.json().catch(() => ({ error: "Invalid backend sync response" }));
+      }
+
       backendSync = {
-        ok: syncRes.ok,
-        status: syncRes.status,
+        ok: syncOk,
+        status: syncStatus,
         result: body,
         payload_summary: {
           published: payload.published.length,
@@ -10175,10 +10313,58 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
         },
       };
 
-      if (!syncRes.ok) {
-        res.status(syncRes.status).json({
+      if (!syncOk) {
+        repo.logAudit(actorEmail(req), "publish.sync_backend.failed", "content_item", String(id), {
+          content_item_id: id,
+          status: syncStatus,
+          error: body?.error || "Backend sync failed",
+          payload_summary: backendSync.payload_summary,
+        });
+
+        let compensationResult = null;
+        try {
+          compensationResult = compensateReleaseAfterSyncFailure(repo, actorEmail(req), {
+            content_item_id: id,
+            workflow_before: workflowBeforeRelease,
+            published_article_before: publishedArticleBefore,
+            actor_role: actorPolicyRole(req),
+            reason_code: "publish_sync_compensation",
+            note: `compensate release-main after backend sync failed (status=${syncStatus})`,
+          });
+          repo.logAudit(actorEmail(req), "publish.compensation.success", "content_item", String(id), {
+            content_item_id: id,
+            sync_status: syncStatus,
+            workflow_after: compensationResult?.workflow_after || null,
+            published_article_status: compensationResult?.published_article_status || null,
+          });
+        } catch (compErr) {
+          const compensationError = String(compErr?.message || "publish compensation failed");
+          repo.logAudit(actorEmail(req), "publish.compensation.failed", "content_item", String(id), {
+            content_item_id: id,
+            sync_status: syncStatus,
+            sync_error: body?.error || "Backend sync failed",
+            compensation_error: compensationError,
+          });
+          res.status(500).json({
+            error: "Backend sync failed and compensation failed",
+            backend_sync: backendSync,
+            compensation: {
+              ok: false,
+              error: compensationError,
+            },
+            result,
+            readiness: buildExportReadiness(id),
+          });
+          return;
+        }
+
+        res.status(syncStatus).json({
           error: body?.error || "Backend sync failed",
           backend_sync: backendSync,
+          compensation: {
+            ok: true,
+            result: compensationResult,
+          },
           result,
           readiness: buildExportReadiness(id),
         });
@@ -10360,6 +10546,7 @@ app.post("/api/items/:id/recover-problem-translations", requireRole("admin", "ow
   }
 
   try {
+    const aiConfig = getEffectiveAiConfig();
     const result = await rerunProblemTranslations(repo, actorEmail(req), { aiConfig, content_item_id: id });
     const readiness = buildExportReadiness(id);
     repo.logAudit(actorEmail(req), "translation.recover_problematic", "content_item", String(id), result);
@@ -10384,6 +10571,7 @@ app.post("/api/items/:id/generate-translations", requireRole("admin", "owner"), 
   }
 
   try {
+    const aiConfig = getEffectiveAiConfig();
     const result = await rerunProblemTranslations(repo, actorEmail(req), { aiConfig, content_item_id: id });
     const readiness = buildExportReadiness(id);
     repo.logAudit(actorEmail(req), "translation.generate", "content_item", String(id), result);
@@ -10500,6 +10688,127 @@ app.get("/api/admin/deleted-items/:id/cleanup-check", requireRole("owner"), (req
     ok: true,
     item: buildDeletedItemCleanupReport(row),
   });
+});
+
+app.post("/api/items/:id/field-pack/return-to-clean", requireRole("owner", "admin", "user"), workflowRateLimit, async (req, res) => {
+  const id = Number(req.params.id || 0);
+  if (!id) {
+    res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureArticleComposerEditAccess(req, res, item)) {
+    return;
+  }
+  if (!ensurePrepItemEditAccess(req, res, item)) {
+    return;
+  }
+
+  try {
+    const result = returnFieldPackToClean(repo, actorEmail(req), {
+      content_item_id: id,
+      notes: req.body?.comment,
+      actor_role: actorPolicyRole(req),
+    });
+    res.json(result);
+  } catch (err) {
+    const msg = String(err?.message || "Cannot return field pack to clean");
+    const status = /current field pack not found/i.test(msg)
+      ? 404
+      : /notes\/reason is required|content_item_id is required/i.test(msg)
+        ? 400
+        : /active assignment|publish-ready|published state/i.test(msg)
+          ? 409
+          : 400;
+    res.status(status).json({ error: msg });
+  }
+});
+
+app.get("/api/admin/deleted-items/:id/references", requireRole("owner"), (req, res) => {
+  const id = Number(req.params.id || 0) || 0;
+  if (!id) {
+    res.status(400).json({ error: "invalid item id" });
+    return;
+  }
+  try {
+    const result = repo.getDeletedItemReferenceGroups(id);
+    res.json(result);
+  } catch (err) {
+    const statusCode = Number(err?.statusCode || 0) || 400;
+    if (statusCode === 404) {
+      res.status(404).json({ error: "deleted item not found" });
+      return;
+    }
+    res.status(400).json({ error: err instanceof Error ? err.message : "invalid request" });
+  }
+});
+
+app.post("/api/admin/deleted-items/:id/references/cleanup", requireRole("owner"), (req, res) => {
+  const id = Number(req.params.id || 0) || 0;
+  if (!id) {
+    res.status(400).json({ error: "invalid item id" });
+    return;
+  }
+  const groups = Array.isArray(req.body?.groups) ? req.body.groups : [];
+  const reason = String(req.body?.reason || "").trim();
+  try {
+    const cleanupResult = repo.cleanupDeletedItemReferenceGroups({
+      itemId: id,
+      groups,
+      actorEmail: actorEmail(req),
+      reason,
+    });
+    const deletedAssetIds = Array.isArray(cleanupResult?.deleted_asset_ids) ? cleanupResult.deleted_asset_ids : [];
+    let assetsCleaned = 0;
+    const skipped_assets = [];
+    for (const assetId of deletedAssetIds) {
+      const result = deleteAssetIfUnused(assetId);
+      if (result?.deleted_asset) assetsCleaned += 1;
+      if (!result?.deleted_asset) {
+        skipped_assets.push({
+          asset_id: Number(assetId || 0) || 0,
+          blocked_references: Array.isArray(result?.blocked_references) ? result.blocked_references : [],
+        });
+      }
+    }
+    const remainingGroups = repo.getDeletedItemReferenceGroups(id)?.groups || [];
+    const normalizedRemainingGroups = remainingGroups.map((entry) => ({
+      key: entry.key,
+      count: Number(entry.count || 0) || 0,
+      label_th: entry.label_th,
+      category: entry.category,
+      resolution_hint: entry.resolution_hint || null,
+    }));
+    res.json({
+      ok: true,
+      item_id: id,
+      cleaned: cleanupResult?.cleaned || {},
+      assets_cleaned: assetsCleaned,
+      remaining_groups: normalizedRemainingGroups,
+      remaining_blockers: normalizedRemainingGroups.filter((entry) => entry.category === "hard_blocker"),
+      skipped_assets,
+    });
+  } catch (err) {
+    const statusCode = Number(err?.statusCode || 0) || 400;
+    if (statusCode === 404) {
+      res.status(404).json({ error: "deleted item not found" });
+      return;
+    }
+    if (statusCode === 400 && String(err?.message || "") === "group not eligible for cleanup") {
+      res.status(400).json({
+        error: "group not eligible for cleanup",
+        group: String(err?.group || "").trim().toLowerCase() || null,
+        category: String(err?.category || "").trim().toLowerCase() || "invalid_group",
+      });
+      return;
+    }
+    res.status(400).json({ error: err instanceof Error ? err.message : "cleanup failed" });
+  }
 });
 
 app.post("/api/admin/deleted-items/:id/purge", requireRole("owner"), (req, res) => {
@@ -10853,6 +11162,7 @@ app.post("/api/run/ai-draft", requireRole("admin", "user"), workflowRateLimit, a
   }
 
   try {
+    const aiConfig = getEffectiveAiConfig();
     const result = await runAiDraftStage(repo, actorEmail(req), { mode, allowFallback, aiConfig, contentItemId });
 
     if ((result.blocked_items || []).length > 0) {
@@ -10950,22 +11260,6 @@ app.post("/api/web-review-feedback", async (req, res) => {
       String(workflowBefore?.publication_state || "").trim().toLowerCase() === "published"
         ? "unpublished"
         : "draft";
-    const currentProductionState = String(workflowBefore?.production_state || "").trim().toLowerCase();
-    if (currentProductionState === "ready_for_publish") {
-      repo.upsertWorkflowModel(
-        sourceContentItemId,
-        {
-          production_state: "completed",
-          publication_state: String(workflowBefore?.publication_state || "").trim().toLowerCase() || "approved",
-          last_transition_note: reviewNote,
-        },
-        actor,
-        {
-          actor_role: "admin",
-          reason_code: "web_review_needs_revision_intermediate",
-        }
-      );
-    }
     const nextProductionState = "needs_revision";
     repo.upsertWorkflowModel(
       sourceContentItemId,

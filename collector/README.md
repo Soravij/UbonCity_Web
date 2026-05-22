@@ -131,9 +131,10 @@ See: `database/schema.sql`
 
 ## AI model (optional)
 - Default deterministic draft works without external AI.
-- To enable real AI draft from UI button `Generate with AI`, set:
-  - `AI_PROVIDER=openai`
-  - `AI_MODEL=gpt-5-mini`
+- To enable real AI draft from UI button `Generate with AI`, set credentials only:
   - `OPENAI_API_KEY=...`
   - `OPENAI_BASE_URL=https://api.openai.com/v1`
+  - `GOOGLE_AI_API_KEY=...`
+  - `GOOGLE_AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta`
+- Feature-to-model selection is controlled from the owner panel inside collector, not from env.
 - If AI call fails, system automatically falls back to deterministic draft.
