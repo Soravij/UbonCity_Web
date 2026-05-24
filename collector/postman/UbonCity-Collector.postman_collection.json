@@ -1,0 +1,174 @@
+{
+    "info":  {
+                 "name":  "UbonCity Collector API",
+                 "_postman_id":  "c4e8f9c8-4a6e-4f5e-b5d1-collector-auto-token",
+                 "description":  "Collector app API with auto token setup from login response. SECURITY WARNING: Replace placeholder credentials with secure secrets. Weak/default passwords must not be used.",
+                 "schema":  "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+             },
+    "item":  [
+                 {
+                     "name":  "Auth - Login (Auto set token)",
+                     "event":  [
+                                   {
+                                       "listen":  "test",
+                                       "script":  {
+                                                      "type":  "text/javascript",
+                                                      "exec":  [
+                                                                   "pm.test(\u0027Login success\u0027, function () {",
+                                                                   "  pm.response.to.have.status(200);",
+                                                                   "});",
+                                                                   "const json = pm.response.json();",
+                                                                   "if (json \u0026\u0026 json.token) {",
+                                                                   "  pm.collectionVariables.set(\u0027token\u0027, json.token);",
+                                                                   "  console.log(\u0027Token saved to collection variable: token\u0027);",
+                                                                   "} else {",
+                                                                   "  console.warn(\u0027Token not found in login response\u0027);",
+                                                                   "}"
+                                                               ]
+                                                  }
+                                   }
+                               ],
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\n  \"email\": \"{{OWNER_EMAIL}}\",\n  \"password\": \"{{OWNER_PASSWORD}}\"\n}"
+                                              },
+                                     "url":  {
+                                                 "raw":  "{{baseUrl}}/api/auth/login",
+                                                 "host":  [
+                                                              "{{baseUrl}}"
+                                                          ],
+                                                 "path":  [
+                                                              "api",
+                                                              "auth",
+                                                              "login"
+                                                          ]
+                                             }
+                                 }
+                 },
+                 {
+                     "name":  "Health",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+
+                                                ],
+                                     "url":  {
+                                                 "raw":  "{{baseUrl}}/api/health",
+                                                 "host":  [
+                                                              "{{baseUrl}}"
+                                                          ],
+                                                 "path":  [
+                                                              "api",
+                                                              "health"
+                                                          ]
+                                             }
+                                 }
+                 },
+                 {
+                     "name":  "Source Adapters",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "Authorization",
+                                                        "value":  "Bearer {{token}}"
+                                                    }
+                                                ],
+                                     "url":  {
+                                                 "raw":  "{{baseUrl}}/api/source-adapters",
+                                                 "host":  [
+                                                              "{{baseUrl}}"
+                                                          ],
+                                                 "path":  [
+                                                              "api",
+                                                              "source-adapters"
+                                                          ]
+                                             }
+                                 }
+                 },
+                 {
+                     "name":  "Collect - Google Maps (AI discovery)",
+                     "request":  {
+                                     "method":  "POST",
+                                     "header":  [
+                                                    {
+                                                        "key":  "Content-Type",
+                                                        "value":  "application/json"
+                                                    },
+                                                    {
+                                                        "key":  "Authorization",
+                                                        "value":  "Bearer {{token}}"
+                                                    }
+                                                ],
+                                     "body":  {
+                                                  "mode":  "raw",
+                                                  "raw":  "{\n  \"adapter\": \"google_maps\",\n  \"ai_discovery\": true,\n  \"topic\": \"คาเฟ่อุบลราชธานีวิวแม่น้ำ\",\n  \"category\": \"cafes\",\n  \"lang\": \"th\",\n  \"max_queries\": 5,\n  \"auto_import\": true,\n  \"source_label\": \"postman-collect\",\n  \"payload\": {\n    \"language\": \"th\",\n    \"region\": \"th\",\n    \"max_results_per_query\": 10,\n    \"location\": { \"lat\": 15.244, \"lng\": 104.847 },\n    \"radius\": 25000\n  }\n}"
+                                              },
+                                     "url":  {
+                                                 "raw":  "{{baseUrl}}/api/collect",
+                                                 "host":  [
+                                                              "{{baseUrl}}"
+                                                          ],
+                                                 "path":  [
+                                                              "api",
+                                                              "collect"
+                                                          ]
+                                             }
+                                 }
+                 },
+                 {
+                     "name":  "Items (raw)",
+                     "request":  {
+                                     "method":  "GET",
+                                     "header":  [
+                                                    {
+                                                        "key":  "Authorization",
+                                                        "value":  "Bearer {{token}}"
+                                                    }
+                                                ],
+                                     "url":  {
+                                                 "raw":  "{{baseUrl}}/api/items?status=raw",
+                                                 "host":  [
+                                                              "{{baseUrl}}"
+                                                          ],
+                                                 "path":  [
+                                                              "api",
+                                                              "items"
+                                                          ],
+                                                 "query":  [
+                                                               {
+                                                                   "key":  "status",
+                                                                   "value":  "raw"
+                                                               }
+                                                           ]
+                                             }
+                                 }
+                 }
+             ],
+    "variable":  [
+                     {
+                         "key":  "baseUrl",
+                         "value":  "http://localhost:5070"
+                     },
+                     {
+                         "key":  "token",
+                         "value":  ""
+                     },
+                     {
+                         "key":  "OWNER_EMAIL",
+                         "value":  "owner@example.com"
+                     },
+                     {
+                         "key":  "OWNER_PASSWORD",
+                         "value":  "REPLACE_WITH_STRONG_SECRET"
+                     }
+                 ]
+}

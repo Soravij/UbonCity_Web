@@ -1,0 +1,16 @@
+﻿[
+  {
+    "source_name": "Google Maps",
+    "source_url": "https://maps.google.com/?cid=123456",
+    "type": "place",
+    "category": "cafes",
+    "title": "Cafe Example Ubon",
+    "description": "Specialty coffee and cozy vibe in Ubon.",
+    "image": "https://example.com/cafe.jpg",
+    "latitude": 15.2447,
+    "longitude": 104.8472,
+    "google_place_id": "ChIJxxxx",
+    "map_url": "https://maps.google.com/?q=15.2447,104.8472",
+    "tags": ["cafe", "ubon"]
+  }
+]

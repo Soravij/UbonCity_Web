@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UAT E2E Master Checklist</title>
+  <style>
+    :root {
+      --text: #1a1a1a;
+      --line: #cfcfcf;
+      --line-strong: #9a9a9a;
+      --font: "TH Sarabun New", "Sarabun", "Noto Sans Thai", "Segoe UI", sans-serif;
+    }
+    @page { size: A4; margin: 8mm; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12.5px;
+      line-height: 1.24;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .sheet { width: 100%; max-width: 190mm; margin: 0 auto; padding: 2mm; box-sizing: border-box; }
+    h1, h2 { margin: 0; line-height: 1.2; }
+    h1 { font-size: 22px; margin-bottom: 2px; }
+    h2 { font-size: 15px; margin-top: 6px; margin-bottom: 2px; border-bottom: 1px solid var(--line-strong); padding-bottom: 1px; }
+    .note { margin: 2px 0 1px; font-size: 11.5px; color: #555; }
+    .mono { font-family: Consolas, "Courier New", monospace; font-size: 11px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid var(--line); padding: 2px 4px; vertical-align: top; word-wrap: break-word; }
+    th { background: #f5f5f5; font-weight: 700; text-align: left; }
+    .meta td { background: #fff; }
+    .meta-label { width: 15%; font-weight: 700; white-space: nowrap; }
+    .meta-value { width: 35%; color: #555; }
+    .w-item { width: 42%; }
+    .w-role { width: 7%; text-align: center; }
+    .w-result { width: 14%; }
+    .w-proof { width: 23%; }
+    .w-id { width: 5%; text-align: center; }
+    .w-sev { width: 8%; }
+    .w-owner { width: 11%; }
+    .check { display: inline-block; width: 11px; height: 11px; border: 1.4px solid #333; vertical-align: middle; }
+    .section { margin-bottom: 2px; }
+    .print-btn { margin: 0 0 2px auto; display: inline-block; border: 1px solid #444; border-radius: 6px; padding: 2px 8px; background: #fff; cursor: pointer; font-size: 11px; }
+    @media print { .print-btn { display: none; } .sheet { padding: 0; } }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <button class="print-btn" onclick="window.print()">Print</button>
+    <h1>UAT E2E Master Checklist</h1>
+    <p class="note">ชุดนี้เน้นทดสอบใช้งานจริงครบ flow: Owner/Admin/User full cycle + assign รอบใหญ่ + Freelance/Editor revision loop + internal matrix</p>
+
+    <table class="meta">
+      <tr><td class="meta-label">Date</td><td class="meta-value">____________________</td><td class="meta-label">Environment</td><td class="meta-value">____________________</td></tr>
+      <tr><td class="meta-label">Build/Commit</td><td class="meta-value">____________________</td><td class="meta-label">Tester Lead</td><td class="meta-value">____________________</td></tr>
+    </table>
+
+    <section class="section">
+      <h2>Phase A: Owner Full Cycle (Raw -> Backend Display)</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>สร้างงานจาก raw data source สำเร็จ</td><td><span class="check"></span></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>วิ่ง workflow จนแสดงผลบน backend ได้</td><td><span class="check"></span></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>ข้อมูลที่แสดงบน backend ตรงกับที่คาด (title/status/time)</td><td><span class="check"></span></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Phase B: Admin & User Full Cycle (Raw -> Backend Display)</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>Admin ทำ full cycle สำเร็จ</td><td></td><td><span class="check"></span></td><td></td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>User ทำ full cycle สำเร็จ</td><td></td><td></td><td><span class="check"></span></td><td></td><td></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Phase C: Assignment Rounds</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>Owner assign งานให้ Editor/Freelance ภายใต้การดูแลได้</td><td><span class="check"></span></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>Admin assign งานให้ Editor/Freelance ภายใต้การดูแลได้</td><td></td><td><span class="check"></span></td><td></td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>User assign งานให้ Editor/Freelance ภายใต้การดูแลได้</td><td></td><td></td><td><span class="check"></span></td><td></td><td></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Phase D: Freelance Loop</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>Freelance รับงาน -> ส่งกลับรอบแรกสำเร็จ</td><td></td><td></td><td></td><td></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>Freelance ได้ revision -> แก้ไข -> ส่งกลับรอบสองสำเร็จ</td><td></td><td></td><td></td><td></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>User รับงานจาก freelance ไปทำต่อได้</td><td></td><td></td><td><span class="check"></span></td><td></td><td></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Phase E: Editor Loop</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>Editor เขียน -> ส่งงานรอบแรกสำเร็จ</td><td></td><td></td><td></td><td><span class="check"></span></td><td></td><td></td><td></td></tr>
+        <tr><td>Editor ได้ revision -> แก้ไข -> ส่งงานรอบสองสำเร็จ</td><td></td><td></td><td></td><td><span class="check"></span></td><td></td><td></td><td></td></tr>
+        <tr><td>User รับงานจาก editor ไปทำต่อได้</td><td></td><td></td><td><span class="check"></span></td><td></td><td></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Phase F: Internal Matrix (Owner/Admin/User)</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>Owner/Admin/User เข้า surfaces ที่ควรเข้าได้ครบ</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>Owner/Admin/User ถูกกันจาก action เกินสิทธิ์</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Phase G: เพิ่มเติม (แนะนำ)</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>session expiry recovery ใช้งานได้</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>deep-link / return_to ถูกต้อง</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Failure Log</h2>
+      <table>
+        <tr><th class="w-id">ID</th><th class="w-sev">Severity</th><th class="w-role">Role</th><th>Phase</th><th>URL/Page</th><th>Steps / Expected / Actual</th><th class="w-owner">Owner</th></tr>
+        <tr><td class="w-id">1</td><td></td><td></td><td></td><td></td><td style="height:22px"></td><td></td></tr>
+        <tr><td class="w-id">2</td><td></td><td></td><td></td><td></td><td style="height:22px"></td><td></td></tr>
+        <tr><td class="w-id">3</td><td></td><td></td><td></td><td></td><td style="height:22px"></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Release Gate</h2>
+      <table>
+        <tr><th>เกณฑ์</th><th>สถานะ</th><th>หมายเหตุ</th></tr>
+        <tr><td>ไม่มี P1 ค้าง</td><td>[ ]</td><td></td></tr>
+        <tr><td>P2 มี workaround ชัดเจนหรือปิดครบ</td><td>[ ]</td><td></td></tr>
+        <tr><td>Phase A-F ผ่านครบ</td><td>[ ]</td><td></td></tr>
+        <tr><td>หลักฐานครบและตรวจสอบย้อนกลับได้</td><td>[ ]</td><td></td></tr>
+      </table>
+      <table>
+        <tr><td style="width:16%; font-weight:700;">Decision</td><td style="width:20%;">[ ] GO</td><td style="width:20%;">[ ] NO-GO</td><td style="width:22%;">Approved by</td><td style="width:22%;">____________________</td></tr>
+        <tr><td colspan="4">Date</td><td>____________________</td></tr>
+      </table>
+    </section>
+  </div>
+</body>
+</html>
