@@ -1,4 +1,4 @@
-﻿# Deploy Guide (GitHub + VPS/Cloud) - v1.1.1
+# Deploy Guide (GitHub + VPS/Cloud) - v1.1.1
 
 This project has 3 parts:
 - `backend` (Express + MySQL)
@@ -156,3 +156,11 @@ https://your-admin-domain.com/
 5. Deploy frontend
 6. Deploy admin
 7. Login admin and test create/approve flow
+## 9. Collector (internal-only)
+- `collector-app` is intended for private/internal operations only.
+- Bind collector to loopback or private interface only (`COLLECTOR_BIND_HOST=127.0.0.1` by default).
+- Do not open collector port to the public internet.
+- If reverse proxy is used, restrict collector route by VPN/private network and IP allowlist.
+- Keep `CORS_ALLOWED_ORIGINS` explicit and internal; never use wildcard `*`.
+
+
