@@ -48,3 +48,11 @@ places_mojibake_literals.txt
 tmp-release-dom.html
 tmp-review-dom.html
 tmp-thai-test.txt
+
+# Local helper and editor artifacts
+.continue/
+.vscode/
+collector/server/public/_fix.mjs
+collector/tmp-tests.ps1
+frontend/tmp-playwright-preview.cjs
+tmp-runtime-probe.cjs
