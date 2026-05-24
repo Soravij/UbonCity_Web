@@ -1,55 +1,95 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 
-const PREFERENCES = ["system", "dark", "light"];
+const MODES = new Set(["dark", "light"]);
 
-function sanitizePreference(value) {
-  return PREFERENCES.includes(value) ? value : "system";
+function sanitizeMode(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return MODES.has(text) ? text : null;
 }
 
-function readCurrentPreference() {
-  if (typeof window === "undefined") return "system";
-  const attr = document.documentElement.getAttribute("data-theme-preference");
-  if (attr) return sanitizePreference(attr);
-  try {
-    return sanitizePreference(localStorage.getItem("ubon_theme_preference"));
-  } catch {
-    return "system";
+function readInitialMode() {
+  if (typeof window === "undefined") return "light";
+
+  const root = document.documentElement;
+  const preference = root.getAttribute("data-theme-preference");
+  const theme = root.getAttribute("data-theme");
+
+  const fromPreference = sanitizeMode(preference);
+  if (fromPreference) return fromPreference;
+
+  const fromTheme = sanitizeMode(theme);
+  if (fromTheme) return fromTheme;
+
+  if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    return "dark";
   }
+
+  return "light";
 }
 
 export default function ThemeModeControl() {
-  const [preference, setPreference] = useState(() => readCurrentPreference());
+  const toggleId = useId();
+  const [mode, setMode] = useState(() => readInitialMode());
+
+  useEffect(() => {
+    function handleThemeChange(event) {
+      const nextMode = sanitizeMode(event?.detail?.resolvedTheme) || readInitialMode();
+      setMode(nextMode);
+    }
+
+    window.addEventListener("ubon-theme-change", handleThemeChange);
+    return () => window.removeEventListener("ubon-theme-change", handleThemeChange);
+  }, []);
 
   function handleChange(event) {
-    const nextPreference = sanitizePreference(event.target.value);
-    setPreference(nextPreference);
+    const nextMode = event.target.checked ? "dark" : "light";
+    setMode(nextMode);
+
     const api = window.__UBON_THEME__;
     if (api && typeof api.setPreference === "function") {
-      api.setPreference(nextPreference);
-    } else {
-      document.documentElement.setAttribute("data-theme-preference", nextPreference);
-      document.documentElement.setAttribute("data-theme", nextPreference === "system" ? "light" : nextPreference);
+      api.setPreference(nextMode);
+      return;
     }
+
+    document.documentElement.setAttribute("data-theme-preference", nextMode);
+    document.documentElement.setAttribute("data-theme", nextMode);
   }
 
   return (
-    <div className="theme-mode-control" role="group" aria-label="Theme mode">
-      <label htmlFor="theme-mode-select" className="theme-mode-label">
-        ธีม
+    <div className="theme-mode-control theme-switch-control" role="group" aria-label="Theme mode">
+      <label className="switch" htmlFor={toggleId}>
+        <input
+          id={toggleId}
+          type="checkbox"
+          checked={mode === "dark"}
+          onChange={handleChange}
+          aria-label="Theme mode toggle"
+        />
+        <div className="slider round">
+          <div className="sun-moon">
+            <svg id="moon-dot-1" className="moon-dot" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="moon-dot-2" className="moon-dot" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="moon-dot-3" className="moon-dot" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="light-ray-1" className="light-ray" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="light-ray-2" className="light-ray" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="light-ray-3" className="light-ray" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-1" className="cloud-dark" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-2" className="cloud-dark" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-3" className="cloud-dark" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-4" className="cloud-light" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-5" className="cloud-light" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-6" className="cloud-light" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+          </div>
+          <div className="stars">
+            <svg id="star-1" className="star" viewBox="0 0 20 20"><path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" /></svg>
+            <svg id="star-2" className="star" viewBox="0 0 20 20"><path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" /></svg>
+            <svg id="star-3" className="star" viewBox="0 0 20 20"><path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" /></svg>
+            <svg id="star-4" className="star" viewBox="0 0 20 20"><path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" /></svg>
+          </div>
+        </div>
       </label>
-      <select
-        id="theme-mode-select"
-        className="theme-mode-select"
-        value={preference}
-        onChange={handleChange}
-        aria-label="เลือกโหมดธีม"
-      >
-        <option value="system">System</option>
-        <option value="dark">Dark</option>
-        <option value="light">Light</option>
-      </select>
     </div>
   );
 }

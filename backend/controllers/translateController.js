@@ -1,5 +1,5 @@
 import { SUPPORTED_CONTENT_LANGS, LANGUAGE_LABELS, normalizeContentLang } from "../constants/languages.js";
-import { previewTranslateWithRetry } from "../services/translationService.js";
+import { getBackendTranslationConfig, previewTranslateWithRetry } from "../services/translationService.js";
 import { LIMITS, cleanPlainText, cleanRichText } from "../validators/inputSanitizer.js";
 
 // Manual preview endpoint only.
@@ -62,14 +62,23 @@ export const previewTranslateManual = async (req, res) => {
         "Manual translation preview only. This endpoint is not used by draft/review/approve/publish/export lifecycle.",
     });
   } catch (err) {
+    const translationConfig = getBackendTranslationConfig();
+    const provider = translationConfig.provider;
+    const usesGoogle = provider === "google";
+    const missingKeyMsg = usesGoogle
+      ? "Translation unavailable: GOOGLE_AI_API_KEY is not configured. Please set your Google AI API key in backend environment variables."
+      : "Translation unavailable: OPENAI_API_KEY is not configured. Please set your OpenAI API key in backend environment variables.";
+    const hintMsg = usesGoogle
+      ? "If you're the admin, set GOOGLE_AI_API_KEY (or GEMINI_API_KEY) in your backend .env or hosting environment variables."
+      : "If you're the admin, set OPENAI_API_KEY in your backend .env or hosting environment variables.";
     return res.status(500).json({
-      error: err.message?.includes("OPENAI_API_KEY")
-        ? "Translation unavailable: OPENAI_API_KEY is not configured. Please set your OpenAI API key in the backend environment variables."
+      error: /OPENAI_API_KEY|GOOGLE_AI_API_KEY|GEMINI_API_KEY/i.test(String(err?.message || ""))
+        ? missingKeyMsg
         : "Internal server error",
       preview_only: true,
       manual_only: true,
       lifecycle_participation: "none",
-      hint: "If you're the admin, set OPENAI_API_KEY in your backend .env or hosting environment variables.",
+      hint: hintMsg,
     });
   }
 };

@@ -62,12 +62,12 @@ export default function DecisionSearchBar({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={placeholder}
-          className="min-w-0 flex-1 rounded-2xl border border-transparent bg-transparent px-4 py-3 text-sm text-[color:var(--theme-text)] outline-none placeholder:text-[color:var(--theme-text-muted)] focus:border-[color:var(--theme-primary)] focus:bg-white/70 focus:ring-2 focus:ring-[color:var(--theme-primary)]/20"
+          className="min-w-0 flex-1 rounded-2xl border border-transparent bg-transparent px-4 py-3 text-sm tracking-[0.012em] text-[color:var(--theme-text)] outline-none placeholder:tracking-[0.01em] placeholder:text-[color:var(--theme-text-muted)] focus:border-[color:var(--theme-primary)] focus:bg-white/70 focus:ring-2 focus:ring-[color:var(--theme-primary)]/20"
           aria-label={placeholder}
         />
         <button
           type="submit"
-          className="rounded-2xl border border-[color:var(--theme-primary)] bg-[color:var(--theme-primary)] px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_18px_color-mix(in_srgb,var(--theme-primary)_28%,transparent)] transition hover:bg-[color:var(--theme-primary-strong)]"
+          className="rounded-2xl border border-[color:var(--theme-primary)] bg-[color:var(--theme-primary)] px-5 py-3 text-sm font-semibold tracking-[0.012em] text-white shadow-[0_10px_18px_color-mix(in_srgb,var(--theme-primary)_28%,transparent)] transition hover:bg-[color:var(--theme-primary-strong)]"
         >
           {submitLabel}
         </button>
@@ -78,7 +78,7 @@ export default function DecisionSearchBar({
           <Link
             key={action.href}
             href={action.href}
-            className="interactive-tile rounded-full px-3.5 py-2 text-xs font-semibold text-[color:var(--theme-text)] transition hover:-translate-y-0.5"
+            className="interactive-tile rounded-full px-3.5 py-2 text-xs font-semibold tracking-[0.012em] text-[color:var(--theme-text)] transition hover:-translate-y-0.5"
           >
             {action.label}
           </Link>

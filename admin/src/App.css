@@ -3,7 +3,7 @@
 }
 
 #root {
-  --font-ui: "Inter", "IBM Plex Sans Thai", "Noto Sans Thai", "Noto Sans", "Segoe UI", sans-serif;
+  --font-ui: "Inter", "IBM Plex Sans Thai", sans-serif;
   --font-heading: var(--font-ui);
 }
 
@@ -19,6 +19,14 @@
   font-size: 14px;
   line-height: 1.6;
   font-weight: 400;
+}
+
+button,
+input,
+select,
+textarea,
+option {
+  font-family: var(--font-ui) !important;
 }
 
 h1,
@@ -1424,13 +1432,28 @@ th {
 
 .theme-mode-control {
   position: fixed;
-  right: 80px;
-  top: 14px;
+  --theme-zoom-factor: 1;
+  right: 98px;
+  top: 12px;
   z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transform: scale(calc(1 / var(--theme-zoom-factor)));
+  transform-origin: top right;
 }
 
 .theme-switch-control {
-  --scale: 0.9;
+  --scale: 1.08;
 }
 
 .theme-switch-control .switch {
@@ -1450,12 +1473,12 @@ th {
   position: absolute;
   cursor: pointer;
   inset: 0;
-  background-color: #2196f3;
+  background: linear-gradient(135deg, #7cc7ff 0%, #3b82f6 100%);
   transition: 0.4s;
   z-index: 0;
   overflow: hidden;
-  border: 0;
-  box-shadow: none;
+  border: 1px solid color-mix(in srgb, #ffffff 22%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22);
 }
 
 .theme-switch-control .sun-moon {
@@ -1464,17 +1487,17 @@ th {
   width: calc(var(--scale) * 26px);
   left: calc(var(--scale) * 4px);
   bottom: calc(var(--scale) * 4px);
-  background-color: yellow;
+  background-color: #ffe27a;
   transition: 0.4s;
-  box-shadow: none;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.22);
 }
 
 .theme-switch-control input:checked + .slider {
-  background-color: black;
+  background: linear-gradient(135deg, #0f172a 0%, #1f2937 100%);
 }
 
 .theme-switch-control input:focus + .slider {
-  box-shadow: 0 0 calc(var(--scale) * 1px) #2196f3;
+  box-shadow: 0 0 0 calc(var(--scale) * 2px) rgba(96, 165, 250, 0.34);
 }
 
 .theme-switch-control input:checked + .slider .sun-moon {
@@ -1856,8 +1879,8 @@ th {
 }
 
 :root[data-theme="dark"] .theme-mode-control {
-  background: rgba(25, 31, 40, 0.92);
-  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.42);
+  background: transparent;
+  box-shadow: none;
 }
 
 

@@ -6,14 +6,17 @@ import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORY_KEYS, getLangContent } from "@/lib/site";
 import LanguageSwitch from "./LanguageSwitch";
+import ThemeModeControl from "./ThemeModeControl";
 
-export default function Navbar({ lang }) {
+export default function Navbar({ lang, variant = "default" }) {
   const copy = getLangContent(lang);
   const pathname = usePathname();
   const desktopMenuRef = useRef(null);
   const itemRefs = useRef(new Map());
   const [indicator, setIndicator] = useState({ left: 0, width: 0, visible: false });
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [overlayScrolled, setOverlayScrolled] = useState(false);
+  const isOverlay = variant === "overlay";
 
   const activeKey = useMemo(() => {
     const parts = String(pathname || "").split("/").filter(Boolean);
@@ -55,9 +58,26 @@ export default function Navbar({ lang }) {
     return () => window.removeEventListener("resize", handleResize);
   }, [activeKey]);
 
+  useEffect(() => {
+    if (!isOverlay) {
+      setOverlayScrolled(false);
+      return undefined;
+    }
+
+    const updateOverlayState = () => {
+      setOverlayScrolled(window.scrollY > 48);
+    };
+
+    updateOverlayState();
+    window.addEventListener("scroll", updateOverlayState, { passive: true });
+    return () => window.removeEventListener("scroll", updateOverlayState);
+  }, [isOverlay]);
+
+  const overlayClassName = isOverlay ? `site-navbar--overlay${overlayScrolled || mobileOpen ? " is-scrolled" : ""}` : "sticky top-0 z-30 border-b backdrop-blur";
+
   return (
-    <header className="site-navbar sticky top-0 z-30 border-b backdrop-blur">
-      <nav className="site-navbar-inner mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3 text-sm md:px-8 md:py-4">
+    <header className={`site-navbar ${overlayClassName}`}>
+      <nav className="site-navbar-inner mx-auto flex w-full max-w-[1280px] items-center gap-3 px-4 py-3 text-sm md:px-8 md:py-4">
         <button
           type="button"
           aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
@@ -137,8 +157,9 @@ export default function Navbar({ lang }) {
           </div>
         </div>
 
-        <div className="shrink-0">
+        <div className="shrink-0 flex items-center gap-2">
           <LanguageSwitch />
+          <ThemeModeControl />
         </div>
       </nav>
     </header>

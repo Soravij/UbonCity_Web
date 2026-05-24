@@ -1,5 +1,4 @@
-﻿import "./globals.css";
-import ThemeModeControl from "@/components/ThemeModeControl";
+import "./globals.css";
 
 const THEME_BOOTSTRAP_SCRIPT = `
 (() => {
@@ -35,6 +34,9 @@ const THEME_BOOTSTRAP_SCRIPT = `
         localStorage.setItem(key, preference);
       } catch {}
     }
+    window.dispatchEvent(new CustomEvent("ubon-theme-change", {
+      detail: { preference, resolvedTheme },
+    }));
     return { preference, resolvedTheme };
   };
 
@@ -85,10 +87,11 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" translate="no" suppressHydrationWarning>
       <head>
+        <link rel="preload" as="image" href="/hero-main2.png" />
+        <link rel="preload" as="image" href="/hero-main2-dark.png" />
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
       </head>
       <body className="antialiased notranslate" translate="no">
-        <ThemeModeControl />
         {children}
       </body>
     </html>

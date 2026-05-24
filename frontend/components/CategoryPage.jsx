@@ -12,8 +12,8 @@ export default async function CategoryPage({ lang, category }) {
   );
 
   return (
-    <section className="editorial-shell space-y-8 md:space-y-10">
-      <section className="editorial-section category-hero">
+    <section className="editorial-shell editorial-shell--content space-y-8 md:space-y-10">
+      <section className="editorial-section category-hero category-hero--content-light">
         <div className="category-hero-grid">
           <div className="space-y-4 md:space-y-5">
             <p className="hero-banner-eyebrow editorial-kicker">{copy.siteTitle}</p>

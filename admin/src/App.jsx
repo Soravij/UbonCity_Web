@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import "./App.css";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
@@ -17,58 +17,118 @@ const DASHBOARD_PATHS = [
   "/dashboard/settings",
 ];
 
-const THEME_PREFERENCES = new Set(["light", "dark", "system"]);
+const THEME_PREFERENCES = new Set(["light", "dark"]);
 
-function sanitizeThemePreference(value) {
+function sanitizeThemeMode(value) {
   const text = String(value || "").trim().toLowerCase();
-  return THEME_PREFERENCES.has(text) ? text : "system";
+  return THEME_PREFERENCES.has(text) ? text : null;
 }
 
-function readThemePreference() {
-  const attr = document.documentElement.getAttribute("data-theme-preference");
-  if (attr) return sanitizeThemePreference(attr);
+function readThemeMode() {
+  const root = document.documentElement;
+  const attr = root.getAttribute("data-theme-preference");
+  const fromPreference = sanitizeThemeMode(attr);
+  if (fromPreference) return fromPreference;
+  const fromTheme = sanitizeThemeMode(root.getAttribute("data-theme"));
+  if (fromTheme) return fromTheme;
+  if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) return "dark";
   try {
-    return sanitizeThemePreference(localStorage.getItem(THEME_PREFERENCE_KEY));
+    const fromStorage = sanitizeThemeMode(localStorage.getItem(THEME_PREFERENCE_KEY));
+    if (fromStorage) return fromStorage;
   } catch {
-    return "system";
+    return "light";
   }
+  return "light";
 }
 
 function ThemeModeControl() {
-  const [preference, setPreference] = useState(() => readThemePreference());
+  const toggleId = useId();
+  const [mode, setMode] = useState(() => readThemeMode());
+  const [zoomFactor, setZoomFactor] = useState(1);
+
+  useEffect(() => {
+    function handleThemeChange(event) {
+      const nextMode = sanitizeThemeMode(event?.detail?.resolvedTheme) || readThemeMode();
+      setMode(nextMode);
+    }
+
+    window.addEventListener("ubon-theme-change", handleThemeChange);
+    return () => window.removeEventListener("ubon-theme-change", handleThemeChange);
+  }, []);
+
+  useEffect(() => {
+    const baseDevicePixelRatio = Number(window.devicePixelRatio || 1) || 1;
+
+    function currentViewportScale() {
+      const scale = Number(window.visualViewport?.scale || 1);
+      return Number.isFinite(scale) && scale > 0 ? scale : 1;
+    }
+
+    function syncZoomFactor() {
+      const currentDpr = Number(window.devicePixelRatio || baseDevicePixelRatio) || baseDevicePixelRatio;
+      const dprRatio = currentDpr / baseDevicePixelRatio;
+      const zoom = Math.max(dprRatio, currentViewportScale(), 1);
+      setZoomFactor(Number.isFinite(zoom) && zoom > 0 ? zoom : 1);
+    }
+
+    syncZoomFactor();
+    window.visualViewport?.addEventListener("resize", syncZoomFactor);
+    window.visualViewport?.addEventListener("scroll", syncZoomFactor);
+    window.addEventListener("resize", syncZoomFactor);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", syncZoomFactor);
+      window.visualViewport?.removeEventListener("scroll", syncZoomFactor);
+      window.removeEventListener("resize", syncZoomFactor);
+    };
+  }, []);
 
   function onChange(event) {
-    const nextPreference = sanitizeThemePreference(event.target.value);
-    setPreference(nextPreference);
+    const nextMode = event.target.checked ? "dark" : "light";
+    setMode(nextMode);
     const api = window.__UBON_THEME__;
     if (api && typeof api.setPreference === "function") {
-      api.setPreference(nextPreference);
+      api.setPreference(nextMode);
       return;
     }
-    document.documentElement.setAttribute("data-theme-preference", nextPreference);
-    document.documentElement.setAttribute("data-theme", nextPreference === "system" ? "light" : nextPreference);
+    document.documentElement.setAttribute("data-theme-preference", nextMode);
+    document.documentElement.setAttribute("data-theme", nextMode);
   }
 
   return (
-    <div className="theme-mode-control" role="group" aria-label="Theme mode">
-      <label htmlFor="theme-mode-select" className="theme-mode-label">
-        ธีม
+    <div
+      className="theme-mode-control theme-switch-control"
+      role="group"
+      aria-label="Theme mode"
+      style={{ "--theme-zoom-factor": String(zoomFactor) }}
+    >
+      <label className="switch" htmlFor={toggleId}>
+        <input id={toggleId} type="checkbox" checked={mode === "dark"} onChange={onChange} aria-label="Theme mode toggle" />
+        <div className="slider round">
+          <div className="sun-moon">
+            <svg id="moon-dot-1" className="moon-dot" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="moon-dot-2" className="moon-dot" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="moon-dot-3" className="moon-dot" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="light-ray-1" className="light-ray" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="light-ray-2" className="light-ray" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="light-ray-3" className="light-ray" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-1" className="cloud-dark" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-2" className="cloud-dark" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-3" className="cloud-dark" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-4" className="cloud-light" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-5" className="cloud-light" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+            <svg id="cloud-6" className="cloud-light" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" /></svg>
+          </div>
+          <div className="stars">
+            <svg id="star-1" className="star" viewBox="0 0 20 20"><path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" /></svg>
+            <svg id="star-2" className="star" viewBox="0 0 20 20"><path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" /></svg>
+            <svg id="star-3" className="star" viewBox="0 0 20 20"><path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" /></svg>
+            <svg id="star-4" className="star" viewBox="0 0 20 20"><path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" /></svg>
+          </div>
+        </div>
       </label>
-      <select
-        id="theme-mode-select"
-        className="theme-mode-select"
-        value={preference}
-        onChange={onChange}
-        aria-label="เลือกโหมดธีม"
-      >
-        <option value="system">System</option>
-        <option value="dark">Dark</option>
-        <option value="light">Light</option>
-      </select>
     </div>
   );
 }
-
 function currentPath() {
   return window.location.pathname || "/login";
 }
@@ -239,3 +299,4 @@ function App() {
 }
 
 export default App;
+

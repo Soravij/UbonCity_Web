@@ -21,9 +21,22 @@ function aqiLevelKey(aqiValue) {
   return "hazardous";
 }
 
+const DEFAULT_API_TIMEOUT_MS = 2500;
+const DEFAULT_WEATHER_TIMEOUT_MS = 3500;
+
+async function fetchJsonWithTimeout(url, options = {}) {
+  const { timeoutMs = DEFAULT_API_TIMEOUT_MS, ...fetchOptions } = options;
+  const signal = fetchOptions.signal || AbortSignal.timeout(timeoutMs);
+  const res = await fetch(url, { ...fetchOptions, signal });
+  if (!res.ok) return null;
+  return res.json();
+}
+
 function getApiUrl() {
   const raw = String(process.env.NEXT_PUBLIC_API_URL || "").trim();
   const env = String(process.env.NODE_ENV || "development").toLowerCase();
+  const hostname =
+    typeof window !== "undefined" ? String(window.location.hostname || "").trim().toLowerCase() : "";
 
   if (raw && !raw.includes("your-backend-domain")) {
     return raw;
@@ -34,27 +47,22 @@ function getApiUrl() {
     return "/api";
   }
 
-  const hostname = typeof window !== "undefined" ? String(window.location.hostname || "").trim().toLowerCase() : "";
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return "http://localhost:5000/api";
+  if (hostname) {
+    return `http://${hostname}:5000/api`;
   }
-  throw new Error("NEXT_PUBLIC_API_URL is not configured for non-local access");
+
+  // Server-side development requests do not have window.location. Default to the local backend.
+  return "http://127.0.0.1:5000/api";
 }
 
 export async function getPlaces(category, lang) {
   const apiUrl = getApiUrl();
 
   try {
-    const res = await fetch(
+    const data = await fetchJsonWithTimeout(
       `${apiUrl}/places?category=${encodeURIComponent(category)}&lang=${encodeURIComponent(lang)}`,
       { cache: "no-store" }
     );
-
-    if (!res.ok) {
-      return [];
-    }
-
-    const data = await res.json();
     return Array.isArray(data.items) ? data.items : [];
   } catch {
     return [];
@@ -65,16 +73,10 @@ export async function getPlaceDetail(category, slug, lang) {
   const apiUrl = getApiUrl();
 
   try {
-    const res = await fetch(
+    const data = await fetchJsonWithTimeout(
       `${apiUrl}/places/${encodeURIComponent(category)}/${encodeURIComponent(slug)}?lang=${encodeURIComponent(lang)}`,
       { cache: "no-store" }
     );
-
-    if (!res.ok) {
-      return null;
-    }
-
-    const data = await res.json();
     return data?.item || null;
   } catch {
     return null;
@@ -85,16 +87,13 @@ export async function getNearbyPlaces(category, slug, lang, limit = 4) {
   const apiUrl = getApiUrl();
 
   try {
-    const res = await fetch(
+    const data = await fetchJsonWithTimeout(
       `${apiUrl}/places/${encodeURIComponent(category)}/${encodeURIComponent(slug)}/nearby?lang=${encodeURIComponent(lang)}&limit=${encodeURIComponent(limit)}`,
       { cache: "no-store" }
     );
-
-    if (!res.ok) {
+    if (!data) {
       return { items: [], rangeKey: "none" };
     }
-
-    const data = await res.json();
     return {
       items: Array.isArray(data.items) ? data.items : [],
       rangeKey: String(data?.range_key || "none"),
@@ -108,13 +107,9 @@ export async function getEvents(lang = "th") {
   const apiUrl = getApiUrl();
 
   try {
-    const res = await fetch(`${apiUrl}/events?lang=${encodeURIComponent(lang)}`, { cache: "no-store" });
-
-    if (!res.ok) {
-      return [];
-    }
-
-    const data = await res.json();
+    const data = await fetchJsonWithTimeout(`${apiUrl}/events?lang=${encodeURIComponent(lang)}`, {
+      cache: "no-store",
+    });
     return Array.isArray(data.items) ? data.items : [];
   } catch {
     return [];
@@ -125,16 +120,10 @@ export async function getHomepageLayout(lang = "th", layoutKey = "home") {
   const apiUrl = getApiUrl();
 
   try {
-    const res = await fetch(
+    const data = await fetchJsonWithTimeout(
       `${apiUrl}/homepage-layout?layout_key=${encodeURIComponent(layoutKey)}&lang=${encodeURIComponent(lang)}`,
       { cache: "no-store" }
     );
-
-    if (!res.ok) {
-      return null;
-    }
-
-    const data = await res.json();
     return data?.item || null;
   } catch {
     return null;
@@ -145,15 +134,9 @@ export async function getEventDetail(id, lang = "th") {
   const apiUrl = getApiUrl();
 
   try {
-    const res = await fetch(`${apiUrl}/events/${encodeURIComponent(id)}?lang=${encodeURIComponent(lang)}`, {
+    const data = await fetchJsonWithTimeout(`${apiUrl}/events/${encodeURIComponent(id)}?lang=${encodeURIComponent(lang)}`, {
       cache: "no-store",
     });
-
-    if (!res.ok) {
-      return null;
-    }
-
-    const data = await res.json();
     return data?.item || null;
   } catch {
     return null;
@@ -167,12 +150,10 @@ export async function getReviewContentDetail(reviewId, token) {
   if (!id || !authToken) return null;
 
   try {
-    const res = await fetch(`${apiUrl}/review-content/${encodeURIComponent(id)}`, {
+    const data = await fetchJsonWithTimeout(`${apiUrl}/review-content/${encodeURIComponent(id)}`, {
       cache: "no-store",
       headers: { Authorization: `Bearer ${authToken}` },
     });
-    if (!res.ok) return null;
-    const data = await res.json();
     return data?.item || null;
   } catch {
     return null;
@@ -185,12 +166,10 @@ export async function getTransportRoutes(options = {}) {
   const includeStops = options?.includeStops ? "1" : "0";
 
   try {
-    const res = await fetch(
+    const data = await fetchJsonWithTimeout(
       `${apiUrl}/transport-routes?include_path=${includePath}&include_stops=${includeStops}`,
       { cache: "no-store" }
     );
-    if (!res.ok) return [];
-    const data = await res.json();
     return Array.isArray(data.items) ? data.items : [];
   } catch {
     return [];
@@ -201,9 +180,8 @@ export async function getTransportMapsConfig() {
   const apiUrl = getApiUrl();
 
   try {
-    const res = await fetch(`${apiUrl}/transport/config`, { cache: "no-store" });
-    if (!res.ok) return { mapsApiKey: "" };
-    const data = await res.json();
+    const data = await fetchJsonWithTimeout(`${apiUrl}/transport/config`, { cache: "no-store" });
+    if (!data) return { mapsApiKey: "" };
     return { mapsApiKey: String(data?.mapsApiKey || "") };
   } catch {
     return { mapsApiKey: "" };
@@ -218,20 +196,17 @@ export async function getUbonWeather() {
   const airUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi&timezone=Asia%2FBangkok`;
 
   try {
-    const [weatherRes, airRes] = await Promise.all([
-      fetch(weatherUrl, { cache: "no-store" }),
-      fetch(airUrl, { cache: "no-store" }),
+    const [weatherData, airData] = await Promise.all([
+      fetchJsonWithTimeout(weatherUrl, { cache: "no-store", timeoutMs: DEFAULT_WEATHER_TIMEOUT_MS }),
+      fetchJsonWithTimeout(airUrl, { cache: "no-store", timeoutMs: DEFAULT_WEATHER_TIMEOUT_MS }),
     ]);
 
-    if (!weatherRes.ok) return null;
-
-    const weatherData = await weatherRes.json();
+    if (!weatherData) return null;
     const current = weatherData?.current || {};
     const daily = weatherData?.daily || {};
 
     let aqiValue = NaN;
-    if (airRes.ok) {
-      const airData = await airRes.json();
+    if (airData) {
       aqiValue = Number(airData?.current?.us_aqi);
     }
 
