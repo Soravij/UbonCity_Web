@@ -145,6 +145,14 @@ function renderCreateAssigneeOptions() {
   select.innerHTML = writerOptionsHtml(0);
 }
 
+function workflowStatusPillClass(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "approved" || normalized === "published" || normalized === "submitted" || normalized === "content_in_progress") {
+    return "status-pill status-active";
+  }
+  return "status-pill status-inactive";
+}
+
 function renderEventsTable() {
   const tbody = qs("events-table")?.querySelector("tbody");
   if (!tbody) return;
@@ -157,6 +165,7 @@ function renderEventsTable() {
     const id = Number(item?.id || 0) || 0;
     const assignment = primaryAssignmentForItem(id);
     const workflowStatus = derivedArticleWorkflowStatus(item) || "draft";
+    const statusClass = workflowStatusPillClass(workflowStatus);
     const assigneeName = assignment?.assignee_display_name || assignment?.assignee_email || assignment?.assignee_name || "-";
     return `
       <tr>
@@ -165,7 +174,7 @@ function renderEventsTable() {
           <div><strong>${escapeHtml(item?.title || "(untitled)")}</strong></div>
           <div><span class="workflow-badge workflow-badge-generated">Event</span></div>
         </td>
-        <td>${escapeHtml(workflowStatus)}</td>
+        <td><span class="${statusClass}">${escapeHtml(workflowStatus)}</span></td>
         <td>${escapeHtml(assigneeName)}</td>
         <td>
           <div class="toolbar compact-toolbar">

@@ -64,7 +64,9 @@ function fieldPackResponse() {
       social_hook: "field hook",
       checklists: {
         must_verify_fact: ["verify opening hours"],
-        must_capture_shot: ["capture entrance"],
+        must_capture: [
+          { capture_type: "photo", item_text: "capture entrance" },
+        ],
         must_ask_question: ["ask staff about rules"],
       },
     },
@@ -96,7 +98,8 @@ test("field pack prompt blocks article output and requires handoff contract", ()
   const prompt = buildFieldPackPrompt(createItem({ agent_profile: { profile_text: "use a practical field producer tone" } }));
   assert.match(prompt, /field_pack/);
   assert.match(prompt, /NOT an article-writing task/);
-  assert.match(prompt, /must_capture_shot/);
+  assert.match(prompt, /must_capture/);
+  assert.match(prompt, /capture_type/);
   assert.match(prompt, /Never output description_clean/);
   assert.match(prompt, /use a practical field producer tone/);
 });
@@ -131,13 +134,21 @@ test("external agent engine normalizes visual context and field pack responses",
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
+    if (String(url) === "https://example.com/photo.jpg") {
+      return new Response("fake-image-bytes", {
+        status: 200,
+        headers: {
+          "content-type": "image/jpeg",
+        },
+      });
+    }
     const body = JSON.parse(String(options.body || "{}"));
     calls.push({ url, body, authorization: options.headers?.Authorization || "" });
     if (body.task === "generate_visual_context") {
       return Response.json({
         visual_context: {
-          visual_summary: "สวนร่มรื่น",
-          setting_cues: ["ต้นไม้"],
+          visual_summary: "mock garden mood",
+          setting_cues: ["trees"],
         },
       });
     }
@@ -152,7 +163,13 @@ test("external agent engine normalizes visual context and field pack responses",
       externalAgentToken: "secret-token",
       model: "agent-v1",
     });
-    const item = createItem();
+    const item = createItem({
+      agent_profile: {
+        agent_key: "field_pack_agent",
+        display_name: "Field Pack Agent",
+        profile_text: "custom tone profile",
+      },
+    });
     const visual = await engine.generateVisualContext(item);
     const fieldPack = await engine.generateFieldPack({ ...item, visual_context: visual });
     const revised = await engine.reviseFieldPack(
@@ -161,8 +178,8 @@ test("external agent engine normalizes visual context and field pack responses",
       "make it more practical"
     );
 
-    assert.equal(visual.visual_summary, "สวนร่มรื่น");
-    assert.deepEqual(visual.setting_cues, ["ต้นไม้"]);
+    assert.equal(visual.visual_summary, "mock garden mood");
+    assert.deepEqual(visual.setting_cues, ["trees"]);
     assert.equal(fieldPack.status, "ready_for_field");
     assert.equal(fieldPack.ai_summary, "field brief");
     assert.equal(fieldPack.field_pack_checklists.length, 3);
@@ -173,8 +190,11 @@ test("external agent engine normalizes visual context and field pack responses",
     assert.equal(calls[0].body.task, "generate_visual_context");
     assert.equal(calls[0].body.images.length, 1);
     assert.equal(calls[1].body.task, "generate_field_pack");
-    assert.equal(calls[1].body.visual_context.visual_summary, "สวนร่มรื่น");
+    assert.equal(calls[1].body.agent_profile.profile_text, "custom tone profile");
+    assert.equal(calls[1].body.prompt_input.agent_profile.profile_text, "custom tone profile");
+    assert.equal(calls[1].body.visual_context.visual_summary, "mock garden mood");
     assert.equal(calls[2].body.task, "revise_field_pack");
+    assert.equal(calls[2].body.agent_profile.profile_text, "custom tone profile");
     assert.equal(calls[2].body.previous_field_pack.ai_summary, "field brief");
     assert.equal(calls[2].body.revision_note, "make it more practical");
   } finally {

@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/styles.css" />
     <script defer src="/theme-control.js"></script>
   </head>
-  <body>
+  <body class="clean-item-page">
     <main class="container article-page-shell">
       <header class="header">
         <div class="auth-row">
@@ -28,7 +28,7 @@
       </header>
 <div class="card page-actions-strip raw-process-actions">
   <div class="toolbar">
-    <button id="btn-back" class="utility-action">Home</button>
+    <button id="btn-back" class="utility-action btn-home">Home</button>
     <button id="btn-prev-step" class="utility-action">กลับหน้ารับข้อมูลดิบ</button>
     <button class="primary utility-action" id="btn-save">บันทึก</button>
     <button class="ok nav-next" id="btn-next-ai">ถัดไป: ประมวลผลด้วย Agent</button>
@@ -352,6 +352,7 @@
         <h2 class="section-title">ตัวอย่างข้อมูลที่ Agent จะได้รับ</h2>
         <div class="toolbar">
           <button id="btn-refresh-draft-preview">รีเฟรชตัวอย่าง</button>
+          <button class="primary utility-action" id="btn-save-ai-context">บันทึก</button>
           <button class="ok" id="btn-run-ai-context">ประมวลผลด้วย Agent จาก Approved Context</button>
         </div>
         <p class="status" id="draft-preview-status"></p>

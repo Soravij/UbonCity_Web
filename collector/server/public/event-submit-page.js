@@ -460,7 +460,7 @@ function applyStaticCopy() {
   const headerHelp = document.querySelector(".header .auth-row p");
   if (headerHelp) headerHelp.textContent = "ตรวจความพร้อมของ event และ self-check ก่อนส่งเข้า Admin Review";
   const backHomeBtn = qs("btn-back-home");
-  if (backHomeBtn) backHomeBtn.textContent = "กลับ";
+  if (backHomeBtn) backHomeBtn.textContent = "Home";
   const openIntakeBtn = qs("btn-open-intake");
   if (openIntakeBtn) openIntakeBtn.textContent = "กลับหน้าแรก";
   const openWorkspaceBtn = qs("btn-open-workspace");

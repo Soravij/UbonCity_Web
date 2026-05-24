@@ -197,6 +197,8 @@ const state = {
     rawReviewCollapsed: false,
     rawSort: "interestingness",
     rawStageFilter: "all",
+    rawIntakeFilter: "all",
+    rawReviewFilter: "all",
     rawSelectedIds: new Set(),
     rawMergeOpen: false,
     rawMergeMasterId: 0,
@@ -690,8 +692,9 @@ function resolveQueueBucket(itemSnapshot) {
   const productionState = String(snapshot?.productionState || "").trim().toLowerCase();
   const publicationState = String(snapshot?.publicationState || "").trim().toLowerCase();
   const assignmentState = String(snapshot?.assignmentState || "").trim().toLowerCase();
-  const hasFieldPack = Number(source?.current_field_pack_id || source?.field_pack_id || snapshot?.current_field_pack_id || snapshot?.field_pack_id || 0) > 0;
   const fieldPackStatus = String(source?.current_field_pack_status || source?.field_pack_status || snapshot?.current_field_pack_status || snapshot?.field_pack_status || "").trim().toLowerCase();
+  const hasFieldPackPointer = Number(source?.current_field_pack_id || source?.field_pack_id || snapshot?.current_field_pack_id || snapshot?.field_pack_id || 0) > 0;
+  const hasFieldPack = hasFieldPackPointer || Boolean(fieldPackStatus);
 
   if (publicationState === "published" || productionState === "completed") {
     return "published";
@@ -717,6 +720,11 @@ function resolveQueueBucket(itemSnapshot) {
     return "field_pack_review";
   }
   return "raw_prep";
+}
+
+function isRawPreparationItem(item) {
+  return resolveQueueBucket(item) === "raw_prep"
+    && getItemWorkflowSnapshot(item).productionState === "collected";
 }
 
 function getEditorialSurfaceUrlForItem(item, preferredStatus = "") {
@@ -985,6 +993,12 @@ function setStatus(id, text, isError = false) {
   const node = qs(id);
   if (!node) return;
   node.textContent = text || "";
+  if (id === "assignment-status") {
+    node.classList.remove("is-success", "is-error");
+    if (text) {
+      node.classList.add(isError ? "is-error" : "is-success");
+    }
+  }
   node.style.color = isError ? "#b42318" : "#1f8a52";
 }
 
@@ -1598,6 +1612,16 @@ function formatAssignmentContextFieldPackStatusLabel(status) {
   if (value === "on_hold") return "พักไว้";
   if (!value) return "-";
   return "ไม่ทราบสถานะ";
+}
+
+function renderHandoffQueueStatusBadge(item) {
+  const ready = isHandoffEligibleItem(item);
+  const rawStatus = String(item?.current_field_pack_status || item?.field_pack_status || "").trim().toLowerCase();
+  const label = ready
+    ? "ready_for_handoff"
+    : (rawStatus || "-");
+  const title = escapeHtml(rawStatus || "-");
+  return `<span class="workflow-badge workflow-badge-generated" title="field_pack_status: ${title}">${escapeHtml(label)}</span>`;
 }
 
 function interestingnessBadgeClass(label) {
@@ -3265,6 +3289,13 @@ function renderAssignmentReviewSubmissionContent(assignment) {
     ? `
       <div class="assignment-brief-label">วิดีโอที่ส่งกลับล่าสุด</div>
       <div class="assignment-review-video-layout">
+        <div class="assignment-review-video-player">
+          <video controls preload="metadata" src="${escapeHtml(selectedVideo.url)}"></video>
+          <div class="assignment-review-video-meta">
+            <div>${escapeHtml(selectedVideo.label)}</div>
+            ${selectedVideo.meta ? `<div>${escapeHtml(selectedVideo.meta)}</div>` : ""}
+          </div>
+        </div>
         <div class="assignment-review-video-list">
           ${videoItems.map((item) => `
             <button
@@ -3273,13 +3304,6 @@ function renderAssignmentReviewSubmissionContent(assignment) {
               data-review-video-key="${escapeHtml(item.key)}"
             >${escapeHtml(item.label)}</button>
           `).join("")}
-        </div>
-        <div class="assignment-review-video-player">
-          <video controls preload="metadata" src="${escapeHtml(selectedVideo.url)}"></video>
-          <div class="assignment-review-video-meta">
-            <div>${escapeHtml(selectedVideo.label)}</div>
-            ${selectedVideo.meta ? `<div>${escapeHtml(selectedVideo.meta)}</div>` : ""}
-          </div>
         </div>
       </div>
     `
@@ -4125,17 +4149,17 @@ function normalizeDashboardWorkflowStage(workflowInput) {
   return "raw";
 }
 
-const DASHBOARD_STAGE_FILTERS = Object.freeze([
+const RAW_INTAKE_FILTERS = Object.freeze([
   Object.freeze({ value: "all", label: "ทั้งหมด" }),
   Object.freeze({ value: "raw", label: "รอคัดเข้า AI" }),
-  Object.freeze({ value: "cleaned", label: "ตรวจแก้/จัดชุดสั่งงาน" }),
-  Object.freeze({ value: "generated", label: "รอตรวจชุดสั่งงาน" }),
+  Object.freeze({ value: "cleaned", label: "กำลังคัดข้อมูล" }),
 ]);
 
-function getDashboardStageFilterLabel(value) {
-  const normalized = String(value || "all").trim().toLowerCase();
-  return DASHBOARD_STAGE_FILTERS.find((row) => row.value === normalized)?.label || "ทั้งหมด";
-}
+const RAW_REVIEW_FILTERS = Object.freeze([
+  Object.freeze({ value: "all", label: "ทั้งหมด" }),
+  Object.freeze({ value: "review", label: "รอตรวจชุดสั่งงาน" }),
+  Object.freeze({ value: "handoff", label: "พร้อมส่งต่อ" }),
+]);
 
 function getPreparationQueueItems(items = state.items) {
   const list = Array.isArray(items) ? items : [];
@@ -4145,36 +4169,29 @@ function getPreparationQueueItems(items = state.items) {
   });
 }
 
-function renderRawStageFilters(items = state.items) {
-  const root = qs("raw-stage-filters");
-  if (!root) return;
-
-  const rows = getPreparationQueueItems(items);
-  const counts = rows.reduce((acc, item) => {
-    const bucket = resolveQueueBucket(item);
-    acc.all += 1;
-    if (bucket === "field_pack_review") {
-      acc.generated += 1;
-      return acc;
-    }
-    const isRaw = getItemWorkflowSnapshot(item).productionState === "collected";
-    if (isRaw) {
-      acc.raw += 1;
-    } else {
-      acc.cleaned += 1;
-    }
-    return acc;
-  }, {
-    all: 0,
-    raw: 0,
-    cleaned: 0,
-    generated: 0,
-  });
-
-  root.innerHTML = DASHBOARD_STAGE_FILTERS.map((filter) => {
-    const active = String(state.dashboard.rawStageFilter || "all") === filter.value;
+function buildRawIntakeFilterHtml(items = []) {
+  const counts = {
+    all: items.length,
+    raw: items.filter((item) => isRawPreparationItem(item)).length,
+    cleaned: items.filter((item) => !isRawPreparationItem(item)).length,
+  };
+  return RAW_INTAKE_FILTERS.map((filter) => {
+    const active = String(state.dashboard.rawIntakeFilter || "all").trim().toLowerCase() === filter.value;
     const count = Number(counts[filter.value] || 0);
-    return `<button type="button" class="raw-stage-filter${active ? " is-active" : ""}" data-stage-filter="${escapeHtml(filter.value)}">${escapeHtml(filter.label)} <span>${count}</span></button>`;
+    return `<button type="button" class="raw-stage-filter${active ? " is-active" : ""}" data-intake-filter="${escapeHtml(filter.value)}">${escapeHtml(filter.label)} <span>${count}</span></button>`;
+  }).join("");
+}
+
+function buildRawReviewFilterHtml(items = []) {
+  const counts = {
+    all: items.length,
+    review: items.filter((item) => !isHandoffEligibleItem(item)).length,
+    handoff: items.filter((item) => isHandoffEligibleItem(item)).length,
+  };
+  return RAW_REVIEW_FILTERS.map((filter) => {
+    const active = String(state.dashboard.rawReviewFilter || "all").trim().toLowerCase() === filter.value;
+    const count = Number(counts[filter.value] || 0);
+    return `<button type="button" class="raw-stage-filter${active ? " is-active" : ""}" data-review-filter="${escapeHtml(filter.value)}">${escapeHtml(filter.label)} <span>${count}</span></button>`;
   }).join("");
 }
 
@@ -4223,8 +4240,15 @@ function buildRawQueueStatusLabel(item, queueType) {
   if (queueType === "review") {
     return bucket === "handoff" ? "พร้อมส่งต่อ" : "รอตรวจชุดสั่งงาน";
   }
-  if (bucket === "raw_prep") return "รอคัดเข้า AI";
-  return "กำลังคัดข้อมูล";
+  return isRawPreparationItem(item) ? "รอคัดเข้า AI" : "กำลังคัดข้อมูล";
+}
+
+function buildRawQueueStatusBadgeClass(item, queueType) {
+  const bucket = resolveQueueBucket(item);
+  if (queueType === "review") {
+    return bucket === "handoff" ? "workflow-badge-sent" : "workflow-badge-generated";
+  }
+  return isRawPreparationItem(item) ? "workflow-badge-raw" : "workflow-badge-cleaned";
 }
 
 function renderRawQueueTable({
@@ -4271,7 +4295,9 @@ function renderRawQueueTable({
     const isSelected = getRawSelectedIds().has(id);
     const interestingness = item?.interestingness || {};
     const interestingnessReasons = Array.isArray(interestingness?.reasons) ? interestingness.reasons.filter(Boolean) : [];
+    const isRawRow = isRawPreparationItem(item);
     const statusLabel = buildRawQueueStatusLabel(item, queueType);
+    const statusBadgeClass = buildRawQueueStatusBadgeClass(item, queueType);
     const readyForHandoff = isHandoffEligibleItem(item);
     const primaryUrl = queueType === "review"
       ? `/item-editor.html?id=${id}`
@@ -4292,11 +4318,12 @@ function renderRawQueueTable({
       </td>
       ${showInterestingness ? `
       <td>
+        ${isRawRow ? `
         <div class="raw-interest-wrap" title="${escapeHtml(interestingnessReasons.join(" | "))}">
           <span class="intake-badge ${interestingnessBadgeClass(interestingness.label)}">${escapeHtml((interestingness.label || "ข้อมูลยังบาง") + " #" + Number(interestingness.score || 0))}</span>
-        </div>
+        </div>` : ""}
       </td>` : ""}
-      <td><span class="workflow-badge workflow-badge-cleaned">${escapeHtml(statusLabel)}</span></td>
+      <td><span class="workflow-badge ${escapeHtml(statusBadgeClass)}">${escapeHtml(statusLabel)}</span></td>
       <td>${formatPreparationClaimBadge(item)}</td>
       <td class="raw-actions-cell">
         <button type="button" data-action="open-state-entry" data-id="${id}" data-url="${escapeHtml(primaryUrl)}">${escapeHtml(primaryLabel)}</button>
@@ -4576,31 +4603,45 @@ function applyPreferredLandingTab() {
 function renderRawTable(items) {
   const tableWrap = qs("raw-table-wrap");
   if (!tableWrap) return;
+  const legacyFilterRoot = qs("raw-stage-filters");
+  if (legacyFilterRoot) {
+    legacyFilterRoot.innerHTML = "";
+    legacyFilterRoot.classList.add("hidden");
+  }
   const list = sortRawItems(getPreparationQueueItems(items));
   const split = splitRawQueueByFieldPack(list);
-  renderRawStageFilters(list);
-
   const canManage = canManageBulkContentItems();
-  const requestedStageFilter = String(state.dashboard.rawStageFilter || "all").trim().toLowerCase() || "all";
-  const activeStageFilter = DASHBOARD_STAGE_FILTERS.some((filter) => filter.value === requestedStageFilter)
-    ? requestedStageFilter
+  const requestedIntakeFilter = String(state.dashboard.rawIntakeFilter || "all").trim().toLowerCase() || "all";
+  const activeIntakeFilter = RAW_INTAKE_FILTERS.some((filter) => filter.value === requestedIntakeFilter)
+    ? requestedIntakeFilter
     : "all";
-  if (activeStageFilter !== requestedStageFilter) {
-    state.dashboard.rawStageFilter = activeStageFilter;
+  if (activeIntakeFilter !== requestedIntakeFilter) {
+    state.dashboard.rawIntakeFilter = activeIntakeFilter;
   }
-  const filteredIntake = activeStageFilter === "all"
+  const requestedReviewFilter = String(state.dashboard.rawReviewFilter || "all").trim().toLowerCase() || "all";
+  const activeReviewFilter = RAW_REVIEW_FILTERS.some((filter) => filter.value === requestedReviewFilter)
+    ? requestedReviewFilter
+    : "all";
+  if (activeReviewFilter !== requestedReviewFilter) {
+    state.dashboard.rawReviewFilter = activeReviewFilter;
+  }
+
+  const filteredIntake = activeIntakeFilter === "all"
     ? split.intake
     : split.intake.filter((item) => {
-      if (activeStageFilter === "generated") return false;
-      const snapshot = getItemWorkflowSnapshot(item);
-      const isRaw = snapshot.productionState === "collected";
-      if (activeStageFilter === "raw") return isRaw;
-      if (activeStageFilter === "cleaned") return !isRaw;
+      const isRaw = isRawPreparationItem(item);
+      if (activeIntakeFilter === "raw") return isRaw;
+      if (activeIntakeFilter === "cleaned") return !isRaw;
       return true;
     });
-  const filteredReview = activeStageFilter === "all" || activeStageFilter === "generated"
+  const filteredReview = activeReviewFilter === "all"
     ? split.review
-    : [];
+    : split.review.filter((item) => {
+      const readyForHandoff = isHandoffEligibleItem(item);
+      if (activeReviewFilter === "review") return !readyForHandoff;
+      if (activeReviewFilter === "handoff") return readyForHandoff;
+      return true;
+    });
   const visibleIntake = state.dashboard.rawShowAll ? filteredIntake : filteredIntake.slice(0, state.dashboard.rawLimit);
   const visibleReview = filteredReview;
   pruneRawSelection(filteredIntake);
@@ -4611,6 +4652,7 @@ function renderRawTable(items) {
         <h3 class="section-title" style="margin:0;">Raw Intake / Clean Prep</h3>
         <button id="btn-toggle-raw-intake" type="button">${state.dashboard.rawIntakeCollapsed ? "แสดงตาราง" : "ซ่อนตาราง"}</button>
       </div>
+      <div class="toolbar compact-toolbar">${buildRawIntakeFilterHtml(split.intake)}</div>
       <div class="table-wrap${state.dashboard.rawIntakeCollapsed ? " hidden" : ""}" id="raw-intake-table-wrap">
         <table id="table-raw-intake">
           <thead><tr></tr></thead>
@@ -4623,6 +4665,7 @@ function renderRawTable(items) {
         <h3 class="section-title" style="margin:0;">Field Pack Review</h3>
         <button id="btn-toggle-raw-review" type="button">${state.dashboard.rawReviewCollapsed ? "แสดงตาราง" : "ซ่อนตาราง"}</button>
       </div>
+      <div class="toolbar compact-toolbar">${buildRawReviewFilterHtml(split.review)}</div>
       <div class="table-wrap${state.dashboard.rawReviewCollapsed ? " hidden" : ""}" id="raw-review-table-wrap">
         <table id="table-raw-review">
           <thead><tr></tr></thead>
@@ -4654,9 +4697,8 @@ function renderRawTable(items) {
     const suffix = state.dashboard.rawShowAll || filteredIntake.length <= state.dashboard.rawLimit
       ? ""
       : ` | กำลังแสดง intake ${visibleIntake.length}/${filteredIntake.length}`;
-    const filterLabel = getDashboardStageFilterLabel(activeStageFilter);
     const loadedCount = Array.isArray(state.items) ? state.items.length : 0;
-    summaryNode.textContent = `กำลังดู: ${filterLabel} | loaded=${loadedCount} | intake=${filteredIntake.length} | review=${filteredReview.length}${suffix}`;
+    summaryNode.textContent = `loaded=${loadedCount} | intake=${filteredIntake.length} | review=${filteredReview.length}${suffix}`;
   }
 
   const showAllBtn = qs("btn-show-all-raw");
@@ -5932,40 +5974,12 @@ function renderAssignmentCreateSummary() {
       : "ยังไม่มีชุดลงหน้างานปัจจุบัน";
   const briefStepLabel = prepState.briefPrepared ? "ผ่านแล้ว" : "ยังไม่ผ่าน";
   const readyStepLabel = prepState.readyForAssignment ? "ผ่านแล้ว" : "ยังไม่ผ่าน";
-  node.className = "assignment-brief-grid";
+  node.className = "assignment-brief-section";
   node.innerHTML = `
-    <div class="assignment-brief-section">
-      <div class="assignment-brief-label">รายการ</div>
-      <div class="assignment-brief-text">item #${escapeHtml(String(itemId))}</div>
-    </div>
-    <div class="assignment-brief-section">
-      <div class="assignment-brief-label">ชื่อคอนเทนต์</div>
-      <div class="assignment-brief-text">${escapeHtml(String(item.title || "").trim() || "-")}</div>
-    </div>
-    <div class="assignment-brief-section">
-      <div class="assignment-brief-label">หมวดหมู่</div>
-      <div class="assignment-brief-text">${escapeHtml(toCategoryLabel(item.category))}</div>
-    </div>
-    <div class="assignment-brief-section">
-      <div class="assignment-brief-label">ภาษา</div>
-      <div class="assignment-brief-text">${escapeHtml(String(item.lang || "").trim() || "-")}</div>
-    </div>
-    <div class="assignment-brief-section">
-      <div class="assignment-brief-label">ประเภทงาน</div>
-      <div class="assignment-brief-text">${escapeHtml(assignmentKindLabel)}</div>
-    </div>
-    <div class="assignment-brief-section full-span">
-      <div class="assignment-brief-label">สถานะชุดลงหน้างาน</div>
-      <div class="assignment-brief-text">${escapeHtml(fieldPackStatus)}</div>
-    </div>
-    <div class="assignment-brief-section">
-      <div class="assignment-brief-label">ขั้น 1: จัด brief</div>
-      <div class="assignment-brief-text">${escapeHtml(briefStepLabel)}</div>
-    </div>
-    <div class="assignment-brief-section">
-      <div class="assignment-brief-label">ขั้น 2: พร้อมส่งเข้า handoff</div>
-      <div class="assignment-brief-text">${escapeHtml(readyStepLabel)}</div>
-    </div>
+    <div class="assignment-brief-text"><strong>item #${escapeHtml(String(itemId))}</strong> · ${escapeHtml(String(item.title || "").trim() || "-")}</div>
+    <div class="assignment-brief-text">หมวด ${escapeHtml(toCategoryLabel(item.category))} · ภาษา ${escapeHtml(String(item.lang || "").trim() || "-")} · ประเภทงาน ${escapeHtml(assignmentKindLabel)}</div>
+    <div class="assignment-brief-text">สถานะชุดลงหน้างาน: ${escapeHtml(fieldPackStatus)}</div>
+    <div class="assignment-brief-text">จัด brief: ${escapeHtml(briefStepLabel)} · พร้อมส่งเข้า handoff: ${escapeHtml(readyStepLabel)}</div>
   `;
 }
 
@@ -6119,29 +6133,29 @@ function renderAssignmentHandoffBrief() {
   node.className = "assignment-brief-grid";
   node.innerHTML = `
     <div class="assignment-brief-section full-span">
-      <div class="assignment-brief-label">สรุปงานตั้งต้น</div>
+      <div class="assignment-brief-label"><span class="workflow-badge workflow-badge-cleaned">สรุปสั้น</span></div>
       <div class="assignment-brief-text">${summary ? escapeHtml(summary) : '<span class="muted">-</span>'}</div>
     </div>
     <div class="assignment-brief-section">
-      <div class="assignment-brief-label">สิ่งที่ต้องยืนยัน</div>
+      <div class="assignment-brief-label"><span class="workflow-badge workflow-badge-generated">ต้องยืนยัน</span></div>
       ${renderAssignmentBriefList(mustVerify, "ยังไม่ได้ระบุ")}
     </div>
     <div class="assignment-brief-section">
-      <div class="assignment-brief-label">สิ่งที่ต้องถ่าย</div>
-      ${renderAssignmentBriefList(mustCapture, "ยังไม่ได้ระบุ")}
-    </div>
-    <div class="assignment-brief-section">
-      <div class="assignment-brief-label">คำถามที่ต้องถาม</div>
+      <div class="assignment-brief-label"><span class="workflow-badge workflow-badge-raw">ต้องถาม</span></div>
       ${renderAssignmentBriefList(mustAsk, "ยังไม่ได้ระบุ")}
     </div>
     <div class="assignment-brief-section full-span">
-      <div class="assignment-brief-label">แนวเล่า social</div>
+      <div class="assignment-brief-label"><span class="workflow-badge workflow-badge-sent">social</span></div>
       <div class="assignment-brief-text"><strong>จุด hook:</strong> ${socialHook ? escapeHtml(socialHook) : '<span class="muted">-</span>'}</div>
       <div class="assignment-brief-text"><strong>แนว caption:</strong> ${socialCaptionAngle ? escapeHtml(socialCaptionAngle) : '<span class="muted">-</span>'}</div>
       <div class="assignment-brief-label" style="margin-top:8px;">ช็อตที่ควรเน้น</div>
       ${renderAssignmentBriefList(socialShotEmphasis, "ยังไม่ได้ระบุ")}
       <div class="assignment-brief-label" style="margin-top:8px;">ประเด็นพูดหน้ากล้อง</div>
       ${renderAssignmentBriefList(socialOnCameraPoints, "ยังไม่ได้ระบุ")}
+    </div>
+    <div class="assignment-brief-section full-span">
+      <div class="assignment-brief-label"><span class="workflow-badge workflow-badge-cleaned">ต้องถ่าย</span></div>
+      ${renderAssignmentBriefList(mustCapture, "ยังไม่ได้ระบุ")}
     </div>
   `;
 }
@@ -6591,7 +6605,7 @@ function renderAssignmentsTable(rows) {
         <td>${escapeHtml(String(selectedItem?.title || "").trim() || "-")}</td>
         <td>${escapeHtml(toCategoryLabel(selectedItem?.category))}</td>
         <td>
-          ${workflowBadge(selectedItem)}
+          ${renderHandoffQueueStatusBadge(selectedItem)}
           <div class="muted" style="margin-top:4px;">รายการนี้ถูกเปิดมาจากหน้า editor แต่ไม่ได้อยู่ในคิวพร้อมส่งตอนนี้</div>
         </td>
         <td>${escapeHtml(String(selectedItem?.updated_at || selectedItem?.created_at || "-").trim() || "-")}</td>
@@ -6618,7 +6632,7 @@ function renderAssignmentsTable(rows) {
         <td>${id || "-"}</td>
         <td>${escapeHtml(String(item?.title || "").trim() || "-")}</td>
         <td>${escapeHtml(toCategoryLabel(item?.category))}</td>
-        <td>${workflowBadge(item)}</td>
+        <td>${renderHandoffQueueStatusBadge(item)}</td>
         <td>${escapeHtml(String(item?.updated_at || item?.created_at || "-").trim() || "-")}</td>
         <td class="action-stack">
           <button type="button" data-action="open-handoff-item" data-id="${id}">1.1 เลือกงาน</button>
@@ -7942,13 +7956,24 @@ function wireRawTableControls() {
     refreshAll().catch((err) => setStatus("source-status", err.message, true));
   });
 
-  qs("raw-stage-filters")?.addEventListener("click", (event) => {
-    const btn = event.target.closest("button[data-stage-filter]");
-    if (!btn) return;
-    const nextFilter = String(btn.dataset.stageFilter || "all").trim().toLowerCase() || "all";
-    if (state.dashboard.rawStageFilter === nextFilter) return;
-    state.dashboard.rawStageFilter = nextFilter;
-    renderRawTable(state.items);
+  qs("raw-table-wrap")?.addEventListener("click", (event) => {
+    const intakeBtn = event.target.closest("button[data-intake-filter]");
+    if (intakeBtn) {
+      const nextFilter = String(intakeBtn.dataset.intakeFilter || "all").trim().toLowerCase() || "all";
+      if (state.dashboard.rawIntakeFilter !== nextFilter) {
+        state.dashboard.rawIntakeFilter = nextFilter;
+        renderRawTable(state.items);
+      }
+      return;
+    }
+    const reviewBtn = event.target.closest("button[data-review-filter]");
+    if (reviewBtn) {
+      const nextFilter = String(reviewBtn.dataset.reviewFilter || "all").trim().toLowerCase() || "all";
+      if (state.dashboard.rawReviewFilter !== nextFilter) {
+        state.dashboard.rawReviewFilter = nextFilter;
+        renderRawTable(state.items);
+      }
+    }
   });
 
   qs("raw-sort")?.addEventListener("change", (event) => {

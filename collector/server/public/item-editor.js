@@ -157,12 +157,11 @@ function applyEditorActionGuards() {
     saveBtn.disabled = !editGuard.allowed;
     saveBtn.title = editGuard.allowed ? "" : editGuard.reason;
   }
-  const regenerateBtn = qs("btn-regenerate-field-pack");
-  if (regenerateBtn) {
-    regenerateBtn.disabled = !editGuard.allowed;
-    regenerateBtn.title = editGuard.allowed ? "" : editGuard.reason;
+  const saveAiContextBtn = qs("btn-save-ai-context");
+  if (saveAiContextBtn) {
+    saveAiContextBtn.disabled = saveBtn ? saveBtn.disabled : !editGuard.allowed;
+    saveAiContextBtn.title = saveBtn ? String(saveBtn.title || "") : (editGuard.allowed ? "" : editGuard.reason);
   }
-
   if (isCleanMode) {
     const nextAiBtn = qs("btn-next-ai");
     const runAiBtn = qs("btn-run-ai-context");
@@ -228,6 +227,10 @@ function sanitizeUrl(value) {
 
   if (raw.startsWith("/")) return raw;
   if (/^https?:\/\//i.test(raw)) return raw;
+  if (/\s/.test(raw)) return "";
+  if (/^(?:www\.)?[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:[\/?#].*)?$/i.test(raw)) {
+    return `https://${raw.replace(/^\/+/, "")}`;
+  }
   return "";
 }
 
@@ -468,9 +471,17 @@ function renderItemClaimBanner() {
 
 function setStatus(text, isError = false) {
   const node = qs("editor-status");
-  if (!node) return;
-  node.textContent = text || "";
-  node.style.color = isError ? "#b42318" : "#1f8a52";
+  const mirrorNode = qs("draft-preview-status");
+  const message = text || "";
+  const color = isError ? "#b42318" : "#1f8a52";
+  if (node) {
+    node.textContent = message;
+    node.style.color = color;
+  }
+  if (mirrorNode) {
+    mirrorNode.textContent = message;
+    mirrorNode.style.color = color;
+  }
 }
 
 function setAssetStatus(text, isError = false) {
@@ -539,10 +550,239 @@ function parseLineList(value) {
     .filter(Boolean);
 }
 
+function normalizeCaptureType(value, fallback = "photo") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "photo" || normalized === "video" || normalized === "both") return normalized;
+  return fallback;
+}
+
+function explodeBothCaptureRow(baseRow = {}, index = 0) {
+  const itemText = String(baseRow?.item_text || "").trim();
+  if (!itemText) return [];
+  const captureType = normalizeCaptureType(baseRow?.capture_type, "photo");
+  const itemOrderBase = Number.isFinite(Number(baseRow?.item_order)) ? Number(baseRow.item_order) : index;
+  const status = String(baseRow?.status || "todo").trim() || "todo";
+  const note = baseRow?.note == null ? null : String(baseRow.note || "").trim() || null;
+
+  if (captureType === "both") {
+    return [
+      { item_text: itemText, capture_type: "photo", item_order: itemOrderBase * 10, status, note },
+      { item_text: itemText, capture_type: "video", item_order: itemOrderBase * 10 + 1, status, note },
+    ];
+  }
+  return [{ item_text: itemText, capture_type: captureType, item_order: itemOrderBase * 10, status, note }];
+}
+
+function buildMustCaptureEditorRowsFromChecklists(checklists = [], fallbackLines = []) {
+  const rows = (Array.isArray(checklists) ? checklists : [])
+    .filter((row) => {
+      const type = String(row?.checklist_type || "").trim().toLowerCase();
+      return type === "must_capture" || type === "must_capture_shot";
+    })
+    .flatMap((row, index) => explodeBothCaptureRow({
+      item_text: String(row?.item_text || "").trim(),
+      capture_type: normalizeCaptureType(
+        row?.capture_type,
+        String(row?.checklist_type || "").trim().toLowerCase() === "must_capture_shot" ? "both" : "photo"
+      ),
+      item_order: Number.isFinite(Number(row?.item_order)) ? Number(row.item_order) : index,
+      status: String(row?.status || "todo").trim() || "todo",
+      note: row?.note == null ? null : String(row.note || "").trim() || null,
+    }, index));
+
+  if (rows.length) {
+    return rows.sort((a, b) => Number(a.item_order || 0) - Number(b.item_order || 0));
+  }
+
+  return (Array.isArray(fallbackLines) ? fallbackLines : [])
+    .flatMap((line, index) => explodeBothCaptureRow({
+      item_text: String(line || "").trim(),
+      capture_type: "both",
+      item_order: index,
+      status: "todo",
+      note: null,
+    }, index))
+    .filter((row) => row.item_text);
+}
+
+function buildMustCaptureEditorRowsFromCards(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .flatMap((text, index) => explodeBothCaptureRow({
+      item_text: String(text || "").trim(),
+      capture_type: "both",
+      item_order: index,
+      status: "todo",
+      note: null,
+    }, index))
+    .filter((row) => row.item_text);
+}
+
+function formatMustCaptureDisplayItems(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((row) => {
+      const itemText = String(row?.item_text || row || "").trim();
+      if (!itemText) return "";
+      const captureType = normalizeCaptureType(row?.capture_type, "both");
+      return `[${captureType}] ${itemText}`;
+    })
+    .filter(Boolean);
+}
+
+function ensureMustCaptureEditor() {
+  const source = qs("fp-must-capture-shots");
+  if (!source) return null;
+  source.style.display = "none";
+  source.setAttribute("aria-hidden", "true");
+  source.dataset.mustCaptureSource = "1";
+  let root = qs("fp-must-capture-editor");
+  if (!root) {
+    root = document.createElement("div");
+    root.id = "fp-must-capture-editor";
+    root.className = "must-capture-editor";
+    source.insertAdjacentElement("afterend", root);
+  }
+  return root;
+}
+
+function getMustCaptureAddDraft() {
+  const type = normalizeCaptureType(qs("must-capture-add-type")?.value, "photo");
+  const text = String(qs("must-capture-add-text")?.value || "").trim();
+  return { type, text };
+}
+
+function syncMustCaptureEditorShadowValue() {
+  const rows = getMustCaptureEditorRows();
+  const source = qs("fp-must-capture-shots");
+  if (!source) return;
+  source.value = rows.map((row) => `[${row.capture_type}] ${row.item_text}`).join("\n");
+}
+
+function getMustCaptureEditorRows() {
+  const root = qs("fp-must-capture-editor");
+  if (!root) return [];
+  return Array.from(root.querySelectorAll(".must-capture-row"))
+    .map((row, index) => ({
+      checklist_type: "must_capture",
+      item_text: String(row.querySelector(".must-capture-item-text")?.value || "").trim(),
+      capture_type: normalizeCaptureType(row.getAttribute("data-capture-type"), "photo"),
+      item_order: index,
+      status: String(row.dataset.status || "todo").trim() || "todo",
+      note: String(row.dataset.note || "").trim() || null,
+    }))
+    .filter((row) => row.item_text);
+}
+
+function renderMustCaptureEditor(items = []) {
+  const root = ensureMustCaptureEditor();
+  if (!root) return;
+  const rows = (Array.isArray(items) ? items : [])
+    .map((row, index) => ({
+      item_text: String(row?.item_text || "").trim(),
+      capture_type: normalizeCaptureType(row?.capture_type, "photo"),
+      item_order: Number.isFinite(Number(row?.item_order)) ? Number(row.item_order) : index,
+      status: String(row?.status || "todo").trim() || "todo",
+      note: row?.note == null ? null : String(row.note || "").trim() || null,
+    }))
+    .filter((row) => row.item_text)
+    .sort((a, b) => Number(a.item_order || 0) - Number(b.item_order || 0));
+  const photoRows = rows.filter((row) => row.capture_type === "photo");
+  const videoRows = rows.filter((row) => row.capture_type === "video");
+  const renderRow = (row, index, type) => `
+    <div class="must-capture-row" data-capture-type="${escapeHtml(type)}" data-status="${escapeHtml(String(row.status || "todo"))}" data-note="${escapeHtml(String(row.note || ""))}">
+      <span class="intake-badge ${type === "video" ? "priority-good" : "priority-top"}">${escapeHtml(type)}</span>
+      <input class="must-capture-item-text" value="${escapeHtml(String(row.item_text || ""))}" placeholder="${type === "video" ? "อธิบายวิดีโอช็อตที่ถ่ายได้จริง 1 รายการ" : "อธิบายภาพช็อตที่ต้องถ่าย 1 รายการ"}" />
+      <button type="button" class="utility-action must-capture-remove" aria-label="remove ${type} shot ${index + 1}">ลบ</button>
+    </div>
+  `;
+  const draft = getMustCaptureAddDraft();
+  root.innerHTML = `
+    <div class="must-capture-grid">
+      <div class="must-capture-column">
+        <h4>Photo</h4>
+        <div class="must-capture-list" data-capture-group="photo">
+          ${photoRows.map((row, index) => renderRow(row, index, "photo")).join("") || '<p class="muted">ยังไม่มีรายการภาพ</p>'}
+        </div>
+      </div>
+      <div class="must-capture-column">
+        <h4>Video</h4>
+        <div class="must-capture-list" data-capture-group="video">
+          ${videoRows.map((row, index) => renderRow(row, index, "video")).join("") || '<p class="muted">ยังไม่มีรายการวิดีโอ</p>'}
+        </div>
+      </div>
+    </div>
+    <div class="must-capture-editor-toolbar">
+      <div class="must-capture-add-row">
+        <select id="must-capture-add-type" aria-label="เลือกประเภทช็อต">
+          <option value="photo" ${draft.type === "photo" ? "selected" : ""}>photo</option>
+          <option value="video" ${draft.type === "video" ? "selected" : ""}>video</option>
+          <option value="both" ${draft.type === "both" ? "selected" : ""}>both</option>
+        </select>
+        <input id="must-capture-add-text" value="${escapeHtml(draft.text)}" placeholder="อธิบาย 1 ช็อตต่อ 1 รายการ" />
+        <button type="button" class="utility-action" id="btn-must-capture-add">+ เพิ่มช็อต</button>
+      </div>
+      <span class="muted">ใช้ "both" เป็นทางลัดได้ ระบบจะแยกเป็นรายการภาพและวิดีโอให้โดยอัตโนมัติ</span>
+    </div>
+  `;
+  syncMustCaptureEditorShadowValue();
+}
+
+function addMustCaptureEditorRow(defaultType = "photo", defaultText = "") {
+  const existing = getMustCaptureEditorRows();
+  const nextType = normalizeCaptureType(defaultType, "photo");
+  const nextText = String(defaultText || "").trim();
+  if (!nextText) {
+    renderMustCaptureEditor(existing);
+    return;
+  }
+  if (nextType === "both") {
+    existing.push({ checklist_type: "must_capture", item_text: nextText, capture_type: "photo", item_order: existing.length, status: "todo", note: null });
+    existing.push({ checklist_type: "must_capture", item_text: nextText, capture_type: "video", item_order: existing.length + 1, status: "todo", note: null });
+  } else {
+    existing.push({ checklist_type: "must_capture", item_text: nextText, capture_type: nextType, item_order: existing.length, status: "todo", note: null });
+  }
+  renderMustCaptureEditor(existing);
+}
+
 function setLineListValue(id, values = []) {
   const node = qs(id);
   if (!node) return;
   node.value = (Array.isArray(values) ? values : []).map((x) => String(x || "").trim()).filter(Boolean).join("\n");
+}
+
+const FIELD_PACK_FIXED_HEIGHT_TEXTAREA_IDS = new Set([
+  "fp-references",
+  "fp-writer-references",
+  "fp-external-media-hints",
+]);
+
+function autosizeTextarea(node) {
+  if (!(node instanceof HTMLTextAreaElement)) return;
+  if (FIELD_PACK_FIXED_HEIGHT_TEXTAREA_IDS.has(node.id)) return;
+  node.style.overflowY = "hidden";
+  node.style.resize = "none";
+  node.style.minHeight = "0px";
+  node.style.height = "auto";
+  node.style.height = `${node.scrollHeight}px`;
+}
+
+function autosizeFieldPackTextareas() {
+  [
+    "fp-ai-summary",
+    "fp-ai-highlights",
+    "fp-ai-unknowns",
+    "fp-editor-summary",
+    "fp-verified-facts",
+    "fp-uncertain-facts",
+    "fp-story-angle",
+    "fp-field-notes",
+    "fp-must-verify-facts",
+    "fp-must-ask-questions",
+    "fp-social-hook",
+    "fp-social-shot-emphasis",
+    "fp-social-on-camera-points",
+    "fp-social-caption-angle",
+    "fp-return-to-clean-note",
+  ].forEach((id) => autosizeTextarea(qs(id)));
 }
 
 function listChecklistTexts(items = []) {
@@ -616,8 +856,8 @@ function formatExternalMediaHintLines(items = []) {
 }
 
 function normalizeMediaHintPayloadUrl(rawUrl, contentAssetId = 0) {
-  if (Number(contentAssetId || 0) > 0) return null;
   const text = String(rawUrl || "").trim();
+  if (!text && Number(contentAssetId || 0) > 0) return null;
   return text || null;
 }
 
@@ -644,13 +884,18 @@ function preserveChecklistRows(existingItems = [], checklistType, nextTexts = []
     const matchIndex = exactIndex >= 0 ? exactIndex : fallbackIndex;
     const match = matchIndex >= 0 ? pool[matchIndex] : null;
     if (matchIndex >= 0) used.add(matchIndex);
-    return {
+    const nextRow = {
       checklist_type: checklistType,
       item_text: normalizedText,
       item_order: index,
       status: String(match?.status || "todo").trim() || "todo",
       note: match?.note == null ? null : String(match.note || "").trim() || null,
     };
+    if (checklistType === "must_capture") {
+      const captureType = String(match?.capture_type || "").trim().toLowerCase();
+      nextRow.capture_type = ["photo", "video", "both"].includes(captureType) ? captureType : "both";
+    }
+    return nextRow;
   });
 }
 
@@ -738,17 +983,13 @@ function getAgentBlockingMessages() {
   const title = String(qs("e-title")?.value || "").trim();
   const missing = [];
   if (!title) missing.push("title");
-  if (!hasPlaceReferenceForAgent()) missing.push("reference");
-  if (!hasApprovedContextForAgent()) missing.push("approved_context");
+    if (!hasApprovedContextForAgent()) missing.push("approved_context");
 
   if (missing.length > 1) {
     return ["ยังส่งให้ Agent ไม่ได้: ข้อมูลสำคัญยังไม่ครบถ้วน"];
   }
   if (missing[0] === "title") {
     return ["ยังส่งให้ Agent ไม่ได้: ยังไม่ได้กรอกชื่อเรื่อง"];
-  }
-  if (missing[0] === "reference") {
-    return ["ยังส่งให้ Agent ไม่ได้: ต้องมีแหล่งอ้างอิงหรือ source อย่างน้อย 1 จุด"];
   }
   if (missing[0] === "approved_context") {
     return ["ยังส่งให้ Agent ไม่ได้: ต้องมี approved context จาก Clean อย่างน้อย 1 จุด"];
@@ -893,7 +1134,7 @@ function buildSourceOpenLink(url) {
 
 function classifyEvidenceSourceFamily(row = {}) {
   const backendFamily = String(row.source_family || "").trim().toLowerCase();
-  if (backendFamily === "official") return { key: "official", label: "Official Web / เว็บไซต์ทางการ", priority: 1 };
+  if (backendFamily === "official") return { key: "official", label: "Official Web", priority: 1 };
   if (backendFamily === "institutional") return { key: "institutional", label: "หน่วยงานทางการ", priority: 1 };
   if (backendFamily === "google_maps") return { key: "google_maps", label: "Google Maps", priority: 2 };
   if (backendFamily === "google") return { key: "google", label: "Google", priority: 3 };
@@ -916,7 +1157,7 @@ function classifyEvidenceSourceFamily(row = {}) {
     return { key: "institutional", label: "หน่วยงานทางการ", priority: 1 };
   }
   if (sourceType === "official" || sourceType === "official_site") {
-    return { key: "official", label: "Official Web / เว็บไซต์ทางการ", priority: 1 };
+    return { key: "official", label: "Official Web", priority: 1 };
   }
   if (sourceType === "system" || sourceType === "collector" || sourceType === "import") {
     return { key: "system", label: "ระบบ", priority: 5 };
@@ -1021,6 +1262,20 @@ function buildEditorReferenceSourceSummary(maxVisible = 3) {
       ? `${visible.join(", ")}${labels.length > visible.length ? ` +${labels.length - visible.length}` : ""}`
       : "ยังไม่พบแหล่งอ้างอิงที่สรุปได้",
   };
+}
+
+function buildEditorReferenceSourceLinks() {
+  const rows = [];
+  const seen = new Set();
+  for (const row of collectEditorReferenceSources()) {
+    const label = getReadableSourceShortLabel(row);
+    const url = sanitizeUrl(String(row?.url || row?.source_url || "").trim());
+    const key = `${String(label || "").trim().toLowerCase()}|${String(url || "").toLowerCase()}`;
+    if (!label || seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ label, url });
+  }
+  return rows;
 }
 
 function renderEditorReferenceSourceSummary() {
@@ -1311,7 +1566,7 @@ function renderEvidenceTable() {
 
     const status = String(row.status || "active");
     const selectedBadge = activeCtx
-      ? `<span class="workflow-badge workflow-badge-sent">ส่งให้ Agent แล้ว (context ${Number(activeCtx.id) || 0})</span>`
+      ? '<span class="workflow-badge workflow-badge-sent">ส่งให้ Agent</span>'
       : '<span class="muted">ยังไม่ถูกเลือกส่งให้ Agent</span>';
     const sourceUrl = String(row.source_url || "").trim();
     const sourceUrlHtml = sourceUrl
@@ -1575,7 +1830,7 @@ function renderDraftInputPreviewPanel() {
       const sourceType = String(block?.provenance?.evidence_source_type || "-");
       const sourceUrl = String(block?.provenance?.evidence_source_url || "").trim();
       const sourceUrlHtml = sourceUrl
-        ? `<a class="preview-url" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener" title="${escapeHtml(sourceUrl)}">${escapeHtml(sourceUrl)}</a>`
+        ? `<span class="preview-url">${buildEvidenceSourceUrlHtml(sourceUrl)}</span>`
         : "-";
       return `
         <article class="preview-card">
@@ -2200,6 +2455,7 @@ function buildDraftGuideData() {
   const hook = buildSignalHook(baseData, primarySignals);
   const cta = buildPrimaryCta(category, title);
   const sourceSummary = buildEditorReferenceSourceSummary();
+  const sourceSummaryLinks = buildEditorReferenceSourceLinks();
   return {
     ...baseData,
     signalFocus,
@@ -2209,14 +2465,9 @@ function buildDraftGuideData() {
     cta,
     primarySignals,
     sourceSummaryText: sourceSummary.summaryText,
+    sourceSummaryLinks,
     descriptionLength: normalizeWhitespace(description).length,
   };
-}
-
-function buildListHtml(items) {
-  const list = (Array.isArray(items) ? items : []).map((item) => normalizeWhitespace(item)).filter(Boolean);
-  if (!list.length) return '<p class="muted">ยังไม่มีรายการที่แนะนำในส่วนนี้</p>';
-  return `<ul>${list.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
 
 function buildFieldPackDefaults() {
@@ -2237,6 +2488,7 @@ function buildFieldPackDefaults() {
     story_angle: data.angle || "",
     field_notes: "",
     must_verify_facts: fieldCards[0]?.items || [],
+    must_capture_items: buildMustCaptureEditorRowsFromCards(fieldCards[1]?.items || []),
     must_capture_shots: fieldCards[1]?.items || [],
     must_ask_questions: fieldCards[2]?.items || [],
     social_hook: data.hook || "",
@@ -2428,7 +2680,14 @@ function fillFieldPackForm(fieldPack = null) {
   const pack = fieldPack || {};
   const checklists = Array.isArray(pack.checklists) ? pack.checklists : [];
   const mustVerifyFacts = listChecklistTexts(checklists.filter((row) => String(row.checklist_type || "") === "must_verify_fact"));
-  const mustCaptureShots = listChecklistTexts(checklists.filter((row) => String(row.checklist_type || "") === "must_capture_shot"));
+  const mustCaptureItems = buildMustCaptureEditorRowsFromChecklists(
+    checklists,
+    defaults.must_capture_shots || []
+  );
+  if (!mustCaptureItems.length && Array.isArray(defaults.must_capture_items) && defaults.must_capture_items.length) {
+    mustCaptureItems.push(...defaults.must_capture_items);
+  }
+  const mustCaptureShots = mustCaptureItems.map((row) => String(row.item_text || "").trim()).filter(Boolean);
   const mustAskQuestions = listChecklistTexts(checklists.filter((row) => String(row.checklist_type || "") === "must_ask_question"));
   const fieldAssignment = buildAssignmentFormState("field", pack.assignments);
   const writerAssignment = buildAssignmentFormState("writer", pack.assignments);
@@ -2446,7 +2705,8 @@ function fillFieldPackForm(fieldPack = null) {
   setLineListValue("fp-verified-facts", pack.verified_facts_json || defaults.verified_facts || []);
   setLineListValue("fp-uncertain-facts", pack.uncertain_facts_json || defaults.uncertain_facts || []);
   setLineListValue("fp-must-verify-facts", mustVerifyFacts.length ? mustVerifyFacts : (defaults.must_verify_facts || []));
-  setLineListValue("fp-must-capture-shots", mustCaptureShots.length ? mustCaptureShots : (defaults.must_capture_shots || []));
+  setLineListValue("fp-must-capture-shots", mustCaptureShots);
+  renderMustCaptureEditor(mustCaptureItems);
   setLineListValue("fp-must-ask-questions", mustAskQuestions.length ? mustAskQuestions : (defaults.must_ask_questions || []));
   setLineListValue("fp-social-shot-emphasis", pack.social_shot_emphasis_json || defaults.social_shot_emphasis || []);
   setLineListValue("fp-social-on-camera-points", pack.social_on_camera_points_json || defaults.social_on_camera_points || []);
@@ -2464,6 +2724,7 @@ function fillFieldPackForm(fieldPack = null) {
   if (qs("fp-writer-due-at")) qs("fp-writer-due-at").value = writerAssignment.due_at;
   if (qs("fp-writer-assignment-note")) qs("fp-writer-assignment-note").value = writerAssignment.note;
   renderFieldPackMediaHintEditor(pack);
+  autosizeFieldPackTextareas();
   renderFieldProgressControl();
 }
 
@@ -2491,6 +2752,7 @@ function readFieldPackFormState() {
         .filter(Boolean)
     : [];
 
+  const mustCaptureItems = getMustCaptureEditorRows();
   return {
     id: Number(qs("fp-id")?.value || 0) || 0,
     status: String(qs("fp-status")?.value || "draft").trim() || "draft",
@@ -2504,7 +2766,8 @@ function readFieldPackFormState() {
     story_angle: String(qs("fp-story-angle")?.value || "").trim(),
     field_notes: String(qs("fp-field-notes")?.value || "").trim(),
     must_verify_facts: parseLineList(qs("fp-must-verify-facts")?.value || ""),
-    must_capture_shots: parseLineList(qs("fp-must-capture-shots")?.value || ""),
+    must_capture_items: mustCaptureItems,
+    must_capture_shots: mustCaptureItems.map((row) => String(row.item_text || "").trim()).filter(Boolean),
     must_ask_questions: parseLineList(qs("fp-must-ask-questions")?.value || ""),
     social_hook: String(qs("fp-social-hook")?.value || "").trim(),
     social_shot_emphasis: parseLineList(qs("fp-social-shot-emphasis")?.value || ""),
@@ -2553,9 +2816,18 @@ function buildFieldPackTopLevelPayload(pack) {
 }
 
 function buildFieldPackChecklistPayload(pack, existing = state.fieldPack || {}) {
+  const captureRows = (Array.isArray(pack.must_capture_items) ? pack.must_capture_items : []).map((row, index) => ({
+    checklist_type: "must_capture",
+    item_text: String(row?.item_text || "").trim(),
+    capture_type: normalizeCaptureType(row?.capture_type, "photo"),
+    item_order: index,
+    status: String(row?.status || "todo").trim() || "todo",
+    note: row?.note == null ? null : String(row.note || "").trim() || null,
+  })).filter((row) => row.item_text);
+
   return [
     ...preserveChecklistRows(existing.checklists, "must_verify_fact", pack.must_verify_facts),
-    ...preserveChecklistRows(existing.checklists, "must_capture_shot", pack.must_capture_shots),
+    ...captureRows,
     ...preserveChecklistRows(existing.checklists, "must_ask_question", pack.must_ask_questions),
   ];
 }
@@ -2646,20 +2918,14 @@ async function saveCurrentFieldPack() {
   return state.fieldPack;
 }
 
-async function regenerateCurrentFieldPack(revisionNote) {
+async function returnCurrentFieldPackToClean(comment) {
   if (isCleanMode) return null;
-  const note = String(revisionNote || "").trim();
-  if (!note) throw new Error("กรุณาระบุเหตุผลสำหรับให้ Agent แก้ไข");
-
-  const result = await api(`/api/items/${state.itemId}/field-pack/regenerate`, {
+  const note = String(comment || "").trim();
+  if (!note) throw new Error("กรุณากรอกเหตุผลก่อนส่งกลับไป Clean");
+  return api(`/api/items/${state.itemId}/field-pack/return-to-clean`, {
     method: "POST",
-    body: JSON.stringify({ revision_note: note }),
+    body: JSON.stringify({ comment: note }),
   });
-  state.fieldPack = result?.field_pack || state.fieldPack;
-  fillFieldPackForm(state.fieldPack);
-  applyEditorActionGuards();
-  renderStepFourGuides();
-  return state.fieldPack;
 }
 
 function isFieldPackReadyForAssignment(status) {
@@ -2701,7 +2967,7 @@ function buildPackagingRequirements(data, fieldPack) {
   if (!fieldPack.must_verify_facts.length) {
     addRequirement("fp-must-verify-facts", "ข้อเท็จจริงที่ต้องตรวจ", "ควรมีรายการข้อเท็จจริงที่ต้องยืนยันก่อนเผยแพร่");
   }
-  if (!fieldPack.must_capture_shots.length) {
+  if (!fieldPack.must_capture_items.length) {
     addRequirement("fp-must-capture-shots", "Shot List", "ควรมีรายการช็อตภาพที่ต้องเก็บภาคสนาม");
   }
   if (!fieldPack.must_ask_questions.length) {
@@ -3014,16 +3280,48 @@ function renderGuideCards(rootId, cards) {
   const root = qs(rootId);
   if (!root) return;
   const list = Array.isArray(cards) ? cards : [];
-  root.innerHTML = list
-    .map((card) => `
-      <article class="preview-card">
-        <h4>${escapeHtml(card.title || "-")}</h4>
-        ${Array.isArray(card.rows) ? card.rows.map((row) => `<p><strong>${escapeHtml(row.label || "-")}:</strong> ${escapeHtml(row.value || "-")}</p>`).join("") : ""}
-        ${card.listTitle ? `<p><strong>${escapeHtml(card.listTitle)}:</strong></p>` : ""}
-        ${buildListHtml(card.items)}
-      </article>
-    `)
+  const sections = list
+    .map((card) => {
+      const rowsHtml = Array.isArray(card.rows)
+        ? card.rows.map((row) => {
+          const labelText = escapeHtml(row?.label || "-");
+          if (row?.kind === "reference_summary") {
+            return `<p class="brief-block-text"><strong>${labelText}:</strong> ${buildReferenceLabelListHtml(row?.referenceItems, row?.emptyText || "ไม่มีข้อมูล")}</p>`;
+          }
+          return `<p class="brief-block-text"><strong>${labelText}:</strong> ${escapeHtml(row?.value || "-")}</p>`;
+        }).join("")
+        : "";
+      const listHtml = card.listTitle
+        ? `<h4>${escapeHtml(card.listTitle)}</h4>${buildListHtml(card.items)}`
+        : buildListHtml(card.items);
+      return `
+        <h3>${escapeHtml(card.title || "-")}</h3>
+        ${rowsHtml}
+        ${listHtml}
+      `;
+    })
     .join("");
+  root.innerHTML = `<article class="article-brief-doc">${sections}</article>`;
+}
+
+function buildReferenceLabelListHtml(items, emptyText = "ไม่มีข้อมูล") {
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) return `<span>${escapeHtml(emptyText)}</span>`;
+  return rows.map((item) => {
+    const label = String(item?.label || "").trim();
+    const url = sanitizeUrl(item?.url || "");
+    if (url) {
+      return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(label || "ลิงก์อ้างอิง")}</a>`;
+    }
+    return `<span>${escapeHtml(label || "-")}</span>`;
+  }).join(", ");
+}
+
+function buildListHtml(items) {
+  if (!Array.isArray(items) || !items.length) return "";
+  return `<ul class="brief-list">${items
+    .map((item) => `<li>${escapeHtml(item || "-")}</li>`)
+    .join("")}</ul>`;
 }
 
 function buildFieldQuestions(data, signals) {
@@ -3081,7 +3379,12 @@ function buildAiSummaryCardsFromData(data) {
     {
       title: "ช่องว่างข้อมูลที่ต้องตรวจ",
       rows: [
-        { label: "แหล่งอ้างอิง", value: data.sourceSummaryText || "ไม่มีข้อมูล" },
+        {
+          label: "แหล่งอ้างอิง",
+          kind: "reference_summary",
+          referenceItems: data.sourceSummaryLinks || [],
+          emptyText: "ไม่มีข้อมูล",
+        },
         { label: "signal focus", value: data.signalFocus || data.angle },
         { label: "เป้าหมายตรวจสอบ", value: "ยืนยันข้อเท็จจริงให้ครบก่อนส่งต่อทีมภาคสนาม" },
       ],
@@ -3110,7 +3413,12 @@ function buildAiSummaryCards() {
     {
       title: "ช่องว่างข้อมูลที่ต้องตรวจ",
       rows: [
-        { label: "แหล่งอ้างอิง", value: data.sourceSummaryText || "ไม่มีข้อมูล" },
+        {
+          label: "แหล่งอ้างอิง",
+          kind: "reference_summary",
+          referenceItems: data.sourceSummaryLinks || [],
+          emptyText: "ไม่มีข้อมูล",
+        },
         { label: "signal focus", value: data.signalFocus || data.angle },
         { label: "เป้าหมายตรวจสอบ", value: "ยืนยันข้อเท็จจริงให้ครบก่อนส่งต่อทีมภาคสนาม" },
       ],
@@ -3147,7 +3455,12 @@ function buildFactCheckCardsFromData(data) {
       rows: [
         { label: "หัวข้อ", value: data.fallbackTitle },
         { label: "หมวด", value: data.categoryLabel },
-        { label: "แหล่งอ้างอิง", value: data.sourceSummaryText || "ไม่มีข้อมูล" },
+        {
+          label: "แหล่งอ้างอิง",
+          kind: "reference_summary",
+          referenceItems: data.sourceSummaryLinks || [],
+          emptyText: "ไม่มีข้อมูล",
+        },
       ],
       listTitle: "รายการข้อมูลที่มี",
       items: baselineFacts,
@@ -3261,7 +3574,9 @@ function buildFieldPackCards() {
         { label: "signal focus", value: data.signalFocus || data.angle },
       ],
       listTitle: "Shot List",
-      items: fieldPack.must_capture_shots.length ? fieldPack.must_capture_shots : (fallbackCards[1]?.items || []),
+      items: fieldPack.must_capture_items.length
+        ? formatMustCaptureDisplayItems(fieldPack.must_capture_items)
+        : (fallbackCards[1]?.items || []),
     },
     {
       title: "คำถามที่ควรถามหน้างาน",
@@ -3353,7 +3668,7 @@ function renderAssetsTable(rows) {
       actions.push(`<button data-action="set-cover" data-id="${assetId}"${disabledAttr}${disabledTitleAttr}>ตั้งเป็นภาพปก</button>`);
     }
     if (isCleanMode && isOwnerUser()) {
-      actions.push(`<button data-action="delete-asset" data-id="${assetId}" class="fail"${disabledAttr}${disabledTitleAttr}>??</button>`);
+      actions.push(`<button data-action="delete-asset" data-id="${assetId}" class="fail"${disabledAttr}${disabledTitleAttr}>ลบ</button>`);
     }
 
     const tr = document.createElement("tr");
@@ -3515,6 +3830,7 @@ async function syncClaimedItem(resultItem = null) {
 
 
 function wire() {
+  ensureMustCaptureEditor();
   qs("btn-close-evidence-value-modal")?.addEventListener("click", () => {
     closeEvidenceValueModal();
   });
@@ -3665,7 +3981,13 @@ function wire() {
     }
   });
 
-  qs("btn-regenerate-field-pack")?.addEventListener("click", async (event) => {
+  qs("btn-save-ai-context")?.addEventListener("click", () => {
+    const saveBtn = qs("btn-save");
+    if (!saveBtn) return;
+    saveBtn.click();
+  });
+
+  qs("btn-return-to-clean")?.addEventListener("click", async (event) => {
     const btn = event.currentTarget;
     try {
       const editGuard = getEditPermissionGuard();
@@ -3674,27 +3996,23 @@ function wire() {
         setFieldPackRegenerateStatus(editGuard.reason, true);
         return;
       }
-      const note = String(qs("fp-regenerate-note")?.value || "").trim();
+      const note = String(qs("fp-return-to-clean-note")?.value || "").trim();
       if (!note) {
-        setFieldPackRegenerateStatus("กรุณากรอกเหตุผลสำหรับให้ Agent แก้ไข", true);
+        setFieldPackRegenerateStatus("กรุณากรอกเหตุผลก่อนส่งกลับไป Clean", true);
         return;
       }
-      const hasCurrentFieldPack = Boolean(state.fieldPack?.id || Number(qs("fp-id")?.value || 0));
-      const confirmMessage = hasCurrentFieldPack
-        ? "ยืนยัน regenerate field pack โดยใช้เหตุผลนี้ ระบบจะสร้างข้อมูลใหม่ทับของเดิม"
-        : "สร้าง field pack ใหม่จากข้อมูล clean context ปัจจุบันหรือไม่";
-      if (!window.confirm(confirmMessage)) {
+      if (!window.confirm("ยืนยันส่งกลับไปหน้า Clean ระบบจะลบ field pack ปัจจุบันและไม่ generate ใหม่อัตโนมัติ")) {
         return;
       }
-      await withButtonLoading(btn, "กำลัง regenerate...", async () => {
-        setFieldPackRegenerateStatus(hasCurrentFieldPack ? "กำลังให้ Agent ปรับ field pack..." : "กำลังให้ Agent สร้าง field pack...");
-        await regenerateCurrentFieldPack(note);
+      await withButtonLoading(btn, "กำลังส่งกลับ...", async () => {
+        setFieldPackRegenerateStatus("กำลังส่งกลับไปหน้า Clean...");
+        const result = await returnCurrentFieldPackToClean(note);
+        const redirectUrl = String(result?.redirect_url || "").trim() || `/clean-item.html?id=${state.itemId}`;
+        window.location.href = redirectUrl;
       });
-      setFieldPackRegenerateStatus("regenerate field pack สำเร็จ");
-      setStatus(`Agent สร้าง/ปรับ field pack ให้ item #${state.itemId} แล้ว`);
     } catch (err) {
       setFieldPackRegenerateStatus(err.message, true);
-      setStatus(`Agent สร้าง/ปรับ field pack ไม่สำเร็จ: ${err.message}`, true);
+      setStatus(`ส่งกลับไป Clean ไม่สำเร็จ: ${err.message}`, true);
     }
   });
 
@@ -3807,9 +4125,44 @@ function wire() {
     if (!node) return;
     const eventName = node.type === "checkbox" || node.tagName === "SELECT" ? "change" : "input";
     node.addEventListener(eventName, () => {
+      if (node instanceof HTMLTextAreaElement) autosizeTextarea(node);
       applyEditorActionGuards();
       renderStepFourGuides();
     });
+  });
+  qs("fp-must-capture-editor")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.id === "btn-must-capture-add") {
+      const nextType = normalizeCaptureType(qs("must-capture-add-type")?.value, "photo");
+      const textNode = qs("must-capture-add-text");
+      const nextText = String(textNode?.value || "").trim();
+      if (textNode) textNode.value = "";
+      addMustCaptureEditorRow(nextType, nextText);
+      applyEditorActionGuards();
+      renderStepFourGuides();
+      return;
+    }
+    if (target.classList.contains("must-capture-remove")) {
+      const row = target.closest(".must-capture-row");
+      if (row) row.remove();
+      syncMustCaptureEditorShadowValue();
+      if (!getMustCaptureEditorRows().length) {
+        renderMustCaptureEditor([]);
+      }
+      applyEditorActionGuards();
+      renderStepFourGuides();
+    }
+  });
+  qs("fp-must-capture-editor")?.addEventListener("input", () => {
+    syncMustCaptureEditorShadowValue();
+    applyEditorActionGuards();
+    renderStepFourGuides();
+  });
+  qs("fp-must-capture-editor")?.addEventListener("change", () => {
+    syncMustCaptureEditorShadowValue();
+    applyEditorActionGuards();
+    renderStepFourGuides();
   });
   qs("fp-media-hints-editor")?.addEventListener("input", renderStepFourGuides);
   qs("fp-media-hints-editor")?.addEventListener("change", renderStepFourGuides);
@@ -3982,10 +4335,6 @@ function wire() {
     setStatus(err.message, true);
   }
 })();
-
-
-
-
 
 
 

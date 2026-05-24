@@ -1319,11 +1319,11 @@ function normalizeFieldPackReferenceRow(row) {
   };
 }
 
-function normalizeFieldPackMediaHintRow(row) {
-  if (!row) return null;
-  return {
-    ...row,
-    selected: Boolean(row.selected),
+  function normalizeFieldPackMediaHintRow(row) {
+    if (!row) return null;
+    return {
+      ...row,
+      selected: Boolean(row.selected),
   };
 }
 
@@ -9272,6 +9272,83 @@ function normalizeStateValue(value, stateGroup) {
     };
   }
 
+  function listPostAssignmentAiInputCleanupCandidates(contentItemId, options = {}) {
+    const itemId = Number(contentItemId || 0) || 0;
+    if (!itemId) throw new Error("invalid content_item_id");
+    const item = getItem(itemId);
+    if (!item) throw new Error("item not found");
+
+    const includeBlocked = options?.include_blocked !== false;
+    const rows = listContentAssetsByItem(itemId, { onlySelected: false });
+    const countFieldPackRefsStmt = db.prepare(
+      "SELECT COUNT(*) AS c FROM field_pack_media_hints WHERE content_asset_id=?"
+    );
+    const countDeliverableRefsStmt = db.prepare(
+      "SELECT COUNT(*) AS c FROM content_assignment_submission_deliverables WHERE content_item_id=? AND source_asset_id=?"
+    );
+
+    const assets = [];
+    let eligibleCount = 0;
+    let blockedCount = 0;
+
+    for (const row of rows) {
+      const contentAssetId = Number(row.id || 0) || 0;
+      const assetId = Number(row.asset_id || 0) || 0;
+      const role = String(row.role || "").trim().toLowerCase();
+      const mimeType = String(row.mime_type || "").trim().toLowerCase();
+      const selectedInClean = Number(row.selected_in_clean || 0) === 1;
+      const selectedForAi = selectedInClean && role !== "unused" && (!mimeType || mimeType.startsWith("image/"));
+      if (!selectedForAi) continue;
+
+      const assignmentSurface = String(row.assignment_surface || "").trim().toLowerCase();
+      const fieldPackHintRefs = Number(countFieldPackRefsStmt.get(contentAssetId)?.c || 0);
+      const assignmentDeliverableRefs = Number(countDeliverableRefsStmt.get(itemId, assetId)?.c || 0);
+
+      const blockedReasons = [];
+      if (Number(row.is_cover || 0) === 1 || role === "cover") blockedReasons.push("article_cover_asset");
+      if (role === "inline" || String(row.placement_type || "").trim().toLowerCase() === "inline") {
+        blockedReasons.push("article_inline_asset");
+      }
+      if (assignmentSurface === "assignment_work") blockedReasons.push("assignment_work_surface");
+      if (fieldPackHintRefs > 0) blockedReasons.push("referenced_in_field_pack_media_hints");
+      if (assignmentDeliverableRefs > 0) blockedReasons.push("referenced_in_assignment_deliverables");
+
+      const eligible = blockedReasons.length === 0;
+      if (eligible) eligibleCount += 1;
+      else blockedCount += 1;
+
+      if (eligible || includeBlocked) {
+        assets.push({
+          content_asset_id: contentAssetId,
+          asset_id: assetId,
+          file_name: String(row.file_name || "").trim() || null,
+          mime_type: mimeType || null,
+          role,
+          selected_in_clean: selectedInClean,
+          assignment_surface: assignmentSurface || null,
+          eligible_for_cleanup: eligible,
+          blocked_reasons: blockedReasons,
+          reference_counts: {
+            field_pack_media_hints: fieldPackHintRefs,
+            assignment_deliverables: assignmentDeliverableRefs,
+          },
+        });
+      }
+    }
+
+    return {
+      content_item_id: itemId,
+      policy_version: "post_assignment_ai_input_cleanup_v1",
+      summary: {
+        total_assets: rows.length,
+        ai_input_assets: eligibleCount + blockedCount,
+        eligible_assets: eligibleCount,
+        blocked_assets: blockedCount,
+      },
+      assets,
+    };
+  }
+
   function addSearchEnrichmentRecord(contentItemId, payload = {}) {
     const item = getItem(contentItemId);
     if (!item) throw new Error("item not found");
@@ -10261,6 +10338,7 @@ function normalizeStateValue(value, stateGroup) {
     setContentAssetSelected,
     listApprovedImageContext,
     evaluateContentAssetCleanupEligibility,
+    listPostAssignmentAiInputCleanupCandidates,
     getDeletedItemReferenceGroups,
     cleanupDeletedItemReferenceGroups,
     addSearchEnrichmentRecord,
@@ -10359,10 +10437,6 @@ function deriveExpectedDeliverablesFromHandoff(handoffPackage) {
   }
   return normalizeAssignmentDeliverableTypeList(derived);
 }
-
-
-
-
 
 
 

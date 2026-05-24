@@ -138,32 +138,6 @@ function deriveHostName(value) {
   }
 }
 
-function splitPipeParts(line) {
-  return String(line || "").split("|").map((part) => String(part || "").trim());
-}
-
-function parseLineList(value) {
-  return String(value || "")
-    .split(/\r?\n/)
-    .map((x) => x.trim())
-    .filter(Boolean);
-}
-
-function parseReferenceSummaryLines(value) {
-  return parseLineList(value)
-    .map((line) => {
-      const [label, url, sourceFamily = "manual", note = ""] = splitPipeParts(line);
-      if (!url) return null;
-      return {
-        label: String(label || "").trim(),
-        url: String(url || "").trim(),
-        source_family: String(sourceFamily || "manual").trim(),
-        note: String(note || "").trim(),
-      };
-    })
-    .filter(Boolean);
-}
-
 function classifyEvidenceSourceFamily(row = {}) {
   const backendFamily = String(row.source_family || "").trim().toLowerCase();
   if (backendFamily === "official") return { key: "official", label: "เว็บไซต์ทางการ" };
@@ -253,17 +227,34 @@ function buildReferenceRows() {
   return rows;
 }
 
-function buildReferenceSummary() {
-  const labels = [];
+function buildReferenceDocumentRows() {
+  const rows = [];
   const seen = new Set();
   for (const row of buildReferenceRows()) {
     const label = getReadableSourceShortLabel(row);
-    const key = String(label || "").trim().toLowerCase();
-    if (!key || seen.has(key)) continue;
+    const url = String(row?.url || row?.source_url || "").trim();
+    const safeUrl = sanitizeUrl(url);
+    const key = `${String(label || "").trim().toLowerCase()}|${safeUrl.toLowerCase()}`;
+    if (!label || seen.has(key)) continue;
     seen.add(key);
-    labels.push(label);
+    rows.push({ label, url: safeUrl });
   }
-  return labels;
+  return rows;
+}
+
+function buildReferenceListHtml(items, emptyText = "") {
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) {
+    return emptyText ? `<p class="muted">${escapeHtml(emptyText)}</p>` : "";
+  }
+  return `<ul class="brief-list">${rows.map((item) => {
+    const label = String(item?.label || "").trim();
+    const url = sanitizeUrl(item?.url || "");
+    if (url) {
+      return `<li><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(label || "ลิงก์อ้างอิง")}</a></li>`;
+    }
+    return `<li>${escapeHtml(label || "-")}</li>`;
+  }).join("")}</ul>`;
 }
 
 function findAssignment(scope) {
@@ -282,6 +273,59 @@ function listChecklistTexts(items, checklistType) {
     .filter((row) => String(row?.checklist_type || "").trim() === checklistType)
     .map((row) => String(row?.item_text || "").trim())
     .filter(Boolean);
+}
+
+function normalizeCaptureType(value, fallback = "both") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "photo" || normalized === "video" || normalized === "both") return normalized;
+  return fallback;
+}
+
+function explodeBothCaptureRows(rows = []) {
+  return (Array.isArray(rows) ? rows : []).flatMap((row, index) => {
+    const text = String(row?.item_text || "").trim();
+    if (!text) return [];
+    const type = normalizeCaptureType(row?.capture_type, "both");
+    const baseOrder = Number.isFinite(Number(row?.item_order)) ? Number(row.item_order) : index;
+    if (type !== "both") {
+      return [{
+        item_text: text,
+        capture_type: type,
+        item_order: baseOrder,
+      }];
+    }
+    return [
+      { item_text: text, capture_type: "photo", item_order: baseOrder * 10 + 1 },
+      { item_text: text, capture_type: "video", item_order: baseOrder * 10 + 2 },
+    ];
+  });
+}
+
+function listMustCaptureChecklistItems() {
+  const checklists = Array.isArray(state.fieldPack?.checklists) ? state.fieldPack.checklists : [];
+  const rows = explodeBothCaptureRows(checklists
+    .filter((row) => {
+      const type = String(row?.checklist_type || "").trim().toLowerCase();
+      return type === "must_capture" || type === "must_capture_shot";
+    })
+    .map((row, index) => ({
+      item_text: String(row?.item_text || "").trim(),
+      capture_type: normalizeCaptureType(
+        row?.capture_type,
+        String(row?.checklist_type || "").trim().toLowerCase() === "must_capture_shot" ? "both" : "both"
+      ),
+      item_order: Number.isFinite(Number(row?.item_order)) ? Number(row.item_order) : index,
+    }))
+    .filter((row) => row.item_text))
+    .sort((a, b) => Number(a.item_order || 0) - Number(b.item_order || 0));
+
+  if (rows.length) return rows;
+  const legacy = getPackList("must_capture_shots", "");
+  return explodeBothCaptureRows(legacy.map((text, index) => ({
+    item_text: String(text || "").trim(),
+    capture_type: "both",
+    item_order: index,
+  })).filter((row) => row.item_text));
 }
 
 function getPackList(key, checklistType = "") {
@@ -323,47 +367,38 @@ function getPackList(key, checklistType = "") {
   return [];
 }
 
-function renderListBlock(id, items, emptyText) {
-  const root = qs(id);
-  if (!root) return;
-  const rows = (Array.isArray(items) ? items : []).map((x) => String(x || "").trim()).filter(Boolean);
+function buildBriefListHtml(items, emptyText = "") {
+  const rows = (Array.isArray(items) ? items : []).map((item) => String(item || "").trim()).filter(Boolean);
   if (!rows.length) {
-    root.innerHTML = `<p class="muted">${escapeHtml(emptyText)}</p>`;
-    return;
+    return emptyText ? `<p class="muted">${escapeHtml(emptyText)}</p>` : "";
   }
-  root.innerHTML = `<ul class="brief-list">${rows.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+  return `<ul class="brief-list">${rows.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
 
-function renderSummary() {
-  const root = qs("brief-summary");
+function buildMustCaptureDocumentHtml() {
+  const rows = listMustCaptureChecklistItems();
+  if (!rows.length) {
+    return '<p class="muted">ยังไม่ได้ระบุช็อตที่ต้องเก็บ</p>';
+  }
+  const photoRows = rows.filter((row) => row.capture_type === "photo").map((row) => row.item_text);
+  const videoRows = rows.filter((row) => row.capture_type === "video").map((row) => row.item_text);
+  return `
+    <h4>ภาพนิ่ง (photo)</h4>
+    ${buildBriefListHtml(photoRows, "ยังไม่ได้ระบุภาพนิ่งที่ต้องเก็บ")}
+    <h4>วิดีโอ (video)</h4>
+    ${buildBriefListHtml(videoRows, "ยังไม่ได้ระบุวิดีโอที่ต้องเก็บ")}
+  `;
+}
+
+function renderBriefDocument() {
+  const root = qs("brief-document");
   if (!root) return;
   const brief = getAssignmentBrief();
   const summary = String(state.fieldPack?.editor_summary || state.fieldPack?.ai_summary || brief?.brief_summary || "").trim();
   const angle = String(state.fieldPack?.story_angle || brief?.recommended_hook || "").trim();
   const notes = String(state.fieldPack?.field_notes || "").trim();
-
-  root.innerHTML = `
-    <div class="brief-grid">
-      <div class="brief-panel">
-        <div class="brief-panel-label">สรุปงานสำหรับทีมภาคสนาม</div>
-        <div>${escapeHtml(summary || "ยังไม่มีสรุปสำหรับทีมภาคสนาม")}</div>
-      </div>
-      <div class="brief-panel">
-        <div class="brief-panel-label">มุมเล่าเรื่อง</div>
-        <div>${escapeHtml(angle || "ยังไม่ได้กำหนดมุมเล่าเรื่อง")}</div>
-      </div>
-      <div class="brief-panel brief-panel-full">
-        <div class="brief-panel-label">หมายเหตุหน้างาน</div>
-        <div>${escapeHtml(notes || "ไม่มีหมายเหตุเพิ่มเติม")}</div>
-      </div>
-    </div>
-  `;
-}
-
-function renderSocialBlock() {
-  const root = qs("brief-social");
-  if (!root) return;
-  const brief = getAssignmentBrief();
+  const verifyRows = getPackList("must_verify_facts", "must_verify_fact");
+  const questionRows = getPackList("must_ask_questions", "must_ask_question");
   const hook = String(state.fieldPack?.social_hook || brief?.recommended_hook || "").trim();
   const onCamera = getPackList("social_on_camera_points");
   const captionAngle = String(
@@ -372,28 +407,51 @@ function renderSocialBlock() {
     || ""
   ).trim();
   const shotEmphasis = getPackList("social_shot_emphasis");
+  const referenceRows = buildReferenceDocumentRows();
+  const fieldAssignment = state.assignment || findAssignment("field");
+  const assignmentRows = fieldAssignment
+    ? [
+        `ผู้รับงาน: ${String(fieldAssignment.assignee_display_name || fieldAssignment.assigned_name || fieldAssignment.assignee_name || fieldAssignment.assignee_email || "").trim() || "-"}`,
+        `บทบาท: ${String(fieldAssignment.assigned_role || fieldAssignment.assignment_kind || "").trim() || "-"}`,
+        `กำหนดส่ง: ${formatDateTime(fieldAssignment.due_at)}`,
+        `หมายเหตุ: ${String(fieldAssignment.note || "").trim() || "ไม่มีหมายเหตุเพิ่มเติม"}`,
+      ]
+    : [];
 
   root.innerHTML = `
-    <div class="brief-panel">
-      <div class="brief-panel-label">Hook</div>
-      <div>${escapeHtml(hook || "ยังไม่ได้กำหนด Hook")}</div>
-    </div>
-    <div class="brief-panel">
-      <div class="brief-panel-label">แนวทาง Caption</div>
-      <div>${escapeHtml(captionAngle || "ยังไม่ได้กำหนดแนวทาง Caption")}</div>
-    </div>
-    <div class="brief-panel">
-      <div class="brief-panel-label">ช็อตที่ควรเน้น</div>
-      ${shotEmphasis.length
-        ? `<ul class="brief-list">${shotEmphasis.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
-        : '<p class="muted">ยังไม่ได้กำหนดช็อตที่ควรเน้น</p>'}
-    </div>
-    <div class="brief-panel">
-      <div class="brief-panel-label">ประเด็นที่พูดหน้ากล้อง</div>
-      ${onCamera.length
-        ? `<ul class="brief-list">${onCamera.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
-        : '<p class="muted">ยังไม่ได้กำหนดประเด็นที่พูดหน้ากล้อง</p>'}
-    </div>
+    <article class="article-brief-doc">
+      <h3>สรุปโจทย์หน้างาน</h3>
+      <p class="brief-block-text">${escapeHtml(summary || "ยังไม่มีสรุปสำหรับทีมภาคสนาม")}</p>
+      <h4>มุมเล่าเรื่อง</h4>
+      <p>${escapeHtml(angle || "ยังไม่ได้กำหนดมุมเล่าเรื่อง")}</p>
+      <h4>หมายเหตุหน้างาน</h4>
+      <p>${escapeHtml(notes || "ไม่มีหมายเหตุเพิ่มเติม")}</p>
+
+      <h3>สิ่งที่ต้องยืนยัน</h3>
+      ${buildBriefListHtml(verifyRows, "ยังไม่ได้ระบุสิ่งที่ต้องยืนยัน")}
+
+      <h3>ช็อตที่ต้องเก็บ</h3>
+      ${buildMustCaptureDocumentHtml()}
+
+      <h3>คำถามที่ต้องถาม</h3>
+      ${buildBriefListHtml(questionRows, "ยังไม่ได้ระบุคำถามที่ต้องถาม")}
+
+      <h3>แนวเล่าเวลาเก็บคลิปหรือเสียง</h3>
+      <h4>Hook</h4>
+      <p>${escapeHtml(hook || "ยังไม่ได้กำหนด Hook")}</p>
+      <h4>แนวทาง Caption</h4>
+      <p>${escapeHtml(captionAngle || "ยังไม่ได้กำหนดแนวทาง Caption")}</p>
+      <h4>ช็อตที่ควรเน้น</h4>
+      ${buildBriefListHtml(shotEmphasis, "ยังไม่ได้กำหนดช็อตที่ควรเน้น")}
+      <h4>ประเด็นที่พูดหน้ากล้อง</h4>
+      ${buildBriefListHtml(onCamera, "ยังไม่ได้กำหนดประเด็นที่พูดหน้ากล้อง")}
+
+      <h3>แหล่งอ้างอิง</h3>
+      ${buildReferenceListHtml(referenceRows, "ยังไม่มีแหล่งอ้างอิงที่ดึงมาแล้ว")}
+
+      <h3>ข้อมูลการมอบหมาย</h3>
+      ${buildBriefListHtml(assignmentRows, "ยังไม่มีข้อมูลการมอบหมายงานภาคสนาม")}
+    </article>
   `;
 }
 
@@ -401,23 +459,15 @@ function renderMediaHints() {
   const root = qs("brief-media-hints");
   if (!root) return;
   const hints = Array.isArray(state.fieldPack?.media_hints) ? state.fieldPack.media_hints : [];
-  const assetById = new Map(
-    (Array.isArray(state.assets) ? state.assets : [])
-      .filter((row) => Number(row?.id || 0) > 0)
-      .map((row) => [Number(row.id || 0), row])
-  );
   const rows = hints
     .filter((hint) => {
-      const selected = Number(hint?.selected || 0) === 1;
-      const hasAssetBinding = Number(hint?.content_asset_id || 0) > 0;
-      return selected || hasAssetBinding;
+      return Number(hint?.selected || 0) === 1;
     })
     .map((hint) => {
-      const asset = assetById.get(Number(hint?.content_asset_id || 0)) || null;
-      const url = sanitizeUrl(hint?.url || asset?.public_url || "");
+      const url = sanitizeUrl(hint?.url || "");
       return {
         url,
-        kind: String(hint?.kind || asset?.role || "reference").trim() || "reference",
+        kind: String(hint?.kind || "reference").trim() || "reference",
         caption: String(hint?.caption || "").trim(),
       };
     })
@@ -437,49 +487,6 @@ function renderMediaHints() {
       </figcaption>
     </figure>
   `).join("");
-}
-
-function renderReferences() {
-  const root = qs("brief-references");
-  if (!root) return;
-  const labels = buildReferenceSummary();
-  if (!labels.length) {
-    root.innerHTML = '<p class="muted">ยังไม่มีแหล่งอ้างอิงที่ดึงมาแล้ว</p>';
-    return;
-  }
-  root.innerHTML = `
-    <div class="source-summary-list">
-      ${labels.map((label) => `<span class="source-summary-chip">${escapeHtml(label)}</span>`).join("")}
-    </div>
-  `;
-}
-
-function renderAssignment() {
-  const root = qs("brief-assignment");
-  if (!root) return;
-  const fieldAssignment = state.assignment || findAssignment("field");
-  if (!fieldAssignment) {
-    root.innerHTML = '<p class="muted">ยังไม่มีข้อมูลการมอบหมายงานภาคสนาม</p>';
-    return;
-  }
-  root.innerHTML = `
-    <div class="brief-panel">
-      <div class="brief-panel-label">ผู้รับงาน</div>
-      <div>${escapeHtml(String(fieldAssignment.assignee_display_name || fieldAssignment.assigned_name || fieldAssignment.assignee_name || fieldAssignment.assignee_email || "").trim() || "-")}</div>
-    </div>
-    <div class="brief-panel">
-      <div class="brief-panel-label">บทบาท</div>
-      <div>${escapeHtml(String(fieldAssignment.assigned_role || fieldAssignment.assignment_kind || "").trim() || "-")}</div>
-    </div>
-    <div class="brief-panel">
-      <div class="brief-panel-label">กำหนดส่ง</div>
-      <div>${escapeHtml(formatDateTime(fieldAssignment.due_at))}</div>
-    </div>
-    <div class="brief-panel brief-panel-full">
-      <div class="brief-panel-label">หมายเหตุการมอบหมาย</div>
-      <div>${escapeHtml(String(fieldAssignment.note || "").trim() || "ไม่มีหมายเหตุเพิ่มเติม")}</div>
-    </div>
-  `;
 }
 
 function renderHeader() {
@@ -513,14 +520,8 @@ function renderHeader() {
 
 function renderPage() {
   renderHeader();
-  renderSummary();
-  renderListBlock("brief-verify", getPackList("must_verify_facts", "must_verify_fact"), "ยังไม่ได้ระบุสิ่งที่ต้องยืนยัน");
-  renderListBlock("brief-shots", getPackList("must_capture_shots", "must_capture_shot"), "ยังไม่ได้ระบุช็อตที่ต้องเก็บ");
-  renderListBlock("brief-questions", getPackList("must_ask_questions", "must_ask_question"), "ยังไม่ได้ระบุคำถามที่ต้องถาม");
-  renderSocialBlock();
+  renderBriefDocument();
   renderMediaHints();
-  renderReferences();
-  renderAssignment();
 }
 
 function wire() {
@@ -529,12 +530,7 @@ function wire() {
   const backHomeBtn = qs("btn-back-home");
   if (backHomeBtn) backHomeBtn.textContent = "โฮม";
   qs("btn-back-editor")?.addEventListener("click", () => {
-    const role = String(state.user?.role || "").trim().toLowerCase();
-    if (role === "freelance") {
-      window.location.href = buildAssignmentWorkUrl(state.itemId, state.assignmentId);
-      return;
-    }
-    window.location.href = `/item-editor.html?id=${state.itemId}`;
+    window.location.href = buildAssignmentWorkUrl(state.itemId, state.assignmentId);
   });
   qs("btn-back-home")?.addEventListener("click", () => {
     window.location.href = rolePortalUrl(state.user?.role);
@@ -568,16 +564,14 @@ function wire() {
         ];
 
     const itemRequest = apiOptional(`/api/items/${state.itemId}`);
-    const [item, fieldPackRes, assets, evidenceRes, approvedContextRes] = await Promise.all([
+    const [item, fieldPackRes, evidenceRes, approvedContextRes] = await Promise.all([
       itemRequest,
       api(`/api/items/${state.itemId}/field-pack/current`),
-      api(`/api/assets?content_item_id=${state.itemId}&only_selected=1`),
       ...extendedSourceRequests,
     ]);
 
     state.item = item || null;
     state.fieldPack = fieldPackRes?.field_pack || {};
-    state.assets = Array.isArray(assets) ? assets : [];
     state.evidenceBlocks = Array.isArray(evidenceRes?.blocks) ? evidenceRes.blocks : [];
     state.approvedContextBlocks = Array.isArray(approvedContextRes?.blocks) ? approvedContextRes.blocks : [];
     renderPage();

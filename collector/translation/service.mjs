@@ -230,7 +230,10 @@ function ensureValidModelPayload(payload) {
 }
 
 async function openAiTranslate(source, targetLang, aiConfig) {
-  if (!aiConfig?.enabled || !aiConfig?.apiKey) {
+  const apiKey = String(aiConfig?.openAiApiKey || aiConfig?.apiKey || "").trim();
+  const baseUrl = String(aiConfig?.openAiBaseUrl || aiConfig?.baseUrl || "https://api.openai.com/v1").trim().replace(/\/$/, "");
+  const model = String(aiConfig?.translationModel || aiConfig?.model || "gpt-5-mini").trim();
+  if (!apiKey) {
     throw new Error("OPENAI_API_KEY is missing");
   }
 
@@ -244,14 +247,14 @@ async function openAiTranslate(source, targetLang, aiConfig) {
     JSON.stringify(source, null, 2),
   ].join("\n");
 
-  const response = await fetch(`${aiConfig.baseUrl}/responses`, {
+  const response = await fetch(`${baseUrl}/responses`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${aiConfig.apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: aiConfig.model,
+      model,
       input: prompt,
       text: { format: { type: "text" } },
     }),
@@ -268,20 +271,84 @@ async function openAiTranslate(source, targetLang, aiConfig) {
     throw new Error("Invalid translation JSON payload");
   }
 
-  return { ...parsed, _engine: "openai", _model: aiConfig.model };
+  return { ...parsed, _engine: "openai", _model: model };
+}
+
+async function googleAiTranslate(source, targetLang, aiConfig) {
+  const apiKey = String(aiConfig?.googleApiKey || "").trim();
+  const baseUrl = String(aiConfig?.googleBaseUrl || "https://generativelanguage.googleapis.com/v1beta").trim().replace(/\/$/, "");
+  const model = String(aiConfig?.translationModel || aiConfig?.googleModel || "gemini-2.0-flash").trim();
+  if (!apiKey) {
+    throw new Error("GOOGLE_AI_API_KEY is missing");
+  }
+
+  const prompt = [
+    "Return ONLY valid JSON with keys:",
+    "translated_title, translated_excerpt, translated_body, translated_meta_title, translated_meta_description",
+    `Translate into target language: ${targetLang}`,
+    "Do not include markdown fences.",
+    "Preserve factual details; no hallucination.",
+    "Input:",
+    JSON.stringify(source, null, 2),
+  ].join("\n");
+
+  const response = await fetch(
+    `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json" },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Google AI error ${response.status}: ${body.slice(0, 220)}`);
+  }
+
+  const data = await response.json();
+  const outputText = data?.candidates?.[0]?.content?.parts?.find((part) => typeof part?.text === "string")?.text || "";
+  const parsed = ensureValidModelPayload(parseJsonLike(String(outputText || "")));
+  if (!parsed) {
+    throw new Error("Invalid translation JSON payload");
+  }
+
+  return { ...parsed, _engine: "google", _model: model };
+}
+
+function createDeterministicTranslator() {
+  return {
+    async translate(source, targetLang) {
+      return deterministicTranslate(source, targetLang);
+    },
+  };
 }
 
 export function createTranslationGenerator(aiConfig) {
+  if (!aiConfig || typeof aiConfig !== "object") {
+    return createDeterministicTranslator();
+  }
+  const translationConfig = aiConfig?.features?.translation && typeof aiConfig.features.translation === "object"
+    ? aiConfig.features.translation
+    : aiConfig;
+  const provider = String(
+    translationConfig?.provider
+    || aiConfig?.translationProvider
+    || aiConfig?.provider
+    || "openai"
+  ).trim().toLowerCase();
   return {
     async translate(source, targetLang) {
-      if (aiConfig?.enabled) {
-        try {
-          return await openAiTranslate(source, targetLang, aiConfig);
-        } catch {
-          return deterministicTranslate(source, targetLang);
-        }
+      if (provider === "google") {
+        return googleAiTranslate(source, targetLang, translationConfig);
       }
-      return deterministicTranslate(source, targetLang);
+      if (provider === "openai") {
+        return openAiTranslate(source, targetLang, translationConfig);
+      }
+      throw new Error(`Unsupported translation provider: ${provider}`);
     },
   };
 }

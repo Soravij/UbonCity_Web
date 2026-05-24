@@ -66,7 +66,8 @@ function buildFieldPackContractPrompt(context) {
       social_on_camera_points: "string[]",
       checklists: {
         must_verify_fact: "string[]",
-        must_capture_shot: "string[]",
+
+        must_capture: "object[]",
         must_ask_question: "string[]",
       },
       field_pack_references: "object[]",
@@ -87,8 +88,7 @@ function buildFieldPackContractPrompt(context) {
     ],
     style_rules: [
       lang === "th" ? "Write concise natural Thai instructions." : "Write in the requested item language.",
-      "Prefer short, action-oriented list items.",
-      "Make must_capture_shot concrete enough for a person with a camera.",
+      "must_capture is an array of objects with capture_type (photo/video/both) and item_text. Make each item concrete enough for a person with a camera.",
       "Make must_verify_fact checkable.",
       "Make must_ask_question useful for staff/local people/visitors.",
       "social_hook and social_caption_angle are direction notes, not final published copy.",

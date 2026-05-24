@@ -1368,7 +1368,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
   for (const item of generationInput) {
     let finalItem = item;
     let finalFieldPack = null;
-    let generatedBy = agentEngine ? "structured-context-openai" : "deterministic-ai";
+    let generatedBy = agentEngine ? "structured-context-ai" : "deterministic-ai";
     traceAiDraft("item.start", {
       item_id: Number(item?.id || 0) || null,
       title: String(item?.title || "").trim() || null,
@@ -2247,7 +2247,6 @@ export function compensateReleaseAfterSyncFailure(repo, actorEmail, options = {}
     published_article_status: articleStatusAfter,
   };
 }
-
 
 
 

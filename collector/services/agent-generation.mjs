@@ -584,12 +584,27 @@ function resolveFeatureConfig(aiConfig, featureKey) {
   return aiConfig;
 }
 
-function getMissingProviderKeyMessage(featureConfig) {
+function normalizeFeatureKeyForMessage(featureKey) {
+  const raw = String(featureKey || "").trim();
+  if (!raw) return "feature";
+  if (raw === "fieldPack") return "fieldPack";
+  if (raw === "visualContext") return "visualContext";
+  if (raw === "translation") return "translation";
+  if (raw === "revision") return "revision";
+  return raw;
+}
+
+function getProviderDisplayName(provider) {
+  return String(provider || "").trim().toLowerCase() === "google" ? "Google" : "OpenAI";
+}
+
+function getMissingProviderKeyMessage(featureConfig, featureKey = "") {
   const provider = String(featureConfig?.provider || "openai").trim().toLowerCase();
+  const normalizedFeature = normalizeFeatureKeyForMessage(featureKey);
   if (provider === "google") {
-    return "GOOGLE_AI_API_KEY is missing";
+    return `AI config missing for ${normalizedFeature}: provider=${provider}, required env=GOOGLE_AI_API_KEY`;
   }
-  return "OPENAI_API_KEY is missing";
+  return `AI config missing for ${normalizedFeature}: provider=${provider}, required env=OPENAI_API_KEY`;
 }
 
 function normalizeExternalAgentUrl(aiConfig) {
@@ -789,7 +804,7 @@ export function createAgentGenerationEngine(aiConfig) {
     async generateVisualContext(item) {
       const featureConfig = resolveFeatureConfig(aiConfig, "visualContext");
       if (!aiConfig?.enabled || !featureConfig?.apiKey) {
-        throw new Error(getMissingProviderKeyMessage(featureConfig));
+        throw new Error(getMissingProviderKeyMessage(featureConfig, "visualContext"));
       }
 
       const imageInputs = await prepareVisualImageInputs(item, 5);
@@ -813,7 +828,7 @@ export function createAgentGenerationEngine(aiConfig) {
 
       if (!response.ok) {
         const body = await response.text().catch(() => "");
-        throw new Error(`OpenAI visual-context error ${response.status}: ${body.slice(0, 220)}`);
+        throw new Error(`${getProviderDisplayName(featureConfig?.provider)} visual-context error ${response.status}: ${body.slice(0, 220)}`);
       }
 
       const data = await response.json();
@@ -827,7 +842,7 @@ export function createAgentGenerationEngine(aiConfig) {
     async generateFieldPack(item) {
       const featureConfig = resolveFeatureConfig(aiConfig, "fieldPack");
       if (!aiConfig?.enabled || !featureConfig?.apiKey) {
-        throw new Error(getMissingProviderKeyMessage(featureConfig));
+        throw new Error(getMissingProviderKeyMessage(featureConfig, "fieldPack"));
       }
 
       const fullPrompt = buildFieldPackPrompt(item);
@@ -845,7 +860,7 @@ export function createAgentGenerationEngine(aiConfig) {
 
       if (!response.ok) {
         const body = await response.text().catch(() => "");
-        throw new Error(`OpenAI error ${response.status}: ${body.slice(0, 220)}`);
+        throw new Error(`${getProviderDisplayName(featureConfig?.provider)} error ${response.status}: ${body.slice(0, 220)}`);
       }
 
       const data = await response.json();
@@ -860,7 +875,7 @@ export function createAgentGenerationEngine(aiConfig) {
     async reviseFieldPack(item, previousFieldPack = {}, revisionNote = "") {
       const featureConfig = resolveFeatureConfig(aiConfig, "revision");
       if (!aiConfig?.enabled || !featureConfig?.apiKey) {
-        throw new Error(getMissingProviderKeyMessage(featureConfig));
+        throw new Error(getMissingProviderKeyMessage(featureConfig, "revision"));
       }
 
       const revisionPrompt = buildFieldPackRevisionPrompt(item, previousFieldPack, revisionNote);
@@ -878,7 +893,7 @@ export function createAgentGenerationEngine(aiConfig) {
 
       if (!response.ok) {
         const body = await response.text().catch(() => "");
-        throw new Error(`OpenAI revision error ${response.status}: ${body.slice(0, 220)}`);
+        throw new Error(`${getProviderDisplayName(featureConfig?.provider)} revision error ${response.status}: ${body.slice(0, 220)}`);
       }
 
       const data = await response.json();

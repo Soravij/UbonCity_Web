@@ -215,6 +215,15 @@ async function main() {
     createdDirectoryUserId = Number(directoryUserCreate.payload?.user?.id || 0) || 0;
     assert(createdDirectoryUserId > 0, `backend directory sync user id missing: ${JSON.stringify(directoryUserCreate.payload)}`);
 
+    const manualDirectorySync = await requestJson(`http://127.0.0.1:${COLLECTOR_PORT}/api/users/sync`, {
+      method: "POST",
+      token: ownerCollectorToken,
+    });
+    assert(
+      manualDirectorySync.response.ok,
+      `collector manual directory sync failed: ${JSON.stringify(manualDirectorySync.payload)}`
+    );
+
     const collectorUsers = await requestJson(`http://127.0.0.1:${COLLECTOR_PORT}/api/users`, {
       method: "GET",
       token: ownerCollectorToken,
@@ -223,7 +232,7 @@ async function main() {
     const listedUsers = Array.isArray(collectorUsers.payload?.items) ? collectorUsers.payload.items : [];
     assert(
       listedUsers.some((row) => String(row?.email || "").trim().toLowerCase() === directoryUserEmail),
-      `collector users list did not sync backend directory user before collector login: ${JSON.stringify(collectorUsers.payload)}`
+      `collector users list missing backend directory user after manual sync: ${JSON.stringify(collectorUsers.payload)}`
     );
 
     const smokeEnv = {
@@ -241,7 +250,7 @@ async function main() {
       assertions: [
         "temporary collector booted with backend JWT projection config",
         "bootstrap backend owner can authenticate through collector",
-        "collector syncs backend directory users before they log into collector",
+        "collector syncs backend directory users after explicit /api/users/sync call",
         "collector rejects wrong backend credentials without local fallback",
         "collector lifecycle mutation endpoints stay rejected",
       ],

@@ -269,23 +269,7 @@
             <button id="btn-raw-bulk-merge" type="button">เลือกมา merge</button>
             <button id="btn-raw-bulk-delete" type="button" class="fail">ลบที่เลือก</button>
           </div>
-          <div class="table-wrap" id="raw-table-wrap">
-            <table id="table-raw">
-              <thead>
-                <tr>
-                  <th>เลือก</th>
-                  <th>ID</th>
-                  <th>ประเภท</th>
-                  <th>หมวดหมู่</th>
-                  <th>ชื่อเรื่อง</th>
-                  <th>สถานะ</th>
-                  <th>แหล่งข้อมูล</th>
-                  <th>การทำงาน</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
+          <div id="raw-table-wrap"></div>
         </section>
 
         <section id="panel-assignments" class="panel hidden">
@@ -422,7 +406,7 @@
             <p id="assignment-actionable-list-note" class="muted">ใช้เปิดงานในขั้นลงงานเฉพาะงานที่ account นี้ทำต่อได้จริง</p>
             <div class="toolbar assignment-step-toolbar">
               <button id="btn-assignments-load" class="primary step-main">1.1 โหลดงานในกระบวนการนี้</button>
-              <span class="status" id="assignment-status"></span>
+              <span class="status result-banner" id="assignment-status"></span>
             </div>
             <div class="table-wrap">
               <table id="table-assignments">

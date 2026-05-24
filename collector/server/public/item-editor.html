@@ -28,7 +28,7 @@
       </header>
 <div class="card page-actions-strip raw-process-actions">
   <div class="toolbar">
-    <button id="btn-back" class="utility-action">Home</button>
+    <button id="btn-back" class="utility-action btn-home">Home</button>
     <button id="btn-prev-step" class="utility-action">กลับหน้าคัดข้อมูล</button>
     <button class="utility-action" id="btn-open-field-brief">เปิดสรุปหน้างาน (พิมพ์ / PDF)</button>
     <button class="primary utility-action" id="btn-save">บันทึก</button>
@@ -122,44 +122,15 @@
         <p class="muted">สรุปข้อมูลที่ทีมต้องใช้หน้างานให้ชัดและพร้อมใช้งาน</p>
         <div class="grid">
           <input id="fp-id" type="hidden" />
-          <div>
-            <label>สถานะการเตรียมมอบหมาย</label>
-            <div id="fp-progress-control" class="field-progress-control"></div>
-            <select id="fp-status" hidden>
-              <option value="draft">ฉบับร่าง</option>
-              <option value="ready_for_field">พร้อมมอบหมาย</option>
-              <option value="field_in_progress">กำลังลงหน้างาน</option>
-              <option value="field_done">ลงหน้างานแล้ว</option>
-              <option value="on_hold">พักไว้</option>
-            </select>
-            <div class="field-help">ใช้บอกว่าชุดงานนี้ยังจัด brief อยู่หรือพร้อมมอบหมายแล้ว</div>
-          </div>
-          <div>
-            <label><input id="fp-writer-ready" type="checkbox" /> เตรียมส่งต่อทีมเขียนแล้ว</label>
-            <div class="field-help">ใช้เมื่ออยากจัดข้อมูลต่อให้ทีมเขียนหลังจบงานภาคสนาม ส่วนนี้ไม่บังคับในขั้นนี้</div>
-          </div>
-          <div class="full-span">
-            <div id="step4-next-panel" class="secondary-panel"></div>
-          </div>
-          <div class="full-span secondary-panel field-pack-regenerate-panel">
-            <strong>ให้ Agent สร้างหรือปรับชุดสั่งงานใหม่</strong>
-            <div class="field-help">ใช้เมื่อยังไม่มี field pack หรือ field pack ยังไม่ตรงงานจริง ระบบจะใช้ clean context และคำสั่งด้านล่าง โดยไม่ให้ Agent เขียนบทความหรือแก้ description_clean</div>
-            <label for="fp-regenerate-note">สิ่งที่ต้องการให้ปรับ</label>
-            <textarea id="fp-regenerate-note" placeholder="เช่น เพิ่มคำถามสำหรับเจ้าหน้าที่ ลดภาษาเชิงบทความ เน้น shot list และข้อมูลที่ต้องยืนยันหน้างาน"></textarea>
-            <div class="toolbar compact-toolbar">
-              <button id="btn-regenerate-field-pack" type="button" class="warn">สร้างชุดสั่งงานใหม่</button>
-              <span id="fp-regenerate-status" class="status"></span>
-            </div>
-          </div>
           <div class="full-span">
             <label>สรุปชุดสั่งงานจาก AI</label>
             <textarea id="fp-ai-summary" placeholder="สรุปภาพรวมสำหรับทีมลงหน้างาน"></textarea>
           </div>
-          <div>
+          <div class="full-span">
             <label>ประเด็นเด่น (1 บรรทัดต่อ 1 รายการ)</label>
             <textarea id="fp-ai-highlights" placeholder="จุดเด่นที่ AI มองเห็น"></textarea>
           </div>
-          <div>
+          <div class="full-span">
             <label>จุดที่ยังไม่ชัด (1 บรรทัดต่อ 1 รายการ)</label>
             <textarea id="fp-ai-unknowns" placeholder="สิ่งที่ AI ยังไม่ชัวร์"></textarea>
           </div>
@@ -167,11 +138,11 @@
             <label>สรุปหลังตรวจแก้</label>
             <textarea id="fp-editor-summary" placeholder="สรุปที่คนตรวจแก้แล้ว"></textarea>
           </div>
-          <div>
+          <div class="full-span">
             <label>ข้อมูลที่ยืนยันแล้ว (1 บรรทัดต่อ 1 รายการ)</label>
             <textarea id="fp-verified-facts" placeholder="ข้อเท็จจริงที่พอเชื่อถือได้"></textarea>
           </div>
-          <div>
+          <div class="full-span">
             <label>ข้อมูลที่ยังไม่ชัวร์ (1 บรรทัดต่อ 1 รายการ)</label>
             <textarea id="fp-uncertain-facts" placeholder="ข้อเท็จจริงที่ยังต้องระวัง"></textarea>
           </div>
@@ -183,64 +154,61 @@
             <label>หมายเหตุหน้างาน</label>
             <textarea id="fp-field-notes" placeholder="หมายเหตุเพิ่มเติมสำหรับทีมลงหน้างาน"></textarea>
           </div>
-          <div>
+          <div class="full-span">
             <label>ข้อมูลที่ต้องยืนยันหน้างาน (1 บรรทัดต่อ 1 รายการ)</label>
             <textarea id="fp-must-verify-facts" placeholder="สิ่งที่ต้องยืนยันหน้างาน"></textarea>
-          </div>
-          <div>
-            <label>Shot List (1 บรรทัดต่อ 1 รายการ)</label>
-            <textarea id="fp-must-capture-shots" placeholder="shot ที่ต้องถ่าย"></textarea>
-            <div class="field-help">ลิสต์ภาพหรือมุมที่ต้องมีให้ครบเมื่อไปถึงหน้างาน</div>
           </div>
           <div class="full-span">
             <label>คำถามที่ต้องถาม (1 บรรทัดต่อ 1 รายการ)</label>
             <textarea id="fp-must-ask-questions" placeholder="คำถามที่ต้องถามหน้างาน"></textarea>
           </div>
-          <div>
+          <div class="full-span secondary-panel">
+            <strong>ทิศทาง social / on-camera</strong>
+            <div class="field-help">ส่วนนี้ใช้กำหนดน้ำเสียง จุดขาย และช็อตที่อยากเน้นสำหรับคอนเทนต์ social หลังจากสรุปชุดลงหน้างานหลักแล้ว</div>
+          </div>
+          <div class="full-span">
             <label>Hook</label>
             <textarea id="fp-social-hook" placeholder="hook สำหรับคอนเทนต์"></textarea>
             <div class="field-help">ประโยคเปิดหรือประเด็นดึงความสนใจที่อยากใช้เป็นตัวนำ</div>
           </div>
-          <div>
+          <div class="full-span">
             <label>Shot ที่ควรเน้น (1 บรรทัดต่อ 1 รายการ)</label>
             <textarea id="fp-social-shot-emphasis" placeholder="shot ที่ควรเน้นเป็นพิเศษ"></textarea>
             <div class="field-help">เลือกเฉพาะ shot ที่อยากให้เด่นกว่าภาพอื่นในคอนเทนต์</div>
           </div>
-          <div>
+          <div class="full-span">
             <label>ประเด็นที่พูดหน้ากล้อง (1 บรรทัดต่อ 1 รายการ)</label>
             <textarea id="fp-social-on-camera-points" placeholder="ประเด็นที่ควรพูดหน้ากล้อง"></textarea>
             <div class="field-help">สิ่งที่คนเล่าควรพูดให้ครบเมื่อถ่ายคลิปหรือเก็บเสียงหน้างาน</div>
           </div>
-          <div>
+          <div class="full-span">
             <label>แนวทาง Caption</label>
             <textarea id="fp-social-caption-angle" placeholder="แนว caption/post copy"></textarea>
             <div class="field-help">โทนหรือมุมของข้อความประกอบโพสต์ ไม่ต้องเขียนยาวทั้งชิ้นก็ได้</div>
           </div>
+          <div class="full-span secondary-panel">
+            <strong>แหล่งอ้างอิงและภาพประกอบ</strong>
+            <div class="field-help">เก็บเฉพาะแหล่งอ้างอิงที่ตั้งใจส่งต่อจริง และภาพตัวอย่างที่ช่วยให้ทีมหน้างานหรือทีมเขียนตามตรวจได้</div>
+          </div>
           <div class="full-span">
             <label>แหล่งอ้างอิง (1 บรรทัดต่อ 1 รายการ: label | url | source_family | note)</label>
             <textarea id="fp-references" placeholder="แหล่งอ้างอิงทั่วไปของชุดลงหน้างาน"></textarea>
-          </div>
-          <div class="full-span secondary-panel">
-            <strong>การเตรียมส่งต่อทีมเขียน</strong>
-            <div class="field-help">ใช้ส่วนนี้เมื่ออยากแนบข้อมูลต่อให้ทีมเขียนหรือเตรียมงานเขียนล่วงหน้า ถ้ายังไม่ใช้ให้เว้นไว้ได้</div>
           </div>
           <div class="full-span">
             <label>แหล่งอ้างอิงสำหรับทีมเขียน (ถ้ามี) (1 บรรทัดต่อ 1 รายการ: label | url | source_family | note)</label>
             <textarea id="fp-writer-references" placeholder="แหล่งอ้างอิงที่อยากส่งต่อให้ทีมเขียน"></textarea>
           </div>
           <div class="full-span">
-            <label>ภาพอ้างอิงจาก assets ที่เลือกไว้</label>
-            <div id="fp-media-hints-editor" class="secondary-panel"></div>
-            <div class="field-help">ใช้เฉพาะรูปที่ถูกเลือกส่งเข้า Agent เป็นตัวอย่างหรือแนวทางสำหรับทีมหน้างาน</div>
+            <details class="secondary-panel">
+              <summary>ภาพอ้างอิงจาก assets ที่เลือกไว้</summary>
+              <div id="fp-media-hints-editor" class="secondary-panel"></div>
+              <div class="field-help">ใช้เฉพาะรูปที่ถูกเลือกส่งเข้า Agent เป็นตัวอย่างหรือแนวทางสำหรับทีมหน้างาน</div>
+            </details>
           </div>
           <div class="full-span">
             <label>ภาพอ้างอิงจากลิงก์ภายนอก (1 บรรทัดต่อ 1 รายการ: caption | url | kind)</label>
             <textarea id="fp-external-media-hints" placeholder="ภาพอ้างอิงจาก URL ภายนอก ถ้ามี"></textarea>
             <div class="field-help">ใส่เมื่อมีภาพอ้างอิงจากเว็บภายนอกที่อยากแนบไปด้วย</div>
-          </div>
-          <div class="full-span secondary-panel">
-            <strong>Handoff อยู่ขั้นถัดไป</strong>
-            <div class="field-help">หน้านี้ใช้ตรวจ field pack เท่านั้น การสร้าง assignment จริงทำในหน้า Handoff หลังจากกดไปกระบวนการส่งงานไปทำ</div>
           </div>
           <div class="hidden">
             <label>มอบหมายงานภาคสนาม: ลิงก์งานเดิม</label>
@@ -288,6 +256,16 @@
       </div>
 
       <div class="card">
+        <h2 class="section-title">Shot List</h2>
+        <p class="muted">ลิสต์ภาพหรือมุมที่ต้องมีให้ครบเมื่อไปถึงหน้างาน โดยแยก photo และ video ออกจากกันชัดเจน</p>
+        <div class="grid">
+          <div class="full-span">
+            <textarea id="fp-must-capture-shots" placeholder="shot ที่ต้องถ่าย"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
         <h2 class="section-title">สถานะงานภาคสนาม</h2>
         <p class="muted">สรุปความพร้อมของชุดลงหน้างานจากข้อมูลปัจจุบัน ว่ายังขาดอะไรและควรเดินต่ออย่างไร</p>
         <div id="packaging-summary" class="readiness-summary"></div>
@@ -296,19 +274,59 @@
       <div class="card">
         <h2 class="section-title">สรุปจาก AI</h2>
         <p class="muted">สรุปตั้งต้นจาก AI เพื่อให้เห็นภาพรวม จุดเด่น และจุดที่ยังไม่ชัวร์ก่อนจัดงานภาคสนาม</p>
-        <div id="ai-summary-preview" class="preview-grid"></div>
+        <div id="ai-summary-preview"></div>
       </div>
 
       <div class="card">
         <h2 class="section-title">จุดที่ต้องตรวจ</h2>
         <p class="muted">แยกข้อเท็จจริงตั้งต้นที่มีอยู่แล้วออกจากสิ่งที่ยังต้องไปยืนยันหน้างาน</p>
-        <div id="fact-check-preview" class="preview-grid"></div>
+        <div id="fact-check-preview"></div>
       </div>
 
       <div class="card">
         <h2 class="section-title">ชุดลงหน้างาน</h2>
         <p class="muted">ใช้เป็น brief ตั้งต้นสำหรับผู้ลงหน้างาน โดยแยกสิ่งที่ต้องยืนยัน สิ่งที่ต้องถ่าย สิ่งที่ต้องถาม และแนวเล่า social</p>
-        <div id="field-brief-preview" class="preview-grid"></div>
+        <div id="field-brief-preview"></div>
+      </div>
+
+      <div class="card">
+        <h2 class="section-title">Final Decision</h2>
+        <p class="muted">ค่อยตัดสินใจส่วนนี้หลังจากตรวจและจัดคำสั่งงานทั้งหมดด้านบนแล้ว</p>
+        <div class="grid">
+          <div>
+            <label>สถานะการเตรียมมอบหมาย</label>
+            <div id="fp-progress-control" class="field-progress-control"></div>
+            <select id="fp-status" hidden>
+              <option value="draft">ฉบับร่าง</option>
+              <option value="ready_for_field">พร้อมมอบหมาย</option>
+              <option value="field_in_progress">กำลังลงหน้างาน</option>
+              <option value="field_done">ลงหน้างานแล้ว</option>
+              <option value="on_hold">พักไว้</option>
+            </select>
+            <div class="field-help">ใช้บอกว่าชุดงานนี้ยังจัด brief อยู่หรือพร้อมมอบหมายแล้ว</div>
+          </div>
+          <div>
+            <label><input id="fp-writer-ready" type="checkbox" /> เตรียมส่งต่อทีมเขียนแล้ว</label>
+            <div class="field-help">ใช้เมื่ออยากจัดข้อมูลต่อให้ทีมเขียนหลังจบงานภาคสนาม ส่วนนี้ไม่บังคับในขั้นนี้</div>
+          </div>
+          <div class="full-span">
+            <div id="step4-next-panel" class="secondary-panel"></div>
+          </div>
+          <div class="full-span secondary-panel field-pack-regenerate-panel">
+            <strong>ส่ง field pack กลับไปหน้า Clean</strong>
+            <div class="field-help">ใช้เมื่อ approved context หรือทิศทางงานยังต้องแก้ก่อนสร้าง field pack ใหม่ ระบบจะลบ field pack ปัจจุบันแล้วพากลับไปทำงานต่อที่หน้า Clean</div>
+            <label for="fp-return-to-clean-note">เหตุผลที่ส่งกลับ</label>
+            <textarea id="fp-return-to-clean-note" placeholder="เช่น approved context ยังไม่ครบ, shot list ยังไม่ตรงงานจริง, ต้องปรับข้อมูลที่ต้องยืนยันหน้างาน"></textarea>
+            <div class="toolbar compact-toolbar">
+              <button id="btn-return-to-clean" type="button" class="warn">ส่งกลับไป Clean</button>
+              <span id="fp-regenerate-status" class="status"></span>
+            </div>
+          </div>
+          <div class="full-span secondary-panel">
+            <strong>Handoff อยู่ขั้นถัดไป</strong>
+            <div class="field-help">หน้านี้ใช้ตรวจ field pack เท่านั้น การสร้าง assignment จริงทำในหน้า Handoff หลังจากกดไปกระบวนการส่งงานไปทำ</div>
+          </div>
+        </div>
       </div>
 
       <div class="card">

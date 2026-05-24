@@ -24,7 +24,7 @@ function createTestContext() {
   }
 
   function createItem(title) {
-    return repo.saveItem({
+    const created = repo.createItemWithWorkflowHead({
       type: "place",
       category: "attractions",
       title,
@@ -33,6 +33,7 @@ function createTestContext() {
       source_name: "manual",
       source_url: `https://${title.toLowerCase().replace(/\s+/g, "-")}.example.com`,
     });
+    return created.item;
   }
 
   function createDraft(itemId, suffix = "A") {
@@ -318,7 +319,7 @@ test("buildAssignmentHandoffPreview prefers current field pack over readiness br
       social_caption_angle: "เช็กก่อนออกเดินทาง",
       field_pack_checklists: [
         { checklist_type: "must_verify_fact", item_text: "ยืนยันเวลาเปิดจริง" },
-        { checklist_type: "must_capture_shot", item_text: "ถ่ายหน้าร้านและป้าย" },
+        { checklist_type: "must_capture", item_text: "ถ่ายหน้าร้านและป้าย", capture_type: "both" },
         { checklist_type: "must_ask_question", item_text: "ถามช่วงเวลาคนเยอะ" },
       ],
       field_pack_references: [
@@ -382,7 +383,7 @@ test("createAssignmentFromReadiness uses field pack handoff without readiness sn
       uncertain_facts: ["ต้องเช็กเวลาเปิดจริง"],
       field_pack_checklists: [
         { checklist_type: "must_verify_fact", item_text: "เช็กเวลาเปิดจริง" },
-        { checklist_type: "must_capture_shot", item_text: "ถ่ายบรรยากาศรวม" },
+        { checklist_type: "must_capture", item_text: "ถ่ายบรรยากาศรวม", capture_type: "both" },
         { checklist_type: "must_ask_question", item_text: "ถามเจ้าของเรื่องช่วงพีค" },
       ],
     });

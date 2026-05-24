@@ -160,6 +160,41 @@ function getEffectiveAiConfig() {
   return resolveAiConfig({ policyByFeature: listStoredAiFeaturePolicyMap() });
 }
 
+function sleep(ms) {
+  const waitMs = Number(ms || 0);
+  if (!Number.isFinite(waitMs) || waitMs <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, waitMs));
+}
+
+function isRetryableAiDraftError(err) {
+  const message = String(err?.message || "").trim().toLowerCase();
+  if (!message) return false;
+  if (message.includes(" 429") || message.includes(" 503") || message.includes(" 504")) return true;
+  if (message.includes("unavailable")) return true;
+  if (message.includes("timeout")) return true;
+  if (message.includes("temporarily")) return true;
+  return false;
+}
+
+function buildAiFeatureRuntimeSnapshot(aiConfig) {
+  const config = aiConfig && typeof aiConfig === "object" ? aiConfig : {};
+  const features = config?.features && typeof config.features === "object" ? config.features : {};
+  const pickFeature = (key) => {
+    const row = features?.[key] && typeof features[key] === "object" ? features[key] : {};
+    return {
+      policy_key: String(row?.policyKey || "").trim() || null,
+      provider: String(row?.provider || "").trim() || null,
+      model: String(row?.model || "").trim() || null,
+      has_api_key: Boolean(String(row?.apiKey || "").trim()),
+    };
+  };
+  return {
+    field_pack: pickFeature("fieldPack"),
+    visual_context: pickFeature("visualContext"),
+    translation: pickFeature("translation"),
+  };
+}
+
 function listAiFeaturePolicyRowsForOwner() {
   const effectiveMap = buildFeaturePolicyMap(listStoredAiFeaturePolicyMap());
   return AI_FEATURE_CATALOG.map((feature) => {
@@ -1085,6 +1120,7 @@ function attachItemMatchFields(items = [], options = {}) {
     const itemId = Number(item?.id || 0);
     const sourceRecords = repo.listSourceRecordsByItem(itemId);
     const currentFieldPack = repo.getCurrentFieldPackByItem(itemId);
+    const latestFieldPack = currentFieldPack || (Array.isArray(repo.listFieldPacksByItem(itemId)) ? repo.listFieldPacksByItem(itemId)[0] : null);
     const workflow = repo.getWorkflowModelByItem(itemId);
     let matchPhone = "";
     for (const record of sourceRecords) {
@@ -1107,8 +1143,8 @@ function attachItemMatchFields(items = [], options = {}) {
       image_url: sanitizeGoogleMapsPhotoUrl(item?.image_url),
       production_state: String(workflow?.production_state || "").trim().toLowerCase() || null,
       publication_state: String(workflow?.publication_state || "").trim().toLowerCase() || null,
-      current_field_pack_id: Number(currentFieldPack?.id || 0) || null,
-      current_field_pack_status: String(currentFieldPack?.status || "").trim().toLowerCase() || null,
+      current_field_pack_id: Number(currentFieldPack?.id || latestFieldPack?.id || 0) || null,
+      current_field_pack_status: String(currentFieldPack?.status || latestFieldPack?.status || "").trim().toLowerCase() || null,
       assignment_state: String(workflow?.assignment_state || "").trim().toLowerCase() || null,
       current_draft_id: Number(workflow?.current_draft_id || 0) || null,
       current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
@@ -1137,8 +1173,10 @@ function sanitizeItemForResponse(item) {
 
 function attachWorkflowHeadFields(item) {
   if (!item || typeof item !== "object") return item;
-  const workflow = repo.getWorkflowHeadByItem(Number(item?.id || 0)) || null;
-  const currentFieldPack = repo.getCurrentFieldPackByItem(Number(item?.id || 0)) || null;
+  const itemId = Number(item?.id || 0);
+  const workflow = repo.getWorkflowHeadByItem(itemId) || null;
+  const currentFieldPack = repo.getCurrentFieldPackByItem(itemId) || null;
+  const latestFieldPack = currentFieldPack || (Array.isArray(repo.listFieldPacksByItem(itemId)) ? repo.listFieldPacksByItem(itemId)[0] : null);
   return {
     ...item,
     production_state: String(workflow?.production_state || "").trim().toLowerCase() || null,
@@ -1146,8 +1184,8 @@ function attachWorkflowHeadFields(item) {
     assignment_state: String(workflow?.assignment_state || "").trim().toLowerCase() || null,
     current_draft_id: Number(workflow?.current_draft_id || 0) || null,
     current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
-    current_field_pack_id: Number(workflow?.current_field_pack_id || currentFieldPack?.id || 0) || null,
-    current_field_pack_status: String(currentFieldPack?.status || "").trim().toLowerCase() || null,
+    current_field_pack_id: Number(workflow?.current_field_pack_id || currentFieldPack?.id || latestFieldPack?.id || 0) || null,
+    current_field_pack_status: String(currentFieldPack?.status || latestFieldPack?.status || "").trim().toLowerCase() || null,
     workflow_state_version: Number(workflow?.state_version || 0) || 0,
     workflow_content_version: Number(workflow?.content_version || 0) || 0,
   };
@@ -4309,6 +4347,74 @@ function purgeUnusedContentAssetsForItem(contentItemId) {
   };
 }
 
+function cleanupAiInputAssetsAfterAssignmentCreated(contentItemId) {
+  const itemId = Number(contentItemId || 0) || 0;
+  if (!itemId) {
+    return {
+      ok: true,
+      content_item_id: 0,
+      removed_links: 0,
+      removed_assets: 0,
+      removed_local_files: 0,
+      skipped_asset_deletes: 0,
+      blocked_asset_references: [],
+      policy_blocked_assets: [],
+    };
+  }
+
+  const report = repo.listPostAssignmentAiInputCleanupCandidates(itemId, { include_blocked: true });
+  const candidates = Array.isArray(report?.assets) ? report.assets : [];
+  const eligible = candidates.filter((row) => row?.eligible_for_cleanup === true);
+  const policyBlocked = candidates
+    .filter((row) => row?.eligible_for_cleanup !== true)
+    .map((row) => ({
+      content_asset_id: Number(row?.content_asset_id || 0) || 0,
+      asset_id: Number(row?.asset_id || 0) || 0,
+      blocked_reasons: Array.isArray(row?.blocked_reasons) ? row.blocked_reasons : [],
+    }));
+
+  let removedLinks = 0;
+  let removedAssets = 0;
+  let removedLocalFiles = 0;
+  let skippedAssetDeletes = 0;
+  const blockedAssetReferences = [];
+
+  for (const row of eligible) {
+    const contentAssetId = Number(row?.content_asset_id || 0) || 0;
+    const assetId = Number(row?.asset_id || 0) || 0;
+    if (!contentAssetId || !assetId) continue;
+
+    const deleteLinkResult = db.prepare("DELETE FROM content_assets WHERE id=?").run(contentAssetId);
+    removedLinks += Number(deleteLinkResult?.changes || 0) || 0;
+
+    const assetDelete = deleteAssetIfUnused(assetId);
+    if (assetDelete?.deleted_asset) removedAssets += 1;
+    if (assetDelete?.deleted_file) removedLocalFiles += 1;
+    if (!assetDelete?.deleted_asset) {
+      skippedAssetDeletes += 1;
+      blockedAssetReferences.push({
+        asset_id: assetId,
+        references: Array.isArray(assetDelete?.blocked_references) ? assetDelete.blocked_references : [],
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    content_item_id: itemId,
+    policy_version: String(report?.policy_version || "post_assignment_ai_input_cleanup_v1"),
+    ai_input_assets: Number(report?.summary?.ai_input_assets || 0) || 0,
+    eligible_assets: Number(report?.summary?.eligible_assets || 0) || 0,
+    blocked_assets: Number(report?.summary?.blocked_assets || 0) || 0,
+    removed_links: removedLinks,
+    removed_assets: removedAssets,
+    removed_local_files: removedLocalFiles,
+    skipped_asset_deletes: skippedAssetDeletes,
+    blocked_asset_references: blockedAssetReferences,
+    policy_blocked_assets: policyBlocked,
+  };
+}
+
 function scoreRemoteMediaCandidate(entry) {
   const width = Number(entry?.width || 0);
   const height = Number(entry?.height || 0);
@@ -5959,6 +6065,29 @@ app.get("/api/ai-feature-policies", requireRole("owner"), (_req, res) => {
       provider: row.provider,
       model: row.model,
     })),
+  });
+});
+
+app.get("/api/ai-feature-policies/runtime", requireRole("owner"), (_req, res) => {
+  const policyMap = listStoredAiFeaturePolicyMap();
+  const effectiveMap = buildFeaturePolicyMap(policyMap);
+  const aiConfig = getEffectiveAiConfig();
+  res.json({
+    policy_mode: "feature_based",
+    policy_by_feature: policyMap,
+    effective_policies: Object.fromEntries(
+      Object.entries(effectiveMap).map(([key, row]) => [
+        key,
+        {
+          policy_key: String(row?.policy_key || "").trim() || null,
+          provider: String(row?.provider || "").trim() || null,
+          model: String(row?.model || "").trim() || null,
+          feature_status: String(row?.status || "").trim() || null,
+          feature_active: Boolean(row?.active),
+        },
+      ])
+    ),
+    ai_runtime: buildAiFeatureRuntimeSnapshot(aiConfig),
   });
 });
 
@@ -7779,12 +7908,52 @@ app.post("/api/items/:id/assignments/from-readiness", requireRole("owner"), (req
         assignment_id: assignment?.id || null,
       });
     }
+    let aiInputCleanup = null;
+    try {
+      aiInputCleanup = cleanupAiInputAssetsAfterAssignmentCreated(id);
+      repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.post_create", "content_item", String(id), {
+        assignment_id: assignment?.id || null,
+        mode: "from_readiness",
+        ...aiInputCleanup,
+      }, {
+        assignment_id: assignment?.id || null,
+      });
+      repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.post_create", "assignment", String(assignment?.id || ""), {
+        content_item_id: id,
+        mode: "from_readiness",
+        ...aiInputCleanup,
+      }, {
+        assignment_id: assignment?.id || null,
+      });
+    } catch (cleanupErr) {
+      const cleanupMessage = String(cleanupErr?.message || "post-create ai input cleanup failed");
+      repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.error", "content_item", String(id), {
+        assignment_id: assignment?.id || null,
+        mode: "from_readiness",
+        error: cleanupMessage,
+      }, {
+        assignment_id: assignment?.id || null,
+      });
+      repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.error", "assignment", String(assignment?.id || ""), {
+        content_item_id: id,
+        mode: "from_readiness",
+        error: cleanupMessage,
+      }, {
+        assignment_id: assignment?.id || null,
+      });
+      aiInputCleanup = {
+        ok: false,
+        error: cleanupMessage,
+      };
+    }
     res.status(201).json({
       ok: true,
       item_id: id,
       assignment: result.assignment,
       handoff: result.handoff,
       guard: result.guard,
+      ai_input_cleanup: aiInputCleanup,
+      warning: aiInputCleanup?.ok === false ? "Assignment created but AI input cleanup failed" : null,
     });
   } catch (err) {
     const msg = String(err?.message || "Cannot create assignment from readiness");
@@ -8137,7 +8306,51 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
         assignment_id: assignment?.id || null,
       });
     }
-    res.status(201).json({ ok: true, item_id: id, assignment });
+    let aiInputCleanup = null;
+    try {
+      aiInputCleanup = cleanupAiInputAssetsAfterAssignmentCreated(id);
+      repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.post_create", "content_item", String(id), {
+        assignment_id: assignment?.id || null,
+        mode: "manual_legacy",
+        ...aiInputCleanup,
+      }, {
+        assignment_id: assignment?.id || null,
+      });
+      repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.post_create", "assignment", String(assignment?.id || ""), {
+        content_item_id: id,
+        mode: "manual_legacy",
+        ...aiInputCleanup,
+      }, {
+        assignment_id: assignment?.id || null,
+      });
+    } catch (cleanupErr) {
+      const cleanupMessage = String(cleanupErr?.message || "post-create ai input cleanup failed");
+      repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.error", "content_item", String(id), {
+        assignment_id: assignment?.id || null,
+        mode: "manual_legacy",
+        error: cleanupMessage,
+      }, {
+        assignment_id: assignment?.id || null,
+      });
+      repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.error", "assignment", String(assignment?.id || ""), {
+        content_item_id: id,
+        mode: "manual_legacy",
+        error: cleanupMessage,
+      }, {
+        assignment_id: assignment?.id || null,
+      });
+      aiInputCleanup = {
+        ok: false,
+        error: cleanupMessage,
+      };
+    }
+    res.status(201).json({
+      ok: true,
+      item_id: id,
+      assignment,
+      ai_input_cleanup: aiInputCleanup,
+      warning: aiInputCleanup?.ok === false ? "Assignment created but AI input cleanup failed" : null,
+    });
   } catch (err) {
     const msg = String(err?.message || "Cannot create assignment");
     const isConflict = /UNIQUE|constraint/i.test(msg);
@@ -11163,22 +11376,69 @@ app.post("/api/run/ai-draft", requireRole("admin", "user"), workflowRateLimit, a
 
   try {
     const aiConfig = getEffectiveAiConfig();
-    const result = await runAiDraftStage(repo, actorEmail(req), { mode, allowFallback, aiConfig, contentItemId });
+    const aiRuntime = buildAiFeatureRuntimeSnapshot(aiConfig);
+    repo.logAudit(actorEmail(req), "ai_draft.run.start", "content_item", String(contentItemId), {
+      content_item_id: contentItemId,
+      ai_runtime: aiRuntime,
+      mode,
+      allow_fallback: allowFallback,
+    });
+    const maxRetries = 2;
+    const retryDelaysMs = [1200, 3000];
+    let attempt = 0;
+    let lastError = null;
+    let result = null;
+    while (attempt <= maxRetries) {
+      try {
+        result = await runAiDraftStage(repo, actorEmail(req), { mode, allowFallback, aiConfig, contentItemId });
+        break;
+      } catch (err) {
+        lastError = err;
+        if (attempt >= maxRetries || !isRetryableAiDraftError(err)) {
+          throw err;
+        }
+        const delayMs = retryDelaysMs[attempt] || retryDelaysMs[retryDelaysMs.length - 1];
+        repo.logAudit(actorEmail(req), "ai_draft.run.retry", "content_item", String(contentItemId), {
+          content_item_id: contentItemId,
+          ai_runtime: aiRuntime,
+          attempt: attempt + 1,
+          max_retries: maxRetries,
+          delay_ms: delayMs,
+          error: String(err?.message || "").trim() || "unknown error",
+        });
+        await sleep(delayMs);
+      }
+      attempt += 1;
+    }
+    if (!result && lastError) throw lastError;
 
     if ((result.blocked_items || []).length > 0) {
       res.status(400).json({
         error: "Agent blocked: one or more items do not meet clean requirements",
         blocked_items_count: result.blocked_items.length,
+        ai_runtime: aiRuntime,
         ...result,
       });
       return;
     }
 
-    res.json(result);
+    res.json({
+      ...result,
+      ai_runtime: aiRuntime,
+    });
   } catch (err) {
     const reason = String(err?.message || "").trim();
     const msg = reason ? `Agent failed: ${reason}` : "Agent failed";
-    res.status(400).json({ error: msg });
+    const aiConfig = getEffectiveAiConfig();
+    const aiRuntime = buildAiFeatureRuntimeSnapshot(aiConfig);
+    repo.logAudit(actorEmail(req), "ai_draft.run.error", "content_item", String(contentItemId), {
+      content_item_id: contentItemId,
+      ai_runtime: aiRuntime,
+      mode,
+      allow_fallback: allowFallback,
+      error: msg,
+    });
+    res.status(400).json({ error: msg, ai_runtime: aiRuntime });
   }
 });
 
@@ -11604,13 +11864,13 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
     const assetUid = crypto.randomUUID();
     const result = insert.run(assetUid, "local", relativePath, file.originalname, file.mimetype, file.size, checksum);
     const assetId = Number(result.lastInsertRowid);
-    const assetRole = "gallery";
-    const placementType = "gallery";
+    const assetRole = "unused";
+    const placementType = "unused";
     linkAsset.run(
       contentItemId,
       assetId,
       assetRole,
-      1,
+      0,
       0,
       placementType,
       assignmentId,

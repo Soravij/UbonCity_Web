@@ -138,6 +138,15 @@ export function createCollectorAuthIntegration({
     return true;
   }
 
+  function isActiveBackendProjectionRow(row) {
+    const profile = parseObjectJson(row?.profile_json);
+    const authSync = parseObjectJson(profile?._auth_sync);
+    const backendUserId = Number(authSync?.user_id || 0) || 0;
+    if (String(authSync?.provider || "").trim().toLowerCase() !== "backend") return false;
+    if (!backendUserId) return false;
+    return authSync?.directory_active === true;
+  }
+
   function resolveProjectedManagerLocalId(managerBackendUserId) {
     const normalizedManagerBackendUserId = Number(managerBackendUserId || 0) || 0;
     if (!normalizedManagerBackendUserId) return null;
@@ -147,6 +156,7 @@ export function createCollectorAuthIntegration({
       .all();
 
     for (const row of candidates) {
+      if (!isActiveBackendProjectionRow(row)) continue;
       const profile = parseObjectJson(row?.profile_json);
       const authSync = parseObjectJson(profile?._auth_sync);
       const backendUserId = Number(authSync?.user_id || 0) || 0;
@@ -164,6 +174,7 @@ export function createCollectorAuthIntegration({
       .prepare("SELECT id, profile_json FROM users WHERE profile_json IS NOT NULL")
       .all();
     for (const row of candidates) {
+      if (!isActiveBackendProjectionRow(row)) continue;
       const profile = parseObjectJson(row?.profile_json);
       const authSync = parseObjectJson(profile?._auth_sync);
       const backendUserId = Number(authSync?.user_id || 0) || 0;
@@ -309,6 +320,11 @@ export function createCollectorAuthIntegration({
       if (!identity) return null;
       const collectorUser = resolveCollectorUserForBackendIdentity(identity);
       if (!collectorUser?.id) return null;
+      upsertDirectoryStateForRow(collectorUser, {
+        syncedAt: new Date().toISOString(),
+        active: true,
+        role: identity.role,
+      });
       return {
         id: Number(collectorUser.id),
         email: String(collectorUser.email || "").trim().toLowerCase(),
