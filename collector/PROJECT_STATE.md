@@ -1,10 +1,10 @@
 # PROJECT_STATE
 
-Last Updated: 2026-05-13
+Last Updated: 2026-05-25
 
 ## Active Branch
 
-codex/sync-fix
+codex/tester-build-v1-place-event-collector-fixes
 
 ---
 
@@ -48,13 +48,14 @@ Purpose:
 - integration testing
 - browser automation
 - headless operation
+- Cloudflare Tunnel test exposure
 
 Environment:
 - Windows 11
-- headless capable
 - AnyDesk operational
 - local MySQL installed
 - local integration stack operational
+- runtime root migrated to `D:\UbonRuntime`
 
 ---
 
@@ -77,13 +78,29 @@ Status:
 - health checks passing
 
 ## admin (Vite dev)
-Typically:
 http://127.0.0.1:5173
 
 Status:
 - operational
 - can connect to backend
 - local auth integration testing active
+- Vite host allowlist now required for Cloudflare test domain access
+
+## frontend (Next dev)
+http://127.0.0.1:3000
+
+Status:
+- operational when started for test domain routing
+- public test frontend can route through Cloudflare Tunnel
+
+## Cloudflare test domains
+
+Status:
+- active through Cloudflare Tunnel on runtime machine
+- backend health verified at `https://api-test.uboncity.com/api/health`
+- admin reachable at `https://admin-test.uboncity.com`
+- collector reachable at `https://collector-test.uboncity.com`
+- public frontend test entry uses `https://test.uboncity.com`
 
 ---
 
@@ -123,10 +140,16 @@ Acts as source of truth.
 Now successfully synced from:
 
 branch:
-codex/sync-fix
+codex/tester-build-v1-place-event-collector-fixes
+
+latest tester build commit:
+e050bee
 
 ## Collector source
 Now committed and synchronized properly.
+
+## Reusable local ops
+- `ops/windows/test-stack.ps1` added for Windows test-stack start/stop/status orchestration
 
 ---
 
@@ -134,10 +157,10 @@ Now committed and synchronized properly.
 
 ## Infrastructure
 - runtime machine setup complete
-- headless operation validated
+- runtime root moved to M.2-backed `D:\UbonRuntime`
 - AnyDesk remote access operational
-- reboot/reconnect validated
 - local runtime folder structure established
+- Cloudflare Tunnel test access established without router port-forward dependency
 
 ## Repository Cleanup
 - runtime artifacts removed from tracking
@@ -150,38 +173,51 @@ Now committed and synchronized properly.
 - SQLite initialized
 - collector boot successful
 - collector health checks operational
+- translation regenerate flow fixed
+- translation provider config fallback fixed
+- zh compact meta title blocker removed
+- google translator generic `apiKey/baseUrl/model` mapping fixed
 
 ## Backend
 - backend install successful
 - backend boot successful
 - MySQL local integration operational
+- approved place/event media now served from backend uploads
+- public place response rewrites self-hosted media URLs correctly
+- `/uploads` static route now allows frontend cross-origin image embedding
 
 ## Admin
 - Vite dev environment operational
 - backend connectivity operational
+- review-to-public preview flow validated against local backend/frontend alignment
+- Cloudflare test-domain access stabilized via explicit Vite host configuration
+
+## Frontend
+- light theme scenic shell layering fixed for review/detail rendering
+- place/event public detail and list surfaces verified to consume normalized backend media fields
+- test domain routing established via Cloudflare Tunnel
 
 ---
 
 # Current Runtime Folder Layout
 
 ```txt
-C:\UbonRuntime\
- ├── repos\
- │    └── UbonCity_Web
- │
- ├── runtime\
- │    ├── logs
- │    ├── tmp
- │    └── browser-profiles
- │
- ├── data\
- │    └── collector
- │
- ├── backups\
- │
- ├── config\
- │
- └── scripts\
+D:\UbonRuntime\
+|-- repos\
+|   `-- UbonCity_Web
+|
+|-- runtime\
+|   |-- logs
+|   |-- tmp
+|   |-- browser-profiles
+|   `-- test-stack
+|
+|-- data\
+|   `-- collector
+|
+|-- config\
+|
+`-- scripts\
 ```
 
 ---
@@ -197,21 +233,23 @@ C:\UbonRuntime\
 - browser profiles
 - generated exports/media
 - temporary logs
+- Cloudflare tunnel credentials
+- machine-local Cloudflare config
 
 ## Avoid
 - hardcoded Windows absolute paths
 - giant rewrites
-- exposing collector publicly
 - mixing collector runtime into public deployment
+- treating Cloudflare test exposure as production hardening
 
 ---
 
 # Current Priorities
 
-1. stabilize local auth flows
-2. validate review/publish lifecycle
-3. validate workflow integrations
-4. validate transport/content workflows
+1. tester validation on branch `codex/tester-build-v1-place-event-collector-fixes`
+2. stabilize Windows test-stack startup/shutdown on runtime machine
+3. validate review/publish lifecycle on real content items through test domains
+4. validate workflow integrations
 5. local-first testing before VPS deployment
 6. preserve runtime isolation architecture
 
@@ -234,7 +272,7 @@ Pending:
 - monitoring
 - production DB strategy
 - security review
-- Cloudflare/domain staging setup
+- Cloudflare/domain staging auto-start hardening
 
 ---
 
@@ -243,14 +281,17 @@ Pending:
 Current architecture direction:
 
 Main Machine
-→ development/orchestration/database source
+-> development/orchestration/database source
 
 GitHub
-→ canonical source of truth
+-> canonical source of truth
 
 Runtime Machine
-→ isolated execution/integration/runtime testing node
+-> isolated execution/integration/runtime testing node
+
+Cloudflare Tunnel
+-> public test entry for team access without direct router exposure
 
 This separation should be preserved moving forward.
 
-Collector remains intentionally isolated from direct public exposure.
+Collector remains higher-risk than the public site even when exposed through test-domain login flow.
