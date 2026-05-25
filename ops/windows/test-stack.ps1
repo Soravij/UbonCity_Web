@@ -107,16 +107,16 @@ function Stop-ManagedProcess {
     return
   }
 
-  $pid = [int]$pidInfo.pid
-  if (-not (Test-ProcessAlive -ProcessId $pid)) {
+  $processId = [int]$pidInfo.pid
+  if (-not (Test-ProcessAlive -ProcessId $processId)) {
     Remove-PidFile -PidFile $PidFile
     Write-Host ("[{0}] stale pid file removed" -f $Name)
     return
   }
 
-  Stop-Process -Id $pid -Force
+  Stop-Process -Id $processId -Force
   Remove-PidFile -PidFile $PidFile
-  Write-Host ("[{0}] stopped pid {1}" -f $Name, $pid)
+  Write-Host ("[{0}] stopped pid {1}" -f $Name, $processId)
 }
 
 function Get-ManagedStatus {
@@ -214,7 +214,9 @@ switch ($Action) {
     }
   }
   "stop" {
-    foreach ($service in @($services | Select-Object -Reverse)) {
+    $reversedServices = @($services)
+    [array]::Reverse($reversedServices)
+    foreach ($service in $reversedServices) {
       Stop-ManagedProcess -Name $service.Name -PidFile $service.PidFile
     }
   }
