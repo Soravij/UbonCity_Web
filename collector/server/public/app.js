@@ -2291,8 +2291,9 @@ function setUserManagementVisibility(visible) {
   qs("tab-users")?.classList.toggle("hidden", !visible);
   const panel = qs("panel-users");
   if (!panel) return;
-  panel.classList.toggle("hidden", !visible);
-  if (!visible) panel.classList.remove("active");
+  const isUsersTabActive = String(state.preferredTab || "").trim().toLowerCase() === "users";
+  panel.classList.toggle("hidden", !(visible && isUsersTabActive));
+  if (!visible || !isUsersTabActive) panel.classList.remove("active");
 }
 
 function getAllowedAssigneeRolesForAssignmentKind(targetKind = "") {
