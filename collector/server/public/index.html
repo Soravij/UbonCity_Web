@@ -210,6 +210,44 @@
               <input id="source-query-input" placeholder="เช่น วัดหนองบัว อุบลราชธานี" />
               <textarea id="source-query-textarea" class="hidden" rows="4" placeholder="1 URL ต่อ 1 บรรทัด&#10;https://example.com/place-1&#10;https://example.com/place-2"></textarea>
               <p id="source-input-help" class="muted">ใช้สำหรับค้นหาสถานที่จาก Google Maps</p>
+              <div class="toolbar" style="margin-top:8px; margin-bottom:0;">
+                <button id="btn-source-location-panel-toggle" type="button">Advanced location filter</button>
+              </div>
+              <details id="source-location-panel" class="hidden" style="margin-top:8px;">
+                <summary class="hidden">Advanced location filter</summary>
+                <div class="grid" style="margin-top:8px;">
+                  <div style="grid-column: 1 / -1;">
+                    <label style="display:flex; align-items:center; gap:8px;">
+                      <input id="source-use-location-restriction" type="checkbox" />
+                      <span>จำกัดผลตามพิกัดและรัศมี</span>
+                    </label>
+                    <p class="muted" style="margin:6px 0 0;">ถ้าเปิดใช้ ระบบจะจำกัดผลตามพิกัดและรัศมี (radius หน่วยเป็นเมตร เช่น 12000 = 12 km)</p>
+                  </div>
+                  <div>
+                    <label>Latitude</label>
+                    <input id="source-location-latitude" type="text" inputmode="text" placeholder="เช่น 15.2447 หรือ 15°13'53.7&quot;N" />
+                  </div>
+                  <div>
+                    <label>Longitude</label>
+                    <input id="source-location-longitude" type="text" inputmode="text" placeholder="เช่น 104.8472 หรือ 104°51'31.6&quot;E" />
+                  </div>
+                  <div>
+                    <label>Radius (m)</label>
+                    <input id="source-location-radius-m" type="number" step="1" min="1" max="50000" inputmode="numeric" placeholder="เช่น 12000" />
+                  </div>
+                  <div>
+                    <label>Max results per query</label>
+                    <select id="source-max-results-per-query">
+                      <option value="5">5</option>
+                      <option value="10">10</option>
+                      <option value="15">15</option>
+                      <option value="20" selected>20</option>
+                    </select>
+                  </div>
+                </div>
+                <p id="source-location-summary" class="muted" style="margin:8px 0 0;">สถานะ: ไม่ได้จำกัดพื้นที่</p>
+                <p id="source-location-error" class="status hidden" style="margin:6px 0 0;"></p>
+              </details>
             </div>
           </div>
           <div class="toolbar">

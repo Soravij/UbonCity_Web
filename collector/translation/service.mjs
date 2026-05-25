@@ -275,9 +275,9 @@ async function openAiTranslate(source, targetLang, aiConfig) {
 }
 
 async function googleAiTranslate(source, targetLang, aiConfig) {
-  const apiKey = String(aiConfig?.googleApiKey || "").trim();
-  const baseUrl = String(aiConfig?.googleBaseUrl || "https://generativelanguage.googleapis.com/v1beta").trim().replace(/\/$/, "");
-  const model = String(aiConfig?.translationModel || aiConfig?.googleModel || "gemini-2.0-flash").trim();
+  const apiKey = String(aiConfig?.googleApiKey || aiConfig?.apiKey || "").trim();
+  const baseUrl = String(aiConfig?.googleBaseUrl || aiConfig?.baseUrl || "https://generativelanguage.googleapis.com/v1beta").trim().replace(/\/$/, "");
+  const model = String(aiConfig?.translationModel || aiConfig?.googleModel || aiConfig?.model || "gemini-2.0-flash").trim();
   if (!apiKey) {
     throw new Error("GOOGLE_AI_API_KEY is missing");
   }
@@ -340,6 +340,24 @@ export function createTranslationGenerator(aiConfig) {
     || aiConfig?.provider
     || "openai"
   ).trim().toLowerCase();
+  const openAiApiKey = String(
+    translationConfig?.openAiApiKey
+    || translationConfig?.apiKey
+    || aiConfig?.openAiApiKey
+    || aiConfig?.apiKey
+    || ""
+  ).trim();
+  const googleApiKey = String(
+    translationConfig?.googleApiKey
+    || translationConfig?.apiKey
+    || aiConfig?.googleApiKey
+    || ""
+  ).trim();
+
+  if ((provider === "openai" && !openAiApiKey) || (provider === "google" && !googleApiKey)) {
+    return createDeterministicTranslator();
+  }
+
   return {
     async translate(source, targetLang) {
       if (provider === "google") {

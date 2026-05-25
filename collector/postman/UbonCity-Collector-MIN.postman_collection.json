@@ -111,7 +111,7 @@
                                                 ],
                                      "body":  {
                                                   "mode":  "raw",
-                                                  "raw":  "{\n  \"adapter\": \"google_maps\",\n  \"ai_discovery\": true,\n  \"topic\": \"ubon cafe riverside\",\n  \"category\": \"cafes\",\n  \"lang\": \"th\",\n  \"max_queries\": 5,\n  \"auto_import\": true,\n  \"source_label\": \"postman-collect\",\n  \"payload\": {\n    \"language\": \"th\",\n    \"region\": \"th\",\n    \"max_results_per_query\": 10,\n    \"location\": { \"lat\": 15.244, \"lng\": 104.847 },\n    \"radius\": 25000\n  }\n}"
+                                                  "raw":  "{\n  \"adapter\": \"google_maps\",\n  \"ai_discovery\": true,\n  \"topic\": \"ubon cafe riverside\",\n  \"category\": \"cafes\",\n  \"lang\": \"th\",\n  \"max_queries\": 5,\n  \"auto_import\": true,\n  \"source_label\": \"postman-collect\",\n  \"payload\": {\n    \"language\": \"th\",\n    \"region\": \"th\",\n    \"max_results_per_query\": 20,\n    \"location\": { \"lat\": 15.244, \"lng\": 104.847 },\n    \"radius\": 25000\n  }\n}"
                                               },
                                      "url":  {
                                                  "raw":  "{{baseUrl}}/api/collect",

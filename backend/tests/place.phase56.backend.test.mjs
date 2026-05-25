@@ -123,6 +123,7 @@ test("phase 5-6 backend targeted coverage", async (t) => {
       const sql = normalizeSql(call.sql);
 
       if (sql.startsWith("show columns from places like")) return [[{ Field: "ok" }]];
+      if (sql.includes("from places p join categories c on c.id = p.category_id")) return [[]];
       if (sql.startsWith("select id from categories where slug=? limit 1")) return [[{ id: 7 }]];
       if (sql.startsWith("select id from places where id=? limit 1")) return [[]];
       if (sql.includes("insert into places")) return [{ insertId: 101 }];
@@ -137,13 +138,13 @@ test("phase 5-6 backend targeted coverage", async (t) => {
 
       const mutation = findPlacesMutationCall(calls);
       assert.ok(mutation, "expected places insert/update with decision fields");
-      assert.equal(mutation.params[3], 321);
-      assert.equal(mutation.params[4], "day-trip,couple");
-      assert.equal(mutation.params[5], "new,hot");
-      assert.equal(mutation.params[6], "evening,night");
-      assert.equal(mutation.params[7], "nearby");
-      assert.equal(mutation.params[8], "https://img.example/create-cover.jpg");
-      assert.equal(mutation.params[9], "https://img.example/create-thumb.jpg");
+      assert.equal(mutation.params[5], 321);
+      assert.equal(mutation.params[6], "day-trip,couple");
+      assert.equal(mutation.params[7], "new,hot");
+      assert.equal(mutation.params[8], "evening,night");
+      assert.equal(mutation.params[9], "nearby");
+      assert.equal(mutation.params[10], "https://img.example/create-cover.jpg");
+      assert.equal(mutation.params[11], "https://img.example/create-thumb.jpg");
     });
   });
 
@@ -172,7 +173,13 @@ test("phase 5-6 backend targeted coverage", async (t) => {
     await withMockedPool(async (call) => {
       const sql = normalizeSql(call.sql);
 
-      if (sql.startsWith("update places set image=?, is_approved=0")) return [{ affectedRows: 1 }];
+      if (sql.includes("from places p join categories c on c.id = p.category_id")) return [[]];
+      if (sql.startsWith("select p.id, p.slug, c.slug as category from places p join categories c on c.id=p.category_id where p.id=? limit 1")) {
+        return [[{ id: 44, slug: "update-phase56", category: "cafes" }]];
+      }
+      if (sql.startsWith("update places set image=?, is_approved=?, is_emer=?, decision_featured_score=?, decision_scenario_tags=?, decision_trend_flags=?, decision_moment_tags=?, decision_insight_flags=?, decision_cover_image=?, decision_thumbnail_image=? where id=?")) {
+        return [{ affectedRows: 1 }];
+      }
       if (sql.startsWith("update places set slug=coalesce(nullif(trim(slug), ''), ?) where id=?")) return [{}];
       if (sql.startsWith("select id from place_translations where place_id=? and lang=? limit 1")) return [[{ id: 88 }]];
       if (sql.startsWith("update place_translations set title=?, description=?, meta_title=?, meta_description=?")) {
@@ -187,14 +194,14 @@ test("phase 5-6 backend targeted coverage", async (t) => {
 
       const mutation = findPlacesMutationCall(calls);
       assert.ok(mutation, "expected places update with decision fields");
-      assert.equal(mutation.params[1], 222);
-      assert.equal(mutation.params[2], "family");
-      assert.equal(mutation.params[3], "trending");
-      assert.equal(mutation.params[4], "morning");
-      assert.equal(mutation.params[5], "planned");
-      assert.equal(mutation.params[6], "https://img.example/update-cover.jpg");
-      assert.equal(mutation.params[7], "https://img.example/update-thumb.jpg");
-      assert.equal(mutation.params[8], 44);
+      assert.equal(mutation.params[3], 222);
+      assert.equal(mutation.params[4], "family");
+      assert.equal(mutation.params[5], "trending");
+      assert.equal(mutation.params[6], "morning");
+      assert.equal(mutation.params[7], "planned");
+      assert.equal(mutation.params[8], "https://img.example/update-cover.jpg");
+      assert.equal(mutation.params[9], "https://img.example/update-thumb.jpg");
+      assert.equal(mutation.params[10], 44);
     });
   });
 
@@ -675,6 +682,79 @@ test("phase 5-6 backend targeted coverage", async (t) => {
       assert.equal(item.media_inline_images[0], "https://img.example/media-inline-21.jpg");
       assert.equal("req_description" in item, false);
       assert.equal("th_description" in item, false);
+    });
+  });
+
+  await t.test("getPlaceDetail rewrites self-hosted media paths to backend absolute urls", async () => {
+    const req = {
+      ...createBaseReq(),
+      params: { category: "cafes", slug: "detail-local-media" },
+      query: { lang: "th" },
+    };
+    const res = createMockRes();
+
+    const detailRows = [
+      {
+        id: 22,
+        category: "cafes",
+        slug: "detail-local-media",
+        image: "/uploads/legacy-22.jpg",
+        is_approved: 1,
+        decision_featured_score: 50,
+        decision_scenario_tags: "family",
+        decision_trend_flags: "hot",
+        decision_moment_tags: "evening",
+        decision_insight_flags: "nearby",
+        decision_cover_image: "/uploads/published-cover-22.jpg",
+        decision_thumbnail_image: "/uploads/published-thumb-22.jpg",
+        lang: "th",
+        title: "Detail 22",
+        description: '<p>Body</p><figure><img src="/uploads/inline-22.jpg" alt="inline"></figure>',
+        req_description: '<p>Body</p><figure><img src="/uploads/inline-22.jpg" alt="inline"></figure>',
+        th_description: '<p>Body</p><figure><img src="/uploads/inline-22.jpg" alt="inline"></figure>',
+        meta_title: "Detail MT",
+        meta_description: "Detail MD",
+      },
+    ];
+
+    const mediaRows = [
+      {
+        place_id: 22,
+        usage_type: "gallery",
+        position: 1,
+        source_url: "",
+        storage_disk: "local",
+        file_name: "gallery-22.jpg",
+        storage_path: "uploads/gallery-22.jpg",
+      },
+      {
+        place_id: 22,
+        usage_type: "inline",
+        position: 2,
+        source_url: "",
+        storage_disk: "local",
+        file_name: "inline-usage-22.jpg",
+        storage_path: "uploads/inline-usage-22.jpg",
+      },
+    ];
+
+    await withMockedPool(async (call) => {
+      const sql = normalizeSql(call.sql);
+      if (sql.includes("from places p") && sql.includes("where c.slug=? and p.slug=?")) return [detailRows];
+      if (sql.includes("from content_image_usages ciu")) return [mediaRows];
+      throw new Error(`Unexpected SQL in local media detail test: ${call.sql}`);
+    }, async () => {
+      await getPlaceDetail(req, res);
+      assert.equal(res.statusCode, 200);
+      const item = res.body.item;
+      assert.equal(item.image, "https://api.test.local/uploads/legacy-22.jpg");
+      assert.equal(item.decision_cover_image, "https://api.test.local/uploads/published-cover-22.jpg");
+      assert.equal(item.decision_thumbnail_image, "https://api.test.local/uploads/published-thumb-22.jpg");
+      assert.equal(item.effective_cover_image, "https://api.test.local/uploads/published-cover-22.jpg");
+      assert.equal(item.effective_thumbnail_image, "https://api.test.local/uploads/published-thumb-22.jpg");
+      assert.deepEqual(item.media_gallery_images, ["https://api.test.local/uploads/gallery-22.jpg"]);
+      assert.deepEqual(item.media_inline_images, ["https://api.test.local/uploads/inline-usage-22.jpg"]);
+      assert.match(item.description, /https:\/\/api\.test\.local\/uploads\/inline-22\.jpg/);
     });
   });
 });

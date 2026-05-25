@@ -1121,6 +1121,12 @@ a {
 
 .page-stack--scenic-shell {
   position: relative;
+  isolation: isolate;
+}
+
+.page-stack--scenic-shell > * {
+  position: relative;
+  z-index: 1;
 }
 
 :root:not([data-theme="dark"]) .page-stack--scenic-shell::before {

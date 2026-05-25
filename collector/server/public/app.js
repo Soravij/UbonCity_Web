@@ -1570,6 +1570,225 @@ function syncSourceQueryValue(nextValue = "") {
   if (textarea && textarea.value !== value) textarea.value = value;
 }
 
+function getSourceLocationPanelElements() {
+  return {
+    toggleButton: qs("btn-source-location-panel-toggle"),
+    panel: qs("source-location-panel"),
+    useRestriction: qs("source-use-location-restriction"),
+    latitude: qs("source-location-latitude"),
+    longitude: qs("source-location-longitude"),
+    radiusM: qs("source-location-radius-m"),
+    maxResultsPerQuery: qs("source-max-results-per-query"),
+    summary: qs("source-location-summary"),
+    error: qs("source-location-error"),
+  };
+}
+
+function syncSourceLocationPanelToggleLabel() {
+  const { toggleButton, panel } = getSourceLocationPanelElements();
+  if (!toggleButton) return;
+  const isOpen = Boolean(panel?.open);
+  toggleButton.textContent = isOpen ? "ซ่อน advanced location filter" : "Advanced location filter";
+}
+
+function readSourceLocationPanelState() {
+  const elements = getSourceLocationPanelElements();
+  return {
+    useLocationRestriction: Boolean(elements.useRestriction?.checked),
+    latitude: String(elements.latitude?.value || "").trim(),
+    longitude: String(elements.longitude?.value || "").trim(),
+    radiusM: String(elements.radiusM?.value || "").trim(),
+    maxResultsPerQuery: String(elements.maxResultsPerQuery?.value || "20").trim() || "20",
+  };
+}
+
+function clearSourceLocationPanelError() {
+  const { error } = getSourceLocationPanelElements();
+  if (!error) return;
+  error.textContent = "";
+  error.classList.add("hidden");
+}
+
+function showSourceLocationPanelError(message) {
+  const { error } = getSourceLocationPanelElements();
+  if (!error) return;
+  error.textContent = String(message || "").trim();
+  error.classList.toggle("hidden", !error.textContent);
+}
+
+function parseDecimalCoordinate(value, min, max) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  if (!/^[-+]?\d+(?:\.\d+)?$/.test(text)) return null;
+  const n = Number(text);
+  if (!Number.isFinite(n) || n < min || n > max) return null;
+  return n;
+}
+
+function parseDmsCoordinate(value, axis) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const normalized = text
+    .replace(/[“”]/g, "\"")
+    .replace(/[′’]/g, "'")
+    .replace(/[″]/g, "\"")
+    .replace(/[º]/g, "°")
+    .toUpperCase();
+  const match = normalized.match(/^([+-]?\d+(?:\.\d+)?)\s*°\s*(\d+(?:\.\d+)?)?\s*(?:'|MIN)?\s*(\d+(?:\.\d+)?)?\s*(?:\"|SEC)?\s*([NSEW])$/);
+  if (!match) return null;
+  const deg = Number(match[1]);
+  const min = Number(match[2] || 0);
+  const sec = Number(match[3] || 0);
+  const hemisphere = match[4];
+  if (!Number.isFinite(deg) || !Number.isFinite(min) || !Number.isFinite(sec)) return null;
+  if (min < 0 || min >= 60 || sec < 0 || sec >= 60) return null;
+  if (axis === "latitude" && hemisphere !== "N" && hemisphere !== "S") return null;
+  if (axis === "longitude" && hemisphere !== "E" && hemisphere !== "W") return null;
+  let out = Math.abs(deg) + (min / 60) + (sec / 3600);
+  if (hemisphere === "S" || hemisphere === "W" || deg < 0) out *= -1;
+  const minAllowed = axis === "latitude" ? -90 : -180;
+  const maxAllowed = axis === "latitude" ? 90 : 180;
+  if (out < minAllowed || out > maxAllowed) return null;
+  return out;
+}
+
+function parseSingleCoordinate(value, axis) {
+  if (axis === "latitude") {
+    return parseDecimalCoordinate(value, -90, 90) ?? parseDmsCoordinate(value, axis);
+  }
+  return parseDecimalCoordinate(value, -180, 180) ?? parseDmsCoordinate(value, axis);
+}
+
+function extractCoordinatePairFromText(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const normalized = text
+    .replace(/[“”]/g, "\"")
+    .replace(/[′’]/g, "'")
+    .replace(/[″]/g, "\"")
+    .replace(/[º]/g, "°")
+    .replace(/\s+/g, " ")
+    .trim();
+  const pairMatch = normalized.match(/(\d+(?:\.\d+)?\s*°\s*\d+(?:\.\d+)?\s*(?:'|MIN)?\s*\d+(?:\.\d+)?\s*(?:\"|SEC)?\s*[NS])[\s,]+(\d+(?:\.\d+)?\s*°\s*\d+(?:\.\d+)?\s*(?:'|MIN)?\s*\d+(?:\.\d+)?\s*(?:\"|SEC)?\s*[EW])/i);
+  if (!pairMatch) return null;
+  const latitude = parseSingleCoordinate(pairMatch[1], "latitude");
+  const longitude = parseSingleCoordinate(pairMatch[2], "longitude");
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return { latitude, longitude };
+}
+
+function normalizeSourceLocationPairInputs() {
+  const elements = getSourceLocationPanelElements();
+  if (!elements.latitude || !elements.longitude) return;
+  const fromLatitude = extractCoordinatePairFromText(elements.latitude.value);
+  if (fromLatitude) {
+    elements.latitude.value = String(fromLatitude.latitude);
+    elements.longitude.value = String(fromLatitude.longitude);
+    return;
+  }
+  const fromLongitude = extractCoordinatePairFromText(elements.longitude.value);
+  if (fromLongitude) {
+    elements.latitude.value = String(fromLongitude.latitude);
+    elements.longitude.value = String(fromLongitude.longitude);
+  }
+}
+
+function parseSourceLocationPanelState(state = readSourceLocationPanelState()) {
+  if (!state.useLocationRestriction) {
+    return { ok: true, values: null, firstInvalidField: null };
+  }
+
+  const lat = parseSingleCoordinate(state.latitude, "latitude");
+  if (!state.latitude || !Number.isFinite(lat)) {
+    return { ok: false, values: null, firstInvalidFieldKey: "latitude", message: "Latitude ต้องอยู่ในช่วง -90 ถึง 90" };
+  }
+
+  const lng = parseSingleCoordinate(state.longitude, "longitude");
+  if (!state.longitude || !Number.isFinite(lng)) {
+    return { ok: false, values: null, firstInvalidFieldKey: "longitude", message: "Longitude ต้องอยู่ในช่วง -180 ถึง 180" };
+  }
+
+  const radius = Number(state.radiusM);
+  if (
+    !state.radiusM
+    || !Number.isInteger(radius)
+    || radius < 1
+    || radius > 50000
+  ) {
+    return { ok: false, values: null, firstInvalidFieldKey: "radiusM", message: "Radius (m) ต้องเป็นจำนวนเต็ม 1 ถึง 50000" };
+  }
+
+  return {
+    ok: true,
+    values: {
+      latitude: lat,
+      longitude: lng,
+      radiusM: radius,
+    },
+    firstInvalidFieldKey: null,
+  };
+}
+
+function validateSourceLocationPanelState() {
+  const elements = getSourceLocationPanelElements();
+  const parsed = parseSourceLocationPanelState();
+  if (parsed.ok) {
+    clearSourceLocationPanelError();
+    return {
+      ...parsed,
+      firstInvalidField: null,
+    };
+  }
+  showSourceLocationPanelError(parsed.message);
+  const field = parsed.firstInvalidFieldKey ? elements[parsed.firstInvalidFieldKey] : null;
+  return {
+    ...parsed,
+    firstInvalidField: field || null,
+  };
+}
+
+function focusFirstInvalidSourceLocationField(validationResult) {
+  const field = validationResult?.firstInvalidField;
+  if (!field || typeof field.focus !== "function") return;
+  field.focus();
+}
+
+function syncSourceLocationPanelSummary() {
+  const { summary } = getSourceLocationPanelElements();
+  if (!summary) return;
+  const state = readSourceLocationPanelState();
+  if (!state.useLocationRestriction) {
+    summary.textContent = "สถานะ: ไม่ได้จำกัดพื้นที่";
+    return;
+  }
+  const lat = state.latitude || "-";
+  const lng = state.longitude || "-";
+  const radius = state.radiusM || "-";
+  summary.textContent = `สถานะ: จำกัดพื้นที่ (lat ${lat}, lng ${lng}, radius ${radius} m)`;
+}
+
+function resetSourceLocationPanelState() {
+  const elements = getSourceLocationPanelElements();
+  if (elements.useRestriction) elements.useRestriction.checked = false;
+  if (elements.latitude) elements.latitude.value = "";
+  if (elements.longitude) elements.longitude.value = "";
+  if (elements.radiusM) elements.radiusM.value = "";
+  if (elements.maxResultsPerQuery) elements.maxResultsPerQuery.value = "20";
+  clearSourceLocationPanelError();
+  syncSourceLocationPanelSummary();
+}
+
+function updateSourceLocationPanelVisibility(adapter) {
+  const { panel, toggleButton } = getSourceLocationPanelElements();
+  if (!panel) return;
+  const hidden = adapter !== "google_maps";
+  panel.classList.toggle("hidden", hidden);
+  if (toggleButton) {
+    toggleButton.classList.toggle("hidden", hidden);
+  }
+  syncSourceLocationPanelToggleLabel();
+}
+
 function updateSourceInputUI() {
   const adapter = String(qs("source-adapter")?.value || "google_maps").trim();
   const config = SOURCE_INPUT_CONFIG[adapter] || SOURCE_INPUT_CONFIG.google_maps;
@@ -1590,6 +1809,11 @@ function updateSourceInputUI() {
     textarea.classList.toggle("hidden", !config.multiline);
   }
   syncSourceQueryValue(currentValue);
+  updateSourceLocationPanelVisibility(adapter);
+  syncSourceLocationPanelSummary();
+  if (adapter !== "google_maps") {
+    clearSourceLocationPanelError();
+  }
 }
 
 function toFiniteNumberOrNull(value) {
@@ -4731,11 +4955,19 @@ function renderRawTable(items) {
   renderRawBulkToolbar(filteredIntake);
 
   const selectAll = qs("raw-select-all");
+  const syncIntakeSelectionUi = () => {
+    const selectableIds = visibleIntake.map((item) => Number(item?.id || 0)).filter(Boolean);
+    const selectedIds = getRawSelectedIds();
+    if (selectAll) {
+      selectAll.checked = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
+      selectAll.indeterminate = selectableIds.some((id) => selectedIds.has(id)) && !selectAll.checked;
+    }
+    renderRawBulkToolbar(filteredIntake);
+  };
   if (selectAll) {
     const selectableIds = visibleIntake.map((item) => Number(item?.id || 0)).filter(Boolean);
     const selectedIds = getRawSelectedIds();
-    selectAll.checked = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
-    selectAll.indeterminate = selectableIds.some((id) => selectedIds.has(id)) && !selectAll.checked;
+    syncIntakeSelectionUi();
     selectAll.onchange = (event) => {
       const checked = Boolean(event.target?.checked);
       for (const id of selectableIds) {
@@ -4745,7 +4977,10 @@ function renderRawTable(items) {
           selectedIds.delete(id);
         }
       }
-      renderRawTable(items);
+      document.querySelectorAll('#table-raw-intake tbody input[data-action="select"]').forEach((node) => {
+        node.checked = checked;
+      });
+      syncIntakeSelectionUi();
     };
   }
 
@@ -4762,7 +4997,7 @@ function renderRawTable(items) {
     } else {
       selectedIds.delete(id);
     }
-    renderRawTable(items);
+    syncIntakeSelectionUi();
   };
 
   const handleRowAction = async (event) => {
@@ -5082,12 +5317,30 @@ function normalizeCollectPayload(adapter) {
     return toManualUrlRows(query);
   }
 
-  return {
+  const basePayload = {
     query,
     language: "th",
     region: "th",
-    max_results_per_query: 10,
+    max_results_per_query: Number(readSourceLocationPanelState().maxResultsPerQuery) || 20,
     category: "attractions",
+  };
+
+  if (adapter !== "google_maps") {
+    return basePayload;
+  }
+
+  const locationParse = parseSourceLocationPanelState();
+  if (!locationParse.ok || !locationParse.values) {
+    return basePayload;
+  }
+
+  return {
+    ...basePayload,
+    location: {
+      lat: locationParse.values.latitude,
+      lng: locationParse.values.longitude,
+    },
+    radius: locationParse.values.radiusM,
   };
 }
 
@@ -8103,6 +8356,32 @@ function wireSourceCollect() {
   qs("source-adapter")?.addEventListener("change", () => {
     updateSourceInputUI();
   });
+  qs("source-use-location-restriction")?.addEventListener("change", () => {
+    clearSourceLocationPanelError();
+    syncSourceLocationPanelSummary();
+  });
+  qs("source-location-latitude")?.addEventListener("input", () => {
+    normalizeSourceLocationPairInputs();
+    clearSourceLocationPanelError();
+    syncSourceLocationPanelSummary();
+  });
+  qs("source-location-longitude")?.addEventListener("input", () => {
+    normalizeSourceLocationPairInputs();
+    clearSourceLocationPanelError();
+    syncSourceLocationPanelSummary();
+  });
+  qs("source-location-radius-m")?.addEventListener("input", () => {
+    clearSourceLocationPanelError();
+    syncSourceLocationPanelSummary();
+  });
+  qs("btn-source-location-panel-toggle")?.addEventListener("click", () => {
+    const { panel } = getSourceLocationPanelElements();
+    if (!panel || panel.classList.contains("hidden")) return;
+    panel.open = !panel.open;
+    syncSourceLocationPanelToggleLabel();
+  });
+  syncSourceLocationPanelSummary();
+  syncSourceLocationPanelToggleLabel();
 
   qs("btn-source-collect")?.addEventListener("click", async () => {
     try {
@@ -8114,6 +8393,13 @@ function wireSourceCollect() {
           : selectedAdapter === "facebook" || selectedAdapter === "tiktok"
             ? "manual"
             : selectedAdapter;
+      if (adapter === "google_maps") {
+        const locationValidation = validateSourceLocationPanelState();
+        if (!locationValidation.ok) {
+          focusFirstInvalidSourceLocationField(locationValidation);
+          return;
+        }
+      }
       const sourceLabel = String(qs("source-label")?.value || "").trim() || selectedAdapter || adapter;
       const payload = normalizeCollectPayload(adapter);
 
@@ -8133,6 +8419,7 @@ function wireSourceCollect() {
         }),
       });
       syncSourceQueryValue("");
+      resetSourceLocationPanelState();
 
       const rawCount = Number(result.raw_count ?? result.count ?? 0) || 0;
       if (!rawCount) {

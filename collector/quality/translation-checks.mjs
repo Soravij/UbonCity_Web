@@ -103,7 +103,8 @@ export function runAutomaticTranslationChecks(input) {
     issues.push("translated_title length out of range");
   }
 
-  if (translatedMetaTitle.length < 8 || translatedMetaTitle.length > 90) {
+  const minMetaTitleLength = targetLang === "zh" ? 0 : 8;
+  if (translatedMetaTitle.length < minMetaTitleLength || translatedMetaTitle.length > 90) {
     issues.push("translated_meta_title length out of range");
   }
 

@@ -4616,7 +4616,7 @@ function normalizeCollectPayload(payload, adapter, aiQueries = []) {
       queries: aiQueries,
       language: "th",
       region: "th",
-      max_results_per_query: 10,
+      max_results_per_query: 20,
     };
   }
 
@@ -10785,7 +10785,11 @@ app.post("/api/items/:id/generate-translations", requireRole("admin", "owner"), 
 
   try {
     const aiConfig = getEffectiveAiConfig();
-    const result = await rerunProblemTranslations(repo, actorEmail(req), { aiConfig, content_item_id: id });
+    const result = await rerunProblemTranslations(repo, actorEmail(req), {
+      aiConfig,
+      content_item_id: id,
+      forceRegenerate: true,
+    });
     const readiness = buildExportReadiness(id);
     repo.logAudit(actorEmail(req), "translation.generate", "content_item", String(id), result);
     res.json({ ok: true, result, readiness });

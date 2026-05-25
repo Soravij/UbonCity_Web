@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
+import { once } from "node:events";
 
 import { rerunProblemTranslations } from "../services/workflow.mjs";
 import { createTranslationGenerator } from "../translation/service.mjs";
@@ -98,6 +100,250 @@ test("rerunProblemTranslations falls back to draft source before publish", async
   assert.equal(auditLogs.at(-1).action, "translation.final_stage");
 });
 
+test("rerunProblemTranslations can force regenerate ready translations", async () => {
+  const translations = new Map();
+  const translationRuns = [];
+
+  const repo = {
+    listPublishedArticles() {
+      return [];
+    },
+    getPublishedArticleByItem() {
+      return null;
+    },
+    getItem(itemId) {
+      if (Number(itemId) !== 31) return null;
+      return {
+        id: 31,
+        title: "Sample place",
+        summary: "Sample summary",
+        description_clean: "Sample clean description for translation testing.",
+        meta_title: "Sample place",
+        meta_description: "Sample meta description.",
+        slug: "sample-place",
+        lang: "th",
+        category: "attractions",
+      };
+    },
+    latestDraftByItem(itemId) {
+      if (Number(itemId) !== 31) return null;
+      return {
+        id: 301,
+        draft_title: "Sample place",
+        excerpt: "Draft excerpt for translation test.",
+        body: "Draft body for translation test that is long enough to satisfy fallback generation.",
+        meta_title: "Sample place | UbonCity",
+        meta_description: "Draft meta description for translation test.",
+        slug: "sample-place",
+      };
+    },
+    latestApprovedReviewByItem() {
+      return null;
+    },
+    startTranslationRun(stage, inputCount, message) {
+      translationRuns.push({ stage, inputCount, message });
+      return "run-force-regen";
+    },
+    finishTranslationRun(runUid, status, outputCount, failedCount, message) {
+      translationRuns.push({ runUid, status, outputCount, failedCount, message });
+    },
+    markStaleTranslations() {},
+    getTranslation(contentItemId, lang) {
+      return translations.get(`${contentItemId}:${lang}`) || null;
+    },
+    upsertTranslation(payload) {
+      translations.set(`${payload.source_content_item_id}:${payload.lang}`, {
+        ...payload,
+        stale_flag: payload.stale_flag ? 1 : 0,
+      });
+    },
+    listTranslations(contentItemId = null) {
+      const rows = Array.from(translations.values());
+      if (!contentItemId) return rows;
+      return rows.filter((row) => Number(row.source_content_item_id) === Number(contentItemId));
+    },
+    logAudit() {},
+  };
+
+  const baseFingerprint = "31:301:0";
+  for (const lang of ["en", "zh", "lo"]) {
+    repo.upsertTranslation({
+      source_content_item_id: 31,
+      source_published_article_id: null,
+      source_draft_id: 301,
+      source_review_report_id: null,
+      source_fingerprint: baseFingerprint,
+      lang,
+      translated_title: `ready-${lang}`,
+      translated_excerpt: `ready-${lang}`,
+      translated_body: `ready-${lang}`,
+      translated_meta_title: `ready-${lang}`,
+      translated_meta_description: `ready-${lang}`,
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      automatic_check_report: { status: "passed", issues: [] },
+      stale_flag: 0,
+      translator_engine: "deterministic",
+      translator_model: "deterministic-v2",
+    });
+  }
+
+  const result = await rerunProblemTranslations(repo, "admin@uboncity.local", {
+    content_item_id: 31,
+    aiConfig: null,
+    forceRegenerate: true,
+  });
+
+  assert.equal(result.translation_run.run_uid, "run-force-regen");
+  assert.equal(result.translation_run.generated_count, 3);
+  assert.equal(result.totals.passed, 3);
+});
+
+test("rerunProblemTranslations falls back when translation provider has no api key", async () => {
+  const translations = new Map();
+
+  const repo = {
+    listPublishedArticles() {
+      return [];
+    },
+    getPublishedArticleByItem() {
+      return null;
+    },
+    getItem(itemId) {
+      if (Number(itemId) !== 32) return null;
+      return {
+        id: 32,
+        title: "Sample fallback place",
+        summary: "Sample fallback summary",
+        description_clean: "Sample clean description for translation fallback without provider api key.",
+        meta_title: "Sample fallback place",
+        meta_description: "Sample fallback meta description.",
+        slug: "sample-fallback-place",
+        lang: "th",
+        category: "attractions",
+      };
+    },
+    latestDraftByItem(itemId) {
+      if (Number(itemId) !== 32) return null;
+      return {
+        id: 302,
+        draft_title: "Sample fallback place",
+        excerpt: "Draft excerpt for missing key fallback test.",
+        body: "Draft body for missing key fallback test that is long enough to satisfy translation generation checks.",
+        meta_title: "Sample fallback place | UbonCity",
+        meta_description: "Draft meta description for missing key fallback test.",
+        slug: "sample-fallback-place",
+      };
+    },
+    latestApprovedReviewByItem() {
+      return null;
+    },
+    startTranslationRun() {
+      return "run-no-key-fallback";
+    },
+    finishTranslationRun() {},
+    markStaleTranslations() {},
+    getTranslation(contentItemId, lang) {
+      return translations.get(`${contentItemId}:${lang}`) || null;
+    },
+    upsertTranslation(payload) {
+      translations.set(`${payload.source_content_item_id}:${payload.lang}`, {
+        ...payload,
+        stale_flag: payload.stale_flag ? 1 : 0,
+      });
+    },
+    listTranslations(contentItemId = null) {
+      const rows = Array.from(translations.values());
+      if (!contentItemId) return rows;
+      return rows.filter((row) => Number(row.source_content_item_id) === Number(contentItemId));
+    },
+    logAudit() {},
+  };
+
+  const result = await rerunProblemTranslations(repo, "admin@uboncity.local", {
+    content_item_id: 32,
+    aiConfig: {
+      provider: "google",
+      googleApiKey: "",
+      features: {
+        translation: {
+          provider: "google",
+          model: "gemini-2.5-flash-lite",
+          apiKey: "",
+        },
+      },
+    },
+  });
+
+  assert.equal(result.translation_run.generated_count, 3);
+  assert.equal(result.totals.passed, 3);
+});
+
+test("google translator accepts generic feature apiKey/baseUrl fields", async () => {
+  let requestedUrl = "";
+  const server = http.createServer((req, res) => {
+    requestedUrl = String(req.url || "");
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                text: JSON.stringify({
+                  translated_title: "Ubon attraction guide",
+                  translated_excerpt: "Overview of this attraction in Ubon Ratchathani for travelers planning a visit.",
+                  translated_body: "This page provides practical visitor information about the attraction in Ubon Ratchathani, including highlights, atmosphere, and basic planning details before arrival.",
+                  translated_meta_title: "Ubon attraction guide | UbonCity",
+                  translated_meta_description: "Travel information for this attraction in Ubon Ratchathani with highlights and planning notes.",
+                }),
+              },
+            ],
+          },
+        },
+      ],
+    }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+
+  try {
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    const translator = createTranslationGenerator({
+      features: {
+        translation: {
+          provider: "google",
+          model: "gemini-2.5-flash-lite",
+          apiKey: "test-google-key",
+          baseUrl: `http://127.0.0.1:${port}/v1beta`,
+        },
+      },
+    });
+
+    const translated = await translator.translate(
+      {
+        title: "88 Coffee Bean",
+        excerpt: "Cafe in Ubon Ratchathani",
+        body: "Thai source content placeholder that is long enough for translation validation.",
+        meta_title: "88 Coffee Bean",
+        meta_description: "Travel information for 88 Coffee Bean.",
+        category: "cafes",
+        source_lang: "th",
+        slug: "88-coffee-bean",
+      },
+      "en",
+    );
+
+    assert.equal(translated._engine, "google");
+    assert.equal(translated.translated_title, "Ubon attraction guide");
+    assert.match(requestedUrl, /models\/gemini-2\.5-flash-lite:generateContent\?key=test-google-key/);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+});
+
 test("deterministic english translation stays in english shape for thai source", async () => {
   const translator = createTranslationGenerator(null);
   const translated = await translator.translate(
@@ -141,4 +387,20 @@ test("compact translations can pass without minimum-length checks", () => {
   });
 
   assert.equal(check.status, "passed");
+});
+
+test("short chinese meta title is not blocked", () => {
+  const check = runAutomaticTranslationChecks({
+    target_lang: "zh",
+    source_fingerprint: "30:1:0",
+    expected_source_fingerprint: "30:1:0",
+    translated_title: "88 咖啡豆",
+    translated_excerpt: "测试信息 测试信息 测试信息 测试信息 测试信息 测试信息",
+    translated_body: "测试信息 测试信息 测试信息 测试信息 测试信息 测试信息 测试信息 测试信息 测试信息 测试信息",
+    translated_meta_title: "88 咖啡豆",
+    translated_meta_description: "测试信息 测试信息 测试信息 测试信息",
+  });
+
+  assert.equal(check.status, "passed");
+  assert.ok(!check.issues.includes("translated_meta_title length out of range"));
 });

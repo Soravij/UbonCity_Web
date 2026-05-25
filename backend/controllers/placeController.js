@@ -348,7 +348,8 @@ async function fetchNearbyCandidates(req, {
 
   const mediaMap = await loadApprovedPlaceMediaMap(req, rows.map((row) => row.id));
   const items = rows.map((row) =>
-    normalizeDecisionAndMedia(
+    normalizePlaceForResponse(
+      req,
       {
         ...row,
         description: mergeDescriptionWithThaiImages(row?.req_description, row?.th_description, lang),
@@ -378,6 +379,43 @@ function buildMediaPublicUrl(req, asset) {
   if (fileName) return `${base}/uploads/${fileName}`;
   if (storagePath) return `${base}/${storagePath}`;
   return sourceUrl || "";
+}
+
+function resolveRequestBaseUrl(req) {
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+function rewriteSelfHostedMediaUrl(req, value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (/^\/(?:media\/)?uploads\//i.test(raw)) {
+    const normalizedPath = raw.replace(/^\/media\/uploads\//i, "/uploads/");
+    return `${resolveRequestBaseUrl(req)}${normalizedPath}`;
+  }
+  if (/^uploads\//i.test(raw)) {
+    return `${resolveRequestBaseUrl(req)}/${raw.replace(/^\/+/, "")}`;
+  }
+  if (!/^https?:\/\//i.test(raw)) return raw;
+  try {
+    const parsed = new URL(raw);
+    const host = String(parsed.hostname || "").trim().toLowerCase();
+    if (host !== "localhost" && host !== "127.0.0.1") return raw;
+    return `${resolveRequestBaseUrl(req)}${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return raw;
+  }
+}
+
+function rewriteSelfHostedHtmlMediaUrls(req, html) {
+  const markup = String(html || "").trim();
+  if (!markup) return markup;
+  return markup.replace(
+    /\b(src|href)\s*=\s*(["'])([^"'<>]+)\2/gi,
+    (_match, attrName, quote, rawUrl) => {
+      const rewritten = rewriteSelfHostedMediaUrl(req, rawUrl) || rawUrl;
+      return `${attrName}=${quote}${rewritten}${quote}`;
+    }
+  );
 }
 
 async function loadApprovedPlaceMediaMap(req, placeIds) {
@@ -468,6 +506,26 @@ function normalizeDecisionAndMedia(row, media = { cover: null, gallery: [], inli
     transport_contact_phone: String(row?.transport_contact_phone || "").trim() || null,
     transport_contact_details: String(row?.transport_contact_details || "").trim() || null,
     transport_link_url: String(row?.transport_link_url || "").trim() || null,
+  };
+}
+
+function normalizePlaceForResponse(req, row, media) {
+  const normalized = normalizeDecisionAndMedia(row, media);
+  return {
+    ...normalized,
+    image: rewriteSelfHostedMediaUrl(req, normalized.image),
+    description: rewriteSelfHostedHtmlMediaUrls(req, normalized.description),
+    decision_cover_image: rewriteSelfHostedMediaUrl(req, normalized.decision_cover_image),
+    decision_thumbnail_image: rewriteSelfHostedMediaUrl(req, normalized.decision_thumbnail_image),
+    media_cover_image: rewriteSelfHostedMediaUrl(req, normalized.media_cover_image),
+    media_gallery_images: (Array.isArray(normalized.media_gallery_images) ? normalized.media_gallery_images : [])
+      .map((entry) => rewriteSelfHostedMediaUrl(req, entry))
+      .filter(Boolean),
+    media_inline_images: (Array.isArray(normalized.media_inline_images) ? normalized.media_inline_images : [])
+      .map((entry) => rewriteSelfHostedMediaUrl(req, entry))
+      .filter(Boolean),
+    effective_cover_image: rewriteSelfHostedMediaUrl(req, normalized.effective_cover_image),
+    effective_thumbnail_image: rewriteSelfHostedMediaUrl(req, normalized.effective_thumbnail_image),
   };
 }
 
@@ -805,14 +863,18 @@ export const getPlaceDetail = async (req, res) => {
 
         if (fallbackRows.length) {
           const mediaMap = await loadApprovedPlaceMediaMap(req, [fallbackRows[0].id]);
-          const item = normalizeDecisionAndMedia({
-            ...fallbackRows[0],
-            description: mergeDescriptionWithThaiImages(
-              fallbackRows[0]?.req_description,
-              fallbackRows[0]?.th_description,
-              lang
-            ),
-          }, mediaMap.get(Number(fallbackRows[0]?.id)));
+          const item = normalizePlaceForResponse(
+            req,
+            {
+              ...fallbackRows[0],
+              description: mergeDescriptionWithThaiImages(
+                fallbackRows[0]?.req_description,
+                fallbackRows[0]?.th_description,
+                lang
+              ),
+            },
+            mediaMap.get(Number(fallbackRows[0]?.id))
+          );
           delete item.req_description;
           delete item.th_description;
           return res.json({ item });
@@ -823,10 +885,14 @@ export const getPlaceDetail = async (req, res) => {
     }
 
     const mediaMap = await loadApprovedPlaceMediaMap(req, [rows[0].id]);
-    const item = normalizeDecisionAndMedia({
-      ...rows[0],
-      description: mergeDescriptionWithThaiImages(rows[0]?.req_description, rows[0]?.th_description, lang),
-    }, mediaMap.get(Number(rows[0]?.id)));
+    const item = normalizePlaceForResponse(
+      req,
+      {
+        ...rows[0],
+        description: mergeDescriptionWithThaiImages(rows[0]?.req_description, rows[0]?.th_description, lang),
+      },
+      mediaMap.get(Number(rows[0]?.id))
+    );
     delete item.req_description;
     delete item.th_description;
 

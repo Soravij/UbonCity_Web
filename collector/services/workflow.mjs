@@ -844,11 +844,12 @@ function buildDraftTranslationSource(repo, contentItemId) {
   });
 }
 
-async function runTranslationStageForSources(repo, translationSources, aiConfig, actorEmail = "system@local", stage = "final-prefrontend") {
+async function runTranslationStageForSources(repo, translationSources, aiConfig, actorEmail = "system@local", stage = "final-prefrontend", options = {}) {
   const normalizedSources = translationSources.map((source) => normalizeTranslationSource(source)).filter((source) => source.content_item_id);
   const targets = parseTargetLangs();
   const translator = createTranslationGenerator(aiConfig);
   const runUid = repo.startTranslationRun(stage, normalizedSources.length, "Translation started");
+  const forceRegenerate = options?.forceRegenerate === true;
 
   let generatedCount = 0;
   let failedCount = 0;
@@ -864,6 +865,7 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
 
       const existing = repo.getTranslation(article.content_item_id, lang);
       if (
+        !forceRegenerate &&
         existing &&
         existing.source_fingerprint === sourceFingerprint &&
         Number(existing.stale_flag || 0) === 0 &&
@@ -986,7 +988,14 @@ export async function rerunProblemTranslations(repo, actorEmail, options = {}) {
     throw new Error("ไม่พบ source content สำหรับสร้าง translation");
   }
 
-  const summary = await runTranslationStageForSources(repo, translationSources, options.aiConfig || null, actorEmail, stage);
+  const summary = await runTranslationStageForSources(
+    repo,
+    translationSources,
+    options.aiConfig || null,
+    actorEmail,
+    stage,
+    { forceRegenerate: options.forceRegenerate === true }
+  );
   const rows = contentItemId ? repo.listTranslations(contentItemId) : repo.listTranslations();
 
   const pass = rows.filter((row) => row.translation_status === "ready" && row.automatic_check_status === "passed" && Number(row.stale_flag || 0) === 0).length;
@@ -2247,7 +2256,6 @@ export function compensateReleaseAfterSyncFailure(repo, actorEmail, options = {}
     published_article_status: articleStatusAfter,
   };
 }
-
 
 
 

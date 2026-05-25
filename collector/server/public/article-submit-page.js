@@ -557,10 +557,24 @@ async function generateTranslations() {
   setInlineStatus("translation-status", "กำลังสร้างคำแปล...", "loading");
   try {
     const result = await api(`/api/items/${state.itemId}/generate-translations`, { method: "POST" });
+    const generatedCount = Number(result?.result?.translation_run?.generated_count || 0) || 0;
+    const failedCount = Number(result?.result?.translation_run?.failed_count || 0) || 0;
     state.readiness = result?.readiness || state.readiness;
     await refreshTranslations();
     renderSyncSummary();
-    setInlineStatus("translation-status", "สร้างคำแปลแล้ว");
+    if (generatedCount > 0 && failedCount > 0) {
+      setInlineStatus("translation-status", `สร้างคำแปลแล้ว ${generatedCount} ภาษา และมีปัญหา ${failedCount} ภาษา`);
+      return;
+    }
+    if (generatedCount > 0) {
+      setInlineStatus("translation-status", `สร้างคำแปลแล้ว ${generatedCount} ภาษา`);
+      return;
+    }
+    if (failedCount > 0) {
+      setInlineStatus("translation-status", `ยังสร้างคำแปลไม่สำเร็จ (${failedCount} ภาษา)`, "error");
+      return;
+    }
+    setInlineStatus("translation-status", "ไม่มีภาษาที่ต้องสร้างเพิ่ม");
   } finally {
     setTranslationGenerateLoading(false);
     setBusy(false);

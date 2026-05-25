@@ -42,7 +42,16 @@ app.use(applyBasicSecurityHeaders);
 app.use(cors(corsOptionsDelegate));
 app.use(express.json({ limit: "10mb" }));
 app.use(createRateLimiter({ windowMs: 60 * 1000, max: 180, message: "Too many requests" }));
-app.use("/uploads", express.static(path.resolve(__dirname, "uploads"), { index: false }));
+app.use(
+  "/uploads",
+  express.static(path.resolve(__dirname, "uploads"), {
+    index: false,
+    setHeaders(res) {
+      // Frontend public pages load uploaded media from backend on a different port/host.
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    },
+  })
+);
 app.use("/transport", express.static(path.resolve(__dirname, "transport"), { index: false }));
 
 app.get("/api/health", (_req, res) => {
