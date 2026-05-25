@@ -1,3 +1,5 @@
+import fsSync from "node:fs";
+import { executeBackendAiJson } from "./backend-ai-client.mjs";
 
 const FIELD_PACK_AGENT_KEY = "field_pack_agent";
 const DEFAULT_FIELD_PACK_AGENT_PROFILE = [
@@ -509,12 +511,11 @@ function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote
 
 function debugPrompt(stage, promptText, metadata = {}) {
   try {
-    const fs = require('fs');
     const logDir = './logs';
-    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir);
+    if (!fsSync.existsSync(logDir)) fsSync.mkdirSync(logDir);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `${logDir}/prompt_debug_${stage}_${timestamp}.json`;
-    fs.writeFileSync(filename, JSON.stringify({
+    fsSync.writeFileSync(filename, JSON.stringify({
       stage,
       timestamp: new Date().toISOString(),
       metadata,
@@ -535,42 +536,6 @@ function traceAgentGeneration(stage, details = {}) {
   }
 }
 
-async function fetchOpenAiResponses(aiConfig, payload, traceMeta = {}) {
-  const timeoutMs = Number(process.env.COLLECTOR_OPENAI_TIMEOUT_MS || process.env.OPENAI_TIMEOUT_MS || 45000) || 45000;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(new Error(`openai timeout after ${timeoutMs}ms`)), timeoutMs);
-  const url = `${aiConfig.baseUrl}/chat/completions`;
-  const startedAt = Date.now();
-  traceAgentGeneration("request.start", { ...traceMeta, model: aiConfig.model, timeout_ms: timeoutMs, url });
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${aiConfig.apiKey}`,
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-    traceAgentGeneration("request.response", {
-      ...traceMeta,
-      status: response.status,
-      duration_ms: Date.now() - startedAt,
-    });
-    return response;
-  } catch (error) {
-    traceAgentGeneration("request.error", {
-      ...traceMeta,
-      duration_ms: Date.now() - startedAt,
-      error: String(error?.message || error || "unknown error"),
-      cause: String(error?.cause?.message || "").trim() || null,
-    });
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
 function resolveFeatureConfig(aiConfig, featureKey) {
   if (!aiConfig || typeof aiConfig !== "object") return {};
   const normalizedFeatureKey = featureKey === "revision" ? "fieldPack" : featureKey;
@@ -582,29 +547,6 @@ function resolveFeatureConfig(aiConfig, featureKey) {
     };
   }
   return aiConfig;
-}
-
-function normalizeFeatureKeyForMessage(featureKey) {
-  const raw = String(featureKey || "").trim();
-  if (!raw) return "feature";
-  if (raw === "fieldPack") return "fieldPack";
-  if (raw === "visualContext") return "visualContext";
-  if (raw === "translation") return "translation";
-  if (raw === "revision") return "revision";
-  return raw;
-}
-
-function getProviderDisplayName(provider) {
-  return String(provider || "").trim().toLowerCase() === "google" ? "Google" : "OpenAI";
-}
-
-function getMissingProviderKeyMessage(featureConfig, featureKey = "") {
-  const provider = String(featureConfig?.provider || "openai").trim().toLowerCase();
-  const normalizedFeature = normalizeFeatureKeyForMessage(featureKey);
-  if (provider === "google") {
-    return `AI config missing for ${normalizedFeature}: provider=${provider}, required env=GOOGLE_AI_API_KEY`;
-  }
-  return `AI config missing for ${normalizedFeature}: provider=${provider}, required env=OPENAI_API_KEY`;
 }
 
 function normalizeExternalAgentUrl(aiConfig) {
@@ -802,9 +744,8 @@ export function createAgentGenerationEngine(aiConfig) {
 
   return {
     async generateVisualContext(item) {
-      const featureConfig = resolveFeatureConfig(aiConfig, "visualContext");
-      if (!aiConfig?.enabled || !featureConfig?.apiKey) {
-        throw new Error(getMissingProviderKeyMessage(featureConfig, "visualContext"));
+      if (!aiConfig?.enabled) {
+        throw new Error("backend AI proxy is not enabled");
       }
 
       const imageInputs = await prepareVisualImageInputs(item, 5);
@@ -812,27 +753,14 @@ export function createAgentGenerationEngine(aiConfig) {
         return null;
       }
 
-      const content = [
-        { type: "text", text: buildVisualPrompt(item, imageInputs.length) },
-        ...imageInputs,
-      ];
-
-      const response = await fetchOpenAiResponses(featureConfig, {
-        model: featureConfig.model,
-        messages: [{ role: "user", content }],
-      }, {
-        kind: "visual_context",
-        content_item_id: Number(item?.id || 0) || null,
-        image_count: imageInputs.length,
+      const result = await executeBackendAiJson({
+        aiConfig,
+        featureKey: "visualContext",
+        task: "visual_context",
+        prompt: buildVisualPrompt(item, imageInputs.length),
+        imageInputs,
       });
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        throw new Error(`${getProviderDisplayName(featureConfig?.provider)} visual-context error ${response.status}: ${body.slice(0, 220)}`);
-      }
-
-      const data = await response.json();
-      const parsed = normalizeVisualContext(parseJsonLike(extractResponseText(data)));
+      const parsed = normalizeVisualContext(result.parsed || parseJsonLike(result.outputText));
       if (!hasVisualContext(parsed)) {
         return null;
       }
@@ -840,32 +768,20 @@ export function createAgentGenerationEngine(aiConfig) {
     },
 
     async generateFieldPack(item) {
-      const featureConfig = resolveFeatureConfig(aiConfig, "fieldPack");
-      if (!aiConfig?.enabled || !featureConfig?.apiKey) {
-        throw new Error(getMissingProviderKeyMessage(featureConfig, "fieldPack"));
+      if (!aiConfig?.enabled) {
+        throw new Error("backend AI proxy is not enabled");
       }
 
       const fullPrompt = buildFieldPackPrompt(item);
       debugPrompt('field_pack', fullPrompt, { itemId: item?.id, title: String(item?.title || '').trim() });
 
-      const response = await fetchOpenAiResponses(featureConfig, {
-        model: featureConfig.model,
-        messages: [{ role: "user", content: fullPrompt }],
-      }, {
-        kind: "field_pack",
-        content_item_id: Number(item?.id || 0) || null,
-        title: String(item?.title || "").trim() || null,
-        workflow_status: String(item?.workflow_status || "").trim().toLowerCase() || null,
+      const result = await executeBackendAiJson({
+        aiConfig,
+        featureKey: "fieldPack",
+        task: "field_pack",
+        prompt: fullPrompt,
       });
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        throw new Error(`${getProviderDisplayName(featureConfig?.provider)} error ${response.status}: ${body.slice(0, 220)}`);
-      }
-
-      const data = await response.json();
-      const rawText = extractResponseText(data);
-      const parsed = normalizeFieldPack(parseJsonLike(rawText));
+      const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText));
       if (!parsed) {
         throw new Error("AI response is not valid JSON field pack");
       }
@@ -873,32 +789,20 @@ export function createAgentGenerationEngine(aiConfig) {
     },
 
     async reviseFieldPack(item, previousFieldPack = {}, revisionNote = "") {
-      const featureConfig = resolveFeatureConfig(aiConfig, "revision");
-      if (!aiConfig?.enabled || !featureConfig?.apiKey) {
-        throw new Error(getMissingProviderKeyMessage(featureConfig, "revision"));
+      if (!aiConfig?.enabled) {
+        throw new Error("backend AI proxy is not enabled");
       }
 
       const revisionPrompt = buildFieldPackRevisionPrompt(item, previousFieldPack, revisionNote);
       debugPrompt('field_pack_revision', revisionPrompt, { itemId: item?.id, title: String(item?.title || '').trim() });
 
-      const response = await fetchOpenAiResponses(featureConfig, {
-        model: featureConfig.model,
-        messages: [{ role: "user", content: revisionPrompt }],
-      }, {
-        kind: "field_pack_revision",
-        content_item_id: Number(item?.id || 0) || null,
-        title: String(item?.title || "").trim() || null,
-        workflow_status: String(item?.workflow_status || "").trim().toLowerCase() || null,
+      const result = await executeBackendAiJson({
+        aiConfig,
+        featureKey: "revision",
+        task: "field_pack_revision",
+        prompt: revisionPrompt,
       });
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        throw new Error(`${getProviderDisplayName(featureConfig?.provider)} revision error ${response.status}: ${body.slice(0, 220)}`);
-      }
-
-      const data = await response.json();
-      const rawText = extractResponseText(data);
-      const parsed = normalizeFieldPack(parseJsonLike(rawText));
+      const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText));
       if (!parsed) {
         throw new Error("AI revision response is not valid JSON field pack");
       }

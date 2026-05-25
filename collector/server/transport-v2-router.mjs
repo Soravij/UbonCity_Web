@@ -5,6 +5,7 @@ import express from "express";
 import multer from "multer";
 import { resolveAiConfig, resolveAiFeatureConfig } from "../config/ai.mjs";
 import { assertCollectorIntegrationReadiness } from "./integration-readiness.mjs";
+import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
 const DEFAULT_COLOR = "#ff6600";
 const DEFAULT_LABEL_STYLE = {
@@ -453,7 +454,7 @@ function extractResponseText(data) {
 
 async function translateLabelEntries(aiConfig, entries, targetLang) {
   const translationConfig = resolveAiFeatureConfig(aiConfig, "translation");
-  if (!translationConfig?.enabled || !translationConfig?.apiKey) {
+  if (!translationConfig?.enabled) {
     throw new Error("translation AI is not configured");
   }
   const sourceEntries = Object.fromEntries(
@@ -472,23 +473,13 @@ async function translateLabelEntries(aiConfig, entries, targetLang) {
     "Input JSON:",
     JSON.stringify(sourceEntries, null, 2),
   ].join("\n");
-  const response = await fetch(`${translationConfig.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${translationConfig.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: translationConfig.model,
-      messages: [{ role: "user", content: prompt }],
-    }),
+  const result = await executeBackendAiJson({
+    aiConfig: translationConfig,
+    featureKey: "translation",
+    task: "transport_label_translation",
+    prompt,
   });
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`translation error ${response.status}: ${body.slice(0, 220)}`);
-  }
-  const data = await response.json();
-  const parsed = parseJsonLike(extractResponseText(data));
+  const parsed = result?.parsed || parseJsonLike(String(result?.outputText || ""));
   if (!parsed || typeof parsed !== "object") {
     throw new Error("translation response is not valid JSON");
   }
@@ -1524,7 +1515,7 @@ const collectorIntegrationConfig = () => ({
       return res.status(400).json({ error: "target locales are required" });
     }
     const aiConfig = resolveEffectiveAiConfig();
-    if (!aiConfig?.enabled || !aiConfig?.apiKey) {
+    if (!aiConfig?.enabled) {
       return res.status(503).json({ error: "translation AI is not configured" });
     }
     const nextDictionary = normalizeLabelDictionary(dictionary);
@@ -1686,7 +1677,7 @@ const collectorIntegrationConfig = () => ({
       return res.status(400).json({ error: "target locales are required" });
     }
     const aiConfig = resolveEffectiveAiConfig();
-    if (!aiConfig?.enabled || !aiConfig?.apiKey) {
+    if (!aiConfig?.enabled) {
       return res.status(503).json({ error: "translation AI is not configured" });
     }
     const nextDictionary = normalizeLabelDictionary(dictionary);

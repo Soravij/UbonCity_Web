@@ -279,7 +279,7 @@ test("rerunProblemTranslations falls back when translation provider has no api k
   assert.equal(result.totals.passed, 3);
 });
 
-test("google translator accepts generic feature apiKey/baseUrl fields", async () => {
+test("translation generator ignores collector-local provider keys and falls back without backend proxy", async () => {
   let requestedUrl = "";
   const server = http.createServer((req, res) => {
     requestedUrl = String(req.url || "");
@@ -335,9 +335,9 @@ test("google translator accepts generic feature apiKey/baseUrl fields", async ()
       "en",
     );
 
-    assert.equal(translated._engine, "google");
-    assert.equal(translated.translated_title, "Ubon attraction guide");
-    assert.match(requestedUrl, /models\/gemini-2\.5-flash-lite:generateContent\?key=test-google-key/);
+    assert.equal(translated._engine, "deterministic");
+    assert.equal(translated.translated_title, "88 Coffee Bean");
+    assert.equal(requestedUrl, "");
   } finally {
     server.close();
     await once(server, "close");

@@ -46,6 +46,7 @@ import {
   FIELD_PACK_AGENT_KEY,
   createAgentGenerationEngine,
 } from "../services/agent-generation.mjs";
+import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 
 const app = express();
 const port = Number(process.env.PORT || 5060);
@@ -185,7 +186,8 @@ function buildAiFeatureRuntimeSnapshot(aiConfig) {
       policy_key: String(row?.policyKey || "").trim() || null,
       provider: String(row?.provider || "").trim() || null,
       model: String(row?.model || "").trim() || null,
-      has_api_key: Boolean(String(row?.apiKey || "").trim()),
+      has_api_key: false,
+      backend_proxy_ready: Boolean(String(config?.backendApiBase || "").trim() && String(config?.backendSyncToken || "").trim()),
     };
   };
   return {
@@ -4559,7 +4561,7 @@ async function buildAiCollectQueries(topic, category, lang = "th", maxQueries = 
   const safeTopic = String(topic || "").trim();
   if (!safeTopic) return [];
   const aiConfig = resolveAiFeatureConfig(getEffectiveAiConfig(), "aiDiscovery");
-  if (!aiConfig?.enabled || !aiConfig?.apiKey) return [];
+  if (!aiConfig?.enabled) return [];
 
   const prompt = [
     "Generate search queries for discovering real places in Ubon Ratchathani.",
@@ -4571,24 +4573,18 @@ async function buildAiCollectQueries(topic, category, lang = "th", maxQueries = 
     "Queries should be practical for Google Maps text search.",
   ].join("\n");
 
-  const response = await fetch(`${aiConfig.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${aiConfig.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: aiConfig.model,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!response.ok) {
+  let result;
+  try {
+    result = await executeBackendAiJson({
+      aiConfig,
+      featureKey: "aiDiscovery",
+      task: "ai_discovery_queries",
+      prompt,
+    });
+  } catch {
     return [];
   }
-
-  const data = await response.json().catch(() => ({}));
-  const parsed = parseJsonLike(String(data?.choices?.[0]?.message?.content || ""));
+  const parsed = result?.parsed || parseJsonLike(String(result?.outputText || ""));
   const queries = Array.isArray(parsed?.queries) ? parsed.queries : [];
 
   return queries

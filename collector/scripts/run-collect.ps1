@@ -38,7 +38,7 @@ if ($Help) {
   Write-Host "  .\\scripts\\run-collect.ps1 -Adapter manual -AiDiscovery:$false"
   Write-Host ""
   Write-Host "Required env:"
-  Write-Host "  OPENAI_API_KEY (when -AiDiscovery:$true)"
+  Write-Host "  COLLECTOR_SYNC_BACKEND_API + LIFECYCLE_SYNC_TOKEN (when -AiDiscovery:$true)"
   Write-Host "  GOOGLE_MAPS_API_KEY (when -Adapter google_maps)"
   Write-Host "  GOOGLE_CUSTOM_SEARCH_JSON_API_KEY + GOOGLE_CUSTOM_SEARCH_ENGINE_ID (when -Adapter google_search)"
   Write-Host "  GOOGLE_SEARCH_API_KEY + GOOGLE_SEARCH_ENGINE_ID (legacy aliases still supported)"
@@ -94,7 +94,8 @@ try {
   }
 
   if ($AiDiscovery) {
-    Assert-RequiredEnv -Name "OPENAI_API_KEY" -Message "????? OPENAI_API_KEY ?? environment (???????????????? ai_discovery)"
+    Assert-RequiredEnv -Name "COLLECTOR_SYNC_BACKEND_API" -Message "COLLECTOR_SYNC_BACKEND_API is required for AI discovery backend proxy"
+    Assert-RequiredEnv -Name "LIFECYCLE_SYNC_TOKEN" -Message "LIFECYCLE_SYNC_TOKEN is required for AI discovery backend proxy"
   }
 
   if ([string]::IsNullOrWhiteSpace($Password)) {

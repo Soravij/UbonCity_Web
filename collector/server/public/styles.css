@@ -9097,6 +9097,16 @@ button[id^="btn-"]:not([class]):disabled {
   display: none !important;
 }
 
+.app-shell.users-management-mode #panel-users {
+  display: block !important;
+}
+
+.app-shell.users-management-mode #panel-home,
+.app-shell.users-management-mode #panel-raw,
+.app-shell.users-management-mode #panel-assignments {
+  display: none !important;
+}
+
 /* Collector modernization catch-up: raw + clean/item-editor surfaces */
 #panel-raw .raw-stage-filter,
 #panel-raw .raw-stage-filter.is-active {

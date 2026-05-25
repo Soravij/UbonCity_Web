@@ -131,10 +131,11 @@ See: `database/schema.sql`
 
 ## AI model (optional)
 - Default deterministic draft works without external AI.
-- To enable real AI draft from UI button `Generate with AI`, set credentials only:
-  - `OPENAI_API_KEY=...`
-  - `OPENAI_BASE_URL=https://api.openai.com/v1`
-  - `GOOGLE_AI_API_KEY=...`
-  - `GOOGLE_AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta`
+- To enable real AI draft from UI button `Generate with AI`, configure backend-side AI secrets only:
+  - `backend/.env -> OPENAI_API_KEY=...`
+  - `backend/.env -> GOOGLE_AI_API_KEY=...`
+- Collector must still know how to reach backend:
+  - `COLLECTOR_SYNC_BACKEND_API=https://.../api`
+  - `LIFECYCLE_SYNC_TOKEN=...`
 - Feature-to-model selection is controlled from the owner panel inside collector, not from env.
 - If AI call fails, system automatically falls back to deterministic draft.

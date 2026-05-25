@@ -877,9 +877,7 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
 
       const translationConfig = aiConfig?.features?.translation || aiConfig || {};
       const preferredProvider = String(translationConfig?.provider || aiConfig?.translationProvider || aiConfig?.provider || "").trim().toLowerCase();
-      const hasOpenAi = Boolean(String(aiConfig?.openAiApiKey || "").trim());
-      const hasGoogle = Boolean(String(aiConfig?.googleApiKey || "").trim());
-      const hasProviderConfig = preferredProvider === "google" ? hasGoogle : preferredProvider === "openai" ? hasOpenAi : false;
+      const hasProviderConfig = Boolean(aiConfig?.enabled);
       const defaultTranslatorEngine = hasProviderConfig ? preferredProvider : "deterministic";
       const defaultTranslatorModel = String(translationConfig?.model || aiConfig?.translationModel || aiConfig?.model || "deterministic").trim() || "deterministic";
 
@@ -2256,7 +2254,6 @@ export function compensateReleaseAfterSyncFailure(repo, actorEmail, options = {}
     published_article_status: articleStatusAfter,
   };
 }
-
 
 
 

@@ -69,28 +69,12 @@ function normalizePolicyKey(value, fallback = AI_POLICY_DEFAULT_KEY) {
   return fallback;
 }
 
-function resolveProviderTransport(provider, transport) {
-  if (provider === "google") {
-    return {
-      apiKey: transport.googleApiKey,
-      baseUrl: transport.googleBaseUrl,
-    };
-  }
-  return {
-    apiKey: transport.openAiApiKey,
-    baseUrl: transport.openAiBaseUrl,
-  };
-}
-
-function resolveFeatureConfig(provider, model, transport) {
+function resolveFeatureConfig(provider, model) {
   const normalizedProvider = normalizeProvider(provider, "openai");
   const normalizedModel = String(model || "").trim();
-  const providerTransport = resolveProviderTransport(normalizedProvider, transport);
   return {
     provider: normalizedProvider,
     model: normalizedModel,
-    apiKey: providerTransport.apiKey,
-    baseUrl: providerTransport.baseUrl,
   };
 }
 
@@ -159,22 +143,16 @@ export function resolveAiConfig(options = {}) {
   const defaultPolicy = resolvePolicySelection(AI_POLICY_DEFAULT_KEY);
   const provider = defaultPolicy?.provider || "openai";
   const model = defaultPolicy?.model || "gemini-2.5-flash-lite";
-  const transport = {
-    openAiApiKey: String(process.env.OPENAI_API_KEY || "").trim(),
-    openAiBaseUrl: String(process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").trim().replace(/\/$/, ""),
-    googleApiKey: String(process.env.GOOGLE_AI_API_KEY || "").trim(),
-    googleBaseUrl: String(process.env.GOOGLE_AI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta")
-      .trim()
-      .replace(/\/$/, ""),
-  };
-  const globalTransport = resolveProviderTransport(provider, transport);
-  const fieldPack = resolveFeatureConfig(featureMap.fieldPack.provider, featureMap.fieldPack.model, transport);
-  const translation = resolveFeatureConfig(featureMap.translation.provider, featureMap.translation.model, transport);
-  const visualContext = resolveFeatureConfig(featureMap.visualContext.provider, featureMap.visualContext.model, transport);
+  const backendApiBase = String(
+    process.env.COLLECTOR_SYNC_BACKEND_API || process.env.BACKEND_API_BASE_URL || process.env.BACKEND_URL || ""
+  ).trim().replace(/\/+$/, "");
+  const backendSyncToken = String(process.env.LIFECYCLE_SYNC_TOKEN || "").trim();
+  const fieldPack = resolveFeatureConfig(featureMap.fieldPack.provider, featureMap.fieldPack.model);
+  const translation = resolveFeatureConfig(featureMap.translation.provider, featureMap.translation.model);
+  const visualContext = resolveFeatureConfig(featureMap.visualContext.provider, featureMap.visualContext.model);
   const articleGenerator = resolveFeatureConfig(
     featureMap.articleGenerator.provider,
-    featureMap.articleGenerator.model,
-    transport
+    featureMap.articleGenerator.model
   );
   const agentEngine = String(process.env.COLLECTOR_AGENT_ENGINE || "internal").trim().toLowerCase();
   const externalAgentUrl = String(process.env.COLLECTOR_EXTERNAL_AGENT_URL || "").trim().replace(/\/+$/, "");
@@ -183,12 +161,8 @@ export function resolveAiConfig(options = {}) {
   return {
     provider,
     model,
-    apiKey: globalTransport.apiKey,
-    baseUrl: globalTransport.baseUrl,
-    openAiApiKey: transport.openAiApiKey,
-    openAiBaseUrl: transport.openAiBaseUrl,
-    googleApiKey: transport.googleApiKey,
-    googleBaseUrl: transport.googleBaseUrl,
+    backendApiBase,
+    backendSyncToken,
     translationProvider: translation.provider,
     translationModel: translation.model,
     fieldPackProvider: fieldPack.provider,
@@ -197,14 +171,14 @@ export function resolveAiConfig(options = {}) {
     externalAgentUrl,
     externalAgentToken,
     features: {
-      fieldPack: { ...fieldPack, policyKey: featureMap.fieldPack.policy_key },
-      translation: { ...translation, policyKey: featureMap.translation.policy_key },
-      visualContext: { ...visualContext, policyKey: featureMap.visualContext.policy_key },
-      articleGenerator: { ...articleGenerator, policyKey: featureMap.articleGenerator.policy_key },
+      fieldPack: { ...fieldPack, policyKey: featureMap.fieldPack.policy_key, backendApiBase, backendSyncToken },
+      translation: { ...translation, policyKey: featureMap.translation.policy_key, backendApiBase, backendSyncToken },
+      visualContext: { ...visualContext, policyKey: featureMap.visualContext.policy_key, backendApiBase, backendSyncToken },
+      articleGenerator: { ...articleGenerator, policyKey: featureMap.articleGenerator.policy_key, backendApiBase, backendSyncToken },
     },
     featurePolicies: featureMap,
     enabled: agentEngine === "external"
       ? Boolean(externalAgentUrl)
-      : Boolean(fieldPack.apiKey || translation.apiKey || visualContext.apiKey || globalTransport.apiKey),
+      : Boolean(backendApiBase && backendSyncToken),
   };
 }

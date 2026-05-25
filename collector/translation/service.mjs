@@ -1,4 +1,6 @@
-﻿function normalizeUtf8Text(value) {
+import { executeBackendAiJson, isBackendAiConfigured } from "../services/backend-ai-client.mjs";
+
+function normalizeUtf8Text(value) {
   return String(value ?? "")
     .replace(/^\uFEFF/, "")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
@@ -229,15 +231,8 @@ function ensureValidModelPayload(payload) {
   return normalized;
 }
 
-async function openAiTranslate(source, targetLang, aiConfig) {
-  const apiKey = String(aiConfig?.openAiApiKey || aiConfig?.apiKey || "").trim();
-  const baseUrl = String(aiConfig?.openAiBaseUrl || aiConfig?.baseUrl || "https://api.openai.com/v1").trim().replace(/\/$/, "");
-  const model = String(aiConfig?.translationModel || aiConfig?.model || "gpt-5-mini").trim();
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is missing");
-  }
-
-  const prompt = [
+function buildTranslationPrompt(source, targetLang) {
+  return [
     "Return ONLY valid JSON with keys:",
     "translated_title, translated_excerpt, translated_body, translated_meta_title, translated_meta_description",
     `Translate into target language: ${targetLang}`,
@@ -246,6 +241,36 @@ async function openAiTranslate(source, targetLang, aiConfig) {
     "Input:",
     JSON.stringify(source, null, 2),
   ].join("\n");
+}
+
+async function backendTranslate(source, targetLang, aiConfig) {
+  const translationConfig = aiConfig?.features?.translation && typeof aiConfig.features.translation === "object"
+    ? aiConfig.features.translation
+    : aiConfig;
+  const result = await executeBackendAiJson({
+    aiConfig,
+    featureKey: "translation",
+    task: "translation_content",
+    prompt: buildTranslationPrompt(source, targetLang),
+  });
+  const parsed = ensureValidModelPayload(result.parsed || parseJsonLike(result.outputText));
+  if (!parsed) {
+    throw new Error("Invalid translation JSON payload");
+  }
+  return {
+    ...parsed,
+    _engine: String(result.provider || translationConfig?.provider || "openai").trim(),
+    _model: String(result.model || translationConfig?.model || "unknown").trim(),
+  };
+}
+
+async function openAiTranslate(source, targetLang, aiConfig) {
+  const apiKey = String(aiConfig?.openAiApiKey || aiConfig?.apiKey || "").trim();
+  const baseUrl = String(aiConfig?.openAiBaseUrl || aiConfig?.baseUrl || "https://api.openai.com/v1").trim().replace(/\/$/, "");
+  const model = String(aiConfig?.translationModel || aiConfig?.model || "gpt-5-mini").trim();
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is missing");
+  }
 
   const response = await fetch(`${baseUrl}/responses`, {
     method: "POST",
@@ -255,7 +280,7 @@ async function openAiTranslate(source, targetLang, aiConfig) {
     },
     body: JSON.stringify({
       model,
-      input: prompt,
+      input: buildTranslationPrompt(source, targetLang),
       text: { format: { type: "text" } },
     }),
   });
@@ -282,23 +307,13 @@ async function googleAiTranslate(source, targetLang, aiConfig) {
     throw new Error("GOOGLE_AI_API_KEY is missing");
   }
 
-  const prompt = [
-    "Return ONLY valid JSON with keys:",
-    "translated_title, translated_excerpt, translated_body, translated_meta_title, translated_meta_description",
-    `Translate into target language: ${targetLang}`,
-    "Do not include markdown fences.",
-    "Preserve factual details; no hallucination.",
-    "Input:",
-    JSON.stringify(source, null, 2),
-  ].join("\n");
-
   const response = await fetch(
     `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts: [{ text: buildTranslationPrompt(source, targetLang) }] }],
         generationConfig: { responseMimeType: "application/json" },
       }),
     }
@@ -331,42 +346,13 @@ export function createTranslationGenerator(aiConfig) {
   if (!aiConfig || typeof aiConfig !== "object") {
     return createDeterministicTranslator();
   }
-  const translationConfig = aiConfig?.features?.translation && typeof aiConfig.features.translation === "object"
-    ? aiConfig.features.translation
-    : aiConfig;
-  const provider = String(
-    translationConfig?.provider
-    || aiConfig?.translationProvider
-    || aiConfig?.provider
-    || "openai"
-  ).trim().toLowerCase();
-  const openAiApiKey = String(
-    translationConfig?.openAiApiKey
-    || translationConfig?.apiKey
-    || aiConfig?.openAiApiKey
-    || aiConfig?.apiKey
-    || ""
-  ).trim();
-  const googleApiKey = String(
-    translationConfig?.googleApiKey
-    || translationConfig?.apiKey
-    || aiConfig?.googleApiKey
-    || ""
-  ).trim();
 
-  if ((provider === "openai" && !openAiApiKey) || (provider === "google" && !googleApiKey)) {
-    return createDeterministicTranslator();
+  if (isBackendAiConfigured(aiConfig)) {
+    return {
+      async translate(source, targetLang) {
+        return backendTranslate(source, targetLang, aiConfig);
+      },
+    };
   }
-
-  return {
-    async translate(source, targetLang) {
-      if (provider === "google") {
-        return googleAiTranslate(source, targetLang, translationConfig);
-      }
-      if (provider === "openai") {
-        return openAiTranslate(source, targetLang, translationConfig);
-      }
-      throw new Error(`Unsupported translation provider: ${provider}`);
-    },
-  };
+  return createDeterministicTranslator();
 }

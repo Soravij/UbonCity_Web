@@ -180,10 +180,10 @@ test("external agent engine normalizes visual context and field pack responses",
 
     assert.equal(visual.visual_summary, "mock garden mood");
     assert.deepEqual(visual.setting_cues, ["trees"]);
-    assert.equal(fieldPack.status, "ready_for_field");
+    assert.equal(fieldPack.status, "draft");
     assert.equal(fieldPack.ai_summary, "field brief");
     assert.equal(fieldPack.field_pack_checklists.length, 3);
-    assert.equal(revised.status, "ready_for_field");
+    assert.equal(revised.status, "draft");
     assert.equal(calls.length, 3);
     assert.equal(calls[0].url, "https://agent.example/run");
     assert.equal(calls[0].authorization, "Bearer secret-token");

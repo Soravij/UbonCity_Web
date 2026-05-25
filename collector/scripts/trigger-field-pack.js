@@ -53,8 +53,8 @@ async function main() {
   console.log(`   ai model:    ${aiConfig.model}`);
   console.log(`   ai enabled:  ${aiConfig.enabled}`);
   console.log(`   agentEngine: ${aiConfig.agentEngine}`);
-  if (aiConfig.agentEngine === "internal" && !aiConfig.apiKey) {
-    console.error("   ERROR: OPENAI_API_KEY is not set");
+  if (aiConfig.agentEngine === "internal" && !aiConfig.enabled) {
+    console.error("   ERROR: backend AI proxy is not ready (check COLLECTOR_SYNC_BACKEND_API and LIFECYCLE_SYNC_TOKEN)");
     process.exit(1);
   }
 
