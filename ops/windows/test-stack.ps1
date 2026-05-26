@@ -52,6 +52,41 @@ function Test-ProcessAlive {
   }
 }
 
+function Invoke-ProcessTreeStop {
+  param([int]$ProcessId)
+
+  $output = & taskkill.exe /PID $ProcessId /T /F 2>&1
+  $exitCode = $LASTEXITCODE
+
+  return [pscustomobject]@{
+    ok = ($exitCode -eq 0)
+    exitCode = $exitCode
+    output = (($output | Out-String).Trim())
+  }
+}
+
+function Get-CloudflaredHealth {
+  param([string]$MetricsUrl)
+
+  try {
+    $response = Invoke-WebRequest -Uri $MetricsUrl -TimeoutSec 5 -UseBasicParsing
+    $content = [string]$response.Content
+    $connMatch = [regex]::Match($content, '(?m)^cloudflared_tunnel_ha_connections\s+([0-9.]+)\s*$')
+    if (-not $connMatch.Success) {
+      return @{ ok = $false; error = "cloudflared metrics missing ha connection count" }
+    }
+
+    $connections = [int][double]::Parse($connMatch.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
+    if ($connections -le 0) {
+      return @{ ok = $false; error = "cloudflared has no active edge connections"; connections = 0 }
+    }
+
+    return @{ ok = $true; connections = $connections }
+  } catch {
+    return @{ ok = $false; error = $_.Exception.Message }
+  }
+}
+
 function Start-ManagedProcess {
   param(
     [string]$Name,
@@ -130,16 +165,33 @@ function Stop-ManagedProcess {
     return
   }
 
-  Stop-Process -Id $processId -Force
-  Remove-PidFile -PidFile $PidFile
-  Write-Host ("[{0}] stopped pid {1}" -f $Name, $processId)
+  $stopResult = Invoke-ProcessTreeStop -ProcessId $processId
+  if ($stopResult.ok) {
+    Remove-PidFile -PidFile $PidFile
+    Write-Host ("[{0}] stopped pid {1}" -f $Name, $processId)
+    return
+  }
+
+  if ($stopResult.output -match 'Access is denied') {
+    Write-Warning ("[{0}] access denied stopping pid {1}. rerun stop from an elevated shell or the same scheduled-task context." -f $Name, $processId)
+    return
+  }
+
+  if ($stopResult.output -match 'not found' -or $stopResult.output -match 'no running instance') {
+    Remove-PidFile -PidFile $PidFile
+    Write-Host ("[{0}] stale pid file removed after taskkill" -f $Name)
+    return
+  }
+
+  throw ("[{0}] failed to stop pid {1}: {2}" -f $Name, $processId, $stopResult.output)
 }
 
 function Get-ManagedStatus {
   param(
     [string]$Name,
     [string]$PidFile,
-    [string]$HealthUrl = ""
+    [string]$HealthUrl = "",
+    [string]$HealthKind = "http"
   )
 
   $pidInfo = Read-PidInfo -PidFile $PidFile
@@ -148,11 +200,15 @@ function Get-ManagedStatus {
   $health = $null
 
   if ($alive -and -not [string]::IsNullOrWhiteSpace($HealthUrl)) {
-    try {
-      $resp = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 5
-      $health = $resp
-    } catch {
-      $health = @{ ok = $false; error = $_.Exception.Message }
+    if ($HealthKind -eq "cloudflared-metrics") {
+      $health = Get-CloudflaredHealth -MetricsUrl $HealthUrl
+    } else {
+      try {
+        $resp = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 5
+        $health = $resp
+      } catch {
+        $health = @{ ok = $false; error = $_.Exception.Message }
+      }
     }
   }
 
@@ -266,7 +322,8 @@ $services = @(
     PidFile = Join-Path $pidDir "cloudflared.pid.json"
     StdoutFile = Join-Path $logDir "cloudflared.out.log"
     StderrFile = Join-Path $logDir "cloudflared.err.log"
-    HealthUrl = ""
+    HealthUrl = "http://127.0.0.1:20241/metrics"
+    HealthKind = "cloudflared-metrics"
     RestartForever = $true
     RestartDelaySeconds = 5
   }
@@ -296,7 +353,11 @@ switch ($Action) {
   }
   "status" {
     $statuses = foreach ($service in $services) {
-      Get-ManagedStatus -Name $service.Name -PidFile $service.PidFile -HealthUrl $service.HealthUrl
+      Get-ManagedStatus `
+        -Name $service.Name `
+        -PidFile $service.PidFile `
+        -HealthUrl $service.HealthUrl `
+        -HealthKind $(if ($service.HealthKind) { [string]$service.HealthKind } else { "http" })
     }
     $statuses | ConvertTo-Json -Depth 6
   }

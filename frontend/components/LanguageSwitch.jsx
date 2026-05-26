@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SUPPORTED_LANGS } from "@/lib/site";
@@ -54,9 +54,10 @@ function FlagIcon({ code }) {
   );
 }
 
-export default function LanguageSwitch() {
+export default function LanguageSwitch({ mobileList = false, onNavigate }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
 
   const { currentLang, rest } = useMemo(() => {
     const parts = String(pathname || "").split("/").filter(Boolean);
@@ -67,11 +68,71 @@ export default function LanguageSwitch() {
 
   const currentOption = options[currentLang] || options.en;
 
+  useEffect(() => {
+    if (mobileList || !open) {
+      return undefined;
+    }
+
+    function handlePointerDown(event) {
+      if (rootRef.current && !rootRef.current.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [mobileList, open]);
+
+  if (mobileList) {
+    return (
+      <div className="site-lang-mobile-group">
+        <p className="site-lang-mobile-title">Language</p>
+        <div className="site-lang-mobile-list">
+          {SUPPORTED_LANGS.map((lang) => {
+            const href = rest ? `/${lang}/${rest}` : `/${lang}`;
+            const isActive = lang === currentLang;
+            const option = options[lang] || { label: lang.toUpperCase(), flag: "gb" };
+
+            return (
+              <Link
+                key={lang}
+                href={href}
+                onClick={onNavigate}
+                aria-current={isActive ? "page" : undefined}
+                className={`site-lang-mobile-item ${isActive ? "is-active" : ""}`}
+              >
+                <FlagIcon code={option.flag} />
+                <span className="site-lang-mobile-label">{option.label}</span>
+                <span className={`site-lang-check ${isActive ? "is-visible" : ""}`} aria-hidden="true">
+                  ✓
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         aria-label="Open language menu"
+        aria-haspopup="menu"
+        aria-expanded={open}
         className="site-lang-trigger inline-flex h-10 items-center gap-2 rounded-2xl border px-3 transition-all duration-300"
         onClick={() => setOpen((prev) => !prev)}
       >
@@ -96,6 +157,7 @@ export default function LanguageSwitch() {
                 key={lang}
                 href={href}
                 onClick={() => setOpen(false)}
+                aria-current={isActive ? "page" : undefined}
                 className={`site-lang-item flex items-center gap-3 px-4 py-3 text-sm transition-all duration-300 ${
                   isActive ? "is-active" : ""
                 }`}

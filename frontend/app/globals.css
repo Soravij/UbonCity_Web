@@ -975,6 +975,46 @@ a {
   transform: scale(1);
 }
 
+.site-lang-mobile-group {
+  padding: 4px 18px 6px;
+}
+
+.site-lang-mobile-title {
+  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.site-lang-mobile-list {
+  display: grid;
+  gap: 4px;
+}
+
+.site-lang-mobile-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #fff7ef;
+  transition: background-color 220ms ease;
+}
+
+.site-lang-mobile-item:hover,
+.site-lang-mobile-item.is-active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.site-lang-mobile-label {
+  min-width: 0;
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .rotated-image-frame {
   background: color-mix(in srgb, var(--theme-surface) 78%, #fffaf2);
   box-shadow: 0 0 22px color-mix(in srgb, var(--theme-primary) 22%, transparent);
@@ -3480,6 +3520,19 @@ a {
   border-color: rgba(120, 80, 40, 0.14);
   background: linear-gradient(180deg, rgba(255,252,250,0.94) 0%, rgba(252,248,243,0.88) 100%);
   box-shadow: 0 18px 36px rgba(95, 55, 20, 0.12);
+}
+
+:root:not([data-theme="dark"]) .site-navbar--overlay .site-lang-mobile-title {
+  color: #9A641F;
+}
+
+:root:not([data-theme="dark"]) .site-navbar--overlay .site-lang-mobile-item {
+  color: #243042;
+}
+
+:root:not([data-theme="dark"]) .site-navbar--overlay .site-lang-mobile-item:hover,
+:root:not([data-theme="dark"]) .site-navbar--overlay .site-lang-mobile-item.is-active {
+  background: rgba(255, 255, 255, 0.54);
 }
 
 /* --- Weather cards: cream surface + dark text --- */

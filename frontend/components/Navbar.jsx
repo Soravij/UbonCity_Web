@@ -116,6 +116,8 @@ export default function Navbar({ lang, variant = "default" }) {
                 </Link>
               ))}
               <div className="site-mobile-menu-divider" aria-hidden="true" />
+              <LanguageSwitch mobileList onNavigate={() => setMobileOpen(false)} />
+              <div className="site-mobile-menu-divider" aria-hidden="true" />
               <Link href={`/${lang}/contact`} className="site-mobile-menu-link site-mobile-menu-link--utility site-contact-link">
                 {copy.contactUs}
               </Link>
@@ -158,7 +160,9 @@ export default function Navbar({ lang, variant = "default" }) {
         </div>
 
         <div className="shrink-0 flex items-center gap-2">
-          <LanguageSwitch />
+          <div className="hidden md:block">
+            <LanguageSwitch />
+          </div>
           <ThemeModeControl />
         </div>
       </nav>
