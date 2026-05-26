@@ -78,14 +78,10 @@ function Start-ManagedProcess {
   $runCommand = $Command
   if ($RestartForever) {
     # Keep critical services alive: when the child command exits, wait and restart.
-    $escapedName = $Name.Replace("'", "''")
+    $escapedCommand = $Command.Replace("'", "''")
     $runCommand = @"
 while (`$true) {
-  try {
-    & { $Command }
-  } catch {
-    Write-Error ("[{0}] child process failed: {1}" -f '$escapedName', `$_.Exception.Message)
-  }
+  Invoke-Expression '$escapedCommand'
   Start-Sleep -Seconds $RestartDelaySeconds
 }
 "@
