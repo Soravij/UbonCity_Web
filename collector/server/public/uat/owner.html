@@ -204,24 +204,27 @@
     }
     .item-grid {
       display: grid;
-      gap: 10px;
+      gap: 8px;
     }
     .check-item {
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 12px;
+      border-radius: 10px;
+      padding: 8px 10px;
       background: var(--surface-soft);
-      display: grid;
-      gap: 10px;
+      display: block;
     }
     .item-text {
       font-weight: 600;
+      line-height: 1.25;
     }
     .item-controls {
       display: grid;
-      grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
-      gap: 12px;
-      align-items: start;
+      grid-template-columns: minmax(0, 1fr) auto minmax(220px, 340px);
+      gap: 10px;
+      align-items: center;
+    }
+    .note-inline {
+      min-height: 34px;
     }
     .status-group {
       display: flex;
@@ -341,10 +344,9 @@
       }
       .check-item {
         padding: 8px;
-        gap: 6px;
       }
       .item-controls {
-        grid-template-columns: 180px 1fr;
+        grid-template-columns: minmax(0, 1fr) auto minmax(140px, 220px);
         gap: 8px;
       }
       .status-pill span {
@@ -428,8 +430,8 @@
   <input type="text" id="owner:meta:4" data-storage-key="owner:meta:4" value="Owner" />
 </div></div></section>
 <section class="section-card"><h2>1) ความพร้อมก่อนเริ่ม</h2><div class="item-grid"><article class="check-item">
-  <div class="item-text">เข้า `admin-test.uboncity.com` และ `collector-test.uboncity.com` ได้</div>
   <div class="item-controls">
+    <div class="item-text">เข้า `admin-test.uboncity.com` และ `collector-test.uboncity.com` ได้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:1:0:status:pass">
   <input type="radio" id="owner:item:1:0:status:pass" name="owner:item:1:0:status" value="pass" data-storage-key="owner:item:1:0:status" />
@@ -444,14 +446,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:1:0:note">หมายเหตุ</label>
-      <textarea id="owner:item:1:0:note" data-storage-key="owner:item:1:0:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:1:0:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:1:0:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">ผ่าน Cloudflare Access OTP ได้ก่อน login ระบบ</div>
   <div class="item-controls">
+    <div class="item-text">ผ่าน Cloudflare Access OTP ได้ก่อน login ระบบ</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:1:1:status:pass">
   <input type="radio" id="owner:item:1:1:status:pass" name="owner:item:1:1:status" value="pass" data-storage-key="owner:item:1:1:status" />
@@ -466,14 +465,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:1:1:note">หมายเหตุ</label>
-      <textarea id="owner:item:1:1:note" data-storage-key="owner:item:1:1:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:1:1:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:1:1:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">login ด้วยบัญชี owner ได้</div>
   <div class="item-controls">
+    <div class="item-text">login ด้วยบัญชี owner ได้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:1:2:status:pass">
   <input type="radio" id="owner:item:1:2:status:pass" name="owner:item:1:2:status" value="pass" data-storage-key="owner:item:1:2:status" />
@@ -488,14 +484,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:1:2:note">หมายเหตุ</label>
-      <textarea id="owner:item:1:2:note" data-storage-key="owner:item:1:2:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:1:2:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:1:2:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">backend, collector, frontend, admin รันครบ</div>
   <div class="item-controls">
+    <div class="item-text">backend, collector, frontend, admin รันครบ</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:1:3:status:pass">
   <input type="radio" id="owner:item:1:3:status:pass" name="owner:item:1:3:status" value="pass" data-storage-key="owner:item:1:3:status" />
@@ -510,14 +503,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:1:3:note">หมายเหตุ</label>
-      <textarea id="owner:item:1:3:note" data-storage-key="owner:item:1:3:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:1:3:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:1:3:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">เตรียม item ID / assignment ID / โฟลเดอร์เก็บหลักฐานพร้อม</div>
   <div class="item-controls">
+    <div class="item-text">เตรียม item ID / assignment ID / โฟลเดอร์เก็บหลักฐานพร้อม</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:1:4:status:pass">
   <input type="radio" id="owner:item:1:4:status:pass" name="owner:item:1:4:status" value="pass" data-storage-key="owner:item:1:4:status" />
@@ -532,15 +522,12 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:1:4:note">หมายเหตุ</label>
-      <textarea id="owner:item:1:4:note" data-storage-key="owner:item:1:4:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:1:4:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:1:4:note" />
   </div>
 </article></div></section>
 <section class="section-card"><h2>2) Global Smoke</h2><div class="item-grid"><article class="check-item">
-  <div class="item-text">login สำเร็จ</div>
   <div class="item-controls">
+    <div class="item-text">login สำเร็จ</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:2:0:status:pass">
   <input type="radio" id="owner:item:2:0:status:pass" name="owner:item:2:0:status" value="pass" data-storage-key="owner:item:2:0:status" />
@@ -555,14 +542,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:2:0:note">หมายเหตุ</label>
-      <textarea id="owner:item:2:0:note" data-storage-key="owner:item:2:0:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:2:0:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:2:0:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">logout สำเร็จ</div>
   <div class="item-controls">
+    <div class="item-text">logout สำเร็จ</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:2:1:status:pass">
   <input type="radio" id="owner:item:2:1:status:pass" name="owner:item:2:1:status" value="pass" data-storage-key="owner:item:2:1:status" />
@@ -577,14 +561,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:2:1:note">หมายเหตุ</label>
-      <textarea id="owner:item:2:1:note" data-storage-key="owner:item:2:1:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:2:1:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:2:1:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">session หมดอายุแล้วระบบพากลับหน้า login ถูกต้อง</div>
   <div class="item-controls">
+    <div class="item-text">session หมดอายุแล้วระบบพากลับหน้า login ถูกต้อง</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:2:2:status:pass">
   <input type="radio" id="owner:item:2:2:status:pass" name="owner:item:2:2:status" value="pass" data-storage-key="owner:item:2:2:status" />
@@ -599,14 +580,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:2:2:note">หมายเหตุ</label>
-      <textarea id="owner:item:2:2:note" data-storage-key="owner:item:2:2:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:2:2:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:2:2:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">login กลับมาแล้ว deep-link / return_to ถูกต้อง</div>
   <div class="item-controls">
+    <div class="item-text">login กลับมาแล้ว deep-link / return_to ถูกต้อง</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:2:3:status:pass">
   <input type="radio" id="owner:item:2:3:status:pass" name="owner:item:2:3:status" value="pass" data-storage-key="owner:item:2:3:status" />
@@ -621,14 +599,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:2:3:note">หมายเหตุ</label>
-      <textarea id="owner:item:2:3:note" data-storage-key="owner:item:2:3:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:2:3:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:2:3:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">direct-hit หน้า legacy ไม่ทำให้ auth flow พัง</div>
   <div class="item-controls">
+    <div class="item-text">direct-hit หน้า legacy ไม่ทำให้ auth flow พัง</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:2:4:status:pass">
   <input type="radio" id="owner:item:2:4:status:pass" name="owner:item:2:4:status" value="pass" data-storage-key="owner:item:2:4:status" />
@@ -643,14 +618,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:2:4:note">หมายเหตุ</label>
-      <textarea id="owner:item:2:4:note" data-storage-key="owner:item:2:4:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:2:4:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:2:4:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">ไม่มี loop จาก `auth=expired`</div>
   <div class="item-controls">
+    <div class="item-text">ไม่มี loop จาก `auth=expired`</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:2:5:status:pass">
   <input type="radio" id="owner:item:2:5:status:pass" name="owner:item:2:5:status" value="pass" data-storage-key="owner:item:2:5:status" />
@@ -665,15 +637,12 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:2:5:note">หมายเหตุ</label>
-      <textarea id="owner:item:2:5:note" data-storage-key="owner:item:2:5:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:2:5:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:2:5:note" />
   </div>
 </article></div></section>
 <section class="section-card"><h2>3) ขอบเขตสิทธิ์ Owner</h2><div class="item-grid"><article class="check-item">
-  <div class="item-text">เข้า owner-only surfaces ได้</div>
   <div class="item-controls">
+    <div class="item-text">เข้า owner-only surfaces ได้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:3:0:status:pass">
   <input type="radio" id="owner:item:3:0:status:pass" name="owner:item:3:0:status" value="pass" data-storage-key="owner:item:3:0:status" />
@@ -688,14 +657,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:3:0:note">หมายเหตุ</label>
-      <textarea id="owner:item:3:0:note" data-storage-key="owner:item:3:0:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:3:0:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:3:0:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">เข้า internal operational surfaces ได้</div>
   <div class="item-controls">
+    <div class="item-text">เข้า internal operational surfaces ได้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:3:1:status:pass">
   <input type="radio" id="owner:item:3:1:status:pass" name="owner:item:3:1:status" value="pass" data-storage-key="owner:item:3:1:status" />
@@ -710,14 +676,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:3:1:note">หมายเหตุ</label>
-      <textarea id="owner:item:3:1:note" data-storage-key="owner:item:3:1:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:3:1:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:3:1:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">เข้า flow จัดการ contributor / assignment ได้</div>
   <div class="item-controls">
+    <div class="item-text">เข้า flow จัดการ contributor / assignment ได้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:3:2:status:pass">
   <input type="radio" id="owner:item:3:2:status:pass" name="owner:item:3:2:status" value="pass" data-storage-key="owner:item:3:2:status" />
@@ -732,14 +695,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:3:2:note">หมายเหตุ</label>
-      <textarea id="owner:item:3:2:note" data-storage-key="owner:item:3:2:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:3:2:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:3:2:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">ไม่เจอ permission denied ใน flow ที่ owner ควรทำได้</div>
   <div class="item-controls">
+    <div class="item-text">ไม่เจอ permission denied ใน flow ที่ owner ควรทำได้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:3:3:status:pass">
   <input type="radio" id="owner:item:3:3:status:pass" name="owner:item:3:3:status" value="pass" data-storage-key="owner:item:3:3:status" />
@@ -754,15 +714,12 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:3:3:note">หมายเหตุ</label>
-      <textarea id="owner:item:3:3:note" data-storage-key="owner:item:3:3:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:3:3:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:3:3:note" />
   </div>
 </article></div></section>
 <section class="section-card"><h2>4) Owner Full Lifecycle</h2><div class="item-grid"><article class="check-item">
-  <div class="item-text">สร้างงานจาก raw/source flow ได้สำเร็จ 1 รอบ</div>
   <div class="item-controls">
+    <div class="item-text">สร้างงานจาก raw/source flow ได้สำเร็จ 1 รอบ</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:4:0:status:pass">
   <input type="radio" id="owner:item:4:0:status:pass" name="owner:item:4:0:status" value="pass" data-storage-key="owner:item:4:0:status" />
@@ -777,14 +734,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:4:0:note">หมายเหตุ</label>
-      <textarea id="owner:item:4:0:note" data-storage-key="owner:item:4:0:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:4:0:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:4:0:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">ตรวจและแก้ metadata สำคัญก่อนสร้าง content ได้</div>
   <div class="item-controls">
+    <div class="item-text">ตรวจและแก้ metadata สำคัญก่อนสร้าง content ได้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:4:1:status:pass">
   <input type="radio" id="owner:item:4:1:status:pass" name="owner:item:4:1:status" value="pass" data-storage-key="owner:item:4:1:status" />
@@ -799,14 +753,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:4:1:note">หมายเหตุ</label>
-      <textarea id="owner:item:4:1:note" data-storage-key="owner:item:4:1:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:4:1:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:4:1:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">สร้าง content item สำเร็จ</div>
   <div class="item-controls">
+    <div class="item-text">สร้าง content item สำเร็จ</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:4:2:status:pass">
   <input type="radio" id="owner:item:4:2:status:pass" name="owner:item:4:2:status" value="pass" data-storage-key="owner:item:4:2:status" />
@@ -821,14 +772,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:4:2:note">หมายเหตุ</label>
-      <textarea id="owner:item:4:2:note" data-storage-key="owner:item:4:2:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:4:2:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:4:2:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">ดัน workflow ไปถึงสถานะที่ backend ควรเห็นได้</div>
   <div class="item-controls">
+    <div class="item-text">ดัน workflow ไปถึงสถานะที่ backend ควรเห็นได้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:4:3:status:pass">
   <input type="radio" id="owner:item:4:3:status:pass" name="owner:item:4:3:status" value="pass" data-storage-key="owner:item:4:3:status" />
@@ -843,14 +791,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:4:3:note">หมายเหตุ</label>
-      <textarea id="owner:item:4:3:note" data-storage-key="owner:item:4:3:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:4:3:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:4:3:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">backend แสดงผลตรงกับข้อมูลจาก collector/source</div>
   <div class="item-controls">
+    <div class="item-text">backend แสดงผลตรงกับข้อมูลจาก collector/source</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:4:4:status:pass">
   <input type="radio" id="owner:item:4:4:status:pass" name="owner:item:4:4:status" value="pass" data-storage-key="owner:item:4:4:status" />
@@ -865,14 +810,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:4:4:note">หมายเหตุ</label>
-      <textarea id="owner:item:4:4:note" data-storage-key="owner:item:4:4:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:4:4:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:4:4:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">เก็บหลักฐาน item ID / status / screen ครบ</div>
   <div class="item-controls">
+    <div class="item-text">เก็บหลักฐาน item ID / status / screen ครบ</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:4:5:status:pass">
   <input type="radio" id="owner:item:4:5:status:pass" name="owner:item:4:5:status" value="pass" data-storage-key="owner:item:4:5:status" />
@@ -887,15 +829,12 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:4:5:note">หมายเหตุ</label>
-      <textarea id="owner:item:4:5:note" data-storage-key="owner:item:4:5:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:4:5:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:4:5:note" />
   </div>
 </article></div></section>
 <section class="section-card"><h2>5) Owner Assignment Flow</h2><div class="item-grid"><article class="check-item">
-  <div class="item-text">assign งานให้ editor ได้อย่างน้อย 1 งาน</div>
   <div class="item-controls">
+    <div class="item-text">assign งานให้ editor ได้อย่างน้อย 1 งาน</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:5:0:status:pass">
   <input type="radio" id="owner:item:5:0:status:pass" name="owner:item:5:0:status" value="pass" data-storage-key="owner:item:5:0:status" />
@@ -910,14 +849,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:5:0:note">หมายเหตุ</label>
-      <textarea id="owner:item:5:0:note" data-storage-key="owner:item:5:0:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:5:0:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:5:0:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">assign งานให้ freelance ได้อย่างน้อย 1 งาน</div>
   <div class="item-controls">
+    <div class="item-text">assign งานให้ freelance ได้อย่างน้อย 1 งาน</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:5:1:status:pass">
   <input type="radio" id="owner:item:5:1:status:pass" name="owner:item:5:1:status" value="pass" data-storage-key="owner:item:5:1:status" />
@@ -932,14 +868,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:5:1:note">หมายเหตุ</label>
-      <textarea id="owner:item:5:1:note" data-storage-key="owner:item:5:1:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:5:1:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:5:1:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">assignee / assignment state / item target ถูกต้อง</div>
   <div class="item-controls">
+    <div class="item-text">assignee / assignment state / item target ถูกต้อง</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:5:2:status:pass">
   <input type="radio" id="owner:item:5:2:status:pass" name="owner:item:5:2:status" value="pass" data-storage-key="owner:item:5:2:status" />
@@ -954,14 +887,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:5:2:note">หมายเหตุ</label>
-      <textarea id="owner:item:5:2:note" data-storage-key="owner:item:5:2:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:5:2:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:5:2:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">งานที่ assign เห็นเฉพาะผู้รับที่ถูกต้อง</div>
   <div class="item-controls">
+    <div class="item-text">งานที่ assign เห็นเฉพาะผู้รับที่ถูกต้อง</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:5:3:status:pass">
   <input type="radio" id="owner:item:5:3:status:pass" name="owner:item:5:3:status" value="pass" data-storage-key="owner:item:5:3:status" />
@@ -976,14 +906,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:5:3:note">หมายเหตุ</label>
-      <textarea id="owner:item:5:3:note" data-storage-key="owner:item:5:3:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:5:3:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:5:3:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">เก็บหลักฐาน assignment ครบ</div>
   <div class="item-controls">
+    <div class="item-text">เก็บหลักฐาน assignment ครบ</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:5:4:status:pass">
   <input type="radio" id="owner:item:5:4:status:pass" name="owner:item:5:4:status" value="pass" data-storage-key="owner:item:5:4:status" />
@@ -998,15 +925,12 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:5:4:note">หมายเหตุ</label>
-      <textarea id="owner:item:5:4:note" data-storage-key="owner:item:5:4:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:5:4:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:5:4:note" />
   </div>
 </article></div></section>
 <section class="section-card"><h2>6) Owner Review / Handoff Verification</h2><div class="item-grid"><article class="check-item">
-  <div class="item-text">เห็นงานส่งกลับจาก freelance ได้</div>
   <div class="item-controls">
+    <div class="item-text">เห็นงานส่งกลับจาก freelance ได้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:6:0:status:pass">
   <input type="radio" id="owner:item:6:0:status:pass" name="owner:item:6:0:status" value="pass" data-storage-key="owner:item:6:0:status" />
@@ -1021,14 +945,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:6:0:note">หมายเหตุ</label>
-      <textarea id="owner:item:6:0:note" data-storage-key="owner:item:6:0:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:6:0:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:6:0:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">เห็นงานส่งกลับจาก editor ได้</div>
   <div class="item-controls">
+    <div class="item-text">เห็นงานส่งกลับจาก editor ได้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:6:1:status:pass">
   <input type="radio" id="owner:item:6:1:status:pass" name="owner:item:6:1:status" value="pass" data-storage-key="owner:item:6:1:status" />
@@ -1043,14 +964,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:6:1:note">หมายเหตุ</label>
-      <textarea id="owner:item:6:1:note" data-storage-key="owner:item:6:1:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:6:1:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:6:1:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">revision request loop ทำงานได้ทั้ง 2 แบบ</div>
   <div class="item-controls">
+    <div class="item-text">revision request loop ทำงานได้ทั้ง 2 แบบ</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:6:2:status:pass">
   <input type="radio" id="owner:item:6:2:status:pass" name="owner:item:6:2:status" value="pass" data-storage-key="owner:item:6:2:status" />
@@ -1065,14 +983,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:6:2:note">หมายเหตุ</label>
-      <textarea id="owner:item:6:2:note" data-storage-key="owner:item:6:2:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:6:2:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:6:2:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">รับงานกลับมาทำต่อได้โดยสถานะถูกต้อง</div>
   <div class="item-controls">
+    <div class="item-text">รับงานกลับมาทำต่อได้โดยสถานะถูกต้อง</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:6:3:status:pass">
   <input type="radio" id="owner:item:6:3:status:pass" name="owner:item:6:3:status" value="pass" data-storage-key="owner:item:6:3:status" />
@@ -1087,14 +1002,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:6:3:note">หมายเหตุ</label>
-      <textarea id="owner:item:6:3:note" data-storage-key="owner:item:6:3:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:6:3:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:6:3:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">ไม่มี content หรือ asset หายหลัง revise / resubmit</div>
   <div class="item-controls">
+    <div class="item-text">ไม่มี content หรือ asset หายหลัง revise / resubmit</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:6:4:status:pass">
   <input type="radio" id="owner:item:6:4:status:pass" name="owner:item:6:4:status" value="pass" data-storage-key="owner:item:6:4:status" />
@@ -1109,15 +1021,12 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:6:4:note">หมายเหตุ</label>
-      <textarea id="owner:item:6:4:note" data-storage-key="owner:item:6:4:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:6:4:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:6:4:note" />
   </div>
 </article></div></section>
 <section class="section-card"><h2>7) Owner Publish / Release Surface</h2><div class="item-grid"><article class="check-item">
-  <div class="item-text">review preview เปิดได้</div>
   <div class="item-controls">
+    <div class="item-text">review preview เปิดได้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:7:0:status:pass">
   <input type="radio" id="owner:item:7:0:status:pass" name="owner:item:7:0:status" value="pass" data-storage-key="owner:item:7:0:status" />
@@ -1132,14 +1041,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:7:0:note">หมายเหตุ</label>
-      <textarea id="owner:item:7:0:note" data-storage-key="owner:item:7:0:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:7:0:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:7:0:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">publish / release action ทำงานได้ ถ้าอยู่ใน scope รอบนี้</div>
   <div class="item-controls">
+    <div class="item-text">publish / release action ทำงานได้ ถ้าอยู่ใน scope รอบนี้</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:7:1:status:pass">
   <input type="radio" id="owner:item:7:1:status:pass" name="owner:item:7:1:status" value="pass" data-storage-key="owner:item:7:1:status" />
@@ -1154,14 +1060,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:7:1:note">หมายเหตุ</label>
-      <textarea id="owner:item:7:1:note" data-storage-key="owner:item:7:1:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:7:1:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:7:1:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">backend / frontend หลัง publish ตรงกับ approved content</div>
   <div class="item-controls">
+    <div class="item-text">backend / frontend หลัง publish ตรงกับ approved content</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:7:2:status:pass">
   <input type="radio" id="owner:item:7:2:status:pass" name="owner:item:7:2:status" value="pass" data-storage-key="owner:item:7:2:status" />
@@ -1176,14 +1079,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:7:2:note">หมายเหตุ</label>
-      <textarea id="owner:item:7:2:note" data-storage-key="owner:item:7:2:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:7:2:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:7:2:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">media แสดงผลถูกต้องบน public surface</div>
   <div class="item-controls">
+    <div class="item-text">media แสดงผลถูกต้องบน public surface</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:7:3:status:pass">
   <input type="radio" id="owner:item:7:3:status:pass" name="owner:item:7:3:status" value="pass" data-storage-key="owner:item:7:3:status" />
@@ -1198,15 +1098,12 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:7:3:note">หมายเหตุ</label>
-      <textarea id="owner:item:7:3:note" data-storage-key="owner:item:7:3:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:7:3:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:7:3:note" />
   </div>
 </article></div></section>
 <section class="section-card"><h2>8) Regression Hotspots</h2><div class="item-grid"><article class="check-item">
-  <div class="item-text">role boundary ยังถูกต้องเมื่อเปิด direct URL</div>
   <div class="item-controls">
+    <div class="item-text">role boundary ยังถูกต้องเมื่อเปิด direct URL</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:8:0:status:pass">
   <input type="radio" id="owner:item:8:0:status:pass" name="owner:item:8:0:status" value="pass" data-storage-key="owner:item:8:0:status" />
@@ -1221,14 +1118,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:8:0:note">หมายเหตุ</label>
-      <textarea id="owner:item:8:0:note" data-storage-key="owner:item:8:0:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:8:0:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:8:0:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">fallback จาก legacy path ไม่ข้าม role</div>
   <div class="item-controls">
+    <div class="item-text">fallback จาก legacy path ไม่ข้าม role</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:8:1:status:pass">
   <input type="radio" id="owner:item:8:1:status:pass" name="owner:item:8:1:status" value="pass" data-storage-key="owner:item:8:1:status" />
@@ -1243,14 +1137,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:8:1:note">หมายเหตุ</label>
-      <textarea id="owner:item:8:1:note" data-storage-key="owner:item:8:1:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:8:1:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:8:1:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">upload / download asset ไม่ข้าม item หรือ role</div>
   <div class="item-controls">
+    <div class="item-text">upload / download asset ไม่ข้าม item หรือ role</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:8:2:status:pass">
   <input type="radio" id="owner:item:8:2:status:pass" name="owner:item:8:2:status" value="pass" data-storage-key="owner:item:8:2:status" />
@@ -1265,14 +1156,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:8:2:note">หมายเหตุ</label>
-      <textarea id="owner:item:8:2:note" data-storage-key="owner:item:8:2:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:8:2:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:8:2:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">timeline / history ตรงกับ action จริง</div>
   <div class="item-controls">
+    <div class="item-text">timeline / history ตรงกับ action จริง</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:8:3:status:pass">
   <input type="radio" id="owner:item:8:3:status:pass" name="owner:item:8:3:status" value="pass" data-storage-key="owner:item:8:3:status" />
@@ -1287,10 +1175,7 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:8:3:note">หมายเหตุ</label>
-      <textarea id="owner:item:8:3:note" data-storage-key="owner:item:8:3:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:8:3:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:8:3:note" />
   </div>
 </article></div></section>
 <section class="section-card">
@@ -1306,8 +1191,8 @@
   <h2>10) Owner Release Gate</h2>
   <div class="decision-grid">
     <div class="item-grid"><article class="check-item">
-  <div class="item-text">ไม่มี P1 ค้าง</div>
   <div class="item-controls">
+    <div class="item-text">ไม่มี P1 ค้าง</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:10:0:status:pass">
   <input type="radio" id="owner:item:10:0:status:pass" name="owner:item:10:0:status" value="pass" data-storage-key="owner:item:10:0:status" />
@@ -1322,14 +1207,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:10:0:note">หมายเหตุ</label>
-      <textarea id="owner:item:10:0:note" data-storage-key="owner:item:10:0:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:10:0:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:10:0:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">P2 มี workaround หรือปิดแล้ว</div>
   <div class="item-controls">
+    <div class="item-text">P2 มี workaround หรือปิดแล้ว</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:10:1:status:pass">
   <input type="radio" id="owner:item:10:1:status:pass" name="owner:item:10:1:status" value="pass" data-storage-key="owner:item:10:1:status" />
@@ -1344,14 +1226,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:10:1:note">หมายเหตุ</label>
-      <textarea id="owner:item:10:1:note" data-storage-key="owner:item:10:1:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:10:1:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:10:1:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">owner lifecycle flow ผ่าน end-to-end</div>
   <div class="item-controls">
+    <div class="item-text">owner lifecycle flow ผ่าน end-to-end</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:10:2:status:pass">
   <input type="radio" id="owner:item:10:2:status:pass" name="owner:item:10:2:status" value="pass" data-storage-key="owner:item:10:2:status" />
@@ -1366,14 +1245,11 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:10:2:note">หมายเหตุ</label>
-      <textarea id="owner:item:10:2:note" data-storage-key="owner:item:10:2:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:10:2:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:10:2:note" />
   </div>
 </article><article class="check-item">
-  <div class="item-text">assignment และ handoff verification ผ่าน</div>
   <div class="item-controls">
+    <div class="item-text">assignment และ handoff verification ผ่าน</div>
     <div class="status-group">
       <label class="status-pill pass" for="owner:item:10:3:status:pass">
   <input type="radio" id="owner:item:10:3:status:pass" name="owner:item:10:3:status" value="pass" data-storage-key="owner:item:10:3:status" />
@@ -1388,10 +1264,7 @@
   <span>ไม่ทดสอบ</span>
 </label>
     </div>
-    <div class="field">
-      <label for="owner:item:10:3:note">หมายเหตุ</label>
-      <textarea id="owner:item:10:3:note" data-storage-key="owner:item:10:3:note"></textarea>
-    </div>
+    <input type="text" id="owner:item:10:3:note" class="note-inline" placeholder="หมายเหตุ" data-storage-key="owner:item:10:3:note" />
   </div>
 </article></div>
     <div class="decision-box">

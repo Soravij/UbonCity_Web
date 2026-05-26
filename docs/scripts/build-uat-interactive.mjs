@@ -368,24 +368,27 @@ function buildPageHtml(role, parsed) {
     }
     .item-grid {
       display: grid;
-      gap: 10px;
+      gap: 8px;
     }
     .check-item {
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 12px;
+      border-radius: 10px;
+      padding: 8px 10px;
       background: var(--surface-soft);
-      display: grid;
-      gap: 10px;
+      display: block;
     }
     .item-text {
       font-weight: 600;
+      line-height: 1.25;
     }
     .item-controls {
       display: grid;
-      grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
-      gap: 12px;
-      align-items: start;
+      grid-template-columns: minmax(0, 1fr) auto minmax(220px, 340px);
+      gap: 10px;
+      align-items: center;
+    }
+    .note-inline {
+      min-height: 34px;
     }
     .status-group {
       display: flex;
@@ -505,10 +508,9 @@ function buildPageHtml(role, parsed) {
       }
       .check-item {
         padding: 8px;
-        gap: 6px;
       }
       .item-controls {
-        grid-template-columns: 180px 1fr;
+        grid-template-columns: minmax(0, 1fr) auto minmax(140px, 220px);
         gap: 8px;
       }
       .status-pill span {
@@ -681,17 +683,14 @@ function renderChecklistItems(role, items, sectionKey) {
       const groupKey = `${role}:item:${sectionKey}:${itemIndex}:status`;
       const noteKey = `${role}:item:${sectionKey}:${itemIndex}:note`;
       return `<article class="check-item">
-  <div class="item-text">${escapeHtml(item)}</div>
   <div class="item-controls">
+    <div class="item-text">${escapeHtml(item)}</div>
     <div class="status-group">
       ${renderStatusPill(groupKey, "pass", "ผ่าน")}
       ${renderStatusPill(groupKey, "fail", "ไม่ผ่าน")}
       ${renderStatusPill(groupKey, "na", "ไม่ทดสอบ")}
     </div>
-    <div class="field">
-      <label for="${escapeHtml(noteKey)}">หมายเหตุ</label>
-      <textarea id="${escapeHtml(noteKey)}" data-storage-key="${escapeHtml(noteKey)}"></textarea>
-    </div>
+    <input type="text" id="${escapeHtml(noteKey)}" class="note-inline" placeholder="หมายเหตุ" data-storage-key="${escapeHtml(noteKey)}" />
   </div>
 </article>`;
     })
