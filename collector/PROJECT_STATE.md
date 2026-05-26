@@ -1,6 +1,6 @@
 # PROJECT_STATE
 
-Last Updated: 2026-05-25
+Last Updated: 2026-05-26
 
 ## Active Branch
 
@@ -142,14 +142,23 @@ Now successfully synced from:
 branch:
 codex/tester-build-v1-place-event-collector-fixes
 
-latest tester build commit:
-e050bee
+latest branch commits:
+- 3381272 `docs: remove interactive UAT artifacts`
+- 8350312 `docs: compact interactive UAT rows to single-line checklist layout` (later reverted by 3381272)
+- 27a9a60 `ops: harden test-stack cloudflared preflight and add interactive role UAT forms`
+- 3cec15a `collector: keep users panel isolated to users tab`
+- f7e8d43 `collector: move internal AI execution to backend and isolate users tab`
 
 ## Collector source
 Now committed and synchronized properly.
 
 ## Reusable local ops
 - `ops/windows/test-stack.ps1` added for Windows test-stack start/stop/status orchestration
+- cloudflared preflight guard added:
+  - fail-fast when `C:\cloudflared\config.yml` is missing/empty
+  - fail-fast when `credentials-file` is missing
+  - fail-fast when ingress rules are missing
+  - reduces mis-run from direct `cloudflared tunnel run <name>` without config
 
 ---
 
@@ -174,14 +183,16 @@ Now committed and synchronized properly.
 - collector boot successful
 - collector health checks operational
 - translation regenerate flow fixed
-- translation provider config fallback fixed
 - zh compact meta title blocker removed
 - google translator generic `apiKey/baseUrl/model` mapping fixed
+- internal AI execution path moved behind backend proxy for core collector flows
+- local provider fallback removed from translation workflow path (backend-only secret boundary for internal path)
 
 ## Backend
 - backend install successful
 - backend boot successful
 - MySQL local integration operational
+- backend now hosts internal AI execution endpoint for collector internal path
 - approved place/event media now served from backend uploads
 - public place response rewrites self-hosted media URLs correctly
 - `/uploads` static route now allows frontend cross-origin image embedding
@@ -247,11 +258,21 @@ D:\UbonRuntime\
 # Current Priorities
 
 1. tester validation on branch `codex/tester-build-v1-place-event-collector-fixes`
-2. stabilize Windows test-stack startup/shutdown on runtime machine
+2. enforce single-runbook startup (`test-stack.ps1` only, no direct cloudflared manual run)
 3. validate review/publish lifecycle on real content items through test domains
 4. validate workflow integrations
-5. local-first testing before VPS deployment
-6. preserve runtime isolation architecture
+5. continue role-based UAT using markdown print checklists
+6. local-first testing before VPS deployment
+7. preserve runtime isolation architecture
+
+---
+
+# Documentation State
+
+## UAT documents
+- role-based markdown checklists are primary artifacts
+- previous interactive UAT artifacts were removed from branch
+- print usage should use markdown-based role files (or generated local print pack outside git tracking)
 
 ---
 

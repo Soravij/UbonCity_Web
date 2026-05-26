@@ -59,7 +59,9 @@ function Start-ManagedProcess {
     [string]$Command,
     [string]$PidFile,
     [string]$StdoutFile,
-    [string]$StderrFile
+    [string]$StderrFile,
+    [switch]$RestartForever,
+    [int]$RestartDelaySeconds = 3
   )
 
   $existing = Read-PidInfo -PidFile $PidFile
@@ -73,9 +75,25 @@ function Start-ManagedProcess {
   Ensure-Directory -PathValue (Split-Path -Parent $StdoutFile)
   Ensure-Directory -PathValue (Split-Path -Parent $StderrFile)
 
+  $runCommand = $Command
+  if ($RestartForever) {
+    # Keep critical services alive: when the child command exits, wait and restart.
+    $escapedName = $Name.Replace("'", "''")
+    $runCommand = @"
+while (`$true) {
+  try {
+    & { $Command }
+  } catch {
+    Write-Error ("[{0}] child process failed: {1}" -f '$escapedName', `$_.Exception.Message)
+  }
+  Start-Sleep -Seconds $RestartDelaySeconds
+}
+"@
+  }
+
   $proc = Start-Process `
     -FilePath "powershell.exe" `
-    -ArgumentList @("-NoProfile", "-Command", $Command) `
+    -ArgumentList @("-NoProfile", "-Command", $runCommand) `
     -WorkingDirectory $WorkDir `
     -RedirectStandardOutput $StdoutFile `
     -RedirectStandardError $StderrFile `
@@ -86,7 +104,9 @@ function Start-ManagedProcess {
     pid = $proc.Id
     name = $Name
     workdir = $WorkDir
-    command = $Command
+    command = $runCommand
+    restart_forever = [bool]$RestartForever
+    restart_delay_seconds = $RestartDelaySeconds
     started_at = (Get-Date).ToString("o")
     stdout = $StdoutFile
     stderr = $StderrFile
@@ -209,6 +229,7 @@ $services = @(
     StdoutFile = Join-Path $logDir "backend.out.log"
     StderrFile = Join-Path $logDir "backend.err.log"
     HealthUrl = "http://127.0.0.1:5000/api/health"
+    RestartForever = $false
   },
   @{
     Name = "collector"
@@ -218,6 +239,7 @@ $services = @(
     StdoutFile = Join-Path $logDir "collector.out.log"
     StderrFile = Join-Path $logDir "collector.err.log"
     HealthUrl = "http://127.0.0.1:5070/api/health"
+    RestartForever = $false
   },
   @{
     Name = "frontend"
@@ -227,6 +249,8 @@ $services = @(
     StdoutFile = Join-Path $logDir "frontend.out.log"
     StderrFile = Join-Path $logDir "frontend.err.log"
     HealthUrl = "http://127.0.0.1:3000"
+    RestartForever = $true
+    RestartDelaySeconds = 5
   },
   @{
     Name = "admin"
@@ -236,6 +260,8 @@ $services = @(
     StdoutFile = Join-Path $logDir "admin.out.log"
     StderrFile = Join-Path $logDir "admin.err.log"
     HealthUrl = "http://127.0.0.1:5173"
+    RestartForever = $true
+    RestartDelaySeconds = 5
   },
   @{
     Name = "cloudflared"
@@ -245,6 +271,8 @@ $services = @(
     StdoutFile = Join-Path $logDir "cloudflared.out.log"
     StderrFile = Join-Path $logDir "cloudflared.err.log"
     HealthUrl = ""
+    RestartForever = $true
+    RestartDelaySeconds = 5
   }
 )
 
@@ -258,7 +286,9 @@ switch ($Action) {
         -Command $service.Command `
         -PidFile $service.PidFile `
         -StdoutFile $service.StdoutFile `
-        -StderrFile $service.StderrFile
+        -StderrFile $service.StderrFile `
+        -RestartForever:([bool]$service.RestartForever) `
+        -RestartDelaySeconds $(if ($service.RestartDelaySeconds) { [int]$service.RestartDelaySeconds } else { 3 })
     }
   }
   "stop" {

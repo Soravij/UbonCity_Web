@@ -56,3 +56,8 @@ collector/server/public/_fix.mjs
 collector/tmp-tests.ps1
 frontend/tmp-playwright-preview.cjs
 tmp-runtime-probe.cjs
+
+# Generated UAT print pack (local-only)
+docs/print-a4/
+docs/scripts/build-uat-print-pack.mjs
+docs/scripts/build-uat-print-pdf.py
