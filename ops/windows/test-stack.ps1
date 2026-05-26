@@ -148,6 +148,53 @@ function Get-ManagedStatus {
   }
 }
 
+function Assert-CloudflaredConfigReady {
+  param(
+    [string]$ConfigPath,
+    [string]$ExpectedTunnelName
+  )
+
+  if (-not (Test-Path $ConfigPath)) {
+    throw ("cloudflared config not found: {0}" -f $ConfigPath)
+  }
+
+  $configContent = Get-Content $ConfigPath -Raw
+  if ([string]::IsNullOrWhiteSpace($configContent)) {
+    throw ("cloudflared config is empty: {0}" -f $ConfigPath)
+  }
+
+  if ($configContent -notmatch '(?m)^\s*tunnel\s*:') {
+    throw ("cloudflared config missing `tunnel:` entry: {0}" -f $ConfigPath)
+  }
+
+  $hasExpectedTunnel = $configContent -match ("(?m)^\s*tunnel\s*:\s*{0}\s*$" -f [regex]::Escape($ExpectedTunnelName))
+  $hasUuidTunnel = $configContent -match '(?m)^\s*tunnel\s*:\s*[0-9a-fA-F-]{36}\s*$'
+  if (-not ($hasExpectedTunnel -or $hasUuidTunnel)) {
+    throw ("cloudflared config tunnel does not match expected name or UUID. expected=`"{0}`" config=`"{1}`"" -f $ExpectedTunnelName, $ConfigPath)
+  }
+
+  $credsMatch = [regex]::Match($configContent, '(?m)^\s*credentials-file\s*:\s*(.+?)\s*$')
+  if (-not $credsMatch.Success) {
+    throw ("cloudflared config missing `credentials-file:` entry: {0}" -f $ConfigPath)
+  }
+
+  $credsPathRaw = $credsMatch.Groups[1].Value.Trim().Trim('"').Trim("'")
+  $credsPath = [Environment]::ExpandEnvironmentVariables($credsPathRaw)
+  if (-not [System.IO.Path]::IsPathRooted($credsPath)) {
+    $credsPath = Join-Path (Split-Path -Parent $ConfigPath) $credsPath
+  }
+
+  if (-not (Test-Path $credsPath)) {
+    throw ("cloudflared credentials file not found: {0}" -f $credsPath)
+  }
+
+  if ($configContent -notmatch '(?m)^\s*ingress\s*:') {
+    throw ("cloudflared config missing `ingress:` rules. this will return HTTP 503 for all requests")
+  }
+
+  Write-Host ("[cloudflared] config ready: {0}" -f $ConfigPath)
+}
+
 $root = Resolve-RuntimeRoot -ExplicitRoot $RuntimeRoot
 $runtimeDir = Join-Path $root "runtime\test-stack"
 $pidDir = Join-Path $runtimeDir "pids"
@@ -203,6 +250,7 @@ $services = @(
 
 switch ($Action) {
   "start" {
+    Assert-CloudflaredConfigReady -ConfigPath $CloudflaredConfig -ExpectedTunnelName $TunnelName
     foreach ($service in $services) {
       Start-ManagedProcess `
         -Name $service.Name `
