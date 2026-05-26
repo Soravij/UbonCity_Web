@@ -870,7 +870,7 @@ a {
 }
 
 .site-mobile-menu.is-open {
-  max-height: 420px;
+  max-height: min(80vh, 640px);
   opacity: 1;
   pointer-events: auto;
 }
