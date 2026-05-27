@@ -61,3 +61,5 @@ tmp-runtime-probe.cjs
 docs/print-a4/
 docs/scripts/build-uat-print-pack.mjs
 docs/scripts/build-uat-print-pdf.py
+docs/UAT_ROLE_*.print.html
+docs/UAT_ROLE_*.print.md

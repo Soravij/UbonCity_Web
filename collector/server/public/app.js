@@ -1501,6 +1501,35 @@ const SOURCE_INPUT_CONFIG = Object.freeze({
   }),
 });
 
+function getAllowedSourceAdaptersForRole(role = currentRole()) {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  if (normalizedRole === "owner") {
+    return ["google_maps", "manual", "facebook", "tiktok"];
+  }
+  return ["manual", "facebook", "tiktok"];
+}
+
+function syncSourceAdapterOptionsForRole() {
+  const select = qs("source-adapter");
+  if (!select) return "manual";
+
+  const allowed = new Set(getAllowedSourceAdaptersForRole(currentRole()));
+  const fallback = allowed.has("manual") ? "manual" : (Array.from(allowed)[0] || "manual");
+
+  for (const option of Array.from(select.options || [])) {
+    const value = String(option?.value || "").trim().toLowerCase();
+    const visible = allowed.has(value);
+    option.hidden = !visible;
+    option.disabled = !visible;
+  }
+
+  const selected = String(select.value || "").trim().toLowerCase();
+  if (!allowed.has(selected)) {
+    select.value = fallback;
+  }
+  return String(select.value || fallback).trim().toLowerCase();
+}
+
 function toDomainLabel(value) {
   return String(value || "").trim().replace(/^www\./i, "");
 }
@@ -1790,8 +1819,8 @@ function updateSourceLocationPanelVisibility(adapter) {
 }
 
 function updateSourceInputUI() {
-  const adapter = String(qs("source-adapter")?.value || "google_maps").trim();
-  const config = SOURCE_INPUT_CONFIG[adapter] || SOURCE_INPUT_CONFIG.google_maps;
+  const adapter = syncSourceAdapterOptionsForRole();
+  const config = SOURCE_INPUT_CONFIG[adapter] || SOURCE_INPUT_CONFIG.manual;
   const label = qs("source-input-label");
   const help = qs("source-input-help");
   const input = qs("source-query-input");
@@ -4153,6 +4182,7 @@ function applyLogoutUI() {
   renderAssignmentsTable([]);
   renderRawTable([]);
   resetAssignmentPreviews();
+  updateSourceInputUI();
 }
 
 function updateAuthUI() {
@@ -4169,6 +4199,7 @@ function updateAuthUI() {
     setTransportVisibility(false);
     setAssignmentRoleVisibility();
     syncUsersContextTopTabs();
+    updateSourceInputUI();
     return;
   }
   document.body.classList.add("is-authenticated");
@@ -4206,6 +4237,7 @@ function updateAuthUI() {
   }
   renderAssignmentAssigneeOptions();
   renderLandingDebugState("updateAuthUI");
+  updateSourceInputUI();
 }
 
 function renderSourceIngestions(rows) {
@@ -8386,7 +8418,7 @@ function wireSourceCollect() {
 
   qs("btn-source-collect")?.addEventListener("click", async () => {
     try {
-      const selectedAdapter = String(qs("source-adapter")?.value || "google_maps").trim();
+      const selectedAdapter = syncSourceAdapterOptionsForRole();
       const query = getSourceQueryValue();
       const adapter =
         selectedAdapter === "google_maps" && looksLikeUrlInput(query)
