@@ -76,12 +76,13 @@ const slugBackfillResult = typeof repo.backfillInvalidSlugs === "function"
 const MAX_IMAGES_PER_ITEM = 25;
 const GOOGLE_MAPS_PHOTO_PROXY_PATH = "/api/google-maps/photo";
 const COLLECTOR_ASSET_VERSION_TOKEN = "__COLLECTOR_ASSET_VERSION__";
-const collectorRootIndexPath = path.join(dirs.rootDir, "server", "public", "index.html");
+const collectorPublicDir = path.join(dirs.rootDir, "server", "public");
+const collectorRootIndexPath = path.join(collectorPublicDir, "index.html");
 const collectorRootAssetFiles = [
-  path.join(dirs.rootDir, "server", "public", "theme-bootstrap.js"),
-  path.join(dirs.rootDir, "server", "public", "styles.css"),
-  path.join(dirs.rootDir, "server", "public", "theme-control.js"),
-  path.join(dirs.rootDir, "server", "public", "app.js"),
+  path.join(collectorPublicDir, "theme-bootstrap.js"),
+  path.join(collectorPublicDir, "styles.css"),
+  path.join(collectorPublicDir, "theme-control.js"),
+  path.join(collectorPublicDir, "app.js"),
 ];
 
 function resolveCollectorAssetVersion() {
@@ -102,6 +103,74 @@ const collectorRootAssetVersion = resolveCollectorAssetVersion();
 function renderCollectorRootHtml() {
   const htmlTemplate = fsSync.readFileSync(collectorRootIndexPath, "utf8");
   return htmlTemplate.split(COLLECTOR_ASSET_VERSION_TOKEN).join(collectorRootAssetVersion);
+}
+
+function setCollectorHtmlRevalidateHeaders(res) {
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+}
+
+function isSafeCollectorHtmlRequestPath(rawPath) {
+  return typeof rawPath === "string" && /^\/[A-Za-z0-9._/-]+\.html$/i.test(rawPath);
+}
+
+function resolveCollectorHtmlFilePath(requestPath) {
+  if (!isSafeCollectorHtmlRequestPath(requestPath)) return null;
+  const relativePath = requestPath.slice(1);
+  const fullPath = path.resolve(collectorPublicDir, relativePath);
+  const normalizedPublicDir = path.resolve(collectorPublicDir) + path.sep;
+  if (!fullPath.startsWith(normalizedPublicDir)) return null;
+  return fullPath;
+}
+
+function renderCollectorHtmlFile(filePath) {
+  const htmlTemplate = fsSync.readFileSync(filePath, "utf8");
+  return htmlTemplate.split(COLLECTOR_ASSET_VERSION_TOKEN).join(collectorRootAssetVersion);
+}
+
+function isSafeCollectorJsRequestPath(rawPath) {
+  return typeof rawPath === "string" && /^\/[A-Za-z0-9._/-]+\.(?:mjs|js)$/i.test(rawPath);
+}
+
+function resolveCollectorJsFilePath(requestPath) {
+  if (!isSafeCollectorJsRequestPath(requestPath)) return null;
+  const relativePath = requestPath.slice(1);
+  const fullPath = path.resolve(collectorPublicDir, relativePath);
+  const normalizedPublicDir = path.resolve(collectorPublicDir) + path.sep;
+  if (!fullPath.startsWith(normalizedPublicDir)) return null;
+  return fullPath;
+}
+
+function withVersionQuery(specifier) {
+  if (typeof specifier !== "string" || !specifier) return specifier;
+  if (!(specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("/"))) return specifier;
+
+  const hashIndex = specifier.indexOf("#");
+  const hash = hashIndex >= 0 ? specifier.slice(hashIndex) : "";
+  const withoutHash = hashIndex >= 0 ? specifier.slice(0, hashIndex) : specifier;
+  const queryIndex = withoutHash.indexOf("?");
+  const pathname = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex + 1) : "";
+
+  if (!/\.(?:mjs|js)$/i.test(pathname)) return specifier;
+
+  const params = new URLSearchParams(query);
+  if (!params.has("v")) params.set("v", collectorRootAssetVersion);
+  const nextQuery = params.toString();
+  return `${pathname}${nextQuery ? `?${nextQuery}` : ""}${hash}`;
+}
+
+function rewriteCollectorModuleSpecifiers(jsText) {
+  const withTokenResolved = jsText.split(COLLECTOR_ASSET_VERSION_TOKEN).join(collectorRootAssetVersion);
+  const withStaticImports = withTokenResolved.replace(
+    /((?:\bimport|\bexport)\s+(?:[^"'`]*?\s+from\s*)?)(["'])([^"'`]+)\2/g,
+    (match, prefix, quote, specifier) => `${prefix}${quote}${withVersionQuery(specifier)}${quote}`
+  );
+  return withStaticImports.replace(
+    /(\bimport\s*\(\s*)(["'])([^"'`]+)\2(\s*\))/g,
+    (match, prefix, quote, specifier, suffix) => `${prefix}${quote}${withVersionQuery(specifier)}${quote}${suffix}`
+  );
 }
 const CONTENT_ITEM_CATEGORIES = new Set(["attractions", "activities", "hotels", "cafes", "restaurants", "transport"]);
 const ARTICLE_RICH_TEXT_ALLOWED_TAGS = new Set([
@@ -2329,11 +2398,27 @@ app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(createRateLimiter({ windowMs: 60 * 1000, max: 180, message: "Too many requests" }));
 app.use("/media", express.static(dirs.mediaDir, { index: false }));
-app.use(express.static(path.join(dirs.rootDir, "server", "public"), { index: false }));
+app.use((req, res, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD") return next();
+  const fullPath = resolveCollectorHtmlFilePath(req.path || "");
+  if (!fullPath || !fsSync.existsSync(fullPath)) return next();
+  setCollectorHtmlRevalidateHeaders(res);
+  res.type("html");
+  if (req.method === "HEAD") return res.status(200).end();
+  res.send(renderCollectorHtmlFile(fullPath));
+});
+app.use((req, res, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD") return next();
+  const fullPath = resolveCollectorJsFilePath(req.path || "");
+  if (!fullPath || !fsSync.existsSync(fullPath)) return next();
+  res.type("application/javascript; charset=utf-8");
+  if (req.method === "HEAD") return res.status(200).end();
+  const jsSource = fsSync.readFileSync(fullPath, "utf8");
+  res.send(rewriteCollectorModuleSpecifiers(jsSource));
+});
+app.use(express.static(collectorPublicDir, { index: false }));
 app.get("/", (_req, res) => {
-  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
+  setCollectorHtmlRevalidateHeaders(res);
   res.type("html");
   res.send(renderCollectorRootHtml());
 });
