@@ -75,6 +75,34 @@ const slugBackfillResult = typeof repo.backfillInvalidSlugs === "function"
   : null;
 const MAX_IMAGES_PER_ITEM = 25;
 const GOOGLE_MAPS_PHOTO_PROXY_PATH = "/api/google-maps/photo";
+const COLLECTOR_ASSET_VERSION_TOKEN = "__COLLECTOR_ASSET_VERSION__";
+const collectorRootIndexPath = path.join(dirs.rootDir, "server", "public", "index.html");
+const collectorRootAssetFiles = [
+  path.join(dirs.rootDir, "server", "public", "theme-bootstrap.js"),
+  path.join(dirs.rootDir, "server", "public", "styles.css"),
+  path.join(dirs.rootDir, "server", "public", "theme-control.js"),
+  path.join(dirs.rootDir, "server", "public", "app.js"),
+];
+
+function resolveCollectorAssetVersion() {
+  const envVersion = String(process.env.COLLECTOR_ASSET_VERSION || "").trim();
+  if (envVersion) return envVersion;
+  let newestMtimeMs = 0;
+  for (const filePath of collectorRootAssetFiles) {
+    try {
+      const stats = fsSync.statSync(filePath);
+      newestMtimeMs = Math.max(newestMtimeMs, Number(stats.mtimeMs || 0));
+    } catch {}
+  }
+  return newestMtimeMs > 0 ? String(Math.floor(newestMtimeMs)) : String(Date.now());
+}
+
+const collectorRootAssetVersion = resolveCollectorAssetVersion();
+
+function renderCollectorRootHtml() {
+  const htmlTemplate = fsSync.readFileSync(collectorRootIndexPath, "utf8");
+  return htmlTemplate.split(COLLECTOR_ASSET_VERSION_TOKEN).join(collectorRootAssetVersion);
+}
 const CONTENT_ITEM_CATEGORIES = new Set(["attractions", "activities", "hotels", "cafes", "restaurants", "transport"]);
 const ARTICLE_RICH_TEXT_ALLOWED_TAGS = new Set([
   "p",
@@ -2303,7 +2331,11 @@ app.use(createRateLimiter({ windowMs: 60 * 1000, max: 180, message: "Too many re
 app.use("/media", express.static(dirs.mediaDir, { index: false }));
 app.use(express.static(path.join(dirs.rootDir, "server", "public"), { index: false }));
 app.get("/", (_req, res) => {
-  res.sendFile(path.join(dirs.rootDir, "server", "public", "index.html"));
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.type("html");
+  res.send(renderCollectorRootHtml());
 });
 
 app.get(
