@@ -1519,8 +1519,17 @@ function syncSourceAdapterOptionsForRole() {
   for (const option of Array.from(select.options || [])) {
     const value = String(option?.value || "").trim().toLowerCase();
     const visible = allowed.has(value);
-    option.hidden = !visible;
-    option.disabled = !visible;
+    if (visible) {
+      option.hidden = false;
+      option.disabled = false;
+      option.removeAttribute("hidden");
+      option.removeAttribute("disabled");
+    } else {
+      option.hidden = true;
+      option.disabled = true;
+      option.setAttribute("hidden", "");
+      option.setAttribute("disabled", "");
+    }
   }
 
   const selected = String(select.value || "").trim().toLowerCase();

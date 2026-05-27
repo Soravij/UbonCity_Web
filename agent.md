@@ -1,5 +1,25 @@
 # UbonCity_Web Agent Guide
 
+## Current Project State
+
+- Collector raw intake UX now defaults to `manual` for every role.
+- `google_maps` is hidden by default in initial HTML and only becomes available to `owner` after client-side role sync.
+- Non-owner roles must not see or select `google_maps` in the raw source adapter UI.
+- Server-side raw collect guard remains unchanged: the UI restriction is not the security boundary.
+- Local verification for the collector raw adapter change was completed before runtime rollout.
+
+## Runtime Test Stack Canonical Commands
+
+Use the repo-local stack script on runtime machines. Do not hardcode `RuntimeRoot` unless there is a machine-specific reason.
+
+```powershell
+cd D:\UbonRuntime\repos\UbonCity_Web
+git pull --ff-only origin codex/tester-build-v1-place-event-collector-fixes
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\UbonRuntime\repos\UbonCity_Web\ops\windows\test-stack.ps1 -Action stop
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\UbonRuntime\repos\UbonCity_Web\ops\windows\test-stack.ps1 -Action start
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\UbonRuntime\repos\UbonCity_Web\ops\windows\test-stack.ps1 -Action status
+```
+
 ## Git Push Default Policy (Enforced)
 
 When user says "fix" and then asks to "push git", follow this workflow by default.
