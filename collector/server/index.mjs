@@ -5989,10 +5989,20 @@ app.get("/api/users/assignable", requireRole("owner", "admin", "user"), safeAsyn
   const actorRole = String(req.authUser?.role || "").trim().toLowerCase();
   const actorId = Number(req.authUser?.id || 0) || 0;
   let rows = [];
-  if (actorRole === "owner" || actorRole === "admin") {
+  if (actorRole === "owner") {
     rows = db
       .prepare("SELECT id, email, display_name, profile_json, managed_by_user_id, role, created_at, updated_at FROM users ORDER BY id DESC")
       .all();
+  } else if (actorRole === "admin" || actorRole === "user") {
+    rows = db
+      .prepare(`
+        SELECT id, email, display_name, profile_json, managed_by_user_id, role, created_at, updated_at
+        FROM users
+        WHERE (role IN ('freelance', 'editor') AND managed_by_user_id=?)
+           OR id=?
+        ORDER BY id DESC
+      `)
+      .all(actorId, actorId);
   } else {
     rows = db
       .prepare(`
@@ -8882,6 +8892,18 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
       return;
     }
     const currentRound = resolveAssignmentCurrentRound(assignment);
+    if (["owner", "admin", "user", "freelance"].includes(role)) {
+      const currentRoundImageAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image");
+      const currentRoundVideoAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "video");
+      const currentRoundDeliverablesCount = (Array.isArray(currentRoundImageAssets) ? currentRoundImageAssets.length : 0)
+        + (Array.isArray(currentRoundVideoAssets) ? currentRoundVideoAssets.length : 0);
+      if (currentRoundDeliverablesCount < 1) {
+        res.status(409).json({
+          error: "submission is blocked: attach at least one deliverable before submit",
+        });
+        return;
+      }
+    }
     const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
     const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
     enforceResetPerShotRequirements(assignment, assignmentId, currentRound);
