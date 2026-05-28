@@ -4805,7 +4805,7 @@ function normalizeStateValue(value, stateGroup) {
     const actorRole = normalizeWorkflowActorRole(payload.actor_role);
     const reasonCode = payload.reason_code == null ? null : String(payload.reason_code || "").trim().toLowerCase() || null;
 
-    const run = db.transaction(() => {
+    const run = () => runInTransaction(db, () => {
       const current = normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
       if (!current) throw new Error("assignment not found");
       const roundBeforeRevision = Math.max(1, (Number(current.revision_round || 0) || 0) + 1);
@@ -10437,7 +10437,6 @@ function deriveExpectedDeliverablesFromHandoff(handoffPackage) {
   }
   return normalizeAssignmentDeliverableTypeList(derived);
 }
-
 
 
 
