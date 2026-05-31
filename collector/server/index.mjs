@@ -2703,6 +2703,156 @@ function normalizeAssignmentDraftAnswerRows(value) {
     .filter((row) => row.prompt || row.answer);
 }
 
+function uniqueAssignmentPromptStrings(values = []) {
+  return Array.from(new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  ));
+}
+
+function getAssignmentBriefPromptGroups(brief = null) {
+  const source = brief && typeof brief === "object" ? brief : {};
+  const verifiedFacts = uniqueAssignmentPromptStrings(source?.evidence_summary?.verified_facts);
+  const nextActions = uniqueAssignmentPromptStrings(source?.next_actions);
+  const captureItems = uniqueAssignmentPromptStrings(source?.shot_list_suggestions);
+  return {
+    mustVerify: verifiedFacts.length ? verifiedFacts : nextActions,
+    mustCapture: captureItems,
+    mustAsk: nextActions,
+  };
+}
+
+function getFieldPackPromptGroups(fieldPack = null) {
+  const checklists = Array.isArray(fieldPack?.checklists) ? fieldPack.checklists : [];
+  return {
+    mustVerify: checklists
+      .filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_verify_fact")
+      .map((row) => String(row?.item_text || "").trim())
+      .filter(Boolean),
+    mustCapture: checklists
+      .filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_capture")
+      .map((row) => String(row?.item_text || "").trim())
+      .filter(Boolean),
+    mustAsk: checklists
+      .filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_ask_question")
+      .map((row) => String(row?.item_text || "").trim())
+      .filter(Boolean),
+  };
+}
+
+function getEditorialPromptGroups(fieldPack = null, brief = null) {
+  const summary = String(fieldPack?.editor_summary || fieldPack?.ai_summary || brief?.brief_summary || "").trim();
+  const socialHook = String(fieldPack?.social_hook || brief?.recommended_hook || "").trim();
+  const socialCaptionAngle = String(
+    fieldPack?.social_caption_angle
+    || (Array.isArray(brief?.caption_suggestions) ? brief.caption_suggestions[0] : "")
+    || ""
+  ).trim();
+  const socialOnCameraPoints = Array.isArray(fieldPack?.social_on_camera_points_json)
+    ? fieldPack.social_on_camera_points_json.map((value) => String(value || "").trim()).filter(Boolean)
+    : uniqueAssignmentPromptStrings(brief?.script_suggestions);
+  const fallbackGroups = getAssignmentBriefPromptGroups(brief);
+  const { mustVerify, mustAsk } = fieldPack ? getFieldPackPromptGroups(fieldPack) : fallbackGroups;
+  const directionPrompts = [
+    summary ? `สรุปแกนเรื่องจากต้นทาง: ${summary}` : "",
+    socialHook ? `Hook ที่ควรรักษา: ${socialHook}` : "",
+    socialCaptionAngle ? `แนว Caption/Copy ที่ควรรักษา: ${socialCaptionAngle}` : "",
+    ...socialOnCameraPoints.map((value) => `ประเด็นที่ต้องเล่า: ${value}`),
+  ];
+  const sourcePrompts = [
+    ...mustVerify,
+    ...mustAsk,
+  ];
+  const unique = (items) => uniqueAssignmentPromptStrings(items);
+  return {
+    directionPrompts: unique(directionPrompts).length ? unique(directionPrompts) : ["สรุปมุมเล่าและโทนของงานเรียบเรียงที่ต้องรักษา"],
+    sourcePrompts: unique(sourcePrompts).length ? unique(sourcePrompts) : ["ระบุข้อมูลหรือข้อเท็จจริงที่ต้องอ้างอิงให้ครบก่อนเรียบเรียง"],
+  };
+}
+
+function resolveAssignmentFieldPackFromBrief(assignment = null) {
+  const brief = assignment?.brief_json && typeof assignment.brief_json === "object" ? assignment.brief_json : null;
+  if (!brief) return null;
+  const candidates = [
+    brief.field_pack,
+    brief.fieldPack,
+    brief.current_field_pack,
+    brief.currentFieldPack,
+    brief.context_field_pack,
+    brief.contextFieldPack,
+  ];
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) return candidate;
+  }
+  return null;
+}
+
+function resolveAssignmentSubmissionPromptContext(assignment = null) {
+  const brief = assignment?.brief_json && typeof assignment.brief_json === "object" ? assignment.brief_json : null;
+  const contentItemId = Number(assignment?.content_item_id || 0) || 0;
+  const currentFieldPack = contentItemId ? repo.getCurrentFieldPackByItem(contentItemId) : null;
+  const embeddedFieldPack = resolveAssignmentFieldPackFromBrief(assignment);
+  return {
+    brief,
+    fieldPack: currentFieldPack || embeddedFieldPack || null,
+  };
+}
+
+function findMissingPromptAnswers(expectedPrompts = [], answerRows = []) {
+  const expected = uniqueAssignmentPromptStrings(expectedPrompts);
+  if (!expected.length) return [];
+  const answerByPrompt = new Map();
+  for (const row of Array.isArray(answerRows) ? answerRows : []) {
+    const prompt = String(row?.prompt || "").trim();
+    if (!prompt) continue;
+    answerByPrompt.set(prompt, String(row?.answer || "").trim());
+  }
+  return expected.filter((prompt) => !String(answerByPrompt.get(prompt) || "").trim());
+}
+
+function findMissingCapturePrompts(expectedPrompts = [], assignmentId = 0, currentRound = 1) {
+  const prompts = uniqueAssignmentPromptStrings(expectedPrompts);
+  if (!prompts.length || !(Number(assignmentId || 0) > 0)) return [];
+  const imageAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image");
+  const videoAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "video");
+  const uploadedShotSlugs = new Set();
+  for (const asset of [...(Array.isArray(imageAssets) ? imageAssets : []), ...(Array.isArray(videoAssets) ? videoAssets : [])]) {
+    const shotSlug = parseCaptureShotSlugFromFileName(asset?.file_name);
+    if (shotSlug) uploadedShotSlugs.add(shotSlug);
+  }
+  return prompts.filter((prompt, index) => !uploadedShotSlugs.has(toCaptureShotSlug(prompt, index)));
+}
+
+function enforceAssignmentSubmissionRequiredFields(assignment, articlePayload, assignmentId, currentRound) {
+  const payload = articlePayload && typeof articlePayload === "object" && !Array.isArray(articlePayload)
+    ? articlePayload
+    : {};
+  const kind = String(assignment?.assignment_kind || "").trim().toLowerCase() === "editorial" ? "editorial" : "field";
+  const { brief, fieldPack } = resolveAssignmentSubmissionPromptContext(assignment);
+  const missing = [];
+
+  if (kind === "editorial") {
+    const groups = getEditorialPromptGroups(fieldPack, brief);
+    missing.push(...findMissingPromptAnswers(groups.directionPrompts, payload.direction_answers).map((prompt) => `แนวสื่อสารหลัก: ${prompt}`));
+    missing.push(...findMissingPromptAnswers(groups.sourcePrompts, payload.source_answers).map((prompt) => `ข้อมูล/มุมที่ต้องใช้: ${prompt}`));
+  } else {
+    const groups = fieldPack ? getFieldPackPromptGroups(fieldPack) : getAssignmentBriefPromptGroups(brief);
+    missing.push(...findMissingPromptAnswers(groups.mustVerify, payload.verified_answers).map((prompt) => `สิ่งที่ต้องยืนยัน: ${prompt}`));
+    missing.push(...findMissingPromptAnswers(groups.mustAsk, payload.question_answers).map((prompt) => `คำตอบจากหน้างาน: ${prompt}`));
+    missing.push(...findMissingCapturePrompts(groups.mustCapture, assignmentId, currentRound).map((prompt) => `สิ่งที่ต้องถ่าย: ${prompt}`));
+  }
+
+  if (!String(payload.additional_text || "").trim()) {
+    missing.push("ข้อความเพิ่มเติม");
+  }
+  if (missing.length) {
+    const preview = missing.slice(0, 8).join(" | ");
+    const remain = missing.length > 8 ? ` | และอีก ${missing.length - 8} รายการ` : "";
+    throw new Error(`บล็อกการส่งงาน: ต้องกรอกข้อมูลให้ครบทุกช่องก่อนส่ง (${preview}${remain})`);
+  }
+}
+
 function normalizeAssignmentDraftArticlePayload(rawPayload = null, assignment = null) {
   if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) return null;
   const kind = String(assignment?.assignment_kind || "").trim().toLowerCase() === "editorial"
@@ -8952,13 +9102,15 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
         + (Array.isArray(currentRoundVideoAssets) ? currentRoundVideoAssets.length : 0);
       if (currentRoundDeliverablesCount < 1) {
         res.status(409).json({
-          error: "submission is blocked: attach at least one deliverable before submit",
+          error: "บล็อกการส่งงาน: ต้องแนบผลงานอย่างน้อย 1 รายการก่อนส่ง",
         });
         return;
       }
     }
     const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
     const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
+    const normalizedArticlePayload = normalizeAssignmentDraftArticlePayload(req.body?.article_payload_json || null, assignment);
+    enforceAssignmentSubmissionRequiredFields(assignment, normalizedArticlePayload, assignmentId, currentRound);
     enforceResetPerShotRequirements(assignment, assignmentId, currentRound);
     const assignmentAction = normalizedSubmissionState === "resubmitted" ? "resubmit" : "submit";
     const reasonCode = String(req.body?.reason_code || "").trim().toLowerCase()
@@ -8967,7 +9119,7 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
       assignment_id: assignmentId,
       submitted_by_user_id: req.authUser?.id,
       submission_state: normalizedSubmissionState,
-      article_payload_json: req.body?.article_payload_json || null,
+      article_payload_json: normalizedArticlePayload,
       media_payload_json: req.body?.media_payload_json || null,
       contributor_note: req.body?.contributor_note,
       reviewer_note: req.body?.reviewer_note,
