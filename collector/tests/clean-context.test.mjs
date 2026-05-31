@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildCleanStructuredContext,
   buildCleanContextSummary,
+  buildFieldPackContractFromCleanContext,
   validateCleanMinimum,
 } from "../services/clean-context.mjs";
 
@@ -86,6 +87,11 @@ function createApprovedBlock(id, evidenceBlockId, overrides = {}) {
     evidence_lang: "th",
     ...overrides,
   };
+}
+
+function buildContractFromRepo(repo, contentItemId = 59) {
+  const cleanContext = buildCleanStructuredContext(repo, contentItemId);
+  return buildFieldPackContractFromCleanContext(cleanContext);
 }
 
 function createEvidenceBlock(id, overrides = {}) {
@@ -341,4 +347,148 @@ test("buildCleanStructuredContext is stable across repeated calls with same repo
   const second = buildCleanStructuredContext(repo, 59);
 
   assert.deepEqual(second, first);
+});
+
+test("field pack contract does not add hotel or event blockers to cafe/place items", () => {
+  const repo = createMockRepo({
+    item: createBaseItem({
+      map_url: "https://maps.google.com/?q=15.2246,104.8645",
+      google_place_id: "place-123",
+    }),
+    approvedContext: [
+      createApprovedBlock(1, 601, {
+        context_type: "fact",
+        selected_text: "name: TREE CAFE Rim Moon",
+      }),
+      createApprovedBlock(2, 602, {
+        context_type: "ambience",
+        selected_text: "สวนร่มรื่นและมีมุมถ่ายรูป",
+      }),
+      createApprovedBlock(3, 603, {
+        context_type: "tip",
+        selected_text: "แนะนำมาช่วงบ่ายแก่",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+  const blockers = contract.verification.publish_blockers;
+  const needs = contract.verification.needs_verification;
+
+  assert.equal(contract.taxonomy_version, "page_curation_taxonomy_v1");
+  assert.ok(!blockers.includes("price_range"));
+  assert.ok(!blockers.includes("restaurant_features"));
+  assert.ok(!blockers.includes("hotel_amenities"));
+  assert.ok(!blockers.includes("event_date_hints"));
+  assert.ok(!blockers.includes("ticket_hints"));
+  assert.ok(needs.includes("price_range"));
+  assert.ok(needs.includes("restaurant_features"));
+  assert.ok(!needs.includes("hotel_amenities"));
+  assert.ok(!needs.includes("event_date_hints"));
+  assert.ok(!needs.includes("ticket_hints")); // cafe/place scope should not include event checks
+});
+
+test("field pack contract keeps hotel checks scoped to hotel categories", () => {
+  const repo = createMockRepo({
+    item: createBaseItem({
+      type: "place",
+      category: "hotel",
+      map_url: "https://maps.google.com/?q=15.2246,104.8645",
+      google_place_id: "place-123",
+    }),
+    approvedContext: [
+      createApprovedBlock(1, 701, {
+        context_type: "fact",
+        selected_text: "name: Riverside Stay",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+  const blockers = contract.verification.publish_blockers;
+  const needs = contract.verification.needs_verification;
+
+  assert.ok(needs.includes("hotel_amenities"));
+  assert.ok(needs.includes("checkin_checkout"));
+  assert.ok(!blockers.includes("hotel_amenities"));
+  assert.ok(!blockers.includes("checkin_checkout"));
+  assert.ok(!blockers.includes("event_date_hints"));
+  assert.ok(!blockers.includes("ticket_hints"));
+});
+
+test("field pack contract keeps event checks scoped to event items", () => {
+  const repo = createMockRepo({
+    item: createBaseItem({
+      type: "event",
+      category: "event",
+      map_url: "https://maps.google.com/?q=15.2246,104.8645",
+      google_place_id: "place-123",
+    }),
+    approvedContext: [
+      createApprovedBlock(1, 801, {
+        context_type: "fact",
+        selected_text: "name: Lantern Festival",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+  const blockers = contract.verification.publish_blockers;
+  const needs = contract.verification.needs_verification;
+
+  assert.ok(needs.includes("event_date_hints"));
+  assert.ok(needs.includes("ticket_hints"));
+  assert.ok(!blockers.includes("ticket_hints"));
+  assert.ok(blockers.includes("event_date_hints"));
+  assert.ok(!blockers.includes("hotel_amenities"));
+  assert.ok(!blockers.includes("checkin_checkout"));
+});
+
+test("field pack contract keeps editorial ambience and tip text out of verified facts", () => {
+  const repo = createMockRepo({
+    item: createBaseItem({
+      map_url: "https://maps.google.com/?q=15.2246,104.8645",
+      google_place_id: "place-123",
+    }),
+    approvedContext: [
+      createApprovedBlock(1, 901, {
+        context_type: "ambience",
+        selected_text: "บรรยากาศสวนร่มรื่น",
+      }),
+      createApprovedBlock(2, 902, {
+        context_type: "tip",
+        selected_text: "ควรมาช่วงเย็น",
+      }),
+      createApprovedBlock(3, 903, {
+        context_type: "fact",
+        selected_text: "name: TREE CAFE Rim Moon",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+
+  assert.ok(!contract.verification.verified_facts.some((text) => text.includes("บรรยากาศสวนร่มรื่น")));
+  assert.ok(!contract.verification.verified_facts.some((text) => text.includes("ควรมาช่วงเย็น")));
+  assert.ok(contract.verification.verified_facts.some((text) => text.includes("name: TREE CAFE Rim Moon")));
+});
+
+test("field pack contract moves editor_note into local notes", () => {
+  const repo = createMockRepo({
+    item: createBaseItem({
+      map_url: "https://maps.google.com/?q=15.2246,104.8645",
+      google_place_id: "place-123",
+    }),
+    approvedContext: [
+      createApprovedBlock(1, 1001, {
+        context_type: "fact",
+        selected_text: "name: TREE CAFE Rim Moon",
+        editor_note: "เสียงดีตอนบ่ายและควรชี้มุมถ่ายรูปฝั่งสวน",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+
+  assert.ok(contract.universal_curation_profile.local_notes.includes("เสียงดีตอนบ่ายและควรชี้มุมถ่ายรูปฝั่งสวน"));
 });
