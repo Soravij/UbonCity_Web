@@ -233,3 +233,122 @@ export function buildCleanContextSummary(repo, contentItemId) {
     quality_gaps: Array.isArray(context?.completeness?.quality_gaps) ? context.completeness.quality_gaps : [],
   };
 }
+
+function toText(value) {
+  return String(value || "").trim();
+}
+
+function toList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((x) => String(x || "").trim()).filter(Boolean);
+}
+
+function buildTypeSpecificFields(itemType, category, approvedContext) {
+  const safeType = String(itemType || "").trim().toLowerCase() || "place";
+  const safeCategory = String(category || "").trim().toLowerCase();
+  const listFromContextType = (contextType) => approvedContext
+    .filter((row) => String(row?.context_type || "").trim().toLowerCase() === contextType)
+    .map((row) => String(row?.selected_text || "").trim())
+    .filter(Boolean);
+
+  const placeFields = { ambience: [], highlights: [], practical_tips: [] };
+  const hotelFields = { room_types: [], amenities: [], check_in_out_notes: [] };
+  const restaurantFields = { signature_menu: [], dietary_options: [], service_style: [] };
+  const eventFields = { event_dates: [], schedule: [], ticketing_notes: [] };
+
+  placeFields.ambience = listFromContextType("ambience");
+  placeFields.highlights = listFromContextType("feature");
+  placeFields.practical_tips = listFromContextType("tip");
+
+  if (safeType === "event") {
+    eventFields.event_dates = listFromContextType("date_time");
+    eventFields.schedule = listFromContextType("schedule");
+    eventFields.ticketing_notes = listFromContextType("ticketing");
+  }
+
+  if (safeType !== "event" && (safeCategory.includes("hotel") || safeCategory.includes("resort"))) {
+    hotelFields.room_types = listFromContextType("room_type");
+    hotelFields.amenities = listFromContextType("amenity");
+    hotelFields.check_in_out_notes = listFromContextType("check_in_out");
+  }
+
+  if (safeType !== "event" && (safeCategory.includes("restaurant") || safeCategory.includes("cafe") || safeCategory.includes("food"))) {
+    restaurantFields.signature_menu = listFromContextType("menu");
+    restaurantFields.dietary_options = listFromContextType("dietary");
+    restaurantFields.service_style = listFromContextType("service_style");
+  }
+
+  return {
+    place_fields: placeFields,
+    hotel_fields: hotelFields,
+    restaurant_fields: restaurantFields,
+    event_fields: eventFields,
+  };
+}
+
+export function buildFieldPackContractFromCleanContext(cleanContext) {
+  const context = cleanContext && typeof cleanContext === "object" ? cleanContext : null;
+  if (!context) return null;
+
+  const item = context.item && typeof context.item === "object" ? context.item : {};
+  const approvedContext = Array.isArray(context.approved_context) ? context.approved_context : [];
+  const completeness = context.completeness && typeof context.completeness === "object" ? context.completeness : {};
+  const minMissing = toList(completeness.minimum_missing);
+  const qualityGaps = toList(completeness.quality_gaps);
+
+  const coreFactualFields = {
+    title: toText(item.title) || null,
+    type: toText(item.type) || null,
+    category: toText(item.category) || null,
+    slug: toText(item.slug) || null,
+    map_url: toText(item.map_url) || null,
+    google_place_id: toText(item.google_place_id) || null,
+    source_url: toText(item.source_url) || null,
+    latitude: item.latitude ?? null,
+    longitude: item.longitude ?? null,
+  };
+
+  const typeSpecific = buildTypeSpecificFields(item.type, item.category, approvedContext);
+  const suggestedPageBlocks = ["overview", "highlights", "how_to_go", "cta"].filter(Boolean);
+  const priorityCta = coreFactualFields.map_url ? "map" : "none";
+
+  const missingFields = [];
+  if (!coreFactualFields.map_url) missingFields.push("map_url");
+  if (!coreFactualFields.google_place_id) missingFields.push("google_place_id");
+  if (minMissing.includes("approved_context")) missingFields.push("approved_context");
+
+  const verifyRequired = approvedContext
+    .filter((row) => !toText(row?.selected_text) && (row?.selected_numeric == null) && (!Array.isArray(row?.selected_list) || row.selected_list.length < 1))
+    .map((row) => toText(row?.context_type) || "context_item")
+    .filter(Boolean);
+
+  return {
+    core_factual_fields: coreFactualFields,
+    place_fields: typeSpecific.place_fields,
+    hotel_fields: typeSpecific.hotel_fields,
+    restaurant_fields: typeSpecific.restaurant_fields,
+    event_fields: typeSpecific.event_fields,
+    curation_signals: {
+      recommended_angle: toText(item.category) ? `${toText(item.category)} practical guide` : "local guide",
+      suggested_page_blocks: suggestedPageBlocks,
+      priority_cta: priorityCta,
+      target_audience: [],
+      content_risks: qualityGaps,
+      missing_fields: missingFields,
+      verify_required: verifyRequired,
+    },
+    checklists: {
+      missing_data: missingFields,
+      verify_required: verifyRequired,
+      quality_gaps: qualityGaps,
+    },
+    provenance: {
+      contract_version: "field_pack_contract_v1",
+      source: "clean_structured_context",
+      content_item_id: Number(context.content_item_id || 0) || null,
+      approved_context_count: approvedContext.length,
+      evidence_blocks_count: Array.isArray(context.evidence_blocks) ? context.evidence_blocks.length : 0,
+      generated_at: new Date().toISOString(),
+    },
+  };
+}
