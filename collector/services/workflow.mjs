@@ -1577,6 +1577,15 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
         });
       }
     } else {
+      const savedFieldPack = saveAgentFieldPack(repo, finalItem, null, actorEmail, {
+        cleanContract: finalItem?.clean_field_pack_contract || null,
+        sourceDraftInputSnapshotId: finalItem?.source_draft_input_snapshot_id || null,
+      });
+      traceAiDraft("field_pack.save.ok", {
+        item_id: Number(finalItem?.id || 0) || null,
+        field_pack_id: Number(savedFieldPack?.id || 0) || null,
+        status: String(savedFieldPack?.status || "").trim() || null,
+      });
       repo.saveItem(
         {
           id: finalItem.id,
@@ -1620,6 +1629,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
         finalItem.id,
         {
           production_state: "generated",
+          current_field_pack_id: Number(savedFieldPack?.id || 0) || null,
           current_draft_id: Number(latestDraft?.id || 0) || null,
           last_transition_note: "draft generated",
         },
@@ -2350,7 +2360,6 @@ export function compensateReleaseAfterSyncFailure(repo, actorEmail, options = {}
     published_article_status: articleStatusAfter,
   };
 }
-
 
 
 
