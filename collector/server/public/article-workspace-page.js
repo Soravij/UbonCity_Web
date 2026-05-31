@@ -563,8 +563,14 @@ function parseFieldPackContractFromWriterNotes(writerNotes) {
     return null;
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  if (!String(parsed.contract_version || "").trim()) return null;
-  return parsed;
+  const topLevelVersion = String(parsed.contract_version || "").trim();
+  const provenanceVersion = String(parsed?.provenance?.contract_version || "").trim();
+  const resolvedVersion = topLevelVersion || provenanceVersion;
+  if (!resolvedVersion) return null;
+  return {
+    ...parsed,
+    contract_version: resolvedVersion,
+  };
 }
 
 function buildContractFactRows(coreFacts = {}) {
@@ -604,8 +610,8 @@ function renderFieldPackEvidencePanel() {
   const risks = toReviewList(curationSignals.content_risks || checklists.quality_gaps);
   const suggestedBlocks = toReviewList(curationSignals.suggested_page_blocks);
   const coreFacts = buildContractFactRows(contract.core_factual_fields);
-  const verifiedFacts = toReviewList(fieldPack.verified_facts_json);
-  const uncertainFacts = toReviewList(fieldPack.uncertain_facts_json);
+  const verifiedFacts = toReviewList(fieldPack.verified_facts || fieldPack.verified_facts_json);
+  const uncertainFacts = toReviewList(fieldPack.uncertain_facts || fieldPack.uncertain_facts_json);
   const hasRiskWarning = missingFields.length > 0 || verifyRequired.length > 0;
 
   statusNode.className = `status ${hasRiskWarning ? "warn" : "ok"}`;
