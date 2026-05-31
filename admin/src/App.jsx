@@ -187,7 +187,8 @@ function normalizePath(path, session) {
     (
       path === "/dashboard/users" ||
       path === "/dashboard/approvals" ||
-      path === "/dashboard/homepage-curation"
+      path === "/dashboard/homepage-curation" ||
+      path === "/dashboard/analytics"
     ) &&
     !isAdminLike
   ) {
