@@ -141,6 +141,47 @@ This matrix describes business capabilities, not just page visibility.
 
 `Contributor management` and `owner system tools` are separate concepts.
 
+## Visibility and management-line policy
+
+Collector command and visibility follow a pyramid management tree, not flat role rank.
+
+Tree shape:
+
+- `owner`
+- `admin`
+- `user`
+- `editor` / `freelance`
+
+In this model:
+
+- `owner` is the global root.
+- `admin` is a branch root.
+- `user` is a team root within that branch.
+- `editor` and `freelance` are contributor leaf nodes under `user`.
+
+Visibility and target scope must follow subtree boundaries.
+
+- `owner`
+  - Global visibility across collector.
+- `admin`
+  - Visibility is limited to the subtree assigned to that admin.
+  - May see `user`, `editor`, and `freelance` accounts only inside that subtree.
+  - Must not cross into another admin branch.
+- `user`
+  - Visibility is limited to contributors assigned under that user.
+  - Must not see contributors managed by another `user` or outside the parent admin branch.
+- `editor`
+  - Self scope only, except for explicitly assigned workflow context.
+- `freelance`
+  - Self scope only, except for explicitly assigned workflow context.
+
+Canonical rule:
+
+- No cross-line visibility for `admin` or `user`.
+- No role may act outside its assigned subtree, except `owner`.
+- Role capability defines allowed actions inside the assigned subtree.
+- Management line defines which accounts and work items belong to that subtree.
+
 ### Contributor management
 
 Visible to:
