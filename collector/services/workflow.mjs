@@ -1232,6 +1232,16 @@ function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = null) {
 
 function toFieldPackFactList(contract) {
   if (!contract || typeof contract !== "object") return [];
+  const verificationFacts = Array.isArray(contract?.verification?.verified_facts)
+    ? contract.verification.verified_facts
+    : [];
+  const normalizedVerificationFacts = verificationFacts
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  if (normalizedVerificationFacts.length > 0) {
+    return normalizedVerificationFacts;
+  }
+
   const core = contract.core_factual_fields && typeof contract.core_factual_fields === "object"
     ? contract.core_factual_fields
     : {};
@@ -1246,6 +1256,19 @@ function toFieldPackFactList(contract) {
 }
 
 function toFieldPackUnknownList(contract) {
+  const verificationNeeds = Array.isArray(contract?.verification?.needs_verification)
+    ? contract.verification.needs_verification
+    : [];
+  const verificationBlockers = Array.isArray(contract?.verification?.publish_blockers)
+    ? contract.verification.publish_blockers
+    : [];
+  const normalizedVerification = [...verificationNeeds, ...verificationBlockers]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  if (normalizedVerification.length > 0) {
+    return normalizedVerification;
+  }
+
   const missing = Array.isArray(contract?.curation_signals?.missing_fields)
     ? contract.curation_signals.missing_fields
     : [];

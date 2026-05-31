@@ -286,6 +286,114 @@ function buildTypeSpecificFields(itemType, category, approvedContext) {
   };
 }
 
+function uniqueList(values = []) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of values) {
+    const value = String(raw || "").trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+  }
+  return out;
+}
+
+function flattenApprovedContextTexts(approvedContext = []) {
+  const out = [];
+  for (const row of approvedContext) {
+    const text = String(row?.selected_text || "").trim();
+    if (text) out.push(text);
+    const list = Array.isArray(row?.selected_list) ? row.selected_list : [];
+    for (const item of list) {
+      const value = String(item || "").trim();
+      if (value) out.push(value);
+    }
+  }
+  return uniqueList(out);
+}
+
+function pickApprovedEvidence(approvedContext = [], options = {}) {
+  const contextTypes = Array.isArray(options.contextTypes) ? options.contextTypes.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean) : [];
+  const keywords = Array.isArray(options.keywords) ? options.keywords.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean) : [];
+  const maxItems = Math.max(1, Math.min(12, Number(options.maxItems || 6) || 6));
+  const out = [];
+
+  for (const row of approvedContext) {
+    const rowType = String(row?.context_type || "").trim().toLowerCase();
+    const rowValues = [
+      String(row?.selected_text || "").trim(),
+      ...(Array.isArray(row?.selected_list) ? row.selected_list.map((x) => String(x || "").trim()) : []),
+    ].filter(Boolean);
+    if (!rowValues.length) continue;
+
+    const typeMatched = contextTypes.length > 0 && contextTypes.includes(rowType);
+    const keywordMatched = keywords.length > 0 && rowValues.some((value) => keywords.some((kw) => value.toLowerCase().includes(kw)));
+    const isMatch = contextTypes.length || keywords.length ? (typeMatched || keywordMatched) : false;
+    if (!isMatch) continue;
+
+    for (const value of rowValues) {
+      out.push(value);
+      if (out.length >= maxItems) break;
+    }
+    if (out.length >= maxItems) break;
+  }
+
+  return uniqueList(out).slice(0, maxItems);
+}
+
+function hasExplicitApprovedEvidence(approvedContext = [], options = {}) {
+  return pickApprovedEvidence(approvedContext, { ...options, maxItems: 1 }).length > 0;
+}
+
+function firstOrNull(values = []) {
+  const list = uniqueList(values);
+  return list.length ? list[0] : null;
+}
+
+function hasCategoryHint(category, hints = []) {
+  const text = String(category || "").trim().toLowerCase();
+  if (!text) return false;
+  return hints.some((hint) => text.includes(String(hint || "").trim().toLowerCase()));
+}
+
+function extractFactualApprovedFacts(approvedContext = [], options = {}) {
+  const category = String(options.category || "").trim().toLowerCase();
+  const isHotel = hasCategoryHint(category, ["hotel", "resort"]);
+  const isRestaurant = hasCategoryHint(category, ["restaurant", "cafe", "food"]);
+  const factualTypes = new Set([
+    "fact",
+    "identity",
+    "location",
+    "address",
+    "map",
+    "contact",
+    "phone",
+    "website",
+    "opening_hours",
+    "date_time",
+    "ticketing",
+    "price",
+  ]);
+  if (isHotel) factualTypes.add("amenity");
+  if (isRestaurant) factualTypes.add("menu");
+
+  const out = [];
+  for (const row of approvedContext) {
+    const rowType = String(row?.context_type || "").trim().toLowerCase();
+    if (!factualTypes.has(rowType)) continue;
+    const selectedText = String(row?.selected_text || "").trim();
+    if (selectedText) out.push(selectedText);
+    const selectedList = Array.isArray(row?.selected_list) ? row.selected_list : [];
+    for (const item of selectedList) {
+      const text = String(item || "").trim();
+      if (text) out.push(text);
+    }
+  }
+  return uniqueList(out);
+}
+
 export function buildFieldPackContractFromCleanContext(cleanContext) {
   const context = cleanContext && typeof cleanContext === "object" ? cleanContext : null;
   if (!context) return null;
@@ -309,6 +417,12 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
   };
 
   const typeSpecific = buildTypeSpecificFields(item.type, item.category, approvedContext);
+  const itemType = String(item.type || "").trim().toLowerCase();
+  const categoryText = String(item.category || "").trim().toLowerCase();
+  const isEventItem = itemType === "event";
+  const isHotelCategory = hasCategoryHint(categoryText, ["hotel", "resort"]);
+  const isRestaurantCategory = hasCategoryHint(categoryText, ["restaurant", "cafe", "food"]);
+  const isPlaceLike = !isEventItem && !isHotelCategory && !isRestaurantCategory;
   const suggestedPageBlocks = ["overview", "highlights", "how_to_go", "cta"].filter(Boolean);
   const priorityCta = coreFactualFields.map_url ? "map" : "none";
 
@@ -322,7 +436,141 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
     .map((row) => toText(row?.context_type) || "context_item")
     .filter(Boolean);
 
+  const scopedStrictRules = [];
+  if (isEventItem) {
+    scopedStrictRules.push(
+      { key: "event_date_hints", contextTypes: ["date_time", "schedule"], keywords: ["date", "เวลา", "วันที่", "schedule"], blocker: true },
+      { key: "ticket_hints", contextTypes: ["ticketing"], keywords: ["ticket", "บัตร", "ค่าเข้า"], blocker: true },
+      { key: "venue_notes", contextTypes: ["venue", "location", "address"], keywords: ["venue", "สถานที่", "address"], blocker: true }
+    );
+  } else if (isHotelCategory) {
+    scopedStrictRules.push(
+      { key: "parking", contextTypes: ["parking"], keywords: ["parking", "ที่จอด"], blocker: false },
+      { key: "pet_friendly", contextTypes: ["pet", "pet_policy"], keywords: ["pet", "สัตว์เลี้ยง"], blocker: false },
+      { key: "family_friendly", contextTypes: ["family"], keywords: ["family", "ครอบครัว", "เด็ก"], blocker: false },
+      { key: "accessibility", contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible", "ทางลาด"], blocker: false },
+      { key: "hotel_amenities", contextTypes: ["amenity"], keywords: ["amenity", "wifi", "pool", "spa", "อาหารเช้า"], blocker: true },
+      { key: "room_type_hints", contextTypes: ["room_type"], keywords: ["room", "suite", "villa", "ห้อง"], blocker: false },
+      { key: "checkin_checkout", contextTypes: ["check_in_out"], keywords: ["check-in", "check-out", "เวลาเช็ค"], blocker: true },
+      { key: "booking_channels", contextTypes: ["booking_channel"], keywords: ["booking", "agoda", "expedia", "จอง"], blocker: false }
+    );
+  } else if (isRestaurantCategory) {
+    scopedStrictRules.push(
+      { key: "price_range", contextTypes: ["price", "pricing"], keywords: ["price", "ราคา", "บาท"], blocker: true },
+      { key: "parking", contextTypes: ["parking"], keywords: ["parking", "ที่จอด"], blocker: false },
+      { key: "pet_friendly", contextTypes: ["pet", "pet_policy"], keywords: ["pet", "สัตว์เลี้ยง"], blocker: false },
+      { key: "family_friendly", contextTypes: ["family"], keywords: ["family", "ครอบครัว", "เด็ก"], blocker: false },
+      { key: "accessibility", contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible", "ทางลาด"], blocker: false },
+      { key: "restaurant_features", contextTypes: ["restaurant_feature", "service_style"], keywords: ["menu", "service", "โต๊ะ", "คาเฟ่", "restaurant"], blocker: true },
+      { key: "signature_menu", contextTypes: ["menu"], keywords: ["signature", "recommended menu", "เมนู"], blocker: false },
+      { key: "price_signals", contextTypes: ["price", "pricing"], keywords: ["price", "ราคา", "บาท"], blocker: false },
+      { key: "service_style", contextTypes: ["service_style"], keywords: ["self service", "table service", "บริการ"], blocker: false }
+    );
+  } else if (isPlaceLike) {
+    scopedStrictRules.push(
+      { key: "parking", contextTypes: ["parking"], keywords: ["parking", "ที่จอด"], blocker: false },
+      { key: "accessibility", contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible", "ทางลาด"], blocker: false },
+      { key: "family_friendly", contextTypes: ["family"], keywords: ["family", "ครอบครัว", "เด็ก"], blocker: false }
+    );
+    // opening_hours_note is optional; only enforce verify when there are relevant hints.
+    if (hasExplicitApprovedEvidence(approvedContext, { contextTypes: ["opening_hours", "schedule"], keywords: ["open", "hour", "เวลาเปิด", "ปิด"] })) {
+      scopedStrictRules.push({
+        key: "opening_hours_note",
+        contextTypes: ["opening_hours", "schedule"],
+        keywords: ["open", "hour", "เวลาเปิด", "ปิด"],
+        blocker: false,
+      });
+    }
+  }
+
+  const strictNeedsVerification = [];
+  const strictPublishBlockers = [];
+  for (const rule of scopedStrictRules) {
+    if (!hasExplicitApprovedEvidence(approvedContext, rule)) {
+      strictNeedsVerification.push(rule.key);
+      if (rule.blocker) strictPublishBlockers.push(rule.key);
+    }
+  }
+
+  const universalProfile = {
+    highlights: pickApprovedEvidence(approvedContext, { contextTypes: ["feature", "highlight"], keywords: ["เด่น", "highlight", "feature"] }),
+    good_to_know: pickApprovedEvidence(approvedContext, { contextTypes: ["tip", "fact"], keywords: ["ควรรู้", "note", "tip"] }),
+    why_visit: pickApprovedEvidence(approvedContext, { contextTypes: ["feature", "ambience"], keywords: ["บรรยากาศ", "experience", "กิจกรรม"] }),
+    recommended_for: pickApprovedEvidence(approvedContext, { contextTypes: ["audience"], keywords: ["เหมาะกับ", "recommended for"] }),
+    best_for: pickApprovedEvidence(approvedContext, { contextTypes: ["audience"], keywords: ["best for", "เหมาะ", "สาย"] }),
+    nearby: pickApprovedEvidence(approvedContext, { contextTypes: ["nearby_landmark"], keywords: ["nearby", "ใกล้", "landmark"] }),
+    local_notes: uniqueList([
+      ...pickApprovedEvidence(approvedContext, { contextTypes: ["local_note", "tip"], keywords: ["local", "ชุมชน", "ท้องถิ่น"] }),
+      ...approvedContext
+        .map((row) => String(row?.editor_note || "").trim())
+        .filter(Boolean),
+    ]),
+  };
+
+  const practicalProfile = {
+    price_range: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["price", "pricing"], keywords: ["price", "ราคา", "บาท"] })),
+    parking: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["parking"], keywords: ["parking", "ที่จอด"] })) || "unknown",
+    pet_friendly: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["pet", "pet_policy"], keywords: ["pet", "สัตว์เลี้ยง"] })) || "unknown",
+    family_friendly: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["family"], keywords: ["family", "ครอบครัว", "เด็ก"] })) || "unknown",
+    accessibility: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible", "ทางลาด"] })) || "unknown",
+    opening_hours_note: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["opening_hours", "schedule"], keywords: ["open", "hour", "เวลาเปิด", "ปิด"] })),
+    reservation_needed: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["reservation"], keywords: ["reserve", "booking", "จอง"] })) || "unknown",
+  };
+
+  const placeProfile = {
+    view_type: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["view_type"], keywords: ["river", "mountain", "city view", "วิว"] })),
+    atmosphere: pickApprovedEvidence(approvedContext, { contextTypes: ["ambience"], keywords: ["บรรยากาศ", "calm", "vibe"] }),
+    photo_spots: pickApprovedEvidence(approvedContext, { contextTypes: ["photo_spot"], keywords: ["photo", "spot", "มุมถ่าย"] }),
+    visit_duration: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["visit_duration"], keywords: ["hour", "ชม", "ใช้เวลา"] })),
+    best_time_to_visit: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["best_time"], keywords: ["morning", "evening", "golden hour", "ช่วงเวลา"] })),
+  };
+
+  const restaurantProfile = {
+    restaurant_features: pickApprovedEvidence(approvedContext, { contextTypes: ["restaurant_feature", "service_style"], keywords: ["menu", "service", "coffee", "อาหาร"] }),
+    signature_menu: pickApprovedEvidence(approvedContext, { contextTypes: ["menu"], keywords: ["signature", "recommended menu", "เมนู"] }),
+    cuisine_type: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["cuisine_type"], keywords: ["thai", "fusion", "local", "อาหาร"] })),
+    price_signals: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["price", "pricing"], keywords: ["price", "ราคา", "บาท"] })),
+    service_style: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["service_style"], keywords: ["self service", "table service", "บริการ"] })),
+    seating_vibe: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["seating", "ambience"], keywords: ["indoor", "outdoor", "seat", "ที่นั่ง"] })),
+  };
+
+  const hotelProfile = {
+    hotel_amenities: pickApprovedEvidence(approvedContext, { contextTypes: ["amenity"], keywords: ["wifi", "pool", "gym", "spa", "amenity"] }),
+    room_type_hints: pickApprovedEvidence(approvedContext, { contextTypes: ["room_type"], keywords: ["room", "suite", "villa", "ห้อง"] }),
+    checkin_checkout: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["check_in_out"], keywords: ["check-in", "check-out", "เวลาเช็ค"] })),
+    booking_channels: pickApprovedEvidence(approvedContext, { contextTypes: ["booking_channel"], keywords: ["booking", "agoda", "expedia", "จอง"] }),
+    nearby_landmarks: pickApprovedEvidence(approvedContext, { contextTypes: ["nearby_landmark"], keywords: ["nearby", "landmark", "ใกล้"] }),
+    stay_best_for: pickApprovedEvidence(approvedContext, { contextTypes: ["audience"], keywords: ["stay", "เหมาะกับ", "พัก"] }),
+  };
+
+  const eventProfile = {
+    event_date_hints: pickApprovedEvidence(approvedContext, { contextTypes: ["date_time", "schedule"], keywords: ["date", "วันที่", "เวลา", "schedule"] }),
+    schedule_hints: pickApprovedEvidence(approvedContext, { contextTypes: ["schedule"], keywords: ["schedule", "program", "กิจกรรม"] }),
+    ticket_hints: pickApprovedEvidence(approvedContext, { contextTypes: ["ticketing"], keywords: ["ticket", "บัตร", "ค่าเข้า"] }),
+    venue_notes: pickApprovedEvidence(approvedContext, { contextTypes: ["venue", "location"], keywords: ["venue", "สถานที่"] }),
+    event_best_for: pickApprovedEvidence(approvedContext, { contextTypes: ["audience"], keywords: ["best for", "เหมาะกับ", "ผู้เข้าร่วม"] }),
+  };
+
+  const verification = {
+    verified_facts: uniqueList([
+      ...extractFactualApprovedFacts(approvedContext, { category: item.category }),
+      ...Object.entries(coreFactualFields)
+        .filter(([, value]) => value != null && String(value).trim() !== "")
+        .map(([key, value]) => `${key}: ${String(value)}`),
+    ]).slice(0, 20),
+    needs_verification: uniqueList([
+      ...missingFields,
+      ...verifyRequired,
+      ...strictNeedsVerification,
+    ]),
+    publish_blockers: uniqueList([
+      ...minMissing,
+      ...strictPublishBlockers,
+    ]),
+  };
+
   return {
+    taxonomy_version: "page_curation_taxonomy_v1",
     core_factual_fields: coreFactualFields,
     place_fields: typeSpecific.place_fields,
     hotel_fields: typeSpecific.hotel_fields,
@@ -342,6 +590,13 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
       verify_required: verifyRequired,
       quality_gaps: qualityGaps,
     },
+    universal_curation_profile: universalProfile,
+    practical_profile: practicalProfile,
+    place_profile: placeProfile,
+    restaurant_profile: restaurantProfile,
+    hotel_profile: hotelProfile,
+    event_profile: eventProfile,
+    verification,
     provenance: {
       contract_version: "field_pack_contract_v1",
       source: "clean_structured_context",
