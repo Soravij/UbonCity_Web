@@ -55,6 +55,30 @@ function getApiUrl() {
   return "http://127.0.0.1:5000/api";
 }
 
+export async function postAnalyticsEvent(payload = {}) {
+  const apiUrl = getApiUrl();
+  const body = {
+    event_type: payload?.event_type,
+    source_path: payload?.source_path,
+    entity_type: payload?.entity_type || null,
+    entity_id: payload?.entity_id || null,
+    referrer_path: payload?.referrer_path || null,
+    metadata_json: payload?.metadata_json && typeof payload.metadata_json === "object" ? payload.metadata_json : null,
+  };
+
+  try {
+    const res = await fetch(`${apiUrl}/analytics/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      keepalive: true,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function getPlaces(category, lang) {
   const apiUrl = getApiUrl();
 

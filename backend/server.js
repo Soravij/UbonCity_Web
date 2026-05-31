@@ -15,6 +15,7 @@ import mediaRoutes from "./routes/mediaRoutes.js";
 import lifecycleRoutes from "./routes/lifecycleRoutes.js";
 import homepageCurationRoutes from "./routes/homepageCurationRoutes.js";
 import internalAiRoutes from "./routes/internalAiRoutes.js";
+import analyticsRoutes from "./routes/analyticsRoutes.js";
 import { initializeLifecycleInfrastructure } from "./controllers/lifecycleController.js";
 import { ensureUtf8mb4 } from "./config/ensureUtf8mb4.js";
 import { ensureBootstrapOwner } from "./services/bootstrapOwnerService.js";
@@ -76,6 +77,7 @@ app.use("/api", homepageCurationRoutes);
 app.use("/api", reviewContentRoutes);
 app.use("/api", integrationReadinessRoutes);
 app.use("/api", internalAiRoutes);
+app.use("/api", analyticsRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error("Unhandled backend error:", err);
