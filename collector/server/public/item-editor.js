@@ -3596,6 +3596,100 @@ function buildFieldPackCards() {
   ];
 }
 
+function toReviewList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((row) => String(row || "").trim()).filter(Boolean);
+}
+
+function parseFieldPackContractFromWriterNotes(writerNotes) {
+  const raw = String(writerNotes || "").trim();
+  if (!raw) return null;
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (String(parsed.contract_version || "").trim() === "") return null;
+  return parsed;
+}
+
+function buildContractFactRows(coreFacts = {}) {
+  if (!coreFacts || typeof coreFacts !== "object" || Array.isArray(coreFacts)) return [];
+  const rows = [];
+  for (const [key, value] of Object.entries(coreFacts)) {
+    if (value == null) continue;
+    const text = Array.isArray(value) ? value.join(", ") : String(value).trim();
+    if (!text) continue;
+    rows.push({ key, value: text });
+  }
+  return rows;
+}
+
+function renderFieldPackContractPanel() {
+  const panel = qs("field-pack-contract-panel");
+  const statusNode = qs("field-pack-contract-status");
+  if (!panel || !statusNode) return;
+
+  const fieldPack = state.fieldPack && typeof state.fieldPack === "object" ? state.fieldPack : {};
+  const contract = parseFieldPackContractFromWriterNotes(fieldPack.writer_notes);
+
+  if (!contract) {
+    statusNode.className = "status";
+    statusNode.textContent = "No JSON field pack contract found in writer notes.";
+    panel.innerHTML = '<p class="muted">Keep using the normal field pack flow. Contract panel appears when writer_notes contains contract JSON.</p>';
+    return;
+  }
+
+  const curationSignals = contract.curation_signals && typeof contract.curation_signals === "object"
+    ? contract.curation_signals
+    : {};
+  const checklists = contract.checklists && typeof contract.checklists === "object"
+    ? contract.checklists
+    : {};
+
+  const missingFields = toReviewList(curationSignals.missing_fields || checklists.missing_data);
+  const verifyRequired = toReviewList(curationSignals.verify_required || checklists.verify_required);
+  const contentRisks = toReviewList(curationSignals.content_risks || checklists.quality_gaps);
+  const suggestedBlocks = toReviewList(curationSignals.suggested_page_blocks);
+  const coreFactRows = buildContractFactRows(contract.core_factual_fields);
+  const verifiedFacts = toReviewList(fieldPack.verified_facts_json);
+  const uncertainFacts = toReviewList(fieldPack.uncertain_facts_json);
+  const hasRiskWarning = missingFields.length > 0 || verifyRequired.length > 0;
+
+  statusNode.className = `status ${hasRiskWarning ? "warn" : "ok"}`;
+  statusNode.textContent = hasRiskWarning
+    ? "Warning: ข้อมูลนี้ยังไม่ควรถือเป็น publish-ready"
+    : "Contract is present. Review details before publish decision.";
+
+  const listOrEmpty = (items, emptyText = "none") => items.length
+    ? `<ul>${items.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>`
+    : `<p class="muted">${escapeHtml(emptyText)}</p>`;
+
+  panel.innerHTML = `
+    <div class="readiness-summary">
+      <div class="summary-row"><strong>contract_version</strong><span>${escapeHtml(String(contract.contract_version || "-"))}</span></div>
+      <div class="summary-row"><strong>field_pack_id</strong><span>${escapeHtml(String(Number(fieldPack.id || 0) || "-"))}</span></div>
+      <div class="summary-row"><strong>source_draft_input_snapshot_id</strong><span>${escapeHtml(String(Number(fieldPack.source_draft_input_snapshot_id || 0) || "-"))}</span></div>
+      <div class="summary-row"><strong>priority_cta</strong><span>${escapeHtml(String(curationSignals.priority_cta || "-"))}</span></div>
+    </div>
+    <div class="article-brief-doc">
+      <section class="article-brief-section"><h3>Core Facts</h3>${coreFactRows.length ? `<ul>${coreFactRows.map((row) => `<li><strong>${escapeHtml(row.key)}:</strong> ${escapeHtml(row.value)}</li>`).join("")}</ul>` : '<p class="muted">No core facts in contract.</p>'}</section>
+      <section class="article-brief-section"><h3>Verified / Grounded Facts</h3>${listOrEmpty(verifiedFacts, "No verified facts yet.")}</section>
+      <section class="article-brief-section"><h3>Uncertain / Needs Review</h3>${listOrEmpty(uncertainFacts, "No uncertain facts listed.")}</section>
+      <section class="article-brief-section"><h3>Missing Data</h3>${listOrEmpty(missingFields, "No missing_fields.")}</section>
+      <section class="article-brief-section"><h3>Verify Required</h3>${listOrEmpty(verifyRequired, "No verify_required.")}</section>
+      <section class="article-brief-section"><h3>Suggested Page Blocks</h3>${listOrEmpty(suggestedBlocks, "No suggested blocks.")}</section>
+      <section class="article-brief-section"><h3>Content Risks</h3>${listOrEmpty(contentRisks, "No content risks.")}</section>
+      <details>
+        <summary>Debug: raw contract JSON</summary>
+        <pre>${escapeHtml(JSON.stringify(contract, null, 2))}</pre>
+      </details>
+    </div>
+  `;
+}
+
 function renderStepFourGuides() {
   if (isCleanMode) return;
   renderEditorReferenceSourceSummary();
@@ -3604,6 +3698,7 @@ function renderStepFourGuides() {
   renderGuideCards("ai-summary-preview", buildAiSummaryCards());
   renderGuideCards("fact-check-preview", buildFactCheckCards());
   renderGuideCards("field-brief-preview", buildFieldPackCards());
+  renderFieldPackContractPanel();
 }
 
 function roleLabel(row) {
