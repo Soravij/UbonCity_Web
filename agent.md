@@ -14,7 +14,7 @@ Use the repo-local stack script on runtime machines. Do not hardcode `RuntimeRoo
 
 ```powershell
 cd D:\UbonRuntime\repos\UbonCity_Web
-git pull --ff-only origin codex/tester-build-v1-place-event-collector-fixes
+git pull --ff-only origin codex/collector-login-sync-post-auth
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\UbonRuntime\repos\UbonCity_Web\ops\windows\test-stack.ps1 -Action stop
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\UbonRuntime\repos\UbonCity_Web\ops\windows\test-stack.ps1 -Action start
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\UbonRuntime\repos\UbonCity_Web\ops\windows\test-stack.ps1 -Action status
