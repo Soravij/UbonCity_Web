@@ -128,6 +128,22 @@ function sanitizeContentPayload(payload = {}) {
     transport_subtype: cleanSlug(payload.transport_subtype, { required: false, field: "content.transport_subtype" }) || null,
     transport_contact_name: cleanPlainText(payload.transport_contact_name, { required: false, max: 255, field: "content.transport_contact_name" }) || null,
     transport_contact_phone: cleanPlainText(payload.transport_contact_phone, { required: false, max: 120, field: "content.transport_contact_phone" }) || null,
+    phone: cleanPlainText(payload.phone, { required: false, max: 120, field: "content.phone" }) || null,
+    line_url: payload.line_url ? cleanUrl(payload.line_url, { field: "content.line_url" }) : null,
+    facebook_url: payload.facebook_url ? cleanUrl(payload.facebook_url, { field: "content.facebook_url" }) : null,
+    website_url: payload.website_url ? cleanUrl(payload.website_url, { field: "content.website_url" }) : null,
+    primary_cta: ["map", "phone", "line"].includes(String(payload.primary_cta || "").trim().toLowerCase())
+      ? String(payload.primary_cta || "").trim().toLowerCase()
+      : null,
+    tracking_entity_type: ["place", "event", "review_content"].includes(String(payload.tracking_entity_type || "").trim().toLowerCase())
+      ? String(payload.tracking_entity_type || "").trim().toLowerCase()
+      : null,
+    tracking_entity_id:
+      payload.tracking_entity_id == null || payload.tracking_entity_id === ""
+        ? null
+        : (Number.isFinite(Number(payload.tracking_entity_id)) && Number(payload.tracking_entity_id) > 0
+          ? Math.floor(Number(payload.tracking_entity_id))
+          : null),
     transport_contact_details: cleanPlainText(payload.transport_contact_details, { required: false, max: 40000, field: "content.transport_contact_details" }) || null,
     transport_link_url: payload.transport_link_url ? cleanUrl(payload.transport_link_url, { field: "content.transport_link_url" }) : null,
     public_entity_type: publicEntityType === contentType ? publicEntityType : null,
@@ -212,15 +228,17 @@ export async function ingestReviewContent(payload) {
         `INSERT INTO review_contents (
           source_system, source_content_item_id, content_type, status, lang, category, title, body, excerpt,
           meta_title, meta_description, event_period_text, location_text, latitude, longitude, map_url,
-          google_place_id, transport_subtype, transport_contact_name, transport_contact_phone,
+          google_place_id, transport_subtype, transport_contact_name, transport_contact_phone, phone, line_url, facebook_url, website_url, primary_cta,
+          tracking_entity_type, tracking_entity_id,
           transport_contact_details, transport_link_url, slug, slug_locked, public_entity_type, public_entity_id,
           current_batch_uid, review_payload_json
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           sourceSystem, sourceContentItemId, content.content_type, "pending_review", content.lang, content.category,
           content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
           content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url,
           content.google_place_id, content.transport_subtype, content.transport_contact_name, content.transport_contact_phone,
+          content.phone, content.line_url, content.facebook_url, content.website_url, content.primary_cta, content.tracking_entity_type, content.tracking_entity_id,
           content.transport_contact_details, content.transport_link_url, content.slug, content.slug ? 1 : 0,
           content.public_entity_type, content.public_entity_id, currentBatchUid,
           JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
@@ -234,14 +252,16 @@ export async function ingestReviewContent(payload) {
         `UPDATE review_contents
          SET status='pending_review', lang=?, category=?, title=?, body=?, excerpt=?, meta_title=?, meta_description=?,
              event_period_text=?, location_text=?, latitude=?, longitude=?, map_url=?, google_place_id=?,
-             transport_subtype=?, transport_contact_name=?, transport_contact_phone=?, transport_contact_details=?,
+             transport_subtype=?, transport_contact_name=?, transport_contact_phone=?, phone=?, line_url=?, facebook_url=?, website_url=?, primary_cta=?,
+             tracking_entity_type=?, tracking_entity_id=?, transport_contact_details=?,
              transport_link_url=?, slug=?, slug_locked=?, public_entity_type=?, public_entity_id=?,
              current_batch_uid=?, review_payload_json=?, updated_at=CURRENT_TIMESTAMP
          WHERE id=?`,
         [
           content.lang, content.category, content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
           content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url, content.google_place_id,
-          content.transport_subtype, content.transport_contact_name, content.transport_contact_phone, content.transport_contact_details,
+          content.transport_subtype, content.transport_contact_name, content.transport_contact_phone, content.phone, content.line_url, content.facebook_url, content.website_url,
+          content.primary_cta, content.tracking_entity_type, content.tracking_entity_id, content.transport_contact_details,
           content.transport_link_url, content.slug, content.slug ? 1 : 0, content.public_entity_type, content.public_entity_id,
           currentBatchUid, JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
           reviewContentId,

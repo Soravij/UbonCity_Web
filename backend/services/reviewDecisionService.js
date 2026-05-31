@@ -44,6 +44,26 @@ function selectPreferredPlaceSlug(content, requestedSlug, existingSlug) {
   return buildFallbackPlaceSlug(content);
 }
 
+function buildApproveWarnings(content) {
+  const warnings = [];
+  const mapUrl = String(content?.map_url || "").trim();
+  const phone = String(content?.phone || "").trim();
+  const transportContactPhone = String(content?.transport_contact_phone || "").trim();
+  const hasPhoneCta = Boolean(phone || transportContactPhone);
+  const lineUrl = String(content?.line_url || "").trim();
+  const primaryCta = String(content?.primary_cta || "").trim().toLowerCase();
+  if (!mapUrl && !hasPhoneCta && !lineUrl) {
+    warnings.push({ code: "CTA_EMPTY", message: "No CTA data (map_url/phone/line_url) in review content" });
+  }
+  if (primaryCta && !["map", "phone", "line"].includes(primaryCta)) {
+    warnings.push({ code: "PRIMARY_CTA_INVALID", message: "primary_cta is not in supported set" });
+  }
+  if (primaryCta === "map" && !mapUrl) warnings.push({ code: "PRIMARY_CTA_MAP_MISSING", message: "primary_cta=map but map_url is empty" });
+  if (primaryCta === "phone" && !hasPhoneCta) warnings.push({ code: "PRIMARY_CTA_PHONE_MISSING", message: "primary_cta=phone but phone is empty" });
+  if (primaryCta === "line" && !lineUrl) warnings.push({ code: "PRIMARY_CTA_LINE_MISSING", message: "primary_cta=line but line_url is empty" });
+  return warnings;
+}
+
 async function ensureUniquePlaceSlug(connection, initialSlug, excludePlaceId = null) {
   const base = slugify(initialSlug);
   let candidate = base;
@@ -79,7 +99,8 @@ async function upsertPublishedPlace(connection, content, slug) {
       `UPDATE places
        SET category_id=?, slug=?, is_approved=1,
            latitude=?, longitude=?, map_url=?, google_place_id=?, transport_subtype=?,
-           transport_contact_name=?, transport_contact_phone=?, transport_contact_details=?, transport_link_url=?
+           transport_contact_name=?, transport_contact_phone=?, phone=?, line_url=?, facebook_url=?, website_url=?, primary_cta=?, tracking_entity_type=?, tracking_entity_id=?,
+           transport_contact_details=?, transport_link_url=?
        WHERE id=?`,
       [
         categoryId,
@@ -91,6 +112,13 @@ async function upsertPublishedPlace(connection, content, slug) {
         content.transport_subtype,
         content.transport_contact_name,
         content.transport_contact_phone,
+        content.phone,
+        content.line_url,
+        content.facebook_url,
+        content.website_url,
+        content.primary_cta,
+        content.tracking_entity_type,
+        content.tracking_entity_id,
         content.transport_contact_details,
         content.transport_link_url,
         placeId,
@@ -102,8 +130,9 @@ async function upsertPublishedPlace(connection, content, slug) {
     const [insertResult] = await connection.query(
       `INSERT INTO places (
         category_id, slug, image, is_approved, latitude, longitude, map_url, google_place_id,
-        transport_subtype, transport_contact_name, transport_contact_phone, transport_contact_details, transport_link_url
-      ) VALUES (?,?,?,1,?,?,?,?,?,?,?, ?,?)`,
+        transport_subtype, transport_contact_name, transport_contact_phone, phone, line_url, facebook_url, website_url, primary_cta, tracking_entity_type, tracking_entity_id,
+        transport_contact_details, transport_link_url
+      ) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         categoryId,
         resolvedSlug,
@@ -115,6 +144,13 @@ async function upsertPublishedPlace(connection, content, slug) {
         content.transport_subtype,
         content.transport_contact_name,
         content.transport_contact_phone,
+        content.phone,
+        content.line_url,
+        content.facebook_url,
+        content.website_url,
+        content.primary_cta,
+        content.tracking_entity_type,
+        content.tracking_entity_id,
         content.transport_contact_details,
         content.transport_link_url,
       ]
@@ -194,6 +230,7 @@ export async function approveReviewContent({ reviewContent, actorUserId, reviewN
     let slug = String(content.slug || "").trim() || null;
     let publicEntityId = null;
     const contentType = String(content.content_type || "").trim().toLowerCase();
+    const approveWarnings = buildApproveWarnings(content);
     if (contentType === "place") {
       await assertNoEmerConflictForPublish({
         entityType: "place",
@@ -251,7 +288,7 @@ export async function approveReviewContent({ reviewContent, actorUserId, reviewN
       nextStatus: "published",
       actorUserId,
       reviewNote,
-      payloadSnapshot: { slug, public_entity_id: publicEntityId, public_entity_type: contentType },
+      payloadSnapshot: { slug, public_entity_id: publicEntityId, public_entity_type: contentType, warnings: approveWarnings },
       executor: connection,
     });
 
@@ -265,7 +302,14 @@ export async function approveReviewContent({ reviewContent, actorUserId, reviewN
     });
 
     await connection.commit();
-    result = { id: reviewContent.id, status: "published", slug, public_entity_type: contentType, public_entity_id: publicEntityId };
+    result = {
+      id: reviewContent.id,
+      status: "published",
+      slug,
+      public_entity_type: contentType,
+      public_entity_id: publicEntityId,
+      warnings: approveWarnings,
+    };
   } catch (err) {
     try {
       await connection.rollback();

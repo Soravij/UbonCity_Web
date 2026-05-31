@@ -1,8 +1,11 @@
+"use client";
+
 import Link from "next/link";
 import MediaGallery from "@/components/MediaGallery";
 import RotatedImage from "@/components/RotatedImage";
 import { hasRichHtmlContent, sanitizeRichContentHtml } from "@/lib/richContent";
 import { resolveDecisionSignalFromTags } from "@/lib/phase56-decision-helpers.mjs";
+import { postAnalyticsEvent } from "@/lib/api";
 
 const DETAIL_COPY = {
   en: {
@@ -17,6 +20,10 @@ const DETAIL_COPY = {
     contactPhone: "Phone",
     contactLink: "Website / Link",
     contactDetails: "Details",
+    ctaTitle: "Quick Actions",
+    ctaMap: "Open Map",
+    ctaPhone: "Call",
+    ctaLine: "Open LINE",
     audience: { family: "Family / mixed ages", couple: "Couples / photo-friendly trips", solo: "Solo / small groups", all: "Most travelers" },
     time: { morning: "Morning to daytime", evening: "Late afternoon to evening", anytime: "Anytime" },
     budget: { budget: "Budget-friendly", mid: "Mid-range", premium: "Premium / flexible budget" },
@@ -33,6 +40,10 @@ const DETAIL_COPY = {
     contactPhone: "เบอร์โทร",
     contactLink: "ลิงก์หลัก",
     contactDetails: "รายละเอียดติดต่อ",
+    ctaTitle: "ช่องทางติดต่อ / ไปยังสถานที่",
+    ctaMap: "เปิดแผนที่",
+    ctaPhone: "โทร",
+    ctaLine: "เปิด LINE",
     audience: { family: "ครอบครัว / ไปได้หลายช่วงวัย", couple: "คู่รัก / เน้นบรรยากาศและถ่ายรูป", solo: "เดี่ยวหรือกลุ่มเล็ก", all: "เหมาะกับผู้เดินทางทั่วไป" },
     time: { morning: "ช่วงเช้าถึงกลางวัน", evening: "ช่วงเย็นถึงค่ำ", anytime: "ไปได้ทุกช่วงเวลา" },
     budget: { budget: "ประหยัดและคุมงบ", mid: "งบปานกลาง", premium: "งบยืดหยุ่นหรือพรีเมียม" },
@@ -143,6 +154,18 @@ function resolveDecisionSignal(place, category) {
   return resolveDecisionSignalFromTags(fallback, normalized);
 }
 
+function safeRelativePathname() {
+  if (typeof window === "undefined") return "/";
+  const pathname = String(window.location?.pathname || "").trim();
+  if (!pathname || !pathname.startsWith("/")) return "/";
+  return pathname;
+}
+
+function hasPublishedPlaceIdentity(place) {
+  const placeId = Number(place?.id || 0);
+  return Number.isFinite(placeId) && placeId > 0;
+}
+
 export default function PlaceDetailContent({ place, activeLang = "th", category, categoryLabel = "-", isReviewMode = false }) {
   const detailCopy = DETAIL_COPY[activeLang] || DETAIL_COPY.en;
   const rawGalleryImages = Array.isArray(place?.media_gallery_images)
@@ -165,6 +188,15 @@ export default function PlaceDetailContent({ place, activeLang = "th", category,
     : blocks;
   const decisionSignal = resolveDecisionSignal(place, category);
   const nearbyHref = `/${activeLang}/${category}/${place?.slug}`;
+  const ctaMapUrl = String(place?.map_url || "").trim();
+  const ctaPhone = String(place?.phone || place?.transport_contact_phone || "").trim();
+  const ctaLineUrl = String(place?.line_url || "").trim();
+  const ctaRows = [
+    ctaMapUrl ? { key: "map", label: detailCopy.ctaMap, href: ctaMapUrl, eventType: "MAP_CLICK" } : null,
+    ctaPhone ? { key: "phone", label: detailCopy.ctaPhone, href: `tel:${ctaPhone}`, eventType: "PHONE_CLICK" } : null,
+    ctaLineUrl ? { key: "line", label: detailCopy.ctaLine, href: ctaLineUrl, eventType: "LINE_CLICK" } : null,
+  ].filter(Boolean);
+  const shouldTrackPublicCtaClick = !isReviewMode && hasPublishedPlaceIdentity(place);
   const isTransportCategory = String(category || "").trim().toLowerCase() === "transport";
   const contactRows = isTransportCategory
     ? [
@@ -244,6 +276,37 @@ export default function PlaceDetailContent({ place, activeLang = "th", category,
                   <p className="mt-1 whitespace-pre-line text-sm">{row.value}</p>
                 )}
               </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {ctaRows.length ? (
+        <section className="section-panel p-5 md:p-6">
+          <h2 className="text-lg font-semibold md:text-xl">{detailCopy.ctaTitle}</h2>
+          <div className="mt-3 flex flex-wrap gap-3">
+            {ctaRows.map((row) => (
+              <a
+                key={row.key}
+                href={row.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => {
+                  if (!shouldTrackPublicCtaClick) return;
+                  void postAnalyticsEvent({
+                    event_type: row.eventType,
+                    source_path: safeRelativePathname(),
+                    entity_type: "place",
+                    entity_id: Number(place?.id || 0),
+                    metadata_json: {
+                      primary_cta: String(place?.primary_cta || "").trim().toLowerCase() || null,
+                    },
+                  });
+                }}
+                className="interactive-tile inline-flex rounded-full px-5 py-3 text-sm font-semibold transition"
+              >
+                {row.label}
+              </a>
             ))}
           </div>
         </section>
