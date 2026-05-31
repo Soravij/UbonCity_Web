@@ -8,6 +8,7 @@ const SESSION_KEY = "admin_session";
 const THEME_PREFERENCE_KEY = "ubon_theme_preference";
 const DASHBOARD_PATHS = [
   "/dashboard",
+  "/dashboard/analytics",
   "/dashboard/places",
   "/dashboard/emergency",
   "/dashboard/delete-content",

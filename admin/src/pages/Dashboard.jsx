@@ -3,6 +3,7 @@ import { api, authHeaders } from "../api/api";
 import Settings from "./Settings";
 import Users from "./Users";
 import Approvals from "./Approvals";
+import CtaAnalytics from "./CtaAnalytics";
 import HomepageCuration from "./HomepageCuration";
 import EmergencyWorkspace from "./EmergencyWorkspace";
 import DeleteContentWorkspace from "./DeleteContentWorkspace";
@@ -13,6 +14,7 @@ function buildMainMenu(isAdminLike, pendingCount = 0) {
 
   return [
     { key: "approvals", label: "Approvals", path: "/dashboard/approvals", badge: pendingCount },
+    { key: "analytics", label: "CTA & Analytics", path: "/dashboard/analytics" },
     { key: "homepage-curation", label: "Homepage Curation", path: "/dashboard/homepage-curation" },
     { key: "users", label: "Users", path: "/dashboard/users" },
     ...base,
@@ -29,6 +31,10 @@ function DashboardContent({ path, session, onPendingChanged, onNavigate }) {
 
   if (path === "/dashboard/approvals" && isAdminLike) {
     return <Approvals token={session.token} onPendingChanged={onPendingChanged} onNavigate={onNavigate} />;
+  }
+
+  if (path === "/dashboard/analytics" && isAdminLike) {
+    return <CtaAnalytics token={session.token} />;
   }
 
   if (path === "/dashboard/homepage-curation" && isAdminLike) {
