@@ -16,7 +16,7 @@ const GOVERNANCE_REASON_CODES = Object.freeze({
 import { FIELD_PACK_AGENT_KEY, createAgentGenerationEngine } from "./agent-generation.mjs";
 import { createTranslationGenerator } from "../translation/service.mjs";
 import { runAutomaticTranslationChecks } from "../quality/translation-checks.mjs";
-import { buildCleanStructuredContext, validateCleanMinimum } from "./clean-context.mjs";
+import { buildCleanStructuredContext, buildFieldPackContractFromCleanContext, validateCleanMinimum } from "./clean-context.mjs";
 
 function traceAiDraft(stage, details = {}) {
   const ts = new Date().toISOString();
@@ -1230,6 +1230,62 @@ function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = null) {
   };
 }
 
+function toFieldPackFactList(contract) {
+  if (!contract || typeof contract !== "object") return [];
+  const core = contract.core_factual_fields && typeof contract.core_factual_fields === "object"
+    ? contract.core_factual_fields
+    : {};
+  const out = [];
+  const title = String(core.title || "").trim();
+  const category = String(core.category || "").trim();
+  const mapUrl = String(core.map_url || "").trim();
+  if (title) out.push(`title: ${title}`);
+  if (category) out.push(`category: ${category}`);
+  if (mapUrl) out.push(`map_url: ${mapUrl}`);
+  return out;
+}
+
+function toFieldPackUnknownList(contract) {
+  const missing = Array.isArray(contract?.curation_signals?.missing_fields)
+    ? contract.curation_signals.missing_fields
+    : [];
+  const verifyRequired = Array.isArray(contract?.curation_signals?.verify_required)
+    ? contract.curation_signals.verify_required
+    : [];
+  return [...missing, ...verifyRequired]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+}
+
+function buildFieldPackPayloadFromCleanContract(contract) {
+  if (!contract || typeof contract !== "object") {
+    return {
+      ai_highlights: [],
+      verified_facts: [],
+      uncertain_facts: [],
+      writer_key_points: [],
+      writer_notes: "",
+    };
+  }
+  const suggestedBlocks = Array.isArray(contract?.curation_signals?.suggested_page_blocks)
+    ? contract.curation_signals.suggested_page_blocks.map((x) => String(x || "").trim()).filter(Boolean)
+    : [];
+  const contentRisks = Array.isArray(contract?.curation_signals?.content_risks)
+    ? contract.curation_signals.content_risks.map((x) => String(x || "").trim()).filter(Boolean)
+    : [];
+  const missingData = Array.isArray(contract?.checklists?.missing_data)
+    ? contract.checklists.missing_data.map((x) => String(x || "").trim()).filter(Boolean)
+    : [];
+  return {
+    ai_highlights: suggestedBlocks,
+    verified_facts: toFieldPackFactList(contract),
+    uncertain_facts: toFieldPackUnknownList(contract),
+    writer_key_points: missingData,
+    writer_notes: JSON.stringify(contract),
+    field_notes: contentRisks.join("\n").trim(),
+  };
+}
+
 function countFieldPackChecklist(fieldPack, checklistType) {
   const rows = Array.isArray(fieldPack?.field_pack_checklists) ? fieldPack.field_pack_checklists : [];
   return rows.filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === checklistType && String(row?.item_text || "").trim()).length;
@@ -1262,12 +1318,31 @@ function assertAgentFieldPackContract(fieldPack) {
   }
 }
 
-function saveAgentFieldPack(repo, item, fieldPack, actorEmail) {
+function saveAgentFieldPack(repo, item, fieldPack, actorEmail, options = {}) {
   const currentItem = repo.getItem(item.id);
   if (!currentItem) throw new Error(`item ${item.id} not found while saving field pack`);
   const existingFieldPack = repo.getCurrentFieldPackByItem(item.id);
+  const cleanContract = options.cleanContract || null;
+  const contractPayload = buildFieldPackPayloadFromCleanContract(cleanContract);
+  const sourceDraftInputSnapshotId = Number(options.sourceDraftInputSnapshotId || 0) || null;
+  const basePayload = buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack);
   const payload = {
-    ...buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack),
+    ...basePayload,
+    ai_highlights: Array.isArray(basePayload.ai_highlights) && basePayload.ai_highlights.length
+      ? basePayload.ai_highlights
+      : contractPayload.ai_highlights,
+    verified_facts: Array.isArray(basePayload.verified_facts) && basePayload.verified_facts.length
+      ? basePayload.verified_facts
+      : contractPayload.verified_facts,
+    uncertain_facts: Array.isArray(basePayload.uncertain_facts) && basePayload.uncertain_facts.length
+      ? basePayload.uncertain_facts
+      : contractPayload.uncertain_facts,
+    writer_key_points: Array.isArray(basePayload.writer_key_points) && basePayload.writer_key_points.length
+      ? basePayload.writer_key_points
+      : contractPayload.writer_key_points,
+    writer_notes: String(basePayload.writer_notes || "").trim() || contractPayload.writer_notes,
+    field_notes: String(basePayload.field_notes || "").trim() || contractPayload.field_notes,
+    source_draft_input_snapshot_id: sourceDraftInputSnapshotId,
     content_item_id: item.id,
     updated_by: actorEmail,
   };
@@ -1332,11 +1407,29 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
     const contextDescription = buildDescriptionFromStructuredContext(preview);
     const mapped = mapFromDb(item, idx + 1);
     const imageContext = preview?.image_context || repo.listApprovedImageContext(item.id);
+    const cleanFieldPackContract = buildFieldPackContractFromCleanContext(preview);
+    let draftInputSnapshot = null;
+    try {
+      draftInputSnapshot = repo.createDraftInputSnapshot(
+        item.id,
+        {
+          clean_context: preview,
+          field_pack_contract: cleanFieldPackContract,
+        },
+        actorEmail,
+        "approved_context_preview"
+      );
+    } catch {
+      draftInputSnapshot = null;
+    }
+
     return [{
       ...mapped,
       description: mode === "ai" ? mapped.description : contextDescription || mapped.description,
       map_url: preview?.item?.map_url || mapped.map_url,
       structured_context: preview,
+      clean_field_pack_contract: cleanFieldPackContract,
+      source_draft_input_snapshot_id: Number(draftInputSnapshot?.id || 0) || null,
       approved_context: approvedContext,
       image: imageContext?.cover_url || mapped.image,
       image_context_cover: imageContext?.cover_url || "",
@@ -1451,7 +1544,10 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
 
     traceAiDraft("item.save.start", { item_id: Number(finalItem?.id || 0) || null, generated_by: generatedBy });
     if (agentEngine) {
-      const savedFieldPack = saveAgentFieldPack(repo, finalItem, finalFieldPack, actorEmail);
+      const savedFieldPack = saveAgentFieldPack(repo, finalItem, finalFieldPack, actorEmail, {
+        cleanContract: finalItem?.clean_field_pack_contract || null,
+        sourceDraftInputSnapshotId: finalItem?.source_draft_input_snapshot_id || null,
+      });
       traceAiDraft("field_pack.save.ok", {
         item_id: Number(finalItem?.id || 0) || null,
         field_pack_id: Number(savedFieldPack?.id || 0) || null,
@@ -2254,7 +2350,6 @@ export function compensateReleaseAfterSyncFailure(repo, actorEmail, options = {}
     published_article_status: articleStatusAfter,
   };
 }
-
 
 
 
