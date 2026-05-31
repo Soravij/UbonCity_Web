@@ -376,12 +376,16 @@ test("field pack contract does not add hotel or event blockers to cafe/place ite
   const needs = contract.verification.needs_verification;
 
   assert.equal(contract.taxonomy_version, "page_curation_taxonomy_v1");
+  assert.ok(!blockers.includes("price_range"));
+  assert.ok(!blockers.includes("restaurant_features"));
   assert.ok(!blockers.includes("hotel_amenities"));
   assert.ok(!blockers.includes("event_date_hints"));
   assert.ok(!blockers.includes("ticket_hints"));
+  assert.ok(needs.includes("price_range"));
+  assert.ok(needs.includes("restaurant_features"));
   assert.ok(!needs.includes("hotel_amenities"));
   assert.ok(!needs.includes("event_date_hints"));
-  assert.ok(!needs.includes("ticket_hints"));
+  assert.ok(!needs.includes("ticket_hints")); // cafe/place scope should not include event checks
 });
 
 test("field pack contract keeps hotel checks scoped to hotel categories", () => {
@@ -406,6 +410,8 @@ test("field pack contract keeps hotel checks scoped to hotel categories", () => 
 
   assert.ok(needs.includes("hotel_amenities"));
   assert.ok(needs.includes("checkin_checkout"));
+  assert.ok(!blockers.includes("hotel_amenities"));
+  assert.ok(!blockers.includes("checkin_checkout"));
   assert.ok(!blockers.includes("event_date_hints"));
   assert.ok(!blockers.includes("ticket_hints"));
 });
@@ -432,6 +438,8 @@ test("field pack contract keeps event checks scoped to event items", () => {
 
   assert.ok(needs.includes("event_date_hints"));
   assert.ok(needs.includes("ticket_hints"));
+  assert.ok(!blockers.includes("ticket_hints"));
+  assert.ok(blockers.includes("event_date_hints"));
   assert.ok(!blockers.includes("hotel_amenities"));
   assert.ok(!blockers.includes("checkin_checkout"));
 });

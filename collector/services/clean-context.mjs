@@ -439,38 +439,38 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
   const scopedStrictRules = [];
   if (isEventItem) {
     scopedStrictRules.push(
-      { key: "event_date_hints", contextTypes: ["date_time", "schedule"], keywords: ["date", "เวลา", "วันที่", "schedule"], blocker: true },
-      { key: "ticket_hints", contextTypes: ["ticketing"], keywords: ["ticket", "บัตร", "ค่าเข้า"], blocker: true },
-      { key: "venue_notes", contextTypes: ["venue", "location", "address"], keywords: ["venue", "สถานที่", "address"], blocker: true }
+      { key: "event_date_hints", contextTypes: ["date_time", "schedule"], keywords: ["date", "เวลา", "วันที่", "schedule"] },
+      { key: "ticket_hints", contextTypes: ["ticketing"], keywords: ["ticket", "บัตร", "ค่าเข้า"] },
+      { key: "venue_notes", contextTypes: ["venue", "location", "address"], keywords: ["venue", "สถานที่", "address"] }
     );
   } else if (isHotelCategory) {
     scopedStrictRules.push(
-      { key: "parking", contextTypes: ["parking"], keywords: ["parking", "ที่จอด"], blocker: false },
-      { key: "pet_friendly", contextTypes: ["pet", "pet_policy"], keywords: ["pet", "สัตว์เลี้ยง"], blocker: false },
-      { key: "family_friendly", contextTypes: ["family"], keywords: ["family", "ครอบครัว", "เด็ก"], blocker: false },
-      { key: "accessibility", contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible", "ทางลาด"], blocker: false },
-      { key: "hotel_amenities", contextTypes: ["amenity"], keywords: ["amenity", "wifi", "pool", "spa", "อาหารเช้า"], blocker: true },
-      { key: "room_type_hints", contextTypes: ["room_type"], keywords: ["room", "suite", "villa", "ห้อง"], blocker: false },
-      { key: "checkin_checkout", contextTypes: ["check_in_out"], keywords: ["check-in", "check-out", "เวลาเช็ค"], blocker: true },
-      { key: "booking_channels", contextTypes: ["booking_channel"], keywords: ["booking", "agoda", "expedia", "จอง"], blocker: false }
+      { key: "parking", contextTypes: ["parking"], keywords: ["parking", "ที่จอด"] },
+      { key: "pet_friendly", contextTypes: ["pet", "pet_policy"], keywords: ["pet", "สัตว์เลี้ยง"] },
+      { key: "family_friendly", contextTypes: ["family"], keywords: ["family", "ครอบครัว", "เด็ก"] },
+      { key: "accessibility", contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible", "ทางลาด"] },
+      { key: "hotel_amenities", contextTypes: ["amenity"], keywords: ["amenity", "wifi", "pool", "spa", "อาหารเช้า"] },
+      { key: "room_type_hints", contextTypes: ["room_type"], keywords: ["room", "suite", "villa", "ห้อง"] },
+      { key: "checkin_checkout", contextTypes: ["check_in_out"], keywords: ["check-in", "check-out", "เวลาเช็ค"] },
+      { key: "booking_channels", contextTypes: ["booking_channel"], keywords: ["booking", "agoda", "expedia", "จอง"] }
     );
   } else if (isRestaurantCategory) {
     scopedStrictRules.push(
-      { key: "price_range", contextTypes: ["price", "pricing"], keywords: ["price", "ราคา", "บาท"], blocker: true },
-      { key: "parking", contextTypes: ["parking"], keywords: ["parking", "ที่จอด"], blocker: false },
-      { key: "pet_friendly", contextTypes: ["pet", "pet_policy"], keywords: ["pet", "สัตว์เลี้ยง"], blocker: false },
-      { key: "family_friendly", contextTypes: ["family"], keywords: ["family", "ครอบครัว", "เด็ก"], blocker: false },
-      { key: "accessibility", contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible", "ทางลาด"], blocker: false },
-      { key: "restaurant_features", contextTypes: ["restaurant_feature", "service_style"], keywords: ["menu", "service", "โต๊ะ", "คาเฟ่", "restaurant"], blocker: true },
-      { key: "signature_menu", contextTypes: ["menu"], keywords: ["signature", "recommended menu", "เมนู"], blocker: false },
-      { key: "price_signals", contextTypes: ["price", "pricing"], keywords: ["price", "ราคา", "บาท"], blocker: false },
-      { key: "service_style", contextTypes: ["service_style"], keywords: ["self service", "table service", "บริการ"], blocker: false }
+      { key: "price_range", contextTypes: ["price", "pricing"], keywords: ["price", "ราคา", "บาท"] },
+      { key: "parking", contextTypes: ["parking"], keywords: ["parking", "ที่จอด"] },
+      { key: "pet_friendly", contextTypes: ["pet", "pet_policy"], keywords: ["pet", "สัตว์เลี้ยง"] },
+      { key: "family_friendly", contextTypes: ["family"], keywords: ["family", "ครอบครัว", "เด็ก"] },
+      { key: "accessibility", contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible", "ทางลาด"] },
+      { key: "restaurant_features", contextTypes: ["restaurant_feature", "service_style"], keywords: ["menu", "service", "โต๊ะ", "คาเฟ่", "restaurant"] },
+      { key: "signature_menu", contextTypes: ["menu"], keywords: ["signature", "recommended menu", "เมนู"] },
+      { key: "price_signals", contextTypes: ["price", "pricing"], keywords: ["price", "ราคา", "บาท"] },
+      { key: "service_style", contextTypes: ["service_style"], keywords: ["self service", "table service", "บริการ"] }
     );
   } else if (isPlaceLike) {
     scopedStrictRules.push(
-      { key: "parking", contextTypes: ["parking"], keywords: ["parking", "ที่จอด"], blocker: false },
-      { key: "accessibility", contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible", "ทางลาด"], blocker: false },
-      { key: "family_friendly", contextTypes: ["family"], keywords: ["family", "ครอบครัว", "เด็ก"], blocker: false }
+      { key: "parking", contextTypes: ["parking"], keywords: ["parking", "ที่จอด"] },
+      { key: "accessibility", contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible", "ทางลาด"] },
+      { key: "family_friendly", contextTypes: ["family"], keywords: ["family", "ครอบครัว", "เด็ก"] }
     );
     // opening_hours_note is optional; only enforce verify when there are relevant hints.
     if (hasExplicitApprovedEvidence(approvedContext, { contextTypes: ["opening_hours", "schedule"], keywords: ["open", "hour", "เวลาเปิด", "ปิด"] })) {
@@ -478,19 +478,18 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
         key: "opening_hours_note",
         contextTypes: ["opening_hours", "schedule"],
         keywords: ["open", "hour", "เวลาเปิด", "ปิด"],
-        blocker: false,
       });
     }
   }
 
   const strictNeedsVerification = [];
-  const strictPublishBlockers = [];
   for (const rule of scopedStrictRules) {
     if (!hasExplicitApprovedEvidence(approvedContext, rule)) {
       strictNeedsVerification.push(rule.key);
-      if (rule.blocker) strictPublishBlockers.push(rule.key);
     }
   }
+
+  const eventDateMissing = isEventItem && strictNeedsVerification.includes("event_date_hints");
 
   const universalProfile = {
     highlights: pickApprovedEvidence(approvedContext, { contextTypes: ["feature", "highlight"], keywords: ["เด่น", "highlight", "feature"] }),
@@ -565,7 +564,7 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
     ]),
     publish_blockers: uniqueList([
       ...minMissing,
-      ...strictPublishBlockers,
+      ...(eventDateMissing ? ["event_date_hints"] : []),
     ]),
   };
 
