@@ -5639,6 +5639,20 @@ app.get("/api/integrations/readiness", (_req, res) => {
   res.status(readiness.ok ? 200 : 503).json(readiness);
 });
 
+function isInternalStaffRoleForLoginSync(role) {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  return normalizedRole === "owner" || normalizedRole === "admin" || normalizedRole === "user";
+}
+
+function isDirectorySyncStale(lastSyncedAt, nowMs, thresholdMs = 60000) {
+  const normalized = String(lastSyncedAt || "").trim();
+  if (!normalized) return true;
+  const parsedMs = Date.parse(normalized);
+  if (!Number.isFinite(parsedMs)) return true;
+  const deltaMs = Number(nowMs || Date.now()) - parsedMs;
+  return deltaMs > Number(thresholdMs || 60000);
+}
+
 app.post("/api/auth/login", loginRateLimit, safeAsync(async (req, res) => {
   const email = String(req.body.email || "").trim().toLowerCase();
   const password = String(req.body.password || "");
@@ -5649,6 +5663,45 @@ app.post("/api/auth/login", loginRateLimit, safeAsync(async (req, res) => {
 
   const backendLogin = await authenticateViaBackendLogin(email, password);
   if (backendLogin.ok) {
+    const role = String(backendLogin.user?.role || "").trim().toLowerCase();
+    if (isInternalStaffRoleForLoginSync(role)) {
+      let lastSyncedAt = null;
+      try {
+        lastSyncedAt = readCollectorDirectoryLastSyncedAt();
+        if (isDirectorySyncStale(lastSyncedAt, Date.now(), 60000)) {
+          const syncResult = await syncCollectorUsersFromBackendDirectory(backendLogin.token);
+          if (!syncResult?.ok) {
+            repo.logAudit(email, "auth.login.backend_directory_sync_failed", "user", String(backendLogin.user.id), {
+              role,
+              status: Number(syncResult?.status || 0) || null,
+              error: String(syncResult?.error || "directory sync failed"),
+              last_synced_at: lastSyncedAt || null,
+            });
+          } else {
+            const createdCount = Number(syncResult?.createdCount || 0) || 0;
+            const updatedCount = Number(syncResult?.updatedCount || 0) || 0;
+            const deactivatedCount = Number(syncResult?.deactivatedCount || 0) || 0;
+            if (createdCount > 0 || updatedCount > 0 || deactivatedCount > 0) {
+              repo.logAudit(email, "auth.login.backend_directory_sync", "user", String(backendLogin.user.id), {
+                role,
+                created_count: createdCount,
+                updated_count: updatedCount,
+                deactivated_count: deactivatedCount,
+                synced_backend_user_count: Number(syncResult?.syncedBackendUserCount || 0) || 0,
+                last_synced_at: String(syncResult?.lastSyncedAt || "").trim() || null,
+              });
+            }
+          }
+        }
+      } catch (error) {
+        repo.logAudit(email, "auth.login.backend_directory_sync_failed", "user", String(backendLogin.user.id), {
+          role,
+          error: String(error?.message || "directory sync exception"),
+          last_synced_at: lastSyncedAt || null,
+        });
+      }
+    }
+
     repo.logAudit(email, "auth.login.backend", "user", String(backendLogin.user.id), {
       backend_user_id: Number(backendLogin.user.backend_user_id || 0) || null,
       auth_source: "backend",
