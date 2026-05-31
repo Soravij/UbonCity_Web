@@ -24,13 +24,6 @@ const DECISION_COLUMN_DEFINITIONS = [
   "transport_subtype VARCHAR(64) NULL",
   "transport_contact_name VARCHAR(255) NULL",
   "transport_contact_phone VARCHAR(120) NULL",
-  "phone VARCHAR(120) NULL",
-  "line_url VARCHAR(1200) NULL",
-  "facebook_url VARCHAR(1200) NULL",
-  "website_url VARCHAR(1200) NULL",
-  "primary_cta ENUM('map','phone','line') NULL",
-  "tracking_entity_type ENUM('place','event','review_content') NULL",
-  "tracking_entity_id BIGINT NULL",
   "transport_contact_details TEXT NULL",
   "transport_link_url VARCHAR(1200) NULL",
 ];
