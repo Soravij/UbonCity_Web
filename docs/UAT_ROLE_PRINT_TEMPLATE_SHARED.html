@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UAT Role Print Template</title>
+  <style>
+    :root {
+      --text: #111;
+      --muted: #555;
+      --line: #cfcfcf;
+      --line-strong: #8f8f8f;
+      --font: "TH Sarabun New", "Sarabun", "Noto Sans Thai", "Segoe UI", sans-serif;
+    }
+    @page { size: A4; margin: 5.5mm; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 9.6px;
+      line-height: 1.1;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    body { background: #fff; }
+    .sheet {
+      width: 100%;
+      max-width: 199mm;
+      margin: 0 auto;
+      box-sizing: border-box;
+    }
+    .print-btn {
+      margin: 0 0 2px auto;
+      display: inline-block;
+      border: 1px solid #444;
+      border-radius: 5px;
+      padding: 1px 6px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 9px;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 16.5px; line-height: 1.02; }
+    .subhead { margin-top: 1px; color: var(--muted); font-size: 9px; }
+    .meta {
+      margin-top: 2px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px 8px;
+      font-size: 9.3px;
+    }
+    .meta div { border-bottom: 1px solid var(--line); padding-bottom: 1px; }
+    .layout {
+      margin-top: 3px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      align-items: start;
+    }
+    .card {
+      border: 1px solid var(--line);
+      padding: 3px 4px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    h2 {
+      font-size: 11px;
+      margin-bottom: 1px;
+      border-bottom: 1px solid var(--line-strong);
+      padding-bottom: 1px;
+    }
+    ul {
+      margin: 0;
+      padding-left: 0;
+      list-style: none;
+    }
+    li {
+      margin: 0;
+      padding-left: 12px;
+      position: relative;
+    }
+    li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 1px;
+      width: 7px;
+      height: 7px;
+      border: 1px solid #333;
+      box-sizing: border-box;
+    }
+    .tight li { margin-bottom: 0; }
+    .small { font-size: 8.9px; color: var(--muted); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 9px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 1px 2px;
+      vertical-align: top;
+      word-wrap: break-word;
+    }
+    th { background: #f5f5f5; text-align: left; }
+    .decision td:first-child,
+    .decision td:nth-child(4) { font-weight: 700; }
+    .footer-note {
+      margin-top: 3px;
+      font-size: 8.6px;
+      color: var(--muted);
+    }
+    @media print {
+      .print-btn { display: none; }
+    }
+  </style>
+</head>
+<body></body>
+</html>

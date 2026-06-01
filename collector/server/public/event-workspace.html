@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Event Workspace</title>
+    <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell event-page-shell">
+      <header class="header">
+  <div class="auth-row">
+    <div class="auth-intro">
+      <span class="auth-badge">Collector Workspace</span>
+      <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+      <p>หน้าทำงาน Event สำหรับเขียน event editorial ด้วย composer เดิมในฟอร์มเฉพาะ event</p>
+    </div>
+  </div>
+  <p class="muted" id="workspace-auth-status"></p>
+  <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+</header>
+<div class="card page-actions-strip">
+  <div class="toolbar">
+    <button id="btn-back-home" class="utility-action btn-home">Home</button>
+    <button id="btn-open-events" class="utility-action btn-return">กลับหน้าแรก</button>
+    <button id="btn-open-intake" class="utility-action btn-return">กลับหน้ารับงาน</button>
+    <button id="btn-save-workspace" class="primary">บันทึก</button>
+  </div>
+</div>
+<div id="article-process-bar" class="progress-steps article-progress" aria-label="event workflow progress"></div>
+
+      <div class="article-workspace-grid article-workspace-editor-layout">
+        <section class="article-workspace-main">
+          <div class="card article-work-card article-card-meta">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">ข้อมูลหลักของ Event</h2>
+                <p class="muted">ฟิลด์ที่จำเป็นสำหรับ event editorial</p>
+              </div>
+              <div id="article-status-chip" class="workflow-badge workflow-badge-cleaned"></div>
+            </div>
+            <div class="grid">
+              <div class="full-span">
+                <label>Title</label>
+                <input id="article-title" />
+              </div>
+              <div class="full-span">
+                <label>Summary</label>
+                <textarea id="article-excerpt" rows="3"></textarea>
+              </div>
+              <div>
+                <label>Slug</label>
+                <input id="article-slug" />
+              </div>
+              <div>
+                <label>Meta Title</label>
+                <input id="article-meta-title" />
+              </div>
+              <div class="full-span">
+                <label>Meta Description</label>
+                <textarea id="article-meta-description" rows="3"></textarea>
+              </div>
+              <div>
+                <label>Event Period</label>
+                <input id="event-period-text" placeholder="เช่น 17-21 เม.ย. 2569" />
+              </div>
+              <div>
+                <label>Location</label>
+                <input id="event-location-text" placeholder="เช่น ทุ่งศรีเมือง อุบลราชธานี" />
+              </div>
+              <div class="full-span">
+                <label>Map URL</label>
+                <input id="event-map-url" placeholder="https://maps.google.com/..." />
+              </div>
+            </div>
+          </div>
+
+          <div class="card article-work-card article-card-media">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Media Library</h2>
+                <p class="muted">มี cover image 1 รูป และแทรกรูปในเนื้อหาได้</p>
+              </div>
+            </div>
+            <div class="toolbar">
+              <input id="event-asset-upload" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple />
+              <button id="btn-upload-assets" type="button">อัปโหลดรูป</button>
+              <span id="asset-status" class="status"></span>
+            </div>
+            <div id="asset-library" class="article-asset-list"></div>
+            <div id="article-asset-hover-preview" class="asset-hover-preview hidden">
+              <img id="article-asset-hover-preview-image" alt="event asset preview" class="hidden" />
+              <video id="article-asset-hover-preview-video" class="hidden" muted loop playsinline controls></video>
+            </div>
+          </div>
+
+          <div class="card article-work-card article-card-body">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Body Composer</h2>
+                <p class="muted">ใช้ composer เดิมและรองรับ inline images</p>
+              </div>
+              <div class="toolbar compact-toolbar article-insert-toolbar">
+                <button id="btn-insert-heading" type="button">แทรกหัวข้อ</button>
+                <button id="btn-insert-paragraph" type="button">แทรกย่อหน้า</button>
+                <button id="btn-insert-selected-image" type="button">แทรกรูปที่เลือก</button>
+                <button id="btn-insert-quote" type="button">Quote</button>
+                <button id="btn-insert-list" type="button">List</button>
+              </div>
+            </div>
+            <div class="article-video-tools">
+              <input id="video-embed-url" placeholder="วางลิงก์ YouTube/Vimeo แล้วกดแทรกวิดีโอ" />
+              <button id="btn-insert-video" type="button">แทรกวิดีโอ</button>
+            </div>
+            <div class="article-block-tools">
+              <p class="muted">บันทึก body ลง storage เดิมของ composer</p>
+              <div id="article-blocks" class="article-block-list"></div>
+            </div>
+            <textarea id="article-body" class="article-body-input hidden" rows="18" aria-hidden="true" tabindex="-1"></textarea>
+          </div>
+
+          <div class="card frontend-preview-card article-work-card article-card-preview">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Preview</h2>
+                <p class="muted">ใช้ self-check รอบสุดท้ายก่อนส่งเข้าหน้าตรวจและอนุมัติ</p>
+                <p id="preview-dirty-note" class="workspace-dirty-note hidden">งานส่วนนี้ยังไม่ได้บันทึก</p>
+              </div>
+              <div class="toolbar compact-toolbar">
+                <button id="btn-preview-desktop" type="button" class="active">Desktop</button>
+                <button id="btn-preview-mobile" type="button">Mobile</button>
+              </div>
+            </div>
+            <div id="article-preview-shell" class="article-preview-shell event-preview-shell">
+              <div id="article-preview" class="frontend-preview"></div>
+            </div>
+            <div class="article-preview-review-grid">
+              <section class="article-preview-review-card">
+                <div class="article-section-head article-subsection-head">
+                  <div>
+                    <h3 class="section-title">Self-check ก่อนส่งตรวจ</h3>
+                    <p class="muted">ตรวจความครบถ้วนของข้อมูลหลัก body และ media ก่อนส่งต่อ reviewer</p>
+                  </div>
+                </div>
+                <div id="review-checklist" class="article-checklist"></div>
+              </section>
+              <section class="article-preview-review-card">
+                <div class="article-section-head article-subsection-head">
+                  <div>
+                    <h3 class="section-title">ส่งตรวจ</h3>
+                    <p class="muted">เมื่อ self-check ผ่านแล้วค่อยส่ง event เข้าคิวตรวจ</p>
+                  </div>
+                </div>
+                <div id="review-status" class="status"></div>
+                <div class="toolbar article-side-actions">
+                  <button id="btn-save-before-review" type="button" class="utility-action">บันทึก</button>
+                  <button id="btn-submit-review" type="button" class="ok">ส่งตรวจ</button>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div class="card article-overview-card article-card-activity">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Recent Activity</h2>
+                <p class="muted">ดูโน้ตและ workflow ล่าสุด</p>
+              </div>
+            </div>
+            <div id="article-activity-log" class="secondary-panel"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script type="module" src="/event-workspace-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </body>
+</html>
+
+

@@ -1,68 +1,104 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
+﻿:root {
+  color-scheme: light;
+  --theme-bg: #f7f8fb;
+  --theme-surface: #fffdfb;
+  --theme-surface-success: #f7fff9;
+  --theme-surface-danger: #fff8f8;
+  --theme-border: #f1d2bf;
+  --theme-border-success: #c8ead7;
+  --theme-border-danger: #f0c2c2;
+  --theme-text: #1f2937;
+  --theme-text-muted: #374151;
+  --theme-primary: #ea580c;
+  --theme-primary-strong: #c2410c;
+  --theme-success: #0f8f53;
+  --theme-warning: #b45309;
+  --theme-danger: #b91c1c;
+  --theme-focus-ring: #fb923c;
+  --theme-overlay: rgba(15, 23, 42, 0.32);
+  --theme-shadow: rgba(15, 23, 42, 0.14);
+  --theme-selection: rgba(234, 88, 12, 0.24);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  line-height: 1.4;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
+  color: var(--theme-text);
+  background: var(--theme-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --theme-bg: #14181f;
+  --theme-surface: #1c222c;
+  --theme-surface-success: #1b2822;
+  --theme-surface-danger: #2a1f22;
+  --theme-border: #344154;
+  --theme-border-success: #2e5a45;
+  --theme-border-danger: #664148;
+  --theme-text: #e8edf3;
+  --theme-text-muted: #c8d2de;
+  --theme-primary: #f28c49;
+  --theme-primary-strong: #d36d2a;
+  --theme-success: #5ccf96;
+  --theme-warning: #f1b262;
+  --theme-danger: #f18989;
+  --theme-focus-ring: #f28c49;
+  --theme-overlay: rgba(2, 6, 16, 0.58);
+  --theme-shadow: rgba(2, 6, 16, 0.5);
+  --theme-selection: rgba(242, 140, 73, 0.3);
 }
-a:hover {
-  color: #535bf2;
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
-  min-height: 100vh;
+  color: var(--theme-text);
+  background: var(--theme-bg);
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+::selection {
+  background: var(--theme-selection);
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+.notice-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--theme-overlay);
+  backdrop-filter: blur(4px);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+.notice-card {
+  width: min(460px, 100%);
+  padding: 18px 20px;
+  border-radius: 18px;
+  background: var(--theme-surface);
+  border: 1px solid var(--theme-border);
+  box-shadow: 0 18px 48px var(--theme-shadow);
+}
+
+.notice-card.success {
+  border-color: var(--theme-border-success);
+  background: var(--theme-surface-success);
+}
+
+.notice-card.error {
+  border-color: var(--theme-border-danger);
+  background: var(--theme-surface-danger);
+}
+
+.notice-text {
+  margin: 8px 0 0;
+  color: var(--theme-text-muted);
+  line-height: 1.6;
 }

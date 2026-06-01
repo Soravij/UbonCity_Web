@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Article Workspace</title>
+    <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+  <div class="auth-row">
+    <div class="auth-intro">
+      <span class="auth-badge">Collector Workspace</span>
+      <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+      <p>หน้าทำงานบทความ สำหรับแก้ข้อมูล จัด media และเตรียมบทความก่อนส่งตรวจ</p>
+    </div>
+  </div>
+  <p class="muted" id="workspace-auth-status"></p>
+  <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+</header>
+<div class="card page-actions-strip">
+  <div class="toolbar">
+    <button id="btn-back-home" class="utility-action btn-home">Home</button>
+    <button id="btn-open-intake" class="utility-action btn-return">กลับหน้าแรก</button>
+    <button id="btn-save-workspace" class="primary">บันทึกบทความ</button>
+    <span id="workspace-save-state" class="workspace-save-state" role="status" aria-live="polite">บันทึกแล้ว</span>
+  </div>
+</div>
+<div id="article-process-bar" class="progress-steps article-progress" aria-label="article workflow progress"></div>
+
+      <div class="article-workspace-grid article-workspace-editor-layout">
+        <section class="article-workspace-main">
+          <div class="card article-work-card article-card-meta">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">ข้อมูลหลักของบทความ</h2>
+                <p class="muted">แก้ไขหัวข้อ คำอธิบาย และข้อมูลหลักของบทความ</p>
+              </div>
+              <div id="article-status-chip" class="workflow-badge workflow-badge-cleaned"></div>
+            </div>
+            <div class="grid">
+              <div class="full-span">
+                <label>ชื่อบทความ</label>
+                <input id="article-title" />
+              </div>
+              <div class="full-span">
+                <label>Excerpt / Summary</label>
+                <textarea id="article-excerpt" rows="3"></textarea>
+              </div>
+              <div>
+                <label>Slug</label>
+                <input id="article-slug" />
+              </div>
+              <div>
+                <label>Meta Title</label>
+                <input id="article-meta-title" />
+              </div>
+              <div class="full-span">
+                <label>Meta Description</label>
+                <textarea id="article-meta-description" rows="3"></textarea>
+                <p id="meta-description-guidance" class="meta-description-guidance muted">ควรอ่านง่าย กระชับ และสอดคล้องเนื้อหา (คำแนะนำ ไม่บล็อกการส่ง)</p>
+              </div>
+            </div>
+          </div>
+
+          <div id="other-transport-section" class="card article-work-card hidden">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Other Transport Details</h2>
+                <p class="muted">ข้อมูลติดต่อหลักที่หน้า transport จะใช้จริง</p>
+              </div>
+            </div>
+            <div class="grid">
+              <div>
+                <label>ประเภท</label>
+                <select id="other-transport-type">
+                  <option value="taxi">Taxi</option>
+                  <option value="rental">Rental</option>
+                  <option value="shuttle">Shuttle</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label>ผู้ติดต่อ / ชื่อร้าน</label>
+                <input id="other-transport-contact-name" />
+              </div>
+              <div>
+                <label>เบอร์โทร</label>
+                <input id="other-transport-phone" inputmode="tel" />
+              </div>
+              <div>
+                <label>ลิงก์หลัก</label>
+                <input id="other-transport-link" placeholder="https://..." />
+              </div>
+              <div class="full-span">
+                <label>ช่องทางติดต่อเพิ่มเติม</label>
+                <textarea id="other-transport-contact-details" rows="3" placeholder="เช่น LINE, Facebook, เวลาติดต่อ"></textarea>
+              </div>
+            </div>
+            <div class="article-section-head article-subsection-head">
+              <div>
+                <h3 class="section-title">Thumbnail</h3>
+                <p class="muted">ใช้รูป cover จาก Media Library เป็น thumbnail ของรายการนี้</p>
+              </div>
+            </div>
+            <div class="grid">
+              <div>
+                <label>สถานะ thumbnail</label>
+                <div id="other-transport-thumbnail-summary" class="status"></div>
+              </div>
+              <div class="full-span">
+                <div id="other-transport-thumbnail-block"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card article-work-card article-card-brief">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Writer Brief</h2>
+                <p class="muted">สรุปโจทย์และข้อมูลตั้งต้นที่ต้องยึดก่อนเขียน</p>
+              </div>
+            </div>
+            <div id="writer-brief-status" class="status"></div>
+            <div id="writer-brief-doc" class="article-brief-doc">
+              <section id="writer-brief-angle-section" class="article-brief-section hidden">
+                <h3>มุมเล่าเรื่อง</h3>
+                <div id="writer-brief-angle"></div>
+              </section>
+              <section class="article-brief-section">
+                <h3>สรุปเรื่อง</h3>
+                <div id="writer-brief-summary"></div>
+              </section>
+              <section class="article-brief-section">
+                <h3>ข้อมูลที่ส่งกลับมา</h3>
+                <div id="writer-brief-submission"></div>
+              </section>
+              <section class="article-brief-section">
+                <h3>ข้อควรระวัง</h3>
+                <div id="writer-brief-cautions"></div>
+              </section>
+              <section class="article-brief-section">
+                <h3>แหล่งอ้างอิง</h3>
+                <div id="writer-brief-references"></div>
+              </section>
+            </div>
+            <div class="article-system-box">
+              <button id="btn-toggle-writer-system-info" type="button" class="utility-action" aria-expanded="false">แสดงข้อมูลระบบ</button>
+              <div id="writer-system-info" class="hidden">
+                <div id="writer-system-status" class="status"></div>
+                <div id="writer-system-content" class="article-system-content"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card article-work-card article-card-brief">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Field Pack / Evidence Review</h2>
+                <p class="muted">Grounded facts vs unresolved checks for review only. Not publish-ready by default.</p>
+              </div>
+            </div>
+            <div id="field-pack-evidence-status" class="status"></div>
+            <div id="field-pack-evidence-panel" class="article-brief-doc"></div>
+          </div>
+
+          <div class="card article-work-card article-card-body">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Body Composer</h2>
+                <p class="muted">จัด block ของเนื้อหาให้พร้อมสำหรับ self-check และส่งตรวจ</p>
+                <p id="body-composer-dirty-note" class="workspace-dirty-note hidden">งานส่วนนี้ยังไม่ได้บันทึก</p>
+              </div>
+              <div class="toolbar compact-toolbar article-insert-toolbar">
+                <button id="btn-insert-heading" type="button">แทรกหัวข้อ</button>
+                <button id="btn-insert-paragraph" type="button">แทรกย่อหน้า</button>
+                <button id="btn-insert-selected-image" type="button">แทรกรูปที่เลือก</button>
+                <button id="btn-insert-quote" type="button">Quote</button>
+                <button id="btn-insert-list" type="button">List</button>
+              </div>
+            </div>
+            <div class="article-video-tools">
+              <input id="video-embed-url" placeholder="วางลิงก์ YouTube/Vimeo แล้วกดแทรกวิดีโอ" />
+              <button id="btn-insert-video" type="button">แทรกวิดีโอ</button>
+            </div>
+            <div class="article-block-tools">
+              <p class="muted">Structured blocks จะ sync ไปที่ storage เดิมอัตโนมัติ</p>
+              <div id="article-blocks" class="article-block-list"></div>
+            </div>
+            <textarea id="article-body" class="article-body-input hidden" rows="18" aria-hidden="true" tabindex="-1"></textarea>
+          </div>
+
+          <div class="card frontend-preview-card article-work-card article-card-preview">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Preview</h2>
+                <p class="muted">ใช้ self-check รอบสุดท้ายก่อนส่งเข้าหน้าตรวจและอนุมัติ</p>
+                <p id="preview-dirty-note" class="workspace-dirty-note hidden">งานส่วนนี้ยังไม่ได้บันทึก</p>
+              </div>
+              <div class="toolbar compact-toolbar">
+                <button id="btn-preview-desktop" type="button" class="active">Desktop</button>
+                <button id="btn-preview-mobile" type="button">Mobile</button>
+              </div>
+            </div>
+            <div id="article-preview-shell" class="article-preview-shell">
+              <div id="article-preview" class="frontend-preview"></div>
+            </div>
+            <div class="article-preview-review-grid">
+              <section class="article-preview-review-card">
+                <div class="article-section-head article-subsection-head">
+                  <div>
+                    <h3 class="section-title">Self-check ก่อนส่งตรวจ</h3>
+                    <p class="muted">ตรวจความครบถ้วนของข้อมูลหลัก body และ media ก่อนส่งต่อ reviewer</p>
+                  </div>
+                </div>
+                <div id="review-checklist" class="article-checklist"></div>
+              </section>
+              <section class="article-preview-review-card">
+                <div class="article-section-head article-subsection-head">
+                  <div>
+                    <h3 class="section-title">ส่งตรวจ</h3>
+                    <p class="muted">เมื่อ self-check ผ่านแล้วค่อยส่งบทความเข้าคิวตรวจ</p>
+                  </div>
+                </div>
+                <div id="review-status" class="status"></div>
+                <div class="toolbar article-side-actions">
+                  <button id="btn-save-before-review" type="button" class="utility-action">บันทึก</button>
+                  <button id="btn-submit-review" type="button" class="ok">ส่งตรวจ</button>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div class="card article-work-card article-card-media">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Media Library</h2>
+                <p class="muted">จัดรูปและวิดีโอของบทความก่อนแทรกเข้าเนื้อหา</p>
+              </div>
+              <div class="toolbar compact-toolbar">
+                <button id="btn-toggle-media-library" type="button" aria-expanded="false">แสดงคลังรูป</button>
+              </div>
+            </div>
+            <div id="article-media-library-content" class="assignment-deliverables-card article-media-library-shell hidden">
+              <div class="assignment-deliverables-header article-media-library-head">
+                <div>
+                  <h5 class="assignment-deliverables-title">Media Library ของบทความนี้</h5>
+                </div>
+              </div>
+              <div id="asset-status" class="status"></div>
+              <div id="asset-library" class="article-asset-list"></div>
+              <div id="article-asset-hover-preview" class="asset-hover-preview hidden">
+                <img id="article-asset-hover-preview-image" alt="article asset preview" class="hidden" />
+                <video id="article-asset-hover-preview-video" class="hidden" muted loop playsinline controls></video>
+              </div>
+            </div>
+          </div>
+
+          <div class="card article-overview-card article-card-activity">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Recent Activity</h2>
+                <p class="muted">แถบข้างสรุป transition และโน้ตล่าสุดของ workflow</p>
+              </div>
+            </div>
+            <div id="article-activity-log" class="secondary-panel"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script type="module" src="/article-workspace-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </body>
+</html>
+
+

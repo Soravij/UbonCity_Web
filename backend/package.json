@@ -1,26 +1,37 @@
-{
-  "name": "backend",
-  "version": "1.0.0",
-  "description": "",
-  "main": "server.js",
-  "scripts": {
-    "dev": "nodemon server.js",
-    "start": "node server.js"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
-  "dependencies": {
-    "bcryptjs": "^3.0.3",
-    "cors": "^2.8.6",
-    "dotenv": "^17.3.1",
-    "express": "^5.2.1",
-    "jsonwebtoken": "^9.0.3",
-    "mysql2": "^3.18.2",
-    "openai": "^6.25.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.14"
-  }
+﻿{
+    "name":  "backend",
+    "version":  "1.0.0",
+    "description":  "Backend API and final review smoke coverage",
+    "main":  "server.js",
+    "scripts":  {
+                    "dev":  "nodemon server.js",
+                    "start":  "node server.js",
+                    "ask":  "node scripts/ask.js",
+                    "ai":  "node scripts/ask.js",
+                    "migrate:utf8mb4":  "node scripts/migrate-utf8mb4.js",
+                    "migrate:lifecycle-sync":  "node scripts/migrate-lifecycle-sync.js",
+                    "smoke:collector-admin-final-review":  "node scripts/smoke-collector-admin-final-review.mjs --spawn",
+                    "smoke:review-access-token":  "node scripts/smoke-review-access-token.mjs",
+                    "smoke:frontend-review-session-cookie":  "node scripts/smoke-frontend-review-session-cookie.mjs",
+                    "test:collector-admin-final-review":  "node --test tests/collector-admin-final-review.smoke.test.mjs",
+                    "test:phase56":  "node --test --test-isolation=none tests/place.phase56.backend.test.mjs"
+                },
+    "keywords":  [
+
+                 ],
+    "author":  "",
+    "license":  "ISC",
+    "type":  "module",
+    "dependencies":  {
+                         "bcryptjs":  "^3.0.3",
+                         "cors":  "^2.8.6",
+                         "dotenv":  "^17.3.1",
+                         "express":  "^5.2.1",
+                         "jsonwebtoken":  "^9.0.3",
+                         "mysql2":  "^3.18.2",
+                         "openai":  "^6.25.0"
+                     },
+    "devDependencies":  {
+                            "nodemon":  "^3.1.14"
+                        }
 }

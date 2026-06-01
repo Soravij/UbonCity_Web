@@ -1,19 +1,9 @@
-import Navbar from "@/components/Navbar";
+import LangFrame from "@/components/LangFrame";
+import { normalizeLang } from "@/lib/site";
 
-export default function LangLayout({ children, params }) {
+export default async function LangLayout({ children, params }) {
+  const { lang } = await params;
+  const activeLang = normalizeLang(lang);
 
- const { lang } = params;
-
- return (
-
-  <div>
-
-   <Navbar lang={lang} />
-
-   {children}
-
-  </div>
-
- );
-
+  return <LangFrame lang={activeLang}>{children}</LangFrame>;
 }

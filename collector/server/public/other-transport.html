@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Other Transport</title>
+    <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+            <p>Transport process · Other Transport สำหรับสร้าง มอบหมาย และติดตามคอนเทนต์ transport ทั่วไป</p>
+          </div>
+        </div>
+        <p class="muted" id="workspace-auth-status"></p>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+
+      <div class="card page-actions-strip">
+        <div class="toolbar">
+    <button id="btn-back-home" class="utility-action btn-home">Home</button>
+          <button id="btn-process-home" class="utility-action">กลับหน้าแรก</button>
+        </div>
+      </div>
+
+      <section class="card article-work-card">
+        <div class="article-section-head">
+          <div>
+            <h2 class="section-title">สร้าง Other Transport</h2>
+            <p class="muted">สร้าง content type แบบเบา แล้ว assign ผู้เขียนต่อใน workflow เดิม</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="full-span">
+            <label>Title</label>
+            <input id="other-transport-create-title" placeholder="เช่น แท็กซี่สนามบินอุบล หรือ รถเช่าในเมือง" />
+          </div>
+          <div>
+            <label>Type</label>
+            <select id="other-transport-create-type">
+              <option value="taxi">taxi</option>
+              <option value="rental">rental</option>
+              <option value="shuttle">shuttle</option>
+              <option value="other">other</option>
+            </select>
+          </div>
+          <div>
+            <label>Assign writer (optional)</label>
+            <select id="other-transport-create-assignee">
+              <option value="">-- ยังไม่ assign --</option>
+            </select>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="btn-create-other-transport" class="primary">Create Other Transport</button>
+          <span id="create-status" class="status"></span>
+        </div>
+      </section>
+
+      <section class="card article-work-card">
+        <div class="article-section-head">
+          <div>
+            <h2 class="section-title">Other Transport ทั้งหมด</h2>
+            <p class="muted">จัดการ content transport ที่ไม่ใช่ route map จากหน้านี้</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="basic-table" id="other-transport-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>รายการ</th>
+                <th>สถานะ</th>
+                <th>ผู้เขียน</th>
+                <th>มอบหมาย</th>
+                <th>การทำงาน</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/other-transport-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </body>
+</html>

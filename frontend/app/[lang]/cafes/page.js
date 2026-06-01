@@ -1,24 +1,22 @@
-import { getPlaces } from "@/lib/api";
-import Card from "@/components/Card";
+import CategoryPage from "@/components/CategoryPage";
+import { getLangContent, normalizeLang } from "@/lib/site";
 
-export default async function cafes({ params }) {
+export async function generateMetadata({ params }) {
+  const { lang } = await params;
+  const activeLang = normalizeLang(lang);
+  const copy = getLangContent(activeLang);
+  const title = copy?.nav?.cafes || "Cafes";
 
- const { lang } = params;
+  return {
+    title: `${title} | UBONCITY.COM`,
+    description: `Ubon Ratchathani ${title}`,
+    alternates: {
+      canonical: `/${activeLang}/cafes`,
+    },
+  };
+}
 
- const data = await getPlaces("cafes", lang);
-
- return (
-
-  <div>
-
-   <h1>cafes</h1>
-
-   {data.items.map(place => (
-     <Card key={place.id} place={place} />
-   ))}
-
-  </div>
-
- );
-
+export default async function Cafes({ params, searchParams }) {
+  const { lang } = await params;
+  return <CategoryPage lang={lang} category="cafes" searchParams={await searchParams} />;
 }

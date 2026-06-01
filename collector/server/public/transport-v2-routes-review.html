@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Transport V2 Routes Review</title>
+    <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        overflow: hidden;
+        background: #f4efe6;
+      }
+      .review-page {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+      }
+      .review-map {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        touch-action: none;
+        background:
+          linear-gradient(180deg, rgba(248, 245, 239, 0.96), rgba(241, 236, 226, 0.96)),
+          repeating-linear-gradient(0deg, rgba(20, 26, 43, 0.04), rgba(20, 26, 43, 0.04) 1px, transparent 1px, transparent 48px),
+          repeating-linear-gradient(90deg, rgba(20, 26, 43, 0.04), rgba(20, 26, 43, 0.04) 1px, transparent 1px, transparent 48px);
+      }
+      .review-map.is-panning {
+        cursor: grabbing;
+      }
+      .review-map-viewport,
+      .review-map img,
+      .review-overlay,
+      .review-overlay-layer,
+      .review-label-layer {
+        position: absolute;
+        inset: 0;
+      }
+      .review-map-viewport {
+        transform-origin: center center;
+      }
+      .review-map-viewport.is-dragging {
+        will-change: transform;
+      }
+      .review-map img,
+      .review-overlay,
+      .review-overlay-layer,
+      .review-label-layer {
+        width: 100%;
+        height: 100%;
+      }
+      .review-map img {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        object-fit: contain;
+        transform: translate(-50%, -50%);
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+      .review-overlay-layer,
+      .review-label-layer,
+      .review-overlay {
+        pointer-events: none;
+      }
+      .review-overlay-item {
+        position: absolute;
+        transform: translateY(-100%) scale(var(--review-overlay-scale, 1));
+        transform-origin: left bottom;
+      }
+      .review-overlay-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: fill;
+        display: block;
+      }
+      .review-label-item {
+        position: absolute;
+        transform: translateY(-100%) scale(var(--review-label-scale, 1));
+        transform-origin: left bottom;
+        display: inline-flex;
+        align-items: center;
+        max-width: 220px;
+        white-space: nowrap;
+        text-shadow: 0 1px 2px rgba(255, 255, 255, 0.9);
+      }
+      .review-empty {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        text-align: center;
+        color: rgba(20, 26, 43, 0.62);
+      }
+      .review-back {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        z-index: 3;
+      }
+      .review-status {
+        position: absolute;
+        left: 16px;
+        bottom: 16px;
+        z-index: 3;
+        max-width: min(520px, calc(100vw - 160px));
+      }
+      .review-tools {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        z-index: 3;
+        width: min(320px, calc(100vw - 32px));
+        max-height: calc(100vh - 32px);
+        overflow: auto;
+        padding: 14px;
+        border: 1px solid rgba(20, 26, 43, 0.12);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 20px 40px rgba(20, 26, 43, 0.14);
+      }
+      .review-selector-list {
+        display: grid;
+        gap: 10px;
+      }
+      .review-actions {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .review-selector-item {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 10px;
+        align-items: center;
+      }
+      .review-selector-item label {
+        display: contents;
+      }
+      .review-color-chip {
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(20, 26, 43, 0.18);
+      }
+      @media (max-width: 900px) {
+        .review-tools {
+          top: auto;
+          right: 12px;
+          bottom: 12px;
+          left: 12px;
+          width: auto;
+          max-height: 220px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="review-page">
+      <button id="btn-back-routes" class="utility-action review-back" type="button">Back</button>
+      <div class="result-banner hidden review-status" id="review-status" role="status" aria-live="polite"></div>
+      <section class="review-map">
+        <div id="routes-review-empty" class="review-empty">Select routes from the panel to display them on the map.</div>
+        <div id="routes-review-viewport" class="review-map-viewport">
+          <img id="routes-review-base-map-image" alt="routes review map surface" hidden />
+          <div id="routes-review-overlay-layer" class="review-overlay-layer"></div>
+          <div id="routes-review-label-layer" class="review-label-layer"></div>
+          <svg id="routes-review-overlay" class="review-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+        </div>
+      </section>
+      <aside class="review-tools">
+        <div class="review-actions">
+          <button id="btn-review-zoom-in" type="button">Zoom In</button>
+          <button id="btn-review-zoom-out" type="button">Zoom Out</button>
+          <button id="btn-review-reset-view" type="button">Reset View</button>
+        </div>
+        <div id="routes-review-selector-list" class="review-selector-list"></div>
+      </aside>
+    </main>
+    <script type="module" src="/transport-v2-routes-review-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </body>
+</html>

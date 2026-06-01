@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS collector_import_reviews (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  source_system VARCHAR(64) NOT NULL,
+  source_content_type VARCHAR(32) NOT NULL,
+  source_content_item_id BIGINT NOT NULL,
+  local_entity_type VARCHAR(32) NOT NULL,
+  local_entity_id BIGINT NOT NULL,
+  payload_hash CHAR(64) NOT NULL,
+  published_at DATETIME NULL,
+  imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  translation_count INT NOT NULL DEFAULT 0,
+  translation_langs_json TEXT NULL,
+  review_status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  reviewed_by_user_id BIGINT NULL,
+  reviewed_at DATETIME NULL,
+  review_note TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_collector_import_source (source_system, source_content_type, source_content_item_id),
+  KEY idx_collector_import_review_status (review_status, imported_at),
+  KEY idx_collector_import_local_entity (local_entity_type, local_entity_id)
+);

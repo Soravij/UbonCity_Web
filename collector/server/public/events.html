@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Events</title>
+    <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <style>
+      .events-hub-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+      .events-hub-card { display: grid; gap: 14px; }
+      .events-hub-card p { margin: 0; }
+      .events-hub-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    </style>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+            <p>Events process home สำหรับสร้าง มอบหมาย และติดตามงาน editorial</p>
+          </div>
+          <div class="auth-box">
+            <div class="auth-box-head">
+              <h2>เข้าสู่ระบบ</h2>
+              <p>ระบบจะพาไปทำงานตามสิทธิ์ โดยอัตโนมัติ</p>
+            </div>
+            <label class="auth-field">
+              <span>อีเมล</span>
+              <input id="auth-email" placeholder="อีเมลบัญชีที่ตั้งไว้ในระบบ" />
+            </label>
+            <label class="auth-field">
+              <span>รหัสผ่าน</span>
+              <input id="auth-password" type="password" placeholder="รหัสผ่าน" />
+            </label>
+            <div class="auth-actions">
+              <button class="primary" id="btn-login">เข้าสู่ระบบ</button>
+              <button id="btn-logout">ออกจากระบบ</button>
+            </div>
+            <p class="auth-note">ถ้ามีลิงก์ที่ต้องการเปิด ระบบจะกลับไปหน้าปลายทางหลังเข้าสู่ระบบ และต้องใช้อีเมล/รหัสผ่านของบัญชีที่ถูกตั้งไว้ใน collector instance นี้</p>
+          </div>
+        </div>
+        <p class="muted" id="workspace-auth-status"></p>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+
+      <div class="card page-actions-strip">
+        <div class="toolbar">
+    <button id="btn-back-home" class="utility-action btn-home">Home</button>
+        </div>
+      </div>
+
+      <section class="events-hub-grid">
+        <article class="card article-work-card events-hub-card">
+          <div class="article-section-head">
+            <div>
+              <h2 class="section-title">จัดการ Events</h2>
+              <p class="muted">สร้าง event ใหม่ มอบหมายผู้เขียน และติดตามรายการ event ทั้งหมดจากหน้าจัดการ</p>
+            </div>
+          </div>
+          <div class="events-hub-actions">
+            <button id="btn-open-events-manager" class="primary">เปิดหน้าจัดการ Events</button>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="/events-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </body>
+</html>

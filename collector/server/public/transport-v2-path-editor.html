@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Transport V2 Path Editor</title>
+    <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        overflow: hidden;
+        background: #f4efe6;
+      }
+      .editor-page {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+      }
+      .editor-back {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        z-index: 3;
+      }
+      .editor-status {
+        position: absolute;
+        left: 16px;
+        bottom: 16px;
+        z-index: 3;
+        max-width: min(520px, calc(100vw - 160px));
+      }
+      .path-editor-map-stage {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        background:
+          linear-gradient(180deg, rgba(248, 245, 239, 0.96), rgba(241, 236, 226, 0.96)),
+          repeating-linear-gradient(0deg, rgba(20, 26, 43, 0.04), rgba(20, 26, 43, 0.04) 1px, transparent 1px, transparent 48px),
+          repeating-linear-gradient(90deg, rgba(20, 26, 43, 0.04), rgba(20, 26, 43, 0.04) 1px, transparent 1px, transparent 48px);
+        cursor: crosshair;
+        touch-action: none;
+      }
+      .path-editor-map-stage.mode-select {
+        cursor: grab;
+      }
+      .path-editor-map-stage.is-panning,
+      .path-editor-map-stage.mode-select.is-panning {
+        cursor: grabbing;
+      }
+      .path-editor-map-empty,
+      .path-editor-map-viewport,
+      .path-editor-map-overlay-layer,
+      .path-editor-map-label-layer,
+      .path-editor-map-overlay,
+      .path-editor-map-markers {
+        position: absolute;
+        inset: 0;
+      }
+      .path-editor-map-empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        text-align: center;
+        color: rgba(20, 26, 43, 0.62);
+      }
+      .path-editor-map-viewport {
+        transform-origin: center center;
+      }
+      .path-editor-map-viewport.is-dragging {
+        will-change: transform;
+      }
+      .path-editor-map-viewport img {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+        transform: translate(-50%, -50%);
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+      .path-editor-map-overlay-layer,
+      .path-editor-map-label-layer,
+      .path-editor-map-overlay {
+        pointer-events: none;
+      }
+      .path-editor-map-markers {
+        pointer-events: none;
+      }
+      .path-editor-overlay-item {
+        position: absolute;
+        transform: translateY(-100%) scale(var(--path-overlay-scale, 1));
+        transform-origin: left bottom;
+      }
+      .path-editor-overlay-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: fill;
+        display: block;
+      }
+      .path-editor-label-item {
+        position: absolute;
+        transform: translateY(-100%) scale(var(--path-label-scale, 1));
+        transform-origin: left bottom;
+        display: inline-flex;
+        align-items: center;
+        max-width: 220px;
+        white-space: nowrap;
+        text-shadow: 0 1px 2px rgba(255, 255, 255, 0.9);
+      }
+      .path-editor-point {
+        position: absolute;
+        width: 18px;
+        height: 18px;
+        border: 0;
+        border-radius: 999px;
+        background: #1954d1;
+        box-shadow: 0 8px 24px rgba(20, 26, 43, 0.18);
+        transform: translate(-50%, -50%) scale(var(--path-point-scale, 1));
+        transform-origin: center center;
+        pointer-events: auto;
+      }
+      .path-editor-point.is-selected {
+        box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.95), 0 8px 24px rgba(20, 26, 43, 0.22);
+      }
+      .editor-tools {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        z-index: 3;
+        width: min(260px, calc(100vw - 32px));
+        display: grid;
+        gap: 10px;
+        padding: 14px;
+        border: 1px solid rgba(20, 26, 43, 0.12);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 20px 40px rgba(20, 26, 43, 0.14);
+      }
+      .editor-tools button.active {
+        border-color: var(--brand, #1954d1);
+        background: rgba(25, 84, 209, 0.12);
+      }
+      @media (max-width: 900px) {
+        .editor-tools {
+          top: auto;
+          right: 12px;
+          bottom: 12px;
+          left: 12px;
+          width: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="editor-page">
+      <button id="btn-back-routes" class="utility-action editor-back" type="button">Back</button>
+      <div class="result-banner hidden editor-status" id="path-editor-status" role="status" aria-live="polite"></div>
+      <div id="path-editor-map-stage" class="path-editor-map-stage">
+        <div id="path-editor-map-empty" class="path-editor-map-empty">Select one route from the manager page to open the path editor.</div>
+        <div id="path-editor-map-viewport" class="path-editor-map-viewport">
+          <img id="path-editor-map-image" alt="path editor map surface" hidden />
+          <div id="path-editor-map-overlay-layer" class="path-editor-map-overlay-layer"></div>
+          <div id="path-editor-map-label-layer" class="path-editor-map-label-layer"></div>
+          <svg id="path-editor-map-overlay" class="path-editor-map-overlay" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+          <div id="path-editor-map-markers" class="path-editor-map-markers"></div>
+        </div>
+      </div>
+      <aside class="editor-tools">
+        <button id="btn-path-mode-draw" class="active" type="button">Draw</button>
+        <button id="btn-path-mode-select" type="button">Select</button>
+        <button id="btn-path-zoom-in" type="button">Zoom In</button>
+        <button id="btn-path-zoom-out" type="button">Zoom Out</button>
+        <button id="btn-path-reset-view" type="button">Reset View</button>
+        <button id="btn-path-remove-selected" type="button">Delete</button>
+        <button id="btn-path-save" type="button">Save</button>
+        <button id="btn-path-generate" class="primary" type="button">Generate</button>
+      </aside>
+    </main>
+    <script type="module" src="/transport-v2-path-editor-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </body>
+</html>

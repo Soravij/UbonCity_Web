@@ -1,0 +1,221 @@
+import "dotenv/config";
+import crypto from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { resolvePaths } from "../config/paths.mjs";
+import { openDatabase } from "../db/client.mjs";
+import { createTestClient } from "./lib/test-client.mjs";
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function logStep(step, detail = "") {
+  const suffix = String(detail || "").trim();
+  console.error(`[${nowIso()}] smoke-data-cleanup step=${step}${suffix ? ` ${suffix}` : ""}`);
+}
+
+function createDeletedItem(db, {
+  titleSuffix,
+  withSourceRecord = false,
+  withFieldPack = false,
+  withPublishedArticle = false,
+  withReviewAction = false,
+  withIntelligenceModel = false,
+  withAssignment = false,
+  withTranslation = false,
+}) {
+  const uid = `smoke-cleanup-${crypto.randomUUID()}`;
+  const title = `Smoke Cleanup ${titleSuffix}`;
+  const slug = `smoke-cleanup-${titleSuffix.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
+  const itemResult = db.prepare(`
+    INSERT INTO content_items (
+      item_uid, type, category, lang, title, normalized_title, slug, description_raw, workflow_status, is_deleted
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+  `).run(uid, "place", "attraction", "th", title, title.toLowerCase(), slug, "smoke cleanup fixture", "raw");
+  const itemId = Number(itemResult.lastInsertRowid || 0) || 0;
+  assert(itemId > 0, `failed to create deleted item for ${titleSuffix}`);
+
+  if (withSourceRecord) {
+    db.prepare(`
+      INSERT INTO source_records (content_item_id, source_type, source_name, source_url, payload_json)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(itemId, "smoke", "Smoke Source", `https://example.com/smoke-cleanup/${itemId}`, JSON.stringify({ blocker: "source_records" }));
+  }
+  if (withFieldPack) {
+    db.prepare(`
+      INSERT INTO field_packs (
+        content_item_id, status, is_current, ai_summary, ai_highlights_json, ai_unknowns_json,
+        verified_facts_json, uncertain_facts_json, social_shot_emphasis_json, social_on_camera_points_json, updated_by
+      ) VALUES (?, ?, 1, ?, '[]', '[]', '[]', '[]', '[]', '[]', ?)
+    `).run(itemId, "ready_for_field", `Smoke field pack for ${titleSuffix}`, "smoke-data-cleanup");
+  }
+  if (withPublishedArticle) {
+    db.prepare(`
+      INSERT INTO published_articles (
+        content_item_id, slug, title, body, excerpt, meta_title, meta_description, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(itemId, `${slug}-published`, title, `Published body for ${titleSuffix}`, `Published excerpt for ${titleSuffix}`, title, "smoke", "published");
+  }
+  if (withReviewAction) {
+    db.prepare(`
+      INSERT INTO review_actions (content_item_id, action, reviewer_email, notes)
+      VALUES (?, ?, ?, ?)
+    `).run(itemId, "approve", "smoke-data-cleanup@example.com", `Smoke review action for ${titleSuffix}`);
+  }
+  if (withIntelligenceModel) {
+    db.prepare(`
+      INSERT INTO content_intelligence_models (
+        content_item_id, model_version, quality_score, popularity_score, momentum_score,
+        confidence_score, signals_json, reasons_json, payload_json, computed_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(itemId, "smoke_v1", 50, 50, 50, 70, "{}", "[]", "{}", "smoke-data-cleanup");
+  }
+  if (withAssignment) {
+    db.prepare(`
+      INSERT INTO content_assignments (assignment_uid, content_item_id)
+      VALUES (?, ?)
+    `).run(`smoke-assignment-${crypto.randomUUID()}`, itemId);
+  }
+  if (withTranslation) {
+    db.prepare(`
+      INSERT INTO content_translations (
+        source_content_item_id, source_fingerprint, lang, translated_title, translation_status
+      ) VALUES (?, ?, ?, ?, ?)
+    `).run(itemId, `smoke-fingerprint-${crypto.randomUUID()}`, "en", "Smoke Translation", "pending");
+  }
+
+  return { id: itemId };
+}
+
+function cleanupFixture(db, itemId) {
+  const id = Number(itemId || 0) || 0;
+  if (!id) return;
+  db.prepare("DELETE FROM review_actions WHERE content_item_id=?").run(id);
+  db.prepare("DELETE FROM content_intelligence_models WHERE content_item_id=?").run(id);
+  db.prepare("DELETE FROM content_assignments WHERE content_item_id=?").run(id);
+  db.prepare("DELETE FROM content_translations WHERE source_content_item_id=?").run(id);
+  db.prepare("DELETE FROM published_articles WHERE content_item_id=?").run(id);
+  db.prepare("DELETE FROM field_packs WHERE content_item_id=?").run(id);
+  db.prepare("DELETE FROM source_records WHERE content_item_id=?").run(id);
+  db.prepare("DELETE FROM content_items WHERE id=?").run(id);
+}
+
+async function main() {
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+  const dirs = resolvePaths(path.resolve(scriptDir, ".."));
+  const db = openDatabase(dirs.dbPath, path.join(dirs.rootDir, "database", "schema.sql"));
+  const client = createTestClient();
+
+  let purgeable = null;
+  let blockedSource = null;
+  let blockedFieldPack = null;
+  let blockedPublished = null;
+  let blockedReviewAction = null;
+  let blockedIntelligence = null;
+  let blockedAssignment = null;
+  let blockedTranslation = null;
+
+  try {
+    logStep("auth.me");
+    const auth = await client.get("/api/auth/me");
+    assert(auth.ok, `GET /api/auth/me failed: ${JSON.stringify(auth.body)}`);
+    assert(String(auth.body?.user?.role || "").toLowerCase() === "owner", "owner role required");
+
+    logStep("fixture.create");
+    purgeable = createDeletedItem(db, { titleSuffix: "Purgeable" });
+    blockedSource = createDeletedItem(db, { titleSuffix: "Blocked Source", withSourceRecord: true });
+    blockedFieldPack = createDeletedItem(db, { titleSuffix: "Blocked Field Pack", withFieldPack: true });
+    blockedPublished = createDeletedItem(db, { titleSuffix: "Blocked Published", withPublishedArticle: true });
+    blockedReviewAction = createDeletedItem(db, { titleSuffix: "Blocked Review Action", withReviewAction: true });
+    blockedIntelligence = createDeletedItem(db, { titleSuffix: "Blocked Intelligence", withIntelligenceModel: true });
+    blockedAssignment = createDeletedItem(db, { titleSuffix: "Blocked Assignment", withAssignment: true });
+    blockedTranslation = createDeletedItem(db, { titleSuffix: "Blocked Translation", withTranslation: true });
+
+    logStep("check.core");
+    const purgeableCheck = await client.get(`/api/admin/deleted-items/${purgeable.id}/cleanup-check`);
+    assert(purgeableCheck.ok, "purgeable cleanup-check failed");
+    assert(Boolean(purgeableCheck.body?.item?.can_purge), "purgeable should be purgeable");
+
+    const expectBlocked = async (id, key) => {
+      const check = await client.get(`/api/admin/deleted-items/${id}/cleanup-check`);
+      assert(check.ok, `cleanup-check failed for ${id}`);
+      assert(check.body?.item?.can_purge === false, `item ${id} should be blocked`);
+      assert((check.body?.item?.blockers || []).some((row) => String(row?.key || "") === key), `missing blocker ${key}`);
+    };
+    await expectBlocked(blockedSource.id, "source_records");
+    await expectBlocked(blockedFieldPack.id, "field_packs");
+    await expectBlocked(blockedPublished.id, "published_articles");
+    await expectBlocked(blockedReviewAction.id, "review_actions");
+    await expectBlocked(blockedIntelligence.id, "content_intelligence_models");
+    await expectBlocked(blockedAssignment.id, "assignments");
+    await expectBlocked(blockedTranslation.id, "translations");
+
+    logStep("purge.blocked");
+    const expectPurgeBlocked = async (id, key) => {
+      const response = await client.post(`/api/admin/deleted-items/${id}/purge`, { reason: "smoke blocked" });
+      assert(response.status === 409, `expected 409 for blocked item ${id}`);
+      assert((response.body?.blockers || []).some((row) => String(row?.key || "") === key), `missing purge blocker ${key}`);
+    };
+    await expectPurgeBlocked(blockedSource.id, "source_records");
+    await expectPurgeBlocked(blockedFieldPack.id, "field_packs");
+    await expectPurgeBlocked(blockedPublished.id, "published_articles");
+    await expectPurgeBlocked(blockedReviewAction.id, "review_actions");
+    await expectPurgeBlocked(blockedIntelligence.id, "content_intelligence_models");
+    await expectPurgeBlocked(blockedAssignment.id, "assignments");
+    await expectPurgeBlocked(blockedTranslation.id, "translations");
+
+    logStep("purge.success");
+    const purged = await client.post(`/api/admin/deleted-items/${purgeable.id}/purge`, { reason: "smoke purgeable" });
+    assert(purged.ok, "purgeable purge failed");
+    const after = await client.get(`/api/admin/deleted-items/${purgeable.id}/cleanup-check`);
+    assert(after.status === 404, "purged item should be gone");
+
+    console.log(JSON.stringify({
+      ok: true,
+      fixtures: {
+        purgeable_item_id: purgeable.id,
+        blocked_source_item_id: blockedSource.id,
+        blocked_field_pack_item_id: blockedFieldPack.id,
+        blocked_published_item_id: blockedPublished.id,
+        blocked_review_action_item_id: blockedReviewAction.id,
+        blocked_intelligence_item_id: blockedIntelligence.id,
+        blocked_assignment_item_id: blockedAssignment.id,
+        blocked_translation_item_id: blockedTranslation.id,
+      },
+      checks: {
+        purgeable_can_purge: true,
+        blocked_source_reason_key: "source_records",
+        blocked_field_pack_reason_key: "field_packs",
+        blocked_published_reason_key: "published_articles",
+        blocked_review_action_reason_key: "review_actions",
+        blocked_intelligence_reason_key: "content_intelligence_models",
+        blocked_assignment_reason_key: "assignments",
+        blocked_translation_reason_key: "translations",
+        purged_item_removed: true,
+      },
+    }, null, 2));
+  } finally {
+    try {
+      if (blockedTranslation?.id) cleanupFixture(db, blockedTranslation.id);
+      if (blockedAssignment?.id) cleanupFixture(db, blockedAssignment.id);
+      if (blockedIntelligence?.id) cleanupFixture(db, blockedIntelligence.id);
+      if (blockedReviewAction?.id) cleanupFixture(db, blockedReviewAction.id);
+      if (blockedPublished?.id) cleanupFixture(db, blockedPublished.id);
+      if (blockedFieldPack?.id) cleanupFixture(db, blockedFieldPack.id);
+      if (blockedSource?.id) cleanupFixture(db, blockedSource.id);
+      if (purgeable?.id) cleanupFixture(db, purgeable.id);
+    } finally {
+      if (typeof db.close === "function") db.close();
+    }
+  }
+}
+
+main().catch((err) => {
+  console.error(`smoke-data-cleanup: FAILED - ${String(err?.message || err)}`);
+  process.exitCode = 1;
+});

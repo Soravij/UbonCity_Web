@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Transport V2 Review</title>
+    <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row"><div class="auth-intro"><span class="auth-badge">Collector Workspace</span><h1>Transport Map V2 Review</h1><p>ตรวจ readiness และ preview poster ของ route</p></div></div>
+        <p class="muted" id="workspace-auth-status"></p>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+      <div class="card page-actions-strip"><div class="toolbar"><button id="btn-back-home" class="utility-action btn-home">Home</button><button id="btn-open-manager" class="utility-action">กลับหน้า routes</button><button id="btn-open-workspace" class="utility-action">กลับหน้าเขียน</button></div></div>
+      <section class="card article-work-card">
+        <div class="article-section-head"><div><h2 class="section-title">Readiness</h2><p class="muted">เช็กว่าพร้อม review/release หรือยัง</p></div></div>
+        <pre id="readiness-output" style="white-space:pre-wrap"></pre>
+      </section>
+      <section class="card article-work-card">
+        <div class="article-section-head"><div><h2 class="section-title">Poster Preview</h2><p class="muted">ถ้ามี poster.svg แล้วจะแสดงที่นี่</p></div></div>
+        <div id="poster-preview"></div>
+        <div class="toolbar"><button id="btn-refresh-review" class="primary">Refresh</button><button id="btn-release-route" type="button">Release Main</button><span id="review-status" class="status"></span></div>
+      </section>
+    </main>
+    <script type="module" src="/transport-v2-review-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </body>
+</html>

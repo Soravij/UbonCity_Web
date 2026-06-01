@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Transport Map Workspace</title>
+    <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <style>
+      .transport-map-canvas { min-height: 520px; border-radius: 18px; overflow: hidden; background: rgba(20, 26, 43, 0.08); }
+      .transport-map-toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+      .transport-map-toolbar button.active { border-color: var(--brand, #1954d1); background: rgba(25, 84, 209, 0.12); }
+      .transport-stop-list { display: grid; gap: 10px; }
+      .transport-stop-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid rgba(20, 26, 43, 0.12); border-radius: 12px; }
+      .transport-stop-row .muted { font-size: 12px; }
+      .transport-map-note { font-size: 13px; }
+      .transport-thumbnail-preview { display: grid; gap: 10px; }
+      .transport-thumbnail-preview img { width: 100%; max-width: 320px; height: auto; border-radius: 16px; border: 1px solid rgba(20, 26, 43, 0.12); object-fit: cover; background: rgba(20, 26, 43, 0.04); }
+      .transport-thumbnail-meta { display: grid; gap: 4px; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+  <div class="auth-row">
+    <div class="auth-intro">
+      <span class="auth-badge">Collector Workspace</span>
+      <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+      <p>Transport Map Workspace สำหรับแก้ข้อมูล route วางเส้นทาง และเลือก thumbnail ก่อนส่งตรวจ</p>
+    </div>
+  </div>
+  <p class="muted" id="workspace-auth-status"></p>
+  <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+</header>
+<div class="card page-actions-strip">
+  <div class="toolbar">
+    <button id="btn-back-home" class="utility-action btn-home">Home</button>
+    <button id="btn-open-manager" class="utility-action btn-home">Home</button>
+    <button id="btn-save-workspace" class="primary">บันทึก</button>
+  </div>
+</div>
+
+      <div class="article-workspace-grid article-workspace-editor-layout">
+        <section class="article-workspace-main">
+          <div class="card article-work-card article-card-meta">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">ข้อมูลหลัก</h2>
+                <p class="muted">ข้อมูลนี้จะถูกใช้ใน popup ฝั่ง public และส่งต่อไป backend consumer</p>
+              </div>
+              <div id="route-status-chip" class="workflow-badge workflow-badge-cleaned"></div>
+            </div>
+            <div class="grid">
+              <div>
+                <label>ชื่อสาย</label>
+                <input id="route-name" />
+              </div>
+              <div>
+                <label>เลขสาย</label>
+                <input id="route-number" />
+              </div>
+              <div>
+                <label>ประเภทรถ</label>
+                <select id="vehicle-type">
+                  <option value="songthaew">songthaew</option>
+                  <option value="minibus">minibus</option>
+                  <option value="van">van</option>
+                  <option value="bus">bus</option>
+                </select>
+              </div>
+              <div>
+                <label>สีเส้นทาง</label>
+                <input id="route-color" type="color" value="#ff6600" />
+              </div>
+              <div class="full-span">
+                <label>Thumbnail URL</label>
+                <input id="vehicle-image" placeholder="/transport-vehicles/bus.svg หรือ asset จาก collector" readonly />
+              </div>
+              <div class="full-span">
+                <label>คำอธิบาย</label>
+                <textarea id="route-description" rows="4"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="card article-work-card article-card-media">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Thumbnail</h2>
+                <p class="muted">thumbnail ต้องมาจาก asset ใน collector เท่านั้น โดยเริ่มต้นใช้รูปรถบัส default ได้</p>
+              </div>
+            </div>
+            <div class="toolbar">
+              <input id="transport-asset-upload" type="file" accept="image/*" multiple />
+              <button id="btn-upload-assets" type="button">อัปโหลดรูป</button>
+              <span id="asset-status" class="status"></span>
+            </div>
+            <div id="asset-library" class="article-asset-list"></div>
+            <div class="transport-thumbnail-preview">
+              <div id="transport-thumbnail-preview"></div>
+            </div>
+            <div id="article-asset-hover-preview" class="asset-hover-preview hidden">
+              <img id="article-asset-hover-preview-image" alt="transport asset preview" class="hidden" />
+              <video id="article-asset-hover-preview-video" class="hidden" muted loop playsinline controls></video>
+            </div>
+          </div>
+
+          <div class="card article-work-card">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">Map Editor</h2>
+                <p class="muted">คลิกบนแผนที่เพื่อวาง path หรือ stop แล้วลาก marker เพื่อปรับตำแหน่ง</p>
+              </div>
+            </div>
+            <div class="transport-map-toolbar">
+              <button id="btn-mode-path" type="button" class="active">โหมดวางเส้น</button>
+              <button id="btn-mode-stop" type="button">โหมดเพิ่มจุดจอด</button>
+              <button id="btn-fit-route" type="button">ซูมให้เห็นทั้งหมด</button>
+              <button id="btn-undo-point" type="button">ลบจุด path ล่าสุด</button>
+              <button id="btn-clear-path" type="button">ล้าง path</button>
+            </div>
+            <p class="muted transport-map-note" id="map-editor-note">โหมดปัจจุบัน: วาง path ด้วยการคลิกบนแผนที่</p>
+            <div id="transport-map-canvas" class="transport-map-canvas"></div>
+            <div id="map-status" class="status"></div>
+          </div>
+
+          <div class="card article-work-card">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">จุดจอด</h2>
+                <p class="muted">จุดจอดจะถูกใช้ใน popup และรองรับงาน render ภายหลัง</p>
+              </div>
+            </div>
+            <div id="transport-stop-list" class="transport-stop-list"></div>
+          </div>
+
+          <div class="card article-work-card">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">ส่งตรวจ</h2>
+                <p class="muted">บันทึกงานก่อน แล้วค่อยส่ง route เข้าคิว review</p>
+              </div>
+            </div>
+            <div id="review-status" class="status"></div>
+            <div class="toolbar">
+              <button id="btn-submit-review" type="button" class="ok">ส่งตรวจ</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script type="module" src="/transport-map-workspace-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </body>
+</html>
+
+

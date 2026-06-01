@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UbonCity Web - UAT Checklist (Role Matrix Print)</title>
+  <style>
+    :root {
+      --text: #1a1a1a;
+      --line: #cfcfcf;
+      --line-strong: #9a9a9a;
+      --font: "TH Sarabun New", "Sarabun", "Noto Sans Thai", "Segoe UI", sans-serif;
+    }
+    @page { size: A4; margin: 8mm; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12.5px;
+      line-height: 1.24;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .sheet { width: 100%; max-width: 190mm; margin: 0 auto; padding: 2mm; box-sizing: border-box; }
+    h1, h2 { margin: 0; line-height: 1.2; }
+    h1 { font-size: 22px; margin-bottom: 2px; }
+    h2 { font-size: 16px; margin-top: 6px; margin-bottom: 2px; border-bottom: 1px solid var(--line-strong); padding-bottom: 1px; }
+    .note { margin: 2px 0 1px; font-size: 11.5px; color: #555; }
+    .mono { font-family: Consolas, "Courier New", monospace; font-size: 11px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid var(--line); padding: 2px 4px; vertical-align: top; word-wrap: break-word; }
+    th { background: #f5f5f5; font-weight: 700; text-align: left; }
+    .meta td { background: #fff; }
+    .meta-label { width: 15%; font-weight: 700; white-space: nowrap; }
+    .meta-value { width: 35%; color: #555; }
+    .w-item { width: 34%; }
+    .w-role { width: 6.5%; text-align: center; }
+    .w-result { width: 11%; }
+    .w-proof { width: 22%; }
+    .w-id { width: 5%; text-align: center; }
+    .w-sev { width: 8%; }
+    .w-owner { width: 11%; }
+    .check { display: inline-block; width: 11px; height: 11px; border: 1.4px solid #333; vertical-align: middle; }
+    .section { margin-bottom: 2px; }
+    .print-btn { margin: 0 0 2px auto; display: inline-block; border: 1px solid #444; border-radius: 6px; padding: 2px 8px; background: #fff; cursor: pointer; font-size: 11px; }
+    @media print { .print-btn { display: none; } .sheet { padding: 0; } }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <button class="print-btn" onclick="window.print()">Print</button>
+    <h1>UbonCity Web - UAT Checklist (Role Matrix)</h1>
+    <p class="note">ทุกข้อมีช่องติ๊ก 5 role: owner / admin / user / editor / freelance + คอลัมน์ Result และ Evidence</p>
+
+    <table class="meta">
+      <tr><td class="meta-label">Date</td><td class="meta-value">____________________</td><td class="meta-label">Environment</td><td class="meta-value">____________________ (local/staging)</td></tr>
+      <tr><td class="meta-label">Build/Commit</td><td class="meta-value">____________________</td><td class="meta-label">Tester</td><td class="meta-value">____________________</td></tr>
+    </table>
+
+    <section class="section">
+      <h2>1) Scope & Readiness</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>ใช้ environment ปัจจุบัน (ไม่ใช้ Docker)</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>ทุก service ที่ต้องใช้รันครบ (<span class="mono">frontend, collector, backend admin/API</span>)</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td><span class="mono">.env</span> ชี้ endpoint ถูกต้อง (auth, API base URL, CORS)</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>มี test accounts ครบทุก role</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>2) Global Smoke (ทุก role)</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>login สำเร็จ</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>logout สำเร็จ</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>session หมดอายุแล้วระบบพากลับ login ถูกต้อง</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>login กลับมาแล้ว <span class="mono">return_to</span> / deep-link recovery ถูกต้อง</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>direct-hit หน้า legacy ที่ไม่ควรเข้า ถูก redirect ถูกปลายทาง</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>ไม่มี loop ด้วย <span class="mono">auth=expired</span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>3) Role Matrix Access</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>Owner เข้า owner-only surfaces ได้</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>Admin เข้า internal operational + contributor management ได้</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>User create/assign งาน และทำงานเองใน manager pages ได้</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>Editor เข้าเฉพาะ <span class="mono">editor-home/article-workspace/event-workspace</span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>Freelance เข้าเฉพาะ <span class="mono">freelance-home</span> และ <span class="mono">/?tab=work</span> ของตัวเอง</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>4) E2E Flow (ชุดสั้น)</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>internal สร้าง item ใหม่สำเร็จ</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>assign งานให้ editor/freelance สำเร็จ</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>editor/freelance เปิดงาน แก้ content upload asset submit ได้</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>review/revision loop ทำงานครบ</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>5) Regression Hotspots</h2>
+      <table>
+        <tr><th class="w-item">รายการตรวจ</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>portal redirects ยังถูกต้อง</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>fallback จาก legacy ไม่พา external ไป shared intake ผิด role</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td><span class="mono">/?tab=work</span> ของ freelance ไม่หลุดหน้า</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>6) Failure Log</h2>
+      <table>
+        <tr><th class="w-id">ID</th><th class="w-sev">Severity</th><th class="w-role">Role</th><th>URL/Page</th><th>Steps / Expected / Actual</th><th class="w-owner">Owner</th></tr>
+        <tr><td class="w-id">1</td><td></td><td></td><td></td><td style="height:24px"></td><td></td></tr>
+        <tr><td class="w-id">2</td><td></td><td></td><td></td><td style="height:24px"></td><td></td></tr>
+        <tr><td class="w-id">3</td><td></td><td></td><td></td><td style="height:24px"></td><td></td></tr>
+        <tr><td class="w-id">4</td><td></td><td></td><td></td><td style="height:24px"></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>7) Release Gate</h2>
+      <table>
+        <tr><th class="w-item">เกณฑ์ตัดสิน</th><th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th><th class="w-result">Result</th><th class="w-proof">Evidence / Note</th></tr>
+        <tr><td>ไม่มี P1 ค้าง</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>P2 มี workaround ชัดเจนหรือปิดครบ</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>role matrix ผ่านตาม scope release</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+      </table>
+      <table>
+        <tr><td style="width:16%; font-weight:700;">Decision</td><td style="width:20%;"><span class="check"></span> GO</td><td style="width:20%;"><span class="check"></span> NO-GO</td><td style="width:22%;">Approved by</td><td style="width:22%;">____________________</td></tr>
+        <tr><td colspan="4">Date</td><td>____________________</td></tr>
+      </table>
+    </section>
+  </div>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Transport V2 Routes</title>
+    <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>Transport Map V2 Routes</h1>
+            <p>Create route datasets, manage route inventory, and open the dedicated review or path workspace.</p>
+          </div>
+        </div>
+        <p class="muted" id="workspace-auth-status"></p>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+
+      <div class="card page-actions-strip">
+        <div class="toolbar">
+          <button id="btn-back-home" class="utility-action btn-home" type="button">Home</button>
+          <button id="btn-process-home" class="utility-action btn-home" type="button">Home</button>
+          <button id="btn-open-base-maps" class="utility-action" type="button">Base Maps</button>
+          <button id="btn-open-routes-review" class="utility-action" type="button">Open Routes Review</button>
+          <button id="btn-open-selected-path-top" class="utility-action" type="button">Edit Path</button>
+          <button id="btn-render-published-map" class="warn" type="button">Render Published Map</button>
+          <span id="published-map-status" class="status"></span>
+        </div>
+      </div>
+
+      <div class="stack-lg">
+        <section id="route-create-section" class="card article-work-card">
+          <div class="article-section-head">
+            <div>
+              <h2 class="section-title">Create Route</h2>
+              <p class="muted">Create a route dataset on the latest annotation map, then open the route in a dedicated workspace.</p>
+            </div>
+          </div>
+          <p id="create-route-map-context" class="muted"></p>
+          <div class="grid">
+            <div>
+              <label>Route Name</label>
+              <input id="create-route-name" placeholder="Airport - Bus Terminal" />
+            </div>
+            <div>
+              <label>Route Number</label>
+              <input id="create-route-number" placeholder="A1" />
+            </div>
+            <div>
+              <label>Vehicle</label>
+              <select id="create-route-vehicle">
+                <option value="songthaew">songthaew</option>
+                <option value="minibus">minibus</option>
+                <option value="van">van</option>
+                <option value="bus">bus</option>
+              </select>
+            </div>
+            <div>
+              <label>Color</label>
+              <input id="create-route-color" type="color" value="#ff6600" />
+            </div>
+            <div class="full-span">
+              <label>Description</label>
+              <textarea id="create-route-description" rows="3"></textarea>
+            </div>
+          </div>
+          <div class="toolbar">
+            <button id="btn-create-route" class="primary" type="button">Create Route</button>
+            <span id="create-route-status" class="status"></span>
+          </div>
+        </section>
+
+        <section class="card article-work-card">
+          <div class="article-section-head">
+            <div>
+              <h2 class="section-title">Routes</h2>
+              <p class="muted">Select one or more routes, then open the dedicated review page or path editor.</p>
+            </div>
+          </div>
+          <div class="toolbar">
+            <button id="btn-open-selected-review" type="button">Review Selected</button>
+            <span id="route-selection-status" class="status"></span>
+          </div>
+          <div class="table-wrap">
+            <table class="basic-table" id="route-table">
+              <thead>
+                <tr>
+                  <th>Select</th>
+                  <th>ID</th>
+                  <th>Route</th>
+                  <th>Routing</th>
+                  <th>Poster</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/transport-v2-routes-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </body>
+</html>
+

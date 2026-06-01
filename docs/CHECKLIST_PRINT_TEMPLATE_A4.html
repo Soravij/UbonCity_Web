@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Checklist Template - A4 Role Matrix</title>
+  <style>
+    :root {
+      --text: #1a1a1a;
+      --muted: #555;
+      --line: #cfcfcf;
+      --line-strong: #9a9a9a;
+      --bg: #fff;
+      --font: "TH Sarabun New", "Sarabun", "Noto Sans Thai", "Segoe UI", sans-serif;
+    }
+    @page { size: A4; margin: 8mm; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12.5px;
+      line-height: 1.24;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .sheet { width: 100%; max-width: 190mm; margin: 0 auto; padding: 2mm 2mm 3mm; box-sizing: border-box; }
+    h1, h2, h3 { margin: 0; line-height: 1.2; }
+    h1 { font-size: 22px; margin-bottom: 2px; }
+    h2 { font-size: 16px; margin-top: 6px; margin-bottom: 2px; border-bottom: 1px solid var(--line-strong); padding-bottom: 1px; }
+    h3 { font-size: 13px; margin-top: 3px; margin-bottom: 1px; }
+    .note { margin: 2px 0 1px; color: var(--muted); font-size: 11.5px; }
+    .mono { font-family: Consolas, "Courier New", monospace; font-size: 11px; }
+    .meta-table, .matrix-table, .issue-table, .sign-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .meta-table td,
+    .matrix-table th, .matrix-table td,
+    .issue-table th, .issue-table td,
+    .sign-table td {
+      border: 1px solid var(--line);
+      padding: 2px 4px;
+      vertical-align: top;
+      word-wrap: break-word;
+    }
+    .matrix-table th, .issue-table th { background: #f5f5f5; font-weight: 700; text-align: left; }
+    .meta-label { width: 15%; font-weight: 700; white-space: nowrap; }
+    .meta-value { width: 35%; color: var(--muted); }
+    .w-item { width: 34%; }
+    .w-role { width: 6.5%; text-align: center; }
+    .w-result { width: 11%; }
+    .w-proof { width: 22%; }
+    .w-sev { width: 8%; }
+    .w-owner { width: 11%; }
+    .w-id { width: 5%; text-align: center; }
+    .check { display: inline-block; width: 11px; height: 11px; border: 1.4px solid #333; vertical-align: middle; }
+    .section { margin-bottom: 2px; page-break-inside: auto; break-inside: auto; }
+    .print-btn { margin: 0 0 2px auto; display: inline-block; border: 1px solid #444; background: #fff; border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 11px; }
+    @media print {
+      .print-btn { display: none; }
+      .sheet { padding: 0; }
+      body { zoom: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <button class="print-btn" onclick="window.print()">Print</button>
+    <h1>[PROJECT] - [CHECKLIST TITLE]</h1>
+    <p class="note">Template: แถวเดียวติ๊กครบ 5 role + Result + Evidence</p>
+    <table class="meta-table">
+      <tr>
+        <td class="meta-label">Date</td><td class="meta-value">____________________</td>
+        <td class="meta-label">Environment</td><td class="meta-value">____________________</td>
+      </tr>
+      <tr>
+        <td class="meta-label">Build/Commit</td><td class="meta-value">____________________</td>
+        <td class="meta-label">Tester</td><td class="meta-value">____________________</td>
+      </tr>
+    </table>
+
+    <section class="section">
+      <h2>1) [SECTION TITLE]</h2>
+      <table class="matrix-table">
+        <tr>
+          <th class="w-item">รายการตรวจ</th>
+          <th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th>
+          <th class="w-result">Result</th><th class="w-proof">Evidence / Note</th>
+        </tr>
+        <tr><td>[Checklist item 1]</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>[Checklist item 2]</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>2) [SECTION TITLE]</h2>
+      <table class="matrix-table">
+        <tr>
+          <th class="w-item">รายการตรวจ</th>
+          <th class="w-role">Owner</th><th class="w-role">Admin</th><th class="w-role">User</th><th class="w-role">Editor</th><th class="w-role">Freelance</th>
+          <th class="w-result">Result</th><th class="w-proof">Evidence / Note</th>
+        </tr>
+        <tr><td>[Checklist item]</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+        <tr><td>[Checklist item]</td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>3) Issue Log</h2>
+      <table class="issue-table">
+        <tr><th class="w-id">ID</th><th class="w-sev">Severity</th><th class="w-role">Role</th><th>URL/Page</th><th>Steps / Expected / Actual</th><th class="w-owner">Owner</th></tr>
+        <tr><td class="w-id">1</td><td></td><td></td><td></td><td style="height:24px"></td><td></td></tr>
+        <tr><td class="w-id">2</td><td></td><td></td><td></td><td style="height:24px"></td><td></td></tr>
+        <tr><td class="w-id">3</td><td></td><td></td><td></td><td style="height:24px"></td><td></td></tr>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>4) Decision</h2>
+      <table class="sign-table">
+        <tr>
+          <td style="width:16%; font-weight:700;">Decision</td>
+          <td style="width:20%;"><span class="check"></span> GO</td>
+          <td style="width:20%;"><span class="check"></span> NO-GO</td>
+          <td style="width:22%;">Approved by</td>
+          <td style="width:22%;">____________________</td>
+        </tr>
+        <tr><td colspan="4">Date</td><td>____________________</td></tr>
+      </table>
+    </section>
+  </div>
+</body>
+</html>
