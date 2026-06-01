@@ -208,6 +208,7 @@ const TRANSPORT_MAP_DEFAULT_THUMBNAIL = TRANSPORT_MAP_DEFAULT_IMAGES.bus;
 const TRANSPORT_MAP_DEFAULT_COLOR = "#ff6600";
 const TRANSPORT_MAP_MAX_POINTS = 2000;
 const TRANSPORT_MAP_MAX_STOPS = 400;
+const ASSIGNMENT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024 * 1024;
 const OTHER_TRANSPORT_ITEM_TYPE = "other_transport";
 const OTHER_TRANSPORT_METADATA_SOURCE_TYPE = "manual";
 const OTHER_TRANSPORT_METADATA_SOURCE_NAME = "collector-other-transport";
@@ -2932,8 +2933,8 @@ function enforceResetPerShotRequirements(assignment, assignmentId, currentRound)
     const slug = parseCaptureShotSlugFromFileName(asset?.file_name);
     if (!slug) continue;
     const sizeBytes = Number(asset?.size_bytes || 0) || 0;
-    if (sizeBytes > (500 * 1024 * 1024)) {
-      throw new Error(`video reset is active: shot ${slug} contains file larger than 500MB`);
+    if (sizeBytes > ASSIGNMENT_UPLOAD_MAX_BYTES) {
+      throw new Error(`video reset is active: shot ${slug} contains file larger than 20GB`);
     }
     videoByShot.set(slug, (videoByShot.get(slug) || 0) + 1);
   }
@@ -4401,7 +4402,6 @@ const assignmentUpload = createUploadMiddleware(isAllowedAssignmentUploadMime, {
 });
 const ASSIGNMENT_CHUNK_SIZE_BYTES = 20 * 1024 * 1024;
 const ASSIGNMENT_CHUNK_MAX_BYTES = 30 * 1024 * 1024;
-const ASSIGNMENT_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 const ASSIGNMENT_CHUNK_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const assignmentChunkUpload = multer({
   storage: multer.memoryStorage(),
@@ -5942,8 +5942,8 @@ const uploadRateLimit = createRateLimiter({
   message: "Upload rate limit exceeded",
 });
 const assignmentChunkUploadRateLimit = createRateLimiter({
-  windowMs: 6 * 60 * 60 * 1000,
-  max: 1500,
+  windowMs: 12 * 60 * 60 * 1000,
+  max: 2500,
   keyBy: "user",
   message: "Assignment chunk upload rate limit exceeded",
 });
@@ -12339,7 +12339,7 @@ app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admi
     return;
   }
   if (sizeBytes > ASSIGNMENT_UPLOAD_MAX_BYTES) {
-    res.status(400).json({ error: "File too large. Max 2GB per assignment upload." });
+    res.status(400).json({ error: "File too large. Max 20GB per assignment upload." });
     return;
   }
   if (!Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > 10000) {

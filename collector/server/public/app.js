@@ -7633,7 +7633,7 @@ function buildAssignmentCaptureFileUploadQueue(assignmentId, capturePrompts = []
   return queue;
 }
 
-const ASSIGNMENT_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+const ASSIGNMENT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024 * 1024;
 
 function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = []) {
   const prompts = Array.isArray(capturePrompts) ? capturePrompts.map((value) => String(value || "").trim()).filter(Boolean) : [];
@@ -7657,7 +7657,7 @@ function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = [
       if (videos.length < 1) missing.push(`วิดีโอหัวข้อ ${index + 1}: ${prompt}`);
       if (videos.length > 2) invalid.push(`วิดีโอหัวข้อ ${index + 1}: เกิน 2 ไฟล์`);
       const oversized = videos.find((file) => Number(file?.size || 0) > ASSIGNMENT_UPLOAD_MAX_BYTES);
-      if (oversized) invalid.push(`วิดีโอหัวข้อ ${index + 1}: ไฟล์ ${sanitizeUploadFileName(oversized.name, "video")} เกิน 2GB`);
+      if (oversized) invalid.push(`วิดีโอหัวข้อ ${index + 1}: ไฟล์ ${sanitizeUploadFileName(oversized.name, "video")} เกิน 20GB`);
     }
   });
   if (invalid.length) {
@@ -7669,7 +7669,7 @@ function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = [
 }
 
 async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = []) {
-  const CHUNK_THRESHOLD_BYTES = 80 * 1024 * 1024;
+  const CHUNK_THRESHOLD_BYTES = 20 * 1024 * 1024;
   const CHUNK_SIZE_BYTES = 20 * 1024 * 1024;
   const queue = Array.isArray(fileQueue) ? fileQueue : [];
   const validQueue = queue
@@ -7734,7 +7734,9 @@ async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = []) {
   for (const [index, entry] of validQueue.entries()) {
     let result;
     try {
-      if (Number(entry.original.size || 0) > CHUNK_THRESHOLD_BYTES) {
+      const mimeType = String(entry.original?.type || "").trim().toLowerCase();
+      const shouldUseChunkUpload = mimeType.startsWith("video/") || Number(entry.original.size || 0) > CHUNK_THRESHOLD_BYTES;
+      if (shouldUseChunkUpload) {
         result = await uploadAssignmentFileInChunks(entry, index);
       } else {
         const form = new FormData();
