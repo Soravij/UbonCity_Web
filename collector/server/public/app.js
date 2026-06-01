@@ -7633,6 +7633,8 @@ function buildAssignmentCaptureFileUploadQueue(assignmentId, capturePrompts = []
   return queue;
 }
 
+const ASSIGNMENT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024 * 1024;
+
 function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = []) {
   const prompts = Array.isArray(capturePrompts) ? capturePrompts.map((value) => String(value || "").trim()).filter(Boolean) : [];
   if (!prompts.length) return;
@@ -7654,8 +7656,8 @@ function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = [
     if (requireVideos) {
       if (videos.length < 1) missing.push(`วิดีโอหัวข้อ ${index + 1}: ${prompt}`);
       if (videos.length > 2) invalid.push(`วิดีโอหัวข้อ ${index + 1}: เกิน 2 ไฟล์`);
-      const oversized = videos.find((file) => Number(file?.size || 0) > (500 * 1024 * 1024));
-      if (oversized) invalid.push(`วิดีโอหัวข้อ ${index + 1}: ไฟล์ ${sanitizeUploadFileName(oversized.name, "video")} เกิน 500MB`);
+      const oversized = videos.find((file) => Number(file?.size || 0) > ASSIGNMENT_UPLOAD_MAX_BYTES);
+      if (oversized) invalid.push(`วิดีโอหัวข้อ ${index + 1}: ไฟล์ ${sanitizeUploadFileName(oversized.name, "video")} เกิน 20GB`);
     }
   });
   if (invalid.length) {
@@ -7667,21 +7669,96 @@ function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = [
 }
 
 async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = []) {
+  const CHUNK_THRESHOLD_BYTES = 20 * 1024 * 1024;
+  const CHUNK_SIZE_BYTES = 20 * 1024 * 1024;
   const queue = Array.isArray(fileQueue) ? fileQueue : [];
-  if (!queue.length) return [];
-  const form = new FormData();
-  queue.forEach((entry) => {
-    const original = entry?.file instanceof File ? entry.file : null;
-    if (!original) return;
-    const slug = String(entry?.slug || "misc").trim() || "misc";
-    const renamed = `${slug}__${sanitizeUploadFileName(original.name, "upload")}`;
-    form.append("file", original, renamed);
-  });
-  const result = await api(`/api/assignments/${assignmentId}/assets/upload`, {
-    method: "POST",
-    body: form,
-  });
-  return Array.isArray(result?.uploaded) ? result.uploaded : [];
+  const validQueue = queue
+    .map((entry) => {
+      const original = entry?.file instanceof File ? entry.file : null;
+      if (!original) return null;
+
+      const slug = String(entry?.slug || "misc").trim() || "misc";
+      const renamed = `${slug}__${sanitizeUploadFileName(original.name, "upload")}`;
+
+      return {
+        original,
+        renamed,
+        slug,
+        prompt: entry?.prompt || "",
+      };
+    })
+    .filter(Boolean);
+  if (!validQueue.length) return [];
+
+  async function uploadAssignmentFileInChunks(entry, index) {
+    const totalChunks = Math.max(1, Math.ceil(Number(entry.original.size || 0) / CHUNK_SIZE_BYTES));
+    const startResult = await api(`/api/assignments/${assignmentId}/assets/uploads/start`, {
+      method: "POST",
+      body: JSON.stringify({
+        file_name: entry.renamed,
+        mime_type: String(entry.original.type || "").trim().toLowerCase(),
+        size_bytes: Number(entry.original.size || 0) || 0,
+        total_chunks: totalChunks,
+        chunk_size_bytes: CHUNK_SIZE_BYTES,
+      }),
+    });
+    const uploadId = String(startResult?.upload_id || "").trim();
+    if (!uploadId) {
+      throw new Error("ระบบไม่ส่ง upload_id กลับมา");
+    }
+
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+      const start = chunkIndex * CHUNK_SIZE_BYTES;
+      const end = Math.min(start + CHUNK_SIZE_BYTES, entry.original.size);
+      const blob = entry.original.slice(start, end);
+      const form = new FormData();
+      form.append("chunk", blob, `${entry.renamed}.part-${chunkIndex + 1}`);
+      form.append("chunk_index", String(chunkIndex));
+      setStatus(
+        "assignment-status",
+        `กำลังอัปโหลดไฟล์ ${index + 1}/${validQueue.length}: ${entry.original.name} (chunk ${chunkIndex + 1}/${totalChunks})`
+      );
+      await api(`/api/assignments/${assignmentId}/assets/uploads/${uploadId}/chunks`, {
+        method: "POST",
+        body: form,
+      });
+    }
+
+    return api(`/api/assignments/${assignmentId}/assets/uploads/${uploadId}/finalize`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  const uploaded = [];
+  for (const [index, entry] of validQueue.entries()) {
+    let result;
+    try {
+      const mimeType = String(entry.original?.type || "").trim().toLowerCase();
+      const shouldUseChunkUpload = mimeType.startsWith("video/") || Number(entry.original.size || 0) > CHUNK_THRESHOLD_BYTES;
+      if (shouldUseChunkUpload) {
+        result = await uploadAssignmentFileInChunks(entry, index);
+      } else {
+        const form = new FormData();
+        form.append("file", entry.original, entry.renamed);
+        result = await api(`/api/assignments/${assignmentId}/assets/upload`, {
+          method: "POST",
+          body: form,
+        });
+      }
+    } catch (err) {
+      const fileName = entry.original?.name || entry.renamed || `file ${index + 1}`;
+      const message = err?.message || String(err || "unknown error");
+      throw new Error(
+        `อัปโหลดไฟล์ที่ ${index + 1}/${validQueue.length} ไม่สำเร็จ: ${fileName} — ${message}`
+      );
+    }
+
+    const batchUploaded = Array.isArray(result?.uploaded) ? result.uploaded : [];
+    uploaded.push(...batchUploaded);
+  }
+
+  return uploaded;
 }
 
 async function syncAssignmentSubmissionUploads() {

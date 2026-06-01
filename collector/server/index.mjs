@@ -3,6 +3,8 @@ import crypto from "crypto";
 import fsSync from "fs";
 import fs from "fs/promises";
 import path from "path";
+import { Transform } from "stream";
+import { pipeline } from "stream/promises";
 import express from "express";
 import multer from "multer";
 import jwt from "jsonwebtoken";
@@ -206,6 +208,7 @@ const TRANSPORT_MAP_DEFAULT_THUMBNAIL = TRANSPORT_MAP_DEFAULT_IMAGES.bus;
 const TRANSPORT_MAP_DEFAULT_COLOR = "#ff6600";
 const TRANSPORT_MAP_MAX_POINTS = 2000;
 const TRANSPORT_MAP_MAX_STOPS = 400;
+const ASSIGNMENT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024 * 1024;
 const OTHER_TRANSPORT_ITEM_TYPE = "other_transport";
 const OTHER_TRANSPORT_METADATA_SOURCE_TYPE = "manual";
 const OTHER_TRANSPORT_METADATA_SOURCE_NAME = "collector-other-transport";
@@ -2930,8 +2933,8 @@ function enforceResetPerShotRequirements(assignment, assignmentId, currentRound)
     const slug = parseCaptureShotSlugFromFileName(asset?.file_name);
     if (!slug) continue;
     const sizeBytes = Number(asset?.size_bytes || 0) || 0;
-    if (sizeBytes > (500 * 1024 * 1024)) {
-      throw new Error(`video reset is active: shot ${slug} contains file larger than 500MB`);
+    if (sizeBytes > ASSIGNMENT_UPLOAD_MAX_BYTES) {
+      throw new Error(`video reset is active: shot ${slug} contains file larger than 20GB`);
     }
     videoByShot.set(slug, (videoByShot.get(slug) || 0) + 1);
   }
@@ -4397,6 +4400,165 @@ const upload = createUploadMiddleware(isAllowedImageUploadMime);
 const assignmentUpload = createUploadMiddleware(isAllowedAssignmentUploadMime, {
   maxFileSizeBytes: 500 * 1024 * 1024,
 });
+const ASSIGNMENT_CHUNK_SIZE_BYTES = 20 * 1024 * 1024;
+const ASSIGNMENT_CHUNK_MAX_BYTES = 30 * 1024 * 1024;
+const ASSIGNMENT_CHUNK_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const assignmentChunkUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: ASSIGNMENT_CHUNK_MAX_BYTES },
+});
+
+function isValidAssignmentUploadId(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+
+function sanitizeStoredUploadName(name, fallback = "upload.bin") {
+  const base = String(name || "").trim() || fallback;
+  return base.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function normalizeRelativeStoragePath(value) {
+  return String(value || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/^\.\//, "");
+}
+
+function getAssignmentUploadTempDir(assignmentId, uploadId) {
+  return path.join(
+    dirs.mediaDir,
+    "tmp-chunks",
+    "assignment-work",
+    String(Number(assignmentId || 0) || 0),
+    String(uploadId || "").trim()
+  );
+}
+
+function getAssignmentUploadRootDir() {
+  return path.join(dirs.mediaDir, "tmp-chunks", "assignment-work");
+}
+
+function getAssignmentUploadManifestPath(assignmentId, uploadId) {
+  return path.join(getAssignmentUploadTempDir(assignmentId, uploadId), "manifest.json");
+}
+
+function getAssignmentChunkFilePath(assignmentId, uploadId, chunkIndex) {
+  const index = Number(chunkIndex || 0);
+  const fileName = `chunk-${String(index).padStart(6, "0")}.part`;
+  return path.join(getAssignmentUploadTempDir(assignmentId, uploadId), fileName);
+}
+
+async function writeAssignmentUploadManifest(assignmentId, uploadId, manifest) {
+  const manifestPath = getAssignmentUploadManifestPath(assignmentId, uploadId);
+  const payload = JSON.stringify(manifest, null, 2);
+  await fs.writeFile(manifestPath, payload, "utf8");
+}
+
+async function readAssignmentUploadManifest(assignmentId, uploadId) {
+  const manifestPath = getAssignmentUploadManifestPath(assignmentId, uploadId);
+  const raw = await fs.readFile(manifestPath, "utf8");
+  return JSON.parse(raw);
+}
+
+function isPathWithinRoot(rootPath, candidatePath) {
+  const rootResolved = path.resolve(rootPath);
+  const candidateResolved = path.resolve(candidatePath);
+  return candidateResolved === rootResolved || candidateResolved.startsWith(`${rootResolved}${path.sep}`);
+}
+
+async function removeAssignmentUploadSessionTempDir(assignmentId, uploadId) {
+  const root = getAssignmentUploadRootDir();
+  const target = getAssignmentUploadTempDir(assignmentId, uploadId);
+  if (!isPathWithinRoot(root, target)) return false;
+  await fs.rm(target, { recursive: true, force: true });
+  return true;
+}
+
+async function cleanupStaleAssignmentUploadSessions({ maxAgeMs = ASSIGNMENT_CHUNK_SESSION_MAX_AGE_MS } = {}) {
+  const root = getAssignmentUploadRootDir();
+  const now = Date.now();
+  const safeMaxAge = Number.isFinite(Number(maxAgeMs)) && Number(maxAgeMs) > 0
+    ? Number(maxAgeMs)
+    : ASSIGNMENT_CHUNK_SESSION_MAX_AGE_MS;
+  await fs.mkdir(root, { recursive: true });
+  const assignmentDirs = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+  for (const assignmentDir of assignmentDirs) {
+    if (!assignmentDir?.isDirectory()) continue;
+    const assignmentPath = path.join(root, assignmentDir.name);
+    if (!isPathWithinRoot(root, assignmentPath)) continue;
+    const uploadDirs = await fs.readdir(assignmentPath, { withFileTypes: true }).catch(() => []);
+    for (const uploadDir of uploadDirs) {
+      if (!uploadDir?.isDirectory()) continue;
+      const uploadPath = path.join(assignmentPath, uploadDir.name);
+      if (!isPathWithinRoot(root, uploadPath)) continue;
+      const manifestPath = path.join(uploadPath, "manifest.json");
+      let updatedAtMs = 0;
+      try {
+        const raw = await fs.readFile(manifestPath, "utf8");
+        const parsed = JSON.parse(raw);
+        updatedAtMs = Date.parse(String(parsed?.updated_at || parsed?.created_at || ""));
+      } catch {}
+      if (!Number.isFinite(updatedAtMs) || updatedAtMs <= 0) {
+        try {
+          const stats = await fs.stat(uploadPath);
+          updatedAtMs = Number(stats?.mtimeMs || 0);
+        } catch {
+          updatedAtMs = 0;
+        }
+      }
+      if (Number.isFinite(updatedAtMs) && updatedAtMs > 0 && (now - updatedAtMs) >= safeMaxAge) {
+        await fs.rm(uploadPath, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+  }
+}
+
+async function readFileHeadBytes(filePath, maxBytes = 8192) {
+  const limit = Math.max(64, Number(maxBytes || 0) || 8192);
+  const file = await fs.open(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(limit);
+    const read = await file.read(buffer, 0, limit, 0);
+    return buffer.subarray(0, Number(read?.bytesRead || 0));
+  } finally {
+    await file.close();
+  }
+}
+
+async function appendChunkToStream(chunkPath, outputStream, hash) {
+  let chunkBytesWritten = 0;
+  const hashTap = new Transform({
+    transform(chunk, _encoding, callback) {
+      hash.update(chunk);
+      chunkBytesWritten += chunk.length;
+      callback(null, chunk);
+    },
+  });
+  await pipeline(fsSync.createReadStream(chunkPath), hashTap, outputStream, { end: false });
+  return chunkBytesWritten;
+}
+
+async function ensureAssignmentUploadAccess(req, res, assignmentId) {
+  const normalizedId = Number(assignmentId || 0);
+  if (!normalizedId) {
+    res.status(400).json({ error: "Invalid assignment id" });
+    return null;
+  }
+  const assignment = repo.getAssignmentById(normalizedId);
+  if (!assignment) {
+    res.status(404).json({ error: "assignment not found" });
+    return null;
+  }
+  if (actorPolicyRole(req) === "editor") {
+    res.status(403).json({ error: "editor cannot upload assignment assets from this surface" });
+    return null;
+  }
+  if (!hasAssignmentSubmissionAccess(req, assignment)) {
+    res.status(403).json({ error: "only assigned contributor can upload files for this assignment" });
+    return null;
+  }
+  return assignment;
+}
 
 function toPositiveIntWithinRange(value, fallback, min, max) {
   const n = Number(value);
@@ -5778,6 +5940,12 @@ const uploadRateLimit = createRateLimiter({
   max: 25,
   keyBy: "user",
   message: "Upload rate limit exceeded",
+});
+const assignmentChunkUploadRateLimit = createRateLimiter({
+  windowMs: 12 * 60 * 60 * 1000,
+  max: 2500,
+  keyBy: "user",
+  message: "Assignment chunk upload rate limit exceeded",
 });
 
 app.get("/api/health", (_req, res) => {
@@ -12145,6 +12313,387 @@ app.post("/api/assets/upload", requireRole("owner", "admin", "editor", "user"), 
   });
 });
 
+app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admin", "editor", "user", "freelance"), assignmentChunkUploadRateLimit, async (req, res) => {
+  const assignmentId = Number(req.params.id || 0);
+  const assignment = await ensureAssignmentUploadAccess(req, res, assignmentId);
+  if (!assignment) return;
+  await cleanupStaleAssignmentUploadSessions({ maxAgeMs: ASSIGNMENT_CHUNK_SESSION_MAX_AGE_MS }).catch(() => {});
+
+  const fileNameRaw = String(req.body?.file_name || "").trim();
+  const mimeType = String(req.body?.mime_type || "").trim().toLowerCase();
+  const sizeBytes = Number(req.body?.size_bytes || 0);
+  const totalChunks = Number(req.body?.total_chunks || 0);
+  const requestedChunkSize = Number(req.body?.chunk_size_bytes || ASSIGNMENT_CHUNK_SIZE_BYTES);
+  const chunkSizeBytes = ASSIGNMENT_CHUNK_SIZE_BYTES;
+
+  if (!fileNameRaw) {
+    res.status(400).json({ error: "file_name is required" });
+    return;
+  }
+  if (!isAllowedAssignmentUploadMime(mimeType)) {
+    res.status(400).json({ error: "Unsupported upload mime type for assignment work surface" });
+    return;
+  }
+  if (!Number.isInteger(sizeBytes) || sizeBytes <= 0) {
+    res.status(400).json({ error: "size_bytes must be a positive integer" });
+    return;
+  }
+  if (sizeBytes > ASSIGNMENT_UPLOAD_MAX_BYTES) {
+    res.status(400).json({ error: "File too large. Max 20GB per assignment upload." });
+    return;
+  }
+  if (!Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > 10000) {
+    res.status(400).json({ error: "total_chunks is invalid" });
+    return;
+  }
+  if (!Number.isInteger(requestedChunkSize) || requestedChunkSize !== ASSIGNMENT_CHUNK_SIZE_BYTES) {
+    res.status(400).json({ error: "chunk_size_bytes must be 20MB" });
+    return;
+  }
+  const expectedChunks = Math.max(1, Math.ceil(sizeBytes / chunkSizeBytes));
+  if (expectedChunks !== totalChunks) {
+    res.status(400).json({ error: "size_bytes and total_chunks do not match chunk_size_bytes" });
+    return;
+  }
+
+  const uploadId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const contentItemId = Number(assignment.content_item_id || 0) || 0;
+  const assignmentRound = resolveAssignmentCurrentRound(assignment);
+  const actorUserId = Number(req.authUser?.id || 0) || 0;
+  const tempDir = getAssignmentUploadTempDir(assignmentId, uploadId);
+  await fs.mkdir(tempDir, { recursive: true });
+
+  const manifest = {
+    version: 1,
+    upload_id: uploadId,
+    assignment_id: assignmentId,
+    actor_user_id: actorUserId,
+    content_item_id: contentItemId,
+    assignment_round: assignmentRound,
+    file_name: sanitizeStoredUploadName(fileNameRaw, "upload.bin"),
+    mime_type: mimeType,
+    size_bytes: Math.floor(sizeBytes),
+    total_chunks: Math.floor(totalChunks),
+    chunk_size_bytes: chunkSizeBytes,
+    received_chunks: {},
+    created_at: now,
+    updated_at: now,
+  };
+  await writeAssignmentUploadManifest(assignmentId, uploadId, manifest);
+  res.status(201).json({
+    upload_id: uploadId,
+    assignment_id: assignmentId,
+    chunk_size_bytes: chunkSizeBytes,
+    total_chunks: manifest.total_chunks,
+  });
+});
+
+app.post("/api/assignments/:id/assets/uploads/:uploadId/chunks", requireRole("owner", "admin", "editor", "user", "freelance"), assignmentChunkUploadRateLimit, assignmentChunkUpload.single("chunk"), async (req, res) => {
+  const assignmentId = Number(req.params.id || 0);
+  const uploadId = String(req.params.uploadId || "").trim();
+  const assignment = await ensureAssignmentUploadAccess(req, res, assignmentId);
+  if (!assignment) return;
+  if (!uploadId) {
+    res.status(400).json({ error: "uploadId is required" });
+    return;
+  }
+  if (!isValidAssignmentUploadId(uploadId)) {
+    res.status(400).json({ error: "uploadId is invalid" });
+    return;
+  }
+
+  let manifest;
+  try {
+    manifest = await readAssignmentUploadManifest(assignmentId, uploadId);
+  } catch {
+    res.status(404).json({ error: "upload session not found" });
+    return;
+  }
+
+  const actorUserId = Number(req.authUser?.id || 0) || 0;
+  if (Number(manifest?.assignment_id || 0) !== assignmentId || Number(manifest?.actor_user_id || 0) !== actorUserId) {
+    res.status(403).json({ error: "upload session access denied" });
+    return;
+  }
+
+  const chunkIndex = Number(req.body?.chunk_index);
+  const totalChunks = Number(manifest.total_chunks || 0);
+  if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= totalChunks) {
+    res.status(400).json({ error: "chunk_index is invalid" });
+    return;
+  }
+  const file = req.file;
+  if (!file || !Buffer.isBuffer(file.buffer) || !file.buffer.length) {
+    res.status(400).json({ error: "chunk is required" });
+    return;
+  }
+  const chunkSize = Number(file.size || file.buffer.length || 0);
+  const expectedChunkSize = Number(manifest.chunk_size_bytes || ASSIGNMENT_CHUNK_SIZE_BYTES);
+  const expectedTotalSize = Number(manifest.size_bytes || 0);
+  const isLastChunk = chunkIndex === (totalChunks - 1);
+  const expectedLastChunkSize = expectedTotalSize - (expectedChunkSize * (totalChunks - 1));
+  if (!isLastChunk && chunkSize !== expectedChunkSize) {
+    res.status(400).json({ error: "chunk size does not match expected chunk_size_bytes" });
+    return;
+  }
+  if (isLastChunk && chunkSize !== expectedLastChunkSize) {
+    res.status(400).json({ error: "last chunk size does not match expected remaining bytes" });
+    return;
+  }
+
+  const chunkPath = getAssignmentChunkFilePath(assignmentId, uploadId, chunkIndex);
+  await fs.writeFile(chunkPath, file.buffer);
+  manifest.received_chunks = manifest.received_chunks && typeof manifest.received_chunks === "object"
+    ? manifest.received_chunks
+    : {};
+  manifest.received_chunks[String(chunkIndex)] = {
+    size_bytes: chunkSize,
+    uploaded_at: new Date().toISOString(),
+  };
+  manifest.updated_at = new Date().toISOString();
+  await writeAssignmentUploadManifest(assignmentId, uploadId, manifest);
+  res.status(201).json({
+    ok: true,
+    upload_id: uploadId,
+    chunk_index: chunkIndex,
+    received_chunks: Object.keys(manifest.received_chunks).length,
+    total_chunks: Number(manifest.total_chunks || 0),
+  });
+});
+
+app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("owner", "admin", "editor", "user", "freelance"), assignmentChunkUploadRateLimit, async (req, res) => {
+  const assignmentId = Number(req.params.id || 0);
+  const uploadId = String(req.params.uploadId || "").trim();
+  const assignment = await ensureAssignmentUploadAccess(req, res, assignmentId);
+  if (!assignment) return;
+  if (!uploadId) {
+    res.status(400).json({ error: "uploadId is required" });
+    return;
+  }
+  if (!isValidAssignmentUploadId(uploadId)) {
+    res.status(400).json({ error: "uploadId is invalid" });
+    return;
+  }
+
+  let manifest;
+  try {
+    manifest = await readAssignmentUploadManifest(assignmentId, uploadId);
+  } catch {
+    res.status(404).json({ error: "upload session not found" });
+    return;
+  }
+  const actorUserId = Number(req.authUser?.id || 0) || 0;
+  if (Number(manifest?.assignment_id || 0) !== assignmentId || Number(manifest?.actor_user_id || 0) !== actorUserId) {
+    res.status(403).json({ error: "upload session access denied" });
+    return;
+  }
+
+  const totalChunks = Number(manifest.total_chunks || 0);
+  const expectedTotalSize = Number(manifest.size_bytes || 0);
+  const expectedChunkSize = Number(manifest.chunk_size_bytes || ASSIGNMENT_CHUNK_SIZE_BYTES);
+  if (!Number.isInteger(totalChunks) || totalChunks < 1) {
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(400).json({ error: "upload session total_chunks is invalid" });
+    return;
+  }
+  if (!Number.isInteger(expectedTotalSize) || expectedTotalSize <= 0) {
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(400).json({ error: "upload session size_bytes is invalid" });
+    return;
+  }
+  if (!Number.isInteger(expectedChunkSize) || expectedChunkSize < 1 || expectedChunkSize > ASSIGNMENT_CHUNK_MAX_BYTES) {
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(400).json({ error: "upload session chunk_size_bytes is invalid" });
+    return;
+  }
+
+  const now = new Date();
+  const finalRelativeDir = normalizeRelativeStoragePath(path.join(
+    "assignment-originals",
+    String(now.getFullYear()),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    `assignment-${assignmentId}`
+  ));
+  const safeName = sanitizeStoredUploadName(manifest.file_name, "upload.bin");
+  const finalRelativePath = normalizeRelativeStoragePath(path.join(finalRelativeDir, `${Date.now()}-${safeName}`));
+  const finalDirPath = resolveStoragePath(finalRelativeDir);
+  const finalAbsolutePath = resolveStoragePath(finalRelativePath);
+  const assemblingAbsolutePath = `${finalAbsolutePath}.assembling`;
+  await fs.mkdir(finalDirPath, { recursive: true });
+
+  let checksum = "";
+  let normalizedMime = "";
+  let assembledSize = 0;
+  let output = null;
+  try {
+    const hash = crypto.createHash("sha256");
+    output = fsSync.createWriteStream(assemblingAbsolutePath, { flags: "w" });
+    for (let index = 0; index < totalChunks; index += 1) {
+      const chunkPath = getAssignmentChunkFilePath(assignmentId, uploadId, index);
+      const expectedCurrentChunkSize = index === (totalChunks - 1)
+        ? expectedTotalSize - (expectedChunkSize * (totalChunks - 1))
+        : expectedChunkSize;
+      let stats;
+      try {
+        stats = await fs.stat(chunkPath);
+      } catch {
+        throw new Error(`missing chunk ${index + 1}/${totalChunks}`);
+      }
+      const actualChunkSize = Number(stats?.size || 0);
+      if (actualChunkSize !== expectedCurrentChunkSize) {
+        throw new Error(`invalid chunk size at ${index + 1}/${totalChunks}`);
+      }
+      assembledSize += await appendChunkToStream(chunkPath, output, hash);
+    }
+    await new Promise((resolve, reject) => {
+      output.once("error", reject);
+      output.end(() => resolve());
+    });
+    checksum = hash.digest("hex");
+    normalizedMime = String(manifest.mime_type || "").trim().toLowerCase();
+  } catch (err) {
+    if (output && !output.destroyed) {
+      output.destroy();
+    }
+    await fs.unlink(assemblingAbsolutePath).catch(() => {});
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(400).json({ error: String(err?.message || "Cannot finalize upload") });
+    return;
+  }
+
+  if (assembledSize !== expectedTotalSize) {
+    await fs.unlink(assemblingAbsolutePath).catch(() => {});
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(400).json({ error: "assembled upload size mismatch" });
+    return;
+  }
+
+  const signatureHead = await readFileHeadBytes(assemblingAbsolutePath, 8192);
+  if (!isSupportedMediaSignature(signatureHead, normalizedMime)) {
+    await fs.unlink(assemblingAbsolutePath).catch(() => {});
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(400).json({ error: "Uploaded file signature does not match mime type" });
+    return;
+  }
+
+  try {
+    await fs.rename(assemblingAbsolutePath, finalAbsolutePath);
+  } catch {
+    await fs.unlink(assemblingAbsolutePath).catch(() => {});
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(500).json({ error: "Cannot register finalized upload" });
+    return;
+  }
+
+  const contentItemId = Number(assignment.content_item_id || 0) || 0;
+  const assignmentRound = resolveAssignmentCurrentRound(assignment);
+  const insert = db.prepare(
+    `
+    INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `
+  );
+  const linkAsset = db.prepare(
+    "INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order, assignment_id, assignment_round, assignment_media_type, assignment_surface) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)"
+  );
+  const assetUid = crypto.randomUUID();
+  const mediaType = normalizedMime.startsWith("video/") ? "video" : "image";
+  const assetRole = "unused";
+  let assetId = 0;
+  let transactionBegun = false;
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    transactionBegun = true;
+    const insertResult = insert.run(
+      assetUid,
+      "local",
+      finalRelativePath,
+      safeName,
+      normalizedMime,
+      expectedTotalSize,
+      checksum
+    );
+    const insertedAssetId = Number(insertResult.lastInsertRowid || 0) || 0;
+    linkAsset.run(
+      contentItemId,
+      insertedAssetId,
+      assetRole,
+      0,
+      0,
+      "unused",
+      assignmentId,
+      assignmentRound,
+      mediaType,
+      "assignment_work"
+    );
+    db.exec("COMMIT");
+    transactionBegun = false;
+    assetId = insertedAssetId;
+  } catch (err) {
+    if (transactionBegun) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {}
+    }
+    console.error("[assignment.chunk.finalize.register_failed]", {
+      assignmentId,
+      uploadId,
+      contentItemId,
+      assignmentRound,
+      finalRelativePath,
+      finalAbsolutePath,
+      normalizedMime,
+      expectedTotalSize,
+      hasChecksum: Boolean(checksum),
+      error: err?.message || String(err),
+      stack: err?.stack || null,
+    });
+    await fs.unlink(finalAbsolutePath).catch(() => {});
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(500).json({ error: "Cannot register finalized upload" });
+    return;
+  }
+
+  await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+  try {
+    repo.logAudit(actorEmail(req), "assignment.asset.upload", "assignment", String(assignmentId), {
+      assignment_id: assignmentId,
+      assignment_round: assignmentRound,
+      content_item_id: contentItemId,
+      asset_id: assetId,
+      mime_type: normalizedMime,
+      assignment_media_type: mediaType,
+    }, {
+      assignment_id: assignmentId,
+    });
+  } catch (err) {
+    console.error("[assignment.chunk.finalize.audit_failed]", {
+      assignmentId,
+      uploadId,
+      assetId,
+      error: err?.message || String(err),
+      stack: err?.stack || null,
+    });
+  }
+  const uploadedAsset = {
+    id: assetId,
+    asset_uid: assetUid,
+    storage_path: finalRelativePath,
+    public_url: parseAssetPathForUrl(finalRelativePath),
+    file_name: safeName,
+    mime_type: normalizedMime,
+    role: assetRole,
+  };
+  res.status(201).json({
+    id: uploadedAsset.id,
+    asset_uid: uploadedAsset.asset_uid,
+    storage_path: uploadedAsset.storage_path,
+    public_url: uploadedAsset.public_url,
+    uploaded: [uploadedAsset],
+  });
+});
+
 app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "editor", "user", "freelance"), uploadRateLimit, assignmentUpload.array("file", 20), async (req, res) => {
   const assignmentId = Number(req.params.id || 0);
   if (!assignmentId) {
@@ -12336,9 +12885,17 @@ app.use((err, req, res, _next) => {
   if (res.headersSent) return;
   const requestPath = String(req?.path || "").trim();
   const isAssignmentUploadPath = requestPath.startsWith("/api/assignments/") && requestPath.endsWith("/assets/upload");
+  const isAssignmentChunkPath = requestPath.startsWith("/api/assignments/")
+    && /\/assets\/uploads\/[^/]+\/chunks$/.test(requestPath);
   if (err instanceof multer.MulterError) {
     if (err.code === "LIMIT_FILE_SIZE") {
-      res.status(400).json({ error: isAssignmentUploadPath ? "File too large. Max 500MB per file." : "File too large. Max 20MB." });
+      res.status(400).json({
+        error: isAssignmentUploadPath
+          ? "File too large. Max 500MB per file."
+          : isAssignmentChunkPath
+            ? "Chunk too large. Max 30MB per request."
+            : "File too large. Max 20MB.",
+      });
       return;
     }
     res.status(400).json({ error: String(err.message || "Upload failed") });
