@@ -220,6 +220,8 @@ const state = {
     serverSubmissionDraftLoaded: {},
     serverSubmissionDraftSaveTimers: {},
     latestUploadedAssets: [],
+    latestUploadedAssetsKey: "",
+    syncedUploadAssetsByKey: {},
     reviewSelectedVideoKey: "",
     workLatestComment: "",
     workLatestCommentLoaded: false,
@@ -5942,16 +5944,70 @@ function buildAssignmentCaptureQueueSignature(assignmentId, capturePrompts = [])
   }).join(";");
 }
 
+function getAssignmentCaptureSyncKey(assignmentId, capturePrompts = []) {
+  const id = Number(assignmentId || 0) || 0;
+  if (!id) return "";
+  const signature = buildAssignmentCaptureQueueSignature(id, capturePrompts);
+  if (!signature) return "";
+  return `${id}::${signature}`;
+}
+
+function getSyncedUploadAssetsForKey(syncKey) {
+  const key = String(syncKey || "").trim();
+  if (!key) return [];
+  const bucket = state.assignments.syncedUploadAssetsByKey;
+  if (!bucket || typeof bucket !== "object") return [];
+  const assets = bucket[key];
+  return Array.isArray(assets) ? assets : [];
+}
+
+function setLatestUploadedAssetsForSyncKey(syncKey, uploadedAssets = []) {
+  const key = String(syncKey || "").trim();
+  const nextAssets = Array.isArray(uploadedAssets) ? uploadedAssets : [];
+  state.assignments.latestUploadedAssets = nextAssets;
+  state.assignments.latestUploadedAssetsKey = key;
+  if (key) {
+    if (!state.assignments.syncedUploadAssetsByKey || typeof state.assignments.syncedUploadAssetsByKey !== "object") {
+      state.assignments.syncedUploadAssetsByKey = {};
+    }
+    state.assignments.syncedUploadAssetsByKey[key] = nextAssets;
+  }
+}
+
+function clearSyncedUploadAssetsCacheForAssignment(assignmentId) {
+  const id = Number(assignmentId || 0) || 0;
+  if (!id) return;
+  const bucket = state.assignments.syncedUploadAssetsByKey;
+  if (!bucket || typeof bucket !== "object") return;
+  const prefix = `${id}::`;
+  Object.keys(bucket).forEach((key) => {
+    if (String(key || "").startsWith(prefix)) delete bucket[key];
+  });
+}
+
 function markAssignmentCaptureUploadsDirty(assignmentId) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return;
   const syncBucket = getAssignmentCaptureSyncStateBucket(id, false);
   if (syncBucket) {
+    const priorSignature = String(syncBucket.signature || "");
+    if (priorSignature) {
+      const priorKey = `${id}::${priorSignature}`;
+      if (
+        state.assignments.syncedUploadAssetsByKey
+        && typeof state.assignments.syncedUploadAssetsByKey === "object"
+      ) {
+        delete state.assignments.syncedUploadAssetsByKey[priorKey];
+      }
+      if (String(state.assignments.latestUploadedAssetsKey || "") === priorKey) {
+        state.assignments.latestUploadedAssets = [];
+        state.assignments.latestUploadedAssetsKey = "";
+      }
+    }
     delete syncBucket.signature;
     delete syncBucket.syncedAt;
     delete syncBucket.uploadedCount;
   }
-  state.assignments.latestUploadedAssets = [];
 }
 
 function markAssignmentCaptureUploadsSynced(assignmentId, capturePrompts = [], uploadedAssets = []) {
@@ -5962,6 +6018,8 @@ function markAssignmentCaptureUploadsSynced(assignmentId, capturePrompts = [], u
   syncBucket.signature = buildAssignmentCaptureQueueSignature(id, capturePrompts);
   syncBucket.syncedAt = new Date().toISOString();
   syncBucket.uploadedCount = Array.isArray(uploadedAssets) ? uploadedAssets.length : 0;
+  const syncKey = getAssignmentCaptureSyncKey(id, capturePrompts);
+  setLatestUploadedAssetsForSyncKey(syncKey, uploadedAssets);
 }
 
 function isAssignmentCaptureUploadsSynced(assignmentId, capturePrompts = []) {
@@ -6014,7 +6072,11 @@ function clearAssignmentCaptureUploads(assignmentId) {
   if (state.assignments.captureUploadSyncState && typeof state.assignments.captureUploadSyncState === "object") {
     delete state.assignments.captureUploadSyncState[id];
   }
-  state.assignments.latestUploadedAssets = [];
+  clearSyncedUploadAssetsCacheForAssignment(id);
+  if (String(state.assignments.latestUploadedAssetsKey || "").startsWith(`${id}::`)) {
+    state.assignments.latestUploadedAssets = [];
+    state.assignments.latestUploadedAssetsKey = "";
+  }
 }
 
 function renderAssignmentSubmissionFileList() {
@@ -6025,9 +6087,14 @@ function renderAssignmentSubmissionFileList() {
   const formConfig = getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack);
   const captureBucket = getAssignmentCaptureUploadBucket(assignmentId, false) || {};
   const files = Object.values(captureBucket).flatMap((rows) => (Array.isArray(rows) ? rows : [])).filter((file) => file instanceof File);
-  const uploadedAssets = Array.isArray(state.assignments.latestUploadedAssets)
-    ? state.assignments.latestUploadedAssets
-    : [];
+  const syncKey = getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems);
+  const cachedSyncedAssets = getSyncedUploadAssetsForKey(syncKey);
+  const latestKey = String(state.assignments.latestUploadedAssetsKey || "");
+  const uploadedAssets = cachedSyncedAssets.length
+    ? cachedSyncedAssets
+    : (latestKey === syncKey && Array.isArray(state.assignments.latestUploadedAssets)
+      ? state.assignments.latestUploadedAssets
+      : []);
   const isSynced = isAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems);
   if (!files.length) {
     if (uploadedAssets.length) {
@@ -6050,7 +6117,7 @@ function renderAssignmentSubmissionFileList() {
   }
   node.className = "assignment-brief-list-wrap";
   node.innerHTML = `
-    <div class="assignment-brief-meta" style="margin-bottom:8px;">${isSynced ? "สถานะ: synced แล้ว" : "สถานะ: ยังไม่ sync (ต้องกด อัปโหลด/ซิงก์ไฟล์)"}</div>
+    <div class="assignment-brief-meta" style="margin-bottom:8px;">${isSynced ? "สถานะ: ไฟล์ซิงก์แล้ว รอส่งงานกลับ (ขั้นที่ 2)" : "สถานะ: ยังไม่ซิงก์ไฟล์ (ต้องทำขั้นที่ 1 ก่อนส่งงานกลับ)"}</div>
     <ul class="assignment-brief-list">${files.map((file) => `<li>${escapeHtml(`${String(file.name || "").trim() || "file"} | ${String(file.type || "").trim() || "unknown"}`)}</li>`).join("")}</ul>
   `;
 }
@@ -6094,6 +6161,10 @@ function renderAssignmentSubmissionForm(assignment = null) {
     }
   }
   if (workspaceHelpNode) workspaceHelpNode.textContent = formConfig.workspaceHelp;
+  const syncUploadButton = qs("btn-assignment-sync-upload");
+  if (syncUploadButton) syncUploadButton.textContent = "ขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์";
+  const submitButton = qs("btn-assignment-submit");
+  if (submitButton) submitButton.textContent = "ขั้นที่ 2: ส่งงานกลับ";
   if (briefLabelNode) briefLabelNode.textContent = formConfig.briefLabel;
   if (verifiedLabelNode) verifiedLabelNode.textContent = formConfig.verifiedLabel;
   if (questionLabelNode) questionLabelNode.textContent = formConfig.questionLabel;
@@ -6122,6 +6193,7 @@ function renderAssignmentSubmissionForm(assignment = null) {
     setAssignmentDraftSaveStatus("");
     clearAssignmentCaptureUploads(state.assignments.selectedId);
     state.assignments.latestUploadedAssets = [];
+    state.assignments.latestUploadedAssetsKey = "";
     renderAssignmentSubmissionFileList();
     return;
   }
@@ -6343,7 +6415,7 @@ function getAssignmentSubmissionFormConfig(assignment = null, fieldPack = null) 
     const groups = getEditorialPromptGroups(fieldPack, brief);
     return {
       kind,
-      workspaceHelp: "ใช้ส่วนนี้สำหรับสรุปมุมเล่า งานเขียน หรือโน้ตที่ต้องใช้ต่อยอด พร้อมแนบไฟล์อ้างอิงและส่งงานกลับ",
+      workspaceHelp: "ขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์อ้างอิง | ขั้นที่ 2: ส่งงานกลับ พร้อมสรุปมุมเล่า งานเขียน หรือโน้ตที่ต้องใช้ต่อยอด",
       briefLabel: "สรุปงานอ้างอิง (มุมมองพิมพ์)",
       verifiedLabel: "แนวสื่อสารหลัก",
       questionLabel: "ข้อมูล/มุมที่ต้องใช้",
@@ -6367,7 +6439,7 @@ function getAssignmentSubmissionFormConfig(assignment = null, fieldPack = null) 
   const groups = fieldPack ? getFieldPackPromptGroups(fieldPack) : getAssignmentBriefPromptGroups(brief);
   return {
     kind,
-    workspaceHelp: "ใช้ส่วนนี้สำหรับดูชุดลงหน้างาน กรอกข้อมูลที่ได้จากหน้างาน แนบรูป/วิดีโอ และส่งงานกลับ",
+    workspaceHelp: "ขั้นที่ 1: อัปโหลด/ซิงก์รูปหรือวิดีโอ | ขั้นที่ 2: ส่งงานกลับ พร้อมกรอกข้อมูลที่ได้จากหน้างาน",
     briefLabel: "ใบสั่งงาน (มุมมองพิมพ์)",
     verifiedLabel: "สิ่งที่ต้องยืนยัน",
     questionLabel: "คำตอบจากหน้างาน",
@@ -7035,6 +7107,7 @@ function selectAssignment(assignmentId, { trackOnly = false, submittedView = fal
     state.assignments.workLatestCommentLoaded = false;
     state.assignments.workLatestCommentLoading = false;
     state.assignments.latestUploadedAssets = [];
+    state.assignments.latestUploadedAssetsKey = "";
     state.assignments.assets = [];
     state.assignments.assetLookup = [];
     resetAssignmentExpectedDeliverablesTouched();
@@ -7080,6 +7153,7 @@ function selectAssignment(assignmentId, { trackOnly = false, submittedView = fal
   state.assignments.workLatestCommentLoaded = false;
   state.assignments.workLatestCommentLoading = false;
   state.assignments.latestUploadedAssets = [];
+  state.assignments.latestUploadedAssetsKey = "";
   if (Number(state.assignments.deliverablesBundle?.assignment_id || 0) !== Number(assignment.id || 0)) {
     state.assignments.deliverablesBundle = null;
   }
@@ -7770,11 +7844,23 @@ async function syncAssignmentSubmissionUploads() {
   if (!uploadQueue.length) {
     throw new Error("ยังไม่มีไฟล์สำหรับอัปโหลด/ซิงก์");
   }
+  const syncKey = getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems);
+  if (isAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems)) {
+    const cachedAssets = getSyncedUploadAssetsForKey(syncKey);
+    if (!cachedAssets.length) {
+      throw new Error("พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง");
+    }
+    setLatestUploadedAssetsForSyncKey(syncKey, cachedAssets);
+    const syncedCount = cachedAssets.length;
+    renderAssignmentSubmissionFileList();
+    setStatus("assignment-status", `ไฟล์ชุดนี้ซิงก์แล้ว รอส่งงานกลับ | ซิงก์แล้ว ${syncedCount} ไฟล์`);
+    return;
+  }
   const uploadedAssets = await uploadAssignmentSubmissionFiles(assignmentId, uploadQueue);
-  state.assignments.latestUploadedAssets = uploadedAssets;
   markAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems, uploadedAssets);
   renderAssignmentSubmissionFileList();
-  setStatus("assignment-status", `ซิงก์ไฟล์เข้าระบบแล้ว ${uploadedAssets.length} ไฟล์`);
+  // TODO: define cleanup policy for synced-but-unsubmitted assignment assets.
+  setStatus("assignment-status", `ไฟล์ซิงก์แล้ว รอส่งงานกลับ | ซิงก์แล้ว ${uploadedAssets.length} ไฟล์`);
 }
 
 function buildAssignmentSubmissionMediaPayload(uploadedAssets = []) {
@@ -7822,10 +7908,20 @@ async function createAssignmentSubmission() {
 
   assertAssignmentCaptureUploadsComplete(assignmentId, formConfig.captureItems);
   const uploadQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
-  if (uploadQueue.length && !isAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems)) {
-    throw new Error("ต้องกด อัปโหลด/ซิงก์ไฟล์ ให้ครบก่อนส่งงานกลับ");
+  const syncKey = getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems);
+  const isSynced = isAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems);
+  if (uploadQueue.length && !isSynced) {
+    throw new Error("ต้องทำขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์ ให้ครบก่อนทำขั้นที่ 2: ส่งงานกลับ");
   }
-  const uploadedAssets = Array.isArray(state.assignments.latestUploadedAssets) ? state.assignments.latestUploadedAssets : [];
+  const cachedSyncedAssets = getSyncedUploadAssetsForKey(syncKey);
+  const latestKey = String(state.assignments.latestUploadedAssetsKey || "");
+  const latestAssets = Array.isArray(state.assignments.latestUploadedAssets) ? state.assignments.latestUploadedAssets : [];
+  const uploadedAssets = cachedSyncedAssets.length
+    ? cachedSyncedAssets
+    : (latestKey === syncKey ? latestAssets : []);
+  if (uploadQueue.length && isSynced && !uploadedAssets.length) {
+    throw new Error("พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง");
+  }
   if (uploadedAssets.length) {
     body.media_payload_json = buildAssignmentSubmissionMediaPayload(uploadedAssets);
   }
@@ -7846,7 +7942,7 @@ async function createAssignmentSubmission() {
   await deleteAssignmentSubmissionServerDraft(assignmentId).catch(() => {});
   state.assignments.latestSubmissionArticlePayloads[assignmentId] = articlePayload;
   state.assignments.latestSubmissionLoaded[assignmentId] = true;
-  state.assignments.latestUploadedAssets = uploadedAssets;
+  setLatestUploadedAssetsForSyncKey(syncKey, uploadedAssets);
   setStatus(
     "assignment-status",
     uploadedAssets.length
