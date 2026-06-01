@@ -12601,44 +12601,41 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   const mediaType = normalizedMime.startsWith("video/") ? "video" : "image";
   const assetRole = "unused";
   let assetId = 0;
+  let transactionBegun = false;
   try {
-    const registerFinalizedUpload = db.transaction(() => {
-      const insertResult = insert.run(
-        assetUid,
-        "local",
-        finalRelativePath,
-        safeName,
-        normalizedMime,
-        expectedTotalSize,
-        checksum
-      );
-      const insertedAssetId = Number(insertResult.lastInsertRowid || 0) || 0;
-      linkAsset.run(
-        contentItemId,
-        insertedAssetId,
-        assetRole,
-        0,
-        0,
-        "unused",
-        assignmentId,
-        assignmentRound,
-        mediaType,
-        "assignment_work"
-      );
-      repo.logAudit(actorEmail(req), "assignment.asset.upload", "assignment", String(assignmentId), {
-        assignment_id: assignmentId,
-        assignment_round: assignmentRound,
-        content_item_id: contentItemId,
-        asset_id: insertedAssetId,
-        mime_type: normalizedMime,
-        assignment_media_type: mediaType,
-      }, {
-        assignment_id: assignmentId,
-      });
-      return insertedAssetId;
-    });
-    assetId = registerFinalizedUpload();
+    db.exec("BEGIN IMMEDIATE");
+    transactionBegun = true;
+    const insertResult = insert.run(
+      assetUid,
+      "local",
+      finalRelativePath,
+      safeName,
+      normalizedMime,
+      expectedTotalSize,
+      checksum
+    );
+    const insertedAssetId = Number(insertResult.lastInsertRowid || 0) || 0;
+    linkAsset.run(
+      contentItemId,
+      insertedAssetId,
+      assetRole,
+      0,
+      0,
+      "unused",
+      assignmentId,
+      assignmentRound,
+      mediaType,
+      "assignment_work"
+    );
+    db.exec("COMMIT");
+    transactionBegun = false;
+    assetId = insertedAssetId;
   } catch (err) {
+    if (transactionBegun) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {}
+    }
     console.error("[assignment.chunk.finalize.register_failed]", {
       assignmentId,
       uploadId,
@@ -12659,6 +12656,26 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   }
 
   await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+  try {
+    repo.logAudit(actorEmail(req), "assignment.asset.upload", "assignment", String(assignmentId), {
+      assignment_id: assignmentId,
+      assignment_round: assignmentRound,
+      content_item_id: contentItemId,
+      asset_id: assetId,
+      mime_type: normalizedMime,
+      assignment_media_type: mediaType,
+    }, {
+      assignment_id: assignmentId,
+    });
+  } catch (err) {
+    console.error("[assignment.chunk.finalize.audit_failed]", {
+      assignmentId,
+      uploadId,
+      assetId,
+      error: err?.message || String(err),
+      stack: err?.stack || null,
+    });
+  }
   const uploadedAsset = {
     id: assetId,
     asset_uid: assetUid,
