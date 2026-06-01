@@ -7667,6 +7667,8 @@ function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = [
 }
 
 async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = []) {
+  const CHUNK_THRESHOLD_BYTES = 80 * 1024 * 1024;
+  const CHUNK_SIZE_BYTES = 20 * 1024 * 1024;
   const queue = Array.isArray(fileQueue) ? fileQueue : [];
   const validQueue = queue
     .map((entry) => {
@@ -7686,17 +7688,60 @@ async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = []) {
     .filter(Boolean);
   if (!validQueue.length) return [];
 
-  const uploaded = [];
-  for (const [index, entry] of validQueue.entries()) {
-    const form = new FormData();
-    form.append("file", entry.original, entry.renamed);
+  async function uploadAssignmentFileInChunks(entry, index) {
+    const totalChunks = Math.max(1, Math.ceil(Number(entry.original.size || 0) / CHUNK_SIZE_BYTES));
+    const startResult = await api(`/api/assignments/${assignmentId}/assets/uploads/start`, {
+      method: "POST",
+      body: JSON.stringify({
+        file_name: entry.renamed,
+        mime_type: String(entry.original.type || "").trim().toLowerCase(),
+        size_bytes: Number(entry.original.size || 0) || 0,
+        total_chunks: totalChunks,
+        chunk_size_bytes: CHUNK_SIZE_BYTES,
+      }),
+    });
+    const uploadId = String(startResult?.upload_id || "").trim();
+    if (!uploadId) {
+      throw new Error("ระบบไม่ส่ง upload_id กลับมา");
+    }
 
-    let result;
-    try {
-      result = await api(`/api/assignments/${assignmentId}/assets/upload`, {
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+      const start = chunkIndex * CHUNK_SIZE_BYTES;
+      const end = Math.min(start + CHUNK_SIZE_BYTES, entry.original.size);
+      const blob = entry.original.slice(start, end);
+      const form = new FormData();
+      form.append("chunk", blob, `${entry.renamed}.part-${chunkIndex + 1}`);
+      form.append("chunk_index", String(chunkIndex));
+      setStatus(
+        "assignment-status",
+        `กำลังอัปโหลดไฟล์ ${index + 1}/${validQueue.length}: ${entry.original.name} (chunk ${chunkIndex + 1}/${totalChunks})`
+      );
+      await api(`/api/assignments/${assignmentId}/assets/uploads/${uploadId}/chunks`, {
         method: "POST",
         body: form,
       });
+    }
+
+    return api(`/api/assignments/${assignmentId}/assets/uploads/${uploadId}/finalize`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  const uploaded = [];
+  for (const [index, entry] of validQueue.entries()) {
+    let result;
+    try {
+      if (Number(entry.original.size || 0) > CHUNK_THRESHOLD_BYTES) {
+        result = await uploadAssignmentFileInChunks(entry, index);
+      } else {
+        const form = new FormData();
+        form.append("file", entry.original, entry.renamed);
+        result = await api(`/api/assignments/${assignmentId}/assets/upload`, {
+          method: "POST",
+          body: form,
+        });
+      }
     } catch (err) {
       const fileName = entry.original?.name || entry.renamed || `file ${index + 1}`;
       const message = err?.message || String(err || "unknown error");

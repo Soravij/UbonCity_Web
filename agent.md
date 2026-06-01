@@ -12,6 +12,23 @@
 
 Use the repo-local stack script on runtime machines. Do not hardcode `RuntimeRoot` unless there is a machine-specific reason.
 
+Runtime machine run stack (copy/paste):
+
+```powershell
+cd D:\UbonRuntime\repos\UbonCity_Web
+powershell -ExecutionPolicy Bypass -File .\ops\windows\test-stack.ps1 start
+powershell -ExecutionPolicy Bypass -File .\ops\windows\test-stack.ps1 status
+```
+
+Runtime machine restart stack (copy/paste):
+
+```powershell
+cd D:\UbonRuntime\repos\UbonCity_Web
+powershell -ExecutionPolicy Bypass -File .\ops\windows\test-stack.ps1 stop
+powershell -ExecutionPolicy Bypass -File .\ops\windows\test-stack.ps1 start
+powershell -ExecutionPolicy Bypass -File .\ops\windows\test-stack.ps1 status
+```
+
 ```powershell
 cd D:\UbonRuntime\repos\UbonCity_Web
 git pull --ff-only origin codex/collector-login-sync-post-auth
