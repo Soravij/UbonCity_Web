@@ -1,10 +1,9 @@
 ﻿import "dotenv/config";
 import crypto from "crypto";
+import { once } from "events";
 import fsSync from "fs";
 import fs from "fs/promises";
 import path from "path";
-import { Transform } from "stream";
-import { pipeline } from "stream/promises";
 import express from "express";
 import multer from "multer";
 import jwt from "jsonwebtoken";
@@ -4527,14 +4526,22 @@ async function readFileHeadBytes(filePath, maxBytes = 8192) {
 
 async function appendChunkToStream(chunkPath, outputStream, hash) {
   let chunkBytesWritten = 0;
-  const hashTap = new Transform({
-    transform(chunk, _encoding, callback) {
+  const input = fsSync.createReadStream(chunkPath);
+  const onError = (err) => {
+    input.destroy(err);
+  };
+  outputStream.once("error", onError);
+  try {
+    for await (const chunk of input) {
       hash.update(chunk);
       chunkBytesWritten += chunk.length;
-      callback(null, chunk);
-    },
-  });
-  await pipeline(fsSync.createReadStream(chunkPath), hashTap, outputStream, { end: false });
+      if (!outputStream.write(chunk)) {
+        await once(outputStream, "drain");
+      }
+    }
+  } finally {
+    outputStream.off("error", onError);
+  }
   return chunkBytesWritten;
 }
 
