@@ -5934,6 +5934,21 @@ function getAssignmentCaptureSyncStateBucket(assignmentId, createIfMissing = fal
   return state.assignments.captureUploadSyncState[id] || null;
 }
 
+function buildAssignmentServerAssetSyncSignature(assignmentId, assets = []) {
+  const id = Number(assignmentId || 0) || 0;
+  if (!id || !Array.isArray(assets) || !assets.length) return "";
+  const serialized = assets
+    .map((row) => {
+      const assetId = Number(row?.id || 0) || 0;
+      const fileName = String(row?.file_name || "").trim();
+      const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+      return `${assetId}|${fileName}|${mimeType}`;
+    })
+    .sort()
+    .join(";");
+  return serialized ? `server:${id}:${serialized}` : "";
+}
+
 function buildAssignmentCaptureQueueSignature(assignmentId, capturePrompts = []) {
   const queue = buildAssignmentCaptureFileUploadQueue(assignmentId, capturePrompts);
   return queue.map((entry) => {
@@ -5947,9 +5962,97 @@ function buildAssignmentCaptureQueueSignature(assignmentId, capturePrompts = [])
 function getAssignmentCaptureSyncKey(assignmentId, capturePrompts = []) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return "";
-  const signature = buildAssignmentCaptureQueueSignature(id, capturePrompts);
+  const localSignature = buildAssignmentCaptureQueueSignature(id, capturePrompts);
+  const syncBucket = getAssignmentCaptureSyncStateBucket(id, false);
+  const bucketSignature = String(syncBucket?.signature || "");
+  const signature = localSignature || bucketSignature;
   if (!signature) return "";
   return `${id}::${signature}`;
+}
+
+function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureItems = []) {
+  const id = Number(assignmentId || 0) || 0;
+  if (!id) return { complete: false, assets: [], missing: [], syncSignature: "" };
+  const assignment = getAssignmentById(id);
+  if (!assignment) return { complete: false, assets: [], missing: [], syncSignature: "" };
+  const currentRound = getAssignmentCurrentRound(assignment);
+  const prompts = Array.isArray(captureItems) ? captureItems.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  if (!prompts.length) return { complete: false, assets: [], missing: [], syncSignature: "" };
+  const expectedBySlug = new Map();
+  prompts.forEach((prompt, index) => {
+    expectedBySlug.set(toCaptureSlug(prompt, index), { prompt, index });
+  });
+  const rows = Array.isArray(state.assignments.assetLookup) ? state.assignments.assetLookup : [];
+  const assignmentRows = rows.filter((row) => {
+    if (Number(row?.assignment_id || 0) !== id) return false;
+    if (Number(row?.assignment_round || 0) !== currentRound) return false;
+    if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") return false;
+    const fileName = String(row?.file_name || "").trim();
+    const slug = fileName.includes("__") ? fileName.split("__")[0] : "";
+    return expectedBySlug.has(slug);
+  }).map((row) => ({
+    id: Number(row?.id || 0) || null,
+    file_name: String(row?.file_name || "").trim() || null,
+    mime_type: String(row?.mime_type || "").trim().toLowerCase() || null,
+    public_url: String(row?.public_url || "").trim() || null,
+    storage_path: String(row?.storage_path || "").trim() || null,
+    assignment_id: Number(row?.assignment_id || 0) || null,
+    assignment_round: Number(row?.assignment_round || 0) || null,
+    assignment_surface: String(row?.assignment_surface || "").trim() || null,
+  }));
+
+  const requireImages = Boolean(assignment?.image_reset_required);
+  const requireVideos = Boolean(assignment?.video_reset_required);
+  const countsBySlug = new Map();
+  assignmentRows.forEach((row) => {
+    const fileName = String(row?.file_name || "").trim();
+    const slug = fileName.includes("__") ? fileName.split("__")[0] : "";
+    if (!slug) return;
+    if (!countsBySlug.has(slug)) countsBySlug.set(slug, { image: 0, video: 0 });
+    const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+    const bucket = countsBySlug.get(slug);
+    if (mimeType.startsWith("image/")) bucket.image += 1;
+    if (mimeType.startsWith("video/")) bucket.video += 1;
+  });
+
+  const missing = [];
+  for (const [slug, entry] of expectedBySlug.entries()) {
+    const counts = countsBySlug.get(slug) || { image: 0, video: 0 };
+    if (requireImages && counts.image < 1) missing.push(`รูปหัวข้อ ${entry.index + 1}: ${entry.prompt}`);
+    if (requireVideos && counts.video < 1) missing.push(`วิดีโอหัวข้อ ${entry.index + 1}: ${entry.prompt}`);
+  }
+  const complete = requireImages || requireVideos
+    ? missing.length === 0
+    : assignmentRows.length > 0;
+  return {
+    complete,
+    assets: assignmentRows,
+    missing,
+    syncSignature: buildAssignmentServerAssetSyncSignature(id, assignmentRows),
+  };
+}
+
+function applyAssignmentServerSyncedAssets(assignmentId, captureItems = [], options = {}) {
+  const id = Number(assignmentId || 0) || 0;
+  if (!id) return { complete: false, assets: [], missing: [] };
+  const result = getAssignmentServerSyncedAssetsForCaptureItems(id, captureItems);
+  if (!result.complete || !result.assets.length || !result.syncSignature) return result;
+  const localQueue = buildAssignmentCaptureFileUploadQueue(id, captureItems);
+  if (localQueue.length > 0) {
+    // Local selected files take precedence; do not overwrite sync signature/cache from server state.
+    return result;
+  }
+  const syncBucket = getAssignmentCaptureSyncStateBucket(id, true);
+  if (!syncBucket) return result;
+  syncBucket.signature = result.syncSignature;
+  syncBucket.syncedAt = new Date().toISOString();
+  syncBucket.uploadedCount = result.assets.length;
+  const syncKey = getAssignmentCaptureSyncKey(id, captureItems);
+  setLatestUploadedAssetsForSyncKey(syncKey, result.assets);
+  if (options?.showStatus) {
+    setStatus("assignment-status", `มีไฟล์ที่ซิงก์แล้วบน server รอส่งงานกลับ | ซิงก์แล้ว ${result.assets.length} ไฟล์`);
+  }
+  return result;
 }
 
 function getSyncedUploadAssetsForKey(syncKey) {
@@ -6087,6 +6190,7 @@ function renderAssignmentSubmissionFileList() {
   const formConfig = getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack);
   const captureBucket = getAssignmentCaptureUploadBucket(assignmentId, false) || {};
   const files = Object.values(captureBucket).flatMap((rows) => (Array.isArray(rows) ? rows : [])).filter((file) => file instanceof File);
+  const hasLocalQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems).length > 0;
   const syncKey = getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems);
   const cachedSyncedAssets = getSyncedUploadAssetsForKey(syncKey);
   const latestKey = String(state.assignments.latestUploadedAssetsKey || "");
@@ -6100,7 +6204,7 @@ function renderAssignmentSubmissionFileList() {
     if (uploadedAssets.length) {
       node.className = "assignment-brief-list-wrap";
       node.innerHTML = `
-        <div class="assignment-brief-meta" style="margin-bottom:8px;">อัปโหลดเข้าระบบแล้ว ${uploadedAssets.length} ไฟล์${isSynced ? " (synced)" : ""}</div>
+        <div class="assignment-brief-meta" style="margin-bottom:8px;">${isSynced ? `มีไฟล์ที่ซิงก์แล้วบน server รอส่งงานกลับ | ซิงก์แล้ว ${uploadedAssets.length} ไฟล์` : `อัปโหลดเข้าระบบแล้ว ${uploadedAssets.length} ไฟล์`}</div>
         <ul class="assignment-brief-list">
           ${uploadedAssets.map((asset) => {
             const label = escapeHtml(`${String(asset?.file_name || "").trim() || `asset-${Number(asset?.id || 0)}`} | ${String(asset?.mime_type || "").trim() || "unknown"}`);
@@ -6117,7 +6221,7 @@ function renderAssignmentSubmissionFileList() {
   }
   node.className = "assignment-brief-list-wrap";
   node.innerHTML = `
-    <div class="assignment-brief-meta" style="margin-bottom:8px;">${isSynced ? "สถานะ: ไฟล์ซิงก์แล้ว รอส่งงานกลับ (ขั้นที่ 2)" : "สถานะ: ยังไม่ซิงก์ไฟล์ (ต้องทำขั้นที่ 1 ก่อนส่งงานกลับ)"}</div>
+    <div class="assignment-brief-meta" style="margin-bottom:8px;">${isSynced ? "สถานะ: ไฟล์ซิงก์แล้ว รอส่งงานกลับ (ขั้นที่ 2)" : (hasLocalQueue ? "มีไฟล์ที่เลือกใหม่ ต้องทำขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์ก่อนส่งงานกลับ" : "สถานะ: ยังไม่ซิงก์ไฟล์ (ต้องทำขั้นที่ 1 ก่อนส่งงานกลับ)")}</div>
     <ul class="assignment-brief-list">${files.map((file) => `<li>${escapeHtml(`${String(file.name || "").trim() || "file"} | ${String(file.type || "").trim() || "unknown"}`)}</li>`).join("")}</ul>
   `;
 }
@@ -7629,12 +7733,17 @@ async function loadAssignmentAssets({ showStatus = false } = {}) {
     renderAssignmentDeliverableAssetPreview();
     return [];
   }
-  const rows = await api(`/api/assets?content_item_id=${contentItemId}&only_selected=1`);
+  const rows = await api(`/api/assets?content_item_id=${contentItemId}`);
   if (Number(state.assignments.selectedId || 0) !== assignmentId) {
     return Array.isArray(rows) ? rows : [];
   }
   state.assignments.assetLookup = Array.isArray(rows) ? rows : [];
   state.assignments.assets = state.assignments.assetLookup.filter((row) => Number(row.selected_in_clean || 0) === 1 && String(row.role || "") !== "unused");
+  const formConfig = getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack);
+  const localQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
+  if (!localQueue.length) {
+    applyAssignmentServerSyncedAssets(assignmentId, formConfig.captureItems, { showStatus: false });
+  }
   renderAssignmentDeliverableAssetOptions();
   renderAssignmentDeliverableAssetPreview();
   renderAssignmentDeliverablesSummary(state.assignments.deliverablesBundle, getAssignmentById(assignmentId));
@@ -7841,26 +7950,34 @@ async function syncAssignmentSubmissionUploads() {
   const formConfig = getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack);
   assertAssignmentCaptureUploadsComplete(assignmentId, formConfig.captureItems);
   const uploadQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
-  if (!uploadQueue.length) {
-    throw new Error("ยังไม่มีไฟล์สำหรับอัปโหลด/ซิงก์");
-  }
-  const syncKey = getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems);
-  if (isAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems)) {
-    const cachedAssets = getSyncedUploadAssetsForKey(syncKey);
-    if (!cachedAssets.length) {
-      throw new Error("พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง");
+  if (uploadQueue.length > 0) {
+    const syncKey = getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems);
+    if (isAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems)) {
+      const cachedAssets = getSyncedUploadAssetsForKey(syncKey);
+      if (!cachedAssets.length) {
+        throw new Error("พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง");
+      }
+      setLatestUploadedAssetsForSyncKey(syncKey, cachedAssets);
+      const syncedCount = cachedAssets.length;
+      renderAssignmentSubmissionFileList();
+      setStatus("assignment-status", `ไฟล์ชุดนี้ซิงก์แล้ว รอส่งงานกลับ | ซิงก์แล้ว ${syncedCount} ไฟล์`);
+      return;
     }
-    setLatestUploadedAssetsForSyncKey(syncKey, cachedAssets);
-    const syncedCount = cachedAssets.length;
+    const uploadedAssets = await uploadAssignmentSubmissionFiles(assignmentId, uploadQueue);
+    markAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems, uploadedAssets);
     renderAssignmentSubmissionFileList();
-    setStatus("assignment-status", `ไฟล์ชุดนี้ซิงก์แล้ว รอส่งงานกลับ | ซิงก์แล้ว ${syncedCount} ไฟล์`);
+    // TODO: define cleanup policy for synced-but-unsubmitted assignment assets.
+    setStatus("assignment-status", `ไฟล์ซิงก์แล้ว รอส่งงานกลับ | ซิงก์แล้ว ${uploadedAssets.length} ไฟล์`);
     return;
   }
-  const uploadedAssets = await uploadAssignmentSubmissionFiles(assignmentId, uploadQueue);
-  markAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems, uploadedAssets);
-  renderAssignmentSubmissionFileList();
-  // TODO: define cleanup policy for synced-but-unsubmitted assignment assets.
-  setStatus("assignment-status", `ไฟล์ซิงก์แล้ว รอส่งงานกลับ | ซิงก์แล้ว ${uploadedAssets.length} ไฟล์`);
+
+  const serverSynced = applyAssignmentServerSyncedAssets(assignmentId, formConfig.captureItems, { showStatus: false });
+  if (serverSynced.complete && Array.isArray(serverSynced.assets) && serverSynced.assets.length) {
+    renderAssignmentSubmissionFileList();
+    setStatus("assignment-status", `มีไฟล์ที่ซิงก์แล้วบน server รอส่งงานกลับ | ซิงก์แล้ว ${serverSynced.assets.length} ไฟล์`);
+    return;
+  }
+  throw new Error("ยังไม่มีไฟล์ที่เลือกในเครื่อง และไม่พบไฟล์ที่ซิงก์แล้วบน server");
 }
 
 function buildAssignmentSubmissionMediaPayload(uploadedAssets = []) {
@@ -7909,19 +8026,31 @@ async function createAssignmentSubmission() {
   assertAssignmentCaptureUploadsComplete(assignmentId, formConfig.captureItems);
   const uploadQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
   const syncKey = getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems);
-  const isSynced = isAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems);
-  if (uploadQueue.length && !isSynced) {
-    throw new Error("ต้องทำขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์ ให้ครบก่อนทำขั้นที่ 2: ส่งงานกลับ");
+  let uploadedAssets = [];
+  if (uploadQueue.length > 0) {
+    if (!isAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems)) {
+      throw new Error("ต้องทำขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์ชุดที่เลือกในเครื่องให้ครบก่อนทำขั้นที่ 2: ส่งงานกลับ");
+    }
+    const cachedSyncedAssets = getSyncedUploadAssetsForKey(syncKey);
+    const latestKey = String(state.assignments.latestUploadedAssetsKey || "");
+    const latestAssets = Array.isArray(state.assignments.latestUploadedAssets) ? state.assignments.latestUploadedAssets : [];
+    uploadedAssets = cachedSyncedAssets.length
+      ? cachedSyncedAssets
+      : (latestKey === syncKey ? latestAssets : []);
+    if (!uploadedAssets.length) {
+      throw new Error("พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง");
+    }
+  } else {
+    const serverSynced = applyAssignmentServerSyncedAssets(assignmentId, formConfig.captureItems, { showStatus: false });
+    if (serverSynced.complete && Array.isArray(serverSynced.assets) && serverSynced.assets.length) {
+      uploadedAssets = serverSynced.assets;
+    } else if (Array.isArray(serverSynced.missing) && serverSynced.missing.length) {
+      throw new Error(`ยังแนบไฟล์ไม่ครบตามเงื่อนไข reset: ${serverSynced.missing.join(" | ")}`);
+    } else {
+      throw new Error("ยังไม่มีไฟล์ที่เลือกในเครื่อง และไม่พบไฟล์ที่ซิงก์แล้วบน server");
+    }
   }
-  const cachedSyncedAssets = getSyncedUploadAssetsForKey(syncKey);
-  const latestKey = String(state.assignments.latestUploadedAssetsKey || "");
-  const latestAssets = Array.isArray(state.assignments.latestUploadedAssets) ? state.assignments.latestUploadedAssets : [];
-  const uploadedAssets = cachedSyncedAssets.length
-    ? cachedSyncedAssets
-    : (latestKey === syncKey ? latestAssets : []);
-  if (uploadQueue.length && isSynced && !uploadedAssets.length) {
-    throw new Error("พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง");
-  }
+
   if (uploadedAssets.length) {
     body.media_payload_json = buildAssignmentSubmissionMediaPayload(uploadedAssets);
   }

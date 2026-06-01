@@ -12211,7 +12211,9 @@ app.get("/api/assets", (req, res) => {
   if (contentItemId > 0) {
     rows = db
       .prepare(`
-      SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type, c.title AS content_title
+      SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type,
+             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface,
+             c.title AS content_title
       FROM assets a
       LEFT JOIN content_assets ca ON ca.asset_id = a.id
       LEFT JOIN content_items c ON c.id = ca.content_item_id
@@ -12222,7 +12224,9 @@ app.get("/api/assets", (req, res) => {
   } else {
     rows = db
       .prepare(`
-      SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type, c.title AS content_title
+      SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type,
+             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface,
+             c.title AS content_title
       FROM assets a
       LEFT JOIN content_assets ca ON ca.asset_id = a.id
       LEFT JOIN content_items c ON c.id = ca.content_item_id
