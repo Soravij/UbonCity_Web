@@ -12638,7 +12638,20 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
       return insertedAssetId;
     });
     assetId = registerFinalizedUpload();
-  } catch {
+  } catch (err) {
+    console.error("[assignment.chunk.finalize.register_failed]", {
+      assignmentId,
+      uploadId,
+      contentItemId,
+      assignmentRound,
+      finalRelativePath,
+      finalAbsolutePath,
+      normalizedMime,
+      expectedTotalSize,
+      hasChecksum: Boolean(checksum),
+      error: err?.message || String(err),
+      stack: err?.stack || null,
+    });
     await fs.unlink(finalAbsolutePath).catch(() => {});
     await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
     res.status(500).json({ error: "Cannot register finalized upload" });
