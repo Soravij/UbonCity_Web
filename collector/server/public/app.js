@@ -7633,6 +7633,8 @@ function buildAssignmentCaptureFileUploadQueue(assignmentId, capturePrompts = []
   return queue;
 }
 
+const ASSIGNMENT_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+
 function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = []) {
   const prompts = Array.isArray(capturePrompts) ? capturePrompts.map((value) => String(value || "").trim()).filter(Boolean) : [];
   if (!prompts.length) return;
@@ -7654,8 +7656,8 @@ function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = [
     if (requireVideos) {
       if (videos.length < 1) missing.push(`วิดีโอหัวข้อ ${index + 1}: ${prompt}`);
       if (videos.length > 2) invalid.push(`วิดีโอหัวข้อ ${index + 1}: เกิน 2 ไฟล์`);
-      const oversized = videos.find((file) => Number(file?.size || 0) > (500 * 1024 * 1024));
-      if (oversized) invalid.push(`วิดีโอหัวข้อ ${index + 1}: ไฟล์ ${sanitizeUploadFileName(oversized.name, "video")} เกิน 500MB`);
+      const oversized = videos.find((file) => Number(file?.size || 0) > ASSIGNMENT_UPLOAD_MAX_BYTES);
+      if (oversized) invalid.push(`วิดีโอหัวข้อ ${index + 1}: ไฟล์ ${sanitizeUploadFileName(oversized.name, "video")} เกิน 2GB`);
     }
   });
   if (invalid.length) {
