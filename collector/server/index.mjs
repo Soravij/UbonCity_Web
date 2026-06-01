@@ -5941,6 +5941,12 @@ const uploadRateLimit = createRateLimiter({
   keyBy: "user",
   message: "Upload rate limit exceeded",
 });
+const assignmentChunkUploadRateLimit = createRateLimiter({
+  windowMs: 6 * 60 * 60 * 1000,
+  max: 1500,
+  keyBy: "user",
+  message: "Assignment chunk upload rate limit exceeded",
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "collector-app" });
@@ -12307,7 +12313,7 @@ app.post("/api/assets/upload", requireRole("owner", "admin", "editor", "user"), 
   });
 });
 
-app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admin", "editor", "user", "freelance"), uploadRateLimit, async (req, res) => {
+app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admin", "editor", "user", "freelance"), assignmentChunkUploadRateLimit, async (req, res) => {
   const assignmentId = Number(req.params.id || 0);
   const assignment = await ensureAssignmentUploadAccess(req, res, assignmentId);
   if (!assignment) return;
@@ -12318,7 +12324,7 @@ app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admi
   const sizeBytes = Number(req.body?.size_bytes || 0);
   const totalChunks = Number(req.body?.total_chunks || 0);
   const requestedChunkSize = Number(req.body?.chunk_size_bytes || ASSIGNMENT_CHUNK_SIZE_BYTES);
-  const chunkSizeBytes = Number.isFinite(requestedChunkSize) ? Math.floor(requestedChunkSize) : ASSIGNMENT_CHUNK_SIZE_BYTES;
+  const chunkSizeBytes = ASSIGNMENT_CHUNK_SIZE_BYTES;
 
   if (!fileNameRaw) {
     res.status(400).json({ error: "file_name is required" });
@@ -12340,8 +12346,8 @@ app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admi
     res.status(400).json({ error: "total_chunks is invalid" });
     return;
   }
-  if (!Number.isInteger(chunkSizeBytes) || chunkSizeBytes < (1 * 1024 * 1024) || chunkSizeBytes > ASSIGNMENT_CHUNK_MAX_BYTES) {
-    res.status(400).json({ error: "chunk_size_bytes is invalid" });
+  if (!Number.isInteger(requestedChunkSize) || requestedChunkSize !== ASSIGNMENT_CHUNK_SIZE_BYTES) {
+    res.status(400).json({ error: "chunk_size_bytes must be 20MB" });
     return;
   }
   const expectedChunks = Math.max(1, Math.ceil(sizeBytes / chunkSizeBytes));
@@ -12383,7 +12389,7 @@ app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admi
   });
 });
 
-app.post("/api/assignments/:id/assets/uploads/:uploadId/chunks", requireRole("owner", "admin", "editor", "user", "freelance"), uploadRateLimit, assignmentChunkUpload.single("chunk"), async (req, res) => {
+app.post("/api/assignments/:id/assets/uploads/:uploadId/chunks", requireRole("owner", "admin", "editor", "user", "freelance"), assignmentChunkUploadRateLimit, assignmentChunkUpload.single("chunk"), async (req, res) => {
   const assignmentId = Number(req.params.id || 0);
   const uploadId = String(req.params.uploadId || "").trim();
   const assignment = await ensureAssignmentUploadAccess(req, res, assignmentId);
@@ -12456,7 +12462,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/chunks", requireRole("ow
   });
 });
 
-app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("owner", "admin", "editor", "user", "freelance"), uploadRateLimit, async (req, res) => {
+app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("owner", "admin", "editor", "user", "freelance"), assignmentChunkUploadRateLimit, async (req, res) => {
   const assignmentId = Number(req.params.id || 0);
   const uploadId = String(req.params.uploadId || "").trim();
   const assignment = await ensureAssignmentUploadAccess(req, res, assignmentId);
@@ -12571,7 +12577,14 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
     return;
   }
 
-  await fs.rename(assemblingAbsolutePath, finalAbsolutePath);
+  try {
+    await fs.rename(assemblingAbsolutePath, finalAbsolutePath);
+  } catch {
+    await fs.unlink(assemblingAbsolutePath).catch(() => {});
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(500).json({ error: "Cannot register finalized upload" });
+    return;
+  }
 
   const contentItemId = Number(assignment.content_item_id || 0) || 0;
   const assignmentRound = resolveAssignmentCurrentRound(assignment);
@@ -12585,41 +12598,52 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
     "INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order, assignment_id, assignment_round, assignment_media_type, assignment_surface) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)"
   );
   const assetUid = crypto.randomUUID();
-  const insertResult = insert.run(
-    assetUid,
-    "local",
-    finalRelativePath,
-    safeName,
-    normalizedMime,
-    expectedTotalSize,
-    checksum
-  );
-  const assetId = Number(insertResult.lastInsertRowid || 0) || 0;
   const mediaType = normalizedMime.startsWith("video/") ? "video" : "image";
   const assetRole = "unused";
-  linkAsset.run(
-    contentItemId,
-    assetId,
-    assetRole,
-    0,
-    0,
-    "unused",
-    assignmentId,
-    assignmentRound,
-    mediaType,
-    "assignment_work"
-  );
-
-  repo.logAudit(actorEmail(req), "assignment.asset.upload", "assignment", String(assignmentId), {
-    assignment_id: assignmentId,
-    assignment_round: assignmentRound,
-    content_item_id: contentItemId,
-    asset_id: assetId,
-    mime_type: normalizedMime,
-    assignment_media_type: mediaType,
-  }, {
-    assignment_id: assignmentId,
-  });
+  let assetId = 0;
+  try {
+    const registerFinalizedUpload = db.transaction(() => {
+      const insertResult = insert.run(
+        assetUid,
+        "local",
+        finalRelativePath,
+        safeName,
+        normalizedMime,
+        expectedTotalSize,
+        checksum
+      );
+      const insertedAssetId = Number(insertResult.lastInsertRowid || 0) || 0;
+      linkAsset.run(
+        contentItemId,
+        insertedAssetId,
+        assetRole,
+        0,
+        0,
+        "unused",
+        assignmentId,
+        assignmentRound,
+        mediaType,
+        "assignment_work"
+      );
+      repo.logAudit(actorEmail(req), "assignment.asset.upload", "assignment", String(assignmentId), {
+        assignment_id: assignmentId,
+        assignment_round: assignmentRound,
+        content_item_id: contentItemId,
+        asset_id: insertedAssetId,
+        mime_type: normalizedMime,
+        assignment_media_type: mediaType,
+      }, {
+        assignment_id: assignmentId,
+      });
+      return insertedAssetId;
+    });
+    assetId = registerFinalizedUpload();
+  } catch {
+    await fs.unlink(finalAbsolutePath).catch(() => {});
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(500).json({ error: "Cannot register finalized upload" });
+    return;
+  }
 
   await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
   const uploadedAsset = {
