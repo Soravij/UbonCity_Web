@@ -7668,20 +7668,48 @@ function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = [
 
 async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = []) {
   const queue = Array.isArray(fileQueue) ? fileQueue : [];
-  if (!queue.length) return [];
-  const form = new FormData();
-  queue.forEach((entry) => {
-    const original = entry?.file instanceof File ? entry.file : null;
-    if (!original) return;
-    const slug = String(entry?.slug || "misc").trim() || "misc";
-    const renamed = `${slug}__${sanitizeUploadFileName(original.name, "upload")}`;
-    form.append("file", original, renamed);
-  });
-  const result = await api(`/api/assignments/${assignmentId}/assets/upload`, {
-    method: "POST",
-    body: form,
-  });
-  return Array.isArray(result?.uploaded) ? result.uploaded : [];
+  const validQueue = queue
+    .map((entry) => {
+      const original = entry?.file instanceof File ? entry.file : null;
+      if (!original) return null;
+
+      const slug = String(entry?.slug || "misc").trim() || "misc";
+      const renamed = `${slug}__${sanitizeUploadFileName(original.name, "upload")}`;
+
+      return {
+        original,
+        renamed,
+        slug,
+        prompt: entry?.prompt || "",
+      };
+    })
+    .filter(Boolean);
+  if (!validQueue.length) return [];
+
+  const uploaded = [];
+  for (const [index, entry] of validQueue.entries()) {
+    const form = new FormData();
+    form.append("file", entry.original, entry.renamed);
+
+    let result;
+    try {
+      result = await api(`/api/assignments/${assignmentId}/assets/upload`, {
+        method: "POST",
+        body: form,
+      });
+    } catch (err) {
+      const fileName = entry.original?.name || entry.renamed || `file ${index + 1}`;
+      const message = err?.message || String(err || "unknown error");
+      throw new Error(
+        `อัปโหลดไฟล์ที่ ${index + 1}/${validQueue.length} ไม่สำเร็จ: ${fileName} — ${message}`
+      );
+    }
+
+    const batchUploaded = Array.isArray(result?.uploaded) ? result.uploaded : [];
+    uploaded.push(...batchUploaded);
+  }
+
+  return uploaded;
 }
 
 async function syncAssignmentSubmissionUploads() {
