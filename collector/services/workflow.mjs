@@ -821,6 +821,31 @@ function buildTranslationDiagnostics(article, lang, provider, model) {
   };
 }
 
+const TRANSLATION_PROVIDER_TIMEOUT_MS = 55_000;
+
+function createTranslationProviderTimeoutError(durationMs) {
+  const error = new Error(`translation provider timed out after ${durationMs}ms`);
+  error.code = "translation_provider_timeout";
+  error.duration_ms = Number(durationMs || 0) || TRANSLATION_PROVIDER_TIMEOUT_MS;
+  return error;
+}
+
+async function withTranslationProviderTimeout(promise, timeoutMs = TRANSLATION_PROVIDER_TIMEOUT_MS) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(createTranslationProviderTimeoutError(timeoutMs));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function buildDraftTranslationSource(repo, contentItemId) {
   const itemId = Number(contentItemId || 0);
   if (!itemId) {
@@ -924,7 +949,10 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
           throw Object.assign(new Error("missing_article_draft_body"), { code: "missing_article_draft_body" });
         }
 
-        const translated = await translator.translate(sourceToTranslationInput(article), lang);
+        const translated = await withTranslationProviderTimeout(
+          translator.translate(sourceToTranslationInput(article), lang),
+          TRANSLATION_PROVIDER_TIMEOUT_MS
+        );
         const translatorEngine = String(translated?._engine || defaultTranslatorEngine).trim();
         const translatorModel = String(translated?._model || defaultTranslatorModel).trim();
 
@@ -985,6 +1013,9 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
         const failureReason = normalizeFailureReason(err?.code || err?.message, "translation_failed");
         const failureMessage = String(err?.message || "translation failed");
         const debugDetails = {};
+        if (Number.isFinite(Number(err?.duration_ms))) {
+          debugDetails.duration_ms = Number(err.duration_ms);
+        }
         if (failureReason === "invalid_translation_json_payload" && String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
           if (typeof err?.parse_error === "string" || err?.parse_error === null) {
             debugDetails.parse_error = err.parse_error ?? null;
