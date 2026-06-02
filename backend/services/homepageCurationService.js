@@ -3,6 +3,14 @@ import pool from "../config/db.js";
 const VALID_SOURCE_MODES = new Set(["manual-first-hybrid", "manual-only", "rule-only"]);
 const VALID_FALLBACK_MODES = new Set(["latest-approved", "featured", "none"]);
 const VALID_ENTITY_TYPES = new Set(["place", "event"]);
+const FIXED_BLOCK_ORDER = ["hero", "top_picks", "trending", "scenarios", "featured_events"];
+const FIXED_BLOCK_TYPES = {
+  hero: "hero",
+  top_picks: "place-list",
+  trending: "place-list",
+  scenarios: "scenario-grid",
+  featured_events: "event-list",
+};
 
 const DEFAULT_BLOCK_COPY = {
   th: {
@@ -144,6 +152,10 @@ function createDefaultBlocks(lang = "th") {
       },
     },
   ];
+}
+
+function createDefaultBlockMap(lang = "th") {
+  return new Map(createDefaultBlocks(lang).map((block) => [block.key, block]));
 }
 
 function parseJson(value, fallback) {
@@ -294,7 +306,6 @@ async function loadApprovedPlacesForHomepage(lang = "th") {
        COALESCE(pt_req.meta_title, pt_th.meta_title) AS meta_title,
        COALESCE(pt_req.meta_description, pt_th.meta_description) AS meta_description,
        p.image,
-       p.updated_at,
        p.decision_featured_score,
        p.decision_scenario_tags
      FROM places p
@@ -476,6 +487,63 @@ function sanitizeManualItems(items) {
     .filter((item) => item.entity_id);
 }
 
+function sanitizeHeroBlock(block, fallbackBlock) {
+  return {
+    ...block,
+    source_mode: "manual-first-hybrid",
+    fallback_mode: "none",
+    min_items: 0,
+    max_items: 0,
+    manual_items: [],
+    rule_config: {
+      ...(fallbackBlock?.rule_config || {}),
+      sort_by: String(fallbackBlock?.rule_config?.sort_by || "featured_then_recent").trim(),
+    },
+  };
+}
+
+function sanitizeBlockByKey(block, fallbackBlock, position) {
+  const key = fallbackBlock.key;
+  const forcedType = FIXED_BLOCK_TYPES[key];
+  const sourceMode = String(block?.source_mode || fallbackBlock.source_mode || "manual-first-hybrid").trim().toLowerCase();
+  const fallbackMode = String(block?.fallback_mode || fallbackBlock.fallback_mode || "latest-approved").trim().toLowerCase();
+  const minItems = Math.max(0, Number(block?.min_items ?? fallbackBlock.min_items ?? 0) || 0);
+  const maxItems = Math.max(minItems, Number(block?.max_items ?? fallbackBlock.max_items ?? minItems) || minItems);
+
+  const normalizedBlock = {
+    key,
+    type: forcedType,
+    enabled: typeof block?.enabled === "boolean" ? block.enabled : Boolean(fallbackBlock.enabled),
+    position,
+    title: String(block?.title || fallbackBlock.title || key).trim(),
+    subtitle: String(block?.subtitle || fallbackBlock.subtitle || "").trim(),
+    source_mode: VALID_SOURCE_MODES.has(sourceMode) ? sourceMode : fallbackBlock.source_mode,
+    fallback_mode: VALID_FALLBACK_MODES.has(fallbackMode) ? fallbackMode : fallbackBlock.fallback_mode,
+    min_items: minItems,
+    max_items: maxItems,
+    manual_items: sanitizeManualItems(block?.manual_items),
+    rule_config: {
+      ...sanitizeRuleConfig(fallbackBlock?.rule_config),
+      ...sanitizeRuleConfig(block?.rule_config),
+    },
+  };
+
+  if (forcedType === "event-list") {
+    normalizedBlock.manual_items = normalizedBlock.manual_items.map((item) => ({
+      ...item,
+      entity_type: "event",
+    }));
+  } else if (forcedType !== "event-list") {
+    normalizedBlock.manual_items = normalizedBlock.manual_items.filter((item) => item.entity_type !== "event");
+  }
+
+  if (key === "hero") {
+    return sanitizeHeroBlock(normalizedBlock, fallbackBlock);
+  }
+
+  return normalizedBlock;
+}
+
 function sanitizeRuleConfig(input) {
   const config = input || {};
   return {
@@ -486,32 +554,37 @@ function sanitizeRuleConfig(input) {
 }
 
 function sanitizeBlocks(blocks, lang = "th") {
-  return (Array.isArray(blocks) ? blocks : createDefaultBlocks(lang))
-    .map((block, index) => {
-      const key = String(block?.key || `block_${index + 1}`).trim().toLowerCase();
-      const fallbackCopy = getDefaultBlockCopy(lang, key);
-      const sourceMode = String(block?.source_mode || "manual-first-hybrid").trim().toLowerCase();
-      const fallbackMode = String(block?.fallback_mode || "latest-approved").trim().toLowerCase();
-      const minItems = Math.max(0, Number(block?.min_items || 0) || 0);
-      const maxItems = Math.max(minItems, Number(block?.max_items || minItems) || minItems);
+  const defaultBlockMap = createDefaultBlockMap(lang);
+  const submittedByKey = new Map();
+  const submittedKeysInOrder = [];
 
-      return {
-        key,
-        type: String(block?.type || "place-list").trim().toLowerCase(),
-        enabled: Boolean(block?.enabled),
-        position: Number(block?.position || index + 1) || index + 1,
-        title: String(block?.title || fallbackCopy.title || key).trim(),
-        subtitle: String(block?.subtitle || fallbackCopy.subtitle || "").trim(),
-        source_mode: VALID_SOURCE_MODES.has(sourceMode) ? sourceMode : "manual-first-hybrid",
-        fallback_mode: VALID_FALLBACK_MODES.has(fallbackMode) ? fallbackMode : "latest-approved",
-        min_items: minItems,
-        max_items: maxItems,
-        manual_items: sanitizeManualItems(block?.manual_items),
-        rule_config: sanitizeRuleConfig(block?.rule_config),
-      };
-    })
-    .sort((a, b) => a.position - b.position)
-    .map((block, index) => ({ ...block, position: index + 1 }));
+  const orderedBlocks = (Array.isArray(blocks) ? [...blocks] : [])
+    .map((block, index) => ({
+      block,
+      index,
+      position: Number(block?.position || 0) || index + 1,
+    }))
+    .sort((a, b) => {
+      if (a.position !== b.position) return a.position - b.position;
+      return a.index - b.index;
+    });
+
+  for (const entry of orderedBlocks) {
+    const block = entry.block;
+    const key = String(block?.key || "").trim().toLowerCase();
+    if (!defaultBlockMap.has(key) || submittedByKey.has(key)) continue;
+    submittedByKey.set(key, block);
+    submittedKeysInOrder.push(key);
+  }
+
+  const finalKeys = [
+    ...submittedKeysInOrder,
+    ...FIXED_BLOCK_ORDER.filter((key) => !submittedByKey.has(key)),
+  ];
+
+  return finalKeys.map((key, index) =>
+    sanitizeBlockByKey(submittedByKey.get(key) || defaultBlockMap.get(key), defaultBlockMap.get(key), index + 1)
+  );
 }
 
 export async function ensureHomepageCurationTables() {
