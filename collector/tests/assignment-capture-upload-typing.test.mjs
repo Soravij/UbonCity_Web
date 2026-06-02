@@ -26,18 +26,29 @@ function extractNamedFunctionSource(source, name) {
 
 const normalizeAssignmentCaptureUploadItemsForTest = new Function(
   `${extractNamedFunctionSource(appJs, "toCaptureSlug")}
+${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(appJs, "buildAssignmentCaptureSlotKey")}
 ${extractNamedFunctionSource(appJs, "isVideoCapturePrompt")}
 ${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureUploadItems")}
 return normalizeAssignmentCaptureUploadItems;`
 )();
 
 const validateAssignmentCaptureRequirementsFromAssetsForTest = new Function(
-  `${extractNamedFunctionSource(appJs, "getAssignmentAssetSlotTypeKeyFromAsset")}
+  `${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(appJs, "buildAssignmentCaptureSlotKey")}
+${extractNamedFunctionSource(appJs, "getAssignmentAssetSlotTypeKeyFromAsset")}
 ${extractNamedFunctionSource(appJs, "toCaptureSlug")}
 ${extractNamedFunctionSource(appJs, "isVideoCapturePrompt")}
 ${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureUploadItems")}
 ${extractNamedFunctionSource(appJs, "validateAssignmentCaptureRequirementsFromAssets")}
 return validateAssignmentCaptureRequirementsFromAssets;`
+)();
+
+const getAssignmentAssetSlotTypeKeyFromAssetForTest = new Function(
+  `${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(appJs, "buildAssignmentCaptureSlotKey")}
+${extractNamedFunctionSource(appJs, "getAssignmentAssetSlotTypeKeyFromAsset")}
+return getAssignmentAssetSlotTypeKeyFromAsset;`
 )();
 
 test("normalizeAssignmentCaptureUploadItems preserves capture_type and splits both into two slot keys", () => {
@@ -123,4 +134,13 @@ test("validateAssignmentCaptureRequirementsFromAssets tracks image/video slots s
   ];
   const completeMissing = validateAssignmentCaptureRequirementsFromAssetsForTest(assignment, captureItems, bothAssets);
   assert.deepEqual(completeMissing, []);
+});
+
+test("getAssignmentAssetSlotTypeKeyFromAsset prefers canonical media key from assignment metadata", () => {
+  const key = getAssignmentAssetSlotTypeKeyFromAssetForTest({
+    file_name: "shot-3-scene__clip.mp4",
+    mime_type: "application/octet-stream",
+    assignment_media_type: "video",
+  });
+  assert.equal(key, "shot-3-scene|video");
 });
