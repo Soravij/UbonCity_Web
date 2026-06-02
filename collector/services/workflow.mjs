@@ -995,6 +995,18 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
           if (typeof err?.raw_response_preview === "string") {
             debugDetails.raw_response_preview = err.raw_response_preview;
           }
+          if (Number.isFinite(Number(err?.raw_response_length))) {
+            debugDetails.raw_response_length = Number(err.raw_response_length);
+          }
+          if (typeof err?.raw_response_ends_with === "string") {
+            debugDetails.raw_response_ends_with = err.raw_response_ends_with;
+          }
+          if (typeof err?.raw_response_starts_with_brace === "boolean") {
+            debugDetails.raw_response_starts_with_brace = err.raw_response_starts_with_brace;
+          }
+          if (typeof err?.raw_response_ends_with_brace === "boolean") {
+            debugDetails.raw_response_ends_with_brace = err.raw_response_ends_with_brace;
+          }
         }
         repo.upsertTranslation({
           source_content_item_id: article.content_item_id,

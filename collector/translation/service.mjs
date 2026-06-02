@@ -21,6 +21,16 @@ function parseJsonLike(raw) {
   try {
     return JSON.parse(cleaned);
   } catch {
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      const extracted = cleaned.slice(firstBrace, lastBrace + 1).trim();
+      try {
+        return JSON.parse(extracted);
+      } catch {
+        return null;
+      }
+    }
     return null;
   }
 }
@@ -31,6 +41,11 @@ function isDebugDiagnosticsEnabled() {
 
 function buildRawResponsePreview(raw) {
   return String(raw || "").replace(/^\uFEFF/, "").trim().slice(0, 1000);
+}
+
+function buildRawResponseEndingPreview(raw) {
+  const text = String(raw || "").replace(/^\uFEFF/, "").trim();
+  return text.slice(-500);
 }
 
 function questionMarkRatio(value) {
@@ -280,6 +295,10 @@ function buildInvalidTranslationPayloadError(rawText, parsedPayload) {
   error.parse_error = parsedPayload ? null : "invalid_json_or_no_json_object";
   error.validation_errors = collectValidationErrors(parsedPayload);
   error.raw_response_preview = buildRawResponsePreview(rawText);
+  error.raw_response_length = String(rawText || "").length;
+  error.raw_response_ends_with = buildRawResponseEndingPreview(rawText);
+  error.raw_response_starts_with_brace = String(rawText || "").replace(/^\uFEFF/, "").trim().startsWith("{");
+  error.raw_response_ends_with_brace = String(rawText || "").replace(/^\uFEFF/, "").trim().endsWith("}");
   return error;
 }
 
