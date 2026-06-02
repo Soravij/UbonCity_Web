@@ -18,6 +18,8 @@ const FIXED_BLOCK_TYPES = {
 };
 const HERO_BLOCK_KEY = "hero";
 const EVENT_BLOCK_KEY = "featured_events";
+const TAB_LAYOUT = "layout";
+const TAB_SIGNALS = "signals";
 
 const SOURCE_MODE_OPTIONS = [
   { value: "manual-first-hybrid", label: "เลือกเองก่อน แล้วระบบช่วยเติม" },
@@ -229,7 +231,16 @@ function getDefaultCandidateEntityType(block) {
   return isEventBlock(block) ? "event" : "place";
 }
 
+function canUseCandidateInBlock(block, entityType) {
+  if (!block || isHeroBlock(block) || !block.enabled) return false;
+  if (String(entityType || "").trim().toLowerCase() === "event") {
+    return isEventBlock(block);
+  }
+  return !isEventBlock(block);
+}
+
 export default function HomepageCuration({ token }) {
+  const [activeTab, setActiveTab] = useState(TAB_LAYOUT);
   const [lang, setLang] = useState("th");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -241,6 +252,8 @@ export default function HomepageCuration({ token }) {
   const [blocks, setBlocks] = useState([]);
   const [candidateByBlock, setCandidateByBlock] = useState({});
   const [previewBlocks, setPreviewBlocks] = useState([]);
+  const [poolState, setPoolState] = useState(createCandidateState("place"));
+  const [poolTargetBlockKey, setPoolTargetBlockKey] = useState("");
   const previewRequestSeq = useRef(0);
 
   const serializedDraft = useMemo(() => serializeBlocks(blocks), [blocks]);
@@ -249,6 +262,21 @@ export default function HomepageCuration({ token }) {
     () => (Array.isArray(layoutMeta?.published_blocks) ? layoutMeta.published_blocks.length : 0),
     [layoutMeta]
   );
+
+  const eligiblePoolBlocks = useMemo(
+    () => blocks.filter((block) => canUseCandidateInBlock(block, poolState.entity_type)),
+    [blocks, poolState.entity_type]
+  );
+
+  useEffect(() => {
+    if (!eligiblePoolBlocks.length) {
+      setPoolTargetBlockKey("");
+      return;
+    }
+    if (!eligiblePoolBlocks.some((block) => block.key === poolTargetBlockKey)) {
+      setPoolTargetBlockKey(eligiblePoolBlocks[0].key);
+    }
+  }, [eligiblePoolBlocks, poolTargetBlockKey]);
 
   const resetCandidateState = useCallback((nextBlocks) => {
     const nextState = {};
@@ -433,6 +461,13 @@ export default function HomepageCuration({ token }) {
     }));
   }
 
+  function updatePoolState(patch) {
+    setPoolState((current) => ({
+      ...current,
+      ...patch,
+    }));
+  }
+
   async function searchCandidates(block) {
     const key = String(block?.key || "");
     const state = candidateByBlock[key] || createCandidateState(getDefaultCandidateEntityType(block));
@@ -457,6 +492,74 @@ export default function HomepageCuration({ token }) {
         items: [],
       });
     }
+  }
+
+  async function searchPoolCandidates() {
+    setPoolState((current) => ({
+      ...current,
+      loading: true,
+      error: "",
+      items: [],
+    }));
+    try {
+      const res = await api.get("/homepage-curation/candidates", {
+        params: {
+          entity_type: poolState.entity_type,
+          lang,
+          q: poolState.q,
+          limit: 20,
+        },
+        headers: authHeaders(token),
+      });
+      setPoolState((current) => ({
+        ...current,
+        loading: false,
+        items: Array.isArray(res.data?.items) ? res.data.items : [],
+      }));
+    } catch (error) {
+      setPoolState((current) => ({
+        ...current,
+        loading: false,
+        error: error.response?.data?.error || "ค้นหารายการไม่สำเร็จ",
+        items: [],
+      }));
+    }
+  }
+
+  function addPoolCandidateToBlock(candidate) {
+    const targetBlockKey = String(poolTargetBlockKey || "").trim().toLowerCase();
+    if (!targetBlockKey) return;
+
+    setBlocks((current) =>
+      current.map((block) => {
+        if (String(block?.key || "").trim().toLowerCase() !== targetBlockKey) return block;
+        if (!canUseCandidateInBlock(block, candidate?.entity_type)) return block;
+
+        const candidateId = Number(candidate?.id || 0) || null;
+        if (!candidateId) return block;
+
+        const candidateType = String(candidate?.entity_type || "").trim().toLowerCase();
+        const dup = (Array.isArray(block.manual_items) ? block.manual_items : []).some(
+          (item) => Number(item?.entity_id || 0) === candidateId && String(item?.entity_type || "").trim().toLowerCase() === candidateType
+        );
+        if (dup) return block;
+
+        return {
+          ...block,
+          manual_items: [
+            ...(Array.isArray(block.manual_items) ? block.manual_items : []),
+            {
+              entity_type: candidateType,
+              entity_id: String(candidateId),
+              category: String(candidate?.category || "").trim(),
+              slug: String(candidate?.slug || "").trim(),
+              label: String(candidate?.title || "").trim(),
+              note: "",
+            },
+          ],
+        };
+      })
+    );
   }
 
   async function onSaveDraft() {
@@ -523,15 +626,19 @@ export default function HomepageCuration({ token }) {
           <button type="button" className="ghost" onClick={() => loadLayout(lang)} disabled={loading}>
             รีเฟรช
           </button>
-          <button type="button" className="ghost" onClick={() => loadPreview(serializedDraft, lang)} disabled={loading || previewLoading}>
-            {previewLoading ? "กำลังประมวลผล..." : "รีเฟรชตัวอย่าง"}
-          </button>
-          <button type="button" className="primary" onClick={onSaveDraft} disabled={loading || saving}>
-            {saving ? "กำลังบันทึก..." : "บันทึกฉบับร่าง"}
-          </button>
-          <button type="button" className="primary" onClick={onPublish} disabled={loading || publishing || saving}>
-            {publishing ? "กำลังเผยแพร่..." : "เผยแพร่เลย์เอาต์"}
-          </button>
+          {activeTab === TAB_LAYOUT ? (
+            <>
+              <button type="button" className="ghost" onClick={() => loadPreview(serializedDraft, lang)} disabled={loading || previewLoading}>
+                {previewLoading ? "กำลังประมวลผล..." : "รีเฟรชตัวอย่าง"}
+              </button>
+              <button type="button" className="primary" onClick={onSaveDraft} disabled={loading || saving}>
+                {saving ? "กำลังบันทึก..." : "บันทึกฉบับร่าง"}
+              </button>
+              <button type="button" className="primary" onClick={onPublish} disabled={loading || publishing || saving}>
+                {publishing ? "กำลังเผยแพร่..." : "เผยแพร่เลย์เอาต์"}
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -564,9 +671,18 @@ export default function HomepageCuration({ token }) {
 
       {message ? <p className="status">{message}</p> : null}
 
+      <div className="actions">
+        <button type="button" className={activeTab === TAB_LAYOUT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_LAYOUT)}>
+          Layout
+        </button>
+        <button type="button" className={activeTab === TAB_SIGNALS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SIGNALS)}>
+          Signals / Content Pool
+        </button>
+      </div>
+
       {loading ? (
         <p className="muted">กำลังโหลดข้อมูลหน้าแรก...</p>
-      ) : (
+      ) : activeTab === TAB_LAYOUT ? (
         <div className="homepage-curation-block-list">
           <article className="homepage-curation-block-card">
             <div className="homepage-curation-block-head">
@@ -858,6 +974,101 @@ export default function HomepageCuration({ token }) {
               </article>
             );
           })}
+        </div>
+      ) : (
+        <div className="homepage-curation-block-list">
+          <article className="homepage-curation-block-card">
+            <div className="homepage-curation-block-head">
+              <div>
+                <p className="homepage-curation-block-kicker">Signals / Content Pool</p>
+                <h3>สัญญาณและกลุ่มคอนเทนต์</h3>
+                <p className="muted">
+                  ใช้แท็บนี้เพื่อรีวิวรายการที่อาจนำไปคัดเลือกบนหน้าแรกเท่านั้น ไม่ใช่หน้าสำหรับแก้ไขเนื้อหา อนุมัติ เผยแพร่ หรือสั่ง AI
+                </p>
+              </div>
+            </div>
+
+            <div className="homepage-curation-rule-panel">
+              <p className="muted">
+                การเพิ่มรายการจากแท็บนี้เป็นการเตรียมในหน้านี้เท่านั้น หากต้องการบันทึก ให้กลับไปแท็บ Layout แล้วกดบันทึกฉบับร่าง
+              </p>
+              <div className="grid two">
+                <label>
+                  ประเภทรายการ
+                  <select
+                    value={poolState.entity_type}
+                    onChange={(event) => updatePoolState({ entity_type: event.target.value, items: [], error: "" })}
+                  >
+                    {ENTITY_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  ค้นหารายการ
+                  <input
+                    value={poolState.q}
+                    onChange={(event) => updatePoolState({ q: event.target.value })}
+                    placeholder={poolState.entity_type === "event" ? "ค้นหาชื่ออีเวนต์" : "ค้นหาด้วยชื่อหรือ slug"}
+                  />
+                </label>
+                <label className="full">
+                  ใช้ในบล็อก
+                  <select value={poolTargetBlockKey} onChange={(event) => setPoolTargetBlockKey(event.target.value)} disabled={!eligiblePoolBlocks.length}>
+                    {eligiblePoolBlocks.length ? (
+                      eligiblePoolBlocks.map((block) => (
+                        <option key={block.key} value={block.key}>
+                          {block.title || block.key}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">ไม่มีบล็อกที่รองรับ</option>
+                    )}
+                  </select>
+                </label>
+              </div>
+
+              <div className="actions">
+                <button type="button" className="ghost" onClick={searchPoolCandidates} disabled={poolState.loading}>
+                  {poolState.loading ? "กำลังค้นหา..." : "ค้นหารายการ"}
+                </button>
+              </div>
+            </div>
+
+            {poolState.error ? <p className="status">{poolState.error}</p> : null}
+            {!poolState.loading && !poolState.error && poolState.items.length === 0 ? (
+              <p className="muted">ยังไม่พบรายการ หรือยังไม่มีคอนเทนต์ในกลุ่มนี้</p>
+            ) : null}
+
+            {poolState.items.length ? (
+              <div className="homepage-curation-manual-list">
+                {poolState.items.map((candidate) => {
+                  const selectedBlock = blocks.find((block) => block.key === poolTargetBlockKey);
+                  const canUseInBlock = canUseCandidateInBlock(selectedBlock, candidate.entity_type);
+
+                  return (
+                    <div key={`pool-${candidate.entity_type}-${candidate.id}`} className="homepage-curation-manual-row">
+                      <div>
+                        <strong>{candidate.title || "-"}</strong>
+                        <p className="muted">
+                          {getEntityTypeLabel(candidate.entity_type)} #{candidate.id}
+                          {candidate.category ? ` | ${candidate.category}` : ""}
+                          {candidate.slug ? ` | รหัส: ${candidate.slug}` : ""}
+                        </p>
+                      </div>
+                      <div className="actions">
+                        <button type="button" className="ghost tiny-btn" onClick={() => addPoolCandidateToBlock(candidate)} disabled={!canUseInBlock}>
+                          Use in block
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </article>
         </div>
       )}
     </section>
