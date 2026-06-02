@@ -4661,6 +4661,14 @@ function toMediaDedupKey(value) {
 
 const ASSIGNMENT_WORK_SYNC_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
+function sanitizeAssignmentSyncBatchId(value, fallback = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return String(fallback || "").trim();
+  const normalized = raw.replace(/[^a-zA-Z0-9._:-]/g, "");
+  if (!normalized) return String(fallback || "").trim();
+  return normalized.slice(0, 128);
+}
+
 function parseIsoMs(value) {
   const ts = Date.parse(String(value || ""));
   return Number.isFinite(ts) ? ts : 0;
@@ -12362,7 +12370,7 @@ app.get("/api/assets", (req, res) => {
     rows = db
       .prepare(`
       SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type,
-             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface,
+             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface, ca.assignment_sync_batch_id,
              c.title AS content_title
       FROM assets a
       LEFT JOIN content_assets ca ON ca.asset_id = a.id
@@ -12375,7 +12383,7 @@ app.get("/api/assets", (req, res) => {
     rows = db
       .prepare(`
       SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type,
-             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface,
+             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface, ca.assignment_sync_batch_id,
              c.title AS content_title
       FROM assets a
       LEFT JOIN content_assets ca ON ca.asset_id = a.id
@@ -12486,6 +12494,7 @@ app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admi
   const totalChunks = Number(req.body?.total_chunks || 0);
   const requestedChunkSize = Number(req.body?.chunk_size_bytes || ASSIGNMENT_CHUNK_SIZE_BYTES);
   const chunkSizeBytes = ASSIGNMENT_CHUNK_SIZE_BYTES;
+  const syncBatchId = sanitizeAssignmentSyncBatchId(req.body?.sync_batch_id);
 
   if (!fileNameRaw) {
     res.status(400).json({ error: "file_name is required" });
@@ -12493,6 +12502,10 @@ app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admi
   }
   if (!isAllowedAssignmentUploadMime(mimeType)) {
     res.status(400).json({ error: "Unsupported upload mime type for assignment work surface" });
+    return;
+  }
+  if (!syncBatchId) {
+    res.status(400).json({ error: "sync_batch_id is required" });
     return;
   }
   if (!Number.isInteger(sizeBytes) || sizeBytes <= 0) {
@@ -12537,6 +12550,7 @@ app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admi
     size_bytes: Math.floor(sizeBytes),
     total_chunks: Math.floor(totalChunks),
     chunk_size_bytes: chunkSizeBytes,
+    sync_batch_id: syncBatchId,
     received_chunks: {},
     created_at: now,
     updated_at: now,
@@ -12749,6 +12763,13 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
 
   const contentItemId = Number(assignment.content_item_id || 0) || 0;
   const assignmentRound = resolveAssignmentCurrentRound(assignment);
+  const syncBatchId = sanitizeAssignmentSyncBatchId(manifest?.sync_batch_id);
+  if (!syncBatchId) {
+    await fs.unlink(finalAbsolutePath).catch(() => {});
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(400).json({ error: "upload session sync_batch_id is invalid" });
+    return;
+  }
   const insert = db.prepare(
     `
     INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
@@ -12756,7 +12777,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   `
   );
   const linkAsset = db.prepare(
-    "INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order, assignment_id, assignment_round, assignment_media_type, assignment_surface) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)"
+    "INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order, assignment_id, assignment_round, assignment_media_type, assignment_surface, assignment_sync_batch_id) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)"
   );
   const assetUid = crypto.randomUUID();
   const mediaType = normalizedMime.startsWith("video/") ? "video" : "image";
@@ -12786,7 +12807,8 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
       assignmentId,
       assignmentRound,
       mediaType,
-      "assignment_work"
+      "assignment_work",
+      syncBatchId
     );
     db.exec("COMMIT");
     transactionBegun = false;
@@ -12805,6 +12827,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
       finalRelativePath,
       finalAbsolutePath,
       normalizedMime,
+      syncBatchId,
       expectedTotalSize,
       hasChecksum: Boolean(checksum),
       error: err?.message || String(err),
@@ -12825,6 +12848,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
       asset_id: assetId,
       mime_type: normalizedMime,
       assignment_media_type: mediaType,
+      assignment_sync_batch_id: syncBatchId,
     }, {
       assignment_id: assignmentId,
     });
@@ -12882,6 +12906,11 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
 
   const contentItemId = Number(assignment.content_item_id || 0) || 0;
   const assignmentRound = resolveAssignmentCurrentRound(assignment);
+  const syncBatchId = sanitizeAssignmentSyncBatchId(req.body?.sync_batch_id);
+  if (!syncBatchId) {
+    res.status(400).json({ error: "sync_batch_id is required" });
+    return;
+  }
   const insert = db.prepare(
     `
     INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
@@ -12889,7 +12918,7 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
   `
   );
   const linkAsset = db.prepare(
-    "INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order, assignment_id, assignment_round, assignment_media_type, assignment_surface) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)"
+    "INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order, assignment_id, assignment_round, assignment_media_type, assignment_surface, assignment_sync_batch_id) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)"
   );
   const uploaded = [];
 
@@ -12930,7 +12959,8 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
       assignmentId,
       assignmentRound,
       mediaType,
-      "assignment_work"
+      "assignment_work",
+      syncBatchId
     );
 
     repo.logAudit(actorEmail(req), "assignment.asset.upload", "assignment", String(assignmentId), {
@@ -12940,6 +12970,7 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
       asset_id: assetId,
       mime_type: file.mimetype || null,
       assignment_media_type: mediaType,
+      assignment_sync_batch_id: syncBatchId,
     }, {
       assignment_id: assignmentId,
     });

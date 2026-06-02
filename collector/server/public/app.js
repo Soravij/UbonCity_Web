@@ -5974,6 +5974,12 @@ const ASSIGNMENT_WORK_SYNC_EXPIRY_MS = 24 * 60 * 60 * 1000;
 const ASSIGNMENT_CAPTURE_MAX_IMAGES_PER_SLOT = 5;
 const ASSIGNMENT_CAPTURE_MAX_VIDEOS_PER_SLOT = 2;
 
+function createAssignmentSyncBatchId(assignmentId) {
+  const id = Number(assignmentId || 0) || 0;
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `assignment-work-${id}-${Date.now()}-${randomPart}`;
+}
+
 function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureItems = []) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return { complete: false, assets: [], missing: [], syncSignature: "" };
@@ -6004,6 +6010,7 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     assignment_id: Number(row?.assignment_id || 0) || null,
     assignment_round: Number(row?.assignment_round || 0) || null,
     assignment_surface: String(row?.assignment_surface || "").trim() || null,
+    assignment_sync_batch_id: String(row?.assignment_sync_batch_id || "").trim() || null,
     created_at: String(row?.created_at || "").trim() || null,
   }));
 
@@ -6031,12 +6038,31 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
   }
   const effectiveRows = [];
   for (const [key, rowsBySlotType] of groupedBySlotType.entries()) {
+    const rowsWithBatch = rowsBySlotType.filter((row) => String(row?.assignment_sync_batch_id || "").trim().length > 0);
+    if (rowsWithBatch.length) {
+      const batchMap = new Map();
+      rowsWithBatch.forEach((row) => {
+        const batchId = String(row?.assignment_sync_batch_id || "").trim();
+        if (!batchMap.has(batchId)) batchMap.set(batchId, []);
+        batchMap.get(batchId).push(row);
+      });
+      let latestBatchId = "";
+      let latestBatchMarker = 0;
+      for (const [batchId, batchRows] of batchMap.entries()) {
+        const marker = batchRows.reduce((maxId, row) => Math.max(maxId, Number(row?.id || 0) || 0), 0);
+        if (marker > latestBatchMarker) {
+          latestBatchMarker = marker;
+          latestBatchId = batchId;
+        }
+      }
+      const selectedBatchRows = (batchMap.get(latestBatchId) || []).slice().sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
+      effectiveRows.push(...selectedBatchRows);
+      continue;
+    }
     const mediaType = key.endsWith("|video") ? "video" : "image";
     const maxCount = mediaType === "video" ? ASSIGNMENT_CAPTURE_MAX_VIDEOS_PER_SLOT : ASSIGNMENT_CAPTURE_MAX_IMAGES_PER_SLOT;
-    const orderedRows = rowsBySlotType
-      .slice()
-      .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
-    // TODO: Persist explicit sync_batch_id and select batch exactly; this fallback keeps newest rows per slot/type up to current limits.
+    const orderedRows = rowsBySlotType.slice().sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
+    // TODO: remove fallback once all legacy rows have assignment_sync_batch_id.
     effectiveRows.push(...orderedRows.slice(0, maxCount));
   }
 
@@ -6070,6 +6096,153 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     syncSignature: buildAssignmentServerAssetSyncSignature(id, effectiveRows),
     has_expired_assets: expiredRows.length > 0,
     expired_count: expiredRows.length,
+  };
+}
+
+function getAssignmentAssetSlotTypeKeyFromAsset(asset) {
+  const fileName = String(asset?.file_name || "").trim();
+  const slug = fileName.includes("__") ? fileName.split("__")[0] : "";
+  const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
+  const mediaType = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("video/") ? "video" : "";
+  if (!slug || !mediaType) return "";
+  return `${slug}|${mediaType}`;
+}
+
+function getAssignmentTouchedSlotTypeKeysFromQueue(uploadQueue = []) {
+  const touched = new Set();
+  (Array.isArray(uploadQueue) ? uploadQueue : []).forEach((entry) => {
+    const slug = String(entry?.slug || "").trim();
+    const mimeType = String(entry?.file?.type || "").trim().toLowerCase();
+    const mediaType = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("video/") ? "video" : "";
+    if (slug && mediaType) touched.add(`${slug}|${mediaType}`);
+  });
+  return touched;
+}
+
+function validateAssignmentCaptureRequirementsFromAssets(assignment, captureItems = [], assets = []) {
+  const prompts = Array.isArray(captureItems) ? captureItems.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  const requireImages = Boolean(assignment?.image_reset_required);
+  const requireVideos = Boolean(assignment?.video_reset_required);
+  if (!prompts.length || (!requireImages && !requireVideos)) return [];
+  const expectedBySlug = new Map();
+  prompts.forEach((prompt, index) => {
+    expectedBySlug.set(toCaptureSlug(prompt, index), { prompt, index });
+  });
+  const countsBySlug = new Map();
+  (Array.isArray(assets) ? assets : []).forEach((asset) => {
+    const key = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+    if (!key) return;
+    const [slug, mediaType] = key.split("|");
+    if (!expectedBySlug.has(slug)) return;
+    if (!countsBySlug.has(slug)) countsBySlug.set(slug, { image: 0, video: 0 });
+    const bucket = countsBySlug.get(slug);
+    if (mediaType === "image") bucket.image += 1;
+    if (mediaType === "video") bucket.video += 1;
+  });
+  const missing = [];
+  for (const [slug, entry] of expectedBySlug.entries()) {
+    const counts = countsBySlug.get(slug) || { image: 0, video: 0 };
+    if (requireImages && counts.image < 1) missing.push(`รูปหัวข้อ ${entry.index + 1}: ${entry.prompt}`);
+    if (requireVideos && counts.video < 1) missing.push(`วิดีโอหัวข้อ ${entry.index + 1}: ${entry.prompt}`);
+  }
+  return missing;
+}
+
+function composeAssignmentSubmissionEffectiveAssets(assignmentId, captureItems = [], options = {}) {
+  const id = Number(assignmentId || 0) || 0;
+  const assignment = getAssignmentById(id);
+  const uploadQueue = Array.isArray(options.uploadQueue)
+    ? options.uploadQueue
+    : buildAssignmentCaptureFileUploadQueue(id, captureItems);
+  const hasLocalQueue = uploadQueue.length > 0;
+  const syncKey = getAssignmentCaptureSyncKey(id, captureItems);
+  const strict = options?.strict === true;
+  const serverSynced = getAssignmentServerSyncedAssetsForCaptureItems(id, captureItems);
+  if (!hasLocalQueue) {
+    const mergedAssets = Array.isArray(serverSynced.assets) ? serverSynced.assets : [];
+    return {
+      assets: mergedAssets,
+      missing: validateAssignmentCaptureRequirementsFromAssets(assignment, captureItems, mergedAssets),
+      hasLocalQueue,
+      syncKey,
+      serverSynced,
+      touchedKeys: new Set(),
+    };
+  }
+
+  if (!isAssignmentCaptureUploadsSynced(id, captureItems)) {
+    if (strict) {
+      throw new Error("ต้องทำขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์ชุดที่เลือกในเครื่องให้ครบก่อนทำขั้นที่ 2: ส่งงานกลับ");
+    }
+    return {
+      assets: [],
+      missing: [],
+      hasLocalQueue,
+      syncKey,
+      serverSynced,
+      touchedKeys: getAssignmentTouchedSlotTypeKeysFromQueue(uploadQueue),
+      blockedMessage: "ต้องทำขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์ชุดที่เลือกในเครื่องให้ครบก่อนทำขั้นที่ 2: ส่งงานกลับ",
+    };
+  }
+
+  const cachedSyncedAssets = getSyncedUploadAssetsForKey(syncKey);
+  const latestKey = String(state.assignments.latestUploadedAssetsKey || "");
+  const latestAssets = Array.isArray(state.assignments.latestUploadedAssets) ? state.assignments.latestUploadedAssets : [];
+  const localSyncedAssets = cachedSyncedAssets.length ? cachedSyncedAssets : (latestKey === syncKey ? latestAssets : []);
+  if (!localSyncedAssets.length) {
+    if (strict) {
+      throw new Error("พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง");
+    }
+    return {
+      assets: [],
+      missing: [],
+      hasLocalQueue,
+      syncKey,
+      serverSynced,
+      touchedKeys: getAssignmentTouchedSlotTypeKeysFromQueue(uploadQueue),
+      blockedMessage: "พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง",
+    };
+  }
+
+  const touchedKeys = getAssignmentTouchedSlotTypeKeysFromQueue(uploadQueue);
+  const localByKey = new Map();
+  localSyncedAssets.forEach((asset) => {
+    const key = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+    if (!key) return;
+    if (!localByKey.has(key)) localByKey.set(key, []);
+    localByKey.get(key).push(asset);
+  });
+  for (const key of touchedKeys) {
+    if (localByKey.has(key)) continue;
+    if (strict) {
+      throw new Error("พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง");
+    }
+  }
+
+  const serverByKey = new Map();
+  (Array.isArray(serverSynced.assets) ? serverSynced.assets : []).forEach((asset) => {
+    const key = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+    if (!key) return;
+    if (!serverByKey.has(key)) serverByKey.set(key, []);
+    serverByKey.get(key).push(asset);
+  });
+  const mergedAssets = [];
+  for (const key of touchedKeys) {
+    const rows = localByKey.get(key) || [];
+    mergedAssets.push(...rows);
+  }
+  for (const [key, rows] of serverByKey.entries()) {
+    if (touchedKeys.has(key)) continue;
+    mergedAssets.push(...rows);
+  }
+
+  return {
+    assets: mergedAssets,
+    missing: validateAssignmentCaptureRequirementsFromAssets(assignment, captureItems, mergedAssets),
+    hasLocalQueue,
+    syncKey,
+    serverSynced,
+    touchedKeys,
   };
 }
 
@@ -6232,15 +6405,24 @@ function renderAssignmentSubmissionFileList() {
   const captureBucket = getAssignmentCaptureUploadBucket(assignmentId, false) || {};
   const files = Object.values(captureBucket).flatMap((rows) => (Array.isArray(rows) ? rows : [])).filter((file) => file instanceof File);
   const hasLocalQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems).length > 0;
-  const syncKey = getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems);
-  const cachedSyncedAssets = getSyncedUploadAssetsForKey(syncKey);
-  const latestKey = String(state.assignments.latestUploadedAssetsKey || "");
-  const uploadedAssets = cachedSyncedAssets.length
-    ? cachedSyncedAssets
-    : (latestKey === syncKey && Array.isArray(state.assignments.latestUploadedAssets)
-      ? state.assignments.latestUploadedAssets
-      : []);
+  const uploadQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
+  const composed = composeAssignmentSubmissionEffectiveAssets(assignmentId, formConfig.captureItems, { uploadQueue, strict: false });
+  const uploadedAssets = Array.isArray(composed?.assets) ? composed.assets : [];
   const isSynced = isAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems);
+  if (isSynced && uploadedAssets.length) {
+    node.className = "assignment-brief-list-wrap";
+    node.innerHTML = `
+      <div class="assignment-brief-meta" style="margin-bottom:8px;">มีไฟล์ที่ซิงก์แล้วบน server รอส่งงานกลับ | ซิงก์แล้ว ${uploadedAssets.length} ไฟล์</div>
+      <ul class="assignment-brief-list">
+        ${uploadedAssets.map((asset) => {
+          const label = escapeHtml(`${String(asset?.file_name || "").trim() || `asset-${Number(asset?.id || 0)}`} | ${String(asset?.mime_type || "").trim() || "unknown"}`);
+          const publicUrl = String(asset?.public_url || "").trim();
+          return `<li>${publicUrl ? `<a href="${escapeHtml(publicUrl)}" target="_blank" rel="noopener noreferrer">${label}</a>` : label}</li>`;
+        }).join("")}
+      </ul>
+    `;
+    return;
+  }
   if (!files.length) {
     if (uploadedAssets.length) {
       node.className = "assignment-brief-list-wrap";
@@ -7895,7 +8077,7 @@ function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = [
   }
 }
 
-async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = []) {
+async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = [], options = {}) {
   const CHUNK_THRESHOLD_BYTES = 20 * 1024 * 1024;
   const CHUNK_SIZE_BYTES = 20 * 1024 * 1024;
   const queue = Array.isArray(fileQueue) ? fileQueue : [];
@@ -7917,6 +8099,11 @@ async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = []) {
     .filter(Boolean);
   if (!validQueue.length) return [];
 
+  const syncBatchId = String(options?.syncBatchId || "").trim();
+  if (!syncBatchId) {
+    throw new Error("ไม่พบ sync batch id สำหรับการอัปโหลดรอบนี้");
+  }
+
   async function uploadAssignmentFileInChunks(entry, index) {
     const totalChunks = Math.max(1, Math.ceil(Number(entry.original.size || 0) / CHUNK_SIZE_BYTES));
     const startResult = await api(`/api/assignments/${assignmentId}/assets/uploads/start`, {
@@ -7927,6 +8114,7 @@ async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = []) {
         size_bytes: Number(entry.original.size || 0) || 0,
         total_chunks: totalChunks,
         chunk_size_bytes: CHUNK_SIZE_BYTES,
+        sync_batch_id: syncBatchId,
       }),
     });
     const uploadId = String(startResult?.upload_id || "").trim();
@@ -7953,7 +8141,7 @@ async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = []) {
 
     return api(`/api/assignments/${assignmentId}/assets/uploads/${uploadId}/finalize`, {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({ sync_batch_id: syncBatchId }),
     });
   }
 
@@ -7968,6 +8156,7 @@ async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = []) {
       } else {
         const form = new FormData();
         form.append("file", entry.original, entry.renamed);
+        form.append("sync_batch_id", syncBatchId);
         result = await api(`/api/assignments/${assignmentId}/assets/upload`, {
           method: "POST",
           body: form,
@@ -8007,7 +8196,8 @@ async function syncAssignmentSubmissionUploads() {
       setStatus("assignment-status", `ไฟล์ชุดนี้ซิงก์แล้ว รอส่งงานกลับ | ซิงก์แล้ว ${syncedCount} ไฟล์`);
       return;
     }
-    const uploadedAssets = await uploadAssignmentSubmissionFiles(assignmentId, uploadQueue);
+    const syncBatchId = createAssignmentSyncBatchId(assignmentId);
+    const uploadedAssets = await uploadAssignmentSubmissionFiles(assignmentId, uploadQueue, { syncBatchId });
     markAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems, uploadedAssets);
     renderAssignmentSubmissionFileList();
     // TODO: define cleanup policy for synced-but-unsubmitted assignment assets.
@@ -8072,32 +8262,18 @@ async function createAssignmentSubmission() {
 
   assertAssignmentCaptureUploadsComplete(assignmentId, formConfig.captureItems);
   const uploadQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
-  const syncKey = getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems);
-  let uploadedAssets = [];
-  if (uploadQueue.length > 0) {
-    if (!isAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems)) {
-      throw new Error("ต้องทำขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์ชุดที่เลือกในเครื่องให้ครบก่อนทำขั้นที่ 2: ส่งงานกลับ");
-    }
-    const cachedSyncedAssets = getSyncedUploadAssetsForKey(syncKey);
-    const latestKey = String(state.assignments.latestUploadedAssetsKey || "");
-    const latestAssets = Array.isArray(state.assignments.latestUploadedAssets) ? state.assignments.latestUploadedAssets : [];
-    uploadedAssets = cachedSyncedAssets.length
-      ? cachedSyncedAssets
-      : (latestKey === syncKey ? latestAssets : []);
-    if (!uploadedAssets.length) {
-      throw new Error("พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง");
-    }
-  } else {
-    const serverSynced = applyAssignmentServerSyncedAssets(assignmentId, formConfig.captureItems, { showStatus: false });
-    if (serverSynced.complete && Array.isArray(serverSynced.assets) && serverSynced.assets.length) {
-      uploadedAssets = serverSynced.assets;
-    } else if (Number(serverSynced?.expired_count || 0) > 0 && Number(serverSynced?.assets?.length || 0) === 0) {
+  const composed = composeAssignmentSubmissionEffectiveAssets(assignmentId, formConfig.captureItems, { uploadQueue, strict: true });
+  const syncKey = String(composed?.syncKey || getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems));
+  const uploadedAssets = Array.isArray(composed?.assets) ? composed.assets : [];
+  const serverSynced = composed?.serverSynced || null;
+  if (!uploadedAssets.length) {
+    if (Number(serverSynced?.expired_count || 0) > 0 && Number(serverSynced?.assets?.length || 0) === 0) {
       throw new Error("ไฟล์ที่ซิงก์ไว้หมดอายุแล้ว กรุณาอัปโหลด/ซิงก์ไฟล์ใหม่อีกครั้ง");
-    } else if (Array.isArray(serverSynced.missing) && serverSynced.missing.length) {
-      throw new Error(`ยังแนบไฟล์ไม่ครบตามเงื่อนไข reset: ${serverSynced.missing.join(" | ")}`);
-    } else {
-      throw new Error("ยังไม่มีไฟล์ที่เลือกในเครื่อง และไม่พบไฟล์ที่ซิงก์แล้วบน server");
     }
+    throw new Error("ยังไม่มีไฟล์ที่เลือกในเครื่อง และไม่พบไฟล์ที่ซิงก์แล้วบน server");
+  }
+  if (Array.isArray(composed?.missing) && composed.missing.length) {
+    throw new Error(`ยังแนบไฟล์ไม่ครบตามเงื่อนไข reset: ${composed.missing.join(" | ")}`);
   }
 
   if (uploadedAssets.length) {
