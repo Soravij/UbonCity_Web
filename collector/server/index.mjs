@@ -7846,6 +7846,7 @@ app.post("/api/items/:id/article-process/transition", requireRole("owner", "admi
 
 app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "admin", "editor", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
+  const isDebugDiagnosticsEnabled = String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
     return;
@@ -7873,6 +7874,7 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
   const reasonCode = String(req.body?.reason_code || "").trim().toLowerCase() || "article_process_ready_for_review";
 
   try {
+    let submitReviewDiagnostics = null;
     const editorialAssignment = listEditorialAssignmentsByItem(id).find((assignment) => {
       const assignmentKind = String(assignment?.assignment_kind || "").trim().toLowerCase();
       const assignmentState = String(assignment?.state || "").trim().toLowerCase();
@@ -7886,8 +7888,11 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
       const latestDraftBodyBeforeSubmit = String(latestDraftBeforeSubmit?.body || "").trim();
       if (!latestDraftBodyBeforeSubmit) {
         res.status(409).json({
+          ok: false,
           error: "latest draft body is required before submit-review",
           failure_reason: "missing_latest_draft_body",
+          latest_draft_id: Number(latestDraftBeforeSubmit?.id || 0) || null,
+          latest_draft_body_length: String(latestDraftBeforeSubmit?.body || "").trim().length,
         });
         return;
       }
@@ -7905,9 +7910,12 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
       const latestDraftBody = String(latestDraft?.body || "").trim();
       if (!latestDraftBody) {
         res.status(409).json({
+          ok: false,
           error: "latest draft body is required before submit-review",
           failure_reason: "missing_latest_draft_body",
           submission_id: Number(submission?.id || 0) || null,
+          latest_draft_id: Number(latestDraft?.id || 0) || null,
+          latest_draft_body_length: latestDraftBody.length,
         });
         return;
       }
@@ -7928,6 +7936,25 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
         },
         status: "submitted",
       }, actorEmail(req));
+      const publishableSourceAfterSubmit = repo.buildPublishableSourceByItem(id);
+      if (isDebugDiagnosticsEnabled) {
+        submitReviewDiagnostics = {
+          submission_id: Number(submission?.id || 0) || null,
+          latest_draft_id: Number(latestDraft?.id || 0) || null,
+          latest_draft_body_length: latestDraftBody.length,
+          latest_draft_title: String(latestDraft?.draft_title || item.title || "").trim() || null,
+          article_draft_deliverable_id: Number(draftDeliverable?.id || 0) || null,
+          article_draft_deliverable_created: Boolean(Number(draftDeliverable?.id || 0)),
+          deliverable_type: String(draftDeliverable?.deliverable_type || "").trim() || "article_draft",
+          deliverable_text_length: String(draftDeliverable?.text_content || "").trim().length,
+          deliverable_status: String(draftDeliverable?.status || "").trim() || null,
+          publishable_source: {
+            article_draft_deliverable_id: Number(publishableSourceAfterSubmit?.article_draft_deliverable_id || 0) || null,
+            article_draft_body_length: Number(publishableSourceAfterSubmit?.article_draft_body_length || 0) || 0,
+            ready_for_publish_source: Boolean(publishableSourceAfterSubmit?.ready_for_publish_source),
+          },
+        };
+      }
       repo.updateAssignmentState(editorialAssignment.id, submissionState, actorEmail(req), {
         actor_role: role,
         reason_code: ASSIGNMENT_REASON_CODE_DEFAULTS[submissionAction],
@@ -7945,11 +7972,13 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
 
     transitionArticleProcessState(req, item, currentStatus, "ready_for_review", note, reasonCode);
     const nextItem = repo.getItem(id) || item;
-    res.json({ ok: true, ...buildArticleProcessPayload(req, nextItem) });
+    const responsePayload = { ok: true, ...buildArticleProcessPayload(req, nextItem) };
+    if (isDebugDiagnosticsEnabled && submitReviewDiagnostics) responsePayload.submit_review_diagnostics = submitReviewDiagnostics;
+    res.json(responsePayload);
   } catch (err) {
     const msg = String(err?.message || "Cannot submit article for review");
     if (String(err?.failure_reason || "").trim().toLowerCase() === "missing_latest_draft_body") {
-      res.status(409).json({ error: msg, failure_reason: "missing_latest_draft_body" });
+      res.status(409).json({ ok: false, error: msg, failure_reason: "missing_latest_draft_body" });
       return;
     }
     const status = /invalid .*transition|cannot transition|duplicate submission|requires revision_requested|use resubmitted/i.test(msg) ? 409 : 400;
