@@ -577,6 +577,70 @@ test("field pack contract only derives price signals from price contexts", () =>
   assert.equal(contract.restaurant_profile.price_signals, "Price starts around 80 THB");
 });
 
+test("field pack contract only derives cuisine type from cuisine_type context", () => {
+  const repo = createMockRepo({
+    item: createBaseItem(),
+    approvedContext: [
+      createApprovedBlock(1, 1451, {
+        context_type: "fact",
+        selected_text: "Thai fusion cafe with varied menu",
+      }),
+      createApprovedBlock(2, 1452, {
+        context_type: "cuisine_type",
+        selected_text: "Thai fusion",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+
+  assert.equal(contract.restaurant_profile.cuisine_type, "Thai fusion");
+});
+
+test("field pack contract only derives view type from view_type context", () => {
+  const repo = createMockRepo({
+    item: createBaseItem(),
+    approvedContext: [
+      createApprovedBlock(1, 1461, {
+        context_type: "fact",
+        selected_text: "4.5 stars and popular scenic stop",
+      }),
+      createApprovedBlock(2, 1462, {
+        context_type: "fact",
+        selected_text: "https://example.com/source/river-view",
+      }),
+      createApprovedBlock(3, 1463, {
+        context_type: "view_type",
+        selected_text: "river view",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+
+  assert.equal(contract.place_profile.view_type, "river view");
+});
+
+test("field pack contract only derives visit duration from visit_duration context", () => {
+  const repo = createMockRepo({
+    item: createBaseItem(),
+    approvedContext: [
+      createApprovedBlock(1, 1471, {
+        context_type: "opening_hours",
+        selected_text: "Open 09:00-18:00 daily",
+      }),
+      createApprovedBlock(2, 1472, {
+        context_type: "visit_duration",
+        selected_text: "about 1-2 hours",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+
+  assert.equal(contract.place_profile.visit_duration, "about 1-2 hours");
+});
+
 test("field pack contract adds category mismatch as warning only without changing category", () => {
   const repo = createMockRepo({
     item: createBaseItem({

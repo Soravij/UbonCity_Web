@@ -622,7 +622,7 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
   };
 
   const placeProfile = {
-    view_type: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["view_type"], keywords: ["river", "mountain", "city view", "view"] })),
+    view_type: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["view_type"], matchMode: "type_only" })),
     atmosphere: sanitizeTaxonomyList(
       pickApprovedEvidence(approvedContext, { contextTypes: ["ambience"], matchMode: "type_only" }),
       { maxLength: 160, maxWords: 24, rejectLongText: true }
@@ -631,7 +631,7 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
       pickApprovedEvidence(approvedContext, { contextTypes: ["photo_spot"], matchMode: "type_only" }),
       { maxLength: 120, maxWords: 16, rejectLongText: true }
     ),
-    visit_duration: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["visit_duration"], keywords: ["hour", "minutes", "duration"] })),
+    visit_duration: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["visit_duration"], matchMode: "type_only" })),
     best_time_to_visit: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["best_time"], keywords: ["morning", "evening", "golden hour", "best time"] })),
   };
 
@@ -647,7 +647,7 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
       pickApprovedEvidence(approvedContext, { contextTypes: ["menu"], matchMode: "type_only" }),
       { maxLength: 120, rejectLongText: true }
     ),
-    cuisine_type: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["cuisine_type"], keywords: ["thai", "fusion", "local", "cuisine"] })),
+    cuisine_type: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["cuisine_type"], matchMode: "type_only" })),
     price_signals: sanitizeTaxonomyText(
       firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["price", "pricing", "fee", "ticket", "menu_price"], matchMode: "type_only" })),
       { maxLength: 120, rejectLongText: true }
