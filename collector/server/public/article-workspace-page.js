@@ -607,11 +607,51 @@ function taxonomyBadge(label, tone = "neutral") {
   return `<span class="${className}">${escapeHtml(label)}</span>`;
 }
 
+function isLikelyUrl(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text.startsWith("http://")
+    || text.startsWith("https://")
+    || text.startsWith("/api/")
+    || text.startsWith("/uploads/")
+    || text.startsWith("/collector/");
+}
+
+function normalizeTaxonomyItems(items = []) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(items) ? items : []) {
+    const text = String(raw || "").trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
+}
+
+function renderPreviewText(text, previewLimit = 200) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return "";
+  if (isLikelyUrl(normalized)) {
+    return `<a href="${escapeHtml(normalized)}" target="_blank" rel="noreferrer">open link</a>`;
+  }
+  if (normalized.length <= previewLimit) return escapeHtml(normalized);
+  const preview = `${normalized.slice(0, previewLimit).trimEnd()}...`;
+  return `${escapeHtml(preview)}<details><summary>show more</summary><div>${escapeHtml(normalized)}</div></details>`;
+}
+
 function taxonomyListValue(items = [], options = {}) {
   const tone = options.tone || "neutral";
-  const list = toReviewList(items);
+  const list = normalizeTaxonomyItems(items);
   if (!list.length) return "";
-  return `<ul>${list.map((item) => `<li>${tone === "normal" ? escapeHtml(item) : taxonomyBadge(item, tone)}</li>`).join("")}</ul>`;
+  const visibleItems = list.slice(0, 5);
+  const hiddenItems = list.slice(5);
+  const visibleHtml = visibleItems.map((item) => `<li>${tone === "normal" ? renderPreviewText(item) : taxonomyBadge(item, tone)}</li>`).join("");
+  const hiddenHtml = hiddenItems.length
+    ? `<details><summary>show ${hiddenItems.length} more</summary><ul>${hiddenItems.map((item) => `<li>${tone === "normal" ? renderPreviewText(item) : taxonomyBadge(item, tone)}</li>`).join("")}</ul></details>`
+    : "";
+  return `<ul>${visibleHtml}</ul>${hiddenHtml}`;
 }
 
 function taxonomyScalarValue(value, options = {}) {
@@ -636,11 +676,11 @@ function renderTaxonomyFieldHtml(field, value, needsVerificationSet, publishBloc
   const statusBadges = renderTaxonomyStatusBadges(field, needsVerificationSet, publishBlockerSet);
 
   if (Array.isArray(value)) {
-    const normalized = toReviewList(value);
+    const normalized = normalizeTaxonomyItems(value);
     if (!normalized.length && !isPublishBlocker && !isNeedsVerification) return "";
     if (!normalized.length) return statusBadges;
     const listHtml = taxonomyListValue(normalized, { tone: "normal" });
-    return statusBadges ? `${statusBadges}${listHtml}` : listHtml;
+    return statusBadges ? `<div>${listHtml}</div><div>${statusBadges}</div>` : listHtml;
   }
 
   const scalar = String(value == null ? "" : value).trim();
@@ -648,8 +688,10 @@ function renderTaxonomyFieldHtml(field, value, needsVerificationSet, publishBloc
   if (!scalar) return statusBadges;
   if (scalar === "unknown" && !isPublishBlocker && !isNeedsVerification) return "";
 
-  const valueHtml = taxonomyScalarValue(scalar, { warning: isNeedsVerification && scalar !== "unknown" && !isPublishBlocker });
-  return statusBadges ? `${valueHtml} ${statusBadges}`.trim() : valueHtml;
+  const valueHtml = scalar === "unknown"
+    ? taxonomyScalarValue(scalar, { warning: false })
+    : renderPreviewText(scalar);
+  return statusBadges ? `<div>${valueHtml}</div><div>${statusBadges}</div>` : valueHtml;
 }
 
 function buildTaxonomySections(contract) {
@@ -706,11 +748,11 @@ function buildTaxonomySections(contract) {
   }
 
   const verificationRows = [];
-  const verifiedFacts = toReviewList(verification.verified_facts);
+  const verifiedFacts = normalizeTaxonomyItems(verification.verified_facts);
   if (verifiedFacts.length) {
     verificationRows.push({ label: "Verified Facts", html: taxonomyListValue(verifiedFacts, { tone: "normal" }) });
   }
-  const needsVerification = toReviewList(verification.needs_verification);
+  const needsVerification = normalizeTaxonomyItems(verification.needs_verification);
   if (needsVerification.length) {
     verificationRows.push({ label: "Needs Verification", html: taxonomyListValue(needsVerification, { tone: "warning" }) });
   }

@@ -375,6 +375,25 @@
   margin-top: 0.32rem;
 }
 
+#taxonomy-review-panel,
+#taxonomy-review-panel li,
+#taxonomy-review-panel a,
+#taxonomy-review-panel details,
+#taxonomy-review-panel summary {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+#taxonomy-review-panel details {
+  margin-top: 0.35rem;
+}
+
+#taxonomy-review-panel .workflow-badge {
+  margin-top: 0.3rem;
+  margin-right: 0.35rem;
+}
+
 .article-system-box {
   margin-top: 0.85rem;
   padding-top: 0.7rem;
