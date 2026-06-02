@@ -799,8 +799,7 @@ export async function searchHomepageCurationCandidates({
        c.slug AS category,
        COALESCE(NULLIF(TRIM(p.slug), ''), CONCAT('place-', p.id)) AS slug,
        COALESCE(pt_req.title, pt_th.title) AS title,
-       COALESCE(pt_req.description, pt_th.description) AS description,
-       p.updated_at
+       COALESCE(pt_req.description, pt_th.description) AS description
      FROM places p
      JOIN categories c ON c.id = p.category_id
      LEFT JOIN place_translations pt_req ON pt_req.place_id = p.id AND pt_req.lang=?
