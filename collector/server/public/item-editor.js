@@ -3633,6 +3633,204 @@ function buildContractFactRows(coreFacts = {}) {
   return rows;
 }
 
+function parseTaxonomyContract(contract) {
+  if (!contract || typeof contract !== "object" || Array.isArray(contract)) return null;
+  return String(contract.taxonomy_version || "").trim() === "page_curation_taxonomy_v1" ? contract : null;
+}
+
+function taxonomyFieldLabel(key) {
+  return String(key || "")
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function taxonomyBadge(label, tone = "neutral") {
+  const className = tone === "warning"
+    ? "workflow-badge workflow-badge-generated"
+    : tone === "danger"
+      ? "workflow-badge workflow-badge-sent"
+      : "workflow-badge workflow-badge-raw";
+  return `<span class="${className}">${escapeHtml(label)}</span>`;
+}
+
+function taxonomyListValue(items = [], options = {}) {
+  const tone = options.tone || "neutral";
+  const list = toReviewList(items);
+  if (!list.length) return "";
+  return `<ul>${list.map((item) => `<li>${tone === "normal" ? escapeHtml(item) : taxonomyBadge(item, tone)}</li>`).join("")}</ul>`;
+}
+
+function taxonomyScalarValue(value, options = {}) {
+  if (value == null) return "";
+  const text = String(value).trim();
+  if (!text) return "";
+  if (text === "unknown") return taxonomyBadge("unknown", "neutral");
+  if (options.warning) return taxonomyBadge(text, "warning");
+  return escapeHtml(text);
+}
+
+function renderTaxonomyStatusBadges(field, needsVerificationSet, publishBlockerSet) {
+  const badges = [];
+  if (publishBlockerSet.has(field)) badges.push(taxonomyBadge("publish blocker", "danger"));
+  if (needsVerificationSet.has(field)) badges.push(taxonomyBadge("needs verification", "warning"));
+  return badges.join(" ");
+}
+
+function renderTaxonomyFieldHtml(field, value, needsVerificationSet, publishBlockerSet) {
+  const isPublishBlocker = publishBlockerSet.has(field);
+  const isNeedsVerification = needsVerificationSet.has(field);
+  const statusBadges = renderTaxonomyStatusBadges(field, needsVerificationSet, publishBlockerSet);
+
+  if (Array.isArray(value)) {
+    const normalized = toReviewList(value);
+    if (!normalized.length && !isPublishBlocker && !isNeedsVerification) return "";
+    if (!normalized.length) return statusBadges;
+    const listHtml = taxonomyListValue(normalized, { tone: "normal" });
+    return statusBadges ? `${statusBadges}${listHtml}` : listHtml;
+  }
+
+  const scalar = String(value == null ? "" : value).trim();
+  if (!scalar && !isPublishBlocker && !isNeedsVerification) return "";
+  if (!scalar) return statusBadges;
+  if (scalar === "unknown" && !isPublishBlocker && !isNeedsVerification) return "";
+
+  const valueHtml = taxonomyScalarValue(scalar, { warning: isNeedsVerification && scalar !== "unknown" && !isPublishBlocker });
+  return statusBadges ? `${valueHtml} ${statusBadges}`.trim() : valueHtml;
+}
+
+function buildTaxonomySections(contract) {
+  const verification = contract.verification && typeof contract.verification === "object" ? contract.verification : {};
+  const needsVerificationSet = new Set(toReviewList(verification.needs_verification));
+  const publishBlockers = toReviewList(verification.publish_blockers);
+  const publishBlockerSet = new Set(publishBlockers);
+  const sectionConfigs = [
+    {
+      title: "Universal Curation",
+      key: "universal_curation_profile",
+      fields: ["highlights", "good_to_know", "why_visit", "recommended_for", "best_for", "nearby", "local_notes"],
+    },
+    {
+      title: "Practical Profile",
+      key: "practical_profile",
+      fields: ["price_range", "parking", "pet_friendly", "family_friendly", "accessibility", "opening_hours_note", "reservation_needed"],
+    },
+    {
+      title: "Place Profile",
+      key: "place_profile",
+      fields: ["view_type", "atmosphere", "photo_spots", "visit_duration", "best_time_to_visit"],
+    },
+    {
+      title: "Restaurant Profile",
+      key: "restaurant_profile",
+      fields: ["restaurant_features", "signature_menu", "cuisine_type", "price_signals", "service_style", "seating_vibe"],
+    },
+    {
+      title: "Hotel Profile",
+      key: "hotel_profile",
+      fields: ["hotel_amenities", "room_type_hints", "checkin_checkout", "booking_channels", "nearby_landmarks", "stay_best_for"],
+    },
+    {
+      title: "Event Profile",
+      key: "event_profile",
+      fields: ["event_date_hints", "schedule_hints", "ticket_hints", "venue_notes", "event_best_for"],
+    },
+  ];
+
+  const sections = [];
+  for (const config of sectionConfigs) {
+    const source = contract[config.key] && typeof contract[config.key] === "object" ? contract[config.key] : {};
+    const rows = [];
+    for (const field of config.fields) {
+      const html = renderTaxonomyFieldHtml(field, source[field], needsVerificationSet, publishBlockerSet);
+      if (!html) continue;
+      rows.push({
+        label: taxonomyFieldLabel(field),
+        html,
+      });
+    }
+    if (rows.length) sections.push({ title: config.title, rows });
+  }
+
+  const verificationRows = [];
+  const verifiedFacts = toReviewList(verification.verified_facts);
+  if (verifiedFacts.length) {
+    verificationRows.push({ label: "Verified Facts", html: taxonomyListValue(verifiedFacts, { tone: "normal" }) });
+  }
+  const needsVerification = toReviewList(verification.needs_verification);
+  if (needsVerification.length) {
+    verificationRows.push({ label: "Needs Verification", html: taxonomyListValue(needsVerification, { tone: "warning" }) });
+  }
+  if (publishBlockers.length) {
+    verificationRows.push({ label: "Publish Blockers", html: taxonomyListValue(publishBlockers, { tone: "danger" }) });
+  }
+  if (verificationRows.length) sections.push({ title: "Verification", rows: verificationRows });
+
+  return sections;
+}
+
+function renderTaxonomyReviewPanel() {
+  const panel = qs("taxonomy-review-panel");
+  const statusNode = qs("taxonomy-review-status");
+  if (!panel || !statusNode) return;
+
+  const fieldPack = state.fieldPack && typeof state.fieldPack === "object" ? state.fieldPack : {};
+  const contract = parseFieldPackContractFromWriterNotes(fieldPack.writer_notes);
+  const taxonomyContract = parseTaxonomyContract(contract);
+
+  if (!contract) {
+    statusNode.className = "status";
+    statusNode.textContent = "No JSON field pack contract found in writer notes.";
+    panel.innerHTML = '<p class="muted">Taxonomy Review appears when writer_notes contains field pack contract JSON.</p>';
+    return;
+  }
+
+  if (!taxonomyContract) {
+    statusNode.className = "status";
+    statusNode.textContent = "No page_curation_taxonomy_v1 contract found.";
+    panel.innerHTML = '<p class="muted">Taxonomy Review stays empty until writer_notes contains a contract with taxonomy_version set to page_curation_taxonomy_v1.</p>';
+    return;
+  }
+
+  const sections = buildTaxonomySections(taxonomyContract);
+  const publishBlockers = toReviewList(taxonomyContract?.verification?.publish_blockers);
+  const needsVerification = toReviewList(taxonomyContract?.verification?.needs_verification);
+
+  statusNode.className = `status ${publishBlockers.length > 0 || needsVerification.length > 0 ? "warn" : "ok"}`;
+  statusNode.textContent = publishBlockers.length > 0
+    ? "Warning: taxonomy review found publish blockers."
+    : needsVerification.length > 0
+      ? "Taxonomy review found unresolved verification items."
+      : "Taxonomy review is available for curation.";
+
+  if (!sections.length) {
+    panel.innerHTML = '<p class="muted">No taxonomy groups with usable values were found in this contract.</p>';
+    return;
+  }
+
+  panel.innerHTML = `
+    <div class="readiness-summary">
+      <div class="summary-row"><strong>contract_version</strong><span>${escapeHtml(String(taxonomyContract.contract_version || "-"))}</span></div>
+      <div class="summary-row"><strong>taxonomy_version</strong><span>${escapeHtml(String(taxonomyContract.taxonomy_version || "-"))}</span></div>
+    </div>
+    <div class="article-brief-doc">
+      ${sections.map((section) => `
+        <section class="article-brief-section">
+          <h3>${escapeHtml(section.title)}</h3>
+          <ul>
+            ${section.rows.map((row) => `<li><strong>${escapeHtml(row.label)}:</strong> ${row.html}</li>`).join("")}
+          </ul>
+        </section>
+      `).join("")}
+      <details>
+        <summary>Debug: taxonomy contract JSON</summary>
+        <pre>${escapeHtml(JSON.stringify(taxonomyContract, null, 2))}</pre>
+      </details>
+    </div>
+  `;
+}
+
 function renderFieldPackContractPanel() {
   const panel = qs("field-pack-contract-panel");
   const statusNode = qs("field-pack-contract-status");
@@ -3705,6 +3903,7 @@ function renderStepFourGuides() {
   renderGuideCards("fact-check-preview", buildFactCheckCards());
   renderGuideCards("field-brief-preview", buildFieldPackCards());
   renderFieldPackContractPanel();
+  renderTaxonomyReviewPanel();
 }
 
 function roleLabel(row) {
