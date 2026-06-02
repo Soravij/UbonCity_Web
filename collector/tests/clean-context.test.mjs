@@ -492,3 +492,135 @@ test("field pack contract moves editor_note into local notes", () => {
 
   assert.ok(contract.universal_curation_profile.local_notes.includes("เสียงดีตอนบ่ายและควรชี้มุมถ่ายรูปฝั่งสวน"));
 });
+
+
+test("field pack contract rejects URL values from photo spots taxonomy", () => {
+  const repo = createMockRepo({
+    item: createBaseItem(),
+    approvedContext: [
+      createApprovedBlock(1, 1101, {
+        context_type: "photo_spot",
+        selected_text: "https://example.com/gallery/front-corner",
+      }),
+      createApprovedBlock(2, 1102, {
+        context_type: "photo_spot",
+        selected_text: "corner table photo spot",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+
+  assert.deepEqual(contract.place_profile.photo_spots, ["corner table photo spot"]);
+  assert.ok(!contract.place_profile.photo_spots.some((value) => value.includes("https://")));
+});
+
+test("field pack contract rejects URL values from good to know taxonomy", () => {
+  const repo = createMockRepo({
+    item: createBaseItem(),
+    approvedContext: [
+      createApprovedBlock(1, 1201, {
+        context_type: "tip",
+        selected_text: "https://example.com/opening-hours",
+      }),
+      createApprovedBlock(2, 1202, {
+        context_type: "tip",
+        selected_text: "Check opening hours before visiting",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+
+  assert.deepEqual(contract.universal_curation_profile.good_to_know, ["Check opening hours before visiting"]);
+  assert.ok(!contract.universal_curation_profile.good_to_know.some((value) => value.includes("https://")));
+});
+
+test("field pack contract keeps generic tips out of restaurant features", () => {
+  const repo = createMockRepo({
+    item: createBaseItem(),
+    approvedContext: [
+      createApprovedBlock(1, 1301, {
+        context_type: "tip",
+        selected_text: "Best to visit in the late afternoon",
+      }),
+      createApprovedBlock(2, 1302, {
+        context_type: "restaurant_feature",
+        selected_text: "Dessert and coffee counter with several drink choices",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+
+  assert.deepEqual(contract.restaurant_profile.restaurant_features, ["Dessert and coffee counter with several drink choices"]);
+  assert.ok(!contract.restaurant_profile.restaurant_features.some((value) => value.includes("late afternoon")));
+});
+
+test("field pack contract only derives price signals from price contexts", () => {
+  const repo = createMockRepo({
+    item: createBaseItem(),
+    approvedContext: [
+      createApprovedBlock(1, 1401, {
+        context_type: "tip",
+        selected_text: "This photo corner gets more attention than the food price",
+      }),
+      createApprovedBlock(2, 1402, {
+        context_type: "price",
+        selected_text: "Price starts around 80 THB",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+
+  assert.equal(contract.restaurant_profile.price_signals, "Price starts around 80 THB");
+});
+
+test("field pack contract adds category mismatch as warning only without changing category", () => {
+  const repo = createMockRepo({
+    item: createBaseItem({
+      category: "attractions",
+      title: "Matcha Garden Cafe",
+    }),
+    approvedContext: [
+      createApprovedBlock(1, 1501, {
+        context_type: "menu",
+        selected_text: "Matcha and coffee menu",
+      }),
+      createApprovedBlock(2, 1502, {
+        context_type: "restaurant_feature",
+        selected_text: "Seating area for cafe visitors",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+
+  assert.equal(contract.core_factual_fields.category, "attractions");
+  assert.ok(contract.curation_signals.content_risks.includes("category_mismatch"));
+  assert.ok(contract.verification.needs_verification.includes("category"));
+  assert.ok(!contract.verification.publish_blockers.includes("category_mismatch"));
+});
+
+test("field pack contract keeps ticket hints as warning only while event date remains blocker", () => {
+  const repo = createMockRepo({
+    item: createBaseItem({
+      type: "event",
+      category: "event",
+    }),
+    approvedContext: [
+      createApprovedBlock(1, 1601, {
+        context_type: "ticketing",
+        selected_text: "",
+        selected_list_json: "[]",
+      }),
+    ],
+  });
+
+  const contract = buildContractFromRepo(repo);
+
+  assert.ok(contract.verification.needs_verification.includes("ticket_hints"));
+  assert.ok(contract.verification.publish_blockers.includes("event_date_hints"));
+  assert.ok(!contract.verification.publish_blockers.includes("ticket_hints"));
+});
