@@ -1685,12 +1685,35 @@ function wire() {
     event.returnValue = "";
   });
   qs("btn-submit-review")?.addEventListener("click", async () => {
+    const shouldLogSubmitReviewResponse = (() => {
+      const hostname = String(window.location?.hostname || "").trim().toLowerCase();
+      return hostname.includes("collector-test")
+        || hostname === "localhost"
+        || hostname === "127.0.0.1"
+        || hostname === "::1";
+    })();
     try {
+      if (shouldLogSubmitReviewResponse) {
+        const clickedAt = new Date().toISOString();
+        sessionStorage.setItem("debug_workspace_submit_button_clicked", clickedAt);
+        localStorage.setItem("debug_workspace_submit_button_clicked", clickedAt);
+        sessionStorage.setItem("debug_workspace_handler_name", "btn-submit-review.click");
+        localStorage.setItem("debug_workspace_handler_name", "btn-submit-review.click");
+        console.log("[workspace submit button clicked]", { handler: "btn-submit-review.click", at: clickedAt });
+      }
       const validation = validateWorkspace();
       if (!validation.ok) throw new Error(`Missing: ${validation.missing.join(", ")}`);
       const note = currentReviewNote() || "submitted from article workspace";
       await saveWorkspace();
       await submitWorkspaceForReview(note);
+      if (shouldLogSubmitReviewResponse) {
+        const navigationAt = new Date().toISOString();
+        sessionStorage.setItem("debug_workspace_review_url_navigation", navigationAt);
+        localStorage.setItem("debug_workspace_review_url_navigation", navigationAt);
+        sessionStorage.setItem("debug_workspace_handler_name", "btn-submit-review.navigate-review-url");
+        localStorage.setItem("debug_workspace_handler_name", "btn-submit-review.navigate-review-url");
+        console.log("[workspace review url navigation]", { handler: "btn-submit-review.navigate-review-url", at: navigationAt, url: reviewUrl() });
+      }
       window.location.href = reviewUrl();
       setInlineStatus("review-status", "Submitted for review");
     } catch (err) {
