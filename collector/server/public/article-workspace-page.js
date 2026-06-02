@@ -1427,6 +1427,8 @@ async function submitWorkspaceForReview(note = "") {
     if (shouldLogSubmitReviewResponse) {
       console.log("[submit-review response]", data);
       console.log("[submit-review diagnostics]", data?.submit_review_diagnostics);
+      sessionStorage.setItem("debug_submit_review_response", JSON.stringify(data, null, 2));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     await refreshArticleProcess();
     await refreshFieldPack();
