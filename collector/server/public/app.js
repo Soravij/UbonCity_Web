@@ -6218,6 +6218,15 @@ function validateAssignmentCaptureRequirementsFromAssets(assignment, captureItem
   return missing;
 }
 
+function buildAssignmentCaptureItemLookup(captureItems = []) {
+  const lookup = new Map();
+  normalizeAssignmentCaptureUploadItems(captureItems).forEach((item) => {
+    const slotKey = String(item?.slotKey || item?.uploadKey || "").trim();
+    if (slotKey) lookup.set(slotKey, item);
+  });
+  return lookup;
+}
+
 function composeAssignmentSubmissionEffectiveAssets(assignmentId, captureItems = [], options = {}) {
   const id = Number(assignmentId || 0) || 0;
   const assignment = getAssignmentById(id);
@@ -8465,13 +8474,32 @@ async function syncAssignmentSubmissionUploads() {
   throw new Error("ยังไม่มีไฟล์ที่เลือกในเครื่อง และไม่พบไฟล์ที่ซิงก์แล้วบน server");
 }
 
-function buildAssignmentSubmissionMediaPayload(uploadedAssets = []) {
+function buildAssignmentSubmissionMediaPayload(uploadedAssets = [], captureItems = []) {
+  const captureLookup = buildAssignmentCaptureItemLookup(captureItems);
   return {
     assets: (Array.isArray(uploadedAssets) ? uploadedAssets : []).map((asset) => ({
       id: Number(asset?.id || 0) || null,
       file_name: String(asset?.file_name || "").trim() || null,
       mime_type: String(asset?.mime_type || "").trim() || null,
       public_url: String(asset?.public_url || "").trim() || null,
+      slotKey: (() => {
+        const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+        return slotTypeKey ? slotTypeKey.split("|")[0] : null;
+      })(),
+      mediaType: (() => {
+        const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+        return slotTypeKey ? slotTypeKey.split("|")[1] : normalizeAssignmentCaptureMediaType(asset?.assignment_media_type) || null;
+      })(),
+      capture_type: (() => {
+        const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+        const slotKey = slotTypeKey ? slotTypeKey.split("|")[0] : "";
+        return String(captureLookup.get(slotKey)?.captureType || "").trim().toLowerCase() || null;
+      })(),
+      prompt: (() => {
+        const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+        const slotKey = slotTypeKey ? slotTypeKey.split("|")[0] : "";
+        return String(captureLookup.get(slotKey)?.prompt || "").trim() || null;
+      })(),
     })),
   };
 }
@@ -8524,7 +8552,7 @@ async function createAssignmentSubmission() {
   const uploadedAssets = Array.isArray(gateState.effectiveAssets) ? gateState.effectiveAssets : [];
 
   if (uploadedAssets.length) {
-    body.media_payload_json = buildAssignmentSubmissionMediaPayload(uploadedAssets);
+    body.media_payload_json = buildAssignmentSubmissionMediaPayload(uploadedAssets, formConfig.captureItems);
   }
 
   const result = await api(`/api/assignments/${assignmentId}/submissions`, {

@@ -2713,6 +2713,28 @@ function uniqueAssignmentPromptStrings(values = []) {
   ));
 }
 
+function normalizeAssignmentCaptureMediaType(value) {
+  const mediaType = String(value || "").trim().toLowerCase();
+  if (mediaType === "image" || mediaType === "video") return mediaType;
+  return "";
+}
+
+function buildAssignmentCaptureSlotKey(prompt, itemOrder, mediaType, captureType) {
+  const base = String(prompt || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const normalized = base || `capture-${(Number(itemOrder || 0) || 0) + 1}`;
+  const baseKey = `shot-${(Number(itemOrder || 0) || 0) + 1}-${normalized}`.slice(0, 48);
+  const normalizedCaptureType = String(captureType || "").trim().toLowerCase();
+  const normalizedMediaType = normalizeAssignmentCaptureMediaType(mediaType);
+  if (normalizedCaptureType === "both" && normalizedMediaType) {
+    return `${baseKey}--${normalizedMediaType}`;
+  }
+  return baseKey;
+}
+
 function getAssignmentBriefPromptGroups(brief = null) {
   const source = brief && typeof brief === "object" ? brief : {};
   const verifiedFacts = uniqueAssignmentPromptStrings(source?.evidence_summary?.verified_facts);
@@ -2741,6 +2763,51 @@ function getFieldPackPromptGroups(fieldPack = null) {
       .map((row) => String(row?.item_text || "").trim())
       .filter(Boolean),
   };
+}
+
+function getStructuredFieldPackCaptureItems(fieldPack = null) {
+  const checklists = Array.isArray(fieldPack?.checklists) ? fieldPack.checklists : [];
+  const normalized = [];
+  checklists
+    .filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_capture")
+    .forEach((row, index) => {
+      const prompt = String(row?.item_text || "").trim();
+      if (!prompt) return;
+      const captureType = ["photo", "video", "both"].includes(String(row?.capture_type || "").trim().toLowerCase())
+        ? String(row.capture_type || "").trim().toLowerCase()
+        : "photo";
+      const itemOrder = Number.isFinite(Number(row?.item_order)) ? Number(row.item_order) : index;
+      const displayIndex = itemOrder + 1;
+      if (captureType === "both") {
+        normalized.push({
+          prompt,
+          captureType,
+          mediaType: "image",
+          itemOrder,
+          displayIndex,
+          slotKey: buildAssignmentCaptureSlotKey(prompt, itemOrder, "image", captureType),
+        });
+        normalized.push({
+          prompt,
+          captureType,
+          mediaType: "video",
+          itemOrder,
+          displayIndex,
+          slotKey: buildAssignmentCaptureSlotKey(prompt, itemOrder, "video", captureType),
+        });
+        return;
+      }
+      const mediaType = captureType === "video" ? "video" : "image";
+      normalized.push({
+        prompt,
+        captureType,
+        mediaType,
+        itemOrder,
+        displayIndex,
+        slotKey: buildAssignmentCaptureSlotKey(prompt, itemOrder, mediaType, captureType),
+      });
+    });
+  return normalized;
 }
 
 function getEditorialPromptGroups(fieldPack = null, brief = null) {
@@ -2813,7 +2880,54 @@ function findMissingPromptAnswers(expectedPrompts = [], answerRows = []) {
   return expected.filter((prompt) => !String(answerByPrompt.get(prompt) || "").trim());
 }
 
-function findMissingCapturePrompts(expectedPrompts = [], assignmentId = 0, currentRound = 1) {
+function getAssignmentCaptureAssetSlotTypeKey(asset) {
+  const source = asset && typeof asset === "object" ? asset : {};
+  const explicitSlotKey = String(source?.slotKey || source?.slot_key || "").trim().toLowerCase();
+  const explicitMediaType = normalizeAssignmentCaptureMediaType(source?.mediaType || source?.media_type || source?.assignment_media_type);
+  if (explicitSlotKey && explicitMediaType) return `${explicitSlotKey}|${explicitMediaType}`;
+  const fileName = String(source?.file_name || "").trim();
+  const shotSlug = parseCaptureShotSlugFromFileName(fileName);
+  const mimeType = String(source?.mime_type || "").trim().toLowerCase();
+  const mediaType = explicitMediaType || (mimeType.startsWith("image/") ? "image" : mimeType.startsWith("video/") ? "video" : "");
+  if (shotSlug && mediaType) return `${shotSlug}|${mediaType}`;
+  return "";
+}
+
+function normalizeAssignmentMediaPayloadAssets(mediaPayload) {
+  const source = mediaPayload && typeof mediaPayload === "object" ? mediaPayload : null;
+  const assets = Array.isArray(source?.assets) ? source.assets : [];
+  return assets.map((asset) => ({
+    id: Number(asset?.id || 0) || null,
+    file_name: String(asset?.file_name || "").trim() || null,
+    mime_type: String(asset?.mime_type || "").trim().toLowerCase() || null,
+    slotKey: String(asset?.slotKey || asset?.slot_key || "").trim().toLowerCase() || null,
+    mediaType: normalizeAssignmentCaptureMediaType(asset?.mediaType || asset?.media_type || asset?.assignment_media_type) || null,
+    capture_type: String(asset?.capture_type || "").trim().toLowerCase() || null,
+    prompt: String(asset?.prompt || "").trim() || null,
+  })).filter((asset) => asset.id || asset.file_name || asset.slotKey);
+}
+
+function findMissingCapturePrompts(expectedPrompts = [], assignmentId = 0, currentRound = 1, options) {
+  const config = options && typeof options === "object" ? options : {};
+  const structuredItems = Array.isArray(config?.structuredItems) ? config.structuredItems : [];
+  if (structuredItems.length) {
+    const payloadAssets = normalizeAssignmentMediaPayloadAssets(config?.mediaPayload);
+    const sourceAssets = payloadAssets.length
+      ? payloadAssets
+      : [
+        ...(Array.isArray(repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image")) ? repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image") : []),
+        ...(Array.isArray(repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "video")) ? repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "video") : []),
+      ];
+    const uploadedSlotTypeKeys = new Set();
+    for (const asset of sourceAssets) {
+      const slotTypeKey = getAssignmentCaptureAssetSlotTypeKey(asset);
+      if (slotTypeKey) uploadedSlotTypeKeys.add(slotTypeKey);
+    }
+    return structuredItems
+      .filter((item) => !uploadedSlotTypeKeys.has(`${String(item.slotKey || "").trim().toLowerCase()}|${item.mediaType}`))
+      .map((item) => item.prompt);
+  }
+
   const prompts = uniqueAssignmentPromptStrings(expectedPrompts);
   if (!prompts.length || !(Number(assignmentId || 0) > 0)) return [];
   const imageAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image");
@@ -2826,7 +2940,7 @@ function findMissingCapturePrompts(expectedPrompts = [], assignmentId = 0, curre
   return prompts.filter((prompt, index) => !uploadedShotSlugs.has(toCaptureShotSlug(prompt, index)));
 }
 
-function enforceAssignmentSubmissionRequiredFields(assignment, articlePayload, assignmentId, currentRound) {
+function enforceAssignmentSubmissionRequiredFields(assignment, articlePayload, assignmentId, currentRound, mediaPayload = null) {
   const payload = articlePayload && typeof articlePayload === "object" && !Array.isArray(articlePayload)
     ? articlePayload
     : {};
@@ -2840,9 +2954,13 @@ function enforceAssignmentSubmissionRequiredFields(assignment, articlePayload, a
     missing.push(...findMissingPromptAnswers(groups.sourcePrompts, payload.source_answers).map((prompt) => `ข้อมูล/มุมที่ต้องใช้: ${prompt}`));
   } else {
     const groups = fieldPack ? getFieldPackPromptGroups(fieldPack) : getAssignmentBriefPromptGroups(brief);
+    const structuredCaptureItems = fieldPack ? getStructuredFieldPackCaptureItems(fieldPack) : [];
     missing.push(...findMissingPromptAnswers(groups.mustVerify, payload.verified_answers).map((prompt) => `สิ่งที่ต้องยืนยัน: ${prompt}`));
     missing.push(...findMissingPromptAnswers(groups.mustAsk, payload.question_answers).map((prompt) => `คำตอบจากหน้างาน: ${prompt}`));
-    missing.push(...findMissingCapturePrompts(groups.mustCapture, assignmentId, currentRound).map((prompt) => `สิ่งที่ต้องถ่าย: ${prompt}`));
+    missing.push(...findMissingCapturePrompts(groups.mustCapture, assignmentId, currentRound, {
+      structuredItems: structuredCaptureItems,
+      mediaPayload,
+    }).map((prompt) => `สิ่งที่ต้องถ่าย: ${prompt}`));
   }
 
   if (!String(payload.additional_text || "").trim()) {
@@ -9426,7 +9544,10 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
     const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
     const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
     const normalizedArticlePayload = normalizeAssignmentDraftArticlePayload(req.body?.article_payload_json || null, assignment);
-    enforceAssignmentSubmissionRequiredFields(assignment, normalizedArticlePayload, assignmentId, currentRound);
+    const mediaPayload = req.body?.media_payload_json && typeof req.body.media_payload_json === "object"
+      ? req.body.media_payload_json
+      : null;
+    enforceAssignmentSubmissionRequiredFields(assignment, normalizedArticlePayload, assignmentId, currentRound, mediaPayload);
     enforceResetPerShotRequirements(assignment, assignmentId, currentRound);
     const assignmentAction = normalizedSubmissionState === "resubmitted" ? "resubmit" : "submit";
     const reasonCode = String(req.body?.reason_code || "").trim().toLowerCase()
@@ -9436,7 +9557,7 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
       submitted_by_user_id: req.authUser?.id,
       submission_state: normalizedSubmissionState,
       article_payload_json: normalizedArticlePayload,
-      media_payload_json: req.body?.media_payload_json || null,
+      media_payload_json: mediaPayload,
       contributor_note: req.body?.contributor_note,
       reviewer_note: req.body?.reviewer_note,
       reviewed_at: req.body?.reviewed_at,

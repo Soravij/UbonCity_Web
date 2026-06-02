@@ -5,6 +5,7 @@ import test from "node:test";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const appJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.js"), "utf8");
+const serverIndexJs = fs.readFileSync(path.join(collectorRoot, "server", "index.mjs"), "utf8");
 
 function extractNamedFunctionSource(source, name) {
   const marker = `function ${name}`;
@@ -23,6 +24,28 @@ function extractNamedFunctionSource(source, name) {
   }
   throw new Error(`Could not extract function ${name}`);
 }
+
+const buildAssignmentCaptureSlotKeyForBackendTest = new Function(
+  `${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(serverIndexJs, "buildAssignmentCaptureSlotKey")}
+return buildAssignmentCaptureSlotKey;`
+)();
+
+const findMissingCapturePromptsForBackendTest = new Function(
+  "repo",
+  `${extractNamedFunctionSource(serverIndexJs, "uniqueAssignmentPromptStrings")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(serverIndexJs, "toCaptureShotSlug")}
+${extractNamedFunctionSource(serverIndexJs, "parseCaptureShotSlugFromFileName")}
+${extractNamedFunctionSource(serverIndexJs, "getAssignmentCaptureAssetSlotTypeKey")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentMediaPayloadAssets")}
+${extractNamedFunctionSource(serverIndexJs, "findMissingCapturePrompts")}
+return findMissingCapturePrompts;`
+)({
+  listAssignmentRoundAssetsByType() {
+    return [];
+  },
+});
 
 const normalizeAssignmentCaptureUploadItemsForTest = new Function(
   `${extractNamedFunctionSource(appJs, "toCaptureSlug")}
@@ -143,4 +166,73 @@ test("getAssignmentAssetSlotTypeKeyFromAsset prefers canonical media key from as
     assignment_media_type: "video",
   });
   assert.equal(key, "shot-3-scene|video");
+});
+
+test("backend capture validation accepts structured video payload assets by canonical slot key", () => {
+  const trackingSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Tracking shot เดินเข้าหน้าร้าน", 12, "video", "video");
+  const pushInSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Push-in shot ไปที่ Barista", 13, "video", "video");
+  const missing = findMissingCapturePromptsForBackendTest(
+    ["Tracking shot เดินเข้าหน้าร้าน", "Push-in shot ไปที่ Barista"],
+    99,
+    1,
+    {
+      structuredItems: [
+        { prompt: "Tracking shot เดินเข้าหน้าร้าน", slotKey: trackingSlotKey, mediaType: "video" },
+        { prompt: "Push-in shot ไปที่ Barista", slotKey: pushInSlotKey, mediaType: "video" },
+      ],
+      mediaPayload: {
+        assets: [
+          {
+            id: 1,
+            file_name: `${trackingSlotKey}__tracking.mp4`,
+            mime_type: "video/mp4",
+            slotKey: trackingSlotKey,
+            mediaType: "video",
+            capture_type: "video",
+            prompt: "Tracking shot เดินเข้าหน้าร้าน",
+          },
+          {
+            id: 2,
+            file_name: `${pushInSlotKey}__pushin.mp4`,
+            mime_type: "video/mp4",
+            slotKey: pushInSlotKey,
+            mediaType: "video",
+            capture_type: "video",
+            prompt: "Push-in shot ไปที่ Barista",
+          },
+        ],
+      },
+    }
+  );
+  assert.deepEqual(missing, []);
+});
+
+test("backend capture validation reports only the missing structured video slot", () => {
+  const trackingSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Tracking shot เดินเข้าหน้าร้าน", 12, "video", "video");
+  const pushInSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Push-in shot ไปที่ Barista", 13, "video", "video");
+  const missing = findMissingCapturePromptsForBackendTest(
+    ["Tracking shot เดินเข้าหน้าร้าน", "Push-in shot ไปที่ Barista"],
+    99,
+    1,
+    {
+      structuredItems: [
+        { prompt: "Tracking shot เดินเข้าหน้าร้าน", slotKey: trackingSlotKey, mediaType: "video" },
+        { prompt: "Push-in shot ไปที่ Barista", slotKey: pushInSlotKey, mediaType: "video" },
+      ],
+      mediaPayload: {
+        assets: [
+          {
+            id: 1,
+            file_name: `${trackingSlotKey}__tracking.mp4`,
+            mime_type: "video/mp4",
+            slotKey: trackingSlotKey,
+            mediaType: "video",
+            capture_type: "video",
+            prompt: "Tracking shot เดินเข้าหน้าร้าน",
+          },
+        ],
+      },
+    }
+  );
+  assert.deepEqual(missing, ["Push-in shot ไปที่ Barista"]);
 });
