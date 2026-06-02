@@ -1410,13 +1410,24 @@ async function submitWorkspaceForReview(note = "") {
   setBusy(true);
   setWorkspaceBanner("Submitting for review...", "loading");
   try {
-    await api(`/api/items/${state.itemId}/article-process/submit-review`, {
+    const shouldLogSubmitReviewResponse = (() => {
+      const hostname = String(window.location?.hostname || "").trim().toLowerCase();
+      return hostname.includes("collector-test")
+        || hostname === "localhost"
+        || hostname === "127.0.0.1"
+        || hostname === "::1";
+    })();
+    const data = await api(`/api/items/${state.itemId}/article-process/submit-review`, {
       method: "POST",
       body: JSON.stringify({
         note: String(note || "").trim() || null,
         reason_code: "article_process_ready_for_review",
       }),
-    }),
+    });
+    if (shouldLogSubmitReviewResponse) {
+      console.log("[submit-review response]", data);
+      console.log("[submit-review diagnostics]", data?.submit_review_diagnostics);
+    }
     await refreshArticleProcess();
     await refreshFieldPack();
     renderAll();
