@@ -1056,7 +1056,9 @@ function setAssignmentDraftSaveStatus(text = "", isError = false) {
 function normalizeAssignmentSubmissionPromptAnswers(items = [], prompts = []) {
   const source = Array.isArray(items) ? items : [];
   const allowedPrompts = Array.isArray(prompts)
-    ? prompts.map((value) => String(value || "").trim()).filter(Boolean)
+    ? prompts
+      .map((value) => String(value?.prompt || value?.item_text || value || "").trim())
+      .filter(Boolean)
     : [];
   const answerByPrompt = new Map();
   source.forEach((row) => {
@@ -5689,7 +5691,9 @@ function renderAssignmentContextBrief(assignment) {
 
 function renderAssignmentBriefList(items = [], emptyText = "-") {
   const normalized = Array.isArray(items)
-    ? items.map((value) => String(value || "").trim()).filter(Boolean)
+    ? items
+      .map((value) => String(value?.prompt || value?.item_text || value || "").trim())
+      .filter(Boolean)
     : [];
   if (!normalized.length) {
     return `<div class="assignment-brief-text"><span class="muted">${escapeHtml(emptyText)}</span></div>`;
@@ -5787,16 +5791,17 @@ function renderAssignmentSubmissionContext(assignment = null, fieldPack = null) 
 }
 
 function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
-  const prompts = Array.isArray(capturePrompts) ? capturePrompts.map((value) => String(value || "").trim()).filter(Boolean) : [];
-  if (!prompts.length) {
+  const normalizedItems = normalizeAssignmentCaptureUploadItems(capturePrompts);
+  if (!normalizedItems.length) {
     return '<div class="assignment-brief-empty">ไม่มีหัวข้อที่ต้องถ่ายในงานนี้</div>';
   }
   const renderPromptCards = (items, mode, sectionTitle, emptyText) => {
     const rows = Array.isArray(items) ? items : [];
-    const cards = rows.map(({ prompt, index }) => {
-      const slug = toCaptureSlug(prompt, index);
-      const files = listAssignmentCaptureFiles(assignmentId, slug);
-      const isLoading = isAssignmentCaptureLoading(assignmentId, slug);
+    const cards = rows.map((item) => {
+      const prompt = String(item?.prompt || "").trim();
+      const uploadKey = String(item?.uploadKey || "").trim();
+      const files = listAssignmentCaptureFiles(assignmentId, uploadKey);
+      const isLoading = isAssignmentCaptureLoading(assignmentId, uploadKey);
       const acceptedPrefix = mode === "video" ? "video/" : "image/";
       const acceptedLabel = mode === "video" ? "วิดีโอ" : "รูป";
       const selectedFiles = files.filter((file) => String(file?.type || "").trim().toLowerCase().startsWith(acceptedPrefix));
@@ -5804,13 +5809,13 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
       const fileRows = selectedFiles.length
         ? `<ul class="assignment-brief-list">${selectedFiles.map((file, fileIndex) => {
             const sourceIndex = files.indexOf(file);
-            return `<li>${escapeHtml(`${sanitizeUploadFileName(file.name, "upload")} | ${String(file.type || "").trim() || "unknown"}`)} <button type="button" class="step-sub" data-capture-remove-file data-capture-slug="${escapeHtml(slug)}" data-capture-file-index="${sourceIndex >= 0 ? sourceIndex : fileIndex}">ลบ</button></li>`;
+            return `<li>${escapeHtml(`${sanitizeUploadFileName(file.name, "upload")} | ${String(file.type || "").trim() || "unknown"}`)} <button type="button" class="step-sub" data-capture-remove-file data-capture-upload-key="${escapeHtml(uploadKey)}" data-capture-file-index="${sourceIndex >= 0 ? sourceIndex : fileIndex}">ลบ</button></li>`;
           }).join("")}</ul>`
         : "";
       return `
-        <div class="assignment-brief-section full-span assignment-capture-card" data-capture-slug="${escapeHtml(slug)}" data-capture-prompt="${escapeHtml(prompt)}">
+        <div class="assignment-brief-section full-span assignment-capture-card" data-capture-upload-key="${escapeHtml(uploadKey)}" data-capture-prompt="${escapeHtml(prompt)}" data-capture-media-type="${escapeHtml(mode)}">
           <div class="assignment-capture-row">
-            <div class="assignment-capture-title"><strong>${index + 1}.</strong> ${escapeHtml(prompt)}</div>
+            <div class="assignment-capture-title"><strong>${Number(item?.displayIndex || 0) || 1}.</strong> ${escapeHtml(prompt)}</div>
             <div class="assignment-capture-actions">
               <label class="assignment-capture-upload-button${isLoading ? " is-loading" : ""}">
                 <span>${isLoading ? "กำลังเพิ่ม..." : `เลือก${acceptedLabel}`}</span>
@@ -5830,9 +5835,8 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
       </div>
     `;
   };
-  const indexedPrompts = prompts.map((prompt, index) => ({ prompt, index }));
-  const imagePrompts = indexedPrompts.filter(({ prompt }) => !isVideoCapturePrompt(prompt));
-  const videoPrompts = indexedPrompts.filter(({ prompt }) => isVideoCapturePrompt(prompt));
+  const imagePrompts = normalizedItems.filter((item) => item.mediaType === "image");
+  const videoPrompts = normalizedItems.filter((item) => item.mediaType === "video");
   return [
     renderPromptCards(imagePrompts, "image", "กล่องอัปโหลดรูป", "ไม่มีหัวข้อสำหรับอัปโหลดรูป"),
     renderPromptCards(videoPrompts, "video", "กล่องอัปโหลดวิดีโอ", "ไม่มีหัวข้อที่ระบุว่าต้องใช้วิดีโอ"),
@@ -5871,6 +5875,60 @@ function isVideoCapturePrompt(prompt) {
   const text = String(prompt || "").trim().toLowerCase();
   if (!text) return false;
   return /(วิดีโอ|video)/i.test(text);
+}
+
+function normalizeAssignmentCaptureUploadItems(captureItems = []) {
+  const items = Array.isArray(captureItems) ? captureItems : [];
+  const normalized = [];
+  items.forEach((rawItem, index) => {
+    const source = rawItem && typeof rawItem === "object" && !Array.isArray(rawItem)
+      ? rawItem
+      : null;
+    const prompt = String(source?.prompt || source?.item_text || rawItem || "").trim();
+    if (!prompt) return;
+    const rawCaptureType = String(source?.captureType || source?.capture_type || "").trim().toLowerCase();
+    const captureType = ["photo", "video", "both"].includes(rawCaptureType)
+      ? rawCaptureType
+      : (isVideoCapturePrompt(prompt) ? "video" : "photo");
+    const originalIndex = Number.isFinite(Number(source?.originalIndex))
+      ? Number(source.originalIndex)
+      : index;
+    const itemOrder = Number.isFinite(Number(source?.item_order))
+      ? Number(source.item_order)
+      : originalIndex;
+    const displayIndex = itemOrder + 1;
+    const baseUploadKey = toCaptureSlug(prompt, itemOrder);
+    const baseItem = {
+      prompt,
+      originalIndex,
+      item_order: itemOrder,
+      captureType,
+      displayIndex,
+    };
+    if (captureType === "both") {
+      normalized.push({
+        ...baseItem,
+        mediaType: "image",
+        uploadKey: `${baseUploadKey}--image`,
+        slotKey: `${baseUploadKey}--image`,
+      });
+      normalized.push({
+        ...baseItem,
+        mediaType: "video",
+        uploadKey: `${baseUploadKey}--video`,
+        slotKey: `${baseUploadKey}--video`,
+      });
+      return;
+    }
+    const mediaType = captureType === "video" ? "video" : "image";
+    normalized.push({
+      ...baseItem,
+      mediaType,
+      uploadKey: baseUploadKey,
+      slotKey: baseUploadKey,
+    });
+  });
+  return normalized;
 }
 
 function sanitizeUploadFileName(name, fallback = "upload") {
@@ -5987,11 +6045,11 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
   const assignment = getAssignmentById(id);
   if (!assignment) return { complete: false, assets: [], missing: [], syncSignature: "" };
   const currentRound = getAssignmentCurrentRound(assignment);
-  const prompts = Array.isArray(captureItems) ? captureItems.map((value) => String(value || "").trim()).filter(Boolean) : [];
-  if (!prompts.length) return { complete: false, assets: [], missing: [], syncSignature: "" };
+  const normalizedItems = normalizeAssignmentCaptureUploadItems(captureItems);
+  if (!normalizedItems.length) return { complete: false, assets: [], missing: [], syncSignature: "" };
   const expectedBySlug = new Map();
-  prompts.forEach((prompt, index) => {
-    expectedBySlug.set(toCaptureSlug(prompt, index), { prompt, index });
+  normalizedItems.forEach((item) => {
+    expectedBySlug.set(String(item?.uploadKey || "").trim(), item);
   });
   const nowMs = Date.now();
   const rows = Array.isArray(state.assignments.assetLookup) ? state.assignments.assetLookup : [];
@@ -6074,18 +6132,14 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     const fileName = String(row?.file_name || "").trim();
     const slug = fileName.includes("__") ? fileName.split("__")[0] : "";
     if (!slug) return;
-    if (!countsBySlug.has(slug)) countsBySlug.set(slug, { image: 0, video: 0 });
-    const mimeType = String(row?.mime_type || "").trim().toLowerCase();
-    const bucket = countsBySlug.get(slug);
-    if (mimeType.startsWith("image/")) bucket.image += 1;
-    if (mimeType.startsWith("video/")) bucket.video += 1;
+    countsBySlug.set(slug, (Number(countsBySlug.get(slug) || 0) || 0) + 1);
   });
 
   const missing = [];
   for (const [slug, entry] of expectedBySlug.entries()) {
-    const counts = countsBySlug.get(slug) || { image: 0, video: 0 };
-    if (requireImages && counts.image < 1) missing.push(`รูปหัวข้อ ${entry.index + 1}: ${entry.prompt}`);
-    if (requireVideos && counts.video < 1) missing.push(`วิดีโอหัวข้อ ${entry.index + 1}: ${entry.prompt}`);
+    const count = Number(countsBySlug.get(slug) || 0) || 0;
+    if (entry.mediaType === "image" && requireImages && count < 1) missing.push(`รูปหัวข้อ ${entry.displayIndex}: ${entry.prompt}`);
+    if (entry.mediaType === "video" && requireVideos && count < 1) missing.push(`วิดีโอหัวข้อ ${entry.displayIndex}: ${entry.prompt}`);
   }
   const complete = requireImages || requireVideos
     ? missing.length === 0
@@ -6121,30 +6175,27 @@ function getAssignmentTouchedSlotTypeKeysFromQueue(uploadQueue = []) {
 }
 
 function validateAssignmentCaptureRequirementsFromAssets(assignment, captureItems = [], assets = []) {
-  const prompts = Array.isArray(captureItems) ? captureItems.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  const normalizedItems = normalizeAssignmentCaptureUploadItems(captureItems);
   const requireImages = Boolean(assignment?.image_reset_required);
   const requireVideos = Boolean(assignment?.video_reset_required);
-  if (!prompts.length || (!requireImages && !requireVideos)) return [];
+  if (!normalizedItems.length || (!requireImages && !requireVideos)) return [];
   const expectedBySlug = new Map();
-  prompts.forEach((prompt, index) => {
-    expectedBySlug.set(toCaptureSlug(prompt, index), { prompt, index });
+  normalizedItems.forEach((item) => {
+    expectedBySlug.set(String(item?.uploadKey || "").trim(), item);
   });
   const countsBySlug = new Map();
   (Array.isArray(assets) ? assets : []).forEach((asset) => {
     const key = getAssignmentAssetSlotTypeKeyFromAsset(asset);
     if (!key) return;
-    const [slug, mediaType] = key.split("|");
+    const [slug] = key.split("|");
     if (!expectedBySlug.has(slug)) return;
-    if (!countsBySlug.has(slug)) countsBySlug.set(slug, { image: 0, video: 0 });
-    const bucket = countsBySlug.get(slug);
-    if (mediaType === "image") bucket.image += 1;
-    if (mediaType === "video") bucket.video += 1;
+    countsBySlug.set(slug, (Number(countsBySlug.get(slug) || 0) || 0) + 1);
   });
   const missing = [];
   for (const [slug, entry] of expectedBySlug.entries()) {
-    const counts = countsBySlug.get(slug) || { image: 0, video: 0 };
-    if (requireImages && counts.image < 1) missing.push(`รูปหัวข้อ ${entry.index + 1}: ${entry.prompt}`);
-    if (requireVideos && counts.video < 1) missing.push(`วิดีโอหัวข้อ ${entry.index + 1}: ${entry.prompt}`);
+    const count = Number(countsBySlug.get(slug) || 0) || 0;
+    if (entry.mediaType === "image" && requireImages && count < 1) missing.push(`รูปหัวข้อ ${entry.displayIndex}: ${entry.prompt}`);
+    if (entry.mediaType === "video" && requireVideos && count < 1) missing.push(`วิดีโอหัวข้อ ${entry.displayIndex}: ${entry.prompt}`);
   }
   return missing;
 }
@@ -6846,8 +6897,12 @@ function getFieldPackPromptGroups(fieldPack = null) {
       .filter(Boolean),
     mustCapture: checklists
       .filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_capture")
-      .map((row) => String(row?.item_text || "").trim())
-      .filter(Boolean),
+      .map((row, index) => ({
+        item_text: String(row?.item_text || "").trim(),
+        capture_type: String(row?.capture_type || "").trim().toLowerCase() || "",
+        item_order: Number.isFinite(Number(row?.item_order)) ? Number(row.item_order) : index,
+      }))
+      .filter((row) => Boolean(row.item_text)),
     mustAsk: checklists
       .filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_ask_question")
       .map((row) => String(row?.item_text || "").trim())
@@ -6889,7 +6944,7 @@ function getEditorialPromptGroups(fieldPack = null, brief = null) {
   return {
     directionPrompts: unique(directionPrompts).length ? unique(directionPrompts) : ["สรุปมุมเล่าและโทนของงานเรียบเรียงที่ต้องรักษา"],
     sourcePrompts: unique(sourcePrompts).length ? unique(sourcePrompts) : ["ระบุข้อมูลหรือข้อเท็จจริงที่ต้องอ้างอิงให้ครบก่อนเรียบเรียง"],
-    captureItems: unique(captureItems),
+    captureItems,
   };
 }
 
@@ -8189,15 +8244,27 @@ async function updateAssignmentState() {
 }
 
 function buildAssignmentCaptureFileUploadQueue(assignmentId, capturePrompts = []) {
-  const prompts = Array.isArray(capturePrompts) ? capturePrompts.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  const normalizedItems = normalizeAssignmentCaptureUploadItems(capturePrompts);
   const queue = [];
-  prompts.forEach((prompt, index) => {
-    const slug = toCaptureSlug(prompt, index);
+  normalizedItems.forEach((item) => {
+    const slug = String(item?.uploadKey || "").trim();
+    const mediaType = String(item?.mediaType || "").trim().toLowerCase();
     const files = listAssignmentCaptureFiles(assignmentId, slug).filter((file) => {
       const mimeType = String(file?.type || "").trim().toLowerCase();
-      return mimeType.startsWith("image/") || mimeType.startsWith("video/");
+      if (mediaType === "image") return mimeType.startsWith("image/");
+      if (mediaType === "video") return mimeType.startsWith("video/");
+      return false;
     });
-    files.forEach((file) => queue.push({ slug, prompt, file }));
+    files.forEach((file) => queue.push({
+      slug,
+      uploadKey: slug,
+      slotKey: String(item?.slotKey || slug).trim() || slug,
+      prompt: String(item?.prompt || "").trim(),
+      mediaType,
+      captureType: String(item?.captureType || "").trim().toLowerCase() || "",
+      displayIndex: Number(item?.displayIndex || 0) || 0,
+      file,
+    }));
   });
   return queue;
 }
@@ -8205,28 +8272,28 @@ function buildAssignmentCaptureFileUploadQueue(assignmentId, capturePrompts = []
 const ASSIGNMENT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024 * 1024;
 
 function assertAssignmentCaptureUploadsComplete(assignmentId, capturePrompts = []) {
-  const prompts = Array.isArray(capturePrompts) ? capturePrompts.map((value) => String(value || "").trim()).filter(Boolean) : [];
-  if (!prompts.length) return;
+  const normalizedItems = normalizeAssignmentCaptureUploadItems(capturePrompts);
+  if (!normalizedItems.length) return;
   const assignment = getAssignmentById(assignmentId);
   const requireImages = Boolean(assignment?.image_reset_required);
   const requireVideos = Boolean(assignment?.video_reset_required);
   if (!requireImages && !requireVideos) return;
   const missing = [];
   const invalid = [];
-  prompts.forEach((prompt, index) => {
-    const slug = toCaptureSlug(prompt, index);
+  normalizedItems.forEach((item) => {
+    const slug = String(item?.uploadKey || "").trim();
     const files = listAssignmentCaptureFiles(assignmentId, slug);
     const images = files.filter((file) => String(file?.type || "").trim().toLowerCase().startsWith("image/"));
     const videos = files.filter((file) => String(file?.type || "").trim().toLowerCase().startsWith("video/"));
-    if (requireImages) {
-      if (images.length < 1) missing.push(`รูปหัวข้อ ${index + 1}: ${prompt}`);
-      if (images.length > 5) invalid.push(`รูปหัวข้อ ${index + 1}: เกิน 5 ไฟล์`);
+    if (item.mediaType === "image" && requireImages) {
+      if (images.length < 1) missing.push(`รูปหัวข้อ ${item.displayIndex}: ${item.prompt}`);
+      if (images.length > 5) invalid.push(`รูปหัวข้อ ${item.displayIndex}: เกิน 5 ไฟล์`);
     }
-    if (requireVideos) {
-      if (videos.length < 1) missing.push(`วิดีโอหัวข้อ ${index + 1}: ${prompt}`);
-      if (videos.length > 2) invalid.push(`วิดีโอหัวข้อ ${index + 1}: เกิน 2 ไฟล์`);
+    if (item.mediaType === "video" && requireVideos) {
+      if (videos.length < 1) missing.push(`วิดีโอหัวข้อ ${item.displayIndex}: ${item.prompt}`);
+      if (videos.length > 2) invalid.push(`วิดีโอหัวข้อ ${item.displayIndex}: เกิน 2 ไฟล์`);
       const oversized = videos.find((file) => Number(file?.size || 0) > ASSIGNMENT_UPLOAD_MAX_BYTES);
-      if (oversized) invalid.push(`วิดีโอหัวข้อ ${index + 1}: ไฟล์ ${sanitizeUploadFileName(oversized.name, "video")} เกิน 20GB`);
+      if (oversized) invalid.push(`วิดีโอหัวข้อ ${item.displayIndex}: ไฟล์ ${sanitizeUploadFileName(oversized.name, "video")} เกิน 20GB`);
     }
   });
   if (invalid.length) {
@@ -9445,9 +9512,9 @@ function wireAssignments() {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
     if (!target.matches("[data-capture-file-input]")) return;
-    const card = target.closest("[data-capture-slug]");
+    const card = target.closest("[data-capture-upload-key]");
     if (!card) return;
-    const slug = String(card.getAttribute("data-capture-slug") || "").trim();
+    const slug = String(card.getAttribute("data-capture-upload-key") || "").trim();
     if (!slug) return;
     const assignmentId = Number(state.assignments.selectedId || 0) || 0;
     const mode = String(target.getAttribute("data-capture-mode") || "").trim().toLowerCase();
@@ -9474,7 +9541,7 @@ function wireAssignments() {
   qs("assignment-submission-capture-guide")?.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-capture-remove-file]");
     if (!button) return;
-    const slug = String(button.getAttribute("data-capture-slug") || "").trim();
+    const slug = String(button.getAttribute("data-capture-upload-key") || "").trim();
     const index = Number(button.getAttribute("data-capture-file-index") || -1);
     const assignmentId = Number(state.assignments.selectedId || 0) || 0;
     if (!slug || assignmentId <= 0 || index < 0) return;
