@@ -5831,9 +5831,10 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
     `;
   };
   const indexedPrompts = prompts.map((prompt, index) => ({ prompt, index }));
+  const imagePrompts = indexedPrompts.filter(({ prompt }) => !isVideoCapturePrompt(prompt));
   const videoPrompts = indexedPrompts.filter(({ prompt }) => isVideoCapturePrompt(prompt));
   return [
-    renderPromptCards(indexedPrompts, "image", "กล่องอัปโหลดรูป", "ไม่มีหัวข้อสำหรับอัปโหลดรูป"),
+    renderPromptCards(imagePrompts, "image", "กล่องอัปโหลดรูป", "ไม่มีหัวข้อสำหรับอัปโหลดรูป"),
     renderPromptCards(videoPrompts, "video", "กล่องอัปโหลดวิดีโอ", "ไม่มีหัวข้อที่ระบุว่าต้องใช้วิดีโอ"),
   ].join("");
 }
@@ -6522,6 +6523,7 @@ function renderAssignmentSubmissionForm(assignment = null) {
     state.assignments.latestUploadedAssets = [];
     state.assignments.latestUploadedAssetsKey = "";
     renderAssignmentSubmissionFileList();
+    renderAssignmentSubmissionGatePanel(null);
     return;
   }
 
@@ -6559,13 +6561,12 @@ function renderAssignmentSubmissionForm(assignment = null) {
   }
   renderAssignmentSubmissionFileList();
   if (submitCalloutNode) {
-    const queueSize = buildAssignmentCaptureFileUploadQueue(
+    const gateState = buildAssignmentSubmissionGateState(
       Number(assignment?.id || state.assignments.selectedId || 0) || 0,
-      formConfig.captureItems
-    ).length;
-    submitCalloutNode.textContent = queueSize > 0
-      ? "ต้องกด อัปโหลด/ซิงก์ไฟล์ ก่อน แล้วจึงส่งงานกลับ"
-      : "เมื่อกรอกข้อมูลและแนบไฟล์ครบแล้ว ให้ส่งงานกลับเพื่อเข้าคิวตรวจงาน";
+      formConfig,
+      { articlePayload }
+    );
+    renderAssignmentSubmissionGatePanel(gateState);
   }
   applyAssignmentModernClasses();
 }
@@ -6578,6 +6579,165 @@ function readAssignmentSubmissionPromptAnswers(groupName) {
       return prompt ? { prompt, answer } : null;
     })
     .filter(Boolean);
+}
+
+function getAssignmentSubmissionMissingTextPrompts(formConfig, articlePayload = null) {
+  const payload = articlePayload && typeof articlePayload === "object"
+    ? articlePayload
+    : buildAssignmentSubmissionArticlePayload();
+  const answerMap = new Map();
+  const verifiedAnswers = Array.isArray(payload?.[formConfig.verifiedAnswers]) ? payload[formConfig.verifiedAnswers] : [];
+  const questionAnswers = Array.isArray(payload?.[formConfig.questionAnswers]) ? payload[formConfig.questionAnswers] : [];
+  verifiedAnswers.forEach((row) => {
+    const prompt = String(row?.prompt || "").trim();
+    if (prompt) answerMap.set(prompt, String(row?.answer || "").trim());
+  });
+  questionAnswers.forEach((row) => {
+    const prompt = String(row?.prompt || "").trim();
+    if (prompt) answerMap.set(prompt, String(row?.answer || "").trim());
+  });
+  const missing = [];
+  formConfig.verifiedPrompts.forEach((prompt) => {
+    const text = String(prompt || "").trim();
+    if (text && !String(answerMap.get(text) || "").trim()) missing.push(text);
+  });
+  formConfig.questionPrompts.forEach((prompt) => {
+    const text = String(prompt || "").trim();
+    if (text && !String(answerMap.get(text) || "").trim()) missing.push(text);
+  });
+  if (!String(payload?.additional_text || "").trim()) {
+    missing.push("ข้อความเพิ่มเติม");
+  }
+  return missing;
+}
+
+function buildAssignmentSubmissionGateState(assignmentId, formConfig, options = {}) {
+  const id = Number(assignmentId || 0) || 0;
+  const assignment = getAssignmentById(id);
+  const articlePayload = options?.articlePayload && typeof options.articlePayload === "object"
+    ? options.articlePayload
+    : buildAssignmentSubmissionArticlePayload();
+  const uploadQueue = Array.isArray(options?.uploadQueue)
+    ? options.uploadQueue
+    : buildAssignmentCaptureFileUploadQueue(id, formConfig.captureItems);
+  const hasLocalQueue = uploadQueue.length > 0;
+  const localSynced = hasLocalQueue ? isAssignmentCaptureUploadsSynced(id, formConfig.captureItems) : true;
+  const composed = composeAssignmentSubmissionEffectiveAssets(id, formConfig.captureItems, {
+    uploadQueue,
+    strict: false,
+  });
+  const effectiveAssets = Array.isArray(composed?.assets) ? composed.assets : [];
+  const serverSynced = composed?.serverSynced || getAssignmentServerSyncedAssetsForCaptureItems(id, formConfig.captureItems);
+  const missingTextPrompts = getAssignmentSubmissionMissingTextPrompts(formConfig, articlePayload);
+  const missingMedia = Array.isArray(composed?.missing) ? composed.missing : [];
+  const expiredBlocking = Number(serverSynced?.expired_count || 0) > 0 && Number(serverSynced?.assets?.length || 0) === 0;
+  const hasEffectiveMedia = effectiveAssets.length > 0;
+  const blockingReasons = [];
+  if (missingTextPrompts.length) {
+    blockingReasons.push(
+      missingTextPrompts.length === 1 && missingTextPrompts[0] === "ข้อความเพิ่มเติม"
+        ? "กรุณากรอกข้อความเพิ่มเติม"
+        : "กรุณากรอกข้อมูลที่จำเป็นให้ครบ"
+    );
+  }
+  if (composed?.blockedMessage) {
+    blockingReasons.push(String(composed.blockedMessage));
+  }
+  if (!localSynced) {
+    blockingReasons.push("มีไฟล์ที่เลือกใหม่ แต่ยังไม่ได้ซิงก์");
+  }
+  if (expiredBlocking) {
+    blockingReasons.push("ไฟล์ที่ซิงก์ไว้หมดอายุแล้ว กรุณาอัปโหลด/ซิงก์ไฟล์ใหม่อีกครั้ง");
+  }
+  if (missingMedia.length) {
+    blockingReasons.push(`ยังขาดไฟล์สำหรับ: ${missingMedia.join(" | ")}`);
+  } else if (!hasEffectiveMedia) {
+    blockingReasons.push("กรุณาอัปโหลด/ซิงก์ไฟล์ให้ครบก่อนส่งงานกลับ");
+  }
+  const warnings = [];
+  if (Number(serverSynced?.expired_count || 0) > 0 && Number(serverSynced?.assets?.length || 0) > 0) {
+    warnings.push("มีไฟล์เก่าที่หมดอายุแล้วบางส่วน ระบบจะใช้เฉพาะไฟล์ที่ยังพร้อมส่ง");
+  }
+  const checklist = [
+    {
+      key: "required_text",
+      label: "ข้อมูลที่จำเป็นครบ",
+      status: missingTextPrompts.length === 0,
+      detail: missingTextPrompts.length
+        ? `ยังขาด: ${missingTextPrompts.join(" | ")}`
+        : "พร้อมใช้งาน",
+    },
+    {
+      key: "required_media",
+      label: "ไฟล์/ช็อตที่จำเป็นครบ",
+      status: missingMedia.length === 0 && hasEffectiveMedia,
+      detail: missingMedia.length ? `ยังขาดไฟล์สำหรับ: ${missingMedia.join(" | ")}` : (hasEffectiveMedia ? `พร้อม ${effectiveAssets.length} ไฟล์` : "กรุณาอัปโหลด/ซิงก์ไฟล์ให้ครบก่อนส่งงานกลับ"),
+    },
+    {
+      key: "sync_current",
+      label: "ไฟล์ซิงก์เป็นชุดล่าสุด",
+      status: !composed?.blockedMessage,
+      detail: composed?.blockedMessage || "พร้อมใช้งาน",
+    },
+    {
+      key: "not_expired",
+      label: "ไฟล์ซิงก์ยังไม่หมดอายุ",
+      status: !expiredBlocking,
+      detail: expiredBlocking ? "ไฟล์ที่ซิงก์ไว้หมดอายุแล้ว กรุณาอัปโหลด/ซิงก์ไฟล์ใหม่อีกครั้ง" : "พร้อมใช้งาน",
+    },
+    {
+      key: "no_pending_local",
+      label: "ไม่มีไฟล์ใหม่ค้างรอซิงก์",
+      status: !hasLocalQueue || localSynced,
+      detail: !hasLocalQueue || localSynced ? "พร้อมใช้งาน" : "มีไฟล์ที่เลือกใหม่ แต่ยังไม่ได้ซิงก์",
+    },
+  ];
+  return {
+    canSubmit: blockingReasons.length === 0,
+    blockingReasons: Array.from(new Set(blockingReasons)),
+    warnings,
+    checklist,
+    effectiveAssets,
+    missingTextPrompts,
+    missingMedia,
+    articlePayload,
+    uploadQueue,
+    composed,
+    serverSynced,
+  };
+}
+
+function renderAssignmentSubmissionGatePanel(gateState) {
+  const node = qs("assignment-submit-callout");
+  if (!node) return;
+  const state = gateState && typeof gateState === "object" ? gateState : null;
+  if (!state) {
+    node.textContent = "";
+    return;
+  }
+  node.className = "assignment-brief-card";
+  node.innerHTML = `
+    <div class="assignment-brief-text"><strong>${escapeHtml(state.canSubmit ? "พร้อมส่งงานกลับ" : "ยังส่งงานไม่ได้")}</strong></div>
+    <ul class="assignment-brief-list" style="margin-top:8px;">
+      ${state.checklist.map((item) => `<li>${item.status ? "ผ่าน" : "ค้าง"} | ${escapeHtml(item.label)} | ${escapeHtml(item.detail)}</li>`).join("")}
+    </ul>
+    ${state.blockingReasons.length ? `<div class="assignment-brief-text" style="margin-top:8px;"><strong>${escapeHtml(state.blockingReasons[0])}</strong></div>` : ""}
+    ${state.warnings.length ? `<div class="assignment-brief-text" style="margin-top:8px;">${escapeHtml(state.warnings.join(" | "))}</div>` : ""}
+  `;
+}
+
+function focusFirstAssignmentSubmissionGateIssue(gateState) {
+  if (!gateState || gateState.canSubmit) return;
+  if (gateState.missingTextPrompts?.length) {
+    qs("assignment-submission-verified-fields")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.querySelector("[data-assignment-prompt-answer]")?.focus();
+    return;
+  }
+  if (gateState.missingMedia?.length || gateState.blockingReasons.some((reason) => /ซิงก์|ไฟล์/.test(String(reason)))) {
+    qs("assignment-submission-capture-guide")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  qs("assignment-submit-callout")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function buildAssignmentSubmissionArticlePayload() {
@@ -8193,6 +8353,7 @@ async function syncAssignmentSubmissionUploads() {
       setLatestUploadedAssetsForSyncKey(syncKey, cachedAssets);
       const syncedCount = cachedAssets.length;
       renderAssignmentSubmissionFileList();
+      renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(assignmentId, formConfig));
       setStatus("assignment-status", `ไฟล์ชุดนี้ซิงก์แล้ว รอส่งงานกลับ | ซิงก์แล้ว ${syncedCount} ไฟล์`);
       return;
     }
@@ -8200,6 +8361,7 @@ async function syncAssignmentSubmissionUploads() {
     const uploadedAssets = await uploadAssignmentSubmissionFiles(assignmentId, uploadQueue, { syncBatchId });
     markAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems, uploadedAssets);
     renderAssignmentSubmissionFileList();
+    renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(assignmentId, formConfig));
     // TODO: define cleanup policy for synced-but-unsubmitted assignment assets.
     setStatus("assignment-status", `ไฟล์ซิงก์แล้ว รอส่งงานกลับ | ซิงก์แล้ว ${uploadedAssets.length} ไฟล์`);
     return;
@@ -8208,6 +8370,7 @@ async function syncAssignmentSubmissionUploads() {
   const serverSynced = applyAssignmentServerSyncedAssets(assignmentId, formConfig.captureItems, { showStatus: false });
   if (serverSynced.complete && Array.isArray(serverSynced.assets) && serverSynced.assets.length) {
     renderAssignmentSubmissionFileList();
+    renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(assignmentId, formConfig));
     setStatus("assignment-status", `มีไฟล์ที่ซิงก์แล้วบน server รอส่งงานกลับ | ซิงก์แล้ว ${serverSynced.assets.length} ไฟล์`);
     return;
   }
@@ -8262,19 +8425,18 @@ async function createAssignmentSubmission() {
 
   assertAssignmentCaptureUploadsComplete(assignmentId, formConfig.captureItems);
   const uploadQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
-  const composed = composeAssignmentSubmissionEffectiveAssets(assignmentId, formConfig.captureItems, { uploadQueue, strict: true });
+  const gateState = buildAssignmentSubmissionGateState(assignmentId, formConfig, {
+    articlePayload,
+    uploadQueue,
+  });
+  renderAssignmentSubmissionGatePanel(gateState);
+  if (!gateState.canSubmit) {
+    focusFirstAssignmentSubmissionGateIssue(gateState);
+    throw new Error(String(gateState.blockingReasons[0] || "ยังส่งงานไม่ได้"));
+  }
+  const composed = gateState.composed || composeAssignmentSubmissionEffectiveAssets(assignmentId, formConfig.captureItems, { uploadQueue, strict: true });
   const syncKey = String(composed?.syncKey || getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems));
-  const uploadedAssets = Array.isArray(composed?.assets) ? composed.assets : [];
-  const serverSynced = composed?.serverSynced || null;
-  if (!uploadedAssets.length) {
-    if (Number(serverSynced?.expired_count || 0) > 0 && Number(serverSynced?.assets?.length || 0) === 0) {
-      throw new Error("ไฟล์ที่ซิงก์ไว้หมดอายุแล้ว กรุณาอัปโหลด/ซิงก์ไฟล์ใหม่อีกครั้ง");
-    }
-    throw new Error("ยังไม่มีไฟล์ที่เลือกในเครื่อง และไม่พบไฟล์ที่ซิงก์แล้วบน server");
-  }
-  if (Array.isArray(composed?.missing) && composed.missing.length) {
-    throw new Error(`ยังแนบไฟล์ไม่ครบตามเงื่อนไข reset: ${composed.missing.join(" | ")}`);
-  }
+  const uploadedAssets = Array.isArray(gateState.effectiveAssets) ? gateState.effectiveAssets : [];
 
   if (uploadedAssets.length) {
     body.media_payload_json = buildAssignmentSubmissionMediaPayload(uploadedAssets);
@@ -9323,15 +9485,23 @@ function wireAssignments() {
   });
   qs("assignment-submission-verified-fields")?.addEventListener("input", () => {
     syncAssignmentSubmissionDraftFromForm();
+    const assignment = getAssignmentById(state.assignments.selectedId);
+    renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(state.assignments.selectedId, getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack)));
   });
   qs("assignment-submission-capture-guide")?.addEventListener("input", () => {
     syncAssignmentSubmissionDraftFromForm();
+    const assignment = getAssignmentById(state.assignments.selectedId);
+    renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(state.assignments.selectedId, getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack)));
   });
   qs("assignment-submission-question-fields")?.addEventListener("input", () => {
     syncAssignmentSubmissionDraftFromForm();
+    const assignment = getAssignmentById(state.assignments.selectedId);
+    renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(state.assignments.selectedId, getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack)));
   });
   qs("assignment-submission-additional-text")?.addEventListener("input", () => {
     syncAssignmentSubmissionDraftFromForm();
+    const assignment = getAssignmentById(state.assignments.selectedId);
+    renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(state.assignments.selectedId, getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack)));
   });
   qs("assignment-submission-brief-link")?.addEventListener("click", (event) => {
     if (event.currentTarget?.classList.contains("disabled")) {
