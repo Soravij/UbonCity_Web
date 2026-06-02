@@ -27,6 +27,15 @@ function traceAiDraft(stage, details = {}) {
   }
 }
 
+function traceTranslationDiagnostics(stage, details = {}) {
+  const ts = new Date().toISOString();
+  try {
+    console.error(`[${ts}] translation-debug stage=${stage} ${JSON.stringify(details)}`);
+  } catch {
+    console.error(`[${ts}] translation-debug stage=${stage}`);
+  }
+}
+
 function splitCsvLine(line) {
   const out = [];
   let cur = "";
@@ -777,6 +786,7 @@ function normalizeTranslationSource(source) {
     source_kind: String(source?.source_kind || "").trim().toLowerCase() || null,
     assignment_id: Number(source?.assignment_id || 0) || 0,
     submission_id: Number(source?.submission_id || 0) || 0,
+    article_draft_deliverable_id: Number(source?.article_draft_deliverable_id || 0) || 0,
     title: String(source?.title || "").trim(),
     excerpt: String(source?.excerpt || "").trim(),
     body: String(source?.body || "").trim(),
@@ -785,6 +795,29 @@ function normalizeTranslationSource(source) {
     source_lang: String(source?.source_lang || source?.lang || "th").trim().toLowerCase() || "th",
     slug: String(source?.slug || "").trim(),
     category: String(source?.category || "").trim(),
+  };
+}
+
+function normalizeFailureReason(value, fallback = "translation_failed") {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    || fallback;
+}
+
+function buildTranslationDiagnostics(article, lang, provider, model) {
+  return {
+    item_id: Number(article?.content_item_id || 0) || null,
+    source_kind: String(article?.source_kind || "").trim().toLowerCase() || null,
+    source_title: String(article?.title || "").trim() || null,
+    source_body_length: String(article?.body || "").trim().length,
+    article_draft_deliverable_id: Number(article?.article_draft_deliverable_id || 0) || null,
+    target_language: String(lang || "").trim().toLowerCase() || null,
+    provider: String(provider || "").trim() || null,
+    model: String(model || "").trim() || null,
   };
 }
 
@@ -812,6 +845,7 @@ function buildDraftTranslationSource(repo, contentItemId) {
       source_kind: publishableSource?.source?.source_kind || "assignment_submission_article_draft",
       assignment_id: publishableSource?.source?.assignment_id || 0,
       submission_id: publishableSource?.source?.latest_submission_id || 0,
+      article_draft_deliverable_id: publishableSource?.source?.article_draft_deliverable_id || 0,
       title: resolved?.title || item.title || "",
       excerpt: resolved?.excerpt || item.summary || "",
       body: resolved?.body || item.description_clean || item.description_raw || "",
@@ -853,6 +887,7 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
 
   let generatedCount = 0;
   let failedCount = 0;
+  const languageResults = [];
 
   for (const article of normalizedSources) {
     const sourceLang = String(article.source_lang || "th").trim().toLowerCase();
@@ -880,8 +915,15 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
       const hasProviderConfig = Boolean(aiConfig?.enabled);
       const defaultTranslatorEngine = hasProviderConfig ? preferredProvider : "deterministic";
       const defaultTranslatorModel = String(translationConfig?.model || aiConfig?.translationModel || aiConfig?.model || "deterministic").trim() || "deterministic";
+      const diagnostics = buildTranslationDiagnostics(article, lang, defaultTranslatorEngine, defaultTranslatorModel);
+      const sourceBody = String(article.body || "").trim();
+      traceTranslationDiagnostics("translation_attempt_start", diagnostics);
 
       try {
+        if (!sourceBody.length) {
+          throw Object.assign(new Error("missing_article_draft_body"), { code: "missing_article_draft_body" });
+        }
+
         const translated = await translator.translate(sourceToTranslationInput(article), lang);
         const translatorEngine = String(translated?._engine || defaultTranslatorEngine).trim();
         const translatorModel = String(translated?._model || defaultTranslatorModel).trim();
@@ -919,11 +961,29 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
 
         if (check.status === "passed") {
           generatedCount += 1;
+          languageResults.push({ lang, status: "generated", failure_reason: null });
+          traceTranslationDiagnostics("translation_attempt_success", {
+            ...diagnostics,
+            provider: translatorEngine || diagnostics.provider,
+            model: translatorModel || diagnostics.model,
+            translation_status: "ready",
+            automatic_check_status: check.status,
+          });
         } else {
           failedCount += 1;
+          languageResults.push({ lang, status: "failed", failure_reason: "automatic_check_failed" });
+          traceTranslationDiagnostics("translation_attempt_check_failed", {
+            ...diagnostics,
+            provider: translatorEngine || diagnostics.provider,
+            model: translatorModel || diagnostics.model,
+            failure_reason: "automatic_check_failed",
+            issues: Array.isArray(check?.issues) ? check.issues : [],
+          });
         }
       } catch (err) {
         failedCount += 1;
+        const failureReason = normalizeFailureReason(err?.code || err?.message, "translation_failed");
+        const failureMessage = String(err?.message || "translation failed");
         repo.upsertTranslation({
           source_content_item_id: article.content_item_id,
           source_published_article_id: article.id || null,
@@ -938,10 +998,16 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
           translated_meta_description: null,
           translation_status: "failed",
           automatic_check_status: "failed",
-          automatic_check_report: { status: "failed", issues: [String(err?.message || "translation failed")] },
+          automatic_check_report: { status: "failed", issues: [failureMessage], failure_reason: failureReason },
           stale_flag: 0,
           translator_engine: defaultTranslatorEngine,
           translator_model: defaultTranslatorModel,
+        });
+        languageResults.push({ lang, status: "failed", failure_reason: failureReason });
+        traceTranslationDiagnostics("translation_attempt_failed", {
+          ...diagnostics,
+          failure_reason: failureReason,
+          error_message: failureMessage,
         });
       }
     }
@@ -956,7 +1022,7 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
   );
   repo.logAudit(actorEmail, "translation.final_stage", "translation_run", runUid, { generatedCount, failedCount });
 
-  return { run_uid: runUid, generated_count: generatedCount, failed_count: failedCount };
+  return { run_uid: runUid, generated_count: generatedCount, failed_count: failedCount, languages: languageResults };
 }
 
 async function runFinalTranslationStage(repo, publishedArticles, aiConfig, actorEmail = "system@local") {
@@ -1004,6 +1070,9 @@ export async function rerunProblemTranslations(repo, actorEmail, options = {}) {
   return {
     content_item_id: contentItemId,
     translation_run: summary,
+    generated_count: Number(summary?.generated_count || 0) || 0,
+    failed_count: Number(summary?.failed_count || 0) || 0,
+    languages: Array.isArray(summary?.languages) ? summary.languages : [],
     totals: {
       passed: pass,
       failed,

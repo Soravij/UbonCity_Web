@@ -242,6 +242,21 @@ function translationIssuesFromRow(row) {
   return issues.map((issue) => String(issue || "").trim()).filter(Boolean);
 }
 
+function translationFailureReasonFromRow(row) {
+  return String(row?.automatic_check_report?.failure_reason || "").trim().toLowerCase() || "";
+}
+
+function summarizeTranslationFailures(rows) {
+  const failures = (Array.isArray(rows) ? rows : [])
+    .filter((row) => String(row?.status || "").trim().toLowerCase() === "failed")
+    .map((row) => {
+      const lang = String(row?.lang || "").trim().toUpperCase();
+      const failureReason = String(row?.failure_reason || "").trim() || "translation_failed";
+      return lang ? `${lang}: ${failureReason}` : failureReason;
+    });
+  return failures.join(", ");
+}
+
 function translationSourceKindLabel(value) {
   const kind = String(value || "").trim().toLowerCase();
   if (kind === "published_article") return "published article";
@@ -257,6 +272,7 @@ function buildRepoTranslationStatusRows() {
     translation_status: String(row?.translation_status || "").trim().toLowerCase() || "-",
     automatic_check_status: String(row?.automatic_check_status || "").trim().toLowerCase() || "-",
     source_kind: String(row?.source_kind || "").trim().toLowerCase() || "-",
+    failure_reason: translationFailureReasonFromRow(row),
     issues: translationIssuesFromRow(row),
     updated_at: row?.updated_at || null,
   }));
@@ -312,6 +328,7 @@ function buildTranslationRows() {
         translation_status: String(live?.translation_status || "").trim().toLowerCase() || "-",
         automatic_check_status: String(live?.automatic_check_status || "").trim().toLowerCase() || "-",
         source_kind: String(live?.source_kind || "").trim().toLowerCase() || "-",
+        failure_reason: translationFailureReasonFromRow(live),
         issues: translationIssuesFromRow(live),
         updated_at: live?.updated_at || null,
       };
@@ -372,6 +389,10 @@ function openTranslationDetail(lang) {
       <div class="translation-detail-item">
         <strong>Source</strong>
         <span>${escapeHtml(translationSourceKindLabel(row.source_kind))}</span>
+      </div>
+      <div class="translation-detail-item">
+        <strong>Failure reason</strong>
+        <span>${escapeHtml(String(row.failure_reason || "-"))}</span>
       </div>
       <div class="translation-detail-item full-span">
         <strong>อัปเดตล่าสุด</strong>
@@ -557,13 +578,14 @@ async function generateTranslations() {
   setInlineStatus("translation-status", "กำลังสร้างคำแปล...", "loading");
   try {
     const result = await api(`/api/items/${state.itemId}/generate-translations`, { method: "POST" });
-    const generatedCount = Number(result?.result?.translation_run?.generated_count || 0) || 0;
-    const failedCount = Number(result?.result?.translation_run?.failed_count || 0) || 0;
+    const generatedCount = Number(result?.generated_count || result?.result?.translation_run?.generated_count || 0) || 0;
+    const failedCount = Number(result?.failed_count || result?.result?.translation_run?.failed_count || 0) || 0;
+    const failureSummary = summarizeTranslationFailures(result?.per_language_status || result?.result?.languages || []);
     state.readiness = result?.readiness || state.readiness;
     await refreshTranslations();
     renderSyncSummary();
     if (generatedCount > 0 && failedCount > 0) {
-      setInlineStatus("translation-status", `สร้างคำแปลแล้ว ${generatedCount} ภาษา และมีปัญหา ${failedCount} ภาษา`);
+      setInlineStatus("translation-status", `สร้างคำแปลแล้ว ${generatedCount} ภาษา และมีปัญหา ${failedCount} ภาษา${failureSummary ? `: ${failureSummary}` : ""}`);
       return;
     }
     if (generatedCount > 0) {
@@ -571,7 +593,7 @@ async function generateTranslations() {
       return;
     }
     if (failedCount > 0) {
-      setInlineStatus("translation-status", `ยังสร้างคำแปลไม่สำเร็จ (${failedCount} ภาษา)`, "error");
+      setInlineStatus("translation-status", `ยังสร้างคำแปลไม่สำเร็จ (${failedCount} ภาษา)${failureSummary ? `: ${failureSummary}` : ""}`, "error");
       return;
     }
     setInlineStatus("translation-status", "ไม่มีภาษาที่ต้องสร้างเพิ่ม");

@@ -1,8 +1,9 @@
 ﻿import Link from "next/link";
 import { CATEGORY_KEYS, getLangContent, normalizeLang } from "@/lib/site";
-import { getEvents, getPlaces, getUbonWeather } from "@/lib/api";
+import { getEvents, getHomepageLayout, getPlaces, getUbonWeather } from "@/lib/api";
 import { buildHomeDecisionSelections } from "@/lib/phase56-decision-helpers.mjs";
 import { getDecisionCopy } from "@/lib/home-copy";
+import HomepageLayoutRenderer from "@/components/HomepageLayoutRenderer";
 import HomeLandingStage from "@/components/home/HomeLandingStage";
 import HomeSelectedBlock from "@/components/home/HomeSelectedBlock";
 import HomeScenariosBlock from "@/components/home/HomeScenariosBlock";
@@ -65,7 +66,8 @@ export default async function LangHome({ params }) {
 
   const homeCategories = CATEGORY_KEYS.filter((key) => key !== "transport");
 
-  const [events, weather, categoryRows] = await Promise.all([
+  const [homepageLayout, events, weather, categoryRows] = await Promise.all([
+    getHomepageLayout(activeLang, "home"),
     getEvents(activeLang),
     getUbonWeather(),
     Promise.all(homeCategories.map(async (category) => [category, await getPlaces(category, activeLang)])),
@@ -142,74 +144,91 @@ export default async function LangHome({ params }) {
     };
   });
 
+  const resolvedBlocks = Array.isArray(homepageLayout?.resolved_blocks) ? homepageLayout.resolved_blocks : [];
+  const hasPublishedCurationLayout = resolvedBlocks.length > 0;
+
   return (
     <section className="home-page-flow">
-      <div className="home-flow-section home-flow-section--landing">
-        <HomeLandingStage
-          activeLang={activeLang}
-          copy={copy}
-          decisionCopy={decisionCopy}
-          weather={weather}
-          quickActions={quickActions}
-          featuredStripPlaces={featuredStripPlaces}
-        />
-      </div>
-
-      <div className="home-flow-section home-flow-section--surface-1 home-flow-section--bridge">
-        <HomeSelectedBlock
-          activeLang={activeLang}
-          copy={copy}
-          decisionCopy={decisionCopy}
-          topTenPlaces={topTenPlaces}
-          topCafePlaces={topCafePlaces}
-          eveningSpots={eveningSpots}
-        />
-      </div>
-
-      <div className="home-flow-section home-flow-section--surface-2">
-        <HomeScenariosBlock
-          activeLang={activeLang}
-          copy={copy}
-          decisionCopy={decisionCopy}
-          scenarioPicks={scenarioPicks}
-        />
-      </div>
-
-      <div className="home-flow-section home-flow-section--surface-2">
-        <HomeTrendingBlock
-          activeLang={activeLang}
-          copy={copy}
-          decisionCopy={decisionCopy}
-          latestEvents={latestEvents}
-        />
-      </div>
-
-      <div className="home-flow-section home-flow-section--surface-1">
-        <section className="editorial-section space-y-6">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:items-end">
-            <div className="home-section-header">
-              <p className="eyebrow-label">Explore</p>
-              <h2 className="section-heading">{decisionCopy.exploreTitle}</h2>
-            </div>
-            <p className="section-copy max-w-2xl">{decisionCopy.exploreSubtitle}</p>
+      {hasPublishedCurationLayout ? (
+        <div className="home-flow-section home-flow-section--surface-1">
+          <HomepageLayoutRenderer
+            blocks={resolvedBlocks}
+            activeLang={activeLang}
+            copy={copy}
+            decisionCopy={decisionCopy}
+            quickActions={quickActions}
+          />
+        </div>
+      ) : (
+        <>
+          <div className="home-flow-section home-flow-section--landing">
+            <HomeLandingStage
+              activeLang={activeLang}
+              copy={copy}
+              decisionCopy={decisionCopy}
+              weather={weather}
+              quickActions={quickActions}
+              featuredStripPlaces={featuredStripPlaces}
+            />
           </div>
-          <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
-            {CATEGORY_KEYS.map((key) => (
-              <Link
-                key={key}
-                href={`/${activeLang}/${key}`}
-                className={`home-explore-link home-explore-link--${key} block p-5 text-base font-semibold text-[color:var(--theme-text)] md:px-5 md:py-6 md:text-lg`}
-              >
-                <span className="home-explore-content">
-                  <span className="eyebrow-label mb-2 block">Category</span>
-                  <span className="home-explore-name block">{copy.nav[key]}</span>
-                </span>
-                <span aria-hidden="true" className="home-explore-art" />
-              </Link>
-            ))}
+
+          <div className="home-flow-section home-flow-section--surface-1 home-flow-section--bridge">
+            <HomeSelectedBlock
+              activeLang={activeLang}
+              copy={copy}
+              decisionCopy={decisionCopy}
+              topTenPlaces={topTenPlaces}
+              topCafePlaces={topCafePlaces}
+              eveningSpots={eveningSpots}
+            />
           </div>
-        </section>
-      </div>
+
+          <div className="home-flow-section home-flow-section--surface-2">
+            <HomeScenariosBlock
+              activeLang={activeLang}
+              copy={copy}
+              decisionCopy={decisionCopy}
+              scenarioPicks={scenarioPicks}
+            />
+          </div>
+
+          <div className="home-flow-section home-flow-section--surface-2">
+            <HomeTrendingBlock
+              activeLang={activeLang}
+              copy={copy}
+              decisionCopy={decisionCopy}
+              latestEvents={latestEvents}
+            />
+          </div>
+
+          <div className="home-flow-section home-flow-section--surface-1">
+            <section className="editorial-section space-y-6">
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:items-end">
+                <div className="home-section-header">
+                  <p className="eyebrow-label">Explore</p>
+                  <h2 className="section-heading">{decisionCopy.exploreTitle}</h2>
+                </div>
+                <p className="section-copy max-w-2xl">{decisionCopy.exploreSubtitle}</p>
+              </div>
+              <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+                {CATEGORY_KEYS.map((key) => (
+                  <Link
+                    key={key}
+                    href={`/${activeLang}/${key}`}
+                    className={`home-explore-link home-explore-link--${key} block p-5 text-base font-semibold text-[color:var(--theme-text)] md:px-5 md:py-6 md:text-lg`}
+                  >
+                    <span className="home-explore-content">
+                      <span className="eyebrow-label mb-2 block">Category</span>
+                      <span className="home-explore-name block">{copy.nav[key]}</span>
+                    </span>
+                    <span aria-hidden="true" className="home-explore-art" />
+                  </Link>
+                ))}
+              </div>
+            </section>
+          </div>
+        </>
+      )}
     </section>
   );
 }

@@ -11585,7 +11585,14 @@ app.post("/api/items/:id/generate-translations", requireRole("admin", "owner"), 
     });
     const readiness = buildExportReadiness(id);
     repo.logAudit(actorEmail(req), "translation.generate", "content_item", String(id), result);
-    res.json({ ok: true, result, readiness });
+    res.json({
+      ok: Number(result?.failed_count || 0) === 0,
+      generated_count: Number(result?.generated_count || 0) || 0,
+      failed_count: Number(result?.failed_count || 0) || 0,
+      per_language_status: Array.isArray(result?.languages) ? result.languages : [],
+      result,
+      readiness,
+    });
   } catch (err) {
     const message = String(err?.message || "Cannot generate translations");
     res.status(400).json({ error: message });

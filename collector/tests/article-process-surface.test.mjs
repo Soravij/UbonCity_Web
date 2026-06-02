@@ -21,11 +21,14 @@ test("article process routes exist with dedicated surface area", () => {
   assert.match(source, /assignee_user_id or assignee_name is required/);
   assert.match(source, /assignee_name: isExternalAssignee \? externalAssigneeName : null/);
   assert.match(source, /assignee_contact: isExternalAssignee \? externalAssigneeContact : null/);
+  assert.match(source, /per_language_status:/);
+  assert.match(source, /generated_count:/);
+  assert.match(source, /failed_count:/);
 });
 
 test("article process uses semantic status helpers without mutating legacy assignment routes", () => {
   assert.match(source, /function normalizeArticleProcessStatus\(value, fallback = ""\)/);
-  assert.match(source, /function deriveArticleProcessStatus\(item, workflowModel = null\)/);
+  assert.match(source, /function deriveArticleProcessStatus\(item, workflowModel = null, publishableSource = null\)/);
   assert.match(source, /function mapArticleProcessStatusToWorkflowPatch\(status\)/);
   assert.match(source, /function buildArticleProcessPayload\(req, item\)/);
   assert.match(source, /app\.post\("\/api\/items\/:id\/assignments", requireRole\("admin", "user"\),/);

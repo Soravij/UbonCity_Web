@@ -279,6 +279,86 @@ test("rerunProblemTranslations falls back when translation provider has no api k
   assert.equal(result.totals.passed, 3);
 });
 
+test("rerunProblemTranslations returns per-language missing_article_draft_body failures without calling translator", async () => {
+  const translations = new Map();
+
+  const repo = {
+    listPublishedArticles() {
+      return [];
+    },
+    getPublishedArticleByItem() {
+      return null;
+    },
+    getItem(itemId) {
+      if (Number(itemId) !== 33) return null;
+      return {
+        id: 33,
+        title: "Broken draft source",
+        summary: "Draft exists but body is empty",
+        description_clean: "",
+        description_raw: "",
+        meta_title: "Broken draft source",
+        meta_description: "Draft exists but body is empty",
+        slug: "broken-draft-source",
+        lang: "th",
+        category: "attractions",
+      };
+    },
+    latestDraftByItem(itemId) {
+      if (Number(itemId) !== 33) return null;
+      return {
+        id: 303,
+        draft_title: "Broken draft source",
+        excerpt: "Empty body draft",
+        body: "",
+        meta_title: "Broken draft source | UbonCity",
+        meta_description: "Empty body draft",
+        slug: "broken-draft-source",
+      };
+    },
+    latestApprovedReviewByItem() {
+      return null;
+    },
+    startTranslationRun() {
+      return "run-empty-body";
+    },
+    finishTranslationRun() {},
+    markStaleTranslations() {},
+    getTranslation(contentItemId, lang) {
+      return translations.get(`${contentItemId}:${lang}`) || null;
+    },
+    upsertTranslation(payload) {
+      translations.set(`${payload.source_content_item_id}:${payload.lang}`, {
+        ...payload,
+        stale_flag: payload.stale_flag ? 1 : 0,
+      });
+    },
+    listTranslations(contentItemId = null) {
+      const rows = Array.from(translations.values());
+      if (!contentItemId) return rows;
+      return rows.filter((row) => Number(row.source_content_item_id) === Number(contentItemId));
+    },
+    logAudit() {},
+  };
+
+  const result = await rerunProblemTranslations(repo, "admin@uboncity.local", {
+    content_item_id: 33,
+    aiConfig: null,
+    forceRegenerate: true,
+  });
+
+  assert.equal(result.generated_count, 0);
+  assert.equal(result.failed_count, 3);
+  assert.deepEqual(
+    result.languages.map((row) => row.failure_reason),
+    ["missing_article_draft_body", "missing_article_draft_body", "missing_article_draft_body"],
+  );
+  for (const row of repo.listTranslations(33)) {
+    assert.equal(row.translation_status, "failed");
+    assert.equal(row.automatic_check_report?.failure_reason, "missing_article_draft_body");
+  }
+});
+
 test("translation generator ignores collector-local provider keys and falls back without backend proxy", async () => {
   let requestedUrl = "";
   const server = http.createServer((req, res) => {
