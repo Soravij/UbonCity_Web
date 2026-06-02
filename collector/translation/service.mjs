@@ -25,6 +25,14 @@ function parseJsonLike(raw) {
   }
 }
 
+function isDebugDiagnosticsEnabled() {
+  return String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
+}
+
+function buildRawResponsePreview(raw) {
+  return String(raw || "").replace(/^\uFEFF/, "").trim().slice(0, 1000);
+}
+
 function questionMarkRatio(value) {
   const text = String(value || "");
   if (!text.length) return 0;
@@ -231,6 +239,50 @@ function ensureValidModelPayload(payload) {
   return normalized;
 }
 
+function collectValidationErrors(payload) {
+  if (!payload || typeof payload !== "object") {
+    return ["payload_not_object"];
+  }
+
+  const normalized = normalizePayload(payload);
+  if (!normalized) {
+    return ["payload_normalization_failed"];
+  }
+
+  const errors = [];
+  const requiredFields = [
+    "translated_title",
+    "translated_excerpt",
+    "translated_body",
+    "translated_meta_title",
+    "translated_meta_description",
+  ];
+
+  for (const field of requiredFields) {
+    if (!normalized[field]) {
+      errors.push(`${field}: missing_required_value`);
+    } else if (hasMojibakeSignals(normalized[field])) {
+      errors.push(`${field}: mojibake_detected`);
+    }
+  }
+
+  return errors;
+}
+
+function buildInvalidTranslationPayloadError(rawText, parsedPayload) {
+  const error = new Error("Invalid translation JSON payload");
+  error.code = "invalid_translation_json_payload";
+
+  if (!isDebugDiagnosticsEnabled()) {
+    return error;
+  }
+
+  error.parse_error = parsedPayload ? null : "invalid_json_or_no_json_object";
+  error.validation_errors = collectValidationErrors(parsedPayload);
+  error.raw_response_preview = buildRawResponsePreview(rawText);
+  return error;
+}
+
 function buildTranslationPrompt(source, targetLang) {
   return [
     "Return ONLY valid JSON with keys:",
@@ -255,7 +307,7 @@ async function backendTranslate(source, targetLang, aiConfig) {
   });
   const parsed = ensureValidModelPayload(result.parsed || parseJsonLike(result.outputText));
   if (!parsed) {
-    throw new Error("Invalid translation JSON payload");
+    throw buildInvalidTranslationPayloadError(result.outputText, result.parsed || parseJsonLike(result.outputText));
   }
   return {
     ...parsed,
@@ -291,9 +343,11 @@ async function openAiTranslate(source, targetLang, aiConfig) {
   }
 
   const data = await response.json();
-  const parsed = ensureValidModelPayload(parseJsonLike(String(data?.output_text || "")));
+  const rawOutput = String(data?.output_text || "");
+  const parsedPayload = parseJsonLike(rawOutput);
+  const parsed = ensureValidModelPayload(parsedPayload);
   if (!parsed) {
-    throw new Error("Invalid translation JSON payload");
+    throw buildInvalidTranslationPayloadError(rawOutput, parsedPayload);
   }
 
   return { ...parsed, _engine: "openai", _model: model };
@@ -326,9 +380,10 @@ async function googleAiTranslate(source, targetLang, aiConfig) {
 
   const data = await response.json();
   const outputText = data?.candidates?.[0]?.content?.parts?.find((part) => typeof part?.text === "string")?.text || "";
-  const parsed = ensureValidModelPayload(parseJsonLike(String(outputText || "")));
+  const parsedPayload = parseJsonLike(String(outputText || ""));
+  const parsed = ensureValidModelPayload(parsedPayload);
   if (!parsed) {
-    throw new Error("Invalid translation JSON payload");
+    throw buildInvalidTranslationPayloadError(outputText, parsedPayload);
   }
 
   return { ...parsed, _engine: "google", _model: model };

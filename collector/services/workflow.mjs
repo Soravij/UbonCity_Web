@@ -984,6 +984,18 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
         failedCount += 1;
         const failureReason = normalizeFailureReason(err?.code || err?.message, "translation_failed");
         const failureMessage = String(err?.message || "translation failed");
+        const debugDetails = {};
+        if (failureReason === "invalid_translation_json_payload" && String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
+          if (typeof err?.parse_error === "string" || err?.parse_error === null) {
+            debugDetails.parse_error = err.parse_error ?? null;
+          }
+          if (Array.isArray(err?.validation_errors)) {
+            debugDetails.validation_errors = err.validation_errors;
+          }
+          if (typeof err?.raw_response_preview === "string") {
+            debugDetails.raw_response_preview = err.raw_response_preview;
+          }
+        }
         repo.upsertTranslation({
           source_content_item_id: article.content_item_id,
           source_published_article_id: article.id || null,
@@ -998,16 +1010,17 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
           translated_meta_description: null,
           translation_status: "failed",
           automatic_check_status: "failed",
-          automatic_check_report: { status: "failed", issues: [failureMessage], failure_reason: failureReason },
+          automatic_check_report: { status: "failed", issues: [failureMessage], failure_reason: failureReason, ...debugDetails },
           stale_flag: 0,
           translator_engine: defaultTranslatorEngine,
           translator_model: defaultTranslatorModel,
         });
-        languageResults.push({ lang, status: "failed", failure_reason: failureReason });
+        languageResults.push({ lang, status: "failed", failure_reason: failureReason, ...debugDetails });
         traceTranslationDiagnostics("translation_attempt_failed", {
           ...diagnostics,
           failure_reason: failureReason,
           error_message: failureMessage,
+          ...debugDetails,
         });
       }
     }
