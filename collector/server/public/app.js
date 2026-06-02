@@ -5970,6 +5970,10 @@ function getAssignmentCaptureSyncKey(assignmentId, capturePrompts = []) {
   return `${id}::${signature}`;
 }
 
+const ASSIGNMENT_WORK_SYNC_EXPIRY_MS = 24 * 60 * 60 * 1000;
+const ASSIGNMENT_CAPTURE_MAX_IMAGES_PER_SLOT = 5;
+const ASSIGNMENT_CAPTURE_MAX_VIDEOS_PER_SLOT = 2;
+
 function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureItems = []) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return { complete: false, assets: [], missing: [], syncSignature: "" };
@@ -5982,6 +5986,7 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
   prompts.forEach((prompt, index) => {
     expectedBySlug.set(toCaptureSlug(prompt, index), { prompt, index });
   });
+  const nowMs = Date.now();
   const rows = Array.isArray(state.assignments.assetLookup) ? state.assignments.assetLookup : [];
   const assignmentRows = rows.filter((row) => {
     if (Number(row?.assignment_id || 0) !== id) return false;
@@ -5999,12 +6004,46 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     assignment_id: Number(row?.assignment_id || 0) || null,
     assignment_round: Number(row?.assignment_round || 0) || null,
     assignment_surface: String(row?.assignment_surface || "").trim() || null,
+    created_at: String(row?.created_at || "").trim() || null,
   }));
+
+  const activeRows = [];
+  const expiredRows = [];
+  assignmentRows.forEach((row) => {
+    const createdAtMs = Date.parse(String(row?.created_at || ""));
+    if (Number.isFinite(createdAtMs) && createdAtMs > 0 && (nowMs - createdAtMs) >= ASSIGNMENT_WORK_SYNC_EXPIRY_MS) {
+      expiredRows.push(row);
+      return;
+    }
+    activeRows.push(row);
+  });
+
+  const groupedBySlotType = new Map();
+  for (const row of activeRows) {
+    const fileName = String(row?.file_name || "").trim();
+    const slug = fileName.includes("__") ? fileName.split("__")[0] : "";
+    const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+    const mediaType = mimeType.startsWith("image/") ? "image" : mimeType.startsWith("video/") ? "video" : "";
+    if (!slug || !mediaType) continue;
+    const key = `${slug}|${mediaType}`;
+    if (!groupedBySlotType.has(key)) groupedBySlotType.set(key, []);
+    groupedBySlotType.get(key).push(row);
+  }
+  const effectiveRows = [];
+  for (const [key, rowsBySlotType] of groupedBySlotType.entries()) {
+    const mediaType = key.endsWith("|video") ? "video" : "image";
+    const maxCount = mediaType === "video" ? ASSIGNMENT_CAPTURE_MAX_VIDEOS_PER_SLOT : ASSIGNMENT_CAPTURE_MAX_IMAGES_PER_SLOT;
+    const orderedRows = rowsBySlotType
+      .slice()
+      .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
+    // TODO: Persist explicit sync_batch_id and select batch exactly; this fallback keeps newest rows per slot/type up to current limits.
+    effectiveRows.push(...orderedRows.slice(0, maxCount));
+  }
 
   const requireImages = Boolean(assignment?.image_reset_required);
   const requireVideos = Boolean(assignment?.video_reset_required);
   const countsBySlug = new Map();
-  assignmentRows.forEach((row) => {
+  effectiveRows.forEach((row) => {
     const fileName = String(row?.file_name || "").trim();
     const slug = fileName.includes("__") ? fileName.split("__")[0] : "";
     if (!slug) return;
@@ -6023,12 +6062,14 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
   }
   const complete = requireImages || requireVideos
     ? missing.length === 0
-    : assignmentRows.length > 0;
+    : effectiveRows.length > 0;
   return {
     complete,
-    assets: assignmentRows,
+    assets: effectiveRows,
     missing,
-    syncSignature: buildAssignmentServerAssetSyncSignature(id, assignmentRows),
+    syncSignature: buildAssignmentServerAssetSyncSignature(id, effectiveRows),
+    has_expired_assets: expiredRows.length > 0,
+    expired_count: expiredRows.length,
   };
 }
 
@@ -7742,7 +7783,10 @@ async function loadAssignmentAssets({ showStatus = false } = {}) {
   const formConfig = getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack);
   const localQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
   if (!localQueue.length) {
-    applyAssignmentServerSyncedAssets(assignmentId, formConfig.captureItems, { showStatus: false });
+    const serverSynced = applyAssignmentServerSyncedAssets(assignmentId, formConfig.captureItems, { showStatus: false });
+    if (!serverSynced.complete && Number(serverSynced?.expired_count || 0) > 0 && Number(serverSynced?.assets?.length || 0) === 0) {
+      setStatus("assignment-status", "ไฟล์ที่ซิงก์ไว้หมดอายุแล้ว กรุณาอัปโหลด/ซิงก์ไฟล์ใหม่อีกครั้ง", true);
+    }
   }
   renderAssignmentDeliverableAssetOptions();
   renderAssignmentDeliverableAssetPreview();
@@ -7977,6 +8021,9 @@ async function syncAssignmentSubmissionUploads() {
     setStatus("assignment-status", `มีไฟล์ที่ซิงก์แล้วบน server รอส่งงานกลับ | ซิงก์แล้ว ${serverSynced.assets.length} ไฟล์`);
     return;
   }
+  if (Number(serverSynced?.expired_count || 0) > 0 && Number(serverSynced?.assets?.length || 0) === 0) {
+    throw new Error("ไฟล์ที่ซิงก์ไว้หมดอายุแล้ว กรุณาอัปโหลด/ซิงก์ไฟล์ใหม่อีกครั้ง");
+  }
   throw new Error("ยังไม่มีไฟล์ที่เลือกในเครื่อง และไม่พบไฟล์ที่ซิงก์แล้วบน server");
 }
 
@@ -8044,6 +8091,8 @@ async function createAssignmentSubmission() {
     const serverSynced = applyAssignmentServerSyncedAssets(assignmentId, formConfig.captureItems, { showStatus: false });
     if (serverSynced.complete && Array.isArray(serverSynced.assets) && serverSynced.assets.length) {
       uploadedAssets = serverSynced.assets;
+    } else if (Number(serverSynced?.expired_count || 0) > 0 && Number(serverSynced?.assets?.length || 0) === 0) {
+      throw new Error("ไฟล์ที่ซิงก์ไว้หมดอายุแล้ว กรุณาอัปโหลด/ซิงก์ไฟล์ใหม่อีกครั้ง");
     } else if (Array.isArray(serverSynced.missing) && serverSynced.missing.length) {
       throw new Error(`ยังแนบไฟล์ไม่ครบตามเงื่อนไข reset: ${serverSynced.missing.join(" | ")}`);
     } else {

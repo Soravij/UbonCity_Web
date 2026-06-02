@@ -4659,6 +4659,134 @@ function toMediaDedupKey(value) {
   return normalizeMediaUrl(raw) || raw;
 }
 
+const ASSIGNMENT_WORK_SYNC_EXPIRY_MS = 24 * 60 * 60 * 1000;
+
+function parseIsoMs(value) {
+  const ts = Date.parse(String(value || ""));
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function listDraftAssignmentWorkAssetRows(options = {}) {
+  const assignmentId = Number(options.assignmentId || 0) || 0;
+  const assignmentRound = Number(options.assignmentRound || 0) || 0;
+  const contentItemId = Number(options.contentItemId || 0) || 0;
+  const clauses = ["COALESCE(ca.assignment_surface, '')='assignment_work'"];
+  const params = [];
+  if (assignmentId > 0) {
+    clauses.push("ca.assignment_id=?");
+    params.push(assignmentId);
+  }
+  if (assignmentRound > 0) {
+    clauses.push("ca.assignment_round=?");
+    params.push(assignmentRound);
+  }
+  if (contentItemId > 0) {
+    clauses.push("ca.content_item_id=?");
+    params.push(contentItemId);
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const rows = db.prepare(`
+    SELECT
+      ca.id AS content_asset_id,
+      ca.assignment_id,
+      ca.assignment_round,
+      ca.assignment_media_type,
+      ca.content_item_id,
+      a.id AS asset_id,
+      a.storage_disk,
+      a.storage_path,
+      a.file_name,
+      a.mime_type,
+      a.created_at
+    FROM content_assets ca
+    JOIN assets a ON a.id = ca.asset_id
+    ${where}
+    ORDER BY a.id DESC
+  `).all(...params);
+  return Array.isArray(rows) ? rows : [];
+}
+
+function removeAssignmentWorkRowsByAssetIds(assetIds = []) {
+  const ids = Array.from(new Set((Array.isArray(assetIds) ? assetIds : []).map((v) => Number(v || 0)).filter((v) => v > 0)));
+  if (!ids.length) return { removed_links: 0, removed_assets: 0, deleted_files: [] };
+  let removedLinks = 0;
+  let removedAssets = 0;
+  const deletedFiles = [];
+  for (const assetId of ids) {
+    const linkRows = db.prepare(
+      "SELECT id, assignment_surface FROM content_assets WHERE asset_id=? AND COALESCE(assignment_surface,'')='assignment_work'"
+    ).all(assetId);
+    for (const linkRow of linkRows) {
+      const result = db.prepare("DELETE FROM content_assets WHERE id=?").run(Number(linkRow?.id || 0) || 0);
+      removedLinks += Number(result?.changes || 0) || 0;
+    }
+    const stillLinked = Number(db.prepare("SELECT COUNT(*) AS c FROM content_assets WHERE asset_id=?").get(assetId)?.c || 0);
+    if (stillLinked > 0) continue;
+    const deliverableRefs = Number(
+      db.prepare("SELECT COUNT(*) AS c FROM content_assignment_submission_deliverables WHERE source_asset_id=?").get(assetId)?.c || 0
+    );
+    if (deliverableRefs > 0) continue;
+    const row = db.prepare("SELECT storage_disk, storage_path FROM assets WHERE id=? LIMIT 1").get(assetId);
+    const deletedAsset = db.prepare("DELETE FROM assets WHERE id=?").run(assetId);
+    if (Number(deletedAsset?.changes || 0) < 1) continue;
+    removedAssets += 1;
+    const storagePath = String(row?.storage_path || "").trim();
+    const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
+    if (!storagePath || !["local", "nas"].includes(storageDisk)) continue;
+    const duplicatePathRefs = Number(
+      db.prepare("SELECT COUNT(*) AS c FROM assets WHERE storage_path=?").get(storagePath)?.c || 0
+    );
+    if (duplicatePathRefs > 0) continue;
+    try {
+      fsSync.unlinkSync(resolveStoragePath(storagePath));
+      deletedFiles.push(storagePath);
+    } catch (err) {
+      console.warn("[assignment.work.cleanup.file_delete_failed]", {
+        assetId,
+        storagePath,
+        error: err?.message || String(err),
+      });
+    }
+  }
+  return { removed_links: removedLinks, removed_assets: removedAssets, deleted_files: deletedFiles };
+}
+
+function cleanupExpiredAssignmentWorkDraftAssets(options = {}) {
+  const nowMs = Date.now();
+  const maxAgeMs = Number(options.maxAgeMs || ASSIGNMENT_WORK_SYNC_EXPIRY_MS) || ASSIGNMENT_WORK_SYNC_EXPIRY_MS;
+  const rows = listDraftAssignmentWorkAssetRows({
+    assignmentId: options.assignmentId,
+    assignmentRound: options.assignmentRound,
+    contentItemId: options.contentItemId,
+  });
+  const expiredAssetIds = [];
+  for (const row of rows) {
+    const assetId = Number(row?.asset_id || 0) || 0;
+    if (!assetId) continue;
+    const deliverableRefs = Number(
+      db.prepare("SELECT COUNT(*) AS c FROM content_assignment_submission_deliverables WHERE source_asset_id=?").get(assetId)?.c || 0
+    );
+    if (deliverableRefs > 0) continue;
+    const createdAtMs = parseIsoMs(row?.created_at);
+    if (createdAtMs <= 0) continue;
+    if ((nowMs - createdAtMs) < maxAgeMs) continue;
+    expiredAssetIds.push(assetId);
+  }
+  return removeAssignmentWorkRowsByAssetIds(expiredAssetIds);
+}
+
+function cleanupSupersededAssignmentWorkAssetsAfterSubmit(assignmentId, assignmentRound, keepAssetIds = []) {
+  const id = Number(assignmentId || 0) || 0;
+  const round = Number(assignmentRound || 0) || 0;
+  if (!id || !round) return { removed_links: 0, removed_assets: 0, deleted_files: [] };
+  const keepSet = new Set((Array.isArray(keepAssetIds) ? keepAssetIds : []).map((v) => Number(v || 0)).filter((v) => v > 0));
+  const rows = listDraftAssignmentWorkAssetRows({ assignmentId: id, assignmentRound: round });
+  const deleteIds = rows
+    .map((row) => Number(row?.asset_id || 0) || 0)
+    .filter((assetId) => assetId > 0 && !keepSet.has(assetId));
+  return removeAssignmentWorkRowsByAssetIds(deleteIds);
+}
+
 function deleteAssetIfUnused(assetId) {
   const id = Number(assetId || 0);
   if (!id) {
@@ -9270,6 +9398,11 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
       return;
     }
     const currentRound = resolveAssignmentCurrentRound(assignment);
+    cleanupExpiredAssignmentWorkDraftAssets({
+      assignmentId,
+      assignmentRound: currentRound,
+      maxAgeMs: ASSIGNMENT_WORK_SYNC_EXPIRY_MS,
+    });
     if (["owner", "admin", "user", "freelance"].includes(role)) {
       const currentRoundImageAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image");
       const currentRoundVideoAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "video");
@@ -9300,6 +9433,9 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
       reviewer_note: req.body?.reviewer_note,
       reviewed_at: req.body?.reviewed_at,
     });
+    const keepAssetIds = Array.isArray(req.body?.media_payload_json?.assets)
+      ? req.body.media_payload_json.assets.map((row) => Number(row?.id || 0)).filter((id) => id > 0)
+      : [];
     const nextAssignmentState = normalizedSubmissionState === "resubmitted" ? "resubmitted" : "submitted";
     const updatedAssignment = repo.updateAssignmentState(assignmentId, nextAssignmentState, actorEmail(req), {
       actor_role: role,
@@ -9347,6 +9483,19 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
     repo.logAudit(actorEmail(req), "assignment.workflow_sync.on_submission", "assignment", String(assignmentId), workflowSyncDetails, {
       assignment_id: assignmentId,
     });
+    const cleanupResult = cleanupSupersededAssignmentWorkAssetsAfterSubmit(assignmentId, currentRound, keepAssetIds);
+    if ((Number(cleanupResult?.removed_links || 0) > 0) || (Number(cleanupResult?.removed_assets || 0) > 0)) {
+      repo.logAudit(actorEmail(req), "assignment.asset.cleanup_post_submit", "assignment", String(assignmentId), {
+        assignment_id: assignmentId,
+        assignment_round: currentRound,
+        keep_asset_ids: keepAssetIds,
+        removed_links: Number(cleanupResult?.removed_links || 0),
+        removed_assets: Number(cleanupResult?.removed_assets || 0),
+        deleted_files: Array.isArray(cleanupResult?.deleted_files) ? cleanupResult.deleted_files.length : 0,
+      }, {
+        assignment_id: assignmentId,
+      });
+    }
     res.status(201).json({ ok: true, submission });
   } catch (err) {
     res.status(400).json({ error: String(err?.message || "Cannot create submission") });
@@ -12203,6 +12352,7 @@ app.get("/api/assets", (req, res) => {
     if (!ensureItemBriefReadAccess(req, res, contentItemId)) {
       return;
     }
+    cleanupExpiredAssignmentWorkDraftAssets({ contentItemId, maxAgeMs: ASSIGNMENT_WORK_SYNC_EXPIRY_MS });
   } else if (role !== "owner" && role !== "admin" && role !== "user") {
     res.status(403).json({ error: "forbidden" });
     return;
