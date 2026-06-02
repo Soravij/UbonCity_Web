@@ -7882,22 +7882,61 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
     }) || null;
 
     if (editorialAssignment?.id) {
+      const latestDraftBeforeSubmit = repo.latestDraftByItem(id);
+      const latestDraftBodyBeforeSubmit = String(latestDraftBeforeSubmit?.body || "").trim();
+      if (!latestDraftBodyBeforeSubmit) {
+        res.status(409).json({
+          error: "latest draft body is required before submit-review",
+          failure_reason: "missing_latest_draft_body",
+        });
+        return;
+      }
+
       const assignmentState = String(editorialAssignment.state || "").trim().toLowerCase();
       const submissionState = assignmentState === "revision_requested" ? "resubmitted" : "submitted";
       const submissionAction = submissionState === "resubmitted" ? "resubmit" : "submit";
-      repo.addAssignmentSubmission({
+      const submission = repo.addAssignmentSubmission({
         assignment_id: editorialAssignment.id,
         submitted_by_user_id: req.authUser?.id,
         submission_state: submissionState,
         contributor_note: note,
       });
+      const latestDraft = repo.latestDraftByItem(id);
+      const latestDraftBody = String(latestDraft?.body || "").trim();
+      if (!latestDraftBody) {
+        res.status(409).json({
+          error: "latest draft body is required before submit-review",
+          failure_reason: "missing_latest_draft_body",
+          submission_id: Number(submission?.id || 0) || null,
+        });
+        return;
+      }
+      const draftDeliverable = repo.createAssignmentSubmissionDeliverable({
+        assignment_id: editorialAssignment.id,
+        submission_id: submission.id,
+        content_item_id: id,
+        deliverable_type: "article_draft",
+        title: String(latestDraft?.draft_title || item.title || "").trim() || null,
+        lang: String(item?.lang || "th").trim().toLowerCase() || "th",
+        text_content: latestDraftBody,
+        payload_json: {
+          excerpt: String(latestDraft?.excerpt || "").trim() || null,
+          meta_title: String(latestDraft?.meta_title || "").trim() || null,
+          meta_description: String(latestDraft?.meta_description || "").trim() || null,
+          draft_id: Number(latestDraft?.id || 0) || null,
+          generation_run_uid: String(latestDraft?.generation_run_uid || "").trim() || null,
+        },
+        status: "submitted",
+      }, actorEmail(req));
       repo.updateAssignmentState(editorialAssignment.id, submissionState, actorEmail(req), {
         actor_role: role,
         reason_code: ASSIGNMENT_REASON_CODE_DEFAULTS[submissionAction],
       });
       repo.logAudit(actorEmail(req), `assignment.submission.${submissionAction}`, "content_item", String(id), {
         assignment_id: editorialAssignment.id,
+        submission_id: submission?.id || null,
         submission_state: submissionState,
+        article_draft_deliverable_id: draftDeliverable?.id || null,
       });
     } else if (role === "editor") {
       res.status(403).json({ error: "editor ต้องมี editorial assignment ที่พร้อม submit หรือ resubmit ก่อนส่งบทความเข้าตรวจ" });
@@ -7909,6 +7948,10 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
     res.json({ ok: true, ...buildArticleProcessPayload(req, nextItem) });
   } catch (err) {
     const msg = String(err?.message || "Cannot submit article for review");
+    if (String(err?.failure_reason || "").trim().toLowerCase() === "missing_latest_draft_body") {
+      res.status(409).json({ error: msg, failure_reason: "missing_latest_draft_body" });
+      return;
+    }
     const status = /invalid .*transition|cannot transition|duplicate submission|requires revision_requested|use resubmitted/i.test(msg) ? 409 : 400;
     res.status(status).json({ error: msg });
   }
