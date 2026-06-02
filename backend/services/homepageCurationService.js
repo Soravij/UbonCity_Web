@@ -306,7 +306,6 @@ async function loadApprovedPlacesForHomepage(lang = "th") {
        COALESCE(pt_req.meta_title, pt_th.meta_title) AS meta_title,
        COALESCE(pt_req.meta_description, pt_th.meta_description) AS meta_description,
        p.image,
-       p.updated_at,
        p.decision_featured_score,
        p.decision_scenario_tags
      FROM places p
@@ -557,14 +556,33 @@ function sanitizeRuleConfig(input) {
 function sanitizeBlocks(blocks, lang = "th") {
   const defaultBlockMap = createDefaultBlockMap(lang);
   const submittedByKey = new Map();
+  const submittedKeysInOrder = [];
 
-  for (const block of Array.isArray(blocks) ? blocks : []) {
+  const orderedBlocks = (Array.isArray(blocks) ? [...blocks] : [])
+    .map((block, index) => ({
+      block,
+      index,
+      position: Number(block?.position || 0) || index + 1,
+    }))
+    .sort((a, b) => {
+      if (a.position !== b.position) return a.position - b.position;
+      return a.index - b.index;
+    });
+
+  for (const entry of orderedBlocks) {
+    const block = entry.block;
     const key = String(block?.key || "").trim().toLowerCase();
     if (!defaultBlockMap.has(key) || submittedByKey.has(key)) continue;
     submittedByKey.set(key, block);
+    submittedKeysInOrder.push(key);
   }
 
-  return FIXED_BLOCK_ORDER.map((key, index) =>
+  const finalKeys = [
+    ...submittedKeysInOrder,
+    ...FIXED_BLOCK_ORDER.filter((key) => !submittedByKey.has(key)),
+  ];
+
+  return finalKeys.map((key, index) =>
     sanitizeBlockByKey(submittedByKey.get(key) || defaultBlockMap.get(key), defaultBlockMap.get(key), index + 1)
   );
 }
