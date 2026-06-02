@@ -8,16 +8,33 @@ const LANGUAGE_OPTIONS = [
   { value: "lo", label: "ลาว" },
 ];
 
+const FIXED_BLOCK_ORDER = ["hero", "top_picks", "trending", "scenarios", "featured_events"];
+const FIXED_BLOCK_TYPES = {
+  hero: "hero",
+  top_picks: "place-list",
+  trending: "place-list",
+  scenarios: "scenario-grid",
+  featured_events: "event-list",
+};
+const HERO_BLOCK_KEY = "hero";
+const EVENT_BLOCK_KEY = "featured_events";
+
 const SOURCE_MODE_OPTIONS = [
-  { value: "manual-first-hybrid", label: "ไฮบริด (เลือกเองก่อน)" },
-  { value: "manual-only", label: "เลือกเองเท่านั้น" },
-  { value: "rule-only", label: "ใช้กฎเท่านั้น" },
+  { value: "manual-first-hybrid", label: "เลือกเองก่อน แล้วระบบช่วยเติม" },
+  { value: "manual-only", label: "ใช้เฉพาะรายการที่เลือกเอง" },
+  { value: "rule-only", label: "ให้ระบบเลือกจากเงื่อนไข" },
 ];
 
 const FALLBACK_MODE_OPTIONS = [
   { value: "latest-approved", label: "ล่าสุดที่อนุมัติแล้ว" },
   { value: "featured", label: "รายการเด่น" },
   { value: "none", label: "ไม่ใช้รายการสำรอง" },
+];
+
+const SORT_BY_OPTIONS = [
+  { value: "featured_then_recent", label: "เด่นก่อน แล้วตามด้วยล่าสุด" },
+  { value: "recent", label: "ล่าสุดก่อน" },
+  { value: "scenario_match", label: "ตรงกับสถานการณ์ก่อน" },
 ];
 
 const ENTITY_TYPE_OPTIONS = [
@@ -31,14 +48,16 @@ const ENTITY_TYPE_LABEL = {
 };
 
 const BLOCK_TYPE_LABEL = {
+  hero: "ฮีโร่",
   "place-list": "รายการสถานที่",
+  "scenario-grid": "กริดสถานการณ์",
   "event-list": "รายการอีเวนต์",
 };
 
 const SOURCE_MODE_LABEL = {
-  "manual-first-hybrid": "ไฮบริด",
-  "manual-only": "เลือกเองเท่านั้น",
-  "rule-only": "ใช้กฎเท่านั้น",
+  "manual-first-hybrid": "เลือกเองก่อน แล้วระบบช่วยเติม",
+  "manual-only": "ใช้เฉพาะรายการที่เลือกเอง",
+  "rule-only": "ให้ระบบเลือกจากเงื่อนไข",
 };
 
 function getEntityTypeLabel(value) {
@@ -53,9 +72,27 @@ function getSourceModeLabel(value) {
   return SOURCE_MODE_LABEL[String(value || "").trim().toLowerCase()] || "ไม่ระบุ";
 }
 
-function createManualItem() {
+function getFixedBlockIndex(key) {
+  return FIXED_BLOCK_ORDER.indexOf(String(key || "").trim().toLowerCase());
+}
+
+function sortBlocksByFixedOrder(blocks) {
+  return [...(Array.isArray(blocks) ? blocks : [])].sort(
+    (a, b) => getFixedBlockIndex(a?.key) - getFixedBlockIndex(b?.key)
+  );
+}
+
+function isHeroBlock(block) {
+  return String(block?.key || "").trim().toLowerCase() === HERO_BLOCK_KEY;
+}
+
+function isEventBlock(block) {
+  return String(block?.key || "").trim().toLowerCase() === EVENT_BLOCK_KEY;
+}
+
+function createManualItem(entityType = "place") {
   return {
-    entity_type: "place",
+    entity_type: entityType,
     entity_id: "",
     category: "",
     slug: "",
@@ -64,79 +101,107 @@ function createManualItem() {
   };
 }
 
+function normalizeRuleConfig(ruleConfig = {}) {
+  return {
+    category_scope: Array.isArray(ruleConfig?.category_scope)
+      ? ruleConfig.category_scope.join(", ")
+      : String(ruleConfig?.category_scope || "").trim(),
+    scenario_tags: Array.isArray(ruleConfig?.scenario_tags)
+      ? ruleConfig.scenario_tags.join(", ")
+      : String(ruleConfig?.scenario_tags || "").trim(),
+    sort_by: String(ruleConfig?.sort_by || "featured_then_recent").trim(),
+  };
+}
+
 function sanitizeBlocks(blocks) {
-  return (Array.isArray(blocks) ? blocks : []).map((block, index) => ({
-    ...block,
-    position: Number(block?.position || index + 1) || index + 1,
-    enabled: Boolean(block?.enabled),
-    min_items: Number(block?.min_items || 0) || 0,
-    max_items: Number(block?.max_items || 0) || 0,
-    manual_items: Array.isArray(block?.manual_items)
+  return sortBlocksByFixedOrder(blocks).map((block, index) => {
+    const key = String(block?.key || "").trim().toLowerCase();
+    const type = FIXED_BLOCK_TYPES[key] || String(block?.type || "place-list").trim().toLowerCase();
+    const hero = isHeroBlock(block);
+    const eventBlock = isEventBlock(block);
+    const manualItems = Array.isArray(block?.manual_items)
       ? block.manual_items.map((item) => ({
-          entity_type: String(item?.entity_type || "place").trim().toLowerCase() || "place",
+          entity_type: eventBlock ? "event" : String(item?.entity_type || "place").trim().toLowerCase() || "place",
           entity_id: item?.entity_id ? String(item.entity_id) : "",
           category: String(item?.category || "").trim(),
           slug: String(item?.slug || "").trim(),
           label: String(item?.label || "").trim(),
           note: String(item?.note || "").trim(),
         }))
-      : [],
-    rule_config: {
-      category_scope: Array.isArray(block?.rule_config?.category_scope)
-        ? block.rule_config.category_scope.join(", ")
-        : String(block?.rule_config?.category_scope || "").trim(),
-      scenario_tags: Array.isArray(block?.rule_config?.scenario_tags)
-        ? block.rule_config.scenario_tags.join(", ")
-        : String(block?.rule_config?.scenario_tags || "").trim(),
-      sort_by: String(block?.rule_config?.sort_by || "featured_then_recent").trim(),
-    },
-  }));
+      : [];
+
+    return {
+      ...block,
+      key,
+      type,
+      position: Number(block?.position || index + 1) || index + 1,
+      enabled: Boolean(block?.enabled),
+      source_mode: hero ? "manual-first-hybrid" : String(block?.source_mode || "manual-first-hybrid").trim().toLowerCase(),
+      fallback_mode: hero ? "none" : String(block?.fallback_mode || "latest-approved").trim().toLowerCase(),
+      min_items: hero ? 0 : Number(block?.min_items || 0) || 0,
+      max_items: hero ? 0 : Number(block?.max_items || 0) || 0,
+      manual_items: hero ? [] : manualItems,
+      rule_config: normalizeRuleConfig(block?.rule_config),
+    };
+  });
 }
 
 function serializeBlocks(blocks) {
-  return (Array.isArray(blocks) ? blocks : []).map((block, index) => ({
-    key: String(block?.key || `block_${index + 1}`).trim().toLowerCase(),
-    type: String(block?.type || "place-list").trim().toLowerCase(),
-    enabled: Boolean(block?.enabled),
-    position: index + 1,
-    title: String(block?.title || "").trim(),
-    subtitle: String(block?.subtitle || "").trim(),
-    source_mode: String(block?.source_mode || "manual-first-hybrid").trim().toLowerCase(),
-    fallback_mode: String(block?.fallback_mode || "latest-approved").trim().toLowerCase(),
-    min_items: Math.max(0, Number(block?.min_items || 0) || 0),
-    max_items: Math.max(0, Number(block?.max_items || 0) || 0),
-    manual_items: (Array.isArray(block?.manual_items) ? block.manual_items : [])
-      .map((item) => ({
-        entity_type: String(item?.entity_type || "place").trim().toLowerCase() || "place",
-        entity_id: Number(item?.entity_id || 0) || null,
-        category: String(item?.category || "").trim().toLowerCase(),
-        slug: String(item?.slug || "").trim(),
-        label: String(item?.label || "").trim(),
-        note: String(item?.note || "").trim(),
-      }))
-      .filter((item) => item.entity_id),
-    rule_config: {
-      category_scope: String(block?.rule_config?.category_scope || "")
-        .split(/[,\n]/g)
-        .map((item) => item.trim().toLowerCase())
-        .filter(Boolean),
-      scenario_tags: String(block?.rule_config?.scenario_tags || "")
-        .split(/[,\n]/g)
-        .map((item) => item.trim().toLowerCase())
-        .filter(Boolean),
-      sort_by: String(block?.rule_config?.sort_by || "featured_then_recent").trim(),
-    },
-  }));
+  return sortBlocksByFixedOrder(blocks).map((block, index) => {
+    const key = String(block?.key || "").trim().toLowerCase();
+    const hero = key === HERO_BLOCK_KEY;
+    const eventBlock = key === EVENT_BLOCK_KEY;
+
+    return {
+      key,
+      type: FIXED_BLOCK_TYPES[key] || String(block?.type || "place-list").trim().toLowerCase(),
+      enabled: Boolean(block?.enabled),
+      position: index + 1,
+      title: String(block?.title || "").trim(),
+      subtitle: String(block?.subtitle || "").trim(),
+      source_mode: hero ? "manual-first-hybrid" : String(block?.source_mode || "manual-first-hybrid").trim().toLowerCase(),
+      fallback_mode: hero ? "none" : String(block?.fallback_mode || "latest-approved").trim().toLowerCase(),
+      min_items: hero ? 0 : Math.max(0, Number(block?.min_items || 0) || 0),
+      max_items: hero ? 0 : Math.max(0, Number(block?.max_items || 0) || 0),
+      manual_items: hero
+        ? []
+        : (Array.isArray(block?.manual_items) ? block.manual_items : [])
+            .map((item) => ({
+              entity_type: eventBlock ? "event" : String(item?.entity_type || "place").trim().toLowerCase() || "place",
+              entity_id: Number(item?.entity_id || 0) || null,
+              category: String(item?.category || "").trim().toLowerCase(),
+              slug: String(item?.slug || "").trim(),
+              label: String(item?.label || "").trim(),
+              note: String(item?.note || "").trim(),
+            }))
+            .filter((item) => item.entity_id),
+      rule_config: {
+        category_scope: String(block?.rule_config?.category_scope || "")
+          .split(/[,\n]/g)
+          .map((item) => item.trim().toLowerCase())
+          .filter(Boolean),
+        scenario_tags: String(block?.rule_config?.scenario_tags || "")
+          .split(/[,\n]/g)
+          .map((item) => item.trim().toLowerCase())
+          .filter(Boolean),
+        sort_by: String(block?.rule_config?.sort_by || "featured_then_recent").trim(),
+      },
+    };
+  });
 }
 
-function createCandidateState() {
+function createCandidateState(entityType = "place") {
   return {
     q: "",
-    entity_type: "place",
+    entity_type: entityType,
     loading: false,
     error: "",
     items: [],
   };
+}
+
+function getDefaultCandidateEntityType(block) {
+  return isEventBlock(block) ? "event" : "place";
 }
 
 export default function HomepageCuration({ token }) {
@@ -160,6 +225,14 @@ export default function HomepageCuration({ token }) {
     [layoutMeta]
   );
 
+  const resetCandidateState = useCallback((nextBlocks) => {
+    const nextState = {};
+    for (const block of Array.isArray(nextBlocks) ? nextBlocks : []) {
+      nextState[block.key] = createCandidateState(getDefaultCandidateEntityType(block));
+    }
+    setCandidateByBlock(nextState);
+  }, []);
+
   const loadLayout = useCallback(async (nextLang = lang) => {
     setLoading(true);
     setMessage("");
@@ -169,17 +242,18 @@ export default function HomepageCuration({ token }) {
         headers: authHeaders(token),
       });
       const item = res.data?.item || null;
+      const nextBlocks = sanitizeBlocks(item?.draft_blocks);
       setLayoutMeta(item);
-      setBlocks(sanitizeBlocks(item?.draft_blocks));
-      setCandidateByBlock({});
+      setBlocks(nextBlocks);
+      resetCandidateState(nextBlocks);
       setPreviewBlocks([]);
       setPreviewError("");
     } catch (error) {
-      setMessage(error.response?.data?.error || "โหลดข้อมูลหน้าจัดหน้าแรกไม่สำเร็จ");
+      setMessage(error.response?.data?.error || "โหลดข้อมูลหน้าแรกไม่สำเร็จ");
     } finally {
       setLoading(false);
     }
-  }, [lang, token]);
+  }, [lang, resetCandidateState, token]);
 
   useEffect(() => {
     loadLayout(lang);
@@ -205,7 +279,7 @@ export default function HomepageCuration({ token }) {
     } catch (error) {
       if (previewRequestSeq.current !== requestId) return;
       setPreviewBlocks([]);
-      setPreviewError(error.response?.data?.error || "โหลดตัวอย่างไม่สำเร็จ");
+      setPreviewError(error.response?.data?.error || "Failed to preview homepage curation layout");
     } finally {
       if (previewRequestSeq.current !== requestId) return;
       setPreviewLoading(false);
@@ -258,7 +332,10 @@ export default function HomepageCuration({ token }) {
     setBlocks((current) =>
       current.map((block, index) =>
         index === blockIndex
-          ? { ...block, manual_items: [...block.manual_items, createManualItem()] }
+          ? {
+              ...block,
+              manual_items: [...block.manual_items, createManualItem(getDefaultCandidateEntityType(block))],
+            }
           : block
       )
     );
@@ -271,13 +348,14 @@ export default function HomepageCuration({ token }) {
     setBlocks((current) =>
       current.map((block, index) => {
         if (index !== blockIndex) return block;
+        const candidateType = getDefaultCandidateEntityType(block);
         const dup = block.manual_items.some(
-          (item) => Number(item?.entity_id || 0) === candidateId && String(item?.entity_type || "") === String(candidate?.entity_type || "")
+          (item) => Number(item?.entity_id || 0) === candidateId && String(item?.entity_type || "") === candidateType
         );
         if (dup) return block;
 
         const nextItem = {
-          entity_type: String(candidate?.entity_type || "place").trim().toLowerCase(),
+          entity_type: candidateType,
           entity_id: String(candidateId),
           category: String(candidate?.category || "").trim(),
           slug: String(candidate?.slug || "").trim(),
@@ -332,12 +410,12 @@ export default function HomepageCuration({ token }) {
 
   async function searchCandidates(block) {
     const key = String(block?.key || "");
-    const state = candidateByBlock[key] || createCandidateState();
-    updateCandidateState(key, { loading: true, error: "", items: [] });
+    const state = candidateByBlock[key] || createCandidateState(getDefaultCandidateEntityType(block));
+    updateCandidateState(key, { loading: true, error: "", items: [], entity_type: getDefaultCandidateEntityType(block) });
     try {
       const res = await api.get("/homepage-curation/candidates", {
         params: {
-          entity_type: state.entity_type,
+          entity_type: getDefaultCandidateEntityType(block),
           lang,
           q: state.q,
           limit: 20,
@@ -345,10 +423,11 @@ export default function HomepageCuration({ token }) {
         headers: authHeaders(token),
       });
       const items = Array.isArray(res.data?.items) ? res.data.items : [];
-      updateCandidateState(key, { loading: false, items });
+      updateCandidateState(key, { loading: false, items, entity_type: getDefaultCandidateEntityType(block) });
     } catch (error) {
       updateCandidateState(key, {
         loading: false,
+        entity_type: getDefaultCandidateEntityType(block),
         error: error.response?.data?.error || "ค้นหารายการไม่สำเร็จ",
         items: [],
       });
@@ -369,12 +448,14 @@ export default function HomepageCuration({ token }) {
         { headers: authHeaders(token) }
       );
       const item = res.data?.item || null;
+      const nextBlocks = sanitizeBlocks(item?.draft_blocks);
       setLayoutMeta(item);
-      setBlocks(sanitizeBlocks(item?.draft_blocks));
+      setBlocks(nextBlocks);
+      resetCandidateState(nextBlocks);
       setMessage("บันทึกฉบับร่างแล้ว");
-      loadPreview(item?.draft_blocks || serializeBlocks(blocks), lang);
+      loadPreview(item?.draft_blocks || serializeBlocks(nextBlocks), lang);
     } catch (error) {
-      setMessage(error.response?.data?.error || "บันทึกหน้าจัดหน้าแรกไม่สำเร็จ");
+      setMessage(error.response?.data?.error || "บันทึกหน้าแรกไม่สำเร็จ");
     } finally {
       setSaving(false);
     }
@@ -393,12 +474,14 @@ export default function HomepageCuration({ token }) {
         { headers: authHeaders(token) }
       );
       const item = res.data?.item || null;
+      const nextBlocks = sanitizeBlocks(item?.draft_blocks);
       setLayoutMeta(item);
-      setBlocks(sanitizeBlocks(item?.draft_blocks));
+      setBlocks(nextBlocks);
+      resetCandidateState(nextBlocks);
       setMessage("เผยแพร่เลย์เอาต์แล้ว");
-      loadPreview(item?.draft_blocks || serializeBlocks(blocks), lang);
+      loadPreview(item?.draft_blocks || serializeBlocks(nextBlocks), lang);
     } catch (error) {
-      setMessage(error.response?.data?.error || "เผยแพร่หน้าจัดหน้าแรกไม่สำเร็จ");
+      setMessage(error.response?.data?.error || "เผยแพร่หน้าแรกไม่สำเร็จ");
     } finally {
       setPublishing(false);
     }
@@ -409,7 +492,7 @@ export default function HomepageCuration({ token }) {
       <div className="card-title-row homepage-curation-head">
         <div>
           <h2>จัดหน้าแรก</h2>
-          <p className="muted">จัดการบล็อกหน้าแรกแบบไฮบริด โดยให้รายการเลือกเองมาก่อนเสมอ</p>
+          <p className="muted">จัดลำดับและเลือกวิธีแสดงผลของช่องคงที่บนหน้าแรก โดยไม่แก้ข้อมูลคอนเทนต์จริง</p>
         </div>
         <div className="homepage-curation-head-actions">
           <button type="button" className="ghost" onClick={() => loadLayout(lang)} disabled={loading}>
@@ -457,22 +540,22 @@ export default function HomepageCuration({ token }) {
       {message ? <p className="status">{message}</p> : null}
 
       {loading ? (
-        <p className="muted">กำลังโหลดข้อมูลหน้าจัดหน้าแรก...</p>
+        <p className="muted">กำลังโหลดข้อมูลหน้าแรก...</p>
       ) : (
         <div className="homepage-curation-block-list">
           <article className="homepage-curation-block-card">
             <div className="homepage-curation-block-head">
               <div>
                 <p className="homepage-curation-block-kicker">ตัวอย่างผลลัพธ์</p>
-                <h3>ตัวอย่างผลลัพธ์หน้าแรก</h3>
-                <p className="muted">ผลลัพธ์จริงหลังรวมรายการเลือกเอง กฎ และรายการสำรอง</p>
+                <h3>ตัวอย่างหน้าแรก</h3>
+                <p className="muted">ผลลัพธ์จากการจัดวางช่องคงที่หลังรวมรายการเลือกเอง กฎ และรายการสำรอง</p>
               </div>
             </div>
 
             {previewError ? <p className="status">{previewError}</p> : null}
             {previewLoading ? <p className="muted">กำลังประมวลผลตัวอย่าง...</p> : null}
             {!previewLoading && !previewBlocks.length && !previewError ? (
-              <p className="muted">ยังไม่พบบล็อกที่เปิดใช้งานในฉบับร่างปัจจุบัน</p>
+              <p className="muted">ยังไม่พบบล็อกที่แสดงผลได้ในฉบับร่างปัจจุบัน</p>
             ) : null}
 
             {previewBlocks.length ? (
@@ -527,7 +610,10 @@ export default function HomepageCuration({ token }) {
           </article>
 
           {blocks.map((block, index) => {
-            const candidateState = candidateByBlock[block.key] || createCandidateState();
+            const candidateState = candidateByBlock[block.key] || createCandidateState(getDefaultCandidateEntityType(block));
+            const hero = isHeroBlock(block);
+            const eventBlock = isEventBlock(block);
+
             return (
               <article key={block.key || index} className="homepage-curation-block-card">
                 <div className="homepage-curation-block-head">
@@ -542,12 +628,7 @@ export default function HomepageCuration({ token }) {
                     <button type="button" className="ghost tiny-btn" onClick={() => moveBlock(index, -1)} disabled={index === 0}>
                       ขึ้น
                     </button>
-                    <button
-                      type="button"
-                      className="ghost tiny-btn"
-                      onClick={() => moveBlock(index, 1)}
-                      disabled={index === blocks.length - 1}
-                    >
+                    <button type="button" className="ghost tiny-btn" onClick={() => moveBlock(index, 1)} disabled={index === blocks.length - 1}>
                       ลง
                     </button>
                   </div>
@@ -562,50 +643,6 @@ export default function HomepageCuration({ token }) {
                     คำอธิบายย่อย
                     <input value={block.subtitle} onChange={(event) => updateBlock(index, { subtitle: event.target.value })} />
                   </label>
-                  <label>
-                    โหมดแหล่งข้อมูล
-                    <select
-                      value={block.source_mode}
-                      onChange={(event) => updateBlock(index, { source_mode: event.target.value })}
-                    >
-                      {SOURCE_MODE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    โหมดรายการสำรอง
-                    <select
-                      value={block.fallback_mode}
-                      onChange={(event) => updateBlock(index, { fallback_mode: event.target.value })}
-                    >
-                      {FALLBACK_MODE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    จำนวนขั้นต่ำ
-                    <input
-                      type="number"
-                      min="0"
-                      value={block.min_items}
-                      onChange={(event) => updateBlock(index, { min_items: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    จำนวนสูงสุด
-                    <input
-                      type="number"
-                      min="0"
-                      value={block.max_items}
-                      onChange={(event) => updateBlock(index, { max_items: event.target.value })}
-                    />
-                  </label>
                   <label className="homepage-curation-checkbox">
                     <input
                       type="checkbox"
@@ -614,170 +651,185 @@ export default function HomepageCuration({ token }) {
                     />
                     <span>เปิดใช้งานบล็อกนี้</span>
                   </label>
-                </div>
 
-                <div className="homepage-curation-rule-panel">
-                  <h4>ตั้งค่ากฎ</h4>
-                  <div className="grid two">
-                    <label>
-                      ขอบเขตหมวดหมู่
-                      <input
-                        value={block.rule_config?.category_scope || ""}
-                        onChange={(event) => updateRuleConfig(index, { category_scope: event.target.value })}
-                        placeholder="เช่น สถานที่ท่องเที่ยว, คาเฟ่, ร้านอาหาร"
-                      />
-                    </label>
-                    <label>
-                      แท็กสถานการณ์
-                      <input
-                        value={block.rule_config?.scenario_tags || ""}
-                        onChange={(event) => updateRuleConfig(index, { scenario_tags: event.target.value })}
-                        placeholder="เช่น เที่ยววันเดียว, งบประหยัด"
-                      />
-                    </label>
-                    <label className="full">
-                      เรียงลำดับด้วย
-                      <input
-                        value={block.rule_config?.sort_by || ""}
-                        onChange={(event) => updateRuleConfig(index, { sort_by: event.target.value })}
-                        placeholder="เช่น เด่นก่อนแล้วค่อยล่าสุด / ล่าสุด / ตรงสถานการณ์"
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                <div className="homepage-curation-rule-panel">
-                  <div className="card-title-row">
-                    <h4>รายการเลือกเอง</h4>
-                    <button type="button" className="ghost tiny-btn" onClick={() => addManualItem(index)}>
-                      เพิ่มแถวว่าง
-                    </button>
-                  </div>
-
-                  <div className="grid two">
-                    <label>
-                      ประเภทรายการ
-                      <select
-                        value={candidateState.entity_type}
-                        onChange={(event) => updateCandidateState(block.key, { entity_type: event.target.value })}
-                      >
-                        {ENTITY_TYPE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      ค้นหารายการ
-                      <input
-                        value={candidateState.q}
-                        onChange={(event) => updateCandidateState(block.key, { q: event.target.value })}
-                        placeholder="ค้นหาด้วยชื่อหรือรหัสรายการ"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="actions">
-                    <button type="button" className="ghost" onClick={() => searchCandidates(block)} disabled={candidateState.loading}>
-                      {candidateState.loading ? "กำลังค้นหา..." : "ค้นหารายการ"}
-                    </button>
-                  </div>
-
-                  {candidateState.error ? <p className="muted">{candidateState.error}</p> : null}
-                  {candidateState.items.length ? (
-                    <div className="homepage-curation-manual-list">
-                      {candidateState.items.map((candidate) => (
-                        <div key={`${block.key}-cand-${candidate.entity_type}-${candidate.id}`} className="homepage-curation-manual-row">
-                          <div>
-                            <strong>{candidate.title || "-"}</strong>
-                            <p className="muted">
-                              {getEntityTypeLabel(candidate.entity_type)} #{candidate.id}
-                              {candidate.category ? ` | ${candidate.category}` : ""}
-                              {candidate.slug ? ` | รหัส: ${candidate.slug}` : ""}
-                            </p>
-                          </div>
-                          <div className="actions">
-                            <button type="button" className="ghost tiny-btn" onClick={() => addManualCandidate(index, candidate)}>
-                              เพิ่มเข้ารายการเลือกเอง
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                  {!hero ? (
+                    <>
+                      <label>
+                        วิธีเลือกเนื้อหา
+                        <select value={block.source_mode} onChange={(event) => updateBlock(index, { source_mode: event.target.value })}>
+                          {SOURCE_MODE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        รายการสำรอง
+                        <select value={block.fallback_mode} onChange={(event) => updateBlock(index, { fallback_mode: event.target.value })}>
+                          {FALLBACK_MODE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        จำนวนขั้นต่ำ
+                        <input type="number" min="0" value={block.min_items} onChange={(event) => updateBlock(index, { min_items: event.target.value })} />
+                      </label>
+                      <label>
+                        จำนวนสูงสุด
+                        <input type="number" min="0" value={block.max_items} onChange={(event) => updateBlock(index, { max_items: event.target.value })} />
+                      </label>
+                    </>
                   ) : null}
-
-                  {block.manual_items.length === 0 ? (
-                    <p className="muted">ยังไม่มีรายการเลือกเอง หากมี ระบบจะเลือกก่อนเสมอ</p>
-                  ) : (
-                    <div className="homepage-curation-manual-list">
-                      {block.manual_items.map((item, itemIndex) => (
-                        <div key={`${block.key}-manual-${itemIndex}`} className="homepage-curation-manual-row">
-                          <label>
-                            ประเภท
-                            <select
-                              value={item.entity_type}
-                              onChange={(event) =>
-                                updateManualItem(index, itemIndex, { entity_type: event.target.value })
-                              }
-                            >
-                              {ENTITY_TYPE_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label>
-                            รหัสรายการ
-                            <input
-                              value={item.entity_id}
-                              onChange={(event) => updateManualItem(index, itemIndex, { entity_id: event.target.value })}
-                              placeholder="123"
-                            />
-                          </label>
-                          <label>
-                            หมวดหมู่
-                            <input
-                              value={item.category}
-                              onChange={(event) => updateManualItem(index, itemIndex, { category: event.target.value })}
-                              placeholder="เช่น สถานที่ท่องเที่ยว"
-                            />
-                          </label>
-                          <label>
-                            รหัสรายการ
-                            <input
-                              value={item.slug}
-                              onChange={(event) => updateManualItem(index, itemIndex, { slug: event.target.value })}
-                              placeholder="เช่น wat-phra-that"
-                            />
-                          </label>
-                          <label>
-                            ป้ายชื่อ
-                            <input
-                              value={item.label}
-                              onChange={(event) => updateManualItem(index, itemIndex, { label: event.target.value })}
-                              placeholder="ชื่อภายในทีม"
-                            />
-                          </label>
-                          <label>
-                            หมายเหตุ
-                            <input
-                              value={item.note}
-                              onChange={(event) => updateManualItem(index, itemIndex, { note: event.target.value })}
-                              placeholder="เหตุผลที่ต้องอยู่ในบล็อกนี้"
-                            />
-                          </label>
-                          <div className="actions">
-                            <button type="button" className="danger tiny-btn" onClick={() => removeManualItem(index, itemIndex)}>
-                              ลบ
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
+
+                {!hero ? (
+                  <div className="homepage-curation-rule-panel">
+                    <h4>ตั้งค่ากฎ</h4>
+                    <div className="grid two">
+                      <label>
+                        ขอบเขตหมวดหมู่
+                        <input
+                          value={block.rule_config?.category_scope || ""}
+                          onChange={(event) => updateRuleConfig(index, { category_scope: event.target.value })}
+                          placeholder="เช่น attractions, cafes, restaurants"
+                        />
+                      </label>
+                      <label>
+                        แท็กสถานการณ์
+                        <input
+                          value={block.rule_config?.scenario_tags || ""}
+                          onChange={(event) => updateRuleConfig(index, { scenario_tags: event.target.value })}
+                          placeholder="เช่น day-trip, budget-500, family"
+                        />
+                      </label>
+                      <label className="full">
+                        วิธีเรียงลำดับ
+                        <select value={block.rule_config?.sort_by || "featured_then_recent"} onChange={(event) => updateRuleConfig(index, { sort_by: event.target.value })}>
+                          {SORT_BY_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {!hero ? (
+                  <div className="homepage-curation-rule-panel">
+                    <div className="card-title-row">
+                      <h4>รายการเลือกเอง</h4>
+                      <button type="button" className="ghost tiny-btn" onClick={() => addManualItem(index)}>
+                        เพิ่มแถวว่าง
+                      </button>
+                    </div>
+
+                    <div className="grid two">
+                      <label>
+                        ประเภทรายการ
+                        <select value={getDefaultCandidateEntityType(block)} disabled>
+                          {ENTITY_TYPE_OPTIONS.filter((option) => option.value === getDefaultCandidateEntityType(block)).map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        ค้นหารายการ
+                        <input
+                          value={candidateState.q}
+                          onChange={(event) => updateCandidateState(block.key, { q: event.target.value, entity_type: getDefaultCandidateEntityType(block) })}
+                          placeholder={eventBlock ? "ค้นหาชื่ออีเวนต์" : "ค้นหาด้วยชื่อหรือรหัสรายการ"}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="actions">
+                      <button type="button" className="ghost" onClick={() => searchCandidates(block)} disabled={candidateState.loading}>
+                        {candidateState.loading ? "กำลังค้นหา..." : "ค้นหารายการ"}
+                      </button>
+                    </div>
+
+                    {candidateState.error ? <p className="muted">{candidateState.error}</p> : null}
+                    {candidateState.items.length ? (
+                      <div className="homepage-curation-manual-list">
+                        {candidateState.items.map((candidate) => (
+                          <div key={`${block.key}-cand-${candidate.entity_type}-${candidate.id}`} className="homepage-curation-manual-row">
+                            <div>
+                              <strong>{candidate.title || "-"}</strong>
+                              <p className="muted">
+                                {getEntityTypeLabel(candidate.entity_type)} #{candidate.id}
+                                {candidate.category ? ` | ${candidate.category}` : ""}
+                                {candidate.slug ? ` | รหัส: ${candidate.slug}` : ""}
+                              </p>
+                            </div>
+                            <div className="actions">
+                              <button type="button" className="ghost tiny-btn" onClick={() => addManualCandidate(index, candidate)}>
+                                เพิ่มเข้ารายการเลือกเอง
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {block.manual_items.length === 0 ? (
+                      <p className="muted">ยังไม่มีรายการเลือกเอง ระบบจะใช้วิธีเลือกเนื้อหาตามที่ตั้งไว้</p>
+                    ) : (
+                      <div className="homepage-curation-manual-list">
+                        {block.manual_items.map((item, itemIndex) => (
+                          <div key={`${block.key}-manual-${itemIndex}`} className="homepage-curation-manual-row">
+                            <label>
+                              ประเภท
+                              <select
+                                value={eventBlock ? "event" : item.entity_type}
+                                disabled={eventBlock}
+                                onChange={(event) => updateManualItem(index, itemIndex, { entity_type: event.target.value })}
+                              >
+                                {(eventBlock ? ENTITY_TYPE_OPTIONS.filter((option) => option.value === "event") : ENTITY_TYPE_OPTIONS).map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              รหัสรายการ
+                              <input value={item.entity_id} onChange={(event) => updateManualItem(index, itemIndex, { entity_id: event.target.value })} placeholder="123" />
+                            </label>
+                            <label>
+                              หมวดหมู่
+                              <input value={item.category} onChange={(event) => updateManualItem(index, itemIndex, { category: event.target.value })} placeholder="เช่น attractions" />
+                            </label>
+                            <label>
+                              รหัส slug
+                              <input value={item.slug} onChange={(event) => updateManualItem(index, itemIndex, { slug: event.target.value })} placeholder="เช่น wat-phra-that" />
+                            </label>
+                            <label>
+                              ป้ายชื่อ
+                              <input value={item.label} onChange={(event) => updateManualItem(index, itemIndex, { label: event.target.value })} placeholder="ชื่อภายในทีม" />
+                            </label>
+                            <label>
+                              หมายเหตุ
+                              <input value={item.note} onChange={(event) => updateManualItem(index, itemIndex, { note: event.target.value })} placeholder="เหตุผลที่ต้องอยู่ในบล็อกนี้" />
+                            </label>
+                            <div className="actions">
+                              <button type="button" className="danger tiny-btn" onClick={() => removeManualItem(index, itemIndex)}>
+                                ลบ
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </article>
             );
           })}
