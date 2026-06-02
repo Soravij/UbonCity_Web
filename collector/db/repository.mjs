@@ -1841,6 +1841,9 @@ function ensureContentAssetWorkflowColumns(db) {
   if (!names.has("assignment_surface")) {
     db.exec("ALTER TABLE content_assets ADD COLUMN assignment_surface TEXT;");
   }
+  if (!names.has("assignment_sync_batch_id")) {
+    db.exec("ALTER TABLE content_assets ADD COLUMN assignment_sync_batch_id TEXT;");
+  }
 
   db.exec(`
     UPDATE content_assets
@@ -10437,7 +10440,6 @@ function deriveExpectedDeliverablesFromHandoff(handoffPackage) {
   }
   return normalizeAssignmentDeliverableTypeList(derived);
 }
-
 
 
 
