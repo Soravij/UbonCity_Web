@@ -72,14 +72,39 @@ function getSourceModeLabel(value) {
   return SOURCE_MODE_LABEL[String(value || "").trim().toLowerCase()] || "ไม่ระบุ";
 }
 
-function getFixedBlockIndex(key) {
-  return FIXED_BLOCK_ORDER.indexOf(String(key || "").trim().toLowerCase());
-}
+function normalizeFixedBlocksInCurrentOrder(blocks) {
+  const seenKeys = new Set();
+  const normalized = [];
 
-function sortBlocksByFixedOrder(blocks) {
-  return [...(Array.isArray(blocks) ? blocks : [])].sort(
-    (a, b) => getFixedBlockIndex(a?.key) - getFixedBlockIndex(b?.key)
-  );
+  for (const block of Array.isArray(blocks) ? blocks : []) {
+    const key = String(block?.key || "").trim().toLowerCase();
+    if (!FIXED_BLOCK_ORDER.includes(key) || seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    normalized.push(block);
+  }
+
+  for (const key of FIXED_BLOCK_ORDER) {
+    if (seenKeys.has(key)) continue;
+    normalized.push({
+      key,
+      type: FIXED_BLOCK_TYPES[key],
+      enabled: true,
+      title: "",
+      subtitle: "",
+      source_mode: "manual-first-hybrid",
+      fallback_mode: key === HERO_BLOCK_KEY ? "none" : "latest-approved",
+      min_items: key === HERO_BLOCK_KEY ? 0 : 0,
+      max_items: key === HERO_BLOCK_KEY ? 0 : 0,
+      manual_items: [],
+      rule_config: {
+        category_scope: "",
+        scenario_tags: "",
+        sort_by: "featured_then_recent",
+      },
+    });
+  }
+
+  return normalized;
 }
 
 function isHeroBlock(block) {
@@ -114,7 +139,7 @@ function normalizeRuleConfig(ruleConfig = {}) {
 }
 
 function sanitizeBlocks(blocks) {
-  return sortBlocksByFixedOrder(blocks).map((block, index) => {
+  return normalizeFixedBlocksInCurrentOrder(blocks).map((block, index) => {
     const key = String(block?.key || "").trim().toLowerCase();
     const type = FIXED_BLOCK_TYPES[key] || String(block?.type || "place-list").trim().toLowerCase();
     const hero = isHeroBlock(block);
@@ -147,7 +172,7 @@ function sanitizeBlocks(blocks) {
 }
 
 function serializeBlocks(blocks) {
-  return sortBlocksByFixedOrder(blocks).map((block, index) => {
+  return normalizeFixedBlocksInCurrentOrder(blocks).map((block, index) => {
     const key = String(block?.key || "").trim().toLowerCase();
     const hero = key === HERO_BLOCK_KEY;
     const eventBlock = key === EVENT_BLOCK_KEY;
