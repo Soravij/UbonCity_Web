@@ -300,6 +300,46 @@ function uniqueList(values = []) {
   return out;
 }
 
+function isLikelyUrl(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return false;
+  return /^https?:\/\//.test(text) || /^\/(api|uploads|collector)(\/|$)/.test(text);
+}
+
+function isLikelySourceOnlyText(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  if (isLikelyUrl(text)) return true;
+  const urlMatches = text.match(/https?:\/\/\S+/gi) || [];
+  if (urlMatches.length !== 1) return false;
+  const remainder = text.replace(urlMatches[0], "").replace(/[()[\]<>:|-]/g, " ").trim();
+  return remainder.length < 16;
+}
+
+function sanitizeTaxonomyText(value, options = {}) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  if (options.rejectUnknown && text.toLowerCase() === "unknown") return null;
+  if (options.rejectUrls !== false && isLikelySourceOnlyText(text)) return null;
+  const maxLength = Math.max(40, Number(options.maxLength || 220) || 220);
+  if (options.rejectLongText && text.length > maxLength) return null;
+  const rawMaxWords = Number(options.maxWords);
+  const maxWords = Number.isFinite(rawMaxWords) && rawMaxWords > 0 ? Math.max(4, rawMaxWords) : 0;
+  if (maxWords > 0 && text.split(/\s+/).length > maxWords) return null;
+  return text;
+}
+
+function sanitizeTaxonomyList(values = [], options = {}) {
+  const out = [];
+  for (const raw of values) {
+    const text = sanitizeTaxonomyText(raw, options);
+    if (!text) continue;
+    out.push(text);
+  }
+  const maxItems = Math.max(1, Math.min(12, Number(options.maxItems || 6) || 6));
+  return uniqueList(out).slice(0, maxItems);
+}
+
 function flattenApprovedContextTexts(approvedContext = []) {
   const out = [];
   for (const row of approvedContext) {
@@ -318,6 +358,7 @@ function pickApprovedEvidence(approvedContext = [], options = {}) {
   const contextTypes = Array.isArray(options.contextTypes) ? options.contextTypes.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean) : [];
   const keywords = Array.isArray(options.keywords) ? options.keywords.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean) : [];
   const maxItems = Math.max(1, Math.min(12, Number(options.maxItems || 6) || 6));
+  const matchMode = String(options.matchMode || "or").trim().toLowerCase();
   const out = [];
 
   for (const row of approvedContext) {
@@ -330,7 +371,18 @@ function pickApprovedEvidence(approvedContext = [], options = {}) {
 
     const typeMatched = contextTypes.length > 0 && contextTypes.includes(rowType);
     const keywordMatched = keywords.length > 0 && rowValues.some((value) => keywords.some((kw) => value.toLowerCase().includes(kw)));
-    const isMatch = contextTypes.length || keywords.length ? (typeMatched || keywordMatched) : false;
+    let isMatch = false;
+    if (contextTypes.length || keywords.length) {
+      if (matchMode === "type_only") {
+        isMatch = typeMatched;
+      } else if (matchMode === "keyword_only") {
+        isMatch = keywordMatched;
+      } else if (matchMode === "and") {
+        isMatch = typeMatched && keywordMatched;
+      } else {
+        isMatch = typeMatched || keywordMatched;
+      }
+    }
     if (!isMatch) continue;
 
     for (const value of rowValues) {
@@ -394,6 +446,37 @@ function extractFactualApprovedFacts(approvedContext = [], options = {}) {
   return uniqueList(out);
 }
 
+function detectCategoryMismatch(item = {}, approvedContext = []) {
+  const currentCategory = String(item?.category || "").trim().toLowerCase();
+  const currentType = String(item?.type || "").trim().toLowerCase();
+  const corpus = [
+    String(item?.title || "").trim(),
+    ...flattenApprovedContextTexts(approvedContext),
+  ].join(" ").toLowerCase();
+  const contextTypes = approvedContext.map((row) => String(row?.context_type || "").trim().toLowerCase());
+  const countMatches = (values, candidates) => candidates.reduce((count, candidate) => {
+    return count + (values.some((value) => value.includes(candidate)) ? 1 : 0);
+  }, 0);
+
+  const restaurantScore = countMatches([corpus], ["cafe", "coffee", "matcha", "menu", "drink", "dessert", "restaurant", "brunch"])
+    + countMatches(contextTypes, ["menu", "restaurant_feature", "food", "drink", "service_style", "seating", "cuisine_type"]);
+  const hotelScore = countMatches([corpus], ["hotel", "resort", "suite", "villa", "check-in", "check out", "stay"])
+    + countMatches(contextTypes, ["room_type", "amenity", "check_in_out", "booking_channel"]);
+  const eventScore = countMatches([corpus], ["festival", "event", "concert", "fair", "exhibition", "ticket", "schedule"])
+    + countMatches(contextTypes, ["date_time", "schedule", "ticketing", "venue"]);
+
+  if (restaurantScore >= 2 && !hasCategoryHint(currentCategory, ["restaurant", "cafe", "food"])) {
+    return { risk: "category_mismatch", suspectedCategory: "restaurant" };
+  }
+  if (hotelScore >= 2 && !hasCategoryHint(currentCategory, ["hotel", "resort"])) {
+    return { risk: "category_mismatch", suspectedCategory: "hotel" };
+  }
+  if (eventScore >= 2 && currentType !== "event" && !hasCategoryHint(currentCategory, ["event", "festival"])) {
+    return { risk: "category_mismatch", suspectedCategory: "event" };
+  }
+  return null;
+}
+
 export function buildFieldPackContractFromCleanContext(cleanContext) {
   const context = cleanContext && typeof cleanContext === "object" ? cleanContext : null;
   if (!context) return null;
@@ -435,6 +518,7 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
     .filter((row) => !toText(row?.selected_text) && (row?.selected_numeric == null) && (!Array.isArray(row?.selected_list) || row.selected_list.length < 1))
     .map((row) => toText(row?.context_type) || "context_item")
     .filter(Boolean);
+  const categoryMismatch = detectCategoryMismatch(item, approvedContext);
 
   const scopedStrictRules = [];
   if (isEventItem) {
@@ -490,47 +574,92 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
   }
 
   const eventDateMissing = isEventItem && strictNeedsVerification.includes("event_date_hints");
+  const categoryReviewNote = categoryMismatch
+    ? `Review category dropdown: content may fit ${categoryMismatch.suspectedCategory}.`
+    : null;
 
   const universalProfile = {
-    highlights: pickApprovedEvidence(approvedContext, { contextTypes: ["feature", "highlight"], keywords: ["เด่น", "highlight", "feature"] }),
-    good_to_know: pickApprovedEvidence(approvedContext, { contextTypes: ["tip", "fact"], keywords: ["ควรรู้", "note", "tip"] }),
-    why_visit: pickApprovedEvidence(approvedContext, { contextTypes: ["feature", "ambience"], keywords: ["บรรยากาศ", "experience", "กิจกรรม"] }),
-    recommended_for: pickApprovedEvidence(approvedContext, { contextTypes: ["audience"], keywords: ["เหมาะกับ", "recommended for"] }),
-    best_for: pickApprovedEvidence(approvedContext, { contextTypes: ["audience"], keywords: ["best for", "เหมาะ", "สาย"] }),
-    nearby: pickApprovedEvidence(approvedContext, { contextTypes: ["nearby_landmark"], keywords: ["nearby", "ใกล้", "landmark"] }),
-    local_notes: uniqueList([
-      ...pickApprovedEvidence(approvedContext, { contextTypes: ["local_note", "tip"], keywords: ["local", "ชุมชน", "ท้องถิ่น"] }),
+    highlights: sanitizeTaxonomyList(
+      pickApprovedEvidence(approvedContext, { contextTypes: ["feature", "highlight"], keywords: ["highlight", "feature"] }),
+      { maxLength: 180, rejectLongText: true }
+    ),
+    good_to_know: sanitizeTaxonomyList(
+      pickApprovedEvidence(approvedContext, {
+        contextTypes: ["tip", "opening_hours", "parking", "reservation", "accessibility"],
+        matchMode: "type_only",
+      }),
+      { maxLength: 220, rejectLongText: true }
+    ),
+    why_visit: sanitizeTaxonomyList(
+      pickApprovedEvidence(approvedContext, { contextTypes: ["feature", "highlight", "ambience"], matchMode: "type_only" }),
+      { maxLength: 220, rejectLongText: true }
+    ),
+    recommended_for: pickApprovedEvidence(approvedContext, { contextTypes: ["audience"], keywords: ["recommended for", "couples", "families", "friends"] }),
+    best_for: pickApprovedEvidence(approvedContext, { contextTypes: ["audience"], keywords: ["best for", "couples", "families", "friends"] }),
+    nearby: pickApprovedEvidence(approvedContext, { contextTypes: ["nearby_landmark"], keywords: ["nearby", "landmark"] }),
+    local_notes: sanitizeTaxonomyList([
+      ...pickApprovedEvidence(approvedContext, { contextTypes: ["local_note"], matchMode: "type_only" }),
       ...approvedContext
         .map((row) => String(row?.editor_note || "").trim())
         .filter(Boolean),
-    ]),
+      ...(categoryReviewNote ? [categoryReviewNote] : []),
+    ], { maxLength: 220, rejectLongText: true }),
   };
 
   const practicalProfile = {
-    price_range: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["price", "pricing"], keywords: ["price", "ราคา", "บาท"] })),
-    parking: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["parking"], keywords: ["parking", "ที่จอด"] })) || "unknown",
-    pet_friendly: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["pet", "pet_policy"], keywords: ["pet", "สัตว์เลี้ยง"] })) || "unknown",
-    family_friendly: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["family"], keywords: ["family", "ครอบครัว", "เด็ก"] })) || "unknown",
-    accessibility: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible", "ทางลาด"] })) || "unknown",
-    opening_hours_note: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["opening_hours", "schedule"], keywords: ["open", "hour", "เวลาเปิด", "ปิด"] })),
-    reservation_needed: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["reservation"], keywords: ["reserve", "booking", "จอง"] })) || "unknown",
+    price_range: sanitizeTaxonomyText(
+      firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["price", "pricing", "fee", "ticket", "menu_price"], matchMode: "type_only" }))
+    ),
+    parking: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["parking"], keywords: ["parking"] })) || "unknown",
+    pet_friendly: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["pet", "pet_policy"], keywords: ["pet"] })) || "unknown",
+    family_friendly: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["family"], keywords: ["family", "kids", "children"] })) || "unknown",
+    accessibility: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["accessibility"], keywords: ["wheelchair", "accessible"] })) || "unknown",
+    opening_hours_note: sanitizeTaxonomyText(
+      firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["opening_hours", "schedule"], keywords: ["open", "hour", "hours", "closed"] })),
+      { maxLength: 160, rejectLongText: true }
+    ),
+    reservation_needed: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["reservation"], keywords: ["reserve", "booking"] })) || "unknown",
   };
 
   const placeProfile = {
-    view_type: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["view_type"], keywords: ["river", "mountain", "city view", "วิว"] })),
-    atmosphere: pickApprovedEvidence(approvedContext, { contextTypes: ["ambience"], keywords: ["บรรยากาศ", "calm", "vibe"] }),
-    photo_spots: pickApprovedEvidence(approvedContext, { contextTypes: ["photo_spot"], keywords: ["photo", "spot", "มุมถ่าย"] }),
-    visit_duration: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["visit_duration"], keywords: ["hour", "ชม", "ใช้เวลา"] })),
-    best_time_to_visit: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["best_time"], keywords: ["morning", "evening", "golden hour", "ช่วงเวลา"] })),
+    view_type: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["view_type"], keywords: ["river", "mountain", "city view", "view"] })),
+    atmosphere: sanitizeTaxonomyList(
+      pickApprovedEvidence(approvedContext, { contextTypes: ["ambience"], matchMode: "type_only" }),
+      { maxLength: 160, maxWords: 24, rejectLongText: true }
+    ),
+    photo_spots: sanitizeTaxonomyList(
+      pickApprovedEvidence(approvedContext, { contextTypes: ["photo_spot"], matchMode: "type_only" }),
+      { maxLength: 120, maxWords: 16, rejectLongText: true }
+    ),
+    visit_duration: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["visit_duration"], keywords: ["hour", "minutes", "duration"] })),
+    best_time_to_visit: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["best_time"], keywords: ["morning", "evening", "golden hour", "best time"] })),
   };
 
   const restaurantProfile = {
-    restaurant_features: pickApprovedEvidence(approvedContext, { contextTypes: ["restaurant_feature", "service_style"], keywords: ["menu", "service", "coffee", "อาหาร"] }),
-    signature_menu: pickApprovedEvidence(approvedContext, { contextTypes: ["menu"], keywords: ["signature", "recommended menu", "เมนู"] }),
-    cuisine_type: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["cuisine_type"], keywords: ["thai", "fusion", "local", "อาหาร"] })),
-    price_signals: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["price", "pricing"], keywords: ["price", "ราคา", "บาท"] })),
-    service_style: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["service_style"], keywords: ["self service", "table service", "บริการ"] })),
-    seating_vibe: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["seating", "ambience"], keywords: ["indoor", "outdoor", "seat", "ที่นั่ง"] })),
+    restaurant_features: sanitizeTaxonomyList(
+      pickApprovedEvidence(approvedContext, {
+        contextTypes: ["restaurant_feature", "food", "drink", "menu", "service_style", "seating", "cafe"],
+        matchMode: "type_only",
+      }),
+      { maxLength: 180, maxWords: 28, rejectLongText: true }
+    ),
+    signature_menu: sanitizeTaxonomyList(
+      pickApprovedEvidence(approvedContext, { contextTypes: ["menu"], matchMode: "type_only" }),
+      { maxLength: 120, rejectLongText: true }
+    ),
+    cuisine_type: firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["cuisine_type"], keywords: ["thai", "fusion", "local", "cuisine"] })),
+    price_signals: sanitizeTaxonomyText(
+      firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["price", "pricing", "fee", "ticket", "menu_price"], matchMode: "type_only" })),
+      { maxLength: 120, rejectLongText: true }
+    ),
+    service_style: sanitizeTaxonomyText(
+      firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["service_style"], matchMode: "type_only" })),
+      { maxLength: 120, rejectLongText: true }
+    ),
+    seating_vibe: sanitizeTaxonomyText(
+      firstOrNull(pickApprovedEvidence(approvedContext, { contextTypes: ["seating"], matchMode: "type_only" })),
+      { maxLength: 120, rejectLongText: true }
+    ),
   };
 
   const hotelProfile = {
@@ -561,6 +690,7 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
       ...missingFields,
       ...verifyRequired,
       ...strictNeedsVerification,
+      ...(categoryMismatch ? ["category"] : []),
     ]),
     publish_blockers: uniqueList([
       ...minMissing,
@@ -580,13 +710,22 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
       suggested_page_blocks: suggestedPageBlocks,
       priority_cta: priorityCta,
       target_audience: [],
-      content_risks: qualityGaps,
+      content_risks: uniqueList([
+        ...qualityGaps,
+        ...(categoryMismatch ? ["category_mismatch"] : []),
+      ]),
       missing_fields: missingFields,
-      verify_required: verifyRequired,
+      verify_required: uniqueList([
+        ...verifyRequired,
+        ...(categoryMismatch ? ["category"] : []),
+      ]),
     },
     checklists: {
       missing_data: missingFields,
-      verify_required: verifyRequired,
+      verify_required: uniqueList([
+        ...verifyRequired,
+        ...(categoryMismatch ? ["category"] : []),
+      ]),
       quality_gaps: qualityGaps,
     },
     universal_curation_profile: universalProfile,
