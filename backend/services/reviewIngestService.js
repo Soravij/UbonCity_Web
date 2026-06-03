@@ -12,6 +12,10 @@ const __dirname = path.dirname(__filename);
 const BACKEND_UPLOADS_DIR = path.resolve(__dirname, "..", "uploads");
 const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
 
+function isDebugDiagnosticsEnabled() {
+  return String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
+}
+
 function normalizeContentType(value) {
   const v = String(value || "").trim().toLowerCase();
   if (v === "place" || v === "event") return v;
@@ -70,7 +74,24 @@ async function mirrorImageToBackendStorage(sourceUrl, sourceBaseUrl) {
   if (!response.ok) throw new Error(`cannot fetch media (${response.status})`);
 
   const contentType = String(response.headers.get("content-type") || "").trim().toLowerCase();
-  if (!contentType.startsWith("image/")) throw new Error(`unsupported media content-type: ${contentType || "unknown"}`);
+  if (!contentType.startsWith("image/")) {
+    const diagnostics = {
+      sourceUrl: String(sourceUrl || "").trim() || null,
+      resolvedSourceUrl,
+      responseStatus: Number(response.status || 0) || null,
+      responseUrl: String(response.url || "").trim() || null,
+      contentType: contentType || "unknown",
+    };
+    if (isDebugDiagnosticsEnabled()) {
+      try {
+        console.error("review-content media ingest unsupported content-type", diagnostics);
+      } catch {
+        console.error("review-content media ingest unsupported content-type");
+      }
+      throw new Error(`unsupported media content-type: ${contentType || "unknown"} ${JSON.stringify(diagnostics)}`);
+    }
+    throw new Error(`unsupported media content-type: ${contentType || "unknown"}`);
+  }
 
   const buffer = Buffer.from(await response.arrayBuffer());
   if (!buffer.length) throw new Error("empty media payload");

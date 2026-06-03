@@ -11562,6 +11562,17 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
       contentItemId: id,
       sourceBaseUrl: resolveCollectorRequestBaseUrl(req) || resolveCollectorPublicBaseUrl(),
     });
+    if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
+      try {
+        console.error("[collector review ingest media_manifest]", JSON.stringify({
+          content_item_id: id,
+          content_type: payload?.content?.content_type || null,
+          media_manifest: payload?.media_manifest || null,
+        }));
+      } catch {
+        console.error("[collector review ingest media_manifest]");
+      }
+    }
     const ingestRes = await fetch(`${backendApiBase}/review-content/ingest`, {
       method: "POST",
       headers: {
