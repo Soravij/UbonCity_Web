@@ -4256,22 +4256,86 @@ function normalizeSelectedAssetRole(asset) {
   return "gallery";
 }
 
+function buildAdminReviewClientMediaUid(contentItemId, asset, role, position = 0) {
+  const itemId = Number(contentItemId || 0) || 0;
+  const assetId = Number(asset?.asset_id || asset?.id || 0) || 0;
+  const normalizedRole = String(role || "gallery").trim().toLowerCase() || "gallery";
+  const normalizedPosition = Number(position || 0) || 0;
+  return `item-${itemId}-asset-${assetId}-${normalizedRole}-${normalizedPosition}`;
+}
+
+function buildSelectedAssetManifestEntry(contentItemId, asset, role, position = 0) {
+  const sourceUrl = String(asset?.public_url || "").trim();
+  const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
+  if (!sourceUrl) return null;
+  if (mimeType && !mimeType.startsWith("image/")) return null;
+  return {
+    kind: "image",
+    source_url: sourceUrl,
+    url: sourceUrl,
+    role,
+    selected: true,
+    client_media_uid: buildAdminReviewClientMediaUid(contentItemId, asset, role, position),
+    source_asset_id: Number(asset?.asset_id || asset?.id || 0) || null,
+    mime_type: mimeType || null,
+    original_file_name: String(asset?.file_name || "").trim() || null,
+    storage_disk: String(asset?.storage_disk || "").trim().toLowerCase() || null,
+    storage_path: String(asset?.storage_path || "").trim() || null,
+  };
+}
+
+function attachSelectedMediaMetadata(mediaManifest, selectedAssets, contentItemId) {
+  const manifest = mediaManifest && typeof mediaManifest === "object" ? mediaManifest : {};
+  const rows = Array.isArray(selectedAssets) ? selectedAssets : [];
+  const byUrl = new Map();
+  rows.forEach((asset) => {
+    const url = String(asset?.public_url || "").trim();
+    if (!url) return;
+    byUrl.set(url, asset);
+  });
+  const enrichEntry = (entry, fallbackRole = "gallery", position = 0) => {
+    if (!entry || typeof entry !== "object") return null;
+    const normalizedUrl = String(entry.source_url || entry.url || "").trim();
+    if (!normalizedUrl) return null;
+    const role = String(entry.role || fallbackRole).trim().toLowerCase() || fallbackRole;
+    const asset = byUrl.get(normalizedUrl) || null;
+    const base = asset ? buildSelectedAssetManifestEntry(contentItemId, asset, role, position) : null;
+    return {
+      ...(base || {}),
+      ...entry,
+      source_url: normalizedUrl,
+      url: normalizedUrl,
+      role,
+      selected: entry.selected !== false,
+      client_media_uid: String(entry.client_media_uid || base?.client_media_uid || "").trim() || null,
+      source_asset_id: Number(entry.source_asset_id || base?.source_asset_id || 0) || null,
+      mime_type: String(entry.mime_type || base?.mime_type || "").trim().toLowerCase() || null,
+      original_file_name: String(entry.original_file_name || base?.original_file_name || "").trim() || null,
+      storage_disk: String(entry.storage_disk || base?.storage_disk || "").trim().toLowerCase() || null,
+      storage_path: String(entry.storage_path || base?.storage_path || "").trim() || null,
+    };
+  };
+
+  const cover = enrichEntry(manifest?.cover, "cover", 0);
+  const gallery = (Array.isArray(manifest?.gallery) ? manifest.gallery : [])
+    .map((entry, index) => enrichEntry(entry, "gallery", index))
+    .filter(Boolean);
+  const inline = (Array.isArray(manifest?.inline) ? manifest.inline : [])
+    .map((entry, index) => enrichEntry(entry, "inline", index))
+    .filter(Boolean);
+
+  return {
+    ...manifest,
+    cover,
+    gallery,
+    inline,
+  };
+}
+
 function toPublishedMediaManifest(contentItemId) {
   const selectedAssets = repo.listContentAssetsByItem(contentItemId, { onlySelected: true });
   const imageEntries = selectedAssets
-    .map((asset) => {
-      const sourceUrl = String(asset?.public_url || "").trim();
-      const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
-      if (!sourceUrl) return null;
-      if (mimeType && !mimeType.startsWith("image/")) return null;
-      const role = normalizeSelectedAssetRole(asset);
-      return {
-        kind: "image",
-        source_url: sourceUrl,
-        role,
-        selected: true,
-      };
-    })
+    .map((asset, index) => buildSelectedAssetManifestEntry(contentItemId, asset, normalizeSelectedAssetRole(asset), index))
     .filter(Boolean);
 
   let cover = imageEntries.find((entry) => entry.role === "cover") || null;
@@ -4383,7 +4447,7 @@ function buildReviewIngestPayload(options = {}) {
     rewrittenBody,
     sourceBaseUrl
   );
-  const mediaManifest = mergedMediaResult?.mediaManifest || {};
+  const mediaManifest = attachSelectedMediaMetadata(mergedMediaResult?.mediaManifest || {}, selectedAssets, contentItemId);
   const coverImage = String(mediaManifest?.cover?.source_url || "").trim();
   if (!coverImage) {
     throw new Error("cover image is required");
@@ -4449,6 +4513,96 @@ function buildReviewIngestPayload(options = {}) {
       inline: Array.isArray(mediaManifest?.inline) ? mediaManifest.inline : [],
       selected_asset_count: selectedAssets.length,
     },
+  };
+}
+
+function buildAdminReviewMultipartFilePlan(payload, contentItemId) {
+  const itemId = Number(contentItemId || 0) || 0;
+  const selectedAssets = repo.listContentAssetsByItem(itemId, { onlySelected: true });
+  const byAssetId = new Map();
+  const byUrl = new Map();
+  selectedAssets.forEach((asset) => {
+    const assetId = Number(asset?.asset_id || asset?.id || 0) || 0;
+    const publicUrl = String(asset?.public_url || "").trim();
+    if (assetId > 0) byAssetId.set(assetId, asset);
+    if (publicUrl) byUrl.set(publicUrl, asset);
+  });
+  const mediaEntries = [];
+  if (payload?.media_manifest?.cover) mediaEntries.push({ usage_type: "cover", position: 0, entry: payload.media_manifest.cover });
+  (Array.isArray(payload?.media_manifest?.gallery) ? payload.media_manifest.gallery : []).forEach((entry, index) => {
+    mediaEntries.push({ usage_type: "gallery", position: index, entry });
+  });
+  (Array.isArray(payload?.media_manifest?.inline) ? payload.media_manifest.inline : []).forEach((entry, index) => {
+    mediaEntries.push({ usage_type: "inline", position: index, entry });
+  });
+
+  const uploadPlan = [];
+  const diagnostics = [];
+  for (const mediaRow of mediaEntries) {
+    const entry = mediaRow?.entry && typeof mediaRow.entry === "object" ? mediaRow.entry : null;
+    if (!entry) continue;
+    const sourceUrl = String(entry.source_url || entry.url || "").trim();
+    const assetId = Number(entry.source_asset_id || 0) || 0;
+    const role = String(entry.role || mediaRow.usage_type || "gallery").trim().toLowerCase() || "gallery";
+    const clientMediaUid = String(entry.client_media_uid || "").trim();
+    const asset = (assetId > 0 ? byAssetId.get(assetId) : null) || byUrl.get(sourceUrl) || null;
+    const diagnostic = {
+      asset_id: assetId || Number(asset?.asset_id || 0) || null,
+      client_media_uid: clientMediaUid || null,
+      role,
+      has_file: false,
+      reason: null,
+    };
+    if (!clientMediaUid) {
+      diagnostic.reason = "client_media_uid_missing";
+      diagnostics.push(diagnostic);
+      throw new Error("eligible collector media client_media_uid missing for admin review upload");
+    }
+    if (!asset) {
+      diagnostic.reason = "selected_asset_mapping_missing";
+      diagnostics.push(diagnostic);
+      throw new Error("eligible collector media file missing for admin review upload");
+    }
+    const storageDisk = String(asset?.storage_disk || "").trim().toLowerCase();
+    const storagePath = String(asset?.storage_path || "").trim();
+    const mimeType = String(entry.mime_type || asset?.mime_type || "").trim().toLowerCase();
+    if (!["local", "nas"].includes(storageDisk) || !storagePath || /^https?:\/\//i.test(storagePath)) {
+      diagnostic.reason = "asset_not_local_storage";
+      diagnostics.push(diagnostic);
+      throw new Error("eligible collector media file missing for admin review upload");
+    }
+    if (mimeType && !mimeType.startsWith("image/")) {
+      diagnostic.reason = "asset_not_image";
+      diagnostics.push(diagnostic);
+      throw new Error("eligible collector media file missing for admin review upload");
+    }
+    const absolutePath = resolveStoragePath(storagePath);
+    const hasFile = fsSync.existsSync(absolutePath);
+    diagnostic.has_file = hasFile;
+    if (!hasFile) {
+      diagnostic.reason = "local_file_missing";
+      diagnostics.push(diagnostic);
+      throw new Error("eligible collector media file missing for admin review upload");
+    }
+    diagnostics.push(diagnostic);
+    uploadPlan.push({
+      asset_id: Number(asset?.asset_id || 0) || null,
+      client_media_uid: clientMediaUid,
+      role,
+      position: Number(mediaRow.position || 0) || 0,
+      source_url: sourceUrl || null,
+      mime_type: mimeType || "application/octet-stream",
+      original_file_name: String(entry.original_file_name || asset?.file_name || "").trim() || `asset-${assetId || "media"}`,
+      absolute_path: absolutePath,
+    });
+  }
+  return {
+    uploadPlan,
+    diagnostics,
+    eligibleSelectedAssetCount: selectedAssets.filter((asset) => {
+      const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
+      return String(asset?.public_url || "").trim() && (!mimeType || mimeType.startsWith("image/"));
+    }).length,
   };
 }
 
@@ -11602,24 +11756,48 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
       contentItemId: id,
       sourceBaseUrl: resolveCollectorRequestBaseUrl(req) || resolveCollectorPublicBaseUrl(),
     });
+    const multipartPlan = buildAdminReviewMultipartFilePlan(payload, id);
     if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
       try {
         console.error("[collector review ingest media_manifest]", JSON.stringify({
           content_item_id: id,
           content_type: payload?.content?.content_type || null,
           media_manifest: payload?.media_manifest || null,
+          eligible_selected_asset_count: Number(multipartPlan?.eligibleSelectedAssetCount || 0) || 0,
+          uploaded_file_count: Array.isArray(multipartPlan?.uploadPlan) ? multipartPlan.uploadPlan.length : 0,
+          upload_diagnostics: Array.isArray(multipartPlan?.diagnostics) ? multipartPlan.diagnostics : [],
         }));
       } catch {
         console.error("[collector review ingest media_manifest]");
       }
     }
+    const formData = new FormData();
+    formData.append("payload", JSON.stringify(payload));
+    const mediaIndex = [];
+    for (const plannedFile of multipartPlan.uploadPlan) {
+      const fileBuffer = await fs.readFile(plannedFile.absolute_path);
+      const blob = new Blob([fileBuffer], { type: plannedFile.mime_type || "application/octet-stream" });
+      const fieldName = `media_${plannedFile.client_media_uid}`;
+      formData.append(fieldName, blob, plannedFile.original_file_name);
+      mediaIndex.push({
+        client_media_uid: plannedFile.client_media_uid,
+        field_name: fieldName,
+        original_name: plannedFile.original_file_name,
+        source_asset_id: plannedFile.asset_id,
+        role: plannedFile.role,
+        position: plannedFile.position,
+        source_url: plannedFile.source_url,
+      });
+    }
+    if (mediaIndex.length > 0) {
+      formData.append("media_index", JSON.stringify({ files: mediaIndex }));
+    }
     const ingestRes = await fetch(`${backendApiBase}/review-content/ingest`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         "x-review-sync-token": webReviewSyncToken,
       },
-      body: JSON.stringify(payload),
+      body: formData,
     });
     const ingestBody = await ingestRes.json().catch(() => ({ error: "Invalid backend ingest response" }));
     const backendResult = {
