@@ -32,7 +32,16 @@ function mirrorCollectorTokenToLocalStorage() {
 
 export function selectedWorkspaceAssets() {
   return (Array.isArray(state.assets) ? state.assets : []).filter((row) => {
-    return Number(row?.selected_in_clean || 0) === 1 && String(row?.role || "").trim().toLowerCase() !== "unused";
+    const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
+    const storagePath = String(row?.storage_path || "").trim();
+    const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+    const localOnly = ["local", "nas"].includes(storageDisk)
+      && Boolean(storagePath)
+      && !/^https?:\/\//i.test(storagePath)
+      && (!mimeType || mimeType.startsWith("image/"));
+    return localOnly
+      && Number(row?.selected_in_clean || 0) === 1
+      && String(row?.role || "").trim().toLowerCase() !== "unused";
   });
 }
 
@@ -794,7 +803,7 @@ export function renderPreview() {
   const title = String(qs("article-title")?.value || state.item?.title || "").trim() || "(untitled)";
   const excerpt = String(qs("article-excerpt")?.value || state.item?.summary || "").trim();
   const assets = selectedWorkspaceAssets();
-  const previewMedia = resolvePreviewMediaAssets(assets, state.item?.image_url || "");
+  const previewMedia = resolvePreviewMediaAssets(assets, "");
   const hero = previewMedia.hero;
   const galleryAssets = previewMedia.gallery;
   const body = bodyToPreviewHtml(qs("article-body")?.value || latestDraft()?.body || state.item?.description_clean || "");
@@ -858,7 +867,7 @@ export async function loadWorkspace() {
     api(`/api/items/${state.itemId}`),
     api(`/api/items/${state.itemId}/article-process`),
     api(`/api/items/${state.itemId}/field-pack/current`),
-    api(`/api/assets?content_item_id=${state.itemId}`),
+    api(`/api/assets?content_item_id=${state.itemId}&local_only=1`),
     api(`/api/translations?content_item_id=${state.itemId}`),
   ]);
   state.item = item || null;

@@ -4332,6 +4332,57 @@ function attachSelectedMediaMetadata(mediaManifest, selectedAssets, contentItemI
   };
 }
 
+function isAdminReviewLocalMediaEntry(entry) {
+  const storageDisk = String(entry?.storage_disk || "").trim().toLowerCase();
+  const storagePath = String(entry?.storage_path || "").trim();
+  if (!["local", "nas"].includes(storageDisk)) return false;
+  if (!storagePath) return false;
+  if (/^https?:\/\//i.test(storagePath)) return false;
+  return true;
+}
+
+function sanitizeAdminReviewMediaManifest(mediaManifest, contentItemId) {
+  const manifest = mediaManifest && typeof mediaManifest === "object" ? mediaManifest : {};
+  const diagnostics = [];
+  const noteExcluded = (entry, role, reason = "external_media_excluded") => {
+    diagnostics.push({
+      reason,
+      content_item_id: Number(contentItemId || 0) || 0,
+      asset_id: Number(entry?.source_asset_id || 0) || null,
+      client_media_uid: String(entry?.client_media_uid || "").trim() || null,
+      source_url: String(entry?.source_url || entry?.url || "").trim() || null,
+      role: String(role || entry?.role || "").trim().toLowerCase() || null,
+    });
+  };
+
+  const cover = manifest?.cover && typeof manifest.cover === "object" ? manifest.cover : null;
+  if (!cover || !isAdminReviewLocalMediaEntry(cover)) {
+    if (cover) noteExcluded(cover, "cover");
+    throw new Error("cover image must be a selected local asset");
+  }
+
+  const gallery = (Array.isArray(manifest?.gallery) ? manifest.gallery : []).filter((entry) => {
+    if (entry && isAdminReviewLocalMediaEntry(entry)) return true;
+    if (entry) noteExcluded(entry, "gallery");
+    return false;
+  });
+  const inline = (Array.isArray(manifest?.inline) ? manifest.inline : []).filter((entry) => {
+    if (entry && isAdminReviewLocalMediaEntry(entry)) return true;
+    if (entry) noteExcluded(entry, "inline");
+    return false;
+  });
+
+  return {
+    mediaManifest: {
+      ...manifest,
+      cover,
+      gallery,
+      inline,
+    },
+    diagnostics,
+  };
+}
+
 function toPublishedMediaManifest(contentItemId) {
   const selectedAssets = repo.listContentAssetsByItem(contentItemId, { onlySelected: true });
   const imageEntries = selectedAssets
@@ -4447,10 +4498,12 @@ function buildReviewIngestPayload(options = {}) {
     rewrittenBody,
     sourceBaseUrl
   );
-  const mediaManifest = attachSelectedMediaMetadata(mergedMediaResult?.mediaManifest || {}, selectedAssets, contentItemId);
+  const enrichedMediaManifest = attachSelectedMediaMetadata(mergedMediaResult?.mediaManifest || {}, selectedAssets, contentItemId);
+  const adminReviewMediaResult = sanitizeAdminReviewMediaManifest(enrichedMediaManifest, contentItemId);
+  const mediaManifest = adminReviewMediaResult.mediaManifest || {};
   const coverImage = String(mediaManifest?.cover?.source_url || "").trim();
   if (!coverImage) {
-    throw new Error("cover image is required");
+    throw new Error("cover image must be a selected local asset");
   }
   const metaTitle = String(latestDraft?.meta_title || item?.meta_title || title).trim();
   const metaDescription = String(latestDraft?.meta_description || item?.meta_description || excerpt).trim();
@@ -4476,6 +4529,14 @@ function buildReviewIngestPayload(options = {}) {
         }));
       } catch {
         console.error("[admin-review media eligibility skipped body images]");
+      }
+    }
+    const excludedExternalMedia = Array.isArray(adminReviewMediaResult?.diagnostics) ? adminReviewMediaResult.diagnostics : [];
+    if (excludedExternalMedia.length > 0) {
+      try {
+        console.error("[admin-review external media excluded]", JSON.stringify(excludedExternalMedia));
+      } catch {
+        console.error("[admin-review external media excluded]");
       }
     }
   }
@@ -4967,6 +5028,16 @@ function parseAssetPathForUrl(storagePath) {
   return `/media/${relative}`;
 }
 
+function isCollectorControlledLocalAssetRow(row) {
+  const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
+  const storagePath = String(row?.storage_path || "").trim();
+  const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+  if (!["local", "nas"].includes(storageDisk)) return false;
+  if (!storagePath || /^https?:\/\//i.test(storagePath)) return false;
+  if (mimeType && !mimeType.startsWith("image/")) return false;
+  return true;
+}
+
 function toMediaDedupKey(value) {
   const raw = sanitizeGoogleMapsPhotoUrl(value);
   if (!raw) return "";
@@ -5376,51 +5447,22 @@ function bridgeCollectedMediaToAssets(contentItemId, rawItem, options = {}) {
   if (!candidates.length) {
     return { added: 0, skipped: 0, total_candidates: 0 };
   }
-
-  const existing = new Set(
-    db
-      .prepare(
-        `SELECT a.storage_path
-         FROM content_assets ca
-         JOIN assets a ON a.id = ca.asset_id
-         WHERE ca.content_item_id=?`
-      )
-      .all(contentItemId)
-      .map((row) => toMediaDedupKey(row?.storage_path))
-      .filter(Boolean)
-  );
-
-  const insertAsset = db.prepare(
-    `INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
-  const linkAsset = db.prepare(
-    `INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order)
-     VALUES (?, ?, 'unused', 0, 0, 'unused', 0)`
-  );
-
-  let added = 0;
-  let skipped = 0;
-
-  for (const media of candidates) {
-    const dedupeKey = toMediaDedupKey(media.url);
-    if (existing.has(dedupeKey)) {
-      skipped += 1;
-      continue;
-    }
-
-    const assetUid = crypto.randomUUID();
-    const fileName = buildRemoteFileName(media.url);
-    const result = insertAsset.run(assetUid, "remote", media.url, fileName, media.mime_type || null, null, null);
-    const assetId = Number(result.lastInsertRowid || 0);
-    if (assetId > 0) {
-      linkAsset.run(contentItemId, assetId);
-      existing.add(dedupeKey);
-      added += 1;
+  if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
+    try {
+      console.error("[external media kept as reference only]", JSON.stringify({
+        content_item_id: Number(contentItemId || 0) || 0,
+        total_candidates: candidates.length,
+        skipped: candidates.map((media) => ({
+          url: String(media?.url || "").trim() || null,
+          mime_type: String(media?.mime_type || "").trim().toLowerCase() || null,
+          reason: "external_reference_only",
+        })),
+      }));
+    } catch {
+      console.error("[external media kept as reference only]");
     }
   }
-
-  return { added, skipped, total_candidates: candidates.length };
+  return { added: 0, skipped: candidates.length, total_candidates: candidates.length, external_reference_only: true };
 }
 
 function resolveStoragePath(storagePath) {
@@ -11927,11 +11969,21 @@ app.patch("/api/items/:id/assets/:assetId/selected", requireRole("owner", "admin
   if (!ensureComposerMediaEditAccess(req, res, item)) {
     return;
   }
+  const targetAsset = repo.listContentAssetsByItem(id, { onlySelected: false }).find((row) => Number(row?.asset_id || 0) === assetId) || null;
+  const wantsSelected = selected === true || selected === 1 || selected === "1";
+  if (wantsSelected && !isCollectorControlledLocalAssetRow(targetAsset)) {
+    res.status(400).json({ error: "usable article media must be selected from uploaded local assets" });
+    return;
+  }
 
   try {
     const status = repo.setContentAssetSelected(id, assetId, selected);
     repo.logAudit(actorEmail(req), "asset.select", "content_item", String(id), { assetId, selected: !!selected });
-    const cover = repo.listApprovedImageContext(id).cover_url || "";
+    const cover = repo
+      .listContentAssetsByItem(id, { onlySelected: true })
+      .filter((row) => isCollectorControlledLocalAssetRow(row))
+      .find((row) => Number(row?.is_cover || 0) === 1 || String(row?.role || "").trim().toLowerCase() === "cover")
+      ?.public_url || "";
     if (item && cover && String(item.image_url || "").trim() !== String(cover).trim()) {
       repo.saveItem({ ...item, id, image_url: cover }, actorEmail(req));
     }
@@ -11958,12 +12010,22 @@ app.patch("/api/items/:id/assets/:assetId/role", requireRole("owner", "admin", "
   if (!ensureComposerMediaEditAccess(req, res, item)) {
     return;
   }
+  const targetAsset = repo.listContentAssetsByItem(id, { onlySelected: false }).find((row) => Number(row?.asset_id || 0) === assetId) || null;
+  const promotesUsableRole = role === "cover" || role === "gallery" || role === "inline";
+  if (promotesUsableRole && !isCollectorControlledLocalAssetRow(targetAsset)) {
+    res.status(400).json({ error: "usable article media must be selected from uploaded local assets" });
+    return;
+  }
 
   try {
     const status = repo.setContentAssetRole(id, assetId, role);
     repo.logAudit(actorEmail(req), "asset.role", "content_item", String(id), { assetId, role });
 
-    const cover = repo.listApprovedImageContext(id).cover_url || "";
+    const cover = repo
+      .listContentAssetsByItem(id, { onlySelected: true })
+      .filter((row) => isCollectorControlledLocalAssetRow(row))
+      .find((row) => Number(row?.is_cover || 0) === 1 || String(row?.role || "").trim().toLowerCase() === "cover")
+      ?.public_url || "";
     if (item) {
       const nextImage = cover || "";
       if (String(item.image_url || "").trim() !== String(nextImage).trim()) {
@@ -12793,6 +12855,7 @@ app.get("/api/assets", (req, res) => {
   const role = actorPolicyRole(req, "");
   const contentItemId = Number(req.query.content_item_id || 0);
   const onlySelected = role === "freelance" || String(req.query.only_selected || "0") === "1";
+  const localOnly = String(req.query.local_only || "0") === "1";
   let rows = [];
 
   if (contentItemId > 0) {
@@ -12840,6 +12903,7 @@ app.get("/api/assets", (req, res) => {
       placement_type: String(row.placement_type || "unused"),
       public_url: parseAssetPathForUrl(row.storage_path),
     }))
+    .filter((row) => (localOnly ? isCollectorControlledLocalAssetRow(row) : true))
     .filter((row) => (onlySelected ? row.selected_in_clean === 1 && row.role !== "unused" : true));
 
   res.json(mapped);

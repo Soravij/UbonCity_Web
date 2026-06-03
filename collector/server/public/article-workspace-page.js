@@ -1355,7 +1355,7 @@ async function refreshFieldPack() {
 }
 
 async function refreshAssets() {
-  state.assets = await api(`/api/assets?content_item_id=${state.itemId}`);
+  state.assets = await api(`/api/assets?content_item_id=${state.itemId}&local_only=1`);
   ensureSelectedAssetId();
   renderHeroAndAssets();
   renderMediaLibraryVisibility();
