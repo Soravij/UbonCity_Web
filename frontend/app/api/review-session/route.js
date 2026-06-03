@@ -12,7 +12,12 @@ export async function POST(req) {
     return NextResponse.json({ error: "Missing review session payload" }, { status: 400 });
   }
 
-  const redirectUrl = new URL(`/${encodeURIComponent(lang)}/review/${encodeURIComponent(reviewId)}`, req.url);
+  const siteBaseUrl = String(process.env.NEXT_PUBLIC_SITE_URL || "").trim().replace(/\/+$/, "");
+  const redirectBaseUrl = siteBaseUrl || req.url;
+  const redirectUrl = new URL(
+    `/${encodeURIComponent(lang)}/review/${encodeURIComponent(reviewId)}`,
+    redirectBaseUrl
+  );
   const response = NextResponse.redirect(redirectUrl, { status: 303 });
   response.cookies.set({
     name: buildReviewAccessCookieName(reviewId),
