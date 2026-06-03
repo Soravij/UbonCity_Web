@@ -4197,19 +4197,33 @@ function mergeInlineMediaManifestFromBody(mediaManifest, bodyHtml, baseUrl) {
   const coverUrl = String(manifest?.cover?.source_url || manifest?.cover?.url || "").trim();
   const existingInline = Array.isArray(manifest?.inline) ? manifest.inline : [];
   const existingGallery = Array.isArray(manifest?.gallery) ? manifest.gallery : [];
+  const allowedSelectedUrls = new Set();
   const seen = new Set();
   const pushSeen = (value) => {
     const normalized = String(value || "").trim();
     if (!normalized) return;
     seen.add(normalized);
   };
+  const pushAllowed = (value) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) return;
+    allowedSelectedUrls.add(normalized);
+  };
+  pushAllowed(coverUrl);
+  existingGallery.forEach((entry) => pushAllowed(entry?.source_url || entry?.url));
+  existingInline.forEach((entry) => pushAllowed(entry?.source_url || entry?.url));
   pushSeen(coverUrl);
   existingGallery.forEach((entry) => pushSeen(entry?.source_url || entry?.url));
   existingInline.forEach((entry) => pushSeen(entry?.source_url || entry?.url));
 
   const bodyUrls = extractInlineImageUrlsFromHtml(bodyHtml, baseUrl);
   const mergedInline = [...existingInline];
+  const skippedBodyImageUrls = [];
   for (const sourceUrl of bodyUrls) {
+    if (!sourceUrl || !allowedSelectedUrls.has(sourceUrl)) {
+      if (sourceUrl) skippedBodyImageUrls.push(sourceUrl);
+      continue;
+    }
     if (!sourceUrl || seen.has(sourceUrl)) continue;
     seen.add(sourceUrl);
     mergedInline.push({
@@ -4221,8 +4235,15 @@ function mergeInlineMediaManifestFromBody(mediaManifest, bodyHtml, baseUrl) {
   }
 
   return {
-    ...manifest,
-    inline: mergedInline,
+    mediaManifest: {
+      ...manifest,
+      inline: mergedInline,
+    },
+    diagnostics: {
+      skipped_body_image_urls: skippedBodyImageUrls,
+      allowed_selected_urls: Array.from(allowedSelectedUrls),
+      body_image_urls: bodyUrls,
+    },
   };
 }
 
@@ -4240,7 +4261,9 @@ function toPublishedMediaManifest(contentItemId) {
   const imageEntries = selectedAssets
     .map((asset) => {
       const sourceUrl = String(asset?.public_url || "").trim();
+      const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
       if (!sourceUrl) return null;
+      if (mimeType && !mimeType.startsWith("image/")) return null;
       const role = normalizeSelectedAssetRole(asset);
       return {
         kind: "image",
@@ -4355,11 +4378,12 @@ function buildReviewIngestPayload(options = {}) {
   const excerpt = String(latestDraft?.excerpt || item?.summary || "").trim();
   const body = String(latestDraft?.body || item?.description_clean || item?.description_raw || "").trim();
   const rewrittenBody = rewriteCollectorHtmlMediaUrls(body, sourceBaseUrl);
-  const mediaManifest = mergeInlineMediaManifestFromBody(
+  const mergedMediaResult = mergeInlineMediaManifestFromBody(
     rewriteMediaManifestForBase(toPublishedMediaManifest(contentItemId), sourceBaseUrl),
     rewrittenBody,
     sourceBaseUrl
   );
+  const mediaManifest = mergedMediaResult?.mediaManifest || {};
   const coverImage = String(mediaManifest?.cover?.source_url || "").trim();
   if (!coverImage) {
     throw new Error("cover image is required");
@@ -4375,6 +4399,22 @@ function buildReviewIngestPayload(options = {}) {
     .filter((t) => t.translation_status === "ready" && t.automatic_check_status === "passed" && Number(t.stale_flag || 0) === 0)
     .map((t) => String(t.lang || "").trim().toLowerCase())
     .filter(Boolean);
+
+  if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
+    const skippedBodyImageUrls = Array.isArray(mergedMediaResult?.diagnostics?.skipped_body_image_urls)
+      ? mergedMediaResult.diagnostics.skipped_body_image_urls
+      : [];
+    if (skippedBodyImageUrls.length > 0) {
+      try {
+        console.error("[admin-review media eligibility skipped body images]", JSON.stringify({
+          content_item_id: contentItemId,
+          skipped_body_image_urls: skippedBodyImageUrls,
+        }));
+      } catch {
+        console.error("[admin-review media eligibility skipped body images]");
+      }
+    }
+  }
 
   return {
     source_system: "collector-app",
