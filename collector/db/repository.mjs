@@ -4669,6 +4669,22 @@ function normalizeStateValue(value, stateGroup) {
     return normalizeAssignmentRow(getAssignmentByIdStmt.get(Number(assignmentId || 0)));
   }
 
+  function setAssignmentLatestSubmission(assignmentId, submissionId) {
+    const assignmentKey = Number(assignmentId || 0) || 0;
+    const submissionKey = Number(submissionId || 0) || 0;
+    if (!assignmentKey) throw new Error("assignment_id is required");
+    if (!submissionKey) throw new Error("submission_id is required");
+    const assignment = normalizeAssignmentRow(getAssignmentByIdStmt.get(assignmentKey));
+    if (!assignment) throw new Error("assignment not found");
+    const submission = normalizeAssignmentSubmissionRow(getAssignmentSubmissionByIdStmt.get(submissionKey));
+    if (!submission) throw new Error("submission not found");
+    if (Number(submission.assignment_id || 0) !== assignmentKey) {
+      throw new Error("submission does not belong to assignment");
+    }
+    attachLatestSubmissionToAssignmentStmt.run(submissionKey, assignmentKey);
+    return normalizeAssignmentRow(getAssignmentByIdStmt.get(assignmentKey));
+  }
+
   function listAssignmentsByItem(contentItemId) {
     return listAssignmentsByItemStmt.all(Number(contentItemId || 0)).map(normalizeAssignmentRow);
   }
@@ -4933,7 +4949,7 @@ function normalizeStateValue(value, stateGroup) {
           reviewedAt,
           latestSubmissionId
         );
-        attachLatestSubmissionToAssignmentStmt.run(latestSubmissionId, assignmentId);
+        setAssignmentLatestSubmission(assignmentId, latestSubmissionId);
         return normalizeAssignmentSubmissionRow(
           db.prepare("SELECT * FROM content_assignment_submissions WHERE id=? LIMIT 1").get(latestSubmissionId)
         );
@@ -4952,7 +4968,7 @@ function normalizeStateValue(value, stateGroup) {
       reviewedAt
     );
     const submissionId = Number(res.lastInsertRowid || 0);
-    attachLatestSubmissionToAssignmentStmt.run(submissionId, assignmentId);
+    setAssignmentLatestSubmission(assignmentId, submissionId);
     return normalizeAssignmentSubmissionRow(
       db.prepare("SELECT * FROM content_assignment_submissions WHERE id=? LIMIT 1").get(submissionId)
     );
@@ -10320,6 +10336,7 @@ function normalizeStateValue(value, stateGroup) {
     updateAssignmentMediaResetPolicy,
     requestAssignmentRevisionWithReset,
     addAssignmentSubmission,
+    setAssignmentLatestSubmission,
     getAssignmentSubmissionById,
     listAssignmentSubmissions,
     upsertAssignmentSubmissionDraft,

@@ -7888,6 +7888,8 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
     }) || null;
 
     if (editorialAssignment?.id) {
+      const assignmentBeforeSubmit = repo.getAssignmentById(editorialAssignment.id);
+      const assignmentLatestSubmissionIdBeforeSubmit = Number(assignmentBeforeSubmit?.latest_submission_id || 0) || null;
       const latestDraftBeforeSubmit = repo.latestDraftByItem(id);
       const latestDraftBodyBeforeSubmit = String(latestDraftBeforeSubmit?.body || "").trim();
       if (!latestDraftBodyBeforeSubmit) {
@@ -7910,6 +7912,8 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
         submission_state: submissionState,
         contributor_note: note,
       });
+      const assignmentAfterSubmission = repo.setAssignmentLatestSubmission(editorialAssignment.id, submission.id);
+      const assignmentLatestSubmissionIdAfterSubmit = Number(assignmentAfterSubmission?.latest_submission_id || 0) || null;
       const latestDraft = repo.latestDraftByItem(id);
       const latestDraftBody = String(latestDraft?.body || "").trim();
       if (!latestDraftBody) {
@@ -7944,6 +7948,8 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
       if (isDebugDiagnosticsEnabled) {
         submitReviewDiagnostics = {
           submission_id: Number(submission?.id || 0) || null,
+          assignment_latest_submission_id_before_submit: assignmentLatestSubmissionIdBeforeSubmit,
+          assignment_latest_submission_id_after_submit: assignmentLatestSubmissionIdAfterSubmit,
           latest_draft_id: Number(latestDraft?.id || 0) || null,
           latest_draft_body_length: latestDraftBody.length,
           latest_draft_title: String(latestDraft?.draft_title || item.title || "").trim() || null,
