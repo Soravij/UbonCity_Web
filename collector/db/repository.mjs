@@ -7671,10 +7671,11 @@ function normalizeStateValue(value, stateGroup) {
         const assignmentState = String(assignment?.state || "").trim().toLowerCase();
         const assignmentAccepted = assignmentState === "accepted" || assignmentState === "closed";
         const deliverablesReviewUsable = Boolean(deliverablesUtility?.review_usable);
+        const hasArticleDraftDeliverable = Boolean(articleDraft?.id);
         const hasArticleDraftContent = Boolean(articleText || String(articleDraft?.source_url || "").trim());
         const readyForPublishSource = assignmentAccepted
           && Boolean(latestSubmissionId)
-          && Boolean(articleDraft?.id)
+          && hasArticleDraftDeliverable
           && hasArticleDraftContent
           && deliverablesReviewUsable;
 
@@ -7689,6 +7690,8 @@ function normalizeStateValue(value, stateGroup) {
           governance_summary: governanceSummary,
           article_draft: articleDraft,
           article_text: articleText,
+          has_article_draft_deliverable: hasArticleDraftDeliverable,
+          has_article_draft_content: hasArticleDraftContent,
           ready_for_publish_source: readyForPublishSource,
           updated_at: String(assignment?.updated_at || assignment?.created_at || latestSubmission?.created_at || "").trim(),
           debug: isDebugDiagnosticsEnabled()
@@ -7700,6 +7703,15 @@ function normalizeStateValue(value, stateGroup) {
       .sort((a, b) => {
         if (Number(b.ready_for_publish_source) !== Number(a.ready_for_publish_source)) {
           return Number(b.ready_for_publish_source) - Number(a.ready_for_publish_source);
+        }
+        if (Number(b.has_article_draft_content) !== Number(a.has_article_draft_content)) {
+          return Number(b.has_article_draft_content) - Number(a.has_article_draft_content);
+        }
+        if (Number(b.has_article_draft_deliverable) !== Number(a.has_article_draft_deliverable)) {
+          return Number(b.has_article_draft_deliverable) - Number(a.has_article_draft_deliverable);
+        }
+        if (Number(b.deliverables_utility?.review_usable) !== Number(a.deliverables_utility?.review_usable)) {
+          return Number(b.deliverables_utility?.review_usable) - Number(a.deliverables_utility?.review_usable);
         }
         if (a.assignment_rank !== b.assignment_rank) return a.assignment_rank - b.assignment_rank;
         return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
@@ -7763,8 +7775,27 @@ function normalizeStateValue(value, stateGroup) {
         candidate_assignment_id: Number(candidate?.assignment_id || 0) || null,
         candidate_assignment_state: String(candidate?.assignment_state || "").trim().toLowerCase() || null,
         candidate_latest_submission_id: Number(candidate?.latest_submission_id || 0) || null,
-        selection_trace: "candidates sorted by ready_for_publish_source desc, assignment_rank asc, updated_at desc",
-        assignments: candidates.map((row) => row?.debug).filter(Boolean),
+        selection_trace: "candidates sorted by ready_for_publish_source desc, has_article_draft_content desc, has_article_draft_deliverable desc, deliverables_review_usable desc, assignment_rank asc, updated_at desc",
+        has_article_draft_deliverable: Boolean(candidate?.has_article_draft_deliverable),
+        article_draft_body_length: String(candidate?.article_text || "").trim().length,
+        assignment_rank: Number(candidate?.assignment_rank ?? 99),
+        ready_for_publish_source: Boolean(candidate?.ready_for_publish_source),
+        selected_candidate_reason: candidate
+          ? (candidate.ready_for_publish_source
+            ? "won_by_ready_for_publish_source"
+            : candidate.has_article_draft_content
+              ? "won_by_article_draft_content_signal"
+              : candidate.has_article_draft_deliverable
+                ? "won_by_article_draft_deliverable_signal"
+                : "won_by_assignment_rank_fallback")
+          : null,
+        assignments: candidates.map((row) => ({
+          ...(row?.debug || {}),
+          assignment_rank: Number(row?.assignment_rank ?? 99),
+          ready_for_publish_source: Boolean(row?.ready_for_publish_source),
+          has_article_draft_deliverable: Boolean(row?.has_article_draft_deliverable),
+          article_draft_body_length: String(row?.article_text || "").trim().length,
+        })).filter(Boolean),
       } : null,
       resolved_article: candidate ? {
         title: String(candidate.article_draft?.title || item.title || "").trim() || null,
