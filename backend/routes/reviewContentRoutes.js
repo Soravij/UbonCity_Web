@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import express from "express";
+import multer from "multer";
 import {
   approveReviewContentAction,
   createReviewAccessTokenAction,
@@ -14,6 +15,15 @@ import {
 import { authorizeEditorOrAdmin, protect, protectReviewContentReadAccess } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
+const MAX_REVIEW_MEDIA_BYTES = 20 * 1024 * 1024;
+const reviewIngestMultipart = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_REVIEW_MEDIA_BYTES,
+    files: 32,
+    fieldSize: 5 * 1024 * 1024,
+  },
+});
 
 function timingSafeEquals(a, b) {
   const left = Buffer.from(String(a || ""));
@@ -36,7 +46,17 @@ function requireCollectorTokenOrPrivilegedUser(req, res, next) {
   return protect(req, res, () => authorizeEditorOrAdmin(req, res, next));
 }
 
-router.post("/review-content/ingest", requireCollectorTokenOrPrivilegedUser, ingestReviewContentAction);
+function parseReviewIngestMultipart(req, res, next) {
+  const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
+  if (!contentType.startsWith("multipart/form-data")) return next();
+  return reviewIngestMultipart.any()(req, res, (err) => {
+    if (!err) return next();
+    const message = String(err?.message || "Invalid multipart review ingest payload");
+    return res.status(400).json({ error: message });
+  });
+}
+
+router.post("/review-content/ingest", requireCollectorTokenOrPrivilegedUser, parseReviewIngestMultipart, ingestReviewContentAction);
 router.post("/review-content/event-queue/enqueue", requireCollectorIngestToken, enqueueEventReviewQueueAction);
 router.get("/review-content/:id", protectReviewContentReadAccess, getReviewContentDetail);
 router.post("/review-content/:id/access-token", protect, authorizeEditorOrAdmin, createReviewAccessTokenAction);

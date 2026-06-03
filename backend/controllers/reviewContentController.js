@@ -9,15 +9,47 @@ import { getReviewContentById } from "../services/reviewContentService.js";
 import { ingestReviewContent } from "../services/reviewIngestService.js";
 import { issueReviewAccessToken } from "../middleware/authMiddleware.js";
 
+function isDebugDiagnosticsEnabled() {
+  return String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
+}
+
+function isMultipartReviewIngestRequest(req) {
+  const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
+  return contentType.startsWith("multipart/form-data");
+}
+
+function parseMultipartJsonField(rawValue, fieldName) {
+  const text = String(rawValue || "").trim();
+  if (!text) throw new Error(`${fieldName} is required`);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${fieldName} must be valid JSON`);
+  }
+}
+
 export async function ingestReviewContentAction(req, res) {
   try {
-    const item = await ingestReviewContent(req.body || {});
+    const isMultipart = isMultipartReviewIngestRequest(req);
+    const payload = isMultipart ? parseMultipartJsonField(req.body?.payload, "payload") : (req.body || {});
+    const mediaIndex = isMultipart && req.body?.media_index != null
+      ? parseMultipartJsonField(req.body?.media_index, "media_index")
+      : null;
+    const item = await ingestReviewContent(payload, {
+      uploadedFiles: Array.isArray(req.files) ? req.files : [],
+      mediaIndex,
+      multipart: isMultipart,
+    });
     return res.json({ item });
   } catch (err) {
     const msg = String(err?.message || "ingest failed");
     console.error("review-content ingest failed:", msg);
-    if (/required|invalid|must be|too large|unsupported|cannot fetch|not configured/i.test(msg)) {
-      return res.status(400).json({ error: msg });
+    if (err?.is_client_error || /required|requires|invalid|must be|too large|unsupported|cannot fetch|not configured|empty/i.test(msg)) {
+      const responsePayload = { error: msg };
+      if (isDebugDiagnosticsEnabled() && err?.diagnostics && typeof err.diagnostics === "object") {
+        responsePayload.diagnostics = err.diagnostics;
+      }
+      return res.status(400).json(responsePayload);
     }
     return res.status(500).json({ error: "Internal server error" });
   }

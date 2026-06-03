@@ -267,6 +267,29 @@ D:\UbonRuntime\
 
 ---
 
+# Admin Review Media Policy
+
+- Fieldpack may contain external images only as reference/evidence media.
+- Final handoff submit / review acceptance automatically clears external images from usable article media.
+- External images must never appear as usable Article Workspace media.
+- Article Workspace media must be local-assets-only.
+- External media is not promoted into cover/gallery/inline usable media.
+- External media is not auto-imported into collector assets/content_assets.
+- Usable article/review media must come only from selected local `content_assets`.
+- Eligible usable media must be collector-controlled assets with `storage_disk` in `local` or `nas`, a non-http(s) `storage_path`, and image mime type when available.
+- Body `<img>` URLs do not create media eligibility.
+- Backend must not fetch external images for Admin Review ingest.
+- Backend must not fall back to Cloudflare-protected collector media URLs.
+- Admin Review media must become backend-owned after ingest.
+- Collector uploads selected local media binaries to backend during Admin Review submit.
+- Article Workspace for new items should receive only local usable media or missing-cover state.
+- This branch does not patch old broken content; runtime verification should use a new item.
+- Submit Admin Review requires selected local cover/assets.
+- To use an external image, an operator must first verify rights, import it into collector-controlled local storage, and then select it as a local asset.
+- Do not regress this policy when changing fieldpack handoff, Article Workspace media, or Admin Review ingest.
+
+---
+
 # Documentation State
 
 ## UAT documents
