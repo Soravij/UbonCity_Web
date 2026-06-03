@@ -7525,6 +7525,87 @@ function normalizeStateValue(value, stateGroup) {
     };
   }
 
+  function isDebugDiagnosticsEnabled() {
+    return String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
+  }
+
+  function buildPublishableSourceSubmissionDiagnostics(assignment, latestSubmissionId, deliverablesBundle) {
+    const assignmentId = Number(assignment?.id || 0) || 0;
+    if (!assignmentId) return null;
+    const assignmentContentItemId = Number(assignment?.content_item_id || 0) || null;
+    const submissions = listAssignmentSubmissions(assignmentId);
+    const queryTrace = {
+      assignment_latest_submission_pointer_source: "content_assignments.latest_submission_id",
+      submissions_query: "SELECT * FROM content_assignment_submissions WHERE assignment_id=? ORDER BY id DESC",
+      deliverables_scope: "latest_submission_only",
+      fulfilled_deliverable_filter: "isFulfilledAssignmentDeliverableStatus(row.status)",
+    };
+
+    const submissionRows = submissions.map((submission) => {
+      const submissionId = Number(submission?.id || 0) || 0;
+      const assignmentMatches = Number(submission?.assignment_id || 0) === assignmentId;
+      const itemMatches = Number(submission?.content_item_id || 0) === Number(assignmentContentItemId || 0);
+      let deliverables = [];
+      let deliverableLookupError = null;
+      try {
+        deliverables = submissionId
+          ? listAssignmentSubmissionDeliverablesBySubmission(assignmentId, submissionId)
+          : [];
+      } catch (err) {
+        deliverableLookupError = String(err?.message || err || "").trim() || "deliverable_lookup_failed";
+      }
+      const fulfilledDeliverables = deliverables.filter((row) => isFulfilledAssignmentDeliverableStatus(row?.status));
+      const articleDraftDeliverables = fulfilledDeliverables.filter((row) => {
+        return String(row?.deliverable_type || "").trim().toLowerCase() === "article_draft";
+      });
+      const articleDraft = articleDraftDeliverables[0] || null;
+      const included = submissionId === latestSubmissionId;
+      const exclusionReasons = [];
+      if (!assignmentMatches) exclusionReasons.push("assignment_id_mismatch");
+      if (!itemMatches) exclusionReasons.push("content_item_id_mismatch");
+      if (!included) exclusionReasons.push(`excluded_by_trace_mode:latest_submission_only(pointer=${latestSubmissionId || "null"})`);
+      if (!fulfilledDeliverables.length) exclusionReasons.push("no_fulfilled_deliverables");
+      if (!articleDraft?.id) exclusionReasons.push("article_draft_missing");
+      if (!String(articleDraft?.text_content || "").trim() && !String(articleDraft?.source_url || "").trim()) {
+        exclusionReasons.push("article_draft_empty");
+      }
+      if (deliverableLookupError) exclusionReasons.push(`deliverable_lookup_error:${deliverableLookupError}`);
+      return {
+        submission_id: submissionId || null,
+        assignment_id: Number(submission?.assignment_id || 0) || null,
+        content_item_id: Number(submission?.content_item_id || 0) || null,
+        submission_state: String(submission?.submission_state || "").trim().toLowerCase() || null,
+        created_at: submission?.created_at || null,
+        reviewed_at: submission?.reviewed_at || null,
+        assignment_latest_submission_pointer: submissionId === latestSubmissionId,
+        deliverable_count: deliverables.length,
+        fulfilled_deliverable_count: fulfilledDeliverables.length,
+        article_draft_deliverable_id: Number(articleDraft?.id || 0) || null,
+        article_draft_text_length: String(articleDraft?.text_content || "").trim().length,
+        article_draft_status: String(articleDraft?.status || "").trim() || null,
+        included_in_publishable_bundle: included,
+        inclusion_reason: included ? "included_by_assignment_latest_submission_pointer" : null,
+        exclusion_reasons: included ? [] : exclusionReasons,
+      };
+    });
+
+    const latestRows = Array.isArray(deliverablesBundle?.deliverables_by_type?.article_draft)
+      ? deliverablesBundle.deliverables_by_type.article_draft
+      : [];
+
+    return {
+      assignment_id: assignmentId,
+      assignment_state: String(assignment?.state || "").trim().toLowerCase() || null,
+      assignment_content_item_id: assignmentContentItemId,
+      assignment_latest_submission_id: Number(assignment?.latest_submission_id || 0) || null,
+      resolved_latest_submission_id: latestSubmissionId,
+      query_trace: queryTrace,
+      latest_bundle_article_draft_deliverable_id: Number(latestRows[0]?.id || 0) || null,
+      latest_bundle_article_draft_text_length: String(latestRows[0]?.text_content || "").trim().length,
+      submissions: submissionRows,
+    };
+  }
+
   function buildPublishableSourceByItem(contentItemId) {
     const itemId = Number(contentItemId || 0);
     if (!itemId) throw new Error("content_item_id is required");
@@ -7594,6 +7675,9 @@ function normalizeStateValue(value, stateGroup) {
           article_text: articleText,
           ready_for_publish_source: readyForPublishSource,
           updated_at: String(assignment?.updated_at || assignment?.created_at || latestSubmission?.created_at || "").trim(),
+          debug: isDebugDiagnosticsEnabled()
+            ? buildPublishableSourceSubmissionDiagnostics(assignment, latestSubmissionId, deliverablesBundle)
+            : null,
         };
       })
       .filter(Boolean)
@@ -7658,6 +7742,13 @@ function normalizeStateValue(value, stateGroup) {
           ...(Array.isArray(candidate.deliverables_utility?.reason_codes) ? candidate.deliverables_utility.reason_codes : []),
           ...(Array.isArray(candidate.governance_summary?.reason_codes) ? candidate.governance_summary.reason_codes : []),
         ]),
+      } : null,
+      debug: isDebugDiagnosticsEnabled() ? {
+        candidate_assignment_id: Number(candidate?.assignment_id || 0) || null,
+        candidate_assignment_state: String(candidate?.assignment_state || "").trim().toLowerCase() || null,
+        candidate_latest_submission_id: Number(candidate?.latest_submission_id || 0) || null,
+        selection_trace: "candidates sorted by ready_for_publish_source desc, assignment_rank asc, updated_at desc",
+        assignments: candidates.map((row) => row?.debug).filter(Boolean),
       } : null,
       resolved_article: candidate ? {
         title: String(candidate.article_draft?.title || item.title || "").trim() || null,

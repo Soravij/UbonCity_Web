@@ -3717,6 +3717,7 @@ function getPrimaryEditorialAssignment(itemId) {
 }
 
 function buildArticleProcessPayload(req, item) {
+  const isDebugDiagnosticsEnabled = String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
   const workflowModel = repo.ensureWorkflowModel(Number(item?.id || 0) || 0);
   const publishableSource = repo.buildPublishableSourceByItem(Number(item?.id || 0) || 0);
   const latestDraft = buildArticleProcessDraftPreview(item, workflowModel, publishableSource);
@@ -3734,6 +3735,7 @@ function buildArticleProcessPayload(req, item) {
     publishable_source: publishableSource?.source || null,
     publishable_source_ready: Boolean(publishableSource?.ready_for_publish_source),
     publishable_source_issues: Array.isArray(publishableSource?.issues) ? publishableSource.issues : [],
+    publishable_source_debug: isDebugDiagnosticsEnabled ? (publishableSource?.debug || null) : undefined,
     editorial_assignments: editorialAssignments,
     active_editorial_assignment: activeEditorialAssignment,
     workflow_transitions: workflowTransitions,
@@ -6029,6 +6031,7 @@ function parseTargetLangs() {
 }
 
 function buildExportReadiness(contentItemId) {
+  const isDebugDiagnosticsEnabled = String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
   const item = repo.getItem(contentItemId);
   if (!item) return null;
 
@@ -6149,6 +6152,7 @@ function buildExportReadiness(contentItemId) {
       publication_state_approved: publicationState === "approved",
     },
     publishable_source: publishableSource?.source || null,
+    publishable_source_debug: isDebugDiagnosticsEnabled ? (publishableSource?.debug || null) : undefined,
     publishable_article_preview: publishableSource?.resolved_article
       ? {
         title: publishableSource.resolved_article.title,
