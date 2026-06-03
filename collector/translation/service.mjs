@@ -48,6 +48,10 @@ function buildRawResponseEndingPreview(raw) {
   return text.slice(-500);
 }
 
+function previewText(value, limit = 240) {
+  return String(value || "").trim().slice(0, limit);
+}
+
 function questionMarkRatio(value) {
   const text = String(value || "");
   if (!text.length) return 0;
@@ -303,15 +307,38 @@ function buildInvalidTranslationPayloadError(rawText, parsedPayload) {
 }
 
 function buildTranslationPrompt(source, targetLang) {
+  const target = String(targetLang || "en").trim().toLowerCase() || "en";
+  const targetLabel = target === "zh"
+    ? "Simplified Chinese / 中文简体"
+    : target === "lo"
+      ? "Lao / ພາສາລາວ"
+      : target === "en"
+        ? "English"
+        : target;
   return [
     "Return ONLY valid JSON with keys:",
     "translated_title, translated_excerpt, translated_body, translated_meta_title, translated_meta_description",
-    `Translate into target language: ${targetLang}`,
+    `Target language code: ${target}`,
+    `Target language label: ${targetLabel}`,
+    "All user-visible prose must be written in the target language.",
+    "For zh use Simplified Chinese only. For lo use Lao only.",
+    "Do not output English prose except brand names, URLs, file paths, addresses, or proper nouns.",
+    "Preserve HTML tags, attributes, URLs, image src values, and brand names exactly as provided.",
+    "Translate text nodes only. Do not rewrite tag names or HTML structure.",
     "Do not include markdown fences.",
+    "Do not include explanations or notes outside the JSON object.",
     "Preserve factual details; no hallucination.",
     "Input:",
     JSON.stringify(source, null, 2),
   ].join("\n");
+}
+
+function resolveTargetLanguageLabel(targetLang) {
+  const target = String(targetLang || "en").trim().toLowerCase() || "en";
+  if (target === "zh") return "Simplified Chinese / 中文简体";
+  if (target === "lo") return "Lao / ພາສາລາວ";
+  if (target === "en") return "English";
+  return target;
 }
 
 async function backendTranslate(source, targetLang, aiConfig) {
@@ -328,10 +355,14 @@ async function backendTranslate(source, targetLang, aiConfig) {
   if (!parsed) {
     throw buildInvalidTranslationPayloadError(result.outputText, result.parsed || parseJsonLike(result.outputText));
   }
+  const promptPreview = buildTranslationPrompt(source, targetLang);
   return {
     ...parsed,
     _engine: String(result.provider || translationConfig?.provider || "openai").trim(),
     _model: String(result.model || translationConfig?.model || "unknown").trim(),
+    _target_lang: String(targetLang || "").trim().toLowerCase() || null,
+    _target_lang_label: resolveTargetLanguageLabel(targetLang),
+    _prompt_language_instruction_preview: previewText(promptPreview, 500),
   };
 }
 
@@ -343,6 +374,7 @@ async function openAiTranslate(source, targetLang, aiConfig) {
     throw new Error("OPENAI_API_KEY is missing");
   }
 
+  const prompt = buildTranslationPrompt(source, targetLang);
   const response = await fetch(`${baseUrl}/responses`, {
     method: "POST",
     headers: {
@@ -351,7 +383,7 @@ async function openAiTranslate(source, targetLang, aiConfig) {
     },
     body: JSON.stringify({
       model,
-      input: buildTranslationPrompt(source, targetLang),
+      input: prompt,
       text: { format: { type: "text" } },
     }),
   });
@@ -369,7 +401,14 @@ async function openAiTranslate(source, targetLang, aiConfig) {
     throw buildInvalidTranslationPayloadError(rawOutput, parsedPayload);
   }
 
-  return { ...parsed, _engine: "openai", _model: model };
+  return {
+    ...parsed,
+    _engine: "openai",
+    _model: model,
+    _target_lang: String(targetLang || "").trim().toLowerCase() || null,
+    _target_lang_label: resolveTargetLanguageLabel(targetLang),
+    _prompt_language_instruction_preview: previewText(prompt, 500),
+  };
 }
 
 async function googleAiTranslate(source, targetLang, aiConfig) {
@@ -380,13 +419,14 @@ async function googleAiTranslate(source, targetLang, aiConfig) {
     throw new Error("GOOGLE_AI_API_KEY is missing");
   }
 
+  const prompt = buildTranslationPrompt(source, targetLang);
   const response = await fetch(
     `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: buildTranslationPrompt(source, targetLang) }] }],
+        contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: "application/json" },
       }),
     }
@@ -405,7 +445,14 @@ async function googleAiTranslate(source, targetLang, aiConfig) {
     throw buildInvalidTranslationPayloadError(outputText, parsedPayload);
   }
 
-  return { ...parsed, _engine: "google", _model: model };
+  return {
+    ...parsed,
+    _engine: "google",
+    _model: model,
+    _target_lang: String(targetLang || "").trim().toLowerCase() || null,
+    _target_lang_label: resolveTargetLanguageLabel(targetLang),
+    _prompt_language_instruction_preview: previewText(prompt, 500),
+  };
 }
 
 function createDeterministicTranslator() {

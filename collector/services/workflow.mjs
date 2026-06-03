@@ -818,6 +818,7 @@ function buildTranslationDiagnostics(article, lang, provider, model) {
     target_language: String(lang || "").trim().toLowerCase() || null,
     provider: String(provider || "").trim() || null,
     model: String(model || "").trim() || null,
+    requested_lang_code: String(lang || "").trim().toLowerCase() || null,
   };
 }
 
@@ -955,6 +956,8 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
         );
         const translatorEngine = String(translated?._engine || defaultTranslatorEngine).trim();
         const translatorModel = String(translated?._model || defaultTranslatorModel).trim();
+        const targetLanguageLabel = String(translated?._target_lang_label || "").trim() || null;
+        const promptLanguageInstructionPreview = String(translated?._prompt_language_instruction_preview || "").trim() || null;
 
         const check = runAutomaticTranslationChecks({
           target_lang: lang,
@@ -992,6 +995,9 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
           languageResults.push({ lang, status: "generated", failure_reason: null });
           traceTranslationDiagnostics("translation_attempt_success", {
             ...diagnostics,
+            requested_lang_code: String(translated?._target_lang || lang || "").trim().toLowerCase() || diagnostics.requested_lang_code,
+            resolved_target_language_label: targetLanguageLabel,
+            prompt_language_instruction_preview: promptLanguageInstructionPreview,
             provider: translatorEngine || diagnostics.provider,
             model: translatorModel || diagnostics.model,
             translation_status: "ready",
@@ -1002,7 +1008,14 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
           const debugDetails = String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production"
             && check?.debug
             && typeof check.debug === "object"
-            ? check.debug
+            ? {
+              ...check.debug,
+              requested_lang_code: String(translated?._target_lang || lang || "").trim().toLowerCase() || diagnostics.requested_lang_code,
+              resolved_target_language_label: targetLanguageLabel,
+              prompt_language_instruction_preview: promptLanguageInstructionPreview,
+              provider: translatorEngine || diagnostics.provider,
+              model: translatorModel || diagnostics.model,
+            }
             : null;
           languageResults.push({
             lang,
@@ -1012,6 +1025,9 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
           });
           traceTranslationDiagnostics("translation_attempt_check_failed", {
             ...diagnostics,
+            requested_lang_code: String(translated?._target_lang || lang || "").trim().toLowerCase() || diagnostics.requested_lang_code,
+            resolved_target_language_label: targetLanguageLabel,
+            prompt_language_instruction_preview: promptLanguageInstructionPreview,
             provider: translatorEngine || diagnostics.provider,
             model: translatorModel || diagnostics.model,
             failure_reason: "automatic_check_failed",
