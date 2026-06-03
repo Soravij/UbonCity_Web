@@ -4358,7 +4358,7 @@ function sanitizeAdminReviewMediaManifest(mediaManifest, contentItemId) {
   const cover = manifest?.cover && typeof manifest.cover === "object" ? manifest.cover : null;
   if (!cover || !isAdminReviewLocalMediaEntry(cover)) {
     if (cover) noteExcluded(cover, "cover");
-    throw new Error("cover image must be a selected local asset");
+    throw new Error("cover image must be selected from uploaded local assets");
   }
 
   const gallery = (Array.isArray(manifest?.gallery) ? manifest.gallery : []).filter((entry) => {
@@ -4503,7 +4503,7 @@ function buildReviewIngestPayload(options = {}) {
   const mediaManifest = adminReviewMediaResult.mediaManifest || {};
   const coverImage = String(mediaManifest?.cover?.source_url || "").trim();
   if (!coverImage) {
-    throw new Error("cover image must be a selected local asset");
+    throw new Error("cover image must be selected from uploaded local assets");
   }
   const metaTitle = String(latestDraft?.meta_title || item?.meta_title || title).trim();
   const metaDescription = String(latestDraft?.meta_description || item?.meta_description || excerpt).trim();
@@ -5036,6 +5036,59 @@ function isCollectorControlledLocalAssetRow(row) {
   if (!storagePath || /^https?:\/\//i.test(storagePath)) return false;
   if (mimeType && !mimeType.startsWith("image/")) return false;
   return true;
+}
+
+function clearExternalUsableMediaAtHandoff(contentItemId, options = {}) {
+  const itemId = Number(contentItemId || 0) || 0;
+  if (!itemId) return { cleared: [], cover_cleared: false, local_cover_url: "" };
+  const item = repo.getItem(itemId);
+  if (!item) return { cleared: [], cover_cleared: false, local_cover_url: "" };
+
+  const submissionId = Number(options?.submissionId || 0) || null;
+  const rows = repo.listContentAssetsByItem(itemId, { onlySelected: false });
+  const cleared = [];
+  for (const row of rows) {
+    const selectedInClean = Number(row?.selected_in_clean || 0) === 1;
+    const role = String(row?.role || "").trim().toLowerCase();
+    const isCover = Number(row?.is_cover || 0) === 1 || role === "cover";
+    const isUsableMedia = selectedInClean || isCover || ["cover", "gallery", "inline"].includes(role);
+    if (!isUsableMedia || isCollectorControlledLocalAssetRow(row)) continue;
+    repo.setContentAssetRole(itemId, Number(row.asset_id || 0), "unused");
+    cleared.push({
+      reason: "external_media_cleared_at_handoff_submit",
+      content_item_id: itemId,
+      submission_id: submissionId,
+      role: role || null,
+      candidate_role: role || null,
+      source_url: String(row?.public_url || "").trim() || null,
+      asset_id: Number(row?.asset_id || 0) || null,
+    });
+  }
+
+  const selectedLocalRows = repo
+    .listContentAssetsByItem(itemId, { onlySelected: true })
+    .filter((row) => isCollectorControlledLocalAssetRow(row));
+  const localCover = selectedLocalRows.find((row) => Number(row?.is_cover || 0) === 1 || String(row?.role || "").trim().toLowerCase() === "cover") || null;
+  const localCoverUrl = String(localCover?.public_url || "").trim();
+  const currentImageUrl = String(item?.image_url || "").trim();
+  const coverCleared = Boolean(currentImageUrl) && currentImageUrl !== localCoverUrl;
+  if (coverCleared) {
+    repo.saveItem({ ...item, id: itemId, image_url: localCoverUrl || "" }, actorEmail(options?.req) || "system@local");
+  }
+
+  if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production" && cleared.length > 0) {
+    try {
+      console.error("[external usable media cleared at handoff submit]", JSON.stringify(cleared));
+    } catch {
+      console.error("[external usable media cleared at handoff submit]");
+    }
+  }
+
+  return {
+    cleared,
+    cover_cleared: coverCleared,
+    local_cover_url: localCoverUrl || "",
+  };
 }
 
 function toMediaDedupKey(value) {
@@ -8201,6 +8254,16 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
           },
         };
       }
+      const handoffCleanup = clearExternalUsableMediaAtHandoff(id, {
+        req,
+        submissionId: Number(submission?.id || 0) || null,
+      });
+      if (isDebugDiagnosticsEnabled && handoffCleanup.cleared.length > 0) {
+        submitReviewDiagnostics = {
+          ...(submitReviewDiagnostics || {}),
+          external_media_cleanup: handoffCleanup,
+        };
+      }
       repo.updateAssignmentState(editorialAssignment.id, submissionState, actorEmail(req), {
         actor_role: role,
         reason_code: ASSIGNMENT_REASON_CODE_DEFAULTS[submissionAction],
@@ -8214,6 +8277,16 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
     } else if (role === "editor") {
       res.status(403).json({ error: "editor ต้องมี editorial assignment ที่พร้อม submit หรือ resubmit ก่อนส่งบทความเข้าตรวจ" });
       return;
+    }
+
+    if (!editorialAssignment?.id) {
+      const handoffCleanup = clearExternalUsableMediaAtHandoff(id, { req });
+      if (isDebugDiagnosticsEnabled && handoffCleanup.cleared.length > 0) {
+        submitReviewDiagnostics = {
+          ...(submitReviewDiagnostics || {}),
+          external_media_cleanup: handoffCleanup,
+        };
+      }
     }
 
     transitionArticleProcessState(req, item, currentStatus, "ready_for_review", note, reasonCode);
@@ -9734,6 +9807,7 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
     const assignmentKind = String(currentAssignment.assignment_kind || "").trim().toLowerCase();
     const contentItemId = Number(assignment?.content_item_id || 0) || 0;
     if (assignmentKind === "field" && nextState === "accepted" && contentItemId) {
+      clearExternalUsableMediaAtHandoff(contentItemId, { req });
       const workflowModel = repo.ensureWorkflowModel(contentItemId);
       const productionState = String(workflowModel?.production_state || "").trim().toLowerCase();
       const publicationState = String(workflowModel?.publication_state || "").trim().toLowerCase() || "draft";
