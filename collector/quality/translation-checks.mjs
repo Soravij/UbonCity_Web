@@ -7,6 +7,18 @@ function countMatches(text, regex) {
   return m ? m.length : 0;
 }
 
+function isDebugDiagnosticsEnabled() {
+  return String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
+}
+
+function previewText(value, limit = 240) {
+  return String(value || "").trim().slice(0, limit);
+}
+
+function stripHtmlTags(value) {
+  return String(value || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function classifyScriptUsage(text) {
   const value = String(text || "");
   const total = value.length || 1;
@@ -69,6 +81,7 @@ export function runAutomaticTranslationChecks(input) {
   const translatedBody = toStr(input?.translated_body);
   const translatedMetaTitle = toStr(input?.translated_meta_title);
   const translatedMetaDescription = toStr(input?.translated_meta_description);
+  const strippedBody = stripHtmlTags(translatedBody);
 
   if (!translatedTitle) issues.push("missing translated_title");
   if (!translatedBody) issues.push("missing translated_body");
@@ -90,12 +103,12 @@ export function runAutomaticTranslationChecks(input) {
     }
   }
 
-  const langSample = [translatedTitle, translatedMetaTitle, translatedBody.slice(0, 1000)].join("\n");
+  const langSample = [translatedTitle, translatedMetaTitle, strippedBody.slice(0, 1000)].join("\n");
   if (!isLanguageShapeLikely(targetLang, langSample)) {
     issues.push("target language shape mismatch");
   }
 
-  if (leakageTooHigh(targetLang, translatedBody)) {
+  if (leakageTooHigh(targetLang, strippedBody)) {
     issues.push("source language leakage too high");
   }
 
@@ -116,8 +129,44 @@ export function runAutomaticTranslationChecks(input) {
     issues.push("translation is not tied to latest source fingerprint");
   }
 
-  return {
+  const report = {
     status: issues.length ? "failed" : "passed",
     issues,
   };
+  if (isDebugDiagnosticsEnabled()) {
+    report.debug = {
+      lang: targetLang,
+      translated_title_preview: previewText(translatedTitle),
+      translated_excerpt_preview: previewText(translatedExcerpt),
+      translated_body_preview: previewText(translatedBody, 1000),
+      body_length: translatedBody.length,
+      detected_script_counts: {
+        lang_sample: classifyScriptUsage(langSample),
+        stripped_body: classifyScriptUsage(strippedBody),
+      },
+      automatic_check_reason_codes: issues.slice(),
+      thresholds: {
+        language_shape: {
+          en: { latin_ratio_min: 0.2, thai_ratio_max: 0.2, lao_ratio_max: 0.2 },
+          zh: { cjk_ratio_min: 0.1 },
+          lo: { lao_ratio_min: 0.1 },
+          th: { thai_ratio_min: 0.1 },
+        },
+        leakage: {
+          en: { thai_ratio_max: 0.35, lao_ratio_max: 0.35 },
+          zh: { thai_ratio_max: 0.4, lao_ratio_max: 0.4 },
+          lo: { thai_ratio_max: 0.45 },
+        },
+        lengths: {
+          translated_title_min: 4,
+          translated_title_max: 200,
+          translated_meta_title_min: targetLang === "zh" ? 0 : 8,
+          translated_meta_title_max: 90,
+          translated_meta_description_max: 220,
+        },
+      },
+      html_tags_stripped_before_check: true,
+    };
+  }
+  return report;
 }

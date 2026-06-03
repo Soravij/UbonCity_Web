@@ -999,13 +999,24 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
           });
         } else {
           failedCount += 1;
-          languageResults.push({ lang, status: "failed", failure_reason: "automatic_check_failed" });
+          const debugDetails = String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production"
+            && check?.debug
+            && typeof check.debug === "object"
+            ? check.debug
+            : null;
+          languageResults.push({
+            lang,
+            status: "failed",
+            failure_reason: "automatic_check_failed",
+            ...(debugDetails || {}),
+          });
           traceTranslationDiagnostics("translation_attempt_check_failed", {
             ...diagnostics,
             provider: translatorEngine || diagnostics.provider,
             model: translatorModel || diagnostics.model,
             failure_reason: "automatic_check_failed",
             issues: Array.isArray(check?.issues) ? check.issues : [],
+            automatic_check_debug: debugDetails,
           });
         }
       } catch (err) {
