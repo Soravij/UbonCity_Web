@@ -104,6 +104,44 @@ export async function ensureReviewInfrastructure() {
       "ALTER TABLE review_actions MODIFY COLUMN action_type ENUM('ingested','approved','needs_revision','rejected','reingested') NOT NULL"
     );
   }
+
+  const reviewContentColumnRepairs = [
+    {
+      name: "phone",
+      alterSql: "ALTER TABLE review_contents ADD COLUMN phone VARCHAR(120) NULL AFTER transport_contact_phone",
+    },
+    {
+      name: "line_url",
+      alterSql: "ALTER TABLE review_contents ADD COLUMN line_url VARCHAR(1200) NULL AFTER phone",
+    },
+    {
+      name: "facebook_url",
+      alterSql: "ALTER TABLE review_contents ADD COLUMN facebook_url VARCHAR(1200) NULL AFTER line_url",
+    },
+    {
+      name: "website_url",
+      alterSql: "ALTER TABLE review_contents ADD COLUMN website_url VARCHAR(1200) NULL AFTER facebook_url",
+    },
+    {
+      name: "primary_cta",
+      alterSql: "ALTER TABLE review_contents ADD COLUMN primary_cta ENUM('map','phone','line') NULL AFTER website_url",
+    },
+    {
+      name: "tracking_entity_type",
+      alterSql: "ALTER TABLE review_contents ADD COLUMN tracking_entity_type ENUM('place','event','review_content') NULL AFTER primary_cta",
+    },
+    {
+      name: "tracking_entity_id",
+      alterSql: "ALTER TABLE review_contents ADD COLUMN tracking_entity_id BIGINT NULL AFTER tracking_entity_type",
+    },
+  ];
+
+  for (const repair of reviewContentColumnRepairs) {
+    const [rows] = await pool.query("SHOW COLUMNS FROM review_contents LIKE ?", [repair.name]);
+    if (!Array.isArray(rows) || !rows.length) {
+      await pool.query(repair.alterSql);
+    }
+  }
 }
 
 function parseJsonText(raw, fallback) {

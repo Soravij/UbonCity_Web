@@ -232,7 +232,7 @@ export async function ingestReviewContent(payload) {
           tracking_entity_type, tracking_entity_id,
           transport_contact_details, transport_link_url, slug, slug_locked, public_entity_type, public_entity_id,
           current_batch_uid, review_payload_json
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           sourceSystem, sourceContentItemId, content.content_type, "pending_review", content.lang, content.category,
           content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
