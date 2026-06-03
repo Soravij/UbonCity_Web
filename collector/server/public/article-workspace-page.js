@@ -1409,54 +1409,18 @@ async function transitionArticle(status, note = "") {
 async function submitWorkspaceForReview(note = "") {
   setBusy(true);
   setWorkspaceBanner("Submitting for review...", "loading");
-  const shouldLogSubmitReviewResponse = (() => {
-    const hostname = String(window.location?.hostname || "").trim().toLowerCase();
-    return hostname.includes("collector-test")
-      || hostname === "localhost"
-      || hostname === "127.0.0.1"
-      || hostname === "::1";
-  })();
-  if (shouldLogSubmitReviewResponse) {
-    const enteredAt = new Date().toISOString();
-    sessionStorage.setItem("debug_submit_review_entered", enteredAt);
-    localStorage.setItem("debug_submit_review_entered", enteredAt);
-    console.log("[submit-review entered]");
-  }
   try {
-    if (shouldLogSubmitReviewResponse) {
-      const beforeApiAt = new Date().toISOString();
-      sessionStorage.setItem("debug_submit_review_before_api", beforeApiAt);
-      localStorage.setItem("debug_submit_review_before_api", beforeApiAt);
-    }
-    const data = await api(`/api/items/${state.itemId}/article-process/submit-review`, {
+    await api(`/api/items/${state.itemId}/article-process/submit-review`, {
       method: "POST",
       body: JSON.stringify({
         note: String(note || "").trim() || null,
         reason_code: "article_process_ready_for_review",
       }),
     });
-    if (shouldLogSubmitReviewResponse) {
-      const afterApiAt = new Date().toISOString();
-      sessionStorage.setItem("debug_submit_review_after_api", afterApiAt);
-      localStorage.setItem("debug_submit_review_after_api", afterApiAt);
-      sessionStorage.setItem("debug_submit_review_response", JSON.stringify(data, null, 2));
-      localStorage.setItem("debug_submit_review_response", JSON.stringify(data, null, 2));
-      console.log("[submit-review response]", data);
-      console.log("[submit-review diagnostics]", data?.submit_review_diagnostics);
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
     await refreshArticleProcess();
     await refreshFieldPack();
     renderAll();
     setWorkspaceBanner("Submitted for review");
-  } catch (err) {
-    if (shouldLogSubmitReviewResponse) {
-      const errorMessage = String(err?.message || err);
-      sessionStorage.setItem("debug_submit_review_error", errorMessage);
-      localStorage.setItem("debug_submit_review_error", errorMessage);
-      console.error("[submit-review error]", err);
-    }
-    throw err;
   } finally {
     setBusy(false);
     applyActionGuards();
@@ -1685,35 +1649,12 @@ function wire() {
     event.returnValue = "";
   });
   qs("btn-submit-review")?.addEventListener("click", async () => {
-    const shouldLogSubmitReviewResponse = (() => {
-      const hostname = String(window.location?.hostname || "").trim().toLowerCase();
-      return hostname.includes("collector-test")
-        || hostname === "localhost"
-        || hostname === "127.0.0.1"
-        || hostname === "::1";
-    })();
     try {
-      if (shouldLogSubmitReviewResponse) {
-        const clickedAt = new Date().toISOString();
-        sessionStorage.setItem("debug_workspace_submit_button_clicked", clickedAt);
-        localStorage.setItem("debug_workspace_submit_button_clicked", clickedAt);
-        sessionStorage.setItem("debug_workspace_handler_name", "btn-submit-review.click");
-        localStorage.setItem("debug_workspace_handler_name", "btn-submit-review.click");
-        console.log("[workspace submit button clicked]", { handler: "btn-submit-review.click", at: clickedAt });
-      }
       const validation = validateWorkspace();
       if (!validation.ok) throw new Error(`Missing: ${validation.missing.join(", ")}`);
       const note = currentReviewNote() || "submitted from article workspace";
       await saveWorkspace();
       await submitWorkspaceForReview(note);
-      if (shouldLogSubmitReviewResponse) {
-        const navigationAt = new Date().toISOString();
-        sessionStorage.setItem("debug_workspace_review_url_navigation", navigationAt);
-        localStorage.setItem("debug_workspace_review_url_navigation", navigationAt);
-        sessionStorage.setItem("debug_workspace_handler_name", "btn-submit-review.navigate-review-url");
-        localStorage.setItem("debug_workspace_handler_name", "btn-submit-review.navigate-review-url");
-        console.log("[workspace review url navigation]", { handler: "btn-submit-review.navigate-review-url", at: navigationAt, url: reviewUrl() });
-      }
       window.location.href = reviewUrl();
       setInlineStatus("review-status", "Submitted for review");
     } catch (err) {
