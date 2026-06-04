@@ -1,0 +1,213 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import vm from "node:vm";
+
+const root = path.resolve("D:/UbonCity_Web/collector");
+
+function read(relativePath) {
+  return fs.readFileSync(path.join(root, relativePath), "utf8");
+}
+
+function createElement(id = "") {
+  return {
+    id,
+    disabled: false,
+    value: "",
+    innerHTML: "",
+    textContent: "",
+    className: "",
+    dataset: {},
+    style: {},
+    focus() {},
+    setAttribute() {},
+    removeAttribute() {},
+    appendChild() {},
+    removeChild() {},
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    closest() { return null; },
+    addEventListener() {},
+    classList: {
+      add() {},
+      remove() {},
+      toggle() {},
+      contains() { return false; },
+    },
+  };
+}
+
+function loadHarness() {
+  const elements = new Map();
+  const source = read("server/public/article-submit-page.js")
+    .replace(/^\uFEFF?import[\s\S]+?from "\.\/article-workflow-core\.js";\s*/u, "")
+    .replace(
+      /\binit\(\);\s*$/u,
+      `
+globalThis.__articleSubmitTestHooks = {
+  state,
+  buildTranslationRows,
+  renderTranslationRecheckPanel,
+  getTranslationRecheckGateState,
+  translationRecheckStatusFromRow,
+  applyActionGuards,
+};
+`,
+    );
+
+  const document = {
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, createElement(id));
+      return elements.get(id);
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  };
+
+  const state = {
+    itemId: 48,
+    item: null,
+    user: { role: "admin" },
+    articleProcess: { status: "ready_for_review" },
+    assets: [],
+    translations: [],
+    readiness: null,
+    busy: false,
+  };
+
+  const context = {
+    console,
+    document,
+    window: {
+      location: { search: "?id=48", origin: "http://127.0.0.1:5062", href: "" },
+      open() {},
+    },
+    URL,
+    URLSearchParams,
+    setTimeout,
+    clearTimeout,
+    state,
+    api: async () => ({}),
+    canApproveArticle: () => true,
+    canManageTranslations: () => true,
+    canSyncArticle: () => true,
+    collectWorkspacePayload: () => ({ item: {} }),
+    currentOtherTransportMeta: () => ({}),
+    currentReviewNote: () => "",
+    currentRole: () => "admin",
+    escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    },
+    formatDateTime(value) {
+      return value ? String(value) : "-";
+    },
+    getArticleStatus: () => "ready_for_review",
+    articleStatusLabel: () => "ready_for_review",
+    latestDraft: () => null,
+    loadTranslations: async () => [],
+    loadWorkspace: async () => ({}),
+    otherTransportSubtypeLabel: () => "-",
+    primaryAssignment: () => null,
+    qs(id) {
+      return document.getElementById(id);
+    },
+    reviewPreviewUrl: () => "/article-preview.html?id=48",
+    renderActivityLog() {},
+    renderAuthStatus() {},
+    renderProcessBar() {},
+    reviewUrl: () => "/article-submit.html?id=48",
+    roleArticleFallbackUrl: () => "/",
+    sanitizeUrl: (value) => String(value || ""),
+    setBanner() {},
+    setInlineStatus() {},
+    isOtherTransportItem: () => false,
+    validateWorkspace: () => ({ ok: true, missing: [] }),
+    workspaceUrl: () => "/article-workspace.html?id=48",
+    globalThis: null,
+  };
+  context.globalThis = context;
+
+  vm.runInNewContext(source, context, { filename: "article-submit-page.js" });
+  return {
+    hooks: context.__articleSubmitTestHooks,
+    elements,
+  };
+}
+
+test("translation recheck treats missing status as not_checked and not ready", () => {
+  const { hooks } = loadHarness();
+  hooks.state.readiness = {
+    translations: [
+      { lang: "en", status: "passed" },
+      { lang: "lo", status: "passed" },
+    ],
+  };
+  hooks.state.translations = [
+    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+    { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "passed" },
+  ];
+
+  const gate = hooks.getTranslationRecheckGateState();
+
+  assert.equal(gate.allReady, false);
+  assert.equal(gate.counts.not_checked, 1);
+  assert.deepEqual(gate.blockingLangs, ["EN"]);
+});
+
+test("translation recheck panel renders placeholder state and tolerates malformed issues json", () => {
+  const { hooks, elements } = loadHarness();
+  hooks.state.readiness = {
+    translations: [{ lang: "en", status: "passed" }],
+  };
+  hooks.state.translations = [
+    {
+      lang: "en",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      recheck_issues_json: "{bad json",
+    },
+  ];
+
+  hooks.renderTranslationRecheckPanel();
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.match(html, /Translation recheck has not run yet\./);
+  assert.match(html, /not_checked/i);
+});
+
+test("translation recheck blocks approve and sync actions until all required locales pass", () => {
+  const { hooks, elements } = loadHarness();
+  hooks.state.readiness = {
+    translations: [
+      { lang: "en", status: "passed" },
+      { lang: "lo", status: "passed" },
+    ],
+  };
+  hooks.state.translations = [
+    {
+      lang: "en",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      translation_recheck_status: "passed",
+    },
+    {
+      lang: "lo",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+    },
+  ];
+
+  hooks.applyActionGuards();
+
+  assert.equal(elements.get("btn-approve-sync").disabled, true);
+  assert.equal(elements.get("btn-send-main-site").disabled, true);
+});
