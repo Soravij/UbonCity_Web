@@ -44,6 +44,18 @@ app.use(applyBasicSecurityHeaders);
 app.use(cors(corsOptionsDelegate));
 app.use(express.json({ limit: "10mb" }));
 app.use(createRateLimiter({ windowMs: 60 * 1000, max: 180, message: "Too many requests" }));
+app.use((req, _res, next) => {
+  if (req.path.includes("/review-content") && req.path.includes("needs-revision")) {
+    console.error("[server needs-revision request]", {
+      method: req.method,
+      path: req.path,
+      original_url: req.originalUrl,
+      has_authorization: Boolean(req.headers?.authorization),
+      content_type: req.headers?.["content-type"] || null,
+    });
+  }
+  next();
+});
 app.use(
   "/uploads",
   express.static(path.resolve(__dirname, "uploads"), {
@@ -79,7 +91,10 @@ app.use("/api", integrationReadinessRoutes);
 app.use("/api", internalAiRoutes);
 app.use("/api", analyticsRoutes);
 
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
+  if (req.path.includes("/review-content") && req.path.includes("needs-revision")) {
+    console.error("[server needs-revision error]", err);
+  }
   console.error("Unhandled backend error:", err);
   if (res.headersSent) return;
   res.status(500).json({ error: "Internal server error" });
