@@ -212,8 +212,10 @@ test("translation recheck panel renders placeholder state and tolerates malforme
   hooks.renderTranslationRecheckPanel();
 
   const html = elements.get("translation-recheck-panel").innerHTML;
-  assert.match(html, /Translation recheck has not run yet\./);
-  assert.match(html, /not_checked/i);
+  assert.match(html, /Not checked/);
+  assert.match(html, /<strong>Score:<\/strong> -/);
+  assert.match(html, />Recheck</);
+  assert.doesNotMatch(html, /Translation recheck has not run yet\./);
 });
 
 test("translation recheck blocks approve and sync actions until all required locales pass", () => {

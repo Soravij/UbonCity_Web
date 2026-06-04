@@ -273,6 +273,15 @@ function translationRecheckStatusFromRow(row) {
   return "not_checked";
 }
 
+function translationRecheckStatusLabel(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if (status === "passed") return "Passed";
+  if (status === "warning") return "Warning";
+  if (status === "failed") return "Failed";
+  if (status === "stale") return "Stale";
+  return "Not checked";
+}
+
 function buildTranslationRecheckRows() {
   return buildTranslationRows().map((row) => {
     const live = (Array.isArray(state.translations) ? state.translations : []).find(
@@ -659,9 +668,9 @@ function renderTranslationRecheckPanel() {
     </div>
     <div class="translation-recheck-list">
       ${gate.rows.map((row) => {
-        const hasRecheck = row.translation_recheck_status !== "not_checked";
         const hasFutureDetails = row.back_translation_th || row.recheck_summary_th || row.recheck_issues.length;
         const primaryScore = row.accuracy_score ?? row.fluency_score ?? row.term_score;
+        const statusLabel = translationRecheckStatusLabel(row.translation_recheck_status);
         const nextActionLabel = row.translation_recheck_status === "passed"
           ? "View details"
           : row.translation_recheck_status === "stale"
@@ -673,13 +682,12 @@ function renderTranslationRecheckPanel() {
           <div class="translation-recheck-row">
             <div class="translation-recheck-row-head">
               <strong>${escapeHtml(localeLabel(row.lang))}</strong>
-              <span class="${row.translation_recheck_status === "passed" ? "ok" : row.translation_recheck_status === "failed" ? "fail" : row.translation_recheck_status === "warning" || row.translation_recheck_status === "stale" ? "warn" : "muted"}">${escapeHtml(row.translation_recheck_status)}</span>
+              <span class="${row.translation_recheck_status === "passed" ? "ok" : row.translation_recheck_status === "failed" ? "fail" : row.translation_recheck_status === "warning" || row.translation_recheck_status === "stale" ? "warn" : "muted"}">${escapeHtml(statusLabel)}</span>
             </div>
             <div class="translation-recheck-meta">
-              <span><strong>Status:</strong> ${escapeHtml(row.translation_recheck_status)}</span>
+              <span><strong>Status:</strong> ${escapeHtml(statusLabel)}</span>
               <span><strong>Score:</strong> ${primaryScore == null ? "-" : escapeHtml(String(primaryScore))}</span>
             </div>
-            ${hasRecheck ? "" : '<p class="muted">Translation recheck has not run yet.</p>'}
             <div class="article-side-actions">
               <button type="button" class="utility-action" disabled>${escapeHtml(nextActionLabel)}</button>
             </div>
