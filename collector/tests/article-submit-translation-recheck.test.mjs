@@ -254,6 +254,7 @@ test("translation recheck blocks approve and sync actions until all required loc
 test("translation summary preserves generate button loading state while toggling priority classes", () => {
   const { hooks, elements } = loadHarness();
   elements.set("btn-generate-translations", createElement("btn-generate-translations"));
+  elements.set("translation-package-actions", createElement("translation-package-actions"));
   hooks.state.readiness = {
     translations: [{ lang: "en", status: "passed" }],
   };
@@ -267,6 +268,7 @@ test("translation summary preserves generate button loading state while toggling
   ];
 
   const button = elements.get("btn-generate-translations");
+  const actions = elements.get("translation-package-actions");
   button.classList.add("is-loading");
 
   hooks.renderTranslationSummary();
@@ -274,10 +276,14 @@ test("translation summary preserves generate button loading state while toggling
   assert.equal(button.classList.contains("is-loading"), true);
   assert.equal(button.classList.contains("utility-action"), true);
   assert.equal(button.classList.contains("ok"), false);
+  assert.equal(actions.classList.contains("hidden"), true);
+  assert.equal(elements.get("translation-package-hint").textContent, "");
 });
 
 test("translation package summary only shows package-oriented fields", () => {
   const { hooks, elements } = loadHarness();
+  elements.set("translation-package-actions", createElement("translation-package-actions"));
+  elements.set("btn-generate-translations", createElement("btn-generate-translations"));
   hooks.state.readiness = {
     translations: [
       { lang: "lo", status: "passed" },
@@ -308,4 +314,31 @@ test("translation package summary only shows package-oriented fields", () => {
   assert.doesNotMatch(html, /Ready now/);
   assert.doesNotMatch(html, /not_checked/i);
   assert.equal(hint, "Source changed after translation. Regenerate stale translations.");
+  assert.equal(elements.get("translation-package-actions").classList.contains("hidden"), false);
+  assert.equal(elements.get("btn-generate-translations").textContent, "Regenerate translations");
+});
+
+test("translation package button label resets from stale to missing state", () => {
+  const { hooks, elements } = loadHarness();
+  elements.set("translation-package-actions", createElement("translation-package-actions"));
+  elements.set("btn-generate-translations", createElement("btn-generate-translations"));
+
+  hooks.state.readiness = {
+    translations: [{ lang: "zh", status: "stale" }],
+  };
+  hooks.state.translations = [
+    { lang: "zh", translation_status: "ready", automatic_check_status: "passed", stale_flag: 1 },
+  ];
+
+  hooks.renderTranslationSummary();
+
+  assert.equal(elements.get("btn-generate-translations").textContent, "Regenerate translations");
+
+  hooks.state.readiness = { translations: [] };
+  hooks.state.translations = [];
+
+  hooks.renderTranslationSummary();
+
+  assert.equal(elements.get("btn-generate-translations").textContent, "Generate translations");
+  assert.equal(elements.get("translation-package-actions").classList.contains("hidden"), false);
 });

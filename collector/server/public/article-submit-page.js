@@ -519,6 +519,7 @@ function renderTranslationSummary() {
   const statusNode = qs("translation-status");
   const hintNode = qs("translation-package-hint");
   const generateBtn = qs("btn-generate-translations");
+  const actionNode = qs("translation-package-actions");
   if (!root) return;
   const gate = getTranslationGateState();
   const rows = gate.rows;
@@ -537,7 +538,9 @@ function renderTranslationSummary() {
     if (generateBtn) {
       generateBtn.classList.add("ok");
       generateBtn.classList.remove("utility-action");
+      generateBtn.textContent = "Generate translations";
     }
+    actionNode?.classList.remove("hidden");
     return;
   }
 
@@ -561,7 +564,7 @@ function renderTranslationSummary() {
   }
   if (hintNode) {
     hintNode.textContent = packageComplete
-      ? "Translations are complete. Next step: check translation quality."
+      ? ""
       : staleCount > 0
         ? "Source changed after translation. Regenerate stale translations."
         : "Create the first translation package for all required locales.";
@@ -569,7 +572,9 @@ function renderTranslationSummary() {
   if (generateBtn) {
     generateBtn.classList.toggle("ok", !packageComplete);
     generateBtn.classList.toggle("utility-action", packageComplete);
+    generateBtn.textContent = staleCount > 0 ? "Regenerate translations" : "Generate translations";
   }
+  actionNode?.classList.toggle("hidden", packageComplete);
 
   root.innerHTML = `
     <div class="summary-row"><strong>Package status</strong><span class="${packageComplete ? "ok" : staleCount > 0 ? "warn" : "fail"}">${escapeHtml(packageLabel)}</span></div>
