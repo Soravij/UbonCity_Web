@@ -11,7 +11,11 @@ function read(relativePath) {
 }
 
 function createElement(id = "") {
-  return {
+  const classes = new Set();
+  const syncClassName = (node) => {
+    node.className = Array.from(classes).join(" ");
+  };
+  const node = {
     id,
     disabled: false,
     value: "",
@@ -30,12 +34,41 @@ function createElement(id = "") {
     closest() { return null; },
     addEventListener() {},
     classList: {
-      add() {},
-      remove() {},
-      toggle() {},
-      contains() { return false; },
+      add(...tokens) {
+        for (const token of tokens) {
+          if (token) classes.add(token);
+        }
+        syncClassName(node);
+      },
+      remove(...tokens) {
+        for (const token of tokens) classes.delete(token);
+        syncClassName(node);
+      },
+      toggle(token, force) {
+        if (!token) return false;
+        if (force === true) {
+          classes.add(token);
+          syncClassName(node);
+          return true;
+        }
+        if (force === false) {
+          classes.delete(token);
+          syncClassName(node);
+          return false;
+        }
+        if (classes.has(token)) {
+          classes.delete(token);
+          syncClassName(node);
+          return false;
+        }
+        classes.add(token);
+        syncClassName(node);
+        return true;
+      },
+      contains(token) { return classes.has(token); },
     },
   };
+  return node;
 }
 
 function loadHarness() {
@@ -48,6 +81,7 @@ function loadHarness() {
 globalThis.__articleSubmitTestHooks = {
   state,
   buildTranslationRows,
+  renderTranslationSummary,
   renderTranslationRecheckPanel,
   getTranslationRecheckGateState,
   translationRecheckStatusFromRow,
@@ -210,4 +244,29 @@ test("translation recheck blocks approve and sync actions until all required loc
 
   assert.equal(elements.get("btn-approve-sync").disabled, true);
   assert.equal(elements.get("btn-send-main-site").disabled, true);
+});
+
+test("translation summary preserves generate button loading state while toggling priority classes", () => {
+  const { hooks, elements } = loadHarness();
+  elements.set("btn-generate-translations", createElement("btn-generate-translations"));
+  hooks.state.readiness = {
+    translations: [{ lang: "en", status: "passed" }],
+  };
+  hooks.state.translations = [
+    {
+      lang: "en",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+    },
+  ];
+
+  const button = elements.get("btn-generate-translations");
+  button.classList.add("is-loading");
+
+  hooks.renderTranslationSummary();
+
+  assert.equal(button.classList.contains("is-loading"), true);
+  assert.equal(button.classList.contains("utility-action"), true);
+  assert.equal(button.classList.contains("ok"), false);
 });

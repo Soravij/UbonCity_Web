@@ -68,23 +68,23 @@ function normalizeReviewActionCopy() {
   const reviewDescription = document.querySelector(".article-card-review > .article-section-head .muted");
   if (reviewDescription) {
     reviewDescription.textContent = isOtherTransport
-      ? "ตรวจความครบถ้วนของรายการขนส่ง บันทึกโน้ต และเลือกอนุมัติหรือส่งกลับแก้ไขจากจุดเดียว"
-      : "ตรวจความครบถ้วนของบทความ บันทึกโน้ต และเลือกอนุมัติหรือส่งกลับแก้ไขจากจุดเดียว";
+      ? "Source content is approved. Finalize translation quality and send the transport item onward."
+      : "Source content is approved. Finalize translation quality and submit this article onward.";
   }
 
   const approveBtn = qs("btn-approve-sync");
   if (approveBtn) {
-    approveBtn.textContent = isOtherTransport ? "อนุมัติรายการ" : "อนุมัติบทความ";
+    approveBtn.textContent = isOtherTransport ? "พร้อมส่งขั้นสุดท้าย" : "พร้อมส่งขั้นสุดท้าย";
   }
 
   const syncTitle = document.querySelector(".article-review-sync-controls .section-title");
   if (syncTitle) {
-    syncTitle.textContent = "ส่งเข้า Admin Review";
+    syncTitle.textContent = "Submit to Admin Review";
   }
 
   const syncDescription = document.querySelector(".article-review-sync-controls .article-section-head .muted");
   if (syncDescription) {
-    syncDescription.textContent = "ส่งข้อมูลเข้า backend และเข้าคิวอนุมัติบน admin panel ก่อนขึ้นหน้า public";
+    syncDescription.textContent = "Send is blocked until every required locale passes translation recheck.";
   }
 
   const syncBtn = qs("btn-send-main-site");
@@ -187,9 +187,9 @@ function renderSyncSummary() {
   root.classList.remove("hidden");
   if (!readiness) {
     root.innerHTML = `
-      <div class="summary-row"><strong>สถานะเผยแพร่</strong><span>${escapeHtml(status === "synced_to_admin" ? "ส่งขึ้นเว็บแล้ว" : status === "submitted_for_admin_review" ? "ส่งเข้า Admin Review แล้ว" : "ยังไม่ได้ตรวจความพร้อม")}</span></div>
-      <div class="summary-row"><strong>สถานะการอนุมัติ</strong><span class="${status === "ready_for_sync" || status === "submitted_for_admin_review" || status === "synced_to_admin" ? "ok" : "warn"}">${status === "ready_for_sync" || status === "submitted_for_admin_review" || status === "synced_to_admin" ? "อนุมัติแล้ว" : "รอการอนุมัติ"}</span></div>
-    `;
+      <div class="summary-row"><strong>Source article</strong><span class="ok">approved</span></div>
+      <div class="summary-row"><strong>Workflow status</strong><span>${escapeHtml(status === "synced_to_admin" ? "sent to main site" : status === "submitted_for_admin_review" ? "submitted to admin review" : "preparing translation workflow")}</span></div>
+      `;
     return;
   }
   const usesFieldFlow = Boolean(readiness?.field_flow_ready) || Boolean(state.articleProcess?.publishable_source_ready);
@@ -206,8 +206,9 @@ function renderSyncSummary() {
         ? "มีเนื้อหาจาก submission พร้อมอนุมัติ"
         : "อยู่ระหว่างตรวจงาน";
   root.innerHTML = `
-    <div class="summary-row"><strong>ความพร้อมข้อมูล</strong><span class="${readiness.source_ready ? "ok" : "fail"}">${readiness.source_ready ? "พร้อม" : "ยังไม่พร้อม"}</span></div>
-    <div class="summary-row"><strong>สถานะการอนุมัติ</strong><span>${escapeHtml(approvalLabel)}</span></div>
+    <div class="summary-row"><strong>Source article</strong><span class="ok">approved</span></div>
+    <div class="summary-row"><strong>Package source</strong><span class="${readiness.source_ready ? "ok" : "fail"}">${readiness.source_ready ? "ready for translation workflow" : "source package incomplete"}</span></div>
+    <div class="summary-row"><strong>Workflow status</strong><span>${escapeHtml(approvalLabel)}</span></div>
     ${issues.length ? `<ul>${issues.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>` : '<p class="muted">ไม่มีประเด็นค้าง</p>'}
   `;
 }
@@ -506,6 +507,9 @@ function closeTranslationDetail() {
 
 function renderTranslationSummary() {
   const root = qs("translation-summary");
+  const statusNode = qs("translation-status");
+  const hintNode = qs("translation-package-hint");
+  const generateBtn = qs("btn-generate-translations");
   if (!root) return;
   const gate = getTranslationGateState();
   const rows = gate.rows;
@@ -513,15 +517,48 @@ function renderTranslationSummary() {
 
   if (!rows.length) {
     root.innerHTML = `
-      <div class="summary-row"><strong>สถานะรวม</strong><span class="fail">ยังไม่พร้อม</span></div>
-      <div class="summary-row"><strong>ภาษาที่ต้องใช้</strong><span>ยังไม่มีรายการภาษา</span></div>
-      <p class="muted">เพิ่มภาษาให้ครบก่อนอนุมัติการเผยแพร่</p>
+      <div class="summary-row"><strong>Required locales</strong><span>0</span></div>
+      <div class="summary-row"><strong>Package status</strong><span class="fail">missing</span></div>
+      <p class="muted">Add the required locale package first.</p>
     `;
+    if (statusNode) statusNode.textContent = "";
+    if (hintNode) hintNode.textContent = "Translations are missing. Generate the package before translation quality review.";
+    if (generateBtn) {
+      generateBtn.classList.add("ok");
+      generateBtn.classList.remove("utility-action");
+    }
     return;
   }
 
+  const counts = gate.counts;
+  const staleCount = Number(counts.stale || 0);
+  const missingCount = Number(counts.not_ready || 0);
+  const failedCount = Number(counts.failed || 0);
+  const packageComplete = staleCount === 0 && missingCount === 0 && failedCount === 0;
+  const packageLabel = packageComplete ? "complete" : staleCount > 0 ? "stale" : missingCount > 0 ? "missing" : "incomplete";
+  if (statusNode) {
+    statusNode.textContent = packageComplete
+      ? "Translations are complete. Next step: check translation quality."
+      : staleCount > 0
+        ? "Some translations are stale. Refresh the package before recheck."
+        : "Translations are missing or incomplete.";
+  }
+  if (hintNode) {
+    hintNode.textContent = packageComplete
+      ? "Translations are complete. Next step: check translation quality."
+      : "Generate translations here before moving to Translation Recheck.";
+  }
+  if (generateBtn) {
+    generateBtn.classList.toggle("ok", !packageComplete);
+    generateBtn.classList.toggle("utility-action", packageComplete);
+  }
+
   root.innerHTML = `
-    <div class="summary-row"><strong>สถานะรวม</strong><span class="${gate.allReady ? "ok" : "fail"}">${escapeHtml(gate.allReady ? "พร้อมทุกภาษา" : `ยังไม่ผ่าน: ${gate.blockingLangs.join(", ")}`)}</span></div>
+    <div class="summary-row"><strong>Required locales</strong><span>${counts.total}</span></div>
+    <div class="summary-row"><strong>Package status</strong><span class="${packageComplete ? "ok" : staleCount > 0 || missingCount > 0 ? "warn" : "fail"}">${escapeHtml(packageLabel)}</span></div>
+    <div class="summary-row"><strong>Ready now</strong><span>${counts.passed}</span></div>
+    <div class="summary-row"><strong>Missing</strong><span>${missingCount}</span></div>
+    <div class="summary-row"><strong>Stale</strong><span>${staleCount}</span></div>
     <div class="article-translation-list">
       ${rows.map((row) => `
         <div class="article-translation-row" role="button" tabindex="0" data-translation-detail="${escapeHtml(String(row.lang || ""))}">
@@ -530,36 +567,40 @@ function renderTranslationSummary() {
         </div>
       `).join("")}
     </div>
-    ${gate.allReady ? "" : "<p class=\"muted\">ยังอนุมัติไม่ได้จนกว่าทุกภาษาจะผ่าน</p>"}
   `;
 }
 function renderTranslationReviewSummary() {
   const root = qs("translation-review-summary");
   if (!root) return;
-  const gate = getTranslationGateState();
-  if (!gate.rows.length) {
+  const translationGate = getTranslationGateState();
+  const recheckGate = getTranslationRecheckGateState();
+  const packageReady = translationGate.rows.length > 0 && translationGate.allReady;
+  if (!recheckGate.rows.length) {
     root.innerHTML = `
       <div class="article-translation-review-head">
-        <strong>ความพร้อมหลายภาษา</strong>
-        <span class="fail">ยังไม่พร้อม</span>
+        <strong>Final send gate</strong>
+        <span class="fail">blocked</span>
       </div>
-      <p class="muted">ยังไม่พบภาษาที่ต้องใช้</p>
+      <div class="readiness-summary">
+        <div class="summary-row"><strong>Translation Package</strong><span class="${packageReady ? "ok" : "fail"}">${packageReady ? "complete" : "not complete"}</span></div>
+        <div class="summary-row"><strong>Translation Recheck</strong><span class="fail">not passed</span></div>
+        <div class="summary-row"><strong>Final send</strong><span class="fail">blocked</span></div>
+      </div>
+      <p class="muted">Send is blocked until every required locale passes translation recheck.</p>
     `;
     return;
   }
   root.innerHTML = `
     <div class="article-translation-review-head">
-      <strong>ความพร้อมหลายภาษา</strong>
-      <span class="${gate.allReady ? "ok" : "fail"}">${gate.allReady ? "ผ่านทั้งหมด" : `ยังขาด ${gate.blockingLangs.join(", ")}`}</span>
+      <strong>Final send gate</strong>
+      <span class="${recheckGate.allReady ? "ok" : "fail"}">${recheckGate.allReady ? "ready to send" : `blocked: ${recheckGate.blockingLangs.join(", ")}`}</span>
     </div>
-    <div class="article-translation-review-list">
-      ${gate.rows.map((row) => `
-        <div class="article-translation-review-row" role="button" tabindex="0" data-translation-detail="${escapeHtml(String(row.lang || ""))}">
-          <strong>${escapeHtml(String(row.lang || "-").toUpperCase())}</strong>
-          <span class="${row.status === "passed" ? "ok" : row.status === "failed" ? "fail" : row.status === "stale" ? "warn" : "muted"}">${escapeHtml(row.status)}</span>
-        </div>
-      `).join("")}
+    <div class="readiness-summary">
+      <div class="summary-row"><strong>Translation Package</strong><span class="${packageReady ? "ok" : "fail"}">${packageReady ? "complete" : "not complete"}</span></div>
+      <div class="summary-row"><strong>Translation Recheck</strong><span class="${recheckGate.allReady ? "ok" : "fail"}">${recheckGate.allReady ? "passed" : "not passed"}</span></div>
+      <div class="summary-row"><strong>Final send</strong><span class="${recheckGate.allReady ? "ok" : "fail"}">${recheckGate.allReady ? "ready" : "blocked"}</span></div>
     </div>
+    <p class="muted">Send is blocked until every required locale passes translation recheck.</p>
   `;
 }
 
@@ -573,7 +614,7 @@ function renderTranslationRecheckPanel() {
     root.innerHTML = `
       <div class="translation-recheck-head">
         <div>
-          <h3 class="section-title">Translation Recheck</h3>
+          <h3 class="section-title">3. Translation Recheck</h3>
           <p class="muted">Translation recheck has not run yet.</p>
         </div>
         <span class="fail">not ready</span>
@@ -588,7 +629,7 @@ function renderTranslationRecheckPanel() {
   root.innerHTML = `
     <div class="translation-recheck-head">
       <div>
-        <h3 class="section-title">Translation Recheck</h3>
+        <h3 class="section-title">3. Translation Recheck</h3>
         <p class="muted">This item cannot be sent to backend until all required locales pass translation recheck.</p>
       </div>
       <span class="${gate.allReady ? "ok" : "fail"}">${escapeHtml(readinessText)}</span>
@@ -606,6 +647,14 @@ function renderTranslationRecheckPanel() {
       ${gate.rows.map((row) => {
         const hasRecheck = row.translation_recheck_status !== "not_checked";
         const hasFutureDetails = row.back_translation_th || row.recheck_summary_th || row.recheck_issues.length;
+        const primaryScore = row.accuracy_score ?? row.fluency_score ?? row.term_score;
+        const nextActionLabel = row.translation_recheck_status === "passed"
+          ? "View details"
+          : row.translation_recheck_status === "stale"
+            ? "Regenerate"
+            : row.translation_recheck_status === "failed" || row.translation_recheck_status === "warning"
+              ? "Repair"
+              : "Recheck";
         return `
           <div class="translation-recheck-row">
             <div class="translation-recheck-row-head">
@@ -613,17 +662,23 @@ function renderTranslationRecheckPanel() {
               <span class="${row.translation_recheck_status === "passed" ? "ok" : row.translation_recheck_status === "failed" ? "fail" : row.translation_recheck_status === "warning" || row.translation_recheck_status === "stale" ? "warn" : "muted"}">${escapeHtml(row.translation_recheck_status)}</span>
             </div>
             <div class="translation-recheck-meta">
-              <span><strong>Technical QA:</strong> ${escapeHtml(row.automatic_check_status || "-")}</span>
-              <span><strong>Recheck:</strong> ${escapeHtml(row.translation_recheck_status)}</span>
-              <span><strong>Accuracy:</strong> ${row.accuracy_score == null ? "-" : escapeHtml(String(row.accuracy_score))}</span>
-              <span><strong>Fluency:</strong> ${row.fluency_score == null ? "-" : escapeHtml(String(row.fluency_score))}</span>
-              <span><strong>Term consistency:</strong> ${row.term_score == null ? "-" : escapeHtml(String(row.term_score))}</span>
-              <span><strong>Rechecked at:</strong> ${escapeHtml(formatDateTime(row.rechecked_at))}</span>
-              <span><strong>Repair attempts:</strong> ${escapeHtml(String(row.repair_attempt_count || 0))}</span>
+              <span><strong>Status:</strong> ${escapeHtml(row.translation_recheck_status)}</span>
+              <span><strong>Score:</strong> ${primaryScore == null ? "-" : escapeHtml(String(primaryScore))}</span>
             </div>
             ${hasRecheck ? "" : '<p class="muted">Translation recheck has not run yet.</p>'}
+            <div class="article-side-actions">
+              <button type="button" class="utility-action" disabled>${escapeHtml(nextActionLabel)}</button>
+            </div>
             <details class="translation-recheck-future-actions">
-              <summary>${escapeHtml(hasFutureDetails ? "Recheck details and future actions" : "Future actions")}</summary>
+              <summary>${escapeHtml(hasFutureDetails ? "Technical details and future actions" : "Technical details")}</summary>
+              <div class="translation-recheck-meta">
+                <span><strong>Technical QA:</strong> ${escapeHtml(row.automatic_check_status || "-")}</span>
+                <span><strong>Accuracy:</strong> ${row.accuracy_score == null ? "-" : escapeHtml(String(row.accuracy_score))}</span>
+                <span><strong>Fluency:</strong> ${row.fluency_score == null ? "-" : escapeHtml(String(row.fluency_score))}</span>
+                <span><strong>Term consistency:</strong> ${row.term_score == null ? "-" : escapeHtml(String(row.term_score))}</span>
+                <span><strong>Rechecked at:</strong> ${escapeHtml(formatDateTime(row.rechecked_at))}</span>
+                <span><strong>Repair attempts:</strong> ${escapeHtml(String(row.repair_attempt_count || 0))}</span>
+              </div>
               <div class="article-side-actions">
                 <button type="button" class="utility-action" disabled>View back translation</button>
                 <button type="button" class="utility-action" disabled>View issues</button>
