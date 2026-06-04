@@ -56,34 +56,14 @@ function parseReviewIngestMultipart(req, res, next) {
   });
 }
 
-function logNeedsRevisionRouteHit(req, res, next) {
-  console.error("[review-content needs-revision route hit]", {
-    id: req.params.id,
-    has_authorization: Boolean(req.headers?.authorization),
-    has_cookie: Boolean(req.headers?.cookie),
-    content_type: req.headers?.["content-type"] || null,
-  });
-  next();
-}
-
-function logLegacyNeedsRevisionRouteHit(req, res, next) {
-  console.error("[review-content legacy needs-revision route hit]", {
-    review_id: req.body?.review_id || null,
-    has_authorization: Boolean(req.headers?.authorization),
-    has_cookie: Boolean(req.headers?.cookie),
-    content_type: req.headers?.["content-type"] || null,
-  });
-  next();
-}
-
 router.post("/review-content/ingest", requireCollectorTokenOrPrivilegedUser, parseReviewIngestMultipart, ingestReviewContentAction);
 router.post("/review-content/event-queue/enqueue", requireCollectorIngestToken, enqueueEventReviewQueueAction);
 router.get("/review-content/:id", protectReviewContentReadAccess, getReviewContentDetail);
 router.post("/review-content/:id/access-token", protect, authorizeEditorOrAdmin, createReviewAccessTokenAction);
 router.post("/review-content/:id/approve", protect, authorizeEditorOrAdmin, approveReviewContentAction);
-router.post("/review-content/:id/needs-revision", logNeedsRevisionRouteHit, protect, authorizeEditorOrAdmin, needsRevisionAction);
+router.post("/review-content/:id/needs-revision", protect, authorizeEditorOrAdmin, needsRevisionAction);
 router.post("/review-content/:id/reject", protect, authorizeEditorOrAdmin, rejectAction);
-router.post("/review-content/legacy-needs-revision", logLegacyNeedsRevisionRouteHit, protect, authorizeEditorOrAdmin, legacyNeedsRevisionAction);
+router.post("/review-content/legacy-needs-revision", protect, authorizeEditorOrAdmin, legacyNeedsRevisionAction);
 router.post("/review-content/legacy-reject", protect, authorizeEditorOrAdmin, legacyRejectAction);
 
 export default router;
