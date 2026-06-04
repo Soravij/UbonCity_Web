@@ -1034,6 +1034,8 @@
 .translation-recheck-default-action {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
   min-height: 1.5rem;
 }
 
@@ -1061,6 +1063,25 @@
 
 .translation-recheck-future-actions .article-side-actions {
   margin-top: 0.5rem;
+}
+
+.translation-recheck-diagnostics {
+  margin-top: 0.55rem;
+  font-size: 0.8rem;
+}
+
+.translation-recheck-diagnostics strong {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.translation-recheck-diagnostics p,
+.translation-recheck-diagnostics ul {
+  margin: 0;
+}
+
+.translation-recheck-diagnostics ul {
+  padding-left: 1rem;
 }
 
 #translation-recheck-panel .utility-action {

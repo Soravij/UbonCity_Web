@@ -214,11 +214,41 @@ test("translation recheck panel renders placeholder state and tolerates malforme
   const html = elements.get("translation-recheck-panel").innerHTML;
   assert.match(html, /Not checked/);
   assert.match(html, /<strong>Score:<\/strong> -/);
-  assert.match(html, /Recheck available in Phase 2/);
+  assert.match(html, /<button type="button" class="utility-action" disabled>Recheck<\/button>/);
   assert.match(html, /Not ready: EN need translation recheck\./);
   assert.doesNotMatch(html, /Translation recheck has not run yet\./);
   assert.doesNotMatch(html, /Required locales/);
   assert.doesNotMatch(html, /Readiness/);
+  assert.doesNotMatch(html, /Technical details and future actions/);
+});
+
+test("translation recheck locale cards show status-specific default actions and diagnostics-only details", () => {
+  const { hooks, elements } = loadHarness();
+  hooks.state.readiness = {
+    translations: [
+      { lang: "en", status: "passed" },
+      { lang: "lo", status: "passed" },
+      { lang: "zh", status: "passed" },
+      { lang: "th", status: "passed" },
+    ],
+  };
+  hooks.state.translations = [
+    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+    { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "passed" },
+    { lang: "zh", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "failed" },
+    { lang: "th", translation_status: "ready", automatic_check_status: "passed", stale_flag: 1, translation_recheck_status: "stale" },
+  ];
+
+  hooks.renderTranslationRecheckPanel();
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.match(html, /View technical details below/);
+  assert.match(html, /<button type="button" class="utility-action" disabled>Recheck<\/button>/);
+  assert.match(html, /<button type="button" class="utility-action" disabled>Repair<\/button>/);
+  assert.match(html, /<button type="button" class="utility-action" disabled>Regenerate<\/button>/);
+  assert.doesNotMatch(html, /Technical details and future actions/);
+  assert.doesNotMatch(html, /View back translation/);
+  assert.doesNotMatch(html, /View issues/);
 });
 
 test("translation recheck blocks approve and sync actions until all required locales pass", () => {

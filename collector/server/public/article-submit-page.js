@@ -670,16 +670,16 @@ function renderTranslationRecheckPanel() {
         const primaryScore = row.accuracy_score ?? row.fluency_score ?? row.term_score;
         const statusLabel = translationRecheckStatusLabel(row.translation_recheck_status);
         const scoreLabel = primaryScore == null ? "-" : `${escapeHtml(String(primaryScore))}/10`;
-        const nextActionLabel = row.translation_recheck_status === "passed"
-          ? "View details"
-          : row.translation_recheck_status === "stale"
-            ? "Regenerate"
-            : row.translation_recheck_status === "failed" || row.translation_recheck_status === "warning"
-              ? "Repair"
-              : "Recheck";
         const defaultActionHtml = row.translation_recheck_status === "passed"
-          ? `<span class="translation-recheck-action-note">Details in technical section</span>`
-          : `<span class="translation-recheck-action-note">${escapeHtml(nextActionLabel)} available in Phase 2</span>`;
+          ? `<span class="translation-recheck-action-note">View technical details below</span>`
+          : row.translation_recheck_status === "stale"
+            ? '<button type="button" class="utility-action" disabled>Regenerate</button>'
+            : row.translation_recheck_status === "failed" || row.translation_recheck_status === "warning"
+              ? `
+                <button type="button" class="utility-action" disabled>Repair</button>
+                <button type="button" class="utility-action" disabled>Regenerate</button>
+              `
+              : '<button type="button" class="utility-action" disabled>Recheck</button>';
         return `
           <div class="translation-recheck-row">
             <div class="translation-recheck-row-head">
@@ -692,7 +692,7 @@ function renderTranslationRecheckPanel() {
             </div>
             <div class="translation-recheck-default-action">${defaultActionHtml}</div>
             <details class="translation-recheck-future-actions">
-              <summary>${escapeHtml(hasFutureDetails ? "Technical details and future actions" : "Technical details")}</summary>
+              <summary>${escapeHtml(hasFutureDetails ? "Technical details" : "Technical details")}</summary>
               <div class="translation-recheck-meta">
                 <span><strong>Technical QA:</strong> ${escapeHtml(row.automatic_check_status || "-")}</span>
                 <span><strong>Accuracy:</strong> ${row.accuracy_score == null ? "-" : escapeHtml(String(row.accuracy_score))}</span>
@@ -701,13 +701,9 @@ function renderTranslationRecheckPanel() {
                 <span><strong>Rechecked at:</strong> ${escapeHtml(formatDateTime(row.rechecked_at))}</span>
                 <span><strong>Repair attempts:</strong> ${escapeHtml(String(row.repair_attempt_count || 0))}</span>
               </div>
-              <div class="article-side-actions">
-                <button type="button" class="utility-action" disabled>View back translation</button>
-                <button type="button" class="utility-action" disabled>View issues</button>
-                <button type="button" class="utility-action" disabled>Recheck</button>
-                <button type="button" class="utility-action" disabled>Repair</button>
-                <button type="button" class="utility-action" disabled>Regenerate</button>
-              </div>
+              ${row.back_translation_th ? `<div class="translation-recheck-diagnostics"><strong>Back translation</strong><p>${escapeHtml(row.back_translation_th)}</p></div>` : ""}
+              ${row.recheck_summary_th ? `<div class="translation-recheck-diagnostics"><strong>Issues</strong><p>${escapeHtml(row.recheck_summary_th)}</p></div>` : ""}
+              ${row.recheck_issues.length ? `<div class="translation-recheck-diagnostics"><strong>Issue list</strong><ul>${row.recheck_issues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul></div>` : ""}
             </details>
           </div>
         `;
