@@ -8,7 +8,7 @@ import { CATEGORY_KEYS, getLangContent } from "@/lib/site";
 import LanguageSwitch from "./LanguageSwitch";
 import ThemeModeControl from "./ThemeModeControl";
 
-export default function Navbar({ lang, variant = "default" }) {
+export default function Navbar({ lang, variant = "default", hideLanguageSwitch = false }) {
   const copy = getLangContent(lang);
   const pathname = usePathname();
   const desktopMenuRef = useRef(null);
@@ -116,8 +116,8 @@ export default function Navbar({ lang, variant = "default" }) {
                 </Link>
               ))}
               <div className="site-mobile-menu-divider" aria-hidden="true" />
-              <LanguageSwitch mobileList onNavigate={() => setMobileOpen(false)} />
-              <div className="site-mobile-menu-divider" aria-hidden="true" />
+              {!hideLanguageSwitch ? <LanguageSwitch mobileList onNavigate={() => setMobileOpen(false)} /> : null}
+              {!hideLanguageSwitch ? <div className="site-mobile-menu-divider" aria-hidden="true" /> : null}
               <Link href={`/${lang}/contact`} className="site-mobile-menu-link site-mobile-menu-link--utility site-contact-link">
                 {copy.contactUs}
               </Link>
@@ -160,9 +160,11 @@ export default function Navbar({ lang, variant = "default" }) {
         </div>
 
         <div className="shrink-0 flex items-center gap-2">
-          <div className="hidden md:block">
-            <LanguageSwitch />
-          </div>
+          {!hideLanguageSwitch ? (
+            <div className="hidden md:block">
+              <LanguageSwitch />
+            </div>
+          ) : null}
           <ThemeModeControl />
         </div>
       </nav>
