@@ -647,30 +647,24 @@ function renderTranslationRecheckPanel() {
     return;
   }
 
-  const counts = gate.counts;
-  const readinessText = gate.allReady ? "Ready" : `Not ready: ${gate.blockingLangs.join(", ") || "translation recheck required"}`;
+  const readinessText = gate.allReady
+    ? "Ready: all required locales passed translation recheck."
+    : `Not ready: ${gate.blockingLangs.join(", ") || "required locales"} need translation recheck.`;
   root.innerHTML = `
     <div class="translation-recheck-head">
       <div>
         <h3 class="section-title">3. Translation Recheck</h3>
         <p class="muted">This item cannot be sent to backend until all required locales pass translation recheck.</p>
       </div>
-      <span class="${gate.allReady ? "ok" : "fail"}">${escapeHtml(readinessText)}</span>
+      <span class="${gate.allReady ? "ok" : "fail"}">${escapeHtml(gate.allReady ? "Ready" : "Not ready")}</span>
     </div>
-    <div class="translation-recheck-summary-grid">
-      <div class="summary-row"><strong>Required locales</strong><span>${counts.total}</span></div>
-      <div class="summary-row"><strong>Passed</strong><span class="ok">${counts.passed}</span></div>
-      <div class="summary-row"><strong>Warning</strong><span class="warn">${counts.warning}</span></div>
-      <div class="summary-row"><strong>Failed</strong><span class="fail">${counts.failed}</span></div>
-      <div class="summary-row"><strong>Stale</strong><span class="warn">${counts.stale}</span></div>
-      <div class="summary-row"><strong>Not checked</strong><span class="muted">${counts.not_checked}</span></div>
-      <div class="summary-row"><strong>Readiness</strong><span class="${gate.allReady ? "ok" : "fail"}">${escapeHtml(gate.allReady ? "ready" : "not ready")}</span></div>
-    </div>
+    <p class="translation-recheck-summary-line ${gate.allReady ? "ok" : "fail"}">${escapeHtml(readinessText)}</p>
     <div class="translation-recheck-list">
       ${gate.rows.map((row) => {
         const hasFutureDetails = row.back_translation_th || row.recheck_summary_th || row.recheck_issues.length;
         const primaryScore = row.accuracy_score ?? row.fluency_score ?? row.term_score;
         const statusLabel = translationRecheckStatusLabel(row.translation_recheck_status);
+        const scoreLabel = primaryScore == null ? "-" : `${escapeHtml(String(primaryScore))}/10`;
         const nextActionLabel = row.translation_recheck_status === "passed"
           ? "View details"
           : row.translation_recheck_status === "stale"
@@ -678,6 +672,9 @@ function renderTranslationRecheckPanel() {
             : row.translation_recheck_status === "failed" || row.translation_recheck_status === "warning"
               ? "Repair"
               : "Recheck";
+        const defaultActionHtml = row.translation_recheck_status === "passed"
+          ? `<span class="translation-recheck-action-note">Details in technical section</span>`
+          : `<span class="translation-recheck-action-note">${escapeHtml(nextActionLabel)} available in Phase 2</span>`;
         return `
           <div class="translation-recheck-row">
             <div class="translation-recheck-row-head">
@@ -686,11 +683,9 @@ function renderTranslationRecheckPanel() {
             </div>
             <div class="translation-recheck-meta">
               <span><strong>Status:</strong> ${escapeHtml(statusLabel)}</span>
-              <span><strong>Score:</strong> ${primaryScore == null ? "-" : escapeHtml(String(primaryScore))}</span>
+              <span><strong>Score:</strong> ${scoreLabel}</span>
             </div>
-            <div class="article-side-actions">
-              <button type="button" class="utility-action" disabled>${escapeHtml(nextActionLabel)}</button>
-            </div>
+            <div class="translation-recheck-default-action">${defaultActionHtml}</div>
             <details class="translation-recheck-future-actions">
               <summary>${escapeHtml(hasFutureDetails ? "Technical details and future actions" : "Technical details")}</summary>
               <div class="translation-recheck-meta">
