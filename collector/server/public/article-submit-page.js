@@ -68,23 +68,23 @@ function normalizeReviewActionCopy() {
   const reviewDescription = document.querySelector(".article-card-review > .article-section-head .muted");
   if (reviewDescription) {
     reviewDescription.textContent = isOtherTransport
-      ? "ตรวจความครบถ้วนของรายการขนส่ง บันทึกโน้ต และเลือกอนุมัติหรือส่งกลับแก้ไขจากจุดเดียว"
-      : "ตรวจความครบถ้วนของบทความ บันทึกโน้ต และเลือกอนุมัติหรือส่งกลับแก้ไขจากจุดเดียว";
+      ? "Source content is approved. Finalize translation quality and send the transport item onward."
+      : "Source content is approved. Finalize translation quality and submit this article onward.";
   }
 
   const approveBtn = qs("btn-approve-sync");
   if (approveBtn) {
-    approveBtn.textContent = isOtherTransport ? "อนุมัติรายการ" : "อนุมัติบทความ";
+    approveBtn.textContent = isOtherTransport ? "พร้อมส่งขั้นสุดท้าย" : "พร้อมส่งขั้นสุดท้าย";
   }
 
   const syncTitle = document.querySelector(".article-review-sync-controls .section-title");
   if (syncTitle) {
-    syncTitle.textContent = "ส่งเข้า Admin Review";
+    syncTitle.textContent = "Submit to Admin Review";
   }
 
   const syncDescription = document.querySelector(".article-review-sync-controls .article-section-head .muted");
   if (syncDescription) {
-    syncDescription.textContent = "ส่งข้อมูลเข้า backend และเข้าคิวอนุมัติบน admin panel ก่อนขึ้นหน้า public";
+    syncDescription.textContent = "Send is blocked until every required locale passes translation recheck.";
   }
 
   const syncBtn = qs("btn-send-main-site");
@@ -128,6 +128,7 @@ function renderReviewChecklist() {
   const body = String(payload.item.description_clean || "").trim();
   const hasCover = (Array.isArray(state.assets) ? state.assets : []).some((row) => Number(row.is_cover || 0) === 1 || String(row.role || "") === "cover");
   const translationGate = getTranslationGateState();
+  const translationRecheckGate = getTranslationRecheckGateState();
   const otherTransportMeta = currentOtherTransportMeta();
   const checks = [
     { label: "มีชื่อบทความ", pass: Boolean(payload.item.title) },
@@ -138,6 +139,7 @@ function renderReviewChecklist() {
     { label: "มีเนื้อหา", pass: Boolean(body) },
     { label: "มีรูปปก", pass: hasCover },
     { label: "ภาษาครบตามเกณฑ์", pass: translationGate.allReady },
+    { label: "Translation recheck ผ่านทุกภาษา", pass: translationRecheckGate.allReady },
   ];
   if (isOtherTransportItem()) {
     checks.push(
@@ -185,9 +187,9 @@ function renderSyncSummary() {
   root.classList.remove("hidden");
   if (!readiness) {
     root.innerHTML = `
-      <div class="summary-row"><strong>สถานะเผยแพร่</strong><span>${escapeHtml(status === "synced_to_admin" ? "ส่งขึ้นเว็บแล้ว" : status === "submitted_for_admin_review" ? "ส่งเข้า Admin Review แล้ว" : "ยังไม่ได้ตรวจความพร้อม")}</span></div>
-      <div class="summary-row"><strong>สถานะการอนุมัติ</strong><span class="${status === "ready_for_sync" || status === "submitted_for_admin_review" || status === "synced_to_admin" ? "ok" : "warn"}">${status === "ready_for_sync" || status === "submitted_for_admin_review" || status === "synced_to_admin" ? "อนุมัติแล้ว" : "รอการอนุมัติ"}</span></div>
-    `;
+      <div class="summary-row"><strong>Source article</strong><span class="ok">approved</span></div>
+      <div class="summary-row"><strong>Workflow status</strong><span>${escapeHtml(status === "synced_to_admin" ? "sent to main site" : status === "submitted_for_admin_review" ? "submitted to admin review" : "preparing translation workflow")}</span></div>
+      `;
     return;
   }
   const usesFieldFlow = Boolean(readiness?.field_flow_ready) || Boolean(state.articleProcess?.publishable_source_ready);
@@ -204,8 +206,9 @@ function renderSyncSummary() {
         ? "มีเนื้อหาจาก submission พร้อมอนุมัติ"
         : "อยู่ระหว่างตรวจงาน";
   root.innerHTML = `
-    <div class="summary-row"><strong>ความพร้อมข้อมูล</strong><span class="${readiness.source_ready ? "ok" : "fail"}">${readiness.source_ready ? "พร้อม" : "ยังไม่พร้อม"}</span></div>
-    <div class="summary-row"><strong>สถานะการอนุมัติ</strong><span>${escapeHtml(approvalLabel)}</span></div>
+    <div class="summary-row"><strong>Source article</strong><span class="ok">approved</span></div>
+    <div class="summary-row"><strong>Package source</strong><span class="${readiness.source_ready ? "ok" : "fail"}">${readiness.source_ready ? "ready for translation workflow" : "source package incomplete"}</span></div>
+    <div class="summary-row"><strong>Workflow status</strong><span>${escapeHtml(approvalLabel)}</span></div>
     ${issues.length ? `<ul>${issues.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>` : '<p class="muted">ไม่มีประเด็นค้าง</p>'}
   `;
 }
@@ -218,6 +221,106 @@ function translationSummaryCounts(rows) {
     counts.total += 1;
   }
   return counts;
+}
+
+function translationRecheckStatusCounts(rows) {
+  const counts = { passed: 0, warning: 0, failed: 0, stale: 0, not_checked: 0, total: 0 };
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const status = String(row?.translation_recheck_status || "").trim().toLowerCase() || "not_checked";
+    if (Object.prototype.hasOwnProperty.call(counts, status)) counts[status] += 1;
+    counts.total += 1;
+  }
+  return counts;
+}
+
+function localeLabel(lang) {
+  const normalized = String(lang || "").trim().toLowerCase();
+  if (normalized === "th") return "TH / Thai";
+  if (normalized === "en") return "EN / English";
+  if (normalized === "lo") return "LO / Lao";
+  if (normalized === "zh") return "ZH / Chinese";
+  return normalized ? normalized.toUpperCase() : "-";
+}
+
+function normalizeScore(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return numeric;
+}
+
+function parseRecheckIssues(value) {
+  if (Array.isArray(value)) return value.map((entry) => String(entry || "").trim()).filter(Boolean);
+  if (!value) return [];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parseRecheckIssues(parsed);
+    } catch {
+      return [];
+    }
+  }
+  if (typeof value === "object") {
+    if (Array.isArray(value.issues)) return parseRecheckIssues(value.issues);
+    return Object.values(value).map((entry) => String(entry || "").trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function translationRecheckStatusFromRow(row) {
+  if (Number(row?.stale_flag || 0) === 1 || String(row?.status || "").trim().toLowerCase() === "stale") return "stale";
+  const raw = String(row?.translation_recheck_status || "").trim().toLowerCase();
+  if (["passed", "warning", "failed", "stale"].includes(raw)) return raw;
+  return "not_checked";
+}
+
+function translationRecheckStatusLabel(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if (status === "passed") return "Passed";
+  if (status === "warning") return "Warning";
+  if (status === "failed") return "Failed";
+  if (status === "stale") return "Stale";
+  return "Not checked";
+}
+
+function buildTranslationRecheckRows() {
+  return buildTranslationRows().map((row) => {
+    const live = (Array.isArray(state.translations) ? state.translations : []).find(
+      (entry) => String(entry?.lang || "").trim().toLowerCase() === String(row?.lang || "").trim().toLowerCase(),
+    ) || null;
+    return {
+      lang: String(row?.lang || "").trim().toLowerCase(),
+      automatic_check_status: String(live?.automatic_check_status || row?.automatic_check_status || "").trim().toLowerCase() || "-",
+      translation_status: String(live?.translation_status || row?.translation_status || "").trim().toLowerCase() || "-",
+      translation_recheck_status: translationRecheckStatusFromRow({ ...row, ...live }),
+      accuracy_score: normalizeScore(live?.accuracy_score),
+      fluency_score: normalizeScore(live?.fluency_score),
+      term_score: normalizeScore(live?.term_score),
+      back_translation_th: String(live?.back_translation_th || "").trim(),
+      recheck_summary_th: String(live?.recheck_summary_th || "").trim(),
+      recheck_issues: parseRecheckIssues(live?.recheck_issues_json),
+      rechecked_at: live?.rechecked_at || null,
+      repair_attempt_count: Number(live?.repair_attempt_count || 0) || 0,
+      stale_flag: Number(live?.stale_flag || 0) || 0,
+    };
+  });
+}
+
+function getTranslationRecheckGateState() {
+  const rows = buildTranslationRecheckRows();
+  const counts = translationRecheckStatusCounts(rows);
+  const blockingRows = rows.filter((row) => {
+    const automaticPassed = String(row?.automatic_check_status || "").trim().toLowerCase() === "passed";
+    const notStale = Number(row?.stale_flag || 0) === 0 && String(row?.translation_recheck_status || "") !== "stale";
+    const recheckPassed = String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed";
+    return !(automaticPassed && notStale && recheckPassed);
+  });
+  return {
+    rows,
+    counts,
+    blockingRows,
+    blockingLangs: blockingRows.map((row) => String(row?.lang || "").trim().toUpperCase()).filter(Boolean),
+    allReady: rows.length > 0 && blockingRows.length === 0,
+  };
 }
 
 function translationStatusFromRepoRow(row) {
@@ -413,6 +516,10 @@ function closeTranslationDetail() {
 
 function renderTranslationSummary() {
   const root = qs("translation-summary");
+  const statusNode = qs("translation-status");
+  const hintNode = qs("translation-package-hint");
+  const generateBtn = qs("btn-generate-translations");
+  const actionNode = qs("translation-package-actions");
   if (!root) return;
   const gate = getTranslationGateState();
   const rows = gate.rows;
@@ -420,52 +527,187 @@ function renderTranslationSummary() {
 
   if (!rows.length) {
     root.innerHTML = `
-      <div class="summary-row"><strong>สถานะรวม</strong><span class="fail">ยังไม่พร้อม</span></div>
-      <div class="summary-row"><strong>ภาษาที่ต้องใช้</strong><span>ยังไม่มีรายการภาษา</span></div>
-      <p class="muted">เพิ่มภาษาให้ครบก่อนอนุมัติการเผยแพร่</p>
+      <div class="summary-row"><strong>Package status</strong><span class="fail">missing</span></div>
+      <div class="summary-row"><strong>Required locales</strong><span>0</span></div>
+      <p class="muted">Create the first translation package for all required locales.</p>
     `;
+    if (statusNode) {
+      statusNode.textContent = "Create the first translation package for all required locales.";
+    }
+    if (hintNode) hintNode.textContent = "Create the first translation package for all required locales.";
+    if (generateBtn) {
+      generateBtn.classList.add("ok");
+      generateBtn.classList.remove("utility-action");
+      generateBtn.textContent = "Generate translations";
+    }
+    actionNode?.classList.remove("hidden");
     return;
   }
 
+  const counts = gate.counts;
+  const staleRows = rows.filter((row) => String(row?.status || "").trim().toLowerCase() === "stale");
+  const missingRows = rows.filter((row) => String(row?.status || "").trim().toLowerCase() !== "passed" && String(row?.status || "").trim().toLowerCase() !== "stale");
+  const staleCount = staleRows.length;
+  const missingCount = missingRows.length;
+  const packageComplete = staleCount === 0 && missingCount === 0;
+  const packageLabel = packageComplete ? "complete" : staleCount > 0 ? "stale" : "missing";
+  const requiredLocales = rows.map((row) => localeLabel(row.lang)).filter(Boolean).join(", ");
+  const missingLocales = missingRows.map((row) => localeLabel(row.lang)).join(", ");
+  const staleLocales = staleRows.map((row) => localeLabel(row.lang)).join(", ");
+
+  if (statusNode) {
+    statusNode.textContent = packageComplete
+      ? "Translations are complete. Next step: check translation quality."
+      : staleCount > 0
+        ? "Source changed after translation. Regenerate stale translations."
+        : "Create the first translation package for all required locales.";
+  }
+  if (hintNode) {
+    hintNode.textContent = packageComplete
+      ? ""
+      : staleCount > 0
+        ? "Source changed after translation. Regenerate stale translations."
+        : "Create the first translation package for all required locales.";
+  }
+  if (generateBtn) {
+    generateBtn.classList.toggle("ok", !packageComplete);
+    generateBtn.classList.toggle("utility-action", packageComplete);
+    generateBtn.textContent = staleCount > 0 ? "Regenerate translations" : "Generate translations";
+  }
+  actionNode?.classList.toggle("hidden", packageComplete);
+
   root.innerHTML = `
-    <div class="summary-row"><strong>สถานะรวม</strong><span class="${gate.allReady ? "ok" : "fail"}">${escapeHtml(gate.allReady ? "พร้อมทุกภาษา" : `ยังไม่ผ่าน: ${gate.blockingLangs.join(", ")}`)}</span></div>
+    <div class="summary-row"><strong>Package status</strong><span class="${packageComplete ? "ok" : staleCount > 0 ? "warn" : "fail"}">${escapeHtml(packageLabel)}</span></div>
+    <div class="summary-row"><strong>Required locales</strong><span>${counts.total}</span></div>
+    <div class="summary-row"><strong>Locale list</strong><span>${escapeHtml(requiredLocales || "-")}</span></div>
+    ${missingCount ? `<div class="summary-row"><strong>Missing locales</strong><span>${escapeHtml(missingLocales)}</span></div>` : ""}
+    ${staleCount ? `<div class="summary-row"><strong>Stale locales</strong><span>${escapeHtml(staleLocales)}</span></div>` : ""}
     <div class="article-translation-list">
-      ${rows.map((row) => `
+      ${rows.map((row) => {
+        const rowStatus = String(row?.status || "").trim().toLowerCase();
+        const packageStatus = rowStatus === "passed" ? "translated" : rowStatus === "stale" ? "stale" : "missing";
+        const packageStatusClass = rowStatus === "passed" ? "ok" : rowStatus === "stale" ? "warn" : "fail";
+        return `
         <div class="article-translation-row" role="button" tabindex="0" data-translation-detail="${escapeHtml(String(row.lang || ""))}">
-          <strong>${escapeHtml(row.lang || "-")}</strong>
-          <span class="${row.status === "passed" ? "ok" : row.status === "failed" ? "fail" : row.status === "stale" ? "warn" : "muted"}">${escapeHtml(row.status)}</span>
+          <strong>${escapeHtml(localeLabel(row.lang))}</strong>
+          <span class="${packageStatusClass}">${escapeHtml(packageStatus)}</span>
         </div>
-      `).join("")}
+      `;
+      }).join("")}
     </div>
-    ${gate.allReady ? "" : "<p class=\"muted\">ยังอนุมัติไม่ได้จนกว่าทุกภาษาจะผ่าน</p>"}
   `;
 }
 function renderTranslationReviewSummary() {
   const root = qs("translation-review-summary");
   if (!root) return;
-  const gate = getTranslationGateState();
-  if (!gate.rows.length) {
+  const translationGate = getTranslationGateState();
+  const recheckGate = getTranslationRecheckGateState();
+  const packageReady = translationGate.rows.length > 0 && translationGate.allReady;
+  if (!recheckGate.rows.length) {
     root.innerHTML = `
       <div class="article-translation-review-head">
-        <strong>ความพร้อมหลายภาษา</strong>
-        <span class="fail">ยังไม่พร้อม</span>
+        <strong>Final send gate</strong>
+        <span class="fail">blocked</span>
       </div>
-      <p class="muted">ยังไม่พบภาษาที่ต้องใช้</p>
+      <div class="readiness-summary">
+        <div class="summary-row"><strong>Translation Package</strong><span class="${packageReady ? "ok" : "fail"}">${packageReady ? "complete" : "not complete"}</span></div>
+        <div class="summary-row"><strong>Translation Recheck</strong><span class="fail">not passed</span></div>
+        <div class="summary-row"><strong>Final send</strong><span class="fail">blocked</span></div>
+      </div>
+      <p class="muted">Send is blocked until every required locale passes translation recheck.</p>
     `;
     return;
   }
   root.innerHTML = `
     <div class="article-translation-review-head">
-      <strong>ความพร้อมหลายภาษา</strong>
-      <span class="${gate.allReady ? "ok" : "fail"}">${gate.allReady ? "ผ่านทั้งหมด" : `ยังขาด ${gate.blockingLangs.join(", ")}`}</span>
+      <strong>Final send gate</strong>
+      <span class="${recheckGate.allReady ? "ok" : "fail"}">${recheckGate.allReady ? "ready to send" : `blocked: ${recheckGate.blockingLangs.join(", ")}`}</span>
     </div>
-    <div class="article-translation-review-list">
-      ${gate.rows.map((row) => `
-        <div class="article-translation-review-row" role="button" tabindex="0" data-translation-detail="${escapeHtml(String(row.lang || ""))}">
-          <strong>${escapeHtml(String(row.lang || "-").toUpperCase())}</strong>
-          <span class="${row.status === "passed" ? "ok" : row.status === "failed" ? "fail" : row.status === "stale" ? "warn" : "muted"}">${escapeHtml(row.status)}</span>
+    <div class="readiness-summary">
+      <div class="summary-row"><strong>Translation Package</strong><span class="${packageReady ? "ok" : "fail"}">${packageReady ? "complete" : "not complete"}</span></div>
+      <div class="summary-row"><strong>Translation Recheck</strong><span class="${recheckGate.allReady ? "ok" : "fail"}">${recheckGate.allReady ? "passed" : "not passed"}</span></div>
+      <div class="summary-row"><strong>Final send</strong><span class="${recheckGate.allReady ? "ok" : "fail"}">${recheckGate.allReady ? "ready" : "blocked"}</span></div>
+    </div>
+    <p class="muted">Send is blocked until every required locale passes translation recheck.</p>
+  `;
+}
+
+function renderTranslationRecheckPanel() {
+  const root = qs("translation-recheck-panel");
+  if (!root) return;
+  const gate = getTranslationRecheckGateState();
+  root.classList.remove("hidden");
+
+  if (!gate.rows.length) {
+    root.innerHTML = `
+      <div class="translation-recheck-head">
+        <div>
+          <h3 class="section-title">3. Translation Recheck</h3>
+          <p class="muted">Translation recheck has not run yet.</p>
         </div>
-      `).join("")}
+        <span class="fail">not ready</span>
+      </div>
+      <p class="muted">No translation rows found.</p>
+    `;
+    return;
+  }
+
+  const readinessText = gate.allReady
+    ? "Ready: all required locales passed translation recheck."
+    : `Not ready: ${gate.blockingLangs.join(", ") || "required locales"} need translation recheck.`;
+  root.innerHTML = `
+    <div class="translation-recheck-head">
+      <div>
+        <h3 class="section-title">3. Translation Recheck</h3>
+        <p class="muted">This item cannot be sent to backend until all required locales pass translation recheck.</p>
+      </div>
+      <span class="${gate.allReady ? "ok" : "fail"}">${escapeHtml(gate.allReady ? "Ready" : "Not ready")}</span>
+    </div>
+    <p class="translation-recheck-summary-line ${gate.allReady ? "ok" : "fail"}">${escapeHtml(readinessText)}</p>
+    <div class="translation-recheck-list">
+      ${gate.rows.map((row) => {
+        const hasFutureDetails = row.back_translation_th || row.recheck_summary_th || row.recheck_issues.length;
+        const primaryScore = row.accuracy_score ?? row.fluency_score ?? row.term_score;
+        const statusLabel = translationRecheckStatusLabel(row.translation_recheck_status);
+        const scoreLabel = primaryScore == null ? "-" : `${escapeHtml(String(primaryScore))}/10`;
+        const defaultActionHtml = row.translation_recheck_status === "passed"
+          ? `<span class="translation-recheck-action-note">View technical details below</span>`
+          : row.translation_recheck_status === "stale"
+            ? '<button type="button" class="utility-action" disabled>Regenerate</button>'
+            : row.translation_recheck_status === "failed" || row.translation_recheck_status === "warning"
+              ? `
+                <button type="button" class="utility-action" disabled>Repair</button>
+                <button type="button" class="utility-action" disabled>Regenerate</button>
+              `
+              : '<button type="button" class="utility-action" disabled>Recheck</button>';
+        return `
+          <div class="translation-recheck-row">
+            <div class="translation-recheck-row-head">
+              <strong>${escapeHtml(localeLabel(row.lang))}</strong>
+              <span class="${row.translation_recheck_status === "passed" ? "ok" : row.translation_recheck_status === "failed" ? "fail" : row.translation_recheck_status === "warning" || row.translation_recheck_status === "stale" ? "warn" : "muted"}">${escapeHtml(statusLabel)}</span>
+            </div>
+            <div class="translation-recheck-meta">
+              <span><strong>Status:</strong> ${escapeHtml(statusLabel)}</span>
+              <span><strong>Score:</strong> ${scoreLabel}</span>
+            </div>
+            <div class="translation-recheck-default-action">${defaultActionHtml}</div>
+            <details class="translation-recheck-future-actions">
+              <summary>${escapeHtml(hasFutureDetails ? "Technical details" : "Technical details")}</summary>
+              <div class="translation-recheck-meta">
+                <span><strong>Technical QA:</strong> ${escapeHtml(row.automatic_check_status || "-")}</span>
+                <span><strong>Accuracy:</strong> ${row.accuracy_score == null ? "-" : escapeHtml(String(row.accuracy_score))}</span>
+                <span><strong>Fluency:</strong> ${row.fluency_score == null ? "-" : escapeHtml(String(row.fluency_score))}</span>
+                <span><strong>Term consistency:</strong> ${row.term_score == null ? "-" : escapeHtml(String(row.term_score))}</span>
+                <span><strong>Rechecked at:</strong> ${escapeHtml(formatDateTime(row.rechecked_at))}</span>
+                <span><strong>Repair attempts:</strong> ${escapeHtml(String(row.repair_attempt_count || 0))}</span>
+              </div>
+              ${row.back_translation_th ? `<div class="translation-recheck-diagnostics"><strong>Back translation</strong><p>${escapeHtml(row.back_translation_th)}</p></div>` : ""}
+              ${row.recheck_summary_th ? `<div class="translation-recheck-diagnostics"><strong>Issues</strong><p>${escapeHtml(row.recheck_summary_th)}</p></div>` : ""}
+              ${row.recheck_issues.length ? `<div class="translation-recheck-diagnostics"><strong>Issue list</strong><ul>${row.recheck_issues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul></div>` : ""}
+            </details>
+          </div>
+        `;
+      }).join("")}
     </div>
   `;
 }
@@ -474,15 +716,29 @@ function applyActionGuards() {
   const status = getArticleStatus();
   const validation = validateWorkspace();
   const translationGate = getTranslationGateState();
+  const translationRecheckGate = getTranslationRecheckGateState();
 
   const revisionBtn = qs("btn-request-revision");
   if (revisionBtn) revisionBtn.disabled = state.busy || !canApproveArticle() || !["ready_for_review", "ready_for_sync", "submitted_for_admin_review"].includes(status);
 
   const approveBtn = qs("btn-approve-sync");
-  if (approveBtn) approveBtn.disabled = state.busy || !canApproveArticle() || status !== "ready_for_review" || !validation.ok || !translationGate.allReady;
+  if (approveBtn) {
+    approveBtn.disabled = state.busy
+      || !canApproveArticle()
+      || status !== "ready_for_review"
+      || !validation.ok
+      || !translationGate.allReady
+      || !translationRecheckGate.allReady;
+  }
 
   const syncBtn = qs("btn-send-main-site");
-  if (syncBtn) syncBtn.disabled = state.busy || !canSyncArticle() || status !== "ready_for_sync" || !translationGate.allReady;
+  if (syncBtn) {
+    syncBtn.disabled = state.busy
+      || !canSyncArticle()
+      || status !== "ready_for_sync"
+      || !translationGate.allReady
+      || !translationRecheckGate.allReady;
+  }
 
   const readinessBtn = qs("btn-refresh-readiness");
   if (readinessBtn) readinessBtn.disabled = state.busy || !canSyncArticle();
@@ -504,6 +760,7 @@ function renderAll(options = {}) {
   renderOtherTransportSummary();
   renderSyncSummary();
   renderTranslationSummary();
+  renderTranslationRecheckPanel();
   renderTranslationReviewSummary();
   applyActionGuards();
 }
@@ -550,6 +807,7 @@ async function refreshReadiness() {
   state.readiness = result?.readiness || null;
   renderSyncSummary();
   renderTranslationSummary();
+  renderTranslationRecheckPanel();
   renderTranslationReviewSummary();
   renderReviewChecklist();
   setInlineStatus("review-status", "อัปเดตความพร้อมแล้ว");
@@ -567,6 +825,7 @@ async function refreshTranslations() {
     };
   }
   renderTranslationSummary();
+  renderTranslationRecheckPanel();
   renderTranslationReviewSummary();
   renderReviewChecklist();
   applyActionGuards();

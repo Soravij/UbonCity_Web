@@ -11,72 +11,93 @@
   <body>
     <main class="container article-page-shell">
       <header class="header">
-  <div class="auth-row">
-    <div class="auth-intro">
-      <span class="auth-badge">Collector Workspace</span>
-      <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
-      <p>ตรวจงานก่อนเผยแพร่ เพื่อเช็กความครบถ้วนของบทความก่อนอนุมัติหรือส่งกลับแก้ไข</p>
-    </div>
-  </div>
-  <p class="muted" id="workspace-auth-status"></p>
-  <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
-</header>
-<div class="card page-actions-strip">
-  <div class="toolbar">
-    <button id="btn-back-home" class="utility-action btn-home">Home</button>
-    <button id="btn-open-intake" class="utility-action btn-return">กลับหน้าแรก</button>
-    <button id="btn-open-workspace" class="utility-action btn-return">กลับหน้าเขียนบทความ</button>
-    <button id="btn-open-review-preview" class="primary" type="button">เปิดหน้ารีวิว</button>
-  </div>
-</div>
-<div id="article-process-bar" class="progress-steps article-progress" aria-label="article workflow progress"></div>
+        <div class="auth-row">
+          <div class="auth-intro">
+            <span class="auth-badge">Collector Workspace</span>
+            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+            <p>จัดการ workflow หลัง source article ผ่านอนุมัติแล้ว ก่อนส่งต่อเข้า Admin Review</p>
+          </div>
+        </div>
+        <p class="muted" id="workspace-auth-status"></p>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+      <div class="card page-actions-strip">
+        <div class="toolbar">
+          <button id="btn-back-home" class="utility-action btn-home">Home</button>
+          <button id="btn-open-intake" class="utility-action btn-return">กลับหน้าแรก</button>
+          <button id="btn-open-workspace" class="utility-action btn-return">กลับหน้าเขียนบทความ</button>
+          <button id="btn-open-review-preview" class="primary" type="button">เปิดหน้ารีวิว</button>
+        </div>
+      </div>
+      <div id="article-process-bar" class="progress-steps article-progress" aria-label="article workflow progress"></div>
 
       <div class="article-workspace-grid article-review-layout">
         <section class="article-workspace-main">
-          <div class="article-review-decision-grid">
-            <div class="card article-work-card article-card-review">
-              <div class="article-section-head">
-                <div>
-                  <h2 class="section-title">การตัดสินใจตรวจงาน</h2>
-                  <p class="muted">บันทึกโน้ต และเลือกอนุมัติหรือส่งกลับแก้ไข</p>
-                </div>
-              </div>
-              <div id="review-status" class="status"></div>
-              <label for="review-note">Review Note</label>
-              <textarea id="review-note" rows="4" placeholder="ระบุเหตุผลที่ส่งกลับแก้ไข หรือโน้ตประกอบการอนุมัติ"></textarea>
-              <div id="review-checklist" class="article-checklist"></div>
-              <div id="translation-review-summary" class="article-translation-review"></div>
-              <div class="toolbar article-side-actions">
-                <button id="btn-request-revision" type="button" class="utility-action">ส่งกลับแก้ไข</button>
-                <button id="btn-approve-sync" type="button" class="ok">อนุมัติบทความ</button>
-              </div>
-              <div class="article-review-sync-controls">
-                <div class="article-section-head article-subsection-head">
-                  <div>
-                    <h3 class="section-title">เผยแพร่</h3>
-                    <p class="muted">ตรวจความพร้อมและส่งบทความเข้าเว็บ</p>
-                  </div>
-                </div>
-                <div class="toolbar article-side-actions">
-                  <button id="btn-refresh-readiness" type="button" class="utility-action">ตรวจความพร้อมอีกครั้ง</button>
-                  <button id="btn-send-main-site" type="button" class="ok">เผยแพร่ขึ้นเว็บ</button>
-                </div>
-              </div>
-            </div>
-
+          <div class="article-review-decision-grid article-review-decision-grid--stacked">
             <div class="card article-overview-card article-card-translation">
               <div class="article-section-head">
                 <div>
-                  <h2 class="section-title">สถานะหลายภาษา</h2>
-                  <p class="muted">ดูสถานะของแต่ละภาษาและสร้างคำแปลใหม่เมื่อจำเป็น</p>
+                  <h2 class="section-title">Post-Approval Translation Workflow</h2>
+                  <p class="muted">Move from approved source content to complete translations, quality recheck, and final submission.</p>
+                </div>
+              </div>
+
+              <div class="article-section-head article-subsection-head">
+                <div>
+                  <h3 class="section-title">1. Source approved summary</h3>
+                  <p class="muted">Source article approved</p>
+                </div>
+              </div>
+              <div id="sync-summary" class="readiness-summary hidden"></div>
+
+              <div class="article-section-head article-subsection-head">
+                <div>
+                  <h3 class="section-title">2. Translation Package</h3>
+                  <p class="muted">Generate or refresh the required locale package before translation quality review.</p>
                 </div>
               </div>
               <div id="translation-status" class="status"></div>
               <div id="translation-summary" class="readiness-summary hidden"></div>
-              <div class="toolbar article-side-actions">
+              <p id="translation-package-hint" class="muted"></p>
+              <div id="translation-package-actions" class="toolbar article-side-actions">
                 <button id="btn-generate-translations" type="button" class="ok">สร้าง translation ใหม่</button>
               </div>
               <div id="translation-generate-state" class="translation-generate-state hidden" aria-live="polite"></div>
+
+              <div id="translation-recheck-panel" class="readiness-summary hidden"></div>
+            </div>
+
+            <div class="card article-work-card article-card-review">
+              <div class="article-section-head">
+                <div>
+                  <h2 class="section-title">4. Final Send / Submit</h2>
+                  <p class="muted">Send is blocked until every required locale passes translation recheck.</p>
+                </div>
+              </div>
+              <div id="review-status" class="status"></div>
+              <label for="review-note">Review Note</label>
+              <textarea id="review-note" rows="4" placeholder="ระบุเหตุผลที่ส่งกลับแก้ไข หรือโน้ตประกอบการส่งต่อ"></textarea>
+              <div id="translation-review-summary" class="article-translation-review"></div>
+              <details class="article-review-diagnostics">
+                <summary>Source diagnostics</summary>
+                <div id="review-checklist" class="article-checklist"></div>
+              </details>
+              <div class="toolbar article-side-actions">
+                <button id="btn-request-revision" type="button" class="utility-action">ส่งกลับแก้ไข</button>
+                <button id="btn-approve-sync" type="button" class="ok">พร้อมส่งขั้นสุดท้าย</button>
+              </div>
+              <div class="article-review-sync-controls">
+                <div class="article-section-head article-subsection-head">
+                  <div>
+                    <h3 class="section-title">Submit to Admin Review</h3>
+                    <p class="muted">ยืนยันขั้นตอนสุดท้าย แล้วส่งรายการนี้เข้า Admin Review</p>
+                  </div>
+                </div>
+                <div class="toolbar article-side-actions">
+                  <button id="btn-refresh-readiness" type="button" class="utility-action">ตรวจความพร้อมอีกครั้ง</button>
+                  <button id="btn-send-main-site" type="button" class="ok">ส่งเข้า Admin Review</button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -90,17 +111,6 @@
               </div>
               <div id="other-transport-review-summary" class="readiness-summary"></div>
             </div>
-
-            <div class="card article-overview-card article-card-sync">
-              <div class="article-section-head">
-                <div>
-                  <h2 class="section-title">ความพร้อมก่อนเผยแพร่</h2>
-                  <p class="muted">สรุปสถานะที่ต้องผ่านก่อนเผยแพร่</p>
-                </div>
-              </div>
-              <div id="sync-summary" class="readiness-summary hidden"></div>
-            </div>
-
             <div class="card article-overview-card article-card-activity">
               <div class="article-section-head">
                 <div>
@@ -128,4 +138,3 @@
     <script type="module" src="/article-submit-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
   </body>
 </html>
-
