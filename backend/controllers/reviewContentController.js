@@ -207,6 +207,7 @@ export async function needsRevisionAction(req, res) {
     if (/collector sync failed|not configured|cannot mark/i.test(msg)) {
       return res.status(409).json({ error: msg });
     }
+    console.error("[review-content needs-revision failed]", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 }
@@ -228,6 +229,7 @@ export async function legacyNeedsRevisionAction(req, res) {
     if (/invalid|not found|not pending|failed to update queue item|collector sync failed|not configured/i.test(msg)) {
       return res.status(409).json({ error: msg });
     }
+    console.error("[review-content legacy needs-revision failed]", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 }
