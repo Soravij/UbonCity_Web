@@ -192,6 +192,11 @@ export async function approveReviewContentAction(req, res) {
 
 export async function needsRevisionAction(req, res) {
   try {
+    console.error("[review-content needs-revision hit]", {
+      id: req.params.id,
+      user_id: req.user?.id || null,
+      body_keys: Object.keys(req.body || {}),
+    });
     const id = Number(req.params.id || 0);
     if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid review id" });
     const item = await getReviewContentById(id);
@@ -214,6 +219,11 @@ export async function needsRevisionAction(req, res) {
 
 export async function legacyNeedsRevisionAction(req, res) {
   try {
+    console.error("[review-content legacy needs-revision hit]", {
+      review_id: req.body?.review_id || null,
+      user_id: req.user?.id || null,
+      body_keys: Object.keys(req.body || {}),
+    });
     const reviewId = Number(req.body?.review_id || 0);
     if (!Number.isFinite(reviewId) || reviewId <= 0) {
       return res.status(400).json({ error: "Invalid review id" });
