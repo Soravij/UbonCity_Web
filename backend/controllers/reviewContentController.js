@@ -204,9 +204,10 @@ export async function needsRevisionAction(req, res) {
     return res.json({ item: result, collector_sync: result?.collector_sync || { ok: true } });
   } catch (err) {
     const msg = String(err?.message || "needs_revision failed");
-    if (/collector sync failed|not configured|cannot mark/i.test(msg)) {
+    if (/collector sync failed|not configured|cannot mark|integration readiness failed/i.test(msg)) {
       return res.status(409).json({ error: msg });
     }
+    console.error("[review-content needs-revision failed]", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 }
@@ -225,9 +226,10 @@ export async function legacyNeedsRevisionAction(req, res) {
     return res.json({ item: result, fallback: true });
   } catch (err) {
     const msg = String(err?.message || "legacy needs_revision failed");
-    if (/invalid|not found|not pending|failed to update queue item|collector sync failed|not configured/i.test(msg)) {
+    if (/invalid|not found|not pending|failed to update queue item|collector sync failed|not configured|integration readiness failed/i.test(msg)) {
       return res.status(409).json({ error: msg });
     }
+    console.error("[review-content legacy needs-revision failed]", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 }

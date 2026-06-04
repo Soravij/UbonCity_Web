@@ -8,6 +8,7 @@ import Navbar from "@/components/Navbar";
 export default function LangFrame({ lang, children }) {
   const pathname = usePathname();
   const isHomeRoot = pathname === `/${lang}` || pathname === `/${lang}/`;
+  const isReviewRoute = pathname === `/${lang}/review` || Boolean(pathname?.startsWith(`/${lang}/review/`));
 
   return (
     <div
@@ -16,7 +17,7 @@ export default function LangFrame({ lang, children }) {
       translate="no"
     >
       <HomeParallaxBackground />
-      <Navbar lang={lang} variant="overlay" />
+      <Navbar lang={lang} variant="overlay" hideLanguageSwitch={isReviewRoute} />
       <main
         className={
           isHomeRoot

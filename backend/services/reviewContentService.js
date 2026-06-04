@@ -91,7 +91,9 @@ export async function ensureReviewInfrastructure() {
 
   const [statusColumnRows] = await pool.query("SHOW COLUMNS FROM review_contents LIKE 'status'");
   const statusColumnType = String(statusColumnRows?.[0]?.Type || "").toLowerCase();
-  if (!statusColumnType.includes("'rejected'")) {
+  const reviewStatusHasNeedsRevision = statusColumnType.includes("'needs_revision'");
+  const reviewStatusHasRejected = statusColumnType.includes("'rejected'");
+  if (!reviewStatusHasNeedsRevision || !reviewStatusHasRejected) {
     await pool.query(
       "ALTER TABLE review_contents MODIFY COLUMN status ENUM('draft','pending_review','needs_revision','rejected','published') NOT NULL DEFAULT 'draft'"
     );
@@ -99,7 +101,9 @@ export async function ensureReviewInfrastructure() {
 
   const [actionTypeColumnRows] = await pool.query("SHOW COLUMNS FROM review_actions LIKE 'action_type'");
   const actionTypeColumnType = String(actionTypeColumnRows?.[0]?.Type || "").toLowerCase();
-  if (!actionTypeColumnType.includes("'rejected'")) {
+  const reviewActionHasNeedsRevision = actionTypeColumnType.includes("'needs_revision'");
+  const reviewActionHasRejected = actionTypeColumnType.includes("'rejected'");
+  if (!reviewActionHasNeedsRevision || !reviewActionHasRejected) {
     await pool.query(
       "ALTER TABLE review_actions MODIFY COLUMN action_type ENUM('ingested','approved','needs_revision','rejected','reingested') NOT NULL"
     );

@@ -87,7 +87,7 @@ function stripLegacyGalleryMarkup(value) {
 
 function parseDescriptionBlocks(text) {
   const source = String(text || "");
-  const regex = /!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g;
+  const regex = /!\[([^\]]*)\]\(((?:https?:\/\/|\/api\/review-media\?[^)\s]+|\/uploads\/[^\s)]+)[^\s)]*)\)/g;
   const blocks = [];
   let lastIndex = 0;
   for (const match of source.matchAll(regex)) {

@@ -26,7 +26,7 @@ export async function POST(req) {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     maxAge: expiresIn,
-    path: `/${lang}/review/${reviewId}`,
+    path: "/",
   });
   return response;
 }

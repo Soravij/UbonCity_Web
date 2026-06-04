@@ -310,31 +310,109 @@ function escapeRegExp(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function rewriteBodyMediaToBackendUrls(html, mirroredRows = [], sourceBaseUrl) {
-  let output = String(html || "");
-  if (!output || !mirroredRows.length) return output;
-  const replacements = [];
+function collectBodyMediaRewriteCandidates(row = {}, sourceBaseUrl) {
+  const candidates = new Set();
+  const sourceUrl = String(row?.source_url || "").trim();
+  const resolvedSourceUrl = String(row?.resolved_source_url || "").trim();
+  const backendUrl = String(row?.backend_url || "").trim();
+
+  const push = (value) => {
+    const text = String(value || "").trim();
+    if (!text || text === backendUrl) return;
+    candidates.add(text);
+  };
+
+  const pushUploadPathAliases = (pathname, origin = "") => {
+    const rawPath = String(pathname || "").trim();
+    if (!rawPath) return;
+    const normalizedPath = rawPath.startsWith("/") ? rawPath : `/${rawPath.replace(/^\/+/, "")}`;
+    let uploadsPath = "";
+    let mediaUploadsPath = "";
+    if (/^\/uploads\//i.test(normalizedPath)) {
+      uploadsPath = normalizedPath;
+      mediaUploadsPath = `/media${normalizedPath}`;
+    } else if (/^\/media\/uploads\//i.test(normalizedPath)) {
+      mediaUploadsPath = normalizedPath;
+      uploadsPath = normalizedPath.replace(/^\/media/i, "");
+    } else {
+      return;
+    }
+
+    push(uploadsPath);
+    push(mediaUploadsPath);
+    const normalizedOrigin = String(origin || "").trim().replace(/\/+$/, "");
+    if (normalizedOrigin) {
+      push(`${normalizedOrigin}${uploadsPath}`);
+      push(`${normalizedOrigin}${mediaUploadsPath}`);
+    }
+  };
+
+  const pushUploadsAliases = (value) => {
+    const text = String(value || "").trim();
+    if (!text) return;
+    try {
+      const parsed = new URL(text);
+      push(parsed.toString());
+      pushUploadPathAliases(parsed.pathname, parsed.origin);
+    } catch {
+      pushUploadPathAliases(text, "");
+    }
+  };
+
+  push(sourceUrl);
+  push(resolvedSourceUrl);
+  pushUploadsAliases(sourceUrl);
+  pushUploadsAliases(resolvedSourceUrl);
+  if (sourceUrl && sourceBaseUrl) {
+    try {
+      const normalizedPath = sourceUrl.startsWith("/") ? sourceUrl : `/${sourceUrl.replace(/^\/+/, "")}`;
+      push(new URL(normalizedPath, `${sourceBaseUrl}/`).toString());
+    } catch {
+      // Ignore invalid URL reconstruction.
+    }
+  }
+  return [...candidates];
+}
+
+function rewriteImgTagSrcByAssetIdentity(html, mirroredRows = []) {
+  const markup = String(html || "");
+  if (!markup || !Array.isArray(mirroredRows) || !mirroredRows.length) return markup;
+
+  const byAssetId = new Map();
+  const byClientMediaUid = new Map();
   for (const row of mirroredRows) {
     const backendUrl = String(row?.backend_url || "").trim();
     if (!backendUrl) continue;
-    const sourceUrl = String(row?.source_url || "").trim();
-    const resolvedSourceUrl = String(row?.resolved_source_url || "").trim();
-    if (sourceUrl) replacements.push(sourceUrl);
-    if (resolvedSourceUrl && resolvedSourceUrl !== sourceUrl) replacements.push(resolvedSourceUrl);
-    if (sourceUrl && sourceBaseUrl) {
-      try {
-        const normalizedPath = sourceUrl.startsWith("/") ? sourceUrl : `/${sourceUrl.replace(/^\/+/, "")}`;
-        const absoluteSourceUrl = new URL(normalizedPath, `${sourceBaseUrl}/`).toString();
-        if (absoluteSourceUrl !== sourceUrl && absoluteSourceUrl !== resolvedSourceUrl) replacements.push(absoluteSourceUrl);
-      } catch {
-        // Ignore invalid URL reconstruction.
-      }
-    }
-    for (const candidate of replacements) {
-      if (!candidate || candidate === backendUrl) continue;
+    const sourceAssetId = Number(row?.source_asset_id || 0) || 0;
+    const clientMediaUid = String(row?.client_media_uid || "").trim();
+    if (sourceAssetId > 0 && !byAssetId.has(String(sourceAssetId))) byAssetId.set(String(sourceAssetId), backendUrl);
+    if (clientMediaUid && !byClientMediaUid.has(clientMediaUid)) byClientMediaUid.set(clientMediaUid, backendUrl);
+  }
+
+  return markup.replace(/<img\b[^>]*>/gi, (tag) => {
+    const assetIdMatch = tag.match(/\bdata-asset-id\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const uidMatch = tag.match(/\bdata-client-media-uid\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const srcMatch = tag.match(/\bsrc\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    if (!srcMatch) return tag;
+
+    const assetId = String(assetIdMatch?.[2] || assetIdMatch?.[3] || assetIdMatch?.[4] || "").trim();
+    const clientMediaUid = String(uidMatch?.[2] || uidMatch?.[3] || uidMatch?.[4] || "").trim();
+    const backendUrl = (assetId && byAssetId.get(assetId)) || (clientMediaUid && byClientMediaUid.get(clientMediaUid)) || "";
+    if (!backendUrl) return tag;
+
+    return tag.replace(/\bsrc\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i, `src="${backendUrl}"`);
+  });
+}
+
+function rewriteBodyMediaToBackendUrls(html, mirroredRows = [], sourceBaseUrl) {
+  let output = rewriteImgTagSrcByAssetIdentity(html, mirroredRows);
+  if (!output || !mirroredRows.length) return output;
+  for (const row of mirroredRows) {
+    const backendUrl = String(row?.backend_url || "").trim();
+    if (!backendUrl) continue;
+    for (const candidate of collectBodyMediaRewriteCandidates(row, sourceBaseUrl)) {
       output = output.replace(new RegExp(escapeRegExp(candidate), "g"), backendUrl);
     }
-    replacements.length = 0;
   }
   return output;
 }
@@ -448,6 +526,8 @@ export async function ingestReviewContent(payload, options = {}) {
       } else {
         mirrored = await mirrorImageToBackendStorage(sourceUrl, sourceBaseUrl);
       }
+      mirrored.source_asset_id = Number(mediaRow?.entry?.source_asset_id || 0) || null;
+      mirrored.client_media_uid = clientMediaUid || null;
       mirroredRows.push(mirrored);
       diagnosticsRow.stored_backend_url = String(mirrored?.backend_url || "").trim() || null;
       mediaDiagnostics.push(diagnosticsRow);

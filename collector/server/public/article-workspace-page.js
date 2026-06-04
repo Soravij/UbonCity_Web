@@ -59,6 +59,8 @@ function createBlock(type, payload = {}) {
     caption: String(payload.caption || ""),
     alt: String(payload.alt || ""),
     list_style: String(payload.list_style || "unordered"),
+    asset_id: Number(payload.asset_id || 0) || 0,
+    content_asset_id: Number(payload.content_asset_id || 0) || 0,
   };
 }
 
@@ -121,6 +123,8 @@ function figureToBlock(element) {
       url: sanitizeUrl(image.getAttribute("src") || ""),
       alt: image.getAttribute("alt") || "",
       caption: element.querySelector("figcaption")?.textContent || "",
+      asset_id: Number(image.getAttribute("data-asset-id") || 0) || 0,
+      content_asset_id: Number(image.getAttribute("data-content-asset-id") || 0) || 0,
     });
   }
   const frame = element.querySelector("iframe, video");
@@ -152,6 +156,8 @@ function htmlNodeToBlock(node) {
       url: sanitizeUrl(node.getAttribute("src") || ""),
       alt: node.getAttribute("alt") || "",
       caption: "",
+      asset_id: Number(node.getAttribute("data-asset-id") || 0) || 0,
+      content_asset_id: Number(node.getAttribute("data-content-asset-id") || 0) || 0,
     });
   }
   if (tag === "iframe" || tag === "video") {
@@ -222,7 +228,13 @@ function serializeBlock(block) {
     if (!url) return "";
     const alt = escapeHtml(String(block?.alt || block?.caption || "image").trim());
     const caption = escapeHtml(String(block?.caption || "").trim());
-    return `<figure>\n  <img src="${url}" alt="${alt}" />\n  ${caption ? `<figcaption>${caption}</figcaption>` : ""}\n</figure>`;
+    const assetId = Number(block?.asset_id || 0) || 0;
+    const contentAssetId = Number(block?.content_asset_id || 0) || 0;
+    const assetAttrs = [
+      assetId > 0 ? `data-asset-id="${assetId}"` : "",
+      contentAssetId > 0 ? `data-content-asset-id="${contentAssetId}"` : "",
+    ].filter(Boolean).join(" ");
+    return `<figure>\n  <img src="${url}" alt="${alt}" ${assetAttrs} />\n  ${caption ? `<figcaption>${caption}</figcaption>` : ""}\n</figure>`;
   }
   if (type === "video") {
     const rawUrl = sanitizeUrl(block?.url || "");
@@ -1456,6 +1468,8 @@ function insertImageByAssetId(assetId) {
     url,
     caption: "",
     alt: "",
+    asset_id: Number(asset?.asset_id || 0) || 0,
+    content_asset_id: Number(asset?.id || 0) || 0,
   });
   setInlineStatus("asset-status", "Image inserted");
 }
