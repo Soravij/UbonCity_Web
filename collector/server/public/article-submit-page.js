@@ -605,6 +605,7 @@ function renderTranslationRecheckPanel() {
     <div class="translation-recheck-list">
       ${gate.rows.map((row) => {
         const hasRecheck = row.translation_recheck_status !== "not_checked";
+        const hasFutureDetails = row.back_translation_th || row.recheck_summary_th || row.recheck_issues.length;
         return `
           <div class="translation-recheck-row">
             <div class="translation-recheck-row-head">
@@ -621,13 +622,16 @@ function renderTranslationRecheckPanel() {
               <span><strong>Repair attempts:</strong> ${escapeHtml(String(row.repair_attempt_count || 0))}</span>
             </div>
             ${hasRecheck ? "" : '<p class="muted">Translation recheck has not run yet.</p>'}
-            <div class="translation-recheck-actions article-side-actions">
-              <button type="button" class="utility-action" disabled>View back translation</button>
-              <button type="button" class="utility-action" disabled>View issues</button>
-              <button type="button" class="utility-action" disabled>Recheck</button>
-              <button type="button" class="utility-action" disabled>Repair</button>
-              <button type="button" class="utility-action" disabled>Regenerate</button>
-            </div>
+            <details class="translation-recheck-future-actions">
+              <summary>${escapeHtml(hasFutureDetails ? "Recheck details and future actions" : "Future actions")}</summary>
+              <div class="article-side-actions">
+                <button type="button" class="utility-action" disabled>View back translation</button>
+                <button type="button" class="utility-action" disabled>View issues</button>
+                <button type="button" class="utility-action" disabled>Recheck</button>
+                <button type="button" class="utility-action" disabled>Repair</button>
+                <button type="button" class="utility-action" disabled>Regenerate</button>
+              </div>
+            </details>
           </div>
         `;
       }).join("")}
