@@ -290,6 +290,19 @@ D:\UbonRuntime\
 
 ---
 
+# Article Body Image Asset Mapping Policy
+
+- Article compose body images must come only from uploaded/imported local collector assets.
+- Compose body image insertion must preserve stable asset identity, at minimum `asset_id` when available.
+- Collector public URL is not the source of truth for approved article/review body images.
+- Admin Review ingest must rewrite known selected/uploaded body images to backend-owned URLs.
+- Backend rewrite is a final guard, not the only mapping mechanism.
+- Frontend review/public pages must never intentionally render collector media URLs.
+- Backend must not fetch arbitrary external images for body rendering.
+- External images remain reference-only unless manually rights-verified, imported into collector storage, and selected as local assets.
+
+---
+
 # Documentation State
 
 ## UAT documents
