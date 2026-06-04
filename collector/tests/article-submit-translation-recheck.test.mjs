@@ -214,12 +214,41 @@ test("translation recheck panel renders placeholder state and tolerates malforme
   const html = elements.get("translation-recheck-panel").innerHTML;
   assert.match(html, /Not checked/);
   assert.match(html, /<strong>Score:<\/strong> -/);
-  assert.match(html, /<button type="button" class="utility-action" disabled>Recheck<\/button>/);
+  assert.match(html, /data-translation-recheck-lang="en"/);
+  assert.match(html, /<button type="button" class="utility-action" data-translation-recheck-lang="en"[^>]*>Recheck<\/button>/);
   assert.match(html, /Not ready: EN need translation recheck\./);
   assert.doesNotMatch(html, /Translation recheck has not run yet\./);
   assert.doesNotMatch(html, /Required locales/);
   assert.doesNotMatch(html, /Readiness/);
   assert.doesNotMatch(html, /Technical details and future actions/);
+});
+
+test("translation recheck panel enables Recheck only for eligible not_checked rows", () => {
+  const { hooks, elements } = loadHarness();
+  hooks.state.readiness = {
+    translations: [
+      { lang: "en", status: "passed" },
+      { lang: "lo", status: "failed" },
+      { lang: "zh", status: "stale" },
+      { lang: "ja", status: "not_ready" },
+    ],
+  };
+  hooks.state.translations = [
+    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+    { lang: "lo", translation_status: "ready", automatic_check_status: "failed", stale_flag: 0 },
+    { lang: "zh", translation_status: "ready", automatic_check_status: "passed", stale_flag: 1, translation_recheck_status: "stale" },
+    { lang: "ja", translation_status: "", automatic_check_status: "", stale_flag: 0 },
+  ];
+
+  hooks.renderTranslationRecheckPanel();
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.match(html, /data-translation-recheck-lang="en"(?![^>]*disabled)/);
+  assert.match(html, /<button type="button" class="utility-action" data-translation-recheck-lang="lo" disabled>Recheck<\/button>/);
+  assert.match(html, /Technical QA must pass first/);
+  assert.match(html, /<button type="button" class="utility-action" data-translation-recheck-lang="ja" disabled>Recheck<\/button>/);
+  assert.match(html, /Translation is missing/);
+  assert.match(html, /Translation is stale/);
 });
 
 test("translation recheck locale cards show status-specific default actions and diagnostics-only details", () => {
@@ -233,9 +262,18 @@ test("translation recheck locale cards show status-specific default actions and 
     ],
   };
   hooks.state.translations = [
-    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
-    { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "passed" },
-    { lang: "zh", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "failed" },
+    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_score: 8.4 },
+    { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "passed", translation_recheck_score: 8.9 },
+    {
+      lang: "zh",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      translation_recheck_status: "failed",
+      back_translation_th: "แปลกลับไทยของ zh",
+      recheck_summary_th: "มีความคลาดเคลื่อนของความหมายบางจุด",
+      recheck_issues: [{ type: "accuracy", severity: "high", problem_th: "ความหมายเพี้ยน", suggestion_th: "แก้ให้ตรงต้นฉบับ" }],
+    },
     { lang: "th", translation_status: "ready", automatic_check_status: "passed", stale_flag: 1, translation_recheck_status: "stale" },
   ];
 
@@ -243,9 +281,14 @@ test("translation recheck locale cards show status-specific default actions and 
 
   const html = elements.get("translation-recheck-panel").innerHTML;
   assert.match(html, /View technical details below/);
-  assert.match(html, /<button type="button" class="utility-action" disabled>Recheck<\/button>/);
+  assert.match(html, /data-translation-recheck-lang="en"/);
+  assert.match(html, /<strong>Score:<\/strong> 8.4\/10/);
   assert.match(html, /<button type="button" class="utility-action" disabled>Repair<\/button>/);
   assert.match(html, /<button type="button" class="utility-action" disabled>Regenerate<\/button>/);
+  assert.match(html, /Back translation/);
+  assert.match(html, /แปลกลับไทยของ zh/);
+  assert.match(html, /มีความคลาดเคลื่อนของความหมายบางจุด/);
+  assert.match(html, /ความหมายเพี้ยน/);
   assert.doesNotMatch(html, /Technical details and future actions/);
   assert.doesNotMatch(html, /View back translation/);
   assert.doesNotMatch(html, /View issues/);
@@ -279,6 +322,29 @@ test("translation recheck blocks approve and sync actions until all required loc
 
   assert.equal(elements.get("btn-approve-sync").disabled, true);
   assert.equal(elements.get("btn-send-main-site").disabled, true);
+});
+
+test("translation recheck warning and failed statuses keep final actions blocked", () => {
+  for (const recheckStatus of ["warning", "failed"]) {
+    const { hooks, elements } = loadHarness();
+    hooks.state.readiness = {
+      translations: [{ lang: "en", status: "passed" }],
+    };
+    hooks.state.translations = [
+      {
+        lang: "en",
+        translation_status: "ready",
+        automatic_check_status: "passed",
+        stale_flag: 0,
+        translation_recheck_status: recheckStatus,
+      },
+    ];
+
+    hooks.applyActionGuards();
+
+    assert.equal(elements.get("btn-approve-sync").disabled, true);
+    assert.equal(elements.get("btn-send-main-site").disabled, true);
+  }
 });
 
 test("translation summary preserves generate button loading state while toggling priority classes", () => {

@@ -36,6 +36,7 @@ import {
   returnFieldPackToClean,
   reviewInternalLink,
   rerunProblemTranslations,
+  rerunTranslationRecheck,
   runAiDraftStage,
   runCleanStage,
   runQualityStage,
@@ -293,6 +294,7 @@ function buildAiFeatureRuntimeSnapshot(aiConfig) {
     field_pack: pickFeature("fieldPack"),
     visual_context: pickFeature("visualContext"),
     translation: pickFeature("translation"),
+    translation_recheck: pickFeature("translationRecheck"),
   };
 }
 
@@ -4452,7 +4454,7 @@ function buildBackendSyncPayload(options = {}) {
 
   const translations = repo
     .listTranslations(contentItemId)
-    .filter((t) => t.translation_status === "ready" && t.automatic_check_status === "passed" && Number(t.stale_flag || 0) === 0)
+    .filter((t) => isTranslationRecheckPassed(t))
     .map((t) => ({
       source_content_item_id: t.source_content_item_id,
       lang: t.lang,
@@ -4513,7 +4515,7 @@ function buildReviewIngestPayload(options = {}) {
 
   const translationLangs = repo
     .listTranslations(contentItemId)
-    .filter((t) => t.translation_status === "ready" && t.automatic_check_status === "passed" && Number(t.stale_flag || 0) === 0)
+    .filter((t) => isTranslationRecheckPassed(t))
     .map((t) => String(t.lang || "").trim().toLowerCase())
     .filter(Boolean);
 
@@ -4704,7 +4706,7 @@ function buildEventAdminQueuePayload(options = {}) {
     },
     translations_snapshot: repo
       .listTranslations(contentItemId)
-      .filter((t) => t.translation_status === "ready" && t.automatic_check_status === "passed" && Number(t.stale_flag || 0) === 0)
+      .filter((t) => isTranslationRecheckPassed(t))
       .map((t) => ({
         lang: String(t.lang || "").trim().toLowerCase(),
         title: t.translated_title,
@@ -4714,7 +4716,7 @@ function buildEventAdminQueuePayload(options = {}) {
       })),
     translation_langs: repo
       .listTranslations(contentItemId)
-      .filter((t) => t.translation_status === "ready" && t.automatic_check_status === "passed" && Number(t.stale_flag || 0) === 0)
+      .filter((t) => isTranslationRecheckPassed(t))
       .map((t) => String(t.lang || "").trim().toLowerCase())
       .filter(Boolean),
   };
@@ -6319,6 +6321,61 @@ function parseTargetLangs() {
     .filter(Boolean);
 }
 
+function isTranslationTechnicalReady(row) {
+  return String(row?.translation_status || "").trim().toLowerCase() === "ready"
+    && String(row?.automatic_check_status || "").trim().toLowerCase() === "passed"
+    && Number(row?.stale_flag || 0) === 0;
+}
+
+function isTranslationRecheckPassed(row) {
+  return isTranslationTechnicalReady(row)
+    && String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed";
+}
+
+function getRequiredTranslationRecheckBlockers(contentItemId, readiness = null) {
+  const exportReadiness = readiness || buildExportReadiness(contentItemId);
+  const item = repo.getItem(contentItemId) || null;
+  const sourceLang = String(item?.lang || "th").trim().toLowerCase() || "th";
+  const requiredLocales = parseTargetLangs().filter((lang) => lang !== sourceLang);
+  const liveTranslationRows = repo.listTranslations(contentItemId);
+  const liveByLang = new Map(
+    liveTranslationRows.map((row) => [String(row?.lang || "").trim().toLowerCase(), row]),
+  );
+  const blockers = requiredLocales.map((lang) => {
+    const live = liveByLang.get(lang);
+    if (!lang) return null;
+    if (!live) {
+      return { lang, reason: "missing translation" };
+    }
+    if (Number(live?.stale_flag || 0) === 1 || String(live?.translation_status || "").trim().toLowerCase() === "stale") {
+      return { lang, reason: "translation is stale" };
+    }
+    if (String(live?.translation_status || "").trim().toLowerCase() !== "ready") {
+      return { lang, reason: "translation is missing or not ready" };
+    }
+    if (String(live?.automatic_check_status || "").trim().toLowerCase() !== "passed") {
+      return { lang, reason: "technical QA must pass first" };
+    }
+    if (String(live?.translation_recheck_status || "").trim().toLowerCase() !== "passed") {
+      return {
+        lang,
+        reason: `translation recheck is not passed (${String(live?.translation_recheck_status || "not_checked").trim().toLowerCase() || "not_checked"})`,
+      };
+    }
+    if (!isTranslationRecheckPassed(live)) {
+      return { lang, reason: "translation recheck gate is not satisfied" };
+    }
+    return null;
+  }).filter(Boolean);
+
+  return {
+    required_locales: requiredLocales,
+    blockers,
+    blocking_langs: blockers.map((row) => String(row?.lang || "").trim().toUpperCase()).filter(Boolean),
+    blocking: blockers.length > 0,
+  };
+}
+
 function buildExportReadiness(contentItemId) {
   const isDebugDiagnosticsEnabled = String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
   const item = repo.getItem(contentItemId);
@@ -6397,6 +6454,13 @@ function buildExportReadiness(contentItemId) {
     total: translations.length,
   };
 
+  const translationRecheckCounts = {
+    passed: rows.filter((row) => String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed").length,
+    warning: rows.filter((row) => String(row?.translation_recheck_status || "").trim().toLowerCase() === "warning").length,
+    failed: rows.filter((row) => String(row?.translation_recheck_status || "").trim().toLowerCase() === "failed").length,
+    not_checked: rows.filter((row) => !String(row?.translation_recheck_status || "").trim() || String(row?.translation_recheck_status || "").trim().toLowerCase() === "not_checked").length,
+  };
+
   return {
     content_item_id: contentItemId,
     source_ready: sourceIssues.length === 0,
@@ -6452,6 +6516,7 @@ function buildExportReadiness(contentItemId) {
       }
       : null,
     translation_counts: counts,
+    translation_recheck_counts: translationRecheckCounts,
     translations,
   };
 }
@@ -11643,6 +11708,17 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
     });
     return;
   }
+  const translationRecheckGate = getRequiredTranslationRecheckBlockers(id, readiness);
+  if (translationRecheckGate.blocking) {
+    res.status(409).json({
+      error: "คำแปลยังไม่ผ่าน translation recheck สำหรับส่งออก",
+      reason: `Blocked locales: ${translationRecheckGate.blocking_langs.join(", ")}`,
+      locales: translationRecheckGate.blocking_langs,
+      translation_recheck_gate: translationRecheckGate,
+      readiness,
+    });
+    return;
+  }
 
   try {
     const aiConfig = getEffectiveAiConfig();
@@ -11831,17 +11907,13 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
       });
       return;
     }
-    const translationCounts = readiness?.translation_counts || {};
-    const translationRows = Array.isArray(readiness?.translations) ? readiness.translations : [];
-    const translationReady =
-      Number(translationCounts.total || 0) > 0
-      && Number(translationCounts.failed || 0) === 0
-      && Number(translationCounts.stale || 0) === 0
-      && Number(translationCounts.not_ready || 0) === 0
-      && translationRows.every((row) => String(row?.status || "").trim().toLowerCase() === "passed");
-    if (!translationReady) {
+    const translationRecheckGate = getRequiredTranslationRecheckBlockers(id, readiness);
+    if (translationRecheckGate.blocking) {
       res.status(409).json({
-        error: "คำแปลยังไม่พร้อมสำหรับส่งเข้า admin review",
+        error: "คำแปลยังไม่ผ่าน translation recheck สำหรับส่งเข้า admin review",
+        reason: `Blocked locales: ${translationRecheckGate.blocking_langs.join(", ")}`,
+        locales: translationRecheckGate.blocking_langs,
+        translation_recheck_gate: translationRecheckGate,
         readiness,
       });
       return;
@@ -12023,6 +12095,39 @@ app.post("/api/items/:id/generate-translations", requireRole("admin", "owner"), 
   } catch (err) {
     const message = String(err?.message || "Cannot generate translations");
     res.status(400).json({ error: message });
+  }
+});
+
+app.post("/api/items/:id/translations/:lang/recheck", requireRole("admin", "owner"), async (req, res) => {
+  const id = Number(req.params.id || 0);
+  const lang = String(req.params.lang || "").trim().toLowerCase();
+  if (!id || !lang) {
+    res.status(400).json({ error: "Invalid item id or locale" });
+    return;
+  }
+
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+
+  try {
+    const aiConfig = getEffectiveAiConfig();
+    const result = await rerunTranslationRecheck(repo, actorEmail(req), {
+      aiConfig,
+      content_item_id: id,
+      lang,
+    });
+    const readiness = buildExportReadiness(id);
+    res.json({
+      ok: true,
+      result,
+      readiness,
+      translations: repo.listTranslations(id),
+    });
+  } catch (err) {
+    res.status(400).json({ error: String(err?.message || "Cannot run translation recheck") });
   }
 });
 

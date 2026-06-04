@@ -249,7 +249,14 @@ function normalizeScore(value) {
 }
 
 function parseRecheckIssues(value) {
-  if (Array.isArray(value)) return value.map((entry) => String(entry || "").trim()).filter(Boolean);
+  if (Array.isArray(value)) {
+    return value.map((entry) => {
+      if (entry && typeof entry === "object") {
+        return String(entry.problem_th || entry.suggestion_th || entry.target_text || entry.source_text || "").trim();
+      }
+      return String(entry || "").trim();
+    }).filter(Boolean);
+  }
   if (!value) return [];
   if (typeof value === "string") {
     try {
@@ -282,6 +289,22 @@ function translationRecheckStatusLabel(value) {
   return "Not checked";
 }
 
+function getTranslationRecheckEligibility(row) {
+  const translationStatus = String(row?.translation_status || "").trim().toLowerCase();
+  const automaticCheckStatus = String(row?.automatic_check_status || "").trim().toLowerCase();
+  const stale = Number(row?.stale_flag || 0) === 1 || String(row?.translation_recheck_status || "").trim().toLowerCase() === "stale";
+  if (stale) {
+    return { eligible: false, reason: "Translation is stale" };
+  }
+  if (translationStatus !== "ready") {
+    return { eligible: false, reason: "Translation is missing" };
+  }
+  if (automaticCheckStatus !== "passed") {
+    return { eligible: false, reason: "Technical QA must pass first" };
+  }
+  return { eligible: true, reason: "" };
+}
+
 function buildTranslationRecheckRows() {
   return buildTranslationRows().map((row) => {
     const live = (Array.isArray(state.translations) ? state.translations : []).find(
@@ -292,12 +315,13 @@ function buildTranslationRecheckRows() {
       automatic_check_status: String(live?.automatic_check_status || row?.automatic_check_status || "").trim().toLowerCase() || "-",
       translation_status: String(live?.translation_status || row?.translation_status || "").trim().toLowerCase() || "-",
       translation_recheck_status: translationRecheckStatusFromRow({ ...row, ...live }),
+      translation_recheck_score: normalizeScore(live?.translation_recheck_score),
       accuracy_score: normalizeScore(live?.accuracy_score),
       fluency_score: normalizeScore(live?.fluency_score),
       term_score: normalizeScore(live?.term_score),
       back_translation_th: String(live?.back_translation_th || "").trim(),
       recheck_summary_th: String(live?.recheck_summary_th || "").trim(),
-      recheck_issues: parseRecheckIssues(live?.recheck_issues_json),
+      recheck_issues: parseRecheckIssues(live?.recheck_issues_json ?? live?.recheck_issues),
       rechecked_at: live?.rechecked_at || null,
       repair_attempt_count: Number(live?.repair_attempt_count || 0) || 0,
       stale_flag: Number(live?.stale_flag || 0) || 0,
@@ -667,19 +691,27 @@ function renderTranslationRecheckPanel() {
     <div class="translation-recheck-list">
       ${gate.rows.map((row) => {
         const hasFutureDetails = row.back_translation_th || row.recheck_summary_th || row.recheck_issues.length;
-        const primaryScore = row.accuracy_score ?? row.fluency_score ?? row.term_score;
+        const primaryScore = row.translation_recheck_score ?? row.accuracy_score ?? row.fluency_score ?? row.term_score;
         const statusLabel = translationRecheckStatusLabel(row.translation_recheck_status);
         const scoreLabel = primaryScore == null ? "-" : `${escapeHtml(String(primaryScore))}/10`;
+        const recheckEligibility = getTranslationRecheckEligibility(row);
+        const recheckDisabled = state.busy || !canManageTranslations() || !recheckEligibility.eligible;
         const defaultActionHtml = row.translation_recheck_status === "passed"
           ? `<span class="translation-recheck-action-note">View technical details below</span>`
           : row.translation_recheck_status === "stale"
-            ? '<button type="button" class="utility-action" disabled>Regenerate</button>'
+            ? `
+              <button type="button" class="utility-action" disabled>Regenerate</button>
+              <span class="translation-recheck-action-note">Translation is stale</span>
+            `
             : row.translation_recheck_status === "failed" || row.translation_recheck_status === "warning"
               ? `
                 <button type="button" class="utility-action" disabled>Repair</button>
                 <button type="button" class="utility-action" disabled>Regenerate</button>
               `
-              : '<button type="button" class="utility-action" disabled>Recheck</button>';
+              : `
+                <button type="button" class="utility-action" data-translation-recheck-lang="${escapeHtml(String(row.lang || ""))}" ${recheckDisabled ? "disabled" : ""}>Recheck</button>
+                ${recheckEligibility.reason ? `<span class="translation-recheck-action-note">${escapeHtml(recheckEligibility.reason)}</span>` : ""}
+              `;
         return `
           <div class="translation-recheck-row">
             <div class="translation-recheck-row-head">
@@ -863,6 +895,29 @@ async function generateTranslations() {
   }
 }
 
+async function runTranslationRecheck(lang) {
+  const normalizedLang = String(lang || "").trim().toLowerCase();
+  if (!normalizedLang || state.busy) return;
+  setBusy(true);
+  setInlineStatus("review-status", `Running translation recheck for ${normalizedLang.toUpperCase()}...`, "loading");
+  try {
+    const result = await api(`/api/items/${state.itemId}/translations/${encodeURIComponent(normalizedLang)}/recheck`, {
+      method: "POST",
+    });
+    state.readiness = result?.readiness || state.readiness;
+    state.translations = Array.isArray(result?.translations) ? result.translations : state.translations;
+    renderSyncSummary();
+    renderTranslationSummary();
+    renderTranslationRecheckPanel();
+    renderTranslationReviewSummary();
+    renderReviewChecklist();
+    setInlineStatus("review-status", `Translation recheck updated for ${normalizedLang.toUpperCase()}`);
+  } finally {
+    setBusy(false);
+    applyActionGuards();
+  }
+}
+
 async function sendToMainSite() {
   setBusy(true);
   setBanner("กำลังส่งเข้า Admin Review...", "loading");
@@ -941,6 +996,15 @@ function wire() {
       await generateTranslations();
     } catch (err) {
       setInlineStatus("translation-status", err.message, "error");
+    }
+  });
+  qs("translation-recheck-panel")?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-translation-recheck-lang]");
+    if (!button || button.disabled) return;
+    try {
+      await runTranslationRecheck(button.dataset.translationRecheckLang);
+    } catch (err) {
+      setInlineStatus("review-status", err.message, "error");
     }
   });
   const openTranslationDetailHandler = (event) => {
