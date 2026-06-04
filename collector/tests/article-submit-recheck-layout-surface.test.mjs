@@ -19,5 +19,7 @@ test("article submit review layout stacks the decision grid and keeps source dia
   assert.match(html, /<details class="article-review-diagnostics">[\s\S]*<summary>Source diagnostics<\/summary>[\s\S]*id="review-checklist"/);
   assert.doesNotMatch(html, /article-card-sync/);
   assert.match(css, /\.article-review-decision-grid--stacked/);
+  assert.match(css, /#translation-recheck-panel \.utility-action:disabled/);
+  assert.match(css, /#translation-recheck-panel \.utility-action:focus-visible/);
   assert.doesNotMatch(css, /\.article-status-block/);
 });

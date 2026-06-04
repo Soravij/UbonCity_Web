@@ -270,3 +270,37 @@ test("translation summary preserves generate button loading state while toggling
   assert.equal(button.classList.contains("utility-action"), true);
   assert.equal(button.classList.contains("ok"), false);
 });
+
+test("translation package summary only shows package-oriented fields", () => {
+  const { hooks, elements } = loadHarness();
+  hooks.state.readiness = {
+    translations: [
+      { lang: "lo", status: "passed" },
+      { lang: "zh", status: "stale" },
+      { lang: "en", status: "not_ready" },
+    ],
+  };
+  hooks.state.translations = [
+    { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+    { lang: "zh", translation_status: "ready", automatic_check_status: "passed", stale_flag: 1 },
+    { lang: "en", translation_status: "", automatic_check_status: "", stale_flag: 0 },
+  ];
+
+  hooks.renderTranslationSummary();
+
+  const html = elements.get("translation-summary").innerHTML;
+  const hint = elements.get("translation-package-hint").textContent;
+  assert.match(html, /Package status/);
+  assert.match(html, /Required locales/);
+  assert.match(html, /Missing locales/);
+  assert.match(html, /Stale locales/);
+  assert.match(html, /LO \/ Lao/);
+  assert.match(html, /ZH \/ Chinese/);
+  assert.match(html, /EN \/ English/);
+  assert.match(html, /translated/);
+  assert.match(html, /stale/);
+  assert.match(html, /missing/);
+  assert.doesNotMatch(html, /Ready now/);
+  assert.doesNotMatch(html, /not_checked/i);
+  assert.equal(hint, "Source changed after translation. Regenerate stale translations.");
+});

@@ -517,12 +517,14 @@ function renderTranslationSummary() {
 
   if (!rows.length) {
     root.innerHTML = `
-      <div class="summary-row"><strong>Required locales</strong><span>0</span></div>
       <div class="summary-row"><strong>Package status</strong><span class="fail">missing</span></div>
-      <p class="muted">Add the required locale package first.</p>
+      <div class="summary-row"><strong>Required locales</strong><span>0</span></div>
+      <p class="muted">Create the first translation package for all required locales.</p>
     `;
-    if (statusNode) statusNode.textContent = "";
-    if (hintNode) hintNode.textContent = "Translations are missing. Generate the package before translation quality review.";
+    if (statusNode) {
+      statusNode.textContent = "Create the first translation package for all required locales.";
+    }
+    if (hintNode) hintNode.textContent = "Create the first translation package for all required locales.";
     if (generateBtn) {
       generateBtn.classList.add("ok");
       generateBtn.classList.remove("utility-action");
@@ -531,22 +533,29 @@ function renderTranslationSummary() {
   }
 
   const counts = gate.counts;
-  const staleCount = Number(counts.stale || 0);
-  const missingCount = Number(counts.not_ready || 0);
-  const failedCount = Number(counts.failed || 0);
-  const packageComplete = staleCount === 0 && missingCount === 0 && failedCount === 0;
-  const packageLabel = packageComplete ? "complete" : staleCount > 0 ? "stale" : missingCount > 0 ? "missing" : "incomplete";
+  const staleRows = rows.filter((row) => String(row?.status || "").trim().toLowerCase() === "stale");
+  const missingRows = rows.filter((row) => String(row?.status || "").trim().toLowerCase() !== "passed" && String(row?.status || "").trim().toLowerCase() !== "stale");
+  const staleCount = staleRows.length;
+  const missingCount = missingRows.length;
+  const packageComplete = staleCount === 0 && missingCount === 0;
+  const packageLabel = packageComplete ? "complete" : staleCount > 0 ? "stale" : "missing";
+  const requiredLocales = rows.map((row) => localeLabel(row.lang)).filter(Boolean).join(", ");
+  const missingLocales = missingRows.map((row) => localeLabel(row.lang)).join(", ");
+  const staleLocales = staleRows.map((row) => localeLabel(row.lang)).join(", ");
+
   if (statusNode) {
     statusNode.textContent = packageComplete
       ? "Translations are complete. Next step: check translation quality."
       : staleCount > 0
-        ? "Some translations are stale. Refresh the package before recheck."
-        : "Translations are missing or incomplete.";
+        ? "Source changed after translation. Regenerate stale translations."
+        : "Create the first translation package for all required locales.";
   }
   if (hintNode) {
     hintNode.textContent = packageComplete
       ? "Translations are complete. Next step: check translation quality."
-      : "Generate translations here before moving to Translation Recheck.";
+      : staleCount > 0
+        ? "Source changed after translation. Regenerate stale translations."
+        : "Create the first translation package for all required locales.";
   }
   if (generateBtn) {
     generateBtn.classList.toggle("ok", !packageComplete);
@@ -554,18 +563,23 @@ function renderTranslationSummary() {
   }
 
   root.innerHTML = `
+    <div class="summary-row"><strong>Package status</strong><span class="${packageComplete ? "ok" : staleCount > 0 ? "warn" : "fail"}">${escapeHtml(packageLabel)}</span></div>
     <div class="summary-row"><strong>Required locales</strong><span>${counts.total}</span></div>
-    <div class="summary-row"><strong>Package status</strong><span class="${packageComplete ? "ok" : staleCount > 0 || missingCount > 0 ? "warn" : "fail"}">${escapeHtml(packageLabel)}</span></div>
-    <div class="summary-row"><strong>Ready now</strong><span>${counts.passed}</span></div>
-    <div class="summary-row"><strong>Missing</strong><span>${missingCount}</span></div>
-    <div class="summary-row"><strong>Stale</strong><span>${staleCount}</span></div>
+    <div class="summary-row"><strong>Locale list</strong><span>${escapeHtml(requiredLocales || "-")}</span></div>
+    ${missingCount ? `<div class="summary-row"><strong>Missing locales</strong><span>${escapeHtml(missingLocales)}</span></div>` : ""}
+    ${staleCount ? `<div class="summary-row"><strong>Stale locales</strong><span>${escapeHtml(staleLocales)}</span></div>` : ""}
     <div class="article-translation-list">
-      ${rows.map((row) => `
+      ${rows.map((row) => {
+        const rowStatus = String(row?.status || "").trim().toLowerCase();
+        const packageStatus = rowStatus === "passed" ? "translated" : rowStatus === "stale" ? "stale" : "missing";
+        const packageStatusClass = rowStatus === "passed" ? "ok" : rowStatus === "stale" ? "warn" : "fail";
+        return `
         <div class="article-translation-row" role="button" tabindex="0" data-translation-detail="${escapeHtml(String(row.lang || ""))}">
-          <strong>${escapeHtml(row.lang || "-")}</strong>
-          <span class="${row.status === "passed" ? "ok" : row.status === "failed" ? "fail" : row.status === "stale" ? "warn" : "muted"}">${escapeHtml(row.status)}</span>
+          <strong>${escapeHtml(localeLabel(row.lang))}</strong>
+          <span class="${packageStatusClass}">${escapeHtml(packageStatus)}</span>
         </div>
-      `).join("")}
+      `;
+      }).join("")}
     </div>
   `;
 }
