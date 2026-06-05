@@ -86,6 +86,7 @@ globalThis.__articleSubmitTestHooks = {
   renderTranslationRecheckPanel,
   getTranslationRecheckGateState,
   runTranslationRecheck,
+  validateRecheckResponseLocale,
   translationRecheckStatusFromRow,
   applyActionGuards,
 };
@@ -260,6 +261,22 @@ test("translation recheck panel enables Recheck only for eligible not_checked ro
   assert.match(html, /Translation is stale/);
 });
 
+test("global busy disables eligible Recheck buttons", () => {
+  const { hooks, elements } = loadHarness();
+  hooks.state.busy = true;
+  hooks.state.readiness = {
+    translations: [{ lang: "en", status: "passed" }],
+  };
+  hooks.state.translations = [
+    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+  ];
+
+  hooks.renderTranslationRecheckPanel();
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.match(html, /data-translation-recheck-lang="en" disabled>Recheck<\/button>/);
+});
+
 test("translation recheck locale cards show status-specific default actions and diagnostics-only details", () => {
   const { hooks, elements } = loadHarness();
   hooks.state.readiness = {
@@ -292,6 +309,7 @@ test("translation recheck locale cards show status-specific default actions and 
   assert.match(html, /View technical details below/);
   assert.match(html, /data-translation-recheck-lang="en"/);
   assert.match(html, /<strong>Score:<\/strong> 8.4\/10/);
+  assert.match(html, /<button type="button" class="utility-action" data-translation-recheck-lang="zh"[^>]*>Recheck again<\/button>/);
   assert.match(html, /<button type="button" class="utility-action" disabled>Repair<\/button>/);
   assert.match(html, /<button type="button" class="utility-action" disabled>Regenerate<\/button>/);
   assert.match(html, /Back translation/);
@@ -375,6 +393,7 @@ test("recheck action refreshes translations and renders warning result after com
   const { hooks, elements } = loadHarness({
     api: async () => ({
       ok: true,
+      result: { locales: [{ lang: "lo", translation_recheck_status: "warning", translation_recheck_score: 10 }] },
       readiness: {
         translations: [{ lang: "lo", status: "passed" }],
       },
@@ -405,6 +424,33 @@ test("recheck action refreshes translations and renders warning result after com
   assert.doesNotMatch(html, /Not checked/);
 });
 
+test("clicking locale-specific recheck uses the exact requested URL", async () => {
+  for (const lang of ["en", "zh", "lo"]) {
+    const calls = [];
+    const { hooks } = loadHarness({
+      api: async (url) => {
+        calls.push(url);
+        return {
+          ok: true,
+          result: { locales: [{ lang, translation_recheck_status: "passed", translation_recheck_score: 10 }] },
+          readiness: { translations: [{ lang, status: "passed" }] },
+          translations: [{ lang, translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "passed", translation_recheck_score: 10 }],
+        };
+      },
+      loadTranslations: async () => {
+        hooks.state.translations = [{ lang, translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "passed", translation_recheck_score: 10 }];
+        return hooks.state.translations;
+      },
+    });
+    hooks.state.readiness = { translations: [{ lang, status: "passed" }] };
+    hooks.state.translations = [{ lang, translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 }];
+
+    await hooks.runTranslationRecheck(lang);
+
+    assert.equal(calls[0], `/api/items/48/translations/${lang}/recheck`);
+  }
+});
+
 test("recheck action renders passed result and updates final send readiness only when all locales passed", async () => {
   const updatedTranslations = [
     {
@@ -427,6 +473,7 @@ test("recheck action renders passed result and updates final send readiness only
   const { hooks, elements } = loadHarness({
     api: async () => ({
       ok: true,
+      result: { locales: [{ lang: "en", translation_recheck_status: "passed", translation_recheck_score: 10 }] },
       readiness: {
         translations: [
           { lang: "en", status: "passed" },
@@ -478,6 +525,7 @@ test("recheck action immediately renders warning result even if refreshTranslati
   const { hooks, elements, inlineStatuses } = loadHarness({
     api: async () => ({
       ok: true,
+      result: { locales: [{ lang: "lo", translation_recheck_status: "warning", translation_recheck_score: 10 }] },
       readiness: {
         translations: [{ lang: "lo", status: "passed" }],
       },
@@ -505,6 +553,98 @@ test("recheck action immediately renders warning result even if refreshTranslati
   assert.match(inlineStatuses.at(-1)?.message || "", /refresh pending/i);
 });
 
+test("requested EN but response locales only contains LO is rejected and does not apply", async () => {
+  const { hooks, elements, inlineStatuses } = loadHarness({
+    api: async () => ({
+      ok: true,
+      result: { locales: [{ lang: "lo", translation_recheck_status: "warning", translation_recheck_score: 10 }] },
+      readiness: { translations: [{ lang: "en", status: "passed" }] },
+      translations: [{ lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "warning", translation_recheck_score: 10 }],
+    }),
+    loadTranslations: async () => {
+      throw new Error("should not refresh on mismatch");
+    },
+  });
+  hooks.state.readiness = { translations: [{ lang: "en", status: "passed" }, { lang: "lo", status: "passed" }] };
+  hooks.state.translations = [
+    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+    { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+  ];
+
+  await hooks.runTranslationRecheck("en");
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.match(inlineStatuses.at(-1)?.message || "", /different locale than requested/i);
+  assert.match(html, /data-translation-recheck-lang="en"/);
+  assert.doesNotMatch(html, /<strong>Score:<\/strong> 10\/10/);
+  assert.equal(hooks.state.translationRecheckBusyLang || "", "");
+});
+
+test("requested EN but result.translation.lang = LO is rejected", async () => {
+  const { hooks, inlineStatuses } = loadHarness({
+    api: async () => ({
+      ok: true,
+      translation: { lang: "lo", translation_recheck_status: "warning", translation_recheck_score: 10 },
+    }),
+  });
+  hooks.state.readiness = { translations: [{ lang: "en", status: "passed" }] };
+  hooks.state.translations = [{ lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 }];
+
+  await hooks.runTranslationRecheck("en");
+
+  assert.match(inlineStatuses.at(-1)?.message || "", /different locale than requested/i);
+  assert.equal(hooks.state.translationRecheckBusyLang || "", "");
+});
+
+test("requested EN but readiness-only response is rejected and does not apply readiness", async () => {
+  const initialReadiness = { translations: [{ lang: "en", status: "passed" }, { lang: "lo", status: "passed" }] };
+  const { hooks, elements, inlineStatuses } = loadHarness({
+    api: async () => ({
+      ok: true,
+      readiness: { translations: [{ lang: "en", status: "passed" }] },
+    }),
+  });
+  hooks.state.readiness = initialReadiness;
+  hooks.state.translations = [
+    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+    { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+  ];
+
+  await hooks.runTranslationRecheck("en");
+  hooks.renderTranslationRecheckPanel();
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.match(inlineStatuses.at(-1)?.message || "", /(did not include the requested locale|different locale than requested)/i);
+  assert.equal(hooks.state.readiness, initialReadiness);
+  assert.equal(hooks.state.busy, false);
+  assert.equal(hooks.state.translationRecheckBusyLang || "", "");
+  assert.doesNotMatch(html, /data-translation-recheck-lang="en" disabled>Recheck<\/button>/);
+  assert.doesNotMatch(html, /data-translation-recheck-lang="lo" disabled>Recheck<\/button>/);
+});
+
+test("result.translations with mismatched result.locales is rejected", async () => {
+  const { hooks, inlineStatuses } = loadHarness({
+    api: async () => ({
+      ok: true,
+      result: { locales: [{ lang: "lo", translation_recheck_status: "warning", translation_recheck_score: 10 }] },
+      translations: [
+        { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "passed", translation_recheck_score: 10 },
+        { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "warning", translation_recheck_score: 10 },
+      ],
+    }),
+  });
+  hooks.state.readiness = { translations: [{ lang: "en", status: "passed" }, { lang: "lo", status: "passed" }] };
+  hooks.state.translations = [
+    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+    { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+  ];
+
+  await hooks.runTranslationRecheck("en");
+
+  assert.match(inlineStatuses.at(-1)?.message || "", /different locale than requested/i);
+  assert.equal(hooks.state.translations.find((row) => row.lang === "en")?.translation_recheck_status, undefined);
+});
+
 test("recheck action immediately renders passed result even if refreshTranslations fails", async () => {
   const immediateTranslations = [
     {
@@ -527,6 +667,7 @@ test("recheck action immediately renders passed result even if refreshTranslatio
   const { hooks, elements } = loadHarness({
     api: async () => ({
       ok: true,
+      result: { locales: [{ lang: "en", translation_recheck_status: "passed", translation_recheck_score: 10 }] },
       readiness: {
         translations: [
           { lang: "en", status: "passed" },
@@ -559,6 +700,112 @@ test("recheck action immediately renders passed result even if refreshTranslatio
   assert.doesNotMatch(html, /Not checked/);
 });
 
+test("warning and failed eligible rows show enabled Recheck again", () => {
+  for (const recheckStatus of ["warning", "failed"]) {
+    const { hooks, elements } = loadHarness();
+    hooks.state.readiness = { translations: [{ lang: "lo", status: "passed" }] };
+    hooks.state.translations = [{
+      lang: "lo",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      translation_recheck_status: recheckStatus,
+    }];
+
+    hooks.renderTranslationRecheckPanel();
+    const html = elements.get("translation-recheck-panel").innerHTML;
+    assert.match(html, /data-translation-recheck-lang="lo"[^>]*>Recheck again<\/button>/);
+    assert.doesNotMatch(html, /data-translation-recheck-lang="lo" disabled>Recheck again<\/button>/);
+  }
+});
+
+test("global busy disables eligible Recheck again buttons", () => {
+  const { hooks, elements } = loadHarness();
+  hooks.state.busy = true;
+  hooks.state.readiness = { translations: [{ lang: "lo", status: "passed" }] };
+  hooks.state.translations = [{
+    lang: "lo",
+    translation_status: "ready",
+    automatic_check_status: "passed",
+    stale_flag: 0,
+    translation_recheck_status: "warning",
+  }];
+
+  hooks.renderTranslationRecheckPanel();
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.match(html, /data-translation-recheck-lang="lo" disabled>Recheck again<\/button>/);
+});
+
+test("warning rows that are not eligible do not show enabled Recheck again and show reason", () => {
+  const rows = [
+    { lang: "lo", translation_status: "ready", automatic_check_status: "failed", stale_flag: 0, translation_recheck_status: "warning", expected: /Technical QA must pass first/ },
+    { lang: "zh", translation_status: "ready", automatic_check_status: "passed", stale_flag: 1, translation_recheck_status: "warning", expected: /Translation is stale/ },
+    { lang: "en", translation_status: "", automatic_check_status: "", stale_flag: 0, translation_recheck_status: "warning", expected: /Translation is missing/ },
+  ];
+  for (const row of rows) {
+    const { hooks, elements } = loadHarness();
+    hooks.state.readiness = { translations: [{ lang: row.lang, status: "passed" }] };
+    hooks.state.translations = [row];
+    hooks.renderTranslationRecheckPanel();
+    const html = elements.get("translation-recheck-panel").innerHTML;
+    assert.match(html, row.expected);
+    if (Number(row.stale_flag || 0) === 1) {
+      assert.doesNotMatch(html, /Recheck again<\/button>/);
+      assert.match(html, /<button type="button" class="utility-action" disabled>Regenerate<\/button>/);
+      continue;
+    }
+    assert.match(html, new RegExp(`data-translation-recheck-lang="${row.lang}" disabled>Recheck again<\\/button>`));
+  }
+});
+
+test("if only result.locales is returned for requested LO, UI applies status and score only", async () => {
+  const { hooks, elements } = loadHarness({
+    api: async () => ({
+      ok: true,
+      result: { locales: [{ lang: "lo", translation_recheck_status: "warning", translation_recheck_score: 10 }] },
+    }),
+    loadTranslations: async () => {
+      throw new Error("network stale");
+    },
+  });
+  hooks.state.readiness = { translations: [{ lang: "lo", status: "passed" }] };
+  hooks.state.translations = [{ lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 }];
+
+  await hooks.runTranslationRecheck("lo");
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.match(html, /Warning/);
+  assert.match(html, /<strong>Score:<\/strong> 10\/10/);
+  assert.doesNotMatch(html, /Back translation/);
+  assert.doesNotMatch(html, /Issue list/);
+});
+
+test("buttons do not stay globally disabled after mismatch", async () => {
+  const { hooks, elements } = loadHarness({
+    api: async () => ({
+      ok: true,
+      result: { locales: [{ lang: "lo", translation_recheck_status: "warning", translation_recheck_score: 10 }] },
+    }),
+  });
+  hooks.state.readiness = { translations: [{ lang: "en", status: "passed" }, { lang: "zh", status: "passed" }] };
+  hooks.state.translations = [
+    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+    { lang: "zh", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+  ];
+
+  await hooks.runTranslationRecheck("en");
+  hooks.renderTranslationRecheckPanel();
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.match(html, /data-translation-recheck-lang="en"/);
+  assert.match(html, /data-translation-recheck-lang="zh"/);
+  assert.equal(hooks.state.busy, false);
+  assert.equal(hooks.state.translationRecheckBusyLang || "", "");
+  assert.doesNotMatch(html, /data-translation-recheck-lang="en" disabled>Recheck<\/button>/);
+  assert.doesNotMatch(html, /data-translation-recheck-lang="zh" disabled>Recheck<\/button>/);
+});
+
 test("canonical refresh data wins when refreshTranslations succeeds after immediate apply", async () => {
   const immediateTranslations = [
     {
@@ -585,6 +832,7 @@ test("canonical refresh data wins when refreshTranslations succeeds after immedi
   const { hooks, elements } = loadHarness({
     api: async () => ({
       ok: true,
+      result: { locales: [{ lang: "lo", translation_recheck_status: "warning", translation_recheck_score: 10 }] },
       readiness: {
         translations: [{ lang: "lo", status: "passed" }],
       },
@@ -607,6 +855,80 @@ test("canonical refresh data wins when refreshTranslations succeeds after immedi
   const html = elements.get("translation-recheck-panel").innerHTML;
   assert.match(html, /canonical summary/);
   assert.doesNotMatch(html, /immediate summary/);
+});
+
+test("after success busy resets and other eligible Recheck buttons become clickable again", async () => {
+  const updatedTranslations = [
+    {
+      lang: "en",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      translation_recheck_status: "passed",
+      translation_recheck_score: 10,
+    },
+    {
+      lang: "lo",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      translation_recheck_status: "warning",
+      translation_recheck_score: 9,
+    },
+  ];
+  const { hooks, elements } = loadHarness({
+    api: async () => ({
+      ok: true,
+      result: { locales: [{ lang: "en", translation_recheck_status: "passed", translation_recheck_score: 10 }] },
+      readiness: { translations: [{ lang: "en", status: "passed" }, { lang: "lo", status: "passed" }] },
+      translations: updatedTranslations,
+    }),
+    loadTranslations: async () => {
+      hooks.state.translations = updatedTranslations;
+      return updatedTranslations;
+    },
+  });
+  hooks.state.readiness = { translations: [{ lang: "en", status: "passed" }, { lang: "lo", status: "passed" }] };
+  hooks.state.translations = [
+    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+    { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "warning" },
+  ];
+
+  await hooks.runTranslationRecheck("en");
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.equal(hooks.state.busy, false);
+  assert.match(html, /data-translation-recheck-lang="lo"[^>]*>Recheck again<\/button>/);
+  assert.doesNotMatch(html, /data-translation-recheck-lang="lo" disabled>Recheck again<\/button>/);
+});
+
+test("after refresh failure busy resets and eligible Recheck buttons become clickable again", async () => {
+  const { hooks, elements } = loadHarness({
+    api: async () => ({
+      ok: true,
+      result: { locales: [{ lang: "en", translation_recheck_status: "warning", translation_recheck_score: 10 }] },
+      readiness: { translations: [{ lang: "en", status: "passed" }, { lang: "lo", status: "passed" }] },
+      translations: [
+        { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "warning", translation_recheck_score: 10 },
+        { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+      ],
+    }),
+    loadTranslations: async () => {
+      throw new Error("refresh failed");
+    },
+  });
+  hooks.state.readiness = { translations: [{ lang: "en", status: "passed" }, { lang: "lo", status: "passed" }] };
+  hooks.state.translations = [
+    { lang: "en", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+    { lang: "lo", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0 },
+  ];
+
+  await hooks.runTranslationRecheck("en");
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.equal(hooks.state.busy, false);
+  assert.match(html, /data-translation-recheck-lang="lo"[^>]*>Recheck<\/button>/);
+  assert.doesNotMatch(html, /data-translation-recheck-lang="lo" disabled>Recheck<\/button>/);
 });
 
 test("translation recheck parses API output from either recheck_issues_json or recheck_issues", () => {

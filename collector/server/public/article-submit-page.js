@@ -305,6 +305,39 @@ function getTranslationRecheckEligibility(row) {
   return { eligible: true, reason: "" };
 }
 
+function isTranslationRecheckBusy(lang = "") {
+  return String(state.translationRecheckBusyLang || "").trim().toLowerCase() === String(lang || "").trim().toLowerCase();
+}
+
+function validateRecheckResponseLocale(response, requestedLang) {
+  const normalizedRequestedLang = String(requestedLang || "").trim().toLowerCase();
+  const localeResults = Array.isArray(response?.result?.locales) ? response.result.locales : [];
+  if (localeResults.length > 0) {
+    const matchedLocale = localeResults.find((row) => String(row?.lang || "").trim().toLowerCase() === normalizedRequestedLang) || null;
+    if (!matchedLocale) {
+      return { ok: false, reason: "Recheck returned a different locale than requested", matchedLocale: null };
+    }
+    return { ok: true, reason: "", matchedLocale: normalizedRequestedLang };
+  }
+
+  const translation = response?.translation && typeof response.translation === "object"
+    ? response.translation
+    : null;
+  if (translation) {
+    const translationLang = String(translation?.lang || "").trim().toLowerCase();
+    if (translationLang !== normalizedRequestedLang) {
+      return { ok: false, reason: "Recheck returned a different locale than requested", matchedLocale: null };
+    }
+    return { ok: true, reason: "", matchedLocale: normalizedRequestedLang };
+  }
+
+  if (Array.isArray(response?.translations)) {
+    return { ok: false, reason: "Recheck returned a different locale than requested", matchedLocale: null };
+  }
+
+  return { ok: false, reason: "Recheck response did not include the requested locale", matchedLocale: null };
+}
+
 function buildTranslationRecheckRows() {
   return buildTranslationRows().map((row) => {
     const live = (Array.isArray(state.translations) ? state.translations : []).find(
@@ -656,6 +689,10 @@ function renderTranslationReviewSummary() {
   `;
 }
 
+function renderFinalSendSummary() {
+  renderTranslationReviewSummary();
+}
+
 function renderTranslationRecheckPanel() {
   const root = qs("translation-recheck-panel");
   if (!root) return;
@@ -695,7 +732,8 @@ function renderTranslationRecheckPanel() {
         const statusLabel = translationRecheckStatusLabel(row.translation_recheck_status);
         const scoreLabel = primaryScore == null ? "-" : `${escapeHtml(String(primaryScore))}/10`;
         const recheckEligibility = getTranslationRecheckEligibility(row);
-        const recheckDisabled = state.busy || !canManageTranslations() || !recheckEligibility.eligible;
+        const rowBusy = isTranslationRecheckBusy(row.lang);
+        const recheckDisabled = state.busy || rowBusy || !canManageTranslations() || !recheckEligibility.eligible;
         const defaultActionHtml = row.translation_recheck_status === "passed"
           ? `<span class="translation-recheck-action-note">View technical details below</span>`
           : row.translation_recheck_status === "stale"
@@ -704,10 +742,18 @@ function renderTranslationRecheckPanel() {
               <span class="translation-recheck-action-note">Translation is stale</span>
             `
             : row.translation_recheck_status === "failed" || row.translation_recheck_status === "warning"
-              ? `
-                <button type="button" class="utility-action" disabled>Repair</button>
-                <button type="button" class="utility-action" disabled>Regenerate</button>
-              `
+              ? recheckEligibility.eligible
+                ? `
+                  <button type="button" class="utility-action" data-translation-recheck-lang="${escapeHtml(String(row.lang || ""))}" ${recheckDisabled ? "disabled" : ""}>Recheck again</button>
+                  <button type="button" class="utility-action" disabled>Repair</button>
+                  <button type="button" class="utility-action" disabled>Regenerate</button>
+                `
+                : `
+                  <button type="button" class="utility-action" data-translation-recheck-lang="${escapeHtml(String(row.lang || ""))}" disabled>Recheck again</button>
+                  <span class="translation-recheck-action-note">${escapeHtml(recheckEligibility.reason)}</span>
+                  <button type="button" class="utility-action" disabled>Repair</button>
+                  <button type="button" class="utility-action" disabled>Regenerate</button>
+                `
               : `
                 <button type="button" class="utility-action" data-translation-recheck-lang="${escapeHtml(String(row.lang || ""))}" ${recheckDisabled ? "disabled" : ""}>Recheck</button>
                 ${recheckEligibility.reason ? `<span class="translation-recheck-action-note">${escapeHtml(recheckEligibility.reason)}</span>` : ""}
@@ -934,13 +980,25 @@ function applyImmediateTranslationRecheckResult(result, fallbackLang = "") {
 
 async function runTranslationRecheck(lang) {
   const normalizedLang = String(lang || "").trim().toLowerCase();
-  if (!normalizedLang || state.busy) return;
+  if (!normalizedLang || state.busy || state.translationRecheckBusyLang) return;
   setBusy(true);
+  state.translationRecheckBusyLang = normalizedLang;
+  renderTranslationRecheckPanel();
+  applyActionGuards();
   setInlineStatus("review-status", `Running translation recheck for ${normalizedLang.toUpperCase()}...`, "loading");
   try {
     const result = await api(`/api/items/${state.itemId}/translations/${encodeURIComponent(normalizedLang)}/recheck`, {
       method: "POST",
     });
+    const localeValidation = validateRecheckResponseLocale(result, normalizedLang);
+    if (!localeValidation.ok) {
+      renderTranslationRecheckPanel();
+      renderTranslationReviewSummary();
+      renderReviewChecklist();
+      applyActionGuards();
+      setInlineStatus("review-status", localeValidation.reason, "error");
+      return;
+    }
     state.readiness = result?.readiness || state.readiness;
     renderSyncSummary();
     applyImmediateTranslationRecheckResult(result, normalizedLang);
@@ -958,6 +1016,11 @@ async function runTranslationRecheck(lang) {
     setInlineStatus("review-status", `Translation recheck updated for ${normalizedLang.toUpperCase()}`);
   } finally {
     setBusy(false);
+    state.translationRecheckBusyLang = "";
+    renderTranslationSummary();
+    renderTranslationRecheckPanel();
+    renderFinalSendSummary();
+    renderReviewChecklist();
     applyActionGuards();
   }
 }
