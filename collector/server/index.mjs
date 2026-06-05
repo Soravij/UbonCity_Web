@@ -4443,6 +4443,23 @@ function buildBackendSyncPayload(options = {}) {
   }
   const contentItemId = Number(options?.contentItemId || options?.content_item_id || 0) || null;
   const currentSourceFingerprint = contentItemId ? getCurrentTranslationSourceFingerprint(repo, contentItemId) : "";
+  const fingerprintByItemId = new Map();
+  function getFingerprintForTranslation(row) {
+    if (contentItemId) {
+      return currentSourceFingerprint;
+    }
+    const sourceContentItemId = Number(row?.source_content_item_id || 0) || 0;
+    if (!sourceContentItemId) {
+      return "";
+    }
+    if (!fingerprintByItemId.has(sourceContentItemId)) {
+      fingerprintByItemId.set(
+        sourceContentItemId,
+        getCurrentTranslationSourceFingerprint(repo, sourceContentItemId),
+      );
+    }
+    return fingerprintByItemId.get(sourceContentItemId) || "";
+  }
   const published = repo
     .listPublishedArticles()
     .filter((row) => !contentItemId || Number(row.content_item_id || 0) === contentItemId)
@@ -4482,7 +4499,7 @@ function buildBackendSyncPayload(options = {}) {
 
   const translations = repo
     .listTranslations(contentItemId)
-    .filter((t) => isTranslationRecheckPassed(t, currentSourceFingerprint))
+    .filter((t) => isTranslationRecheckPassed(t, getFingerprintForTranslation(t)))
     .map((t) => ({
       source_content_item_id: t.source_content_item_id,
       lang: t.lang,

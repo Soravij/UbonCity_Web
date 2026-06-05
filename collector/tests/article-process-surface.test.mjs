@@ -11,7 +11,22 @@ function extractFunctionBlock(name) {
   const signature = `function ${name}`;
   const start = source.indexOf(signature);
   if (start < 0) throw new Error(`Function not found: ${name}`);
-  const open = source.indexOf("{", start);
+  const paramsStart = source.indexOf("(", start);
+  if (paramsStart < 0) throw new Error(`Missing parameter list: ${name}`);
+  let parenDepth = 0;
+  let open = -1;
+  for (let i = paramsStart; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === "(") parenDepth += 1;
+    if (char === ")") {
+      parenDepth -= 1;
+      if (parenDepth === 0) {
+        open = source.indexOf("{", i);
+        break;
+      }
+    }
+  }
+  if (open < 0) throw new Error(`Missing function body: ${name}`);
   let depth = 0;
   for (let i = open; i < source.length; i += 1) {
     const char = source[i];
@@ -78,6 +93,66 @@ globalThis.__translationGateHooks = {
   return context.__translationGateHooks.getRequiredTranslationRecheckBlockers;
 }
 
+function loadBackendSyncPayloadBuilder(options = {}) {
+  const translations = options.translations || [];
+  const published = options.published || [];
+  const fingerprintByItemId = new Map(Object.entries(options.fingerprintByItemId || {}).map(([key, value]) => [Number(key), value]));
+  const context = {
+    hasExplicitCollectorPublicBaseUrl() {
+      return true;
+    },
+    resolveCollectorPublicBaseUrl() {
+      return "https://collector.example";
+    },
+    repo: {
+      listPublishedArticles() {
+        return published;
+      },
+      getItem(id) {
+        return { id };
+      },
+      listTranslations(requestedId) {
+        if (requestedId) {
+          return translations.filter((row) => Number(row.source_content_item_id || 0) === Number(requestedId));
+        }
+        return translations;
+      },
+    },
+    getCurrentTranslationSourceFingerprint(_repo, id) {
+      return fingerprintByItemId.get(Number(id)) || "";
+    },
+    isTranslationRecheckPassed(row, fingerprint) {
+      return String(row?.translation_status || "").trim().toLowerCase() === "ready"
+        && String(row?.automatic_check_status || "").trim().toLowerCase() === "passed"
+        && String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed"
+        && Number(row?.stale_flag || 0) === 0
+        && String(row?.source_fingerprint || "") === String(fingerprint || "");
+    },
+    isOtherTransportItem() {
+      return false;
+    },
+    getOtherTransportMetadata() {
+      return null;
+    },
+    toPublishedMediaManifest() {
+      return {};
+    },
+    toBackendSafeSlug(value, fallback) {
+      return String(value || "").trim() || fallback;
+    },
+    console,
+  };
+  const helperSource = `
+${extractFunctionBlock("buildBackendSyncPayload")}
+globalThis.__backendSyncHooks = {
+  buildBackendSyncPayload,
+};
+`;
+  context.globalThis = context;
+  vm.runInNewContext(helperSource, context, { filename: "backend-sync-payload.js" });
+  return context.__backendSyncHooks.buildBackendSyncPayload;
+}
+
 test("article process routes exist with dedicated surface area", () => {
   assert.match(source, /app\.get\("\/api\/items\/:id\/article-process", requireRole\("owner", "admin", "editor", "user"\)/);
   assert.match(source, /app\.post\("\/api\/items\/:id\/article-process\/transition", requireRole\("owner", "admin", "editor", "user"\)/);
@@ -121,6 +196,56 @@ test("outbound payload builders use fingerprint-aware translation recheck filter
   assert.match(source, /\.filter\(\(t\) => isTranslationRecheckPassed\(t, currentSourceFingerprint\)\)/);
   assert.doesNotMatch(source, /\.filter\(\(t\) => isTranslationRecheckPassed\(t\)\)/);
   assert.match(source, /const currentSourceFingerprint = contentItemId \? getCurrentTranslationSourceFingerprint\(repo, contentItemId\) : "";/);
+});
+
+test("bulk backend sync excludes passed translations whose source fingerprint mismatches current live source", () => {
+  const buildBackendSyncPayload = loadBackendSyncPayloadBuilder({
+    translations: [
+      {
+        source_content_item_id: 101,
+        lang: "en",
+        translated_title: "Keep me",
+        translated_excerpt: "Keep me",
+        translated_body: "Keep me",
+        translated_meta_title: "Keep me",
+        translated_meta_description: "Keep me",
+        translation_status: "ready",
+        automatic_check_status: "passed",
+        translation_recheck_status: "passed",
+        stale_flag: 0,
+        source_fingerprint: "fp-101-current",
+      },
+      {
+        source_content_item_id: 202,
+        lang: "lo",
+        translated_title: "Drop me",
+        translated_excerpt: "Drop me",
+        translated_body: "Drop me",
+        translated_meta_title: "Drop me",
+        translated_meta_description: "Drop me",
+        translation_status: "ready",
+        automatic_check_status: "passed",
+        translation_recheck_status: "passed",
+        stale_flag: 0,
+        source_fingerprint: "fp-202-old",
+      },
+    ],
+    published: [
+      { content_item_id: 101, slug: "item-101" },
+      { content_item_id: 202, slug: "item-202" },
+    ],
+    fingerprintByItemId: {
+      101: "fp-101-current",
+      202: "fp-202-current",
+    },
+  });
+
+  const payload = buildBackendSyncPayload({});
+
+  assert.deepEqual(
+    payload.translations.map((row) => ({ id: row.source_content_item_id, lang: row.lang })),
+    [{ id: 101, lang: "en" }],
+  );
 });
 
 test("required locale translation recheck gate allows release only when all required locales passed", () => {
