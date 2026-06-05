@@ -80,31 +80,17 @@ const GOOGLE_MAPS_PHOTO_PROXY_PATH = "/api/google-maps/photo";
 const COLLECTOR_ASSET_VERSION_TOKEN = "__COLLECTOR_ASSET_VERSION__";
 const collectorPublicDir = path.join(dirs.rootDir, "server", "public");
 const collectorRootIndexPath = path.join(collectorPublicDir, "index.html");
-const collectorRootAssetFiles = [
-  path.join(collectorPublicDir, "theme-bootstrap.js"),
-  path.join(collectorPublicDir, "styles.css"),
-  path.join(collectorPublicDir, "theme-control.js"),
-  path.join(collectorPublicDir, "app.js"),
-];
+const collectorAssetVersionOverride = String(process.env.COLLECTOR_ASSET_VERSION || "").trim();
+const collectorServerBootVersion = String(Date.now());
 
-function resolveCollectorAssetVersion() {
-  const envVersion = String(process.env.COLLECTOR_ASSET_VERSION || "").trim();
-  if (envVersion) return envVersion;
-  let newestMtimeMs = 0;
-  for (const filePath of collectorRootAssetFiles) {
-    try {
-      const stats = fsSync.statSync(filePath);
-      newestMtimeMs = Math.max(newestMtimeMs, Number(stats.mtimeMs || 0));
-    } catch {}
-  }
-  return newestMtimeMs > 0 ? String(Math.floor(newestMtimeMs)) : String(Date.now());
-}
-
-const collectorRootAssetVersion = resolveCollectorAssetVersion();
-
-function renderCollectorRootHtml() {
-  const htmlTemplate = fsSync.readFileSync(collectorRootIndexPath, "utf8");
-  return htmlTemplate.split(COLLECTOR_ASSET_VERSION_TOKEN).join(collectorRootAssetVersion);
+function resolveCollectorAssetVersionForFile(filePath) {
+  if (collectorAssetVersionOverride) return collectorAssetVersionOverride;
+  try {
+    const stats = fsSync.statSync(filePath);
+    const mtimeMs = Number(stats.mtimeMs || 0);
+    if (mtimeMs > 0) return String(Math.floor(mtimeMs));
+  } catch {}
+  return collectorServerBootVersion;
 }
 
 function setCollectorHtmlRevalidateHeaders(res) {
@@ -128,7 +114,7 @@ function resolveCollectorHtmlFilePath(requestPath) {
 
 function renderCollectorHtmlFile(filePath) {
   const htmlTemplate = fsSync.readFileSync(filePath, "utf8");
-  return htmlTemplate.split(COLLECTOR_ASSET_VERSION_TOKEN).join(collectorRootAssetVersion);
+  return rewriteCollectorHtmlAssetUrls(htmlTemplate, filePath);
 }
 
 function isSafeCollectorJsRequestPath(rawPath) {
@@ -144,7 +130,28 @@ function resolveCollectorJsFilePath(requestPath) {
   return fullPath;
 }
 
-function withVersionQuery(specifier) {
+function resolveCollectorAssetFilePath(specifier, importerPath = "") {
+  if (typeof specifier !== "string" || !specifier) return null;
+  if (!(specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("/"))) return null;
+
+  const hashIndex = specifier.indexOf("#");
+  const withoutHash = hashIndex >= 0 ? specifier.slice(0, hashIndex) : specifier;
+  const queryIndex = withoutHash.indexOf("?");
+  const pathname = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+  if (!pathname) return null;
+
+  const importerDir = importerPath
+    ? path.dirname(importerPath)
+    : collectorPublicDir;
+  const candidatePath = pathname.startsWith("/")
+    ? path.resolve(collectorPublicDir, `.${pathname}`)
+    : path.resolve(importerDir, pathname);
+  const normalizedPublicDir = path.resolve(collectorPublicDir) + path.sep;
+  if (!candidatePath.startsWith(normalizedPublicDir)) return null;
+  return candidatePath;
+}
+
+function withVersionQuery(specifier, importerPath = "") {
   if (typeof specifier !== "string" || !specifier) return specifier;
   if (!(specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("/"))) return specifier;
 
@@ -155,24 +162,40 @@ function withVersionQuery(specifier) {
   const pathname = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
   const query = queryIndex >= 0 ? withoutHash.slice(queryIndex + 1) : "";
 
-  if (!/\.(?:mjs|js)$/i.test(pathname)) return specifier;
+  if (!/\.(?:mjs|js|css)$/i.test(pathname)) return specifier;
 
   const params = new URLSearchParams(query);
-  if (!params.has("v")) params.set("v", collectorRootAssetVersion);
+  const assetFilePath = resolveCollectorAssetFilePath(specifier, importerPath);
+  const version = resolveCollectorAssetVersionForFile(assetFilePath || importerPath || collectorRootIndexPath);
+  if (!params.has("v") || params.get("v") === COLLECTOR_ASSET_VERSION_TOKEN) {
+    params.set("v", version);
+  }
   const nextQuery = params.toString();
   return `${pathname}${nextQuery ? `?${nextQuery}` : ""}${hash}`;
 }
 
-function rewriteCollectorModuleSpecifiers(jsText) {
-  const withTokenResolved = jsText.split(COLLECTOR_ASSET_VERSION_TOKEN).join(collectorRootAssetVersion);
+function rewriteCollectorHtmlAssetUrls(htmlText, htmlFilePath) {
+  return htmlText.replace(
+    /((?:src|href)=["'])([^"']+)(["'])/gi,
+    (match, prefix, specifier, suffix) => `${prefix}${withVersionQuery(specifier, htmlFilePath)}${suffix}`
+  );
+}
+
+function rewriteCollectorModuleSpecifiers(jsText, sourcePath = "") {
+  const withTokenResolved = jsText;
   const withStaticImports = withTokenResolved.replace(
     /((?:\bimport|\bexport)\s+(?:[^"'`]*?\s+from\s*)?)(["'])([^"'`]+)\2/g,
-    (match, prefix, quote, specifier) => `${prefix}${quote}${withVersionQuery(specifier)}${quote}`
+    (match, prefix, quote, specifier) => `${prefix}${quote}${withVersionQuery(specifier, sourcePath)}${quote}`
   );
   return withStaticImports.replace(
     /(\bimport\s*\(\s*)(["'])([^"'`]+)\2(\s*\))/g,
-    (match, prefix, quote, specifier, suffix) => `${prefix}${quote}${withVersionQuery(specifier)}${quote}${suffix}`
+    (match, prefix, quote, specifier, suffix) => `${prefix}${quote}${withVersionQuery(specifier, sourcePath)}${quote}${suffix}`
   );
+}
+
+function renderCollectorRootHtml() {
+  const htmlTemplate = fsSync.readFileSync(collectorRootIndexPath, "utf8");
+  return rewriteCollectorHtmlAssetUrls(htmlTemplate, collectorRootIndexPath);
 }
 const CONTENT_ITEM_CATEGORIES = new Set(["attractions", "activities", "hotels", "cafes", "restaurants", "transport"]);
 const ARTICLE_RICH_TEXT_ALLOWED_TAGS = new Set([
@@ -2418,7 +2441,7 @@ app.use((req, res, next) => {
   res.type("application/javascript; charset=utf-8");
   if (req.method === "HEAD") return res.status(200).end();
   const jsSource = fsSync.readFileSync(fullPath, "utf8");
-  res.send(rewriteCollectorModuleSpecifiers(jsSource));
+  res.send(rewriteCollectorModuleSpecifiers(jsSource, fullPath));
 });
 app.use(express.static(collectorPublicDir, { index: false }));
 app.get("/", (_req, res) => {
