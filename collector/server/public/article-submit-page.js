@@ -895,6 +895,43 @@ async function generateTranslations() {
   }
 }
 
+function applyImmediateTranslationRecheckResult(result, fallbackLang = "") {
+  const translationsFromResponse = Array.isArray(result?.translations) ? result.translations : null;
+  if (translationsFromResponse) {
+    state.translations = translationsFromResponse;
+    return;
+  }
+
+  const translationFromResponse = result?.translation && typeof result.translation === "object"
+    ? result.translation
+    : null;
+  const localeResults = Array.isArray(result?.result?.locales) ? result.result.locales : [];
+  const normalizedFallbackLang = String(fallbackLang || "").trim().toLowerCase();
+  if (!translationFromResponse && !localeResults.length) return;
+
+  const nextRows = Array.isArray(state.translations) ? [...state.translations] : [];
+  const updateByLang = new Map(
+    localeResults
+      .map((row) => [String(row?.lang || "").trim().toLowerCase(), row])
+      .filter(([lang]) => lang),
+  );
+  if (translationFromResponse) {
+    const responseLang = String(translationFromResponse?.lang || normalizedFallbackLang).trim().toLowerCase();
+    if (responseLang) updateByLang.set(responseLang, translationFromResponse);
+  }
+
+  for (const [lang, patch] of updateByLang.entries()) {
+    const index = nextRows.findIndex((row) => String(row?.lang || "").trim().toLowerCase() === lang);
+    if (index >= 0) {
+      nextRows[index] = { ...nextRows[index], ...patch };
+      continue;
+    }
+    nextRows.push({ lang, ...patch });
+  }
+
+  state.translations = nextRows;
+}
+
 async function runTranslationRecheck(lang) {
   const normalizedLang = String(lang || "").trim().toLowerCase();
   if (!normalizedLang || state.busy) return;
@@ -905,12 +942,19 @@ async function runTranslationRecheck(lang) {
       method: "POST",
     });
     state.readiness = result?.readiness || state.readiness;
-    state.translations = Array.isArray(result?.translations) ? result.translations : state.translations;
     renderSyncSummary();
+    applyImmediateTranslationRecheckResult(result, normalizedLang);
     renderTranslationSummary();
     renderTranslationRecheckPanel();
     renderTranslationReviewSummary();
     renderReviewChecklist();
+    applyActionGuards();
+    try {
+      await refreshTranslations();
+    } catch (error) {
+      setInlineStatus("review-status", `Translation recheck updated for ${normalizedLang.toUpperCase()} (refresh pending)`, "error");
+      return;
+    }
     setInlineStatus("review-status", `Translation recheck updated for ${normalizedLang.toUpperCase()}`);
   } finally {
     setBusy(false);
