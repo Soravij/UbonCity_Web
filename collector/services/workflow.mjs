@@ -16,6 +16,7 @@ const GOVERNANCE_REASON_CODES = Object.freeze({
 import { FIELD_PACK_AGENT_KEY, createAgentGenerationEngine } from "./agent-generation.mjs";
 import { createTranslationGenerator } from "../translation/service.mjs";
 import { runAutomaticTranslationChecks } from "../quality/translation-checks.mjs";
+import { executeBackendAiJson, isBackendAiConfigured } from "./backend-ai-client.mjs";
 import { buildCleanStructuredContext, buildFieldPackContractFromCleanContext, validateCleanMinimum } from "./clean-context.mjs";
 
 function traceAiDraft(stage, details = {}) {
@@ -847,6 +848,261 @@ async function withTranslationProviderTimeout(promise, timeoutMs = TRANSLATION_P
   }
 }
 
+function parseTranslationRecheckJson(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    const firstBrace = text.indexOf("{");
+    const lastBrace = text.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+function clampTranslationRecheckScore(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  if (numeric < 0) return 0;
+  if (numeric > 10) return 10;
+  return Math.round(numeric * 10) / 10;
+}
+
+function normalizeTranslationRecheckIssue(issue) {
+  const type = String(issue?.type || "").trim().toLowerCase();
+  const severity = String(issue?.severity || "").trim().toLowerCase();
+  return {
+    type: ["accuracy", "fluency", "term", "back_translation"].includes(type) ? type : "accuracy",
+    severity: ["low", "medium", "high"].includes(severity) ? severity : "medium",
+    source_text: String(issue?.source_text || "").trim(),
+    target_text: String(issue?.target_text || "").trim(),
+    problem_th: String(issue?.problem_th || "").trim(),
+    suggestion_th: String(issue?.suggestion_th || "").trim(),
+  };
+}
+
+function buildTranslationRecheckFailure(message, provider = "", model = "") {
+  const detail = String(message || "translation recheck failed").trim() || "translation recheck failed";
+  return {
+    translation_recheck_status: "failed",
+    translation_recheck_score: null,
+    accuracy_score: null,
+    fluency_score: null,
+    term_score: null,
+    back_translation_th: "",
+    recheck_summary_th: `ไม่สามารถรัน Translation Recheck ได้: ${detail}`,
+    recheck_issues: [
+      {
+        type: "accuracy",
+        severity: "high",
+        source_text: "",
+        target_text: "",
+        problem_th: `ระบบไม่สามารถรัน Translation Recheck ได้ (${detail})`,
+        suggestion_th: "ตรวจสอบการตั้งค่า AI provider หรือ backend AI proxy แล้วลองใหม่อีกครั้ง",
+      },
+    ],
+    recheck_model: [String(provider || "").trim(), String(model || "").trim()].filter(Boolean).join(":") || null,
+  };
+}
+
+function deriveTranslationRecheckStatus(scores, issues = []) {
+  const accuracyScore = clampTranslationRecheckScore(scores?.accuracy_score);
+  const fluencyScore = clampTranslationRecheckScore(scores?.fluency_score);
+  const termScore = clampTranslationRecheckScore(scores?.term_score);
+  const normalizedIssues = Array.isArray(issues) ? issues : [];
+  const hasMajorIssue = normalizedIssues.some((issue) => String(issue?.severity || "").trim().toLowerCase() === "high");
+  const hasMinorIssue = normalizedIssues.some((issue) => {
+    const severity = String(issue?.severity || "").trim().toLowerCase();
+    return severity === "low" || severity === "medium";
+  });
+
+  if ((accuracyScore != null && accuracyScore < 7) || (termScore != null && termScore < 7) || hasMajorIssue) {
+    return "failed";
+  }
+  if (
+    accuracyScore != null && accuracyScore >= 8
+    && fluencyScore != null && fluencyScore >= 7
+    && termScore != null && termScore >= 8
+    && !hasMinorIssue
+  ) {
+    return "passed";
+  }
+  return "warning";
+}
+
+function mergeTranslationRecheckStatus(modelStatus, derivedStatus) {
+  const rank = { not_checked: 0, passed: 1, warning: 2, failed: 3 };
+  const normalizedModelStatus = ["passed", "warning", "failed"].includes(String(modelStatus || "").trim().toLowerCase())
+    ? String(modelStatus || "").trim().toLowerCase()
+    : "not_checked";
+  const normalizedDerivedStatus = ["passed", "warning", "failed"].includes(String(derivedStatus || "").trim().toLowerCase())
+    ? String(derivedStatus || "").trim().toLowerCase()
+    : "not_checked";
+  return rank[normalizedModelStatus] > rank[normalizedDerivedStatus] ? normalizedModelStatus : normalizedDerivedStatus;
+}
+
+function normalizeTranslationRecheckResult(raw, provider = "", model = "") {
+  const parsed = raw && typeof raw === "object" ? raw : parseTranslationRecheckJson(raw);
+  if (!parsed || typeof parsed !== "object") {
+    return buildTranslationRecheckFailure("ผลลัพธ์จากโมเดลไม่เป็น JSON ที่ระบบรองรับ", provider, model);
+  }
+
+  const issues = Array.isArray(parsed.issues) ? parsed.issues.map(normalizeTranslationRecheckIssue) : [];
+  const accuracyScore = clampTranslationRecheckScore(parsed.accuracy_score);
+  const fluencyScore = clampTranslationRecheckScore(parsed.fluency_score);
+  const termScore = clampTranslationRecheckScore(parsed.term_score);
+  const derivedStatus = deriveTranslationRecheckStatus({
+    accuracy_score: accuracyScore,
+    fluency_score: fluencyScore,
+    term_score: termScore,
+  }, issues);
+  const modelStatus = String(parsed.status || "").trim().toLowerCase();
+  const finalStatus = mergeTranslationRecheckStatus(modelStatus, derivedStatus);
+  const overallScore = clampTranslationRecheckScore(parsed.overall_score);
+  const fallbackScoreSource = [accuracyScore, fluencyScore, termScore].filter((value) => value != null);
+  const computedOverallScore = overallScore != null
+    ? overallScore
+    : fallbackScoreSource.length
+      ? Math.round((fallbackScoreSource.reduce((sum, value) => sum + value, 0) / fallbackScoreSource.length) * 10) / 10
+      : null;
+
+  return {
+    translation_recheck_status: finalStatus,
+    translation_recheck_score: computedOverallScore,
+    accuracy_score: accuracyScore,
+    fluency_score: fluencyScore,
+    term_score: termScore,
+    back_translation_th: String(parsed.back_translation_th || "").trim(),
+    recheck_summary_th: String(parsed.summary_th || "").trim(),
+    recheck_issues: issues,
+    recheck_model: [String(provider || "").trim(), String(model || "").trim()].filter(Boolean).join(":") || null,
+  };
+}
+
+function buildTranslationRecheckPrompt(article, translationRow) {
+  return [
+    "You are a Translation Recheck Agent for UbonCity collector.",
+    "Evaluate translation quality only. Do not perform SEO, factual verification, hallucination, opening hours, pricing, parking, pet-friendly, or structured-claims checks.",
+    "Compare Thai source content against the target translation and produce a Thai-readable evaluation.",
+    "Check only: accuracy, fluency, term/name consistency, and a literal Thai back translation.",
+    "If unsure, be conservative: prefer warning or failed rather than passed.",
+    "Return ONLY valid JSON with this exact shape:",
+    JSON.stringify({
+      status: "passed|warning|failed",
+      overall_score: 0,
+      accuracy_score: 0,
+      fluency_score: 0,
+      term_score: 0,
+      back_translation_th: "",
+      summary_th: "",
+      issues: [
+        {
+          type: "accuracy|fluency|term|back_translation",
+          severity: "low|medium|high",
+          source_text: "",
+          target_text: "",
+          problem_th: "",
+          suggestion_th: "",
+        },
+      ],
+    }, null, 2),
+    "Source article (Thai):",
+    JSON.stringify(sourceToTranslationInput(article), null, 2),
+    `Target locale: ${String(translationRow?.lang || "").trim().toLowerCase() || "-"}`,
+    "Translated article:",
+    JSON.stringify({
+      translated_title: translationRow?.translated_title || "",
+      translated_excerpt: translationRow?.translated_excerpt || "",
+      translated_body: translationRow?.translated_body || "",
+      translated_meta_title: translationRow?.translated_meta_title || "",
+      translated_meta_description: translationRow?.translated_meta_description || "",
+    }, null, 2),
+  ].join("\n");
+}
+
+async function runSemanticTranslationRecheck(aiConfig, article, translationRow) {
+  const recheckFeatureConfig = aiConfig?.features?.translationRecheck
+    || aiConfig?.features?.translation
+    || aiConfig
+    || {};
+  const provider = String(
+    recheckFeatureConfig?.provider
+    || aiConfig?.translationRecheckProvider
+    || aiConfig?.translationProvider
+    || aiConfig?.provider
+    || ""
+  ).trim().toLowerCase();
+  const model = String(
+    recheckFeatureConfig?.model
+    || aiConfig?.translationRecheckModel
+    || aiConfig?.translationModel
+    || aiConfig?.model
+    || ""
+  ).trim();
+
+  if (!aiConfig || !aiConfig.enabled || !isBackendAiConfigured(recheckFeatureConfig)) {
+    return buildTranslationRecheckFailure("backend AI proxy is not configured for translation recheck", provider, model);
+  }
+
+  try {
+    const result = await executeBackendAiJson({
+      aiConfig: {
+        ...aiConfig,
+        features: {
+          ...(aiConfig?.features || {}),
+          translationRecheck: {
+            ...(recheckFeatureConfig || {}),
+          },
+        },
+      },
+      featureKey: "translationRecheck",
+      task: "translation_recheck",
+      prompt: buildTranslationRecheckPrompt(article, translationRow),
+    });
+    return normalizeTranslationRecheckResult(result?.parsed || result?.outputText, result?.provider || provider, result?.model || model);
+  } catch (error) {
+    return buildTranslationRecheckFailure(error?.message || "translation recheck failed", provider, model);
+  }
+}
+
+async function runTranslationRecheckForRow(repo, article, translationRow, aiConfig) {
+  const eligibility = String(translationRow?.translation_status || "").trim().toLowerCase() === "ready"
+    && String(translationRow?.automatic_check_status || "").trim().toLowerCase() === "passed"
+    && Number(translationRow?.stale_flag || 0) === 0;
+  if (!eligibility) {
+    return repo.updateTranslationRecheck(article.content_item_id, translationRow.lang, {
+      translation_recheck_status: "not_checked",
+      translation_recheck_score: null,
+      accuracy_score: null,
+      fluency_score: null,
+      term_score: null,
+      back_translation_th: null,
+      recheck_summary_th: null,
+      recheck_issues: [],
+      recheck_model: null,
+      rechecked_at: null,
+      repair_attempt_count: Number(translationRow?.repair_attempt_count || 0) || 0,
+    });
+  }
+
+  const result = await runSemanticTranslationRecheck(aiConfig, article, translationRow);
+  traceTranslationDiagnostics("translation_recheck_completed", {
+    item_id: Number(article?.content_item_id || 0) || null,
+    lang: String(translationRow?.lang || "").trim().toLowerCase() || null,
+    status: result.translation_recheck_status,
+    score: result.translation_recheck_score,
+    model: result.recheck_model,
+  });
+  return repo.updateTranslationRecheck(article.content_item_id, translationRow.lang, result);
+}
+
 function buildDraftTranslationSource(repo, contentItemId) {
   const itemId = Number(contentItemId || 0);
   if (!itemId) {
@@ -991,8 +1247,17 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
         });
 
         if (check.status === "passed") {
+          const savedRow = repo.getTranslation(article.content_item_id, lang);
+          const recheckResult = savedRow
+            ? await runTranslationRecheckForRow(repo, article, savedRow, aiConfig)
+            : null;
           generatedCount += 1;
-          languageResults.push({ lang, status: "generated", failure_reason: null });
+          languageResults.push({
+            lang,
+            status: "generated",
+            failure_reason: null,
+            translation_recheck_status: recheckResult?.translation_recheck_status || "not_checked",
+          });
           traceTranslationDiagnostics("translation_attempt_success", {
             ...diagnostics,
             requested_lang_code: String(translated?._target_lang || lang || "").trim().toLowerCase() || diagnostics.requested_lang_code,
@@ -1004,6 +1269,19 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
             automatic_check_status: check.status,
           });
         } else {
+          repo.updateTranslationRecheck(article.content_item_id, lang, {
+            translation_recheck_status: "not_checked",
+            translation_recheck_score: null,
+            accuracy_score: null,
+            fluency_score: null,
+            term_score: null,
+            back_translation_th: null,
+            recheck_summary_th: null,
+            recheck_issues: [],
+            recheck_model: null,
+            rechecked_at: null,
+            repair_attempt_count: 0,
+          });
           failedCount += 1;
           const debugDetails = String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production"
             && check?.debug
@@ -1085,6 +1363,19 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
           translator_engine: defaultTranslatorEngine,
           translator_model: defaultTranslatorModel,
         });
+        repo.updateTranslationRecheck(article.content_item_id, lang, {
+          translation_recheck_status: "not_checked",
+          translation_recheck_score: null,
+          accuracy_score: null,
+          fluency_score: null,
+          term_score: null,
+          back_translation_th: null,
+          recheck_summary_th: null,
+          recheck_issues: [],
+          recheck_model: null,
+          rechecked_at: null,
+          repair_attempt_count: 0,
+        });
         languageResults.push({ lang, status: "failed", failure_reason: failureReason, ...debugDetails });
         traceTranslationDiagnostics("translation_attempt_failed", {
           ...diagnostics,
@@ -1112,6 +1403,16 @@ async function runFinalTranslationStage(repo, publishedArticles, aiConfig, actor
   return runTranslationStageForSources(repo, publishedArticles, aiConfig, actorEmail, "final-prefrontend");
 }
 
+function buildTranslationSourceForItem(repo, contentItemId) {
+  const publishedArticle = typeof repo.getPublishedArticleByItem === "function"
+    ? repo.getPublishedArticleByItem(contentItemId)
+    : null;
+  if (publishedArticle) {
+    return normalizeTranslationSource(publishedArticle);
+  }
+  return buildDraftTranslationSource(repo, contentItemId);
+}
+
 export async function rerunProblemTranslations(repo, actorEmail, options = {}) {
   const contentItemId = Number(options.contentItemId || options.content_item_id || 0) || null;
   let translationSources = [];
@@ -1121,12 +1422,8 @@ export async function rerunProblemTranslations(repo, actorEmail, options = {}) {
     const publishedArticle = typeof repo.getPublishedArticleByItem === "function"
       ? repo.getPublishedArticleByItem(contentItemId)
       : null;
-    if (publishedArticle) {
-      translationSources = [publishedArticle];
-    } else {
-      translationSources = [buildDraftTranslationSource(repo, contentItemId)];
-      stage = "pre-sync-item";
-    }
+    translationSources = [buildTranslationSourceForItem(repo, contentItemId)];
+    if (!publishedArticle) stage = "pre-sync-item";
   } else {
     translationSources = repo.listPublishedArticles();
   }
@@ -1163,6 +1460,57 @@ export async function rerunProblemTranslations(repo, actorEmail, options = {}) {
       pending,
       total: rows.length,
     },
+  };
+}
+
+export async function rerunTranslationRecheck(repo, actorEmail, options = {}) {
+  const contentItemId = Number(options.contentItemId || options.content_item_id || 0) || 0;
+  const langFilter = String(options.lang || "").trim().toLowerCase();
+  if (!contentItemId) {
+    throw new Error("content_item_id is required");
+  }
+
+  const article = buildTranslationSourceForItem(repo, contentItemId);
+  const rows = repo
+    .listTranslations(contentItemId)
+    .filter((row) => !langFilter || String(row?.lang || "").trim().toLowerCase() === langFilter);
+
+  if (!rows.length) {
+    throw new Error("translation locale not found");
+  }
+
+  const eligibleRows = rows.filter((row) =>
+    String(row?.translation_status || "").trim().toLowerCase() === "ready"
+    && String(row?.automatic_check_status || "").trim().toLowerCase() === "passed"
+    && Number(row?.stale_flag || 0) === 0
+  );
+
+  if (!eligibleRows.length) {
+    throw new Error("translation locale is not eligible for recheck");
+  }
+
+  const results = [];
+  for (const row of eligibleRows) {
+    const saved = await runTranslationRecheckForRow(repo, article, row, options.aiConfig || null);
+    results.push({
+      lang: String(saved?.lang || row?.lang || "").trim().toLowerCase(),
+      translation_recheck_status: String(saved?.translation_recheck_status || "not_checked").trim().toLowerCase() || "not_checked",
+      translation_recheck_score: saved?.translation_recheck_score ?? null,
+    });
+  }
+
+  if (typeof repo.logAudit === "function") {
+    repo.logAudit(actorEmail, "translation.recheck", "content_item", String(contentItemId), {
+      content_item_id: contentItemId,
+      lang: langFilter || null,
+      locales: results,
+    });
+  }
+
+  return {
+    content_item_id: contentItemId,
+    locales: results,
+    completed_count: results.length,
   };
 }
 
@@ -2349,7 +2697,12 @@ export async function exportStaging(repo, dirs, options = {}) {
       if (!scopedIds.length) return true;
       return scopedIds.includes(Number(row.source_content_item_id || 0));
     })
-    .filter((row) => row.translation_status === "ready" && row.automatic_check_status === "passed" && Number(row.stale_flag || 0) === 0)
+    .filter((row) =>
+      row.translation_status === "ready"
+      && row.automatic_check_status === "passed"
+      && Number(row.stale_flag || 0) === 0
+      && String(row.translation_recheck_status || "").trim().toLowerCase() === "passed"
+    )
     .map((row) => ({
       source_content_item_id: row.source_content_item_id,
       source_published_article_id: row.source_published_article_id,

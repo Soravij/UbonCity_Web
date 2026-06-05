@@ -1680,6 +1680,7 @@ function ensureLifecycleColumns(db) {
 }
 
 function ensureTranslationTables(db) {
+  const readTranslationCols = () => db.prepare("PRAGMA table_info(content_translations)").all();
   db.exec(`
     CREATE TABLE IF NOT EXISTS content_translations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1697,6 +1698,17 @@ function ensureTranslationTables(db) {
       translation_status TEXT NOT NULL DEFAULT 'pending',
       automatic_check_status TEXT NOT NULL DEFAULT 'pending',
       automatic_check_report_json TEXT,
+      translation_recheck_status TEXT NOT NULL DEFAULT 'not_checked',
+      translation_recheck_score REAL,
+      accuracy_score REAL,
+      fluency_score REAL,
+      term_score REAL,
+      back_translation_th TEXT,
+      recheck_summary_th TEXT,
+      recheck_issues_json TEXT,
+      recheck_model TEXT,
+      rechecked_at TEXT,
+      repair_attempt_count INTEGER NOT NULL DEFAULT 0,
       stale_flag INTEGER NOT NULL DEFAULT 0,
       translator_engine TEXT,
       translator_model TEXT,
@@ -1726,92 +1738,161 @@ function ensureTranslationTables(db) {
     );
   `);
 
-  const cols = db.prepare("PRAGMA table_info(content_translations)").all();
+  let cols = readTranslationCols();
   const sourcePublishedArticleCol = Array.isArray(cols)
     ? cols.find((col) => String(col?.name || "").trim() === "source_published_article_id")
     : null;
   const needsNullablePublishedSourceMigration = Number(sourcePublishedArticleCol?.notnull || 0) === 1;
 
-  if (!needsNullablePublishedSourceMigration) {
-    return;
+  if (needsNullablePublishedSourceMigration) {
+    db.exec("PRAGMA foreign_keys = OFF;");
+    try {
+      db.exec("BEGIN IMMEDIATE;");
+      db.exec("ALTER TABLE content_translations RENAME TO content_translations_legacy_nullable_source;");
+      db.exec(`
+        CREATE TABLE content_translations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          source_content_item_id INTEGER NOT NULL,
+          source_published_article_id INTEGER,
+          source_draft_id INTEGER,
+          source_review_report_id INTEGER,
+          source_fingerprint TEXT NOT NULL,
+          lang TEXT NOT NULL,
+          translated_title TEXT,
+          translated_excerpt TEXT,
+          translated_body TEXT,
+          translated_meta_title TEXT,
+          translated_meta_description TEXT,
+          translation_status TEXT NOT NULL DEFAULT 'pending',
+          automatic_check_status TEXT NOT NULL DEFAULT 'pending',
+          automatic_check_report_json TEXT,
+          translation_recheck_status TEXT NOT NULL DEFAULT 'not_checked',
+          translation_recheck_score REAL,
+          accuracy_score REAL,
+          fluency_score REAL,
+          term_score REAL,
+          back_translation_th TEXT,
+          recheck_summary_th TEXT,
+          recheck_issues_json TEXT,
+          recheck_model TEXT,
+          rechecked_at TEXT,
+          repair_attempt_count INTEGER NOT NULL DEFAULT 0,
+          stale_flag INTEGER NOT NULL DEFAULT 0,
+          translator_engine TEXT,
+          translator_model TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(source_content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
+          FOREIGN KEY(source_published_article_id) REFERENCES published_articles(id) ON DELETE SET NULL,
+          FOREIGN KEY(source_draft_id) REFERENCES content_drafts(id) ON DELETE SET NULL,
+          FOREIGN KEY(source_review_report_id) REFERENCES review_reports(id) ON DELETE SET NULL,
+          UNIQUE(source_content_item_id, lang)
+        );
+      `);
+      db.exec(`
+        INSERT INTO content_translations (
+          id, source_content_item_id, source_published_article_id, source_draft_id, source_review_report_id,
+          source_fingerprint, lang, translated_title, translated_excerpt, translated_body,
+          translated_meta_title, translated_meta_description, translation_status, automatic_check_status,
+          automatic_check_report_json, translation_recheck_status, translation_recheck_score,
+          accuracy_score, fluency_score, term_score, back_translation_th, recheck_summary_th,
+          recheck_issues_json, recheck_model, rechecked_at, repair_attempt_count,
+          stale_flag, translator_engine, translator_model, created_at, updated_at
+        )
+        SELECT
+          id,
+          source_content_item_id,
+          NULLIF(source_published_article_id, 0),
+          source_draft_id,
+          source_review_report_id,
+          source_fingerprint,
+          lang,
+          translated_title,
+          translated_excerpt,
+          translated_body,
+          translated_meta_title,
+          translated_meta_description,
+          translation_status,
+          automatic_check_status,
+          automatic_check_report_json,
+          'not_checked',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          0,
+          stale_flag,
+          translator_engine,
+          translator_model,
+          created_at,
+          updated_at
+        FROM content_translations_legacy_nullable_source;
+      `);
+      db.exec("DROP TABLE content_translations_legacy_nullable_source;");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_content_translations_source ON content_translations(source_content_item_id);");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_content_translations_lang ON content_translations(lang);");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_content_translations_publishable ON content_translations(automatic_check_status, stale_flag, translation_status);");
+      db.exec("COMMIT;");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK;");
+      } catch {}
+      throw error;
+    } finally {
+      db.exec("PRAGMA foreign_keys = ON;");
+    }
+    cols = readTranslationCols();
   }
 
-  db.exec("PRAGMA foreign_keys = OFF;");
-  try {
-    db.exec("BEGIN IMMEDIATE;");
-    db.exec("ALTER TABLE content_translations RENAME TO content_translations_legacy_nullable_source;");
-    db.exec(`
-      CREATE TABLE content_translations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        source_content_item_id INTEGER NOT NULL,
-        source_published_article_id INTEGER,
-        source_draft_id INTEGER,
-        source_review_report_id INTEGER,
-        source_fingerprint TEXT NOT NULL,
-        lang TEXT NOT NULL,
-        translated_title TEXT,
-        translated_excerpt TEXT,
-        translated_body TEXT,
-        translated_meta_title TEXT,
-        translated_meta_description TEXT,
-        translation_status TEXT NOT NULL DEFAULT 'pending',
-        automatic_check_status TEXT NOT NULL DEFAULT 'pending',
-        automatic_check_report_json TEXT,
-        stale_flag INTEGER NOT NULL DEFAULT 0,
-        translator_engine TEXT,
-        translator_model TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(source_content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
-        FOREIGN KEY(source_published_article_id) REFERENCES published_articles(id) ON DELETE SET NULL,
-        FOREIGN KEY(source_draft_id) REFERENCES content_drafts(id) ON DELETE SET NULL,
-        FOREIGN KEY(source_review_report_id) REFERENCES review_reports(id) ON DELETE SET NULL,
-        UNIQUE(source_content_item_id, lang)
-      );
-    `);
-    db.exec(`
-      INSERT INTO content_translations (
-        id, source_content_item_id, source_published_article_id, source_draft_id, source_review_report_id,
-        source_fingerprint, lang, translated_title, translated_excerpt, translated_body,
-        translated_meta_title, translated_meta_description, translation_status, automatic_check_status,
-        automatic_check_report_json, stale_flag, translator_engine, translator_model, created_at, updated_at
-      )
-      SELECT
-        id,
-        source_content_item_id,
-        NULLIF(source_published_article_id, 0),
-        source_draft_id,
-        source_review_report_id,
-        source_fingerprint,
-        lang,
-        translated_title,
-        translated_excerpt,
-        translated_body,
-        translated_meta_title,
-        translated_meta_description,
-        translation_status,
-        automatic_check_status,
-        automatic_check_report_json,
-        stale_flag,
-        translator_engine,
-        translator_model,
-        created_at,
-        updated_at
-      FROM content_translations_legacy_nullable_source;
-    `);
-    db.exec("DROP TABLE content_translations_legacy_nullable_source;");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_content_translations_source ON content_translations(source_content_item_id);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_content_translations_lang ON content_translations(lang);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_content_translations_publishable ON content_translations(automatic_check_status, stale_flag, translation_status);");
-    db.exec("COMMIT;");
-  } catch (error) {
-    try {
-      db.exec("ROLLBACK;");
-    } catch {}
-    throw error;
-  } finally {
-    db.exec("PRAGMA foreign_keys = ON;");
-  }
+  const translationRecheckStatusCol = Array.isArray(cols)
+    ? cols.find((col) => String(col?.name || "").trim() === "translation_recheck_status")
+    : null;
+  if (!translationRecheckStatusCol) db.exec("ALTER TABLE content_translations ADD COLUMN translation_recheck_status TEXT NOT NULL DEFAULT 'not_checked';");
+  const translationRecheckScoreCol = Array.isArray(cols)
+    ? cols.find((col) => String(col?.name || "").trim() === "translation_recheck_score")
+    : null;
+  if (!translationRecheckScoreCol) db.exec("ALTER TABLE content_translations ADD COLUMN translation_recheck_score REAL;");
+  const accuracyScoreCol = Array.isArray(cols)
+    ? cols.find((col) => String(col?.name || "").trim() === "accuracy_score")
+    : null;
+  if (!accuracyScoreCol) db.exec("ALTER TABLE content_translations ADD COLUMN accuracy_score REAL;");
+  const fluencyScoreCol = Array.isArray(cols)
+    ? cols.find((col) => String(col?.name || "").trim() === "fluency_score")
+    : null;
+  if (!fluencyScoreCol) db.exec("ALTER TABLE content_translations ADD COLUMN fluency_score REAL;");
+  const termScoreCol = Array.isArray(cols)
+    ? cols.find((col) => String(col?.name || "").trim() === "term_score")
+    : null;
+  if (!termScoreCol) db.exec("ALTER TABLE content_translations ADD COLUMN term_score REAL;");
+  const backTranslationCol = Array.isArray(cols)
+    ? cols.find((col) => String(col?.name || "").trim() === "back_translation_th")
+    : null;
+  if (!backTranslationCol) db.exec("ALTER TABLE content_translations ADD COLUMN back_translation_th TEXT;");
+  const recheckSummaryCol = Array.isArray(cols)
+    ? cols.find((col) => String(col?.name || "").trim() === "recheck_summary_th")
+    : null;
+  if (!recheckSummaryCol) db.exec("ALTER TABLE content_translations ADD COLUMN recheck_summary_th TEXT;");
+  const recheckIssuesCol = Array.isArray(cols)
+    ? cols.find((col) => String(col?.name || "").trim() === "recheck_issues_json")
+    : null;
+  if (!recheckIssuesCol) db.exec("ALTER TABLE content_translations ADD COLUMN recheck_issues_json TEXT;");
+  const recheckModelCol = Array.isArray(cols)
+    ? cols.find((col) => String(col?.name || "").trim() === "recheck_model")
+    : null;
+  if (!recheckModelCol) db.exec("ALTER TABLE content_translations ADD COLUMN recheck_model TEXT;");
+  const recheckedAtCol = Array.isArray(cols)
+    ? cols.find((col) => String(col?.name || "").trim() === "rechecked_at")
+    : null;
+  if (!recheckedAtCol) db.exec("ALTER TABLE content_translations ADD COLUMN rechecked_at TEXT;");
+  const repairAttemptCountCol = Array.isArray(cols)
+    ? cols.find((col) => String(col?.name || "").trim() === "repair_attempt_count")
+    : null;
+  if (!repairAttemptCountCol) db.exec("ALTER TABLE content_translations ADD COLUMN repair_attempt_count INTEGER NOT NULL DEFAULT 0;");
 }
 
 function ensureContentAssetWorkflowColumns(db) {
@@ -3160,8 +3241,12 @@ export function createRepository(db) {
       translated_title, translated_excerpt, translated_body,
       translated_meta_title, translated_meta_description,
       translation_status, automatic_check_status, automatic_check_report_json,
+      translation_recheck_status, translation_recheck_score,
+      accuracy_score, fluency_score, term_score,
+      back_translation_th, recheck_summary_th, recheck_issues_json, recheck_model, rechecked_at,
+      repair_attempt_count,
       stale_flag, translator_engine, translator_model, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(source_content_item_id, lang) DO UPDATE SET
       source_published_article_id=excluded.source_published_article_id,
       source_draft_id=excluded.source_draft_id,
@@ -3175,6 +3260,17 @@ export function createRepository(db) {
       translation_status=excluded.translation_status,
       automatic_check_status=excluded.automatic_check_status,
       automatic_check_report_json=excluded.automatic_check_report_json,
+      translation_recheck_status=excluded.translation_recheck_status,
+      translation_recheck_score=excluded.translation_recheck_score,
+      accuracy_score=excluded.accuracy_score,
+      fluency_score=excluded.fluency_score,
+      term_score=excluded.term_score,
+      back_translation_th=excluded.back_translation_th,
+      recheck_summary_th=excluded.recheck_summary_th,
+      recheck_issues_json=excluded.recheck_issues_json,
+      recheck_model=excluded.recheck_model,
+      rechecked_at=excluded.rechecked_at,
+      repair_attempt_count=excluded.repair_attempt_count,
       stale_flag=excluded.stale_flag,
       translator_engine=excluded.translator_engine,
       translator_model=excluded.translator_model,
@@ -3205,6 +3301,16 @@ export function createRepository(db) {
     SET stale_flag=1,
         translation_status='stale',
         automatic_check_status='failed',
+        translation_recheck_status='not_checked',
+        translation_recheck_score=NULL,
+        accuracy_score=NULL,
+        fluency_score=NULL,
+        term_score=NULL,
+        back_translation_th=NULL,
+        recheck_summary_th=NULL,
+        recheck_issues_json=NULL,
+        recheck_model=NULL,
+        rechecked_at=NULL,
         updated_at=CURRENT_TIMESTAMP
     WHERE source_content_item_id=? AND source_fingerprint<>?
   `);
@@ -3214,6 +3320,23 @@ export function createRepository(db) {
     SET stale_flag=0,
         updated_at=CURRENT_TIMESTAMP
     WHERE source_content_item_id=? AND source_fingerprint=?
+  `);
+
+  const updateTranslationRecheckStmt = db.prepare(`
+    UPDATE content_translations
+    SET translation_recheck_status=?,
+        translation_recheck_score=?,
+        accuracy_score=?,
+        fluency_score=?,
+        term_score=?,
+        back_translation_th=?,
+        recheck_summary_th=?,
+        recheck_issues_json=?,
+        recheck_model=?,
+        rechecked_at=?,
+        repair_attempt_count=?,
+        updated_at=CURRENT_TIMESTAMP
+    WHERE source_content_item_id=? AND lang=?
   `);
 
   const insertTranslationRunStmt = db.prepare(`
@@ -8918,6 +9041,7 @@ function normalizeStateValue(value, stateGroup) {
     return {
       ...row,
       automatic_check_report: parseJson(row.automatic_check_report_json, null),
+      recheck_issues: parseJson(row.recheck_issues_json, []),
       source_kind: sourceKind,
     };
   }
@@ -8938,6 +9062,21 @@ function normalizeStateValue(value, stateGroup) {
       payload.translation_status || "pending",
       payload.automatic_check_status || "pending",
       payload.automatic_check_report ? JSON.stringify(payload.automatic_check_report) : null,
+      payload.translation_recheck_status || "not_checked",
+      Number.isFinite(Number(payload.translation_recheck_score)) ? Number(payload.translation_recheck_score) : null,
+      Number.isFinite(Number(payload.accuracy_score)) ? Number(payload.accuracy_score) : null,
+      Number.isFinite(Number(payload.fluency_score)) ? Number(payload.fluency_score) : null,
+      Number.isFinite(Number(payload.term_score)) ? Number(payload.term_score) : null,
+      payload.back_translation_th || null,
+      payload.recheck_summary_th || null,
+      payload.recheck_issues_json != null
+        ? String(payload.recheck_issues_json || "").trim() || null
+        : payload.recheck_issues
+          ? JSON.stringify(payload.recheck_issues)
+          : null,
+      payload.recheck_model || null,
+      payload.rechecked_at || null,
+      Number(payload.repair_attempt_count || 0) || 0,
       payload.stale_flag ? 1 : 0,
       payload.translator_engine || null,
       payload.translator_model || null
@@ -8952,6 +9091,7 @@ function normalizeStateValue(value, stateGroup) {
     return rows.map((row) => ({
       ...row,
       automatic_check_report: parseJson(row.automatic_check_report_json, null),
+      recheck_issues: parseJson(row.recheck_issues_json, []),
       source_kind: (Number(row.source_published_article_id || 0) || 0) > 0
         ? "published_article"
         : ((Number(row.source_draft_id || 0) || 0) > 0 || (Number(row.source_review_report_id || 0) || 0) > 0)
@@ -8963,6 +9103,37 @@ function normalizeStateValue(value, stateGroup) {
   function markStaleTranslations(sourceContentItemId, latestFingerprint) {
     markStaleTranslationsStmt.run(sourceContentItemId, latestFingerprint);
     clearStaleCurrentFingerprintStmt.run(sourceContentItemId, latestFingerprint);
+  }
+
+  function updateTranslationRecheck(sourceContentItemId, lang, payload = {}) {
+    const normalizedContentItemId = Number(sourceContentItemId || 0) || 0;
+    const normalizedLang = String(lang || "").trim().toLowerCase();
+    if (!normalizedContentItemId || !normalizedLang) {
+      throw new Error("source_content_item_id and lang are required");
+    }
+    const result = updateTranslationRecheckStmt.run(
+      payload.translation_recheck_status || "not_checked",
+      Number.isFinite(Number(payload.translation_recheck_score)) ? Number(payload.translation_recheck_score) : null,
+      Number.isFinite(Number(payload.accuracy_score)) ? Number(payload.accuracy_score) : null,
+      Number.isFinite(Number(payload.fluency_score)) ? Number(payload.fluency_score) : null,
+      Number.isFinite(Number(payload.term_score)) ? Number(payload.term_score) : null,
+      payload.back_translation_th || null,
+      payload.recheck_summary_th || null,
+      payload.recheck_issues_json != null
+        ? String(payload.recheck_issues_json || "").trim() || null
+        : payload.recheck_issues
+          ? JSON.stringify(payload.recheck_issues)
+          : null,
+      payload.recheck_model || null,
+      payload.rechecked_at === null ? null : payload.rechecked_at || new Date().toISOString(),
+      Number(payload.repair_attempt_count || 0) || 0,
+      normalizedContentItemId,
+      normalizedLang
+    );
+    if (Number(result?.changes || 0) < 1) {
+      throw new Error("translation locale not found");
+    }
+    return getTranslation(normalizedContentItemId, normalizedLang);
   }
 
   function startTranslationRun(stage = "final-prefrontend", inputCount = 0, message = "Translation started") {
@@ -10464,6 +10635,7 @@ function normalizeStateValue(value, stateGroup) {
     upsertTranslation,
     listTranslations,
     markStaleTranslations,
+    updateTranslationRecheck,
     startTranslationRun,
     finishTranslationRun,
     listTranslationRuns,

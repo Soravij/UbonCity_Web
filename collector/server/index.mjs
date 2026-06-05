@@ -36,6 +36,7 @@ import {
   returnFieldPackToClean,
   reviewInternalLink,
   rerunProblemTranslations,
+  rerunTranslationRecheck,
   runAiDraftStage,
   runCleanStage,
   runQualityStage,
@@ -79,31 +80,17 @@ const GOOGLE_MAPS_PHOTO_PROXY_PATH = "/api/google-maps/photo";
 const COLLECTOR_ASSET_VERSION_TOKEN = "__COLLECTOR_ASSET_VERSION__";
 const collectorPublicDir = path.join(dirs.rootDir, "server", "public");
 const collectorRootIndexPath = path.join(collectorPublicDir, "index.html");
-const collectorRootAssetFiles = [
-  path.join(collectorPublicDir, "theme-bootstrap.js"),
-  path.join(collectorPublicDir, "styles.css"),
-  path.join(collectorPublicDir, "theme-control.js"),
-  path.join(collectorPublicDir, "app.js"),
-];
+const collectorAssetVersionOverride = String(process.env.COLLECTOR_ASSET_VERSION || "").trim();
+const collectorServerBootVersion = String(Date.now());
 
-function resolveCollectorAssetVersion() {
-  const envVersion = String(process.env.COLLECTOR_ASSET_VERSION || "").trim();
-  if (envVersion) return envVersion;
-  let newestMtimeMs = 0;
-  for (const filePath of collectorRootAssetFiles) {
-    try {
-      const stats = fsSync.statSync(filePath);
-      newestMtimeMs = Math.max(newestMtimeMs, Number(stats.mtimeMs || 0));
-    } catch {}
-  }
-  return newestMtimeMs > 0 ? String(Math.floor(newestMtimeMs)) : String(Date.now());
-}
-
-const collectorRootAssetVersion = resolveCollectorAssetVersion();
-
-function renderCollectorRootHtml() {
-  const htmlTemplate = fsSync.readFileSync(collectorRootIndexPath, "utf8");
-  return htmlTemplate.split(COLLECTOR_ASSET_VERSION_TOKEN).join(collectorRootAssetVersion);
+function resolveCollectorAssetVersionForFile(filePath) {
+  if (collectorAssetVersionOverride) return collectorAssetVersionOverride;
+  try {
+    const stats = fsSync.statSync(filePath);
+    const mtimeMs = Number(stats.mtimeMs || 0);
+    if (mtimeMs > 0) return String(Math.floor(mtimeMs));
+  } catch {}
+  return collectorServerBootVersion;
 }
 
 function setCollectorHtmlRevalidateHeaders(res) {
@@ -127,7 +114,7 @@ function resolveCollectorHtmlFilePath(requestPath) {
 
 function renderCollectorHtmlFile(filePath) {
   const htmlTemplate = fsSync.readFileSync(filePath, "utf8");
-  return htmlTemplate.split(COLLECTOR_ASSET_VERSION_TOKEN).join(collectorRootAssetVersion);
+  return rewriteCollectorHtmlAssetUrls(htmlTemplate, filePath);
 }
 
 function isSafeCollectorJsRequestPath(rawPath) {
@@ -143,7 +130,28 @@ function resolveCollectorJsFilePath(requestPath) {
   return fullPath;
 }
 
-function withVersionQuery(specifier) {
+function resolveCollectorAssetFilePath(specifier, importerPath = "") {
+  if (typeof specifier !== "string" || !specifier) return null;
+  if (!(specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("/"))) return null;
+
+  const hashIndex = specifier.indexOf("#");
+  const withoutHash = hashIndex >= 0 ? specifier.slice(0, hashIndex) : specifier;
+  const queryIndex = withoutHash.indexOf("?");
+  const pathname = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+  if (!pathname) return null;
+
+  const importerDir = importerPath
+    ? path.dirname(importerPath)
+    : collectorPublicDir;
+  const candidatePath = pathname.startsWith("/")
+    ? path.resolve(collectorPublicDir, `.${pathname}`)
+    : path.resolve(importerDir, pathname);
+  const normalizedPublicDir = path.resolve(collectorPublicDir) + path.sep;
+  if (!candidatePath.startsWith(normalizedPublicDir)) return null;
+  return candidatePath;
+}
+
+function withVersionQuery(specifier, importerPath = "") {
   if (typeof specifier !== "string" || !specifier) return specifier;
   if (!(specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("/"))) return specifier;
 
@@ -154,24 +162,40 @@ function withVersionQuery(specifier) {
   const pathname = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
   const query = queryIndex >= 0 ? withoutHash.slice(queryIndex + 1) : "";
 
-  if (!/\.(?:mjs|js)$/i.test(pathname)) return specifier;
+  if (!/\.(?:mjs|js|css)$/i.test(pathname)) return specifier;
 
   const params = new URLSearchParams(query);
-  if (!params.has("v")) params.set("v", collectorRootAssetVersion);
+  const assetFilePath = resolveCollectorAssetFilePath(specifier, importerPath);
+  const version = resolveCollectorAssetVersionForFile(assetFilePath || importerPath || collectorRootIndexPath);
+  if (!params.has("v") || params.get("v") === COLLECTOR_ASSET_VERSION_TOKEN) {
+    params.set("v", version);
+  }
   const nextQuery = params.toString();
   return `${pathname}${nextQuery ? `?${nextQuery}` : ""}${hash}`;
 }
 
-function rewriteCollectorModuleSpecifiers(jsText) {
-  const withTokenResolved = jsText.split(COLLECTOR_ASSET_VERSION_TOKEN).join(collectorRootAssetVersion);
+function rewriteCollectorHtmlAssetUrls(htmlText, htmlFilePath) {
+  return htmlText.replace(
+    /((?:src|href)=["'])([^"']+)(["'])/gi,
+    (match, prefix, specifier, suffix) => `${prefix}${withVersionQuery(specifier, htmlFilePath)}${suffix}`
+  );
+}
+
+function rewriteCollectorModuleSpecifiers(jsText, sourcePath = "") {
+  const withTokenResolved = jsText;
   const withStaticImports = withTokenResolved.replace(
     /((?:\bimport|\bexport)\s+(?:[^"'`]*?\s+from\s*)?)(["'])([^"'`]+)\2/g,
-    (match, prefix, quote, specifier) => `${prefix}${quote}${withVersionQuery(specifier)}${quote}`
+    (match, prefix, quote, specifier) => `${prefix}${quote}${withVersionQuery(specifier, sourcePath)}${quote}`
   );
   return withStaticImports.replace(
     /(\bimport\s*\(\s*)(["'])([^"'`]+)\2(\s*\))/g,
-    (match, prefix, quote, specifier, suffix) => `${prefix}${quote}${withVersionQuery(specifier)}${quote}${suffix}`
+    (match, prefix, quote, specifier, suffix) => `${prefix}${quote}${withVersionQuery(specifier, sourcePath)}${quote}${suffix}`
   );
+}
+
+function renderCollectorRootHtml() {
+  const htmlTemplate = fsSync.readFileSync(collectorRootIndexPath, "utf8");
+  return rewriteCollectorHtmlAssetUrls(htmlTemplate, collectorRootIndexPath);
 }
 const CONTENT_ITEM_CATEGORIES = new Set(["attractions", "activities", "hotels", "cafes", "restaurants", "transport"]);
 const ARTICLE_RICH_TEXT_ALLOWED_TAGS = new Set([
@@ -293,6 +317,7 @@ function buildAiFeatureRuntimeSnapshot(aiConfig) {
     field_pack: pickFeature("fieldPack"),
     visual_context: pickFeature("visualContext"),
     translation: pickFeature("translation"),
+    translation_recheck: pickFeature("translationRecheck"),
   };
 }
 
@@ -2416,7 +2441,7 @@ app.use((req, res, next) => {
   res.type("application/javascript; charset=utf-8");
   if (req.method === "HEAD") return res.status(200).end();
   const jsSource = fsSync.readFileSync(fullPath, "utf8");
-  res.send(rewriteCollectorModuleSpecifiers(jsSource));
+  res.send(rewriteCollectorModuleSpecifiers(jsSource, fullPath));
 });
 app.use(express.static(collectorPublicDir, { index: false }));
 app.get("/", (_req, res) => {
@@ -4452,7 +4477,7 @@ function buildBackendSyncPayload(options = {}) {
 
   const translations = repo
     .listTranslations(contentItemId)
-    .filter((t) => t.translation_status === "ready" && t.automatic_check_status === "passed" && Number(t.stale_flag || 0) === 0)
+    .filter((t) => isTranslationRecheckPassed(t))
     .map((t) => ({
       source_content_item_id: t.source_content_item_id,
       lang: t.lang,
@@ -4513,7 +4538,7 @@ function buildReviewIngestPayload(options = {}) {
 
   const translationLangs = repo
     .listTranslations(contentItemId)
-    .filter((t) => t.translation_status === "ready" && t.automatic_check_status === "passed" && Number(t.stale_flag || 0) === 0)
+    .filter((t) => isTranslationRecheckPassed(t))
     .map((t) => String(t.lang || "").trim().toLowerCase())
     .filter(Boolean);
 
@@ -4704,7 +4729,7 @@ function buildEventAdminQueuePayload(options = {}) {
     },
     translations_snapshot: repo
       .listTranslations(contentItemId)
-      .filter((t) => t.translation_status === "ready" && t.automatic_check_status === "passed" && Number(t.stale_flag || 0) === 0)
+      .filter((t) => isTranslationRecheckPassed(t))
       .map((t) => ({
         lang: String(t.lang || "").trim().toLowerCase(),
         title: t.translated_title,
@@ -4714,7 +4739,7 @@ function buildEventAdminQueuePayload(options = {}) {
       })),
     translation_langs: repo
       .listTranslations(contentItemId)
-      .filter((t) => t.translation_status === "ready" && t.automatic_check_status === "passed" && Number(t.stale_flag || 0) === 0)
+      .filter((t) => isTranslationRecheckPassed(t))
       .map((t) => String(t.lang || "").trim().toLowerCase())
       .filter(Boolean),
   };
@@ -6319,6 +6344,61 @@ function parseTargetLangs() {
     .filter(Boolean);
 }
 
+function isTranslationTechnicalReady(row) {
+  return String(row?.translation_status || "").trim().toLowerCase() === "ready"
+    && String(row?.automatic_check_status || "").trim().toLowerCase() === "passed"
+    && Number(row?.stale_flag || 0) === 0;
+}
+
+function isTranslationRecheckPassed(row) {
+  return isTranslationTechnicalReady(row)
+    && String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed";
+}
+
+function getRequiredTranslationRecheckBlockers(contentItemId, readiness = null) {
+  const exportReadiness = readiness || buildExportReadiness(contentItemId);
+  const item = repo.getItem(contentItemId) || null;
+  const sourceLang = String(item?.lang || "th").trim().toLowerCase() || "th";
+  const requiredLocales = parseTargetLangs().filter((lang) => lang !== sourceLang);
+  const liveTranslationRows = repo.listTranslations(contentItemId);
+  const liveByLang = new Map(
+    liveTranslationRows.map((row) => [String(row?.lang || "").trim().toLowerCase(), row]),
+  );
+  const blockers = requiredLocales.map((lang) => {
+    const live = liveByLang.get(lang);
+    if (!lang) return null;
+    if (!live) {
+      return { lang, reason: "missing translation" };
+    }
+    if (Number(live?.stale_flag || 0) === 1 || String(live?.translation_status || "").trim().toLowerCase() === "stale") {
+      return { lang, reason: "translation is stale" };
+    }
+    if (String(live?.translation_status || "").trim().toLowerCase() !== "ready") {
+      return { lang, reason: "translation is missing or not ready" };
+    }
+    if (String(live?.automatic_check_status || "").trim().toLowerCase() !== "passed") {
+      return { lang, reason: "technical QA must pass first" };
+    }
+    if (String(live?.translation_recheck_status || "").trim().toLowerCase() !== "passed") {
+      return {
+        lang,
+        reason: `translation recheck is not passed (${String(live?.translation_recheck_status || "not_checked").trim().toLowerCase() || "not_checked"})`,
+      };
+    }
+    if (!isTranslationRecheckPassed(live)) {
+      return { lang, reason: "translation recheck gate is not satisfied" };
+    }
+    return null;
+  }).filter(Boolean);
+
+  return {
+    required_locales: requiredLocales,
+    blockers,
+    blocking_langs: blockers.map((row) => String(row?.lang || "").trim().toUpperCase()).filter(Boolean),
+    blocking: blockers.length > 0,
+  };
+}
+
 function buildExportReadiness(contentItemId) {
   const isDebugDiagnosticsEnabled = String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
   const item = repo.getItem(contentItemId);
@@ -6397,6 +6477,13 @@ function buildExportReadiness(contentItemId) {
     total: translations.length,
   };
 
+  const translationRecheckCounts = {
+    passed: rows.filter((row) => String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed").length,
+    warning: rows.filter((row) => String(row?.translation_recheck_status || "").trim().toLowerCase() === "warning").length,
+    failed: rows.filter((row) => String(row?.translation_recheck_status || "").trim().toLowerCase() === "failed").length,
+    not_checked: rows.filter((row) => !String(row?.translation_recheck_status || "").trim() || String(row?.translation_recheck_status || "").trim().toLowerCase() === "not_checked").length,
+  };
+
   return {
     content_item_id: contentItemId,
     source_ready: sourceIssues.length === 0,
@@ -6452,6 +6539,7 @@ function buildExportReadiness(contentItemId) {
       }
       : null,
     translation_counts: counts,
+    translation_recheck_counts: translationRecheckCounts,
     translations,
   };
 }
@@ -11643,6 +11731,17 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
     });
     return;
   }
+  const translationRecheckGate = getRequiredTranslationRecheckBlockers(id, readiness);
+  if (translationRecheckGate.blocking) {
+    res.status(409).json({
+      error: "คำแปลยังไม่ผ่าน translation recheck สำหรับส่งออก",
+      reason: `Blocked locales: ${translationRecheckGate.blocking_langs.join(", ")}`,
+      locales: translationRecheckGate.blocking_langs,
+      translation_recheck_gate: translationRecheckGate,
+      readiness,
+    });
+    return;
+  }
 
   try {
     const aiConfig = getEffectiveAiConfig();
@@ -11831,17 +11930,13 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
       });
       return;
     }
-    const translationCounts = readiness?.translation_counts || {};
-    const translationRows = Array.isArray(readiness?.translations) ? readiness.translations : [];
-    const translationReady =
-      Number(translationCounts.total || 0) > 0
-      && Number(translationCounts.failed || 0) === 0
-      && Number(translationCounts.stale || 0) === 0
-      && Number(translationCounts.not_ready || 0) === 0
-      && translationRows.every((row) => String(row?.status || "").trim().toLowerCase() === "passed");
-    if (!translationReady) {
+    const translationRecheckGate = getRequiredTranslationRecheckBlockers(id, readiness);
+    if (translationRecheckGate.blocking) {
       res.status(409).json({
-        error: "คำแปลยังไม่พร้อมสำหรับส่งเข้า admin review",
+        error: "คำแปลยังไม่ผ่าน translation recheck สำหรับส่งเข้า admin review",
+        reason: `Blocked locales: ${translationRecheckGate.blocking_langs.join(", ")}`,
+        locales: translationRecheckGate.blocking_langs,
+        translation_recheck_gate: translationRecheckGate,
         readiness,
       });
       return;
@@ -12023,6 +12118,39 @@ app.post("/api/items/:id/generate-translations", requireRole("admin", "owner"), 
   } catch (err) {
     const message = String(err?.message || "Cannot generate translations");
     res.status(400).json({ error: message });
+  }
+});
+
+app.post("/api/items/:id/translations/:lang/recheck", requireRole("admin", "owner"), async (req, res) => {
+  const id = Number(req.params.id || 0);
+  const lang = String(req.params.lang || "").trim().toLowerCase();
+  if (!id || !lang) {
+    res.status(400).json({ error: "Invalid item id or locale" });
+    return;
+  }
+
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+
+  try {
+    const aiConfig = getEffectiveAiConfig();
+    const result = await rerunTranslationRecheck(repo, actorEmail(req), {
+      aiConfig,
+      content_item_id: id,
+      lang,
+    });
+    const readiness = buildExportReadiness(id);
+    res.json({
+      ok: true,
+      result,
+      readiness,
+      translations: repo.listTranslations(id),
+    });
+  } catch (err) {
+    res.status(400).json({ error: String(err?.message || "Cannot run translation recheck") });
   }
 });
 

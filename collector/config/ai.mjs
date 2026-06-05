@@ -39,6 +39,14 @@ const AI_FEATURE_CATALOG = Object.freeze({
     active: true,
     default_policy_key: AI_POLICY_DEFAULT_KEY,
   }),
+  translationRecheck: Object.freeze({
+    key: "translationRecheck",
+    label: "Translation Recheck",
+    description: "Used for semantic translation quality recheck after technical QA passes",
+    status: "active",
+    active: true,
+    default_policy_key: AI_POLICY_DEFAULT_KEY,
+  }),
   visualContext: Object.freeze({
     key: "visualContext",
     label: "Visual Context",
@@ -149,6 +157,7 @@ export function resolveAiConfig(options = {}) {
   const backendSyncToken = String(process.env.LIFECYCLE_SYNC_TOKEN || "").trim();
   const fieldPack = resolveFeatureConfig(featureMap.fieldPack.provider, featureMap.fieldPack.model);
   const translation = resolveFeatureConfig(featureMap.translation.provider, featureMap.translation.model);
+  const translationRecheck = resolveFeatureConfig(featureMap.translationRecheck.provider, featureMap.translationRecheck.model);
   const visualContext = resolveFeatureConfig(featureMap.visualContext.provider, featureMap.visualContext.model);
   const articleGenerator = resolveFeatureConfig(
     featureMap.articleGenerator.provider,
@@ -165,6 +174,8 @@ export function resolveAiConfig(options = {}) {
     backendSyncToken,
     translationProvider: translation.provider,
     translationModel: translation.model,
+    translationRecheckProvider: translationRecheck.provider,
+    translationRecheckModel: translationRecheck.model,
     fieldPackProvider: fieldPack.provider,
     fieldPackModel: fieldPack.model,
     agentEngine,
@@ -173,6 +184,7 @@ export function resolveAiConfig(options = {}) {
     features: {
       fieldPack: { ...fieldPack, policyKey: featureMap.fieldPack.policy_key, backendApiBase, backendSyncToken },
       translation: { ...translation, policyKey: featureMap.translation.policy_key, backendApiBase, backendSyncToken },
+      translationRecheck: { ...translationRecheck, policyKey: featureMap.translationRecheck.policy_key, backendApiBase, backendSyncToken },
       visualContext: { ...visualContext, policyKey: featureMap.visualContext.policy_key, backendApiBase, backendSyncToken },
       articleGenerator: { ...articleGenerator, policyKey: featureMap.articleGenerator.policy_key, backendApiBase, backendSyncToken },
     },
