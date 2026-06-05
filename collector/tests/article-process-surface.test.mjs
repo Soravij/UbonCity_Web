@@ -27,6 +27,7 @@ function extractFunctionBlock(name) {
 function loadTranslationGateHelper(rows, options = {}) {
   const targetLangs = options.targetLangs || ["en", "lo", "zh"];
   const itemLang = options.itemLang || "th";
+  const currentSourceFingerprint = options.currentSourceFingerprint || "current-fingerprint";
   const context = {
     process: {
       env: {
@@ -43,6 +44,23 @@ function loadTranslationGateHelper(rows, options = {}) {
     },
     buildExportReadiness() {
       throw new Error("buildExportReadiness should not be called when readiness is provided");
+    },
+    getCurrentTranslationSourceFingerprint() {
+      return currentSourceFingerprint;
+    },
+    isWorkflowTranslationRowStale(row, fingerprint) {
+      return String(row?.source_fingerprint || "") !== String(fingerprint || "")
+        || Number(row?.stale_flag || 0) === 1
+        || String(row?.translation_status || "").trim().toLowerCase() === "stale";
+    },
+    isWorkflowTranslationTechnicalReady(row, fingerprint) {
+      return String(row?.translation_status || "").trim().toLowerCase() === "ready"
+        && String(row?.automatic_check_status || "").trim().toLowerCase() === "passed"
+        && !context.isWorkflowTranslationRowStale(row, fingerprint);
+    },
+    isWorkflowTranslationRecheckPassed(row, fingerprint) {
+      return context.isWorkflowTranslationTechnicalReady(row, fingerprint)
+        && String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed";
     },
     console,
   };
@@ -99,10 +117,17 @@ test("release-main and admin-review use required locale translation recheck gate
   assert.match(source, /translation recheck is not passed/);
 });
 
+test("outbound payload builders use fingerprint-aware translation recheck filtering", () => {
+  assert.match(source, /\.filter\(\(t\) => isTranslationRecheckPassed\(t, currentSourceFingerprint\)\)/);
+  assert.doesNotMatch(source, /\.filter\(\(t\) => isTranslationRecheckPassed\(t\)\)/);
+  assert.match(source, /const currentSourceFingerprint = contentItemId \? getCurrentTranslationSourceFingerprint\(repo, contentItemId\) : "";/);
+});
+
 test("required locale translation recheck gate allows release only when all required locales passed", () => {
   const getRequiredTranslationRecheckBlockers = loadTranslationGateHelper([
     {
       lang: "en",
+      source_fingerprint: "current-fingerprint",
       translation_status: "ready",
       automatic_check_status: "passed",
       translation_recheck_status: "passed",
@@ -110,6 +135,7 @@ test("required locale translation recheck gate allows release only when all requ
     },
     {
       lang: "lo",
+      source_fingerprint: "current-fingerprint",
       translation_status: "ready",
       automatic_check_status: "passed",
       translation_recheck_status: "passed",
@@ -117,6 +143,7 @@ test("required locale translation recheck gate allows release only when all requ
     },
     {
       lang: "zh",
+      source_fingerprint: "current-fingerprint",
       translation_status: "ready",
       automatic_check_status: "passed",
       translation_recheck_status: "passed",
@@ -143,6 +170,7 @@ test("required locale translation recheck gate reports missing translation from 
   const getRequiredTranslationRecheckBlockers = loadTranslationGateHelper([
     {
       lang: "en",
+      source_fingerprint: "current-fingerprint",
       translation_status: "ready",
       automatic_check_status: "passed",
       translation_recheck_status: "passed",
@@ -150,6 +178,7 @@ test("required locale translation recheck gate reports missing translation from 
     },
     {
       lang: "lo",
+      source_fingerprint: "current-fingerprint",
       translation_status: "ready",
       automatic_check_status: "passed",
       translation_recheck_status: "passed",
@@ -173,6 +202,7 @@ test("required locale translation recheck gate still blocks when readiness trans
   const getRequiredTranslationRecheckBlockers = loadTranslationGateHelper([
     {
       lang: "en",
+      source_fingerprint: "current-fingerprint",
       translation_status: "ready",
       automatic_check_status: "passed",
       translation_recheck_status: "passed",
@@ -180,6 +210,7 @@ test("required locale translation recheck gate still blocks when readiness trans
     },
     {
       lang: "lo",
+      source_fingerprint: "current-fingerprint",
       translation_status: "ready",
       automatic_check_status: "passed",
       translation_recheck_status: "passed",
@@ -205,6 +236,7 @@ test("required locale translation recheck gate reports not_checked warning faile
       name: "not_checked",
       row: {
         lang: "en",
+        source_fingerprint: "current-fingerprint",
         translation_status: "ready",
         automatic_check_status: "passed",
         translation_recheck_status: "not_checked",
@@ -216,6 +248,7 @@ test("required locale translation recheck gate reports not_checked warning faile
       name: "warning",
       row: {
         lang: "en",
+        source_fingerprint: "current-fingerprint",
         translation_status: "ready",
         automatic_check_status: "passed",
         translation_recheck_status: "warning",
@@ -227,6 +260,7 @@ test("required locale translation recheck gate reports not_checked warning faile
       name: "failed",
       row: {
         lang: "en",
+        source_fingerprint: "current-fingerprint",
         translation_status: "ready",
         automatic_check_status: "passed",
         translation_recheck_status: "failed",
@@ -238,6 +272,7 @@ test("required locale translation recheck gate reports not_checked warning faile
       name: "stale",
       row: {
         lang: "en",
+        source_fingerprint: "current-fingerprint",
         translation_status: "ready",
         automatic_check_status: "passed",
         translation_recheck_status: "passed",
@@ -249,6 +284,7 @@ test("required locale translation recheck gate reports not_checked warning faile
       name: "not ready",
       row: {
         lang: "en",
+        source_fingerprint: "current-fingerprint",
         translation_status: "draft",
         automatic_check_status: "passed",
         translation_recheck_status: "passed",
@@ -260,6 +296,7 @@ test("required locale translation recheck gate reports not_checked warning faile
       name: "technical QA failed",
       row: {
         lang: "en",
+        source_fingerprint: "current-fingerprint",
         translation_status: "ready",
         automatic_check_status: "failed",
         translation_recheck_status: "passed",
@@ -278,6 +315,28 @@ test("required locale translation recheck gate reports not_checked warning faile
     assert.deepEqual([...result.blocking_langs], ["EN"], entry.name);
     assert.equal(result.blockers[0]?.reason, entry.expected, entry.name);
   }
+});
+
+test("required locale translation recheck gate blocks fingerprint mismatch even when stale_flag is 0", () => {
+  const getRequiredTranslationRecheckBlockers = loadTranslationGateHelper([
+    {
+      lang: "en",
+      source_fingerprint: "old-fingerprint",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      translation_recheck_status: "passed",
+      stale_flag: 0,
+    },
+  ], { targetLangs: ["en"], currentSourceFingerprint: "current-fingerprint" });
+
+  const result = getRequiredTranslationRecheckBlockers(48, {
+    current_source_fingerprint: "current-fingerprint",
+    translations: [{ lang: "en", status: "passed" }],
+  });
+
+  assert.equal(result.blocking, true);
+  assert.deepEqual([...result.blocking_langs], ["EN"]);
+  assert.equal(result.blockers[0]?.reason, "translation is stale");
 });
 
 test("composer media helper no longer emits prep-claim errors before article access fallback", () => {

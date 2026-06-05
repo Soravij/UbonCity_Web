@@ -233,6 +233,23 @@ function translationRecheckStatusCounts(rows) {
   return counts;
 }
 
+function currentSourceFingerprint() {
+  return String(state.readiness?.current_source_fingerprint || "").trim();
+}
+
+function hasSourceFingerprintMismatch(row, expectedFingerprint = currentSourceFingerprint()) {
+  const currentFingerprint = String(expectedFingerprint || "").trim();
+  if (!currentFingerprint) return false;
+  return String(row?.source_fingerprint || "").trim() !== currentFingerprint;
+}
+
+function isTranslationRowStale(row, expectedFingerprint = currentSourceFingerprint()) {
+  return hasSourceFingerprintMismatch(row, expectedFingerprint)
+    || Number(row?.stale_flag || 0) === 1
+    || String(row?.status || "").trim().toLowerCase() === "stale"
+    || String(row?.translation_status || "").trim().toLowerCase() === "stale";
+}
+
 function localeLabel(lang) {
   const normalized = String(lang || "").trim().toLowerCase();
   if (normalized === "th") return "TH / Thai";
@@ -274,7 +291,7 @@ function parseRecheckIssues(value) {
 }
 
 function translationRecheckStatusFromRow(row) {
-  if (Number(row?.stale_flag || 0) === 1 || String(row?.status || "").trim().toLowerCase() === "stale") return "stale";
+  if (isTranslationRowStale(row)) return "stale";
   const raw = String(row?.translation_recheck_status || "").trim().toLowerCase();
   if (["passed", "warning", "failed", "stale"].includes(raw)) return raw;
   return "not_checked";
@@ -292,7 +309,7 @@ function translationRecheckStatusLabel(value) {
 function getTranslationRecheckEligibility(row) {
   const translationStatus = String(row?.translation_status || "").trim().toLowerCase();
   const automaticCheckStatus = String(row?.automatic_check_status || "").trim().toLowerCase();
-  const stale = Number(row?.stale_flag || 0) === 1 || String(row?.translation_recheck_status || "").trim().toLowerCase() === "stale";
+  const stale = isTranslationRowStale(row) || String(row?.translation_recheck_status || "").trim().toLowerCase() === "stale";
   if (stale) {
     return { eligible: false, reason: "Translation is stale" };
   }
@@ -358,6 +375,7 @@ function buildTranslationRecheckRows() {
       rechecked_at: live?.rechecked_at || null,
       repair_attempt_count: Number(live?.repair_attempt_count || 0) || 0,
       stale_flag: Number(live?.stale_flag || 0) || 0,
+      source_fingerprint: String(live?.source_fingerprint || "").trim(),
     };
   });
 }
@@ -367,7 +385,7 @@ function getTranslationRecheckGateState() {
   const counts = translationRecheckStatusCounts(rows);
   const blockingRows = rows.filter((row) => {
     const automaticPassed = String(row?.automatic_check_status || "").trim().toLowerCase() === "passed";
-    const notStale = Number(row?.stale_flag || 0) === 0 && String(row?.translation_recheck_status || "") !== "stale";
+    const notStale = !isTranslationRowStale(row) && String(row?.translation_recheck_status || "") !== "stale";
     const recheckPassed = String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed";
     return !(automaticPassed && notStale && recheckPassed);
   });
@@ -381,7 +399,7 @@ function getTranslationRecheckGateState() {
 }
 
 function translationStatusFromRepoRow(row) {
-  if (Number(row?.stale_flag || 0) === 1) return "stale";
+  if (isTranslationRowStale(row)) return "stale";
   if (
     String(row?.translation_status || "").trim().toLowerCase() === "ready"
     && String(row?.automatic_check_status || "").trim().toLowerCase() === "passed"
@@ -431,6 +449,7 @@ function buildRepoTranslationStatusRows() {
     status: translationStatusFromRepoRow(row),
     translation_status: String(row?.translation_status || "").trim().toLowerCase() || "-",
     automatic_check_status: String(row?.automatic_check_status || "").trim().toLowerCase() || "-",
+    source_fingerprint: String(row?.source_fingerprint || "").trim(),
     source_kind: String(row?.source_kind || "").trim().toLowerCase() || "-",
     failure_reason: translationFailureReasonFromRow(row),
     issues: translationIssuesFromRow(row),
@@ -482,9 +501,11 @@ function buildTranslationRows() {
     return readinessRows.map((row) => {
       const lang = String(row?.lang || "").trim().toLowerCase();
       const live = repoByLang.get(lang) || null;
-      return {
-        lang,
-        status: String(row?.status || "not_ready").trim().toLowerCase(),
+    return {
+      lang,
+      status: live && isTranslationRowStale(live)
+        ? "stale"
+        : String(row?.status || "not_ready").trim().toLowerCase(),
         translation_status: String(live?.translation_status || "").trim().toLowerCase() || "-",
         automatic_check_status: String(live?.automatic_check_status || "").trim().toLowerCase() || "-",
         source_kind: String(live?.source_kind || "").trim().toLowerCase() || "-",

@@ -84,6 +84,7 @@ globalThis.__articleSubmitTestHooks = {
   refreshTranslations,
   renderTranslationSummary,
   renderTranslationRecheckPanel,
+  renderTranslationReviewSummary,
   getTranslationRecheckGateState,
   runTranslationRecheck,
   validateRecheckResponseLocale,
@@ -1030,6 +1031,46 @@ test("translation package summary only shows package-oriented fields", () => {
   assert.equal(hint, "Source changed after translation. Regenerate stale translations.");
   assert.equal(elements.get("translation-package-actions").classList.contains("hidden"), false);
   assert.equal(elements.get("btn-generate-translations").textContent, "Regenerate translations");
+});
+
+test("fingerprint mismatch makes translation package stale and translation recheck not ready", () => {
+  const { hooks, elements } = loadHarness();
+  elements.set("translation-package-actions", createElement("translation-package-actions"));
+  elements.set("btn-generate-translations", createElement("btn-generate-translations"));
+  hooks.state.readiness = {
+    current_source_fingerprint: "current-fingerprint",
+    translations: [
+      { lang: "lo", status: "passed" },
+      { lang: "zh", status: "passed" },
+      { lang: "en", status: "passed" },
+    ],
+  };
+  hooks.state.translations = [
+    { lang: "lo", source_fingerprint: "old-fingerprint", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "passed" },
+    { lang: "zh", source_fingerprint: "old-fingerprint", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "passed" },
+    { lang: "en", source_fingerprint: "old-fingerprint", translation_status: "ready", automatic_check_status: "passed", stale_flag: 0, translation_recheck_status: "passed" },
+  ];
+
+  hooks.renderTranslationSummary();
+  hooks.renderTranslationRecheckPanel();
+  hooks.renderTranslationReviewSummary();
+  hooks.applyActionGuards();
+
+  const summaryHtml = elements.get("translation-summary").innerHTML;
+  const recheckHtml = elements.get("translation-recheck-panel").innerHTML;
+  const finalHtml = elements.get("translation-review-summary").innerHTML;
+  assert.match(summaryHtml, /Package status/);
+  assert.match(summaryHtml, />stale</);
+  assert.match(summaryHtml, /Stale locales/);
+  assert.equal(elements.get("btn-generate-translations").textContent, "Regenerate translations");
+  assert.equal(elements.get("translation-package-actions").classList.contains("hidden"), false);
+  assert.match(recheckHtml, /Not ready:/);
+  assert.match(recheckHtml, /Stale/);
+  assert.doesNotMatch(recheckHtml, /Ready: all required locales passed translation recheck\./);
+  assert.match(finalHtml, /Final send/);
+  assert.match(finalHtml, /blocked/);
+  assert.equal(elements.get("btn-approve-sync").disabled, true);
+  assert.equal(elements.get("btn-send-main-site").disabled, true);
 });
 
 test("translation package button label resets from stale to missing state", () => {

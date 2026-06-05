@@ -9,6 +9,57 @@ test("workflow module exports rerunTranslationRecheck", () => {
   assert.equal(typeof workflow.rerunTranslationRecheck, "function");
 });
 
+test("buildSourceFingerprint stays the same when live content is identical but draft/review ids change", () => {
+  const base = {
+    content_item_id: 88,
+    draft_id: 1001,
+    review_report_id: 2001,
+    source_kind: "assignment_publishable_source",
+    source_lang: "th",
+    category: "cafes",
+    slug: "same-slug",
+    title: "Same title",
+    excerpt: "Same excerpt",
+    body: "Same body",
+    meta_title: "Same meta title",
+    meta_description: "Same meta description",
+  };
+  const changedIdsOnly = {
+    ...base,
+    draft_id: 1002,
+    review_report_id: 2002,
+  };
+
+  assert.equal(
+    workflow.buildSourceFingerprint(base),
+    workflow.buildSourceFingerprint(changedIdsOnly),
+  );
+});
+
+test("buildSourceFingerprint changes when live source content changes", () => {
+  const base = {
+    content_item_id: 89,
+    source_kind: "assignment_publishable_source",
+    source_lang: "th",
+    category: "cafes",
+    slug: "same-slug",
+    title: "Same title",
+    excerpt: "Same excerpt",
+    body: "Same body",
+    meta_title: "Same meta title",
+    meta_description: "Same meta description",
+  };
+  const changed = {
+    ...base,
+    body: "Changed body content",
+  };
+
+  assert.notEqual(
+    workflow.buildSourceFingerprint(base),
+    workflow.buildSourceFingerprint(changed),
+  );
+});
+
 function createRepo(itemId = 41) {
   const translations = new Map();
   return {
@@ -117,7 +168,7 @@ function createAiConfig() {
   };
 }
 
-test("rerunProblemTranslations runs semantic recheck only after technical QA passes", async () => {
+test("rerunProblemTranslations keeps regenerated rows at not_checked after technical QA passes", async () => {
   const repo = createRepo(41);
   const aiConfig = createAiConfig();
   const originalFetch = globalThis.fetch;
@@ -183,21 +234,22 @@ test("rerunProblemTranslations runs semantic recheck only after technical QA pas
 
   const rows = repo.listTranslations(41);
   const recheckCalls = calls.filter((entry) => entry.task === "translation_recheck");
-  assert.equal(recheckCalls.length, 2);
-  assert.equal(rows.find((row) => row.lang === "en")?.translation_recheck_status, "passed");
-  assert.equal(rows.find((row) => row.lang === "lo")?.translation_recheck_status, "passed");
+  assert.equal(recheckCalls.length, 0);
+  assert.equal(rows.find((row) => row.lang === "en")?.translation_recheck_status, "not_checked");
+  assert.equal(rows.find((row) => row.lang === "lo")?.translation_recheck_status, "not_checked");
   assert.equal(rows.find((row) => row.lang === "zh")?.translation_recheck_status, "not_checked");
 });
 
 test("rerunTranslationRecheck normalizes stored result fields for an eligible locale", async () => {
   const repo = createRepo(55);
   const aiConfig = createAiConfig();
+  const currentFingerprint = workflow.getCurrentTranslationSourceFingerprint(repo, 55);
   repo.upsertTranslation({
     source_content_item_id: 55,
     source_published_article_id: null,
     source_draft_id: 755,
     source_review_report_id: null,
-    source_fingerprint: "55:755:0",
+    source_fingerprint: currentFingerprint,
     lang: "en",
     translated_title: "title-en",
     translated_excerpt: "excerpt-en with enough text",
@@ -266,12 +318,13 @@ test("rerunTranslationRecheck normalizes stored result fields for an eligible lo
 
 test("rerunTranslationRecheck rejects locales that did not pass technical QA", async () => {
   const repo = createRepo(56);
+  const currentFingerprint = workflow.getCurrentTranslationSourceFingerprint(repo, 56);
   repo.upsertTranslation({
     source_content_item_id: 56,
     source_published_article_id: null,
     source_draft_id: 756,
     source_review_report_id: null,
-    source_fingerprint: "56:756:0",
+    source_fingerprint: currentFingerprint,
     lang: "en",
     translated_title: "title-en",
     translated_excerpt: "excerpt-en",
@@ -290,6 +343,39 @@ test("rerunTranslationRecheck rejects locales that did not pass technical QA", a
   await assert.rejects(
     () => rerunTranslationRecheck(repo, "admin@uboncity.local", {
       content_item_id: 56,
+      lang: "en",
+      aiConfig: createAiConfig(),
+    }),
+    /not eligible for recheck/i,
+  );
+});
+
+test("rerunTranslationRecheck rejects fingerprint-mismatched rows even when stale_flag is 0", async () => {
+  const repo = createRepo(57);
+  repo.upsertTranslation({
+    source_content_item_id: 57,
+    source_published_article_id: null,
+    source_draft_id: 757,
+    source_review_report_id: null,
+    source_fingerprint: "v2:old-fingerprint",
+    lang: "en",
+    translated_title: "title-en",
+    translated_excerpt: "excerpt-en",
+    translated_body: "body-en",
+    translated_meta_title: "meta-title-en",
+    translated_meta_description: "meta-description-en",
+    translation_status: "ready",
+    automatic_check_status: "passed",
+    automatic_check_report: { status: "passed", issues: [] },
+    translation_recheck_status: "passed",
+    stale_flag: 0,
+    translator_engine: "openai",
+    translator_model: "gpt-5.4-mini",
+  });
+
+  await assert.rejects(
+    () => rerunTranslationRecheck(repo, "admin@uboncity.local", {
+      content_item_id: 57,
       lang: "en",
       aiConfig: createAiConfig(),
     }),
