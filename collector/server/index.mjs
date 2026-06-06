@@ -3548,7 +3548,10 @@ function ensureArticleComposerEditAccess(req, res, item) {
 
 function ensureArticleProcessTransitionAccess(req, res, item, nextStatus) {
   const role = actorPolicyRole(req);
-  if (role === "owner" || role === "admin" || role === "user") {
+  if (role === "owner") {
+    return true;
+  }
+  if ((role === "admin" || role === "user") && canMutateItemByManagementLine(req.authUser, item)) {
     return true;
   }
   if (role !== "editor") {
@@ -3865,7 +3868,10 @@ function canManageArticleEditorialAssignments(req) {
 
 function canReadArticleProcess(req, item) {
   const role = actorPolicyRole(req);
-  if (role === "owner" || role === "admin" || role === "user") return true;
+  if (role === "owner") return true;
+  if (role === "admin" || role === "user") {
+    return hasItemBriefAccess(req, Number(item?.id || 0) || 0, role);
+  }
   if (role !== "editor") return false;
   return hasItemBriefAccess(req, Number(item?.id || 0) || 0, role);
 }
@@ -7645,7 +7651,7 @@ app.post("/api/items/bulk-merge", requireRole("admin", "owner"), (req, res) => {
   }
 });
 
-app.get("/api/items/:id", (req, res) => {
+app.get("/api/items/:id", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -8339,7 +8345,7 @@ app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "u
   }
 });
 
-app.get("/api/items/:id/workflow-model", (req, res) => {
+app.get("/api/items/:id/workflow-model", requireRole("owner", "admin", "editor", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -8348,6 +8354,9 @@ app.get("/api/items/:id/workflow-model", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
   const model = repo.ensureWorkflowModel(id);
@@ -8441,6 +8450,9 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
   }
   if (!canTransitionArticleProcessByRole(req, "ready_for_review")) {
     res.status(403).json({ error: "role นี้ไม่มีสิทธิ์ส่งบทความเข้าตรวจ" });
+    return;
+  }
+  if (!ensureArticleProcessTransitionAccess(req, res, item, "ready_for_review")) {
     return;
   }
 
@@ -8606,6 +8618,9 @@ app.get("/api/items/:id/transitions", requireRole("admin", "user"), (req, res) =
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
+    return;
+  }
   const limit = Number(req.query.limit || 100);
   const stateGroup = String(req.query.state_group || "").trim().toLowerCase();
   const actorFilter = String(req.query.actor_email || "").trim().toLowerCase();
@@ -8635,6 +8650,9 @@ app.get("/api/items/:id/audit-logs", requireRole("admin", "user"), (req, res) =>
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
+    return;
+  }
   const limit = Number(req.query.limit || 100);
   const action = String(req.query.action || "").trim().toLowerCase();
   const actionPrefix = String(req.query.action_prefix || "").trim().toLowerCase();
@@ -8647,7 +8665,7 @@ app.get("/api/items/:id/audit-logs", requireRole("admin", "user"), (req, res) =>
   res.json({ item_id: id, logs });
 });
 
-app.put("/api/items/:id/workflow-model", requireRole("admin", "user"), (req, res) => {
+app.put("/api/items/:id/workflow-model", requireRole("owner", "admin", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -8656,6 +8674,9 @@ app.put("/api/items/:id/workflow-model", requireRole("admin", "user"), (req, res
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   const actorRole = actorPolicyRole(req);
@@ -8721,7 +8742,7 @@ app.put("/api/items/:id/workflow-model", requireRole("admin", "user"), (req, res
   }
 });
 
-app.get("/api/items/:id/intelligence-model/latest", (req, res) => {
+app.get("/api/items/:id/intelligence-model/latest", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -8730,6 +8751,9 @@ app.get("/api/items/:id/intelligence-model/latest", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
   const model = repo.getLatestIntelligenceModelByItem(id);
@@ -8745,6 +8769,9 @@ app.post("/api/items/:id/intelligence-model", requireRole("admin"), (req, res) =
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   try {
@@ -8805,6 +8832,9 @@ app.post("/api/items/:id/recompute-readiness-brief", requireRole("admin", "user"
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemMutationAccess(req, res, item)) {
+    return;
+  }
   try {
     const snapshot = repo.recomputeReadinessBriefByItem(id, actorEmail(req));
     const readiness = snapshot?.readiness_json || {};
@@ -8842,6 +8872,9 @@ app.get("/api/items/:id/execution-controls/latest", requireRole("admin", "user")
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
+    return;
+  }
   try {
     const readiness = repo.getLatestReadinessBriefByItem(id);
     if (!readiness?.id) {
@@ -8864,6 +8897,9 @@ app.post("/api/items/:id/recompute-execution-controls", requireRole("admin", "us
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   try {
@@ -8894,6 +8930,9 @@ app.get("/api/items/:id/execution-channels", requireRole("admin", "user"), (req,
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
+    return;
+  }
   const channels = repo.listExecutionChannelsByItem(id);
   const latestByChannel = {};
   for (const channel of EXECUTION_CHANNELS) {
@@ -8914,6 +8953,9 @@ app.get("/api/items/:id/execution-readiness", requireRole("admin", "user"), (req
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
+    return;
+  }
   try {
     const summary = repo.evaluateExecutionReadinessByItem(id);
     const drift = repo.getWorkflowStateDriftByItem(id);
@@ -8932,6 +8974,9 @@ app.get("/api/items/:id/execution-readiness/:channel", requireRole("admin", "use
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
   const channel = String(req.params.channel || "").trim().toLowerCase();
@@ -8957,6 +9002,9 @@ app.post("/api/items/:id/execution-readiness/evaluate", requireRole("admin", "us
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   try {
@@ -9000,6 +9048,9 @@ app.get("/api/items/:id/governance-summary", requireRole("admin", "user"), (req,
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
+    return;
+  }
   try {
     const summary = repo.buildGovernanceSummaryByItem(id);
     const drift = repo.getWorkflowStateDriftByItem(id);
@@ -9018,6 +9069,9 @@ app.post("/api/items/:id/governance-summary/evaluate", requireRole("admin", "use
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   try {
@@ -9053,6 +9107,9 @@ app.get("/api/items/:id/execution-channels/:channel/latest", requireRole("admin"
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
+    return;
+  }
   const channel = String(req.params.channel || "").trim().toLowerCase();
   if (!EXECUTION_CHANNELS.has(channel)) {
     res.status(400).json({ error: "channel must be one of: facebook, tiktok" });
@@ -9078,6 +9135,9 @@ app.post("/api/items/:id/execution-channels", requireRole("admin", "user"), (req
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   try {
@@ -9114,6 +9174,9 @@ app.post("/api/items/:id/execution-channels/:channel/validate-latest", requireRo
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   const channel = String(req.params.channel || "").trim().toLowerCase();
@@ -9158,6 +9221,9 @@ app.post("/api/items/:id/execution-channels/:channel/generate", requireRole("adm
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   const channel = String(req.params.channel || "").trim().toLowerCase();
@@ -9415,12 +9481,11 @@ app.get("/api/items/:id/assignments", requireRole("owner", "admin", "user"), (re
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  const role = actorPolicyRole(req);
-  if (role === "editor" && !hasItemBriefAccess(req, id, role)) {
-    res.status(403).json({ error: "forbidden" });
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
-  const assignments = repo.listAssignmentsByItem(id);
+  const authUser = req.authUser || null;
+  const assignments = filterAssignmentsByManagementLine(authUser, repo.listAssignmentsByItem(id));
   res.json({ item_id: id, assignments });
 });
 
@@ -9433,6 +9498,9 @@ app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "a
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   if (!canManageArticleEditorialAssignments(req)) {
@@ -9579,9 +9647,16 @@ app.post("/api/items/:id/article-editorial-assignments/:assignmentId/request-rev
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemMutationAccess(req, res, item)) {
+    return;
+  }
   const assignment = repo.getAssignmentById(assignmentId);
   if (!assignment || Number(assignment.content_item_id || 0) !== id) {
     res.status(404).json({ error: "Editorial assignment not found for this item" });
+    return;
+  }
+  if (!canSeeAssignmentByManagementLine(req.authUser, assignment)) {
+    res.status(403).json({ error: "forbidden" });
     return;
   }
   if (String(assignment.assignment_kind || "").trim().toLowerCase() !== "editorial") {
@@ -9631,6 +9706,9 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   const currentFieldPack = repo.getCurrentFieldPackByItem(id);
@@ -11126,7 +11204,7 @@ app.get("/api/assignments/:id/history", requireRole("owner", "admin", "editor", 
 });
 
 
-app.get("/api/items/:id/search-enrichment", (req, res) => {
+app.get("/api/items/:id/search-enrichment", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -11136,6 +11214,9 @@ app.get("/api/items/:id/search-enrichment", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11154,6 +11235,9 @@ app.post("/api/items/:id/search-enrichment", requireRole("admin"), (req, res) =>
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
 
@@ -11178,6 +11262,9 @@ app.post("/api/items/:id/recompute-intelligence", requireRole("admin"), (req, re
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemMutationAccess(req, res, item)) {
+    return;
+  }
 
   try {
     const intelligence = repo.recomputePlaceIntelligence(id);
@@ -11199,7 +11286,7 @@ app.post("/api/items/:id/recompute-intelligence", requireRole("admin"), (req, re
   }
 });
 
-app.get("/api/items/:id/place-intelligence", (req, res) => {
+app.get("/api/items/:id/place-intelligence", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -11209,6 +11296,9 @@ app.get("/api/items/:id/place-intelligence", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11234,7 +11324,7 @@ app.get("/api/place-intelligence/top", (req, res) => {
   res.json({ limit, category: category || null, items });
 });
 
-app.get("/api/items/:id/social-signals", (req, res) => {
+app.get("/api/items/:id/social-signals", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -11244,6 +11334,9 @@ app.get("/api/items/:id/social-signals", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11263,6 +11356,9 @@ app.post("/api/items/:id/social-signals", requireRole("admin"), (req, res) => {
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemMutationAccess(req, res, item)) {
+    return;
+  }
 
   try {
     const signal = repo.addSocialSignalSource(id, req.body || {});
@@ -11273,7 +11369,7 @@ app.post("/api/items/:id/social-signals", requireRole("admin"), (req, res) => {
   }
 });
 
-app.get("/api/items/:id/momentum", (req, res) => {
+app.get("/api/items/:id/momentum", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -11283,6 +11379,9 @@ app.get("/api/items/:id/momentum", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11307,6 +11406,9 @@ app.post("/api/items/:id/momentum/recompute", requireRole("admin"), (req, res) =
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
 
@@ -11336,6 +11438,9 @@ app.post("/api/items/:id/recompute-content-direction", requireRole("admin"), (re
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemMutationAccess(req, res, item)) {
+    return;
+  }
 
   try {
     const report = repo.recomputeContentDirectionByItem(id);
@@ -11350,7 +11455,7 @@ app.post("/api/items/:id/recompute-content-direction", requireRole("admin"), (re
   }
 });
 
-app.get("/api/items/:id/content-direction", (req, res) => {
+app.get("/api/items/:id/content-direction", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -11360,6 +11465,9 @@ app.get("/api/items/:id/content-direction", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11389,7 +11497,7 @@ app.get("/api/content-direction/top", (req, res) => {
     res.status(400).json({ error: String(err?.message || "Cannot list content direction reports") });
   }
 });
-app.get("/api/items/:id/evidence-blocks", (req, res) => {
+app.get("/api/items/:id/evidence-blocks", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -11399,6 +11507,9 @@ app.get("/api/items/:id/evidence-blocks", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11730,7 +11841,7 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
   }
 });
 
-app.get("/api/items/:id/draft-input-preview", (req, res) => {
+app.get("/api/items/:id/draft-input-preview", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -11740,6 +11851,9 @@ app.get("/api/items/:id/draft-input-preview", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11765,7 +11879,7 @@ app.get("/api/items/:id/draft-input-preview", (req, res) => {
   }
 });
 
-app.get("/api/items/:id/media-candidates", (req, res) => {
+app.get("/api/items/:id/media-candidates", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -11775,6 +11889,9 @@ app.get("/api/items/:id/media-candidates", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11840,7 +11957,7 @@ app.get("/api/items/:id/media-candidates", (req, res) => {
 
   res.json({ item_id: id, collected, assets, direct });
 });
-app.get("/api/items/:id/image-workflow", (req, res) => {
+app.get("/api/items/:id/image-workflow", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -11850,6 +11967,9 @@ app.get("/api/items/:id/image-workflow", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11862,6 +11982,14 @@ app.get("/api/items/:id/assets/cleanup-eligibility", requireRole("admin", "owner
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11885,10 +12013,19 @@ app.get("/api/items/:id/assets/cleanup-eligibility", requireRole("admin", "owner
   }
 });
 
-app.get("/api/items/:id/export-readiness", (req, res) => {
+app.get("/api/items/:id/export-readiness", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11905,6 +12042,14 @@ app.post("/api/items/:id/recheck-export-readiness", requireRole("admin", "owner"
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11931,6 +12076,9 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
 
@@ -12133,6 +12281,9 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
       res.status(404).json({ error: "Item not found" });
       return;
     }
+    if (!ensureItemMutationAccess(req, res, item)) {
+      return;
+    }
     const readiness = buildExportReadiness(id);
     if (!readiness?.source_ready) {
       res.status(409).json({
@@ -12290,6 +12441,9 @@ app.post("/api/items/:id/recover-problem-translations", requireRole("admin", "ow
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemMutationAccess(req, res, item)) {
+    return;
+  }
 
   try {
     const aiConfig = getEffectiveAiConfig();
@@ -12313,6 +12467,9 @@ app.post("/api/items/:id/generate-translations", requireRole("admin", "owner"), 
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
 
@@ -12352,6 +12509,9 @@ app.post("/api/items/:id/translations/:lang/recheck", requireRole("admin", "owne
     res.status(404).json({ error: "Item not found" });
     return;
   }
+  if (!ensureItemMutationAccess(req, res, item)) {
+    return;
+  }
 
   try {
     const aiConfig = getEffectiveAiConfig();
@@ -12383,6 +12543,9 @@ app.post("/api/items/:id/translations/:lang/repair", requireRole("admin", "owner
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
 
@@ -12497,6 +12660,9 @@ app.delete("/api/items/:id", requireRole("admin", "owner"), (req, res) => {
   const current = repo.getItem(id);
   if (!current) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, current)) {
     return;
   }
   try {
@@ -13212,6 +13378,9 @@ app.post("/api/items/:id/unpublish", requireRole("admin", "owner"), (req, res) =
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   const workflowBefore = repo.ensureWorkflowModel(id);
