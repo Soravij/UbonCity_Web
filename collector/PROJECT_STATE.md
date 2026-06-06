@@ -11,6 +11,42 @@ Current completed main baseline:
 - Translation repair merged
 - AI policy rows merged
 - Frontweb homepage draft-fallback issue fixed
+- Assignment and item management-line scope enforcement merged
+
+## Recent Completed Work
+
+### 2026-06-06
+
+Branch / PR:
+- `fix/assignment-management-line-scope`
+- PR `#5`
+
+Status:
+- merged
+
+Summary:
+- tightened assignment scope
+- tightened item context read routes
+- tightened item mutation and recompute routes
+- tightened workflow and article-process routes
+- tightened claim, takeover, and delete
+- added static regression coverage for management-line scope guards
+
+Checks and tests:
+- `node --check collector/server/index.mjs` passed
+- `node --check collector/db/repository.mjs` passed
+- `node --check collector/server/public/app.js` passed
+- `collector/tests/assignment-ui-scope.test.mjs` still has legacy failures unrelated to this patch
+- new management-line scope assertions pass
+
+Follow-up:
+- clean up legacy `collector/tests/assignment-ui-scope.test.mjs` failures separately
+- run manual UAT with `owner` / `admin` / `user` / `editor` / `freelance` accounts
+- verify `admin` cannot see owner or out-of-branch assignments
+- verify `admin` cannot direct-hit item context outside subtree
+- verify `admin` cannot claim, takeover, delete, recompute, or generate on out-of-branch item
+- verify `user` cannot assign upward or across branch
+- verify `owner` remains global
 
 ---
 
