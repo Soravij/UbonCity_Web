@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import * as workflow from "../services/workflow.mjs";
+import { listAiFeatureCatalog, resolveAiConfig } from "../config/ai.mjs";
 
 const { rerunProblemTranslations, rerunTranslationRecheck, repairTranslationFromRecheckIssues } = workflow;
 
@@ -190,9 +191,35 @@ function createAiConfig() {
     features: {
       translation: { provider: "openai", model: "gpt-5.4-mini", backendApiBase: "https://backend.example/api", backendSyncToken: "sync-token" },
       translationRecheck: { provider: "openai", model: "gpt-5.4-mini", backendApiBase: "https://backend.example/api", backendSyncToken: "sync-token" },
+      translationRepair: { provider: "openai", model: "gpt-5.4-mini", backendApiBase: "https://backend.example/api", backendSyncToken: "sync-token" },
     },
   };
 }
+
+test("listAiFeatureCatalog includes translationRepair and seoAgent in workflow order", () => {
+  const rows = listAiFeatureCatalog().map((row) => row.key);
+  assert.deepEqual(rows, [
+    "fieldPack",
+    "translation",
+    "translationRecheck",
+    "translationRepair",
+    "visualContext",
+    "articleGenerator",
+    "seoAgent",
+  ]);
+});
+
+test("resolveAiConfig returns translationRepair and seoAgent defaults", () => {
+  const aiConfig = resolveAiConfig();
+  assert.equal(aiConfig.translationRepairProvider, "google");
+  assert.equal(aiConfig.translationRepairModel, "gemini-2.5-flash");
+  assert.equal(aiConfig.features.translationRepair?.policyKey, "gemini-2.5-flash");
+  assert.equal(aiConfig.features.translationRepair?.model, "gemini-2.5-flash");
+  assert.equal(aiConfig.seoAgentProvider, "google");
+  assert.equal(aiConfig.seoAgentModel, "gemini-2.5-flash-lite");
+  assert.equal(aiConfig.features.seoAgent?.policyKey, "gemini-2.5-flash-lite");
+  assert.equal(aiConfig.features.seoAgent?.model, "gemini-2.5-flash-lite");
+});
 
 test("rerunProblemTranslations keeps regenerated rows at not_checked after technical QA passes", async () => {
   const repo = createRepo(41);
@@ -472,7 +499,14 @@ test("repairTranslationFromRecheckIssues rejects when no repairable recheck issu
 
 test("repairTranslationFromRecheckIssues updates translated fields and resets recheck to not_checked", async () => {
   const repo = createRepo(60);
-  const aiConfig = createAiConfig();
+  const aiConfig = {
+    ...createAiConfig(),
+    features: {
+      ...createAiConfig().features,
+      translation: { provider: "openai", model: "gpt-5.4-mini", backendApiBase: "https://backend.example/api", backendSyncToken: "sync-token" },
+      translationRepair: { provider: "google", model: "gemini-2.5-flash", backendApiBase: "https://backend.example/api", backendSyncToken: "sync-token" },
+    },
+  };
   const currentFingerprint = workflow.getCurrentTranslationSourceFingerprint(repo, 60);
   repo.upsertTranslation({
     source_content_item_id: 60,
@@ -506,9 +540,10 @@ test("repairTranslationFromRecheckIssues updates translated fields and resets re
   globalThis.fetch = async (_url, options = {}) => {
     const body = JSON.parse(String(options.body || "{}"));
     assert.equal(body.task, "translation_repair");
+    assert.equal(body.model, "gemini-2.5-flash");
     return Response.json({
-      provider: "openai",
-      model: "gpt-5.4-mini",
+      provider: "google",
+      model: "gemini-2.5-flash",
       output_text: JSON.stringify({
         translated_title: "new repaired title",
         translated_excerpt: "new repaired excerpt with enough text",
