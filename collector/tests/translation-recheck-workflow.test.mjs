@@ -3,10 +3,14 @@ import assert from "node:assert/strict";
 
 import * as workflow from "../services/workflow.mjs";
 
-const { rerunProblemTranslations, rerunTranslationRecheck } = workflow;
+const { rerunProblemTranslations, rerunTranslationRecheck, repairTranslationFromRecheckIssues } = workflow;
 
 test("workflow module exports rerunTranslationRecheck", () => {
   assert.equal(typeof workflow.rerunTranslationRecheck, "function");
+});
+
+test("workflow module exports repairTranslationFromRecheckIssues", () => {
+  assert.equal(typeof workflow.repairTranslationFromRecheckIssues, "function");
 });
 
 test("buildSourceFingerprint stays the same when live content is identical but draft/review ids change", () => {
@@ -143,6 +147,28 @@ function createRepo(itemId = 41) {
         lang,
         source_content_item_id: contentItemId,
         recheck_issues: Array.isArray(payload.recheck_issues) ? payload.recheck_issues : [],
+      };
+      translations.set(key, next);
+      return next;
+    },
+    updateTranslationRepairResult(contentItemId, lang, payload = {}) {
+      const key = `${contentItemId}:${lang}`;
+      const existing = translations.get(key) || {};
+      const next = {
+        ...existing,
+        ...payload,
+        lang,
+        source_content_item_id: contentItemId,
+        translation_recheck_status: "not_checked",
+        translation_recheck_score: null,
+        accuracy_score: null,
+        fluency_score: null,
+        term_score: null,
+        back_translation_th: null,
+        recheck_summary_th: null,
+        recheck_issues: [],
+        recheck_model: null,
+        rechecked_at: null,
       };
       translations.set(key, next);
       return next;
@@ -381,4 +407,129 @@ test("rerunTranslationRecheck rejects fingerprint-mismatched rows even when stal
     }),
     /not eligible for recheck/i,
   );
+});
+
+test("repairTranslationFromRecheckIssues rejects stale fingerprint mismatch", async () => {
+  const repo = createRepo(58);
+  repo.upsertTranslation({
+    source_content_item_id: 58,
+    source_published_article_id: null,
+    source_draft_id: 758,
+    source_review_report_id: null,
+    source_fingerprint: "v2:old-fingerprint",
+    lang: "en",
+    translated_title: "title-en",
+    translated_excerpt: "excerpt-en",
+    translated_body: "body-en",
+    translated_meta_title: "meta-title-en",
+    translated_meta_description: "meta-description-en",
+    translation_status: "ready",
+    automatic_check_status: "passed",
+    automatic_check_report: { status: "passed", issues: [] },
+    translation_recheck_status: "warning",
+    recheck_summary_th: "term issue",
+    recheck_issues: [{ type: "term", severity: "medium", problem_th: "term mismatch", suggestion_th: "fix term" }],
+    stale_flag: 0,
+    repair_attempt_count: 0,
+  });
+
+  await assert.rejects(
+    () => repairTranslationFromRecheckIssues(repo, 58, "en", createAiConfig(), "admin@uboncity.local"),
+    /not eligible for repair/i,
+  );
+});
+
+test("repairTranslationFromRecheckIssues rejects when no repairable recheck issues exist", async () => {
+  const repo = createRepo(59);
+  const currentFingerprint = workflow.getCurrentTranslationSourceFingerprint(repo, 59);
+  repo.upsertTranslation({
+    source_content_item_id: 59,
+    source_published_article_id: null,
+    source_draft_id: 759,
+    source_review_report_id: null,
+    source_fingerprint: currentFingerprint,
+    lang: "en",
+    translated_title: "title-en",
+    translated_excerpt: "excerpt-en",
+    translated_body: "body-en",
+    translated_meta_title: "meta-title-en",
+    translated_meta_description: "meta-description-en",
+    translation_status: "ready",
+    automatic_check_status: "passed",
+    automatic_check_report: { status: "passed", issues: [] },
+    translation_recheck_status: "warning",
+    recheck_summary_th: "",
+    recheck_issues: [],
+    stale_flag: 0,
+    repair_attempt_count: 0,
+  });
+
+  await assert.rejects(
+    () => repairTranslationFromRecheckIssues(repo, 59, "en", createAiConfig(), "admin@uboncity.local"),
+    /does not have repairable recheck issues/i,
+  );
+});
+
+test("repairTranslationFromRecheckIssues updates translated fields and resets recheck to not_checked", async () => {
+  const repo = createRepo(60);
+  const aiConfig = createAiConfig();
+  const currentFingerprint = workflow.getCurrentTranslationSourceFingerprint(repo, 60);
+  repo.upsertTranslation({
+    source_content_item_id: 60,
+    source_published_article_id: null,
+    source_draft_id: 760,
+    source_review_report_id: null,
+    source_fingerprint: currentFingerprint,
+    lang: "en",
+    translated_title: "old title",
+    translated_excerpt: "old excerpt with enough text",
+    translated_body: "old body with enough text for technical QA to pass before repair.",
+    translated_meta_title: "old meta title",
+    translated_meta_description: "old meta description with enough text",
+    translation_status: "ready",
+    automatic_check_status: "passed",
+    automatic_check_report: { status: "passed", issues: [] },
+    translation_recheck_status: "warning",
+    translation_recheck_score: 7.1,
+    accuracy_score: 7,
+    fluency_score: 7.2,
+    term_score: 7.1,
+    back_translation_th: "back translation",
+    recheck_summary_th: "fix term consistency",
+    recheck_issues: [{ type: "term", severity: "medium", problem_th: "term mismatch", suggestion_th: "use full place name" }],
+    rechecked_at: "2026-06-05T08:00:00.000Z",
+    repair_attempt_count: 1,
+    stale_flag: 0,
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options = {}) => {
+    const body = JSON.parse(String(options.body || "{}"));
+    assert.equal(body.task, "translation_repair");
+    return Response.json({
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      output_text: JSON.stringify({
+        translated_title: "new repaired title",
+        translated_excerpt: "new repaired excerpt with enough text",
+        translated_body: "new repaired body with enough text for technical QA to pass cleanly after repair.",
+        translated_meta_title: "new repaired meta title",
+        translated_meta_description: "new repaired meta description with enough text",
+      }),
+    });
+  };
+
+  try {
+    const saved = await repairTranslationFromRecheckIssues(repo, 60, "en", aiConfig, "admin@uboncity.local");
+    assert.equal(saved.translated_title, "new repaired title");
+    assert.equal(saved.translation_status, "ready");
+    assert.equal(saved.automatic_check_status, "passed");
+    assert.equal(saved.translation_recheck_status, "not_checked");
+    assert.equal(saved.translation_recheck_score, null);
+    assert.equal(saved.recheck_summary_th, null);
+    assert.deepEqual(saved.recheck_issues, []);
+    assert.equal(saved.repair_attempt_count, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

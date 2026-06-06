@@ -1049,6 +1049,65 @@ function buildTranslationRecheckPrompt(article, translationRow) {
   ].join("\n");
 }
 
+function normalizeTranslationRepairPayload(raw) {
+  const parsed = raw && typeof raw === "object" ? raw : parseTranslationRecheckJson(raw);
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("translation repair returned invalid JSON payload");
+  }
+  const normalized = {
+    translated_title: String(parsed.translated_title || "").trim(),
+    translated_excerpt: String(parsed.translated_excerpt || "").trim(),
+    translated_body: String(parsed.translated_body || "").trim(),
+    translated_meta_title: String(parsed.translated_meta_title || "").trim(),
+    translated_meta_description: String(parsed.translated_meta_description || "").trim(),
+  };
+  for (const [key, value] of Object.entries(normalized)) {
+    if (!value) {
+      throw new Error(`translation repair missing required field: ${key}`);
+    }
+  }
+  return normalized;
+}
+
+function buildTranslationRepairPrompt(article, translationRow) {
+  return [
+    "You are a Translation Repair Agent for UbonCity collector.",
+    "Repair only translation quality issues identified by Translation Recheck.",
+    "Do not invent facts, do not add SEO content, and do not rewrite source meaning beyond fixing the reported issues.",
+    "Preserve HTML tags, attributes, URLs, image src values, brand names, and place names unless a reported issue explicitly requires a translation correction.",
+    "Return ONLY valid JSON with this exact shape:",
+    JSON.stringify({
+      translated_title: "",
+      translated_excerpt: "",
+      translated_body: "",
+      translated_meta_title: "",
+      translated_meta_description: "",
+    }, null, 2),
+    "Source article (Thai):",
+    JSON.stringify(sourceToTranslationInput(article), null, 2),
+    `Target locale: ${String(translationRow?.lang || "").trim().toLowerCase() || "-"}`,
+    "Current translated article:",
+    JSON.stringify({
+      translated_title: translationRow?.translated_title || "",
+      translated_excerpt: translationRow?.translated_excerpt || "",
+      translated_body: translationRow?.translated_body || "",
+      translated_meta_title: translationRow?.translated_meta_title || "",
+      translated_meta_description: translationRow?.translated_meta_description || "",
+    }, null, 2),
+    "Translation recheck summary (Thai):",
+    String(translationRow?.recheck_summary_th || "").trim() || "-",
+    "Translation recheck scores:",
+    JSON.stringify({
+      translation_recheck_score: translationRow?.translation_recheck_score ?? null,
+      accuracy_score: translationRow?.accuracy_score ?? null,
+      fluency_score: translationRow?.fluency_score ?? null,
+      term_score: translationRow?.term_score ?? null,
+    }, null, 2),
+    "Translation recheck issues:",
+    JSON.stringify(Array.isArray(translationRow?.recheck_issues) ? translationRow.recheck_issues : [], null, 2),
+  ].join("\n");
+}
+
 async function runSemanticTranslationRecheck(aiConfig, article, translationRow) {
   const recheckFeatureConfig = aiConfig?.features?.translationRecheck
     || aiConfig?.features?.translation
@@ -1555,6 +1614,108 @@ export async function rerunTranslationRecheck(repo, actorEmail, options = {}) {
     locales: results,
     completed_count: results.length,
   };
+}
+
+export async function repairTranslationFromRecheckIssues(repo, contentItemId, lang, aiConfig, actorEmail = "system@local") {
+  const normalizedContentItemId = Number(contentItemId || 0) || 0;
+  const normalizedLang = String(lang || "").trim().toLowerCase();
+  if (!normalizedContentItemId || !normalizedLang) {
+    throw new Error("content_item_id and lang are required");
+  }
+
+  const article = buildTranslationSourceForItem(repo, normalizedContentItemId);
+  const currentSourceFingerprint = buildSourceFingerprint(article);
+  const translationRow = repo.getTranslation(normalizedContentItemId, normalizedLang);
+  if (!translationRow) {
+    throw new Error("translation locale not found");
+  }
+  if (isTranslationRowStale(translationRow, currentSourceFingerprint)) {
+    throw new Error("translation locale is not eligible for repair");
+  }
+  if (String(translationRow?.translation_status || "").trim().toLowerCase() !== "ready") {
+    throw new Error("translation locale is not eligible for repair");
+  }
+  if (String(translationRow?.automatic_check_status || "").trim().toLowerCase() !== "passed") {
+    throw new Error("translation locale is not eligible for repair");
+  }
+  const recheckStatus = String(translationRow?.translation_recheck_status || "").trim().toLowerCase();
+  if (!["warning", "failed"].includes(recheckStatus)) {
+    throw new Error("translation locale does not have repairable recheck issues");
+  }
+  const recheckIssues = Array.isArray(translationRow?.recheck_issues) ? translationRow.recheck_issues : [];
+  if (!recheckIssues.length) {
+    throw new Error("translation locale does not have repairable recheck issues");
+  }
+
+  const repairFeatureConfig = aiConfig?.features?.translationRepair
+    || aiConfig?.features?.translation
+    || aiConfig
+    || {};
+  if (!aiConfig || !aiConfig.enabled || !isBackendAiConfigured(repairFeatureConfig)) {
+    throw new Error("backend AI proxy is not configured for translation repair");
+  }
+
+  const provider = String(
+    repairFeatureConfig?.provider
+    || aiConfig?.translationRepairProvider
+    || aiConfig?.translationProvider
+    || aiConfig?.provider
+    || ""
+  ).trim().toLowerCase();
+  const model = String(
+    repairFeatureConfig?.model
+    || aiConfig?.translationRepairModel
+    || aiConfig?.translationModel
+    || aiConfig?.model
+    || ""
+  ).trim();
+
+  const result = await executeBackendAiJson({
+    aiConfig: {
+      ...aiConfig,
+      features: {
+        ...(aiConfig?.features || {}),
+        translationRepair: {
+          ...(repairFeatureConfig || {}),
+        },
+      },
+    },
+    featureKey: "translationRepair",
+    task: "translation_repair",
+    prompt: buildTranslationRepairPrompt(article, translationRow),
+  });
+  const repaired = normalizeTranslationRepairPayload(result?.parsed || result?.outputText);
+  const check = runAutomaticTranslationChecks({
+    target_lang: normalizedLang,
+    source_fingerprint: currentSourceFingerprint,
+    expected_source_fingerprint: currentSourceFingerprint,
+    translated_title: repaired.translated_title,
+    translated_excerpt: repaired.translated_excerpt,
+    translated_body: repaired.translated_body,
+    translated_meta_title: repaired.translated_meta_title,
+    translated_meta_description: repaired.translated_meta_description,
+  });
+
+  const saved = repo.updateTranslationRepairResult(normalizedContentItemId, normalizedLang, {
+    source_fingerprint: currentSourceFingerprint,
+    ...repaired,
+    translation_status: check.status === "passed" ? "ready" : "check_failed",
+    automatic_check_status: check.status,
+    automatic_check_report: check,
+    repair_attempt_count: (Number(translationRow?.repair_attempt_count || 0) || 0) + 1,
+  });
+
+  if (typeof repo.logAudit === "function") {
+    repo.logAudit(actorEmail, "translation.repair_from_recheck", "content_item", String(normalizedContentItemId), {
+      content_item_id: normalizedContentItemId,
+      lang: normalizedLang,
+      repair_attempt_count: saved?.repair_attempt_count || 0,
+      automatic_check_status: saved?.automatic_check_status || null,
+      repair_model: [provider, model].filter(Boolean).join(":") || null,
+    });
+  }
+
+  return saved;
 }
 
 export async function runCleanStage(repo, actorEmail) {

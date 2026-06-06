@@ -3339,6 +3339,33 @@ export function createRepository(db) {
     WHERE source_content_item_id=? AND lang=?
   `);
 
+  const updateTranslationRepairResultStmt = db.prepare(`
+    UPDATE content_translations
+    SET source_fingerprint=?,
+        translated_title=?,
+        translated_excerpt=?,
+        translated_body=?,
+        translated_meta_title=?,
+        translated_meta_description=?,
+        translation_status=?,
+        automatic_check_status=?,
+        automatic_check_report_json=?,
+        translation_recheck_status='not_checked',
+        translation_recheck_score=NULL,
+        accuracy_score=NULL,
+        fluency_score=NULL,
+        term_score=NULL,
+        back_translation_th=NULL,
+        recheck_summary_th=NULL,
+        recheck_issues_json=NULL,
+        recheck_model=NULL,
+        rechecked_at=NULL,
+        repair_attempt_count=?,
+        stale_flag=0,
+        updated_at=CURRENT_TIMESTAMP
+    WHERE source_content_item_id=? AND lang=?
+  `);
+
   const insertTranslationRunStmt = db.prepare(`
     INSERT INTO translation_runs (run_uid, stage, status, input_count, output_count, failed_count, message)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -9136,6 +9163,32 @@ function normalizeStateValue(value, stateGroup) {
     return getTranslation(normalizedContentItemId, normalizedLang);
   }
 
+  function updateTranslationRepairResult(sourceContentItemId, lang, payload = {}) {
+    const normalizedContentItemId = Number(sourceContentItemId || 0) || 0;
+    const normalizedLang = String(lang || "").trim().toLowerCase();
+    if (!normalizedContentItemId || !normalizedLang) {
+      throw new Error("source_content_item_id and lang are required");
+    }
+    const result = updateTranslationRepairResultStmt.run(
+      String(payload.source_fingerprint || "").trim() || null,
+      String(payload.translated_title || "").trim() || null,
+      String(payload.translated_excerpt || "").trim() || null,
+      String(payload.translated_body || "").trim() || null,
+      String(payload.translated_meta_title || "").trim() || null,
+      String(payload.translated_meta_description || "").trim() || null,
+      String(payload.translation_status || "pending").trim().toLowerCase() || "pending",
+      String(payload.automatic_check_status || "pending").trim().toLowerCase() || "pending",
+      payload.automatic_check_report ? JSON.stringify(payload.automatic_check_report) : null,
+      Number(payload.repair_attempt_count || 0) || 0,
+      normalizedContentItemId,
+      normalizedLang,
+    );
+    if (Number(result?.changes || 0) < 1) {
+      throw new Error("translation locale not found");
+    }
+    return getTranslation(normalizedContentItemId, normalizedLang);
+  }
+
   function startTranslationRun(stage = "final-prefrontend", inputCount = 0, message = "Translation started") {
     const runUid = randomUUID();
     insertTranslationRunStmt.run(runUid, stage, "running", Number(inputCount || 0), 0, 0, message);
@@ -10636,6 +10689,7 @@ function normalizeStateValue(value, stateGroup) {
     listTranslations,
     markStaleTranslations,
     updateTranslationRecheck,
+    updateTranslationRepairResult,
     startTranslationRun,
     finishTranslationRun,
     listTranslationRuns,

@@ -84,6 +84,7 @@ globalThis.__articleSubmitTestHooks = {
   refreshTranslations,
   loadCurrentReadiness,
   generateTranslations,
+  runTranslationRepair,
   renderTranslationSummary,
   renderTranslationRecheckPanel,
   renderTranslationReviewSummary,
@@ -319,7 +320,7 @@ test("translation recheck locale cards show status-specific default actions and 
   assert.match(html, /data-translation-recheck-lang="en"/);
   assert.match(html, /<strong>Score:<\/strong> 8.4\/10/);
   assert.match(html, /<button type="button" class="utility-action" data-translation-recheck-lang="zh"[^>]*>Recheck again<\/button>/);
-  assert.match(html, /<button type="button" class="utility-action" disabled>Repair<\/button>/);
+  assert.match(html, /<button type="button" class="utility-action" data-translation-repair-lang="zh"[^>]*>Repair translation<\/button>/);
   assert.match(html, /<button type="button" class="utility-action" disabled>Regenerate<\/button>/);
   assert.match(html, /Back translation/);
   assert.match(html, /แปลกลับไทยของ zh/);
@@ -328,6 +329,57 @@ test("translation recheck locale cards show status-specific default actions and 
   assert.doesNotMatch(html, /Technical details and future actions/);
   assert.doesNotMatch(html, /View back translation/);
   assert.doesNotMatch(html, /View issues/);
+});
+
+test("warning or failed row with recheck issues shows enabled Repair translation button", () => {
+  const { hooks, elements } = loadHarness();
+  hooks.state.readiness = {
+    current_source_fingerprint: "current-fingerprint",
+    translations: [{ lang: "en", status: "passed" }],
+  };
+  hooks.state.translations = [
+    {
+      lang: "en",
+      source_fingerprint: "current-fingerprint",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      translation_recheck_status: "warning",
+      recheck_issues: [{ problem_th: "term mismatch" }],
+    },
+  ];
+
+  hooks.renderTranslationRecheckPanel();
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.match(html, /data-translation-repair-lang="en"(?![^>]*disabled)/);
+  assert.match(html, /Repair translation/);
+});
+
+test("stale row does not show enabled Repair translation button", () => {
+  const { hooks, elements } = loadHarness();
+  hooks.state.readiness = {
+    current_source_fingerprint: "current-fingerprint",
+    translations: [{ lang: "en", status: "stale" }],
+  };
+  hooks.state.translations = [
+    {
+      lang: "en",
+      source_fingerprint: "old-fingerprint",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 1,
+      translation_recheck_status: "warning",
+      recheck_issues: [{ problem_th: "term mismatch" }],
+    },
+  ];
+
+  hooks.renderTranslationRecheckPanel();
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.doesNotMatch(html, /data-translation-repair-lang="en"(?![^>]*disabled)/);
+  assert.match(html, /Regenerate/);
+  assert.match(html, /Translation is stale/);
 });
 
 test("translation recheck blocks approve and sync actions until all required locales pass", () => {
@@ -1236,6 +1288,257 @@ test("generate translations reloads live readiness and enables eligible recheck 
   assert.match(recheckHtml, /data-translation-recheck-lang="en"(?![^>]*disabled)/);
   assert.match(finalHtml, /blocked/);
   assert.equal(elements.get("btn-send-main-site").disabled, true);
+});
+
+test("after repair, Recheck becomes enabled and Final Send remains blocked", async () => {
+  const apiCalls = [];
+  let harnessHooks = null;
+  let currentTranslations = [
+    {
+      lang: "en",
+      source_fingerprint: "current-fingerprint",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      translation_recheck_status: "warning",
+      recheck_issues: [{ problem_th: "term mismatch" }],
+    },
+  ];
+  const { hooks, elements } = loadHarness({
+    api: async (url) => {
+      apiCalls.push(url);
+      if (url === "/api/items/48/translations/en/repair") {
+        currentTranslations = [
+          {
+            lang: "en",
+            source_fingerprint: "current-fingerprint",
+            translation_status: "ready",
+            automatic_check_status: "passed",
+            stale_flag: 0,
+            translation_recheck_status: "not_checked",
+            recheck_issues: [],
+          },
+        ];
+        return {
+          translation: currentTranslations[0],
+          translations: currentTranslations,
+          readiness: {
+            current_source_fingerprint: "current-fingerprint",
+            translations: [{ lang: "en", status: "passed" }],
+          },
+        };
+      }
+      if (url === "/api/items/48/export-readiness") {
+        return {
+          current_source_fingerprint: "current-fingerprint",
+          translations: [{ lang: "en", status: "passed" }],
+        };
+      }
+      return {};
+    },
+    loadTranslations: async () => {
+      harnessHooks.state.translations = currentTranslations;
+      return currentTranslations;
+    },
+  });
+  harnessHooks = hooks;
+  hooks.state.readiness = {
+    current_source_fingerprint: "current-fingerprint",
+    translations: [{ lang: "en", status: "passed" }],
+  };
+  hooks.state.translations = currentTranslations;
+
+  await hooks.runTranslationRepair("en");
+
+  const recheckHtml = elements.get("translation-recheck-panel").innerHTML;
+  const finalHtml = elements.get("translation-review-summary").innerHTML;
+  assert.deepEqual(apiCalls, [
+    "/api/items/48/translations/en/repair",
+    "/api/items/48/export-readiness",
+  ]);
+  assert.equal(hooks.state.translations[0]?.translation_recheck_status, "not_checked");
+  assert.match(recheckHtml, /data-translation-recheck-lang="en"(?![^>]*disabled)/);
+  assert.match(finalHtml, /blocked/);
+  assert.equal(elements.get("btn-send-main-site").disabled, true);
+});
+
+test("requested EN but repair response translation.lang = LO is rejected", async () => {
+  const { hooks, inlineStatuses } = loadHarness({
+    api: async (url) => {
+      if (url === "/api/items/48/translations/en/repair") {
+        return {
+          translation: {
+            lang: "lo",
+            translation_recheck_status: "not_checked",
+          },
+          readiness: {
+            current_source_fingerprint: "current-fingerprint",
+            translations: [{ lang: "en", status: "passed" }],
+          },
+        };
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+  });
+  hooks.state.readiness = {
+    current_source_fingerprint: "current-fingerprint",
+    translations: [{ lang: "en", status: "passed" }],
+  };
+  hooks.state.translations = [
+    {
+      lang: "en",
+      source_fingerprint: "current-fingerprint",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      translation_recheck_status: "warning",
+      recheck_issues: [{ problem_th: "term mismatch" }],
+    },
+  ];
+
+  await hooks.runTranslationRepair("en");
+
+  assert.equal(hooks.state.translations[0]?.lang, "en");
+  assert.equal(hooks.state.translations[0]?.translation_recheck_status, "warning");
+  assert.equal(hooks.state.readiness?.translations?.[0]?.status, "passed");
+  assert.match(String(inlineStatuses.at(-1)?.message || ""), /different locale than requested/i);
+});
+
+test("requested EN but repair response missing translation.lang and no unambiguous locale is rejected", async () => {
+  const { hooks, inlineStatuses } = loadHarness({
+    api: async (url) => {
+      if (url === "/api/items/48/translations/en/repair") {
+        return {
+          translation: {
+            translation_recheck_status: "not_checked",
+          },
+        };
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+  });
+  hooks.state.readiness = {
+    current_source_fingerprint: "current-fingerprint",
+    translations: [{ lang: "en", status: "passed" }],
+  };
+  hooks.state.translations = [
+    {
+      lang: "en",
+      source_fingerprint: "current-fingerprint",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      translation_recheck_status: "warning",
+      recheck_issues: [{ problem_th: "term mismatch" }],
+    },
+  ];
+
+  await hooks.runTranslationRepair("en");
+
+  assert.equal(hooks.state.translations[0]?.translation_recheck_status, "warning");
+  assert.match(String(inlineStatuses.at(-1)?.message || ""), /did not include the requested locale|different locale than requested/i);
+});
+
+test("requested EN but repair result.translations does not include requested locale is rejected", async () => {
+  const { hooks, inlineStatuses } = loadHarness({
+    api: async (url) => {
+      if (url === "/api/items/48/translations/en/repair") {
+        return {
+          translations: [
+            {
+              lang: "lo",
+              translation_recheck_status: "not_checked",
+            },
+          ],
+        };
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+  });
+  hooks.state.readiness = {
+    current_source_fingerprint: "current-fingerprint",
+    translations: [{ lang: "en", status: "passed" }],
+  };
+  hooks.state.translations = [
+    {
+      lang: "en",
+      source_fingerprint: "current-fingerprint",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      translation_recheck_status: "warning",
+      recheck_issues: [{ problem_th: "term mismatch" }],
+    },
+  ];
+
+  await hooks.runTranslationRepair("en");
+
+  assert.equal(hooks.state.translations[0]?.translation_recheck_status, "warning");
+  assert.match(String(inlineStatuses.at(-1)?.message || ""), /different locale than requested/i);
+});
+
+test("repair action immediately applies result and reports refresh pending when refreshTranslations fails", async () => {
+  let refreshCalls = 0;
+  const { hooks, elements, inlineStatuses } = loadHarness({
+    api: async (url) => {
+      if (url === "/api/items/48/translations/en/repair") {
+        return {
+          translation: {
+            lang: "en",
+            source_fingerprint: "current-fingerprint",
+            translation_status: "ready",
+            automatic_check_status: "passed",
+            stale_flag: 0,
+            translation_recheck_status: "not_checked",
+            recheck_issues: [],
+          },
+          readiness: {
+            current_source_fingerprint: "current-fingerprint",
+            translations: [{ lang: "en", status: "passed" }],
+          },
+        };
+      }
+      if (url === "/api/items/48/export-readiness") {
+        return {
+          current_source_fingerprint: "current-fingerprint",
+          translations: [{ lang: "en", status: "passed" }],
+        };
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    },
+    loadTranslations: async () => {
+      refreshCalls += 1;
+      throw new Error("refresh failed");
+    },
+  });
+  hooks.state.readiness = {
+    current_source_fingerprint: "current-fingerprint",
+    translations: [{ lang: "en", status: "passed" }],
+  };
+  hooks.state.translations = [
+    {
+      lang: "en",
+      source_fingerprint: "current-fingerprint",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 0,
+      translation_recheck_status: "warning",
+      recheck_issues: [{ problem_th: "term mismatch" }],
+    },
+  ];
+
+  await hooks.runTranslationRepair("en");
+
+  const recheckHtml = elements.get("translation-recheck-panel").innerHTML;
+  const finalHtml = elements.get("translation-review-summary").innerHTML;
+  assert.equal(refreshCalls, 1);
+  assert.equal(hooks.state.translations[0]?.translation_recheck_status, "not_checked");
+  assert.match(recheckHtml, /data-translation-recheck-lang="en"(?![^>]*disabled)/);
+  assert.match(finalHtml, /blocked/);
+  assert.equal(elements.get("btn-send-main-site").disabled, true);
+  assert.equal(hooks.state.busy, false);
+  assert.equal(String(hooks.state.translationRepairBusyLang || ""), "");
+  assert.match(String(inlineStatuses.at(-1)?.message || ""), /repair updated.*refresh pending/i);
 });
 
 test("translation package button label resets from stale to missing state", () => {
