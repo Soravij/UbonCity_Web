@@ -237,6 +237,10 @@ function currentSourceFingerprint() {
   return String(state.readiness?.current_source_fingerprint || "").trim();
 }
 
+function hasLiveReadiness() {
+  return Boolean(state.readiness && Array.isArray(state.readiness.translations));
+}
+
 function hasSourceFingerprintMismatch(row, expectedFingerprint = currentSourceFingerprint()) {
   const currentFingerprint = String(expectedFingerprint || "").trim();
   if (!currentFingerprint) return false;
@@ -383,6 +387,16 @@ function buildTranslationRecheckRows() {
 function getTranslationRecheckGateState() {
   const rows = buildTranslationRecheckRows();
   const counts = translationRecheckStatusCounts(rows);
+  if (!hasLiveReadiness()) {
+    const blockingLangs = rows.map((row) => String(row?.lang || "").trim().toUpperCase()).filter(Boolean);
+    return {
+      rows,
+      counts,
+      blockingRows: rows,
+      blockingLangs,
+      allReady: false,
+    };
+  }
   const blockingRows = rows.filter((row) => {
     const automaticPassed = String(row?.automatic_check_status || "").trim().toLowerCase() === "passed";
     const notStale = !isTranslationRowStale(row) && String(row?.translation_recheck_status || "") !== "stale";
@@ -516,7 +530,10 @@ function buildTranslationRows() {
     });
   }
 
-  return buildRepoTranslationStatusRows();
+  return buildRepoTranslationStatusRows().map((row) => ({
+    ...row,
+    status: String(row?.status || "").trim().toLowerCase() === "stale" ? "stale" : "not_ready",
+  }));
 }
 
 function getTranslationGateState() {
@@ -868,6 +885,11 @@ async function refreshArticleProcess() {
   state.articleProcess = await api(`/api/items/${state.itemId}/article-process`);
 }
 
+async function loadCurrentReadiness() {
+  state.readiness = await api(`/api/items/${state.itemId}/export-readiness`);
+  return state.readiness;
+}
+
 async function transitionArticle(status, note = "") {
   setBusy(true);
   setBanner("กำลังอัปเดตสถานะ...", "loading");
@@ -1164,6 +1186,11 @@ async function init() {
   }
   try {
     await loadWorkspace();
+    try {
+      await loadCurrentReadiness();
+    } catch (err) {
+      setBanner(`โหลดสถานะความพร้อมไม่สำเร็จ: ${String(err?.message || "unknown error")}`, "error");
+    }
     if (!canApproveArticle()) {
       window.location.replace(roleArticleFallbackUrl());
       return;

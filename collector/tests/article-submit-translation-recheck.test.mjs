@@ -82,10 +82,12 @@ globalThis.__articleSubmitTestHooks = {
   state,
   buildTranslationRows,
   refreshTranslations,
+  loadCurrentReadiness,
   renderTranslationSummary,
   renderTranslationRecheckPanel,
   renderTranslationReviewSummary,
   getTranslationRecheckGateState,
+  init,
   runTranslationRecheck,
   validateRecheckResponseLocale,
   translationRecheckStatusFromRow,
@@ -116,7 +118,9 @@ globalThis.__articleSubmitTestHooks = {
 
   const apiImpl = options.api || (async () => ({}));
   const loadTranslationsImpl = options.loadTranslations || (async () => []);
+  const loadWorkspaceImpl = options.loadWorkspace || (async () => ({}));
   const inlineStatuses = [];
+  const banners = [];
 
   const context = {
     console,
@@ -153,7 +157,7 @@ globalThis.__articleSubmitTestHooks = {
     articleStatusLabel: () => "ready_for_review",
     latestDraft: () => null,
     loadTranslations: async (...args) => loadTranslationsImpl(...args),
-    loadWorkspace: async () => ({}),
+    loadWorkspace: async (...args) => loadWorkspaceImpl(state, ...args),
     otherTransportSubtypeLabel: () => "-",
     primaryAssignment: () => null,
     qs(id) {
@@ -166,7 +170,9 @@ globalThis.__articleSubmitTestHooks = {
     reviewUrl: () => "/article-submit.html?id=48",
     roleArticleFallbackUrl: () => "/",
     sanitizeUrl: (value) => String(value || ""),
-    setBanner() {},
+    setBanner(message, tone) {
+      banners.push({ message, tone });
+    },
     setInlineStatus(id, message, tone) {
       inlineStatuses.push({ id, message, tone });
     },
@@ -182,6 +188,7 @@ globalThis.__articleSubmitTestHooks = {
     hooks: context.__articleSubmitTestHooks,
     elements,
     inlineStatuses,
+    banners,
   };
 }
 
@@ -1071,6 +1078,94 @@ test("fingerprint mismatch makes translation package stale and translation reche
   assert.match(finalHtml, /blocked/);
   assert.equal(elements.get("btn-approve-sync").disabled, true);
   assert.equal(elements.get("btn-send-main-site").disabled, true);
+});
+
+test("initial article-submit load fetches live readiness and shows fingerprint mismatch as stale without manual refresh", async () => {
+  const apiCalls = [];
+  const { hooks, elements } = loadHarness({
+    loadWorkspace: async (state) => {
+      state.articleProcess = { status: "ready_for_sync" };
+      state.translations = [
+        {
+          lang: "en",
+          source_fingerprint: "old-fingerprint",
+          translation_status: "ready",
+          automatic_check_status: "passed",
+          stale_flag: 0,
+          translation_recheck_status: "passed",
+        },
+      ];
+    },
+    api: async (url) => {
+      apiCalls.push(url);
+      if (url === "/api/items/48/export-readiness") {
+        return {
+          current_source_fingerprint: "current-fingerprint",
+          translations: [{ lang: "en", status: "passed" }],
+        };
+      }
+      return {};
+    },
+  });
+  elements.set("translation-package-actions", createElement("translation-package-actions"));
+  elements.set("btn-generate-translations", createElement("btn-generate-translations"));
+
+  await hooks.init();
+
+  const summaryHtml = elements.get("translation-summary").innerHTML;
+  const recheckHtml = elements.get("translation-recheck-panel").innerHTML;
+  const finalHtml = elements.get("translation-review-summary").innerHTML;
+  assert.deepEqual(apiCalls, ["/api/items/48/export-readiness"]);
+  assert.equal(hooks.state.readiness?.current_source_fingerprint, "current-fingerprint");
+  assert.match(summaryHtml, />stale</);
+  assert.match(summaryHtml, /Stale locales/);
+  assert.match(recheckHtml, /Not ready: EN need translation recheck\./);
+  assert.match(finalHtml, /Final send/);
+  assert.match(finalHtml, /blocked/);
+  assert.equal(elements.get("btn-send-main-site").disabled, true);
+});
+
+test("initial article-submit load still renders when export readiness fetch fails", async () => {
+  const apiCalls = [];
+  const { hooks, elements, banners } = loadHarness({
+    loadWorkspace: async (state) => {
+      state.articleProcess = { status: "ready_for_sync" };
+      state.translations = [
+        {
+          lang: "en",
+          source_fingerprint: "old-fingerprint",
+          translation_status: "ready",
+          automatic_check_status: "passed",
+          stale_flag: 0,
+          translation_recheck_status: "passed",
+        },
+      ];
+    },
+    api: async (url) => {
+      apiCalls.push(url);
+      if (url === "/api/items/48/export-readiness") {
+        throw new Error("temporary readiness failure");
+      }
+      return {};
+    },
+  });
+  elements.set("translation-package-actions", createElement("translation-package-actions"));
+  elements.set("btn-generate-translations", createElement("btn-generate-translations"));
+
+  await hooks.init();
+
+  const summaryHtml = elements.get("translation-summary").innerHTML;
+  const recheckHtml = elements.get("translation-recheck-panel").innerHTML;
+  const finalHtml = elements.get("translation-review-summary").innerHTML;
+  assert.deepEqual(apiCalls, ["/api/items/48/export-readiness"]);
+  assert.equal(hooks.state.readiness, null);
+  assert.match(summaryHtml, /Package status/);
+  assert.match(summaryHtml, /missing/);
+  assert.match(recheckHtml, /Not ready: EN need translation recheck\./);
+  assert.match(finalHtml, /blocked/);
+  assert.equal(elements.get("btn-send-main-site").disabled, true);
+  assert.equal(elements.get("btn-refresh-readiness").disabled, false);
+  assert.match(String(banners[0]?.message || ""), /โหลดสถานะความพร้อมไม่สำเร็จ/);
 });
 
 test("translation package button label resets from stale to missing state", () => {
