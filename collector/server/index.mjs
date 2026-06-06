@@ -323,6 +323,8 @@ function buildAiFeatureRuntimeSnapshot(aiConfig) {
     visual_context: pickFeature("visualContext"),
     translation: pickFeature("translation"),
     translation_recheck: pickFeature("translationRecheck"),
+    translation_repair: pickFeature("translationRepair"),
+    seo_agent: pickFeature("seoAgent"),
   };
 }
 

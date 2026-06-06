@@ -47,6 +47,14 @@ const AI_FEATURE_CATALOG = Object.freeze({
     active: true,
     default_policy_key: AI_POLICY_DEFAULT_KEY,
   }),
+  translationRepair: Object.freeze({
+    key: "translationRepair",
+    label: "Translation Repair",
+    description: "Used to repair warning/failed translations from recheck issues",
+    status: "active",
+    active: true,
+    default_policy_key: "gemini-2.5-flash",
+  }),
   visualContext: Object.freeze({
     key: "visualContext",
     label: "Visual Context",
@@ -62,6 +70,14 @@ const AI_FEATURE_CATALOG = Object.freeze({
     status: "reserved",
     active: false,
     default_policy_key: AI_POLICY_DEFAULT_KEY,
+  }),
+  seoAgent: Object.freeze({
+    key: "seoAgent",
+    label: "SEO Agent",
+    description: "สงวนไว้สำหรับ SEO assistance ใน article-workspace รอบถัดไป",
+    status: "reserved",
+    active: false,
+    default_policy_key: "gemini-2.5-flash-lite",
   }),
 });
 
@@ -158,11 +174,10 @@ export function resolveAiConfig(options = {}) {
   const fieldPack = resolveFeatureConfig(featureMap.fieldPack.provider, featureMap.fieldPack.model);
   const translation = resolveFeatureConfig(featureMap.translation.provider, featureMap.translation.model);
   const translationRecheck = resolveFeatureConfig(featureMap.translationRecheck.provider, featureMap.translationRecheck.model);
+  const translationRepair = resolveFeatureConfig(featureMap.translationRepair.provider, featureMap.translationRepair.model);
   const visualContext = resolveFeatureConfig(featureMap.visualContext.provider, featureMap.visualContext.model);
-  const articleGenerator = resolveFeatureConfig(
-    featureMap.articleGenerator.provider,
-    featureMap.articleGenerator.model
-  );
+  const articleGenerator = resolveFeatureConfig(featureMap.articleGenerator.provider, featureMap.articleGenerator.model);
+  const seoAgent = resolveFeatureConfig(featureMap.seoAgent.provider, featureMap.seoAgent.model);
   const agentEngine = String(process.env.COLLECTOR_AGENT_ENGINE || "internal").trim().toLowerCase();
   const externalAgentUrl = String(process.env.COLLECTOR_EXTERNAL_AGENT_URL || "").trim().replace(/\/+$/, "");
   const externalAgentToken = String(process.env.COLLECTOR_EXTERNAL_AGENT_TOKEN || "").trim();
@@ -176,8 +191,12 @@ export function resolveAiConfig(options = {}) {
     translationModel: translation.model,
     translationRecheckProvider: translationRecheck.provider,
     translationRecheckModel: translationRecheck.model,
+    translationRepairProvider: translationRepair.provider,
+    translationRepairModel: translationRepair.model,
     fieldPackProvider: fieldPack.provider,
     fieldPackModel: fieldPack.model,
+    seoAgentProvider: seoAgent.provider,
+    seoAgentModel: seoAgent.model,
     agentEngine,
     externalAgentUrl,
     externalAgentToken,
@@ -185,8 +204,10 @@ export function resolveAiConfig(options = {}) {
       fieldPack: { ...fieldPack, policyKey: featureMap.fieldPack.policy_key, backendApiBase, backendSyncToken },
       translation: { ...translation, policyKey: featureMap.translation.policy_key, backendApiBase, backendSyncToken },
       translationRecheck: { ...translationRecheck, policyKey: featureMap.translationRecheck.policy_key, backendApiBase, backendSyncToken },
+      translationRepair: { ...translationRepair, policyKey: featureMap.translationRepair.policy_key, backendApiBase, backendSyncToken },
       visualContext: { ...visualContext, policyKey: featureMap.visualContext.policy_key, backendApiBase, backendSyncToken },
       articleGenerator: { ...articleGenerator, policyKey: featureMap.articleGenerator.policy_key, backendApiBase, backendSyncToken },
+      seoAgent: { ...seoAgent, policyKey: featureMap.seoAgent.policy_key, backendApiBase, backendSyncToken },
     },
     featurePolicies: featureMap,
     enabled: agentEngine === "external"
