@@ -1,10 +1,16 @@
 # PROJECT_STATE
 
-Last Updated: 2026-05-26
+Last Updated: 2026-06-06
 
 ## Active Branch
 
-codex/tester-build-v1-place-event-collector-fixes
+`main`
+
+Current completed main baseline:
+- Translation stale gate merged
+- Translation repair merged
+- AI policy rows merged
+- Frontweb homepage draft-fallback issue fixed
 
 ---
 
@@ -110,7 +116,7 @@ Status:
 MySQL 8.0
 
 Database:
-uboncity
+`uboncity`
 
 ## Migration State
 - database dump exported from main machine
@@ -136,21 +142,18 @@ DB_NAME=uboncity
 ## GitHub
 Acts as source of truth.
 
+## Current main baseline
+- `19b4d27` Merge AI policy rows for translation repair and SEO agent
+- `3f9d2d6` Merge translation repair from recheck issues
+- `f8a1d99` Merge translation source fingerprint stale gate
+- `20d7967` Ignore draft fallback homepage layout on public home
+
 ## Runtime Machine
-Now successfully synced from:
-
-branch:
-codex/tester-build-v1-place-event-collector-fixes
-
-latest branch commits:
-- 3381272 `docs: remove interactive UAT artifacts`
-- 8350312 `docs: compact interactive UAT rows to single-line checklist layout` (later reverted by 3381272)
-- 27a9a60 `ops: harden test-stack cloudflared preflight and add interactive role UAT forms`
-- 3cec15a `collector: keep users panel isolated to users tab`
-- f7e8d43 `collector: move internal AI execution to backend and isolate users tab`
+- runtime repo confirmed on `main`
+- runtime repo confirmed at commit `19b4d27`
 
 ## Collector source
-Now committed and synchronized properly.
+- collector/main now includes translation stale gate, translation repair, and AI feature policy updates
 
 ## Reusable local ops
 - `ops/windows/test-stack.ps1` added for Windows test-stack start/stop/status orchestration
@@ -182,11 +185,23 @@ Now committed and synchronized properly.
 - SQLite initialized
 - collector boot successful
 - collector health checks operational
-- translation regenerate flow fixed
-- zh compact meta title blocker removed
-- google translator generic `apiKey/baseUrl/model` mapping fixed
 - internal AI execution path moved behind backend proxy for core collector flows
 - local provider fallback removed from translation workflow path (backend-only secret boundary for internal path)
+- source fingerprint based stale detection for translations completed
+- fingerprint excludes `draft_id` and `review_report_id` to avoid false stale on no-op revision cycles
+- mismatched `source_fingerprint` now blocks translation technical readiness, recheck readiness, submit-admin-review, and final send
+- article submit page now loads live export readiness on init
+- generate/regenerate translations now refresh live readiness after completion
+- bulk backend sync is fingerprint-aware and excludes stale or mismatched translations
+- Translation Recheck evaluates semantic quality only; it does not modify translated fields
+- Translation Repair flow added:
+  - appears for warning/failed recheck rows with `recheck_issues`
+  - repairs a single locale using source + current translation + recheck issues
+  - resets recheck status to `not_checked` after repair
+  - keeps Final Send blocked until recheck passes again
+  - rejects stale fingerprint mismatch and non-eligible rows
+- manual repair flow validated:
+  - `warning/failed -> Repair translation -> not_checked -> Recheck enabled -> Final Send blocked -> Recheck passed -> Final Send enabled`
 
 ## Backend
 - backend install successful
@@ -202,11 +217,61 @@ Now committed and synchronized properly.
 - backend connectivity operational
 - review-to-public preview flow validated against local backend/frontend alignment
 - Cloudflare test-domain access stabilized via explicit Vite host configuration
+- AI Feature Policy page now shows Translation Repair and SEO Agent rows
 
 ## Frontend
 - light theme scenic shell layering fixed for review/detail rendering
 - place/event public detail and list surfaces verified to consume normalized backend media fields
 - test domain routing established via Cloudflare Tunnel
+- public homepage ignores `draft_fallback` homepage layout unless there is a published curation layout
+- frontweb test passed after the homepage draft-fallback fix
+
+---
+
+# AI Feature Policy Status
+
+Current feature rows:
+- Field Pack
+- Translation
+- Translation Recheck
+- Translation Repair
+- Visual Context
+- Article Generator
+- SEO Agent
+
+Current defaults and routing:
+- Translation remains Gemini 2.5 Flash-Lite (economy) by default
+- Translation Recheck can be configured separately
+- Translation Repair is active and defaults to Gemini 2.5 Flash
+- SEO Agent is reserved for future Article Workspace work and defaults to Gemini 2.5 Flash-Lite
+- Repair workflow reads `aiConfig.features.translationRepair` first, then falls back only if that feature config is absent
+
+---
+
+# Article Workspace Test Policy
+
+Before production deploy, Article Workspace should be tested through the full pipeline up to test frontweb.
+
+Current pre-deploy test policy:
+- external research data and external/placeholder photo manifests may be used as test fixtures
+- this is a temporary test-mode override, not a production policy change
+- test fixture content may sync to test frontweb
+- test fixture content must be labelled clearly as:
+  - `source_mode = "test_external_research"`
+  - `publish_policy = "test_only"`
+  - `production_publish_allowed = false`
+- production publish and final production export must remain blocked for external research fixtures unless replaced by field-verified data and owned assets
+- before real deploy, test data must be purged:
+  - test content items
+  - draft articles
+  - generated articles
+  - translation rows
+  - repair/recheck rows
+  - external/placeholder media manifests
+  - generated frontend test outputs if applicable
+- do not treat Google/Search data as field verified
+- do not claim field verification unless `field_return.source_mode` is `field_verified`
+- Article AI must surface `missing_info` and `uncertain_fields` instead of inventing facts
 
 ---
 
@@ -255,15 +320,19 @@ D:\UbonRuntime\
 
 ---
 
-# Current Priorities
+# Next Priority
 
-1. tester validation on branch `codex/tester-build-v1-place-event-collector-fixes`
-2. enforce single-runbook startup (`test-stack.ps1` only, no direct cloudflared manual run)
-3. validate review/publish lifecycle on real content items through test domains
-4. validate workflow integrations
-5. continue role-based UAT using markdown print checklists
-6. local-first testing before VPS deployment
-7. preserve runtime isolation architecture
+1. Start `feat/article-workspace-test-harness`
+2. Define Article AI input contract:
+   - `field_pack`
+   - `research_seed`
+   - `field_return_mock`
+   - `photo_manifest_mock`
+   - `source_policy` metadata
+3. Add test fixture/dry-run mode for Article Workspace
+4. Allow pipeline testing through test frontweb only
+5. Keep production publish blocked for `test_external_research` data
+6. Add cleanup/purge path before real deploy
 
 ---
 
@@ -307,7 +376,7 @@ D:\UbonRuntime\
 
 ## UAT documents
 - role-based markdown checklists are primary artifacts
-- previous interactive UAT artifacts were removed from branch
+- previous interactive UAT artifacts were removed from active workflow
 - print usage should use markdown-based role files (or generated local print pack outside git tracking)
 
 ---
