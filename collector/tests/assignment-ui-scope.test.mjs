@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const indexHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "index.html"), "utf8");
@@ -86,14 +87,109 @@ return normalizeAssignmentSubmissionEditorialPayload;`
   })
 );
 
-const hasAssignmentSubmissionAccessForTest = new Function(
-  `${extractNamedFunctionSource(indexServer, "hasAssignmentSubmissionAccess")}; return hasAssignmentSubmissionAccess;`
-)();
-
 const normalizeAssignmentRowForTest = new Function(
   "parseJson",
   `${extractNamedFunctionSource(repositoryJs, "normalizeAssignmentRow")}; return normalizeAssignmentRow;`
 )(parseJsonForTest);
+
+function loadAssignmentManagementScopeHooks(users = [], options = {}) {
+  const userMap = new Map(
+    (Array.isArray(users) ? users : []).map((row) => [Number(row?.id || 0), {
+      id: Number(row?.id || 0) || 0,
+      role: String(row?.role || "").trim().toLowerCase(),
+      managed_by_user_id: Number(row?.managed_by_user_id || 0) || 0,
+    }])
+  );
+  const itemMap = new Map(
+    (Array.isArray(options?.items) ? options.items : []).map((row) => [Number(row?.id || 0), { ...row, id: Number(row?.id || 0) || 0 }])
+  );
+  const assignmentsByItemId = new Map();
+  (Array.isArray(options?.assignments) ? options.assignments : []).forEach((row) => {
+    const itemId = Number(row?.content_item_id || row?.item_id || 0) || 0;
+    if (!itemId) return;
+    if (!assignmentsByItemId.has(itemId)) assignmentsByItemId.set(itemId, []);
+    assignmentsByItemId.get(itemId).push(row);
+  });
+  const context = {
+    db: {
+      prepare(sql) {
+        return {
+          get(...args) {
+            if (/SELECT role FROM users/i.test(sql)) {
+              const row = userMap.get(Number(args[0] || 0));
+              return row ? { role: row.role } : undefined;
+            }
+            if (/role IN \('freelance', 'editor'\) AND managed_by_user_id=\?/i.test(sql)) {
+              const workerId = Number(args[0] || 0) || 0;
+              const managerId = Number(args[1] || 0) || 0;
+              const row = userMap.get(workerId);
+              if (!row || !["freelance", "editor"].includes(row.role)) return undefined;
+              return row.managed_by_user_id === managerId ? { id: row.id } : undefined;
+            }
+            if (/SELECT id, managed_by_user_id FROM users WHERE id=\?/i.test(sql)) {
+              const row = userMap.get(Number(args[0] || 0));
+              return row ? { id: row.id, managed_by_user_id: row.managed_by_user_id } : undefined;
+            }
+            return undefined;
+          },
+        };
+      },
+    },
+    repo: {
+      getItem(itemId) {
+        return itemMap.get(Number(itemId || 0)) || null;
+      },
+      listAssignmentsByItem(itemId) {
+        return assignmentsByItemId.get(Number(itemId || 0)) || [];
+      },
+    },
+    normalizeUserRole(value, fallback = "user") {
+      const normalized = String(value || "").trim().toLowerCase();
+      return normalized || fallback;
+    },
+    normalizePolicyRole(value, fallback = "user") {
+      const normalized = String(value || "").trim().toLowerCase();
+      return normalized || fallback;
+    },
+    console,
+  };
+  const source = `
+${extractNamedFunctionSource(indexServer, "actorPolicyRole")}
+${extractNamedFunctionSource(indexServer, "isManagedContributorByUser")}
+${extractNamedFunctionSource(indexServer, "getUserAssignmentRole")}
+${extractNamedFunctionSource(indexServer, "isOwnerUser")}
+${extractNamedFunctionSource(indexServer, "getAuthUserId")}
+${extractNamedFunctionSource(indexServer, "canAssignToUserByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canSeeUserByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canSeeManagedWorkForUser")}
+${extractNamedFunctionSource(indexServer, "canSeeAssignmentByManagementLine")}
+${extractNamedFunctionSource(indexServer, "filterAssignmentsByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canClaimItemByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canTakeOverItemByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canMutateItemByManagementLine")}
+${extractNamedFunctionSource(indexServer, "hasAssignmentAccess")}
+${extractNamedFunctionSource(indexServer, "hasAssignmentSubmissionAccess")}
+${extractNamedFunctionSource(indexServer, "listEditorialAssignmentsByItem")}
+${extractNamedFunctionSource(indexServer, "getPrimaryEditorialAssignment")}
+${extractNamedFunctionSource(indexServer, "hasItemBriefAccess")}
+globalThis.__assignmentScopeHooks = {
+  canAssignToUserByManagementLine,
+  canSeeUserByManagementLine,
+  canSeeManagedWorkForUser,
+  canSeeAssignmentByManagementLine,
+  filterAssignmentsByManagementLine,
+  canClaimItemByManagementLine,
+  canTakeOverItemByManagementLine,
+  canMutateItemByManagementLine,
+  hasAssignmentAccess,
+  hasAssignmentSubmissionAccess,
+  hasItemBriefAccess,
+};
+`;
+  context.globalThis = context;
+  vm.runInNewContext(source, context, { filename: "assignment-scope-hooks.js" });
+  return context.__assignmentScopeHooks;
+}
 
 test("assignment HTML removes readiness-only controls and keeps execution-only controls", () => {
   const forbiddenSnippets = [
@@ -605,26 +701,863 @@ test("work-lane article payload prefill keeps only current field-pack prompts an
 });
 
 test("assignment submission access is limited to assignee or external assigner only", () => {
+  const { hasAssignmentSubmissionAccess } = loadAssignmentManagementScopeHooks([
+    { id: 3, role: "user", managed_by_user_id: 0 },
+    { id: 12, role: "freelance", managed_by_user_id: 3 },
+  ]);
   assert.equal(
-    hasAssignmentSubmissionAccessForTest(
-      { authUser: { id: 12 } },
+    hasAssignmentSubmissionAccess(
+      { authUser: { id: 12, role: "freelance" } },
       { assignee_user_id: 12, assigned_by_user_id: 3 }
     ),
     true
   );
   assert.equal(
-    hasAssignmentSubmissionAccessForTest(
-      { authUser: { id: 3 } },
+    hasAssignmentSubmissionAccess(
+      { authUser: { id: 3, role: "user" } },
       { assignee_user_id: 12, assigned_by_user_id: 3 }
     ),
-    false
+    true
   );
   assert.equal(
-    hasAssignmentSubmissionAccessForTest(
-      { authUser: { id: 3 } },
+    hasAssignmentSubmissionAccess(
+      { authUser: { id: 3, role: "user" } },
       { assignee_user_id: null, assigned_by_user_id: 3 }
     ),
     true
+  );
+});
+
+test("assignment management-line helpers keep admin scoped and owner global", () => {
+  const {
+    canAssignToUserByManagementLine,
+    canSeeManagedWorkForUser,
+    canSeeAssignmentByManagementLine,
+    hasAssignmentAccess,
+    hasAssignmentSubmissionAccess,
+  } = loadAssignmentManagementScopeHooks([
+    { id: 1, role: "owner", managed_by_user_id: 0 },
+    { id: 10, role: "admin", managed_by_user_id: 1 },
+    { id: 11, role: "user", managed_by_user_id: 10 },
+    { id: 12, role: "freelance", managed_by_user_id: 11 },
+    { id: 20, role: "admin", managed_by_user_id: 1 },
+    { id: 21, role: "user", managed_by_user_id: 20 },
+    { id: 30, role: "editor", managed_by_user_id: 10 },
+  ]);
+
+  const adminReq = { authUser: { id: 10, role: "admin" } };
+  const ownerReq = { authUser: { id: 1, role: "owner" } };
+  const editorReq = { authUser: { id: 30, role: "editor" } };
+
+  const subtreeAssignment = { assignment_kind: "field", assignee_user_id: 12, assigned_by_user_id: 11 };
+  const outOfScopeAssignedByVisible = { assignment_kind: "field", assignee_user_id: 21, assigned_by_user_id: 11 };
+  const ownerAssignment = { assignment_kind: "field", assignee_user_id: 1, assigned_by_user_id: 1 };
+  const otherBranchAssignment = { assignment_kind: "field", assignee_user_id: 21, assigned_by_user_id: 20 };
+  const externalByOwner = { assignment_kind: "field", assignee_user_id: null, assigned_by_user_id: 1 };
+
+  assert.equal(canAssignToUserByManagementLine(adminReq.authUser, 12), true);
+  assert.equal(canAssignToUserByManagementLine(adminReq.authUser, 10), false);
+  assert.equal(canAssignToUserByManagementLine(adminReq.authUser, 21), false);
+  assert.equal(canAssignToUserByManagementLine(adminReq.authUser, 1), false);
+  assert.equal(canSeeManagedWorkForUser(adminReq.authUser, 12), true);
+  assert.equal(canSeeManagedWorkForUser(adminReq.authUser, 10), false);
+  assert.equal(canSeeManagedWorkForUser(adminReq.authUser, 10, { allowSelf: true }), true);
+  assert.equal(canSeeManagedWorkForUser(adminReq.authUser, 21), false);
+
+  assert.equal(canSeeAssignmentByManagementLine(adminReq.authUser, subtreeAssignment), true);
+  assert.equal(hasAssignmentAccess(adminReq, subtreeAssignment, "admin"), true);
+  assert.equal(hasAssignmentSubmissionAccess(adminReq, subtreeAssignment, "admin"), true);
+
+  assert.equal(canSeeAssignmentByManagementLine(adminReq.authUser, outOfScopeAssignedByVisible), false);
+  assert.equal(hasAssignmentAccess(adminReq, outOfScopeAssignedByVisible, "admin"), false);
+
+  assert.equal(canSeeAssignmentByManagementLine(adminReq.authUser, ownerAssignment), false);
+  assert.equal(hasAssignmentAccess(adminReq, ownerAssignment, "admin"), false);
+  assert.equal(hasAssignmentSubmissionAccess(adminReq, ownerAssignment, "admin"), false);
+
+  assert.equal(canSeeAssignmentByManagementLine(adminReq.authUser, otherBranchAssignment), false);
+  assert.equal(hasAssignmentAccess(adminReq, otherBranchAssignment, "admin"), false);
+  assert.equal(hasAssignmentSubmissionAccess(adminReq, otherBranchAssignment, "admin"), false);
+
+  assert.equal(canSeeAssignmentByManagementLine(adminReq.authUser, externalByOwner), false);
+  assert.equal(hasAssignmentAccess(adminReq, externalByOwner, "admin"), false);
+
+  assert.equal(hasAssignmentAccess(ownerReq, ownerAssignment, "owner"), true);
+  assert.equal(hasAssignmentSubmissionAccess(ownerReq, ownerAssignment, "owner"), true);
+
+  assert.equal(hasAssignmentAccess(editorReq, { assignment_kind: "editorial", assignee_user_id: 30, assigned_by_user_id: 10 }, "editor"), true);
+  assert.equal(hasAssignmentAccess(editorReq, { assignment_kind: "field", assignee_user_id: 30, assigned_by_user_id: 10 }, "editor"), false);
+});
+
+test("item brief access follows assignment and claim scope instead of global admin/user visibility", () => {
+  const {
+    hasItemBriefAccess,
+  } = loadAssignmentManagementScopeHooks(
+    [
+      { id: 1, role: "owner", managed_by_user_id: 0 },
+      { id: 10, role: "admin", managed_by_user_id: 1 },
+      { id: 11, role: "user", managed_by_user_id: 10 },
+      { id: 12, role: "freelance", managed_by_user_id: 11 },
+      { id: 20, role: "admin", managed_by_user_id: 1 },
+      { id: 21, role: "user", managed_by_user_id: 20 },
+    ],
+    {
+      items: [
+        { id: 100, claimed_by_user_id: 11 },
+        { id: 101, claimed_by_user_id: 1 },
+        { id: 102, claimed_by_user_id: 10 },
+        { id: 103, claimed_by_user_id: 0 },
+      ],
+      assignments: [
+        { id: 500, content_item_id: 100, assignment_kind: "field", assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" },
+        { id: 501, content_item_id: 101, assignment_kind: "field", assignee_user_id: 1, assigned_by_user_id: 1, state: "assigned" },
+        { id: 502, content_item_id: 103, assignment_kind: "field", assignee_user_id: 21, assigned_by_user_id: 20, state: "assigned" },
+      ],
+    }
+  );
+
+  assert.equal(hasItemBriefAccess({ authUser: { id: 10, role: "admin" } }, 100, "admin"), true);
+  assert.equal(hasItemBriefAccess({ authUser: { id: 10, role: "admin" } }, 101, "admin"), false);
+  assert.equal(hasItemBriefAccess({ authUser: { id: 10, role: "admin" } }, 103, "admin"), false);
+  assert.equal(hasItemBriefAccess({ authUser: { id: 10, role: "admin" } }, 102, "admin"), false);
+  assert.equal(hasItemBriefAccess({ authUser: { id: 10, role: "admin" } }, 999, "admin"), false);
+
+  assert.equal(hasItemBriefAccess({ authUser: { id: 11, role: "user" } }, 102, "user"), false);
+  assert.equal(hasItemBriefAccess({ authUser: { id: 11, role: "user" } }, 100, "user"), true);
+
+  assert.equal(hasItemBriefAccess({ authUser: { id: 1, role: "owner" } }, 101, "owner"), true);
+});
+
+test("claim and takeover helpers do not let admin or user manufacture scope", () => {
+  const {
+    canClaimItemByManagementLine,
+    canTakeOverItemByManagementLine,
+    canMutateItemByManagementLine,
+  } = loadAssignmentManagementScopeHooks(
+    [
+      { id: 1, role: "owner", managed_by_user_id: 0 },
+      { id: 10, role: "admin", managed_by_user_id: 1 },
+      { id: 11, role: "user", managed_by_user_id: 10 },
+      { id: 12, role: "freelance", managed_by_user_id: 11 },
+      { id: 20, role: "admin", managed_by_user_id: 1 },
+      { id: 21, role: "user", managed_by_user_id: 20 },
+    ],
+    {
+      items: [
+        { id: 200, claimed_by_user_id: 11 },
+        { id: 201, claimed_by_user_id: 1 },
+        { id: 202, claimed_by_user_id: 21 },
+        { id: 203, claimed_by_user_id: 0 },
+        { id: 204, claimed_by_user_id: 0 },
+      ],
+      assignments: [
+        { id: 600, content_item_id: 203, assignment_kind: "field", assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" },
+        { id: 601, content_item_id: 204, assignment_kind: "field", assignee_user_id: 21, assigned_by_user_id: 20, state: "assigned" },
+      ],
+    }
+  );
+
+  assert.equal(canClaimItemByManagementLine({ id: 10, role: "admin" }, { id: 203, claimed_by_user_id: 0 }), true);
+  assert.equal(canClaimItemByManagementLine({ id: 10, role: "admin" }, { id: 204, claimed_by_user_id: 0 }), false);
+  assert.equal(canClaimItemByManagementLine({ id: 10, role: "admin" }, { id: 201, claimed_by_user_id: 1 }), false);
+  assert.equal(canClaimItemByManagementLine({ id: 11, role: "user" }, { id: 203, claimed_by_user_id: 0 }), true);
+  assert.equal(canClaimItemByManagementLine({ id: 11, role: "user" }, { id: 204, claimed_by_user_id: 0 }), false);
+  assert.equal(canClaimItemByManagementLine({ id: 1, role: "owner" }, { id: 204, claimed_by_user_id: 0 }), true);
+
+  assert.equal(canTakeOverItemByManagementLine({ id: 10, role: "admin" }, { id: 200, claimed_by_user_id: 11 }), true);
+  assert.equal(canTakeOverItemByManagementLine({ id: 10, role: "admin" }, { id: 201, claimed_by_user_id: 1 }), false);
+  assert.equal(canTakeOverItemByManagementLine({ id: 10, role: "admin" }, { id: 202, claimed_by_user_id: 21 }), false);
+  assert.equal(canTakeOverItemByManagementLine({ id: 1, role: "owner" }, { id: 201, claimed_by_user_id: 1 }), true);
+
+  assert.equal(canMutateItemByManagementLine({ id: 10, role: "admin" }, { id: 203, claimed_by_user_id: 0 }), true);
+  assert.equal(canMutateItemByManagementLine({ id: 10, role: "admin" }, { id: 204, claimed_by_user_id: 0 }), false);
+  assert.equal(canMutateItemByManagementLine({ id: 10, role: "admin" }, { id: 201, claimed_by_user_id: 1 }), false);
+  assert.equal(canMutateItemByManagementLine({ id: 1, role: "owner" }, { id: 204, claimed_by_user_id: 0 }), true);
+});
+
+test("assignment routes use management-line scope helpers instead of global admin visibility", () => {
+  const routeIndex = (snippet) => indexServer.indexOf(snippet);
+  const routeContainsAfter = (routeSnippet, targetSnippet) => {
+    const start = routeIndex(routeSnippet);
+    if (start < 0) return false;
+    return indexServer.indexOf(targetSnippet, start) > start;
+  };
+  const routeGuardBefore = (routeSnippet, guardSnippet, actionSnippet) => {
+    const start = routeIndex(routeSnippet);
+    if (start < 0) return false;
+    const guard = indexServer.indexOf(guardSnippet, start);
+    const action = indexServer.indexOf(actionSnippet, start);
+    return guard > start && action > guard;
+  };
+  const requiredSnippets = [
+    "function canAssignToUserByManagementLine(authUser, targetUserId) {",
+    "function canSeeUserByManagementLine(authUser, targetUserId) {",
+    "function canSeeManagedWorkForUser(authUser, targetUserId, options) {",
+    "function canSeeAssignmentByManagementLine(authUser, assignment) {",
+    "function hasItemBriefAccess(req, contentItemId, role = actorPolicyRole(req)) {",
+    "function filterAssignmentsByManagementLine(authUser, assignments = []) {",
+    "function canClaimItemByManagementLine(authUser, item) {",
+    "function canTakeOverItemByManagementLine(authUser, item) {",
+    "function canMutateItemByManagementLine(authUser, item, options) {",
+    "function ensureItemMutationAccess(req, res, item, options = {}) {",
+    "function ensureArticleProcessTransitionAccess(req, res, item, nextStatus) {",
+    'if (role === "admin") return canSeeAssignmentByManagementLine(req.authUser, assignment);',
+    'if (assigneeUserId > 0) return canSeeManagedWorkForUser(authUser, assigneeUserId);',
+    'const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;',
+    'if (claimedByUserId > 0 && canSeeManagedWorkForUser(req.authUser, claimedByUserId)) {',
+    'if (!canClaimItemByManagementLine(req.authUser, decoratedCurrent)) {',
+    'if (!canTakeOverPrepClaim(actorRole, claimantRole) || !canTakeOverItemByManagementLine(req.authUser, decoratedCurrent)) {',
+    'if ((role === "admin" || role === "user") && canMutateItemByManagementLine(req.authUser, item)) {',
+    'if (!ensureItemMutationAccess(req, res, item)) {',
+    'if (!ensureItemBriefReadAccess(req, res, item)) {',
+    'app.get("/api/items/:id", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/readiness/latest", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/approved-context", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/brief/latest", requireRole("owner", "admin", "user"), (req, res) => {',
+    'app.get("/api/items/:id/field-pack/current", requireRole("owner", "admin", "editor", "freelance", "user"), (req, res) => {',
+    'app.get("/api/items/:id/draft-input-preview", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/media-candidates", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/image-workflow", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/export-readiness", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/workflow-model", requireRole("owner", "admin", "editor", "user"), (req, res) => {',
+    'app.get("/api/items/:id/article-process", requireRole("owner", "admin", "editor", "user"), (req, res) => {',
+    'app.post("/api/items/:id/article-process/transition", requireRole("owner", "admin", "editor", "user"), async (req, res) => {',
+    'app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "admin", "editor", "user"), (req, res) => {',
+    'app.get("/api/items/:id/transitions", requireRole("admin", "user"), (req, res) => {',
+    'app.get("/api/items/:id/audit-logs", requireRole("admin", "user"), (req, res) => {',
+    'app.get("/api/items/:id/intelligence-model/latest", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/execution-controls/latest", requireRole("admin", "user"), (req, res) => {',
+    'app.get("/api/items/:id/execution-channels", requireRole("admin", "user"), (req, res) => {',
+    'app.get("/api/items/:id/execution-readiness", requireRole("admin", "user"), (req, res) => {',
+    'app.get("/api/items/:id/execution-readiness/:channel", requireRole("admin", "user"), (req, res) => {',
+    'app.get("/api/items/:id/governance-summary", requireRole("admin", "user"), (req, res) => {',
+    'app.get("/api/items/:id/execution-channels/:channel/latest", requireRole("admin", "user"), (req, res) => {',
+    'app.get("/api/items/:id/search-enrichment", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/place-intelligence", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/social-signals", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/momentum", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/content-direction", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/evidence-blocks", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/assignments", requireRole("owner", "admin", "user"), (req, res) => {',
+    'app.put("/api/items/:id/workflow-model", requireRole("owner", "admin", "user"), (req, res) => {',
+    'app.get("/api/items/:id/assets/cleanup-eligibility", requireRole("admin", "owner"), (req, res) => {',
+    'app.post("/api/items/:id/recheck-export-readiness", requireRole("admin", "owner"), (req, res) => {',
+    'app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowRateLimit, async (req, res) => {',
+    'app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), workflowRateLimit, async (req, res) => {',
+    'app.post("/api/items/:id/recover-problem-translations", requireRole("admin", "owner"), async (req, res) => {',
+    'app.post("/api/items/:id/generate-translations", requireRole("admin", "owner"), async (req, res) => {',
+    'app.post("/api/items/:id/translations/:lang/recheck", requireRole("admin", "owner"), async (req, res) => {',
+    'app.post("/api/items/:id/translations/:lang/repair", requireRole("admin", "owner"), async (req, res) => {',
+    'app.post("/api/items/:id/recompute-readiness-brief", requireRole("admin", "user"), (req, res) => {',
+    'app.post("/api/items/:id/intelligence-model", requireRole("admin"), (req, res) => {',
+    'app.post("/api/items/:id/recompute-execution-controls", requireRole("admin", "user"), (req, res) => {',
+    'app.post("/api/items/:id/execution-readiness/evaluate", requireRole("admin", "user"), (req, res) => {',
+    'app.post("/api/items/:id/governance-summary/evaluate", requireRole("admin", "user"), (req, res) => {',
+    'app.post("/api/items/:id/execution-channels", requireRole("admin", "user"), (req, res) => {',
+    'app.post("/api/items/:id/execution-channels/:channel/validate-latest", requireRole("admin", "user"), (req, res) => {',
+    'app.post("/api/items/:id/execution-channels/:channel/generate", requireRole("admin", "user"), async (req, res) => {',
+    'app.post("/api/items/:id/search-enrichment", requireRole("admin"), (req, res) => {',
+    'app.post("/api/items/:id/recompute-intelligence", requireRole("admin"), (req, res) => {',
+    'app.post("/api/items/:id/social-signals", requireRole("admin"), (req, res) => {',
+    'app.post("/api/items/:id/momentum/recompute", requireRole("admin"), (req, res) => {',
+    'app.post("/api/items/:id/recompute-content-direction", requireRole("admin"), (req, res) => {',
+    'app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "admin", "user"), (req, res) => {',
+    'app.post("/api/items/:id/article-editorial-assignments/:assignmentId/request-revision", requireRole("owner", "admin", "user"), (req, res) => {',
+    'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+    'app.post("/api/items/:id/unpublish", requireRole("admin", "owner"), (req, res) => {',
+    'app.post("/api/assets/upload", requireRole("owner", "admin", "editor", "user"), uploadRateLimit, upload.array("file", 20), async (req, res) => {',
+    'app.put("/api/transport-map-routes/:id", requireRole("owner", "admin", "user"), (req, res) => {',
+    'const assignments = buildManagedAssignmentsForActor(req.authUser?.id, authRole, limit);',
+    'const assignments = filterAssignmentsByManagementLine(',
+    'filterAssignmentsByManagementLine(\n        authUser,',
+    'filterAssignmentsByManagementLine(\n      { id: actorUserId, role },',
+    'assigner cannot assign work outside the management subtree',
+    'assigner cannot assign article work outside the management subtree',
+  ];
+  for (const snippet of requiredSnippets) {
+    assert.equal(indexServer.includes(snippet), true, `assignment scope helper snippet should exist: ${snippet}`);
+  }
+
+  const forbiddenSnippets = [
+    'if (role === "owner" || role === "admin") return true;',
+    'if (role === "owner" || role === "admin") return true',
+    'if (authRole === "owner" || authRole === "admin") {',
+    'if (role === "owner" || role === "admin" || role === "user") return true;',
+    'if (role === "owner" || role === "admin" || role === "user") {',
+    'if (role === "owner" || role === "admin" || role === "user") {\r\n    return true;\r\n  }',
+    'if (role === "owner" || role === "admin" || role === "user") {\n    return true;\n  }',
+    'if ((role === "editor" || role === "freelance") && !hasItemBriefAccess(req, id, role)) {',
+    'canSeeManagedWorkForUser(req.authUser, claimedByUserId, { allowSelf: true })',
+    'repo.claimItem(id, actorId, { claim_note: req.body?.claim_note })',
+    'repo.takeOverItemClaim(id, actorId, { claim_note: req.body?.claim_note })',
+    'const assignments = repo.listAssignments(limit);',
+  ];
+  assert.equal(
+    indexServer.includes('if (authRole === "owner") {\r\n      const assignments = repo.listAssignments(limit);')
+      || indexServer.includes('if (authRole === "owner") {\n      const assignments = repo.listAssignments(limit);'),
+    true,
+    "owner-only global assignments branch should remain"
+  );
+  assert.equal(
+    indexServer.includes('if (authRole === "owner" || authRole === "admin") {\r\n      const assignments = repo.listAssignments(limit);')
+      || indexServer.includes('if (authRole === "owner" || authRole === "admin") {\n      const assignments = repo.listAssignments(limit);'),
+    false,
+    "admin should no longer share owner global assignments branch"
+  );
+  for (const snippet of forbiddenSnippets.slice(0, 3)) {
+    assert.equal(indexServer.includes(snippet), false, `legacy global visibility snippet should be removed: ${snippet}`);
+  }
+  assert.equal(
+    indexServer.includes('if (!canClaimItemByManagementLine(req.authUser, decoratedCurrent)) {\r\n    res.status(403).json({ error: "forbidden" });')
+      || indexServer.includes('if (!canClaimItemByManagementLine(req.authUser, decoratedCurrent)) {\n    res.status(403).json({ error: "forbidden" });'),
+    true,
+    "claim route should deny before mutation"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!canClaimItemByManagementLine(req.authUser, decoratedCurrent)) {')
+      < indexServer.indexOf('repo.claimItem(id, actorId, { claim_note: req.body?.claim_note })'),
+    true,
+    "claim helper must run before repo.claimItem"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!canTakeOverPrepClaim(actorRole, claimantRole) || !canTakeOverItemByManagementLine(req.authUser, decoratedCurrent)) {')
+      < indexServer.indexOf('repo.takeOverItemClaim(id, actorId, { claim_note: req.body?.claim_note })'),
+    true,
+    "takeover helper must run before repo.takeOverItemClaim"
+  );
+  assert.equal(
+    indexServer.includes('app.post("/api/items/:id/claim", requireRole("owner", "admin", "user"), (req, res) => {'),
+    true,
+    "claim route must allow owner"
+  );
+  assert.equal(
+    indexServer.includes('app.post("/api/items/:id/field-packs", requireRole("owner", "admin", "user"), (req, res) => {\r\n')
+      || indexServer.includes('app.post("/api/items/:id/field-packs", requireRole("owner", "admin", "user"), (req, res) => {\n'),
+    true,
+    "field-pack create route should still be present"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const fieldPack = repo.createFieldPack({'),
+    true,
+    "field-pack create must guard subtree mutation before create"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const fieldPack = repo.updateFieldPack(fieldPackId, {'),
+    true,
+    "field-pack update must guard subtree mutation before update"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const agentEngine = createAgentGenerationEngine(aiConfig);'),
+    true,
+    "field-pack regenerate must guard subtree mutation before regenerate"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const status = repo.setContentAssetSelected(id, assetId, selected);'),
+    true,
+    "asset selected route must guard subtree mutation before update"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const status = repo.setContentAssetRole(id, assetId, role);'),
+    true,
+    "asset role route must guard subtree mutation before update"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureComposerMediaEditAccess(req, res, item)) {')
+      < indexServer.indexOf('const requestedRole = String(req.body.role || "gallery");'),
+    true,
+    "asset upload route must stay behind subtree-aware media mutation guard"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/assets/register", requireRole("owner", "admin", "editor", "user"), uploadRateLimit, (req, res) => {',
+      'if (!ensureComposerMediaEditAccess(req, res, item)) {',
+      'const assetUid = crypto.randomUUID();'
+    ),
+    true,
+    "asset register route must stay behind subtree-aware media mutation guard"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, current)) {')
+      < indexServer.indexOf('const routePayload = normalizeTransportRoutePayload(req.body || null, current);'),
+    true,
+    "transport route update must guard subtree mutation before update"
+  );
+  assert.equal(
+    indexServer.includes('if ((role === "admin" || role === "user") && canMutateItemByManagementLine(req.authUser, item)) {'),
+    true,
+    "composer edit helper must use subtree helper for admin/user instead of role-global allow"
+  );
+  assert.equal(
+    indexServer.includes('if (role === "owner" || role === "admin" || role === "user") return true;'),
+    false,
+    "article-process read helper must not allow admin/user globally by role"
+  );
+  assert.equal(
+    indexServer.includes('if (role === "admin" || role === "user") {\r\n    return hasItemBriefAccess(req, Number(item?.id || 0) || 0, role);\r\n  }')
+      || indexServer.includes('if (role === "admin" || role === "user") {\n    return hasItemBriefAccess(req, Number(item?.id || 0) || 0, role);\n  }'),
+    true,
+    "article-process read helper must delegate admin/user access to subtree item-read scope"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const officialReference = repo.getOfficialReferenceByItem(id);'
+    ),
+    true,
+    "item detail route must guard subtree read access before loading item context"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemBriefReadAccess(req, res, item)) {')
+      < indexServer.indexOf('const preview = buildCleanStructuredContext(repo, id);'),
+    true,
+    "draft-input-preview must guard subtree read access before returning context"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemBriefReadAccess(req, res, item)) {')
+      < indexServer.indexOf('const sourceRecord = db'),
+    true,
+    "media-candidates must guard subtree read access before returning item media context"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemBriefReadAccess(req, res, item)) {')
+      < indexServer.indexOf('const status = buildImageWorkflowState(id);'),
+    true,
+    "image-workflow must guard subtree read access before returning workflow state"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemBriefReadAccess(req, res, item)) {')
+      < indexServer.indexOf('const readiness = buildExportReadiness(id);'),
+    true,
+    "export-readiness must guard subtree read access before returning readiness"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/workflow-model", requireRole("owner", "admin", "editor", "user"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const model = repo.ensureWorkflowModel(id);'
+    ),
+    true,
+    "workflow-model must guard subtree read access before returning workflow context"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.get("/api/items/:id/article-process", requireRole("owner", "admin", "editor", "user"), (req, res) => {',
+      'if (!ensureArticleProcessReadAccess(req, res, item)) {'
+    ),
+    true,
+    "article-process read route must use article-process read guard"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/article-process/transition", requireRole("owner", "admin", "editor", "user"), async (req, res) => {',
+      'if (!ensureArticleProcessTransitionAccess(req, res, item, nextStatus)) {',
+      'const workflowModel = repo.ensureWorkflowModel(id);'
+    ),
+    true,
+    "article-process transition route must guard subtree mutation before transition logic"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "admin", "editor", "user"), (req, res) => {',
+      'if (!ensureArticleProcessTransitionAccess(req, res, item, "ready_for_review")) {',
+      'const workflowModel = repo.ensureWorkflowModel(id);'
+    ),
+    true,
+    "article-process submit-review must guard subtree mutation before submit logic"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.put("/api/items/:id/workflow-model", requireRole("owner", "admin", "user"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const actorRole = actorPolicyRole(req);'
+    ),
+    true,
+    "workflow-model update must guard subtree mutation before updating state"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/transitions", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'transitions = repo.listWorkflowTransitionsByItem(id, limit, {'
+    ),
+    true,
+    "transitions route must guard subtree read access before listing workflow transitions"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/audit-logs", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const logs = repo.listAuditByTarget("content_item", String(id), limit, {'
+    ),
+    true,
+    "audit-logs route must guard subtree read access before listing content item audit logs"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/intelligence-model/latest", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const model = repo.getLatestIntelligenceModelByItem(id);'
+    ),
+    true,
+    "intelligence-model latest route must guard subtree read access before loading model"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/execution-controls/latest", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const readiness = repo.getLatestReadinessBriefByItem(id);'
+    ),
+    true,
+    "execution-controls latest route must guard subtree read access before loading readiness/controls context"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/execution-channels", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const channels = repo.listExecutionChannelsByItem(id);'
+    ),
+    true,
+    "execution-channels route must guard subtree read access before listing channels"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/execution-readiness", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const summary = repo.evaluateExecutionReadinessByItem(id);'
+    ),
+    true,
+    "execution-readiness route must guard subtree read access before evaluating readiness"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/execution-readiness/:channel", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const readiness = repo.evaluateExecutionReadinessByItem(id, channel);'
+    ),
+    true,
+    "execution-readiness by channel route must guard subtree read access before evaluating channel readiness"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/governance-summary", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const summary = repo.buildGovernanceSummaryByItem(id);'
+    ),
+    true,
+    "governance-summary route must guard subtree read access before building summary"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/execution-channels/:channel/latest", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const latest = repo.getLatestExecutionChannelByItemAndChannel(id, channel);'
+    ),
+    true,
+    "execution-channel latest route must guard subtree read access before loading latest channel state"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/search-enrichment", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const records = repo.listSearchEnrichmentByItem(id);'
+    ),
+    true,
+    "search-enrichment route must guard subtree read access before loading enrichment records"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/place-intelligence", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const intelligence = repo.getPlaceIntelligenceByItem(id);'
+    ),
+    true,
+    "place-intelligence route must guard subtree read access before loading intelligence"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/social-signals", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const signals = repo.listSocialSignalSourcesByItem(id);'
+    ),
+    true,
+    "social-signals route must guard subtree read access before loading signals"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/momentum", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const snapshots = repo.listMomentumSnapshotsByItem(id, platform);'
+    ),
+    true,
+    "momentum route must guard subtree read access before loading snapshots"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/content-direction", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const report = repo.getLatestContentDirectionByItem(id);'
+    ),
+    true,
+    "content-direction route must guard subtree read access before loading report"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/evidence-blocks", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'let blocks = repo.listEvidenceBlocks(id);'
+    ),
+    true,
+    "evidence-blocks route must guard subtree read access before loading evidence data"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.get("/api/items/:id/assignments", requireRole("owner", "admin", "user"), (req, res) => {',
+      'if (!ensureItemBriefReadAccess(req, res, item)) {',
+      'const assignments = filterAssignmentsByManagementLine(authUser, repo.listAssignmentsByItem(id));'
+    ),
+    true,
+    "item assignments route must guard subtree read access before loading assignments"
+  );
+  assert.equal(
+    indexServer.includes('app.get("/api/items/:id/assets/cleanup-eligibility", requireRole("admin", "owner"), (req, res) => {\r\n')
+      || indexServer.includes('app.get("/api/items/:id/assets/cleanup-eligibility", requireRole("admin", "owner"), (req, res) => {\n'),
+    true,
+    "assets cleanup eligibility route should still be present"
+  );
+  assert.equal(
+    indexServer.indexOf('app.get("/api/items/:id/assets/cleanup-eligibility", requireRole("admin", "owner"), (req, res) => {')
+      < indexServer.indexOf('if (!ensureItemBriefReadAccess(req, res, item)) {', indexServer.indexOf('app.get("/api/items/:id/assets/cleanup-eligibility", requireRole("admin", "owner"), (req, res) => {'))
+      && indexServer.indexOf('if (!ensureItemBriefReadAccess(req, res, item)) {', indexServer.indexOf('app.get("/api/items/:id/assets/cleanup-eligibility", requireRole("admin", "owner"), (req, res) => {'))
+        < indexServer.indexOf('const report = repo.evaluateContentAssetCleanupEligibility(id, { scope });'),
+    true,
+    "assets cleanup eligibility must guard subtree read access before evaluating report"
+  );
+  assert.equal(
+    indexServer.indexOf('app.post("/api/items/:id/recheck-export-readiness", requireRole("admin", "owner"), (req, res) => {')
+      < indexServer.indexOf('if (!ensureItemBriefReadAccess(req, res, item)) {', indexServer.indexOf('app.post("/api/items/:id/recheck-export-readiness", requireRole("admin", "owner"), (req, res) => {'))
+      && indexServer.indexOf('if (!ensureItemBriefReadAccess(req, res, item)) {', indexServer.indexOf('app.post("/api/items/:id/recheck-export-readiness", requireRole("admin", "owner"), (req, res) => {'))
+        < indexServer.indexOf('const readiness = buildExportReadiness(id);', indexServer.indexOf('app.post("/api/items/:id/recheck-export-readiness", requireRole("admin", "owner"), (req, res) => {')),
+    true,
+    "recheck-export-readiness must guard subtree read access before recomputing readiness"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const readiness = buildExportReadiness(id);'),
+    true,
+    "release-main must guard subtree mutation access before release logic"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const payload = buildReviewIngestPayload({'),
+    true,
+    "submit-admin-review must guard subtree mutation access before review ingest"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/recompute-readiness-brief", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const snapshot = repo.recomputeReadinessBriefByItem(id, actorEmail(req));'
+    ),
+    true,
+    "recompute-readiness-brief must guard subtree mutation access before recompute"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/intelligence-model", requireRole("admin"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const model = repo.addIntelligenceModel({ ...req.body, content_item_id: id, computed_by: actorEmail(req) });'
+    ),
+    true,
+    "intelligence-model create route must guard subtree mutation access before create"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/recompute-execution-controls", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const snapshot = repo.recomputeExecutionControlsByItem(id, actorEmail(req));'
+    ),
+    true,
+    "recompute-execution-controls must guard subtree mutation access before recompute"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/execution-readiness/evaluate", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const summary = repo.evaluateExecutionReadinessByItem(id);'
+    ),
+    true,
+    "execution-readiness evaluate must guard subtree mutation access before evaluation"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/governance-summary/evaluate", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const summary = repo.buildGovernanceSummaryByItem(id);'
+    ),
+    true,
+    "governance-summary evaluate must guard subtree mutation access before evaluation"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/execution-channels", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const record = repo.createExecutionChannelRecord(payload, actorEmail(req));'
+    ),
+    true,
+    "execution-channels create route must guard subtree mutation access before create"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/execution-channels/:channel/validate-latest", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const result = repo.validateLatestExecutionChannelByItemAndChannel(id, channel, actorEmail(req));'
+    ),
+    true,
+    "execution-channel validate route must guard subtree mutation access before validation"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/execution-channels/:channel/generate", requireRole("admin", "user"), async (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const result = await generateExecutionChannelForItem(repo, id, channel, {'
+    ),
+    true,
+    "execution-channel generate route must guard subtree mutation access before generation"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/search-enrichment", requireRole("admin"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const record = repo.addSearchEnrichmentRecord(id, req.body || {});'
+    ),
+    true,
+    "search-enrichment create route must guard subtree mutation access before create"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/recompute-intelligence", requireRole("admin"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const intelligence = repo.recomputePlaceIntelligence(id);'
+    ),
+    true,
+    "recompute-intelligence route must guard subtree mutation access before recompute"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/social-signals", requireRole("admin"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const signal = repo.addSocialSignalSource(id, req.body || {});'
+    ),
+    true,
+    "social-signals create route must guard subtree mutation access before create"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/momentum/recompute", requireRole("admin"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const snapshot = repo.recomputeMomentumScore(id, platform);'
+    ),
+    true,
+    "momentum recompute route must guard subtree mutation access before recompute"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/recompute-content-direction", requireRole("admin"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const report = repo.recomputeContentDirectionByItem(id);'
+    ),
+    true,
+    "content-direction recompute route must guard subtree mutation access before recompute"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "admin", "user"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'if (!isExternalAssignee && !canAssignToUserByManagementLine(req.authUser, assigneeId)) {'
+    ),
+    true,
+    "article-editorial-assignments route must guard item subtree before assignee subtree checks"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "admin", "user"), (req, res) => {',
+      'if (!isExternalAssignee && !canAssignToUserByManagementLine(req.authUser, assigneeId)) {'
+    ),
+    true,
+    "article-editorial-assignments route must validate assignee management-line scope"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/article-editorial-assignments/:assignmentId/request-revision", requireRole("owner", "admin", "user"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const updatedAssignment = repo.updateAssignmentState(assignmentId, "revision_requested", actorEmail(req), {'
+    ),
+    true,
+    "article assignment request-revision route must guard item subtree before mutation"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/article-editorial-assignments/:assignmentId/request-revision", requireRole("owner", "admin", "user"), (req, res) => {',
+      'if (!canSeeAssignmentByManagementLine(req.authUser, assignment)) {'
+    ),
+    true,
+    "article assignment request-revision route must validate assignment subtree visibility"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'if (!canAssignToUserByManagementLine(req.authUser, assigneeId)) {'
+    ),
+    true,
+    "item assignments create route must guard item subtree before assignee subtree checks"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+      'if (!canAssignToUserByManagementLine(req.authUser, assigneeId)) {'
+    ),
+    true,
+    "item assignments create route must validate assignee management-line scope"
+  );
+  assert.equal(
+    routeGuardBefore(
+      'app.post("/api/items/:id/unpublish", requireRole("admin", "owner"), (req, res) => {',
+      'if (!ensureItemMutationAccess(req, res, item)) {',
+      'const workflowBefore = repo.ensureWorkflowModel(id);'
+    ),
+    true,
+    "unpublish route must guard subtree mutation access before publication mutation"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const result = await rerunProblemTranslations(repo, actorEmail(req), { aiConfig, content_item_id: id });'),
+    true,
+    "recover-problem-translations must guard subtree mutation access before rerun"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const result = await rerunProblemTranslations(repo, actorEmail(req), {'),
+    true,
+    "generate-translations must guard subtree mutation access before rerun"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const result = await rerunTranslationRecheck(repo, actorEmail(req), {'),
+    true,
+    "translation recheck must guard subtree mutation access before rerun"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const translation = await repairTranslationFromRecheckIssues(repo, id, lang, aiConfig, actorEmail(req));'),
+    true,
+    "translation repair must guard subtree mutation access before repair"
   );
 });
 
