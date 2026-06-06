@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { CATEGORY_KEYS, getLangContent, normalizeLang } from "@/lib/site";
 import { getEvents, getHomepageLayout, getPlaces, getUbonWeather } from "@/lib/api";
 import { buildHomeDecisionSelections } from "@/lib/phase56-decision-helpers.mjs";
@@ -145,7 +145,10 @@ export default async function LangHome({ params }) {
   });
 
   const resolvedBlocks = Array.isArray(homepageLayout?.resolved_blocks) ? homepageLayout.resolved_blocks : [];
-  const hasPublishedCurationLayout = resolvedBlocks.length > 0;
+  const hasPublishedCurationLayout =
+    Boolean(homepageLayout?.published_at) &&
+    homepageLayout?.source !== "draft_fallback" &&
+    resolvedBlocks.length > 0;
 
   return (
     <section className="home-page-flow">
