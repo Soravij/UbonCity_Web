@@ -233,6 +233,27 @@ function translationRecheckStatusCounts(rows) {
   return counts;
 }
 
+function currentSourceFingerprint() {
+  return String(state.readiness?.current_source_fingerprint || "").trim();
+}
+
+function hasLiveReadiness() {
+  return Boolean(state.readiness && Array.isArray(state.readiness.translations));
+}
+
+function hasSourceFingerprintMismatch(row, expectedFingerprint = currentSourceFingerprint()) {
+  const currentFingerprint = String(expectedFingerprint || "").trim();
+  if (!currentFingerprint) return false;
+  return String(row?.source_fingerprint || "").trim() !== currentFingerprint;
+}
+
+function isTranslationRowStale(row, expectedFingerprint = currentSourceFingerprint()) {
+  return hasSourceFingerprintMismatch(row, expectedFingerprint)
+    || Number(row?.stale_flag || 0) === 1
+    || String(row?.status || "").trim().toLowerCase() === "stale"
+    || String(row?.translation_status || "").trim().toLowerCase() === "stale";
+}
+
 function localeLabel(lang) {
   const normalized = String(lang || "").trim().toLowerCase();
   if (normalized === "th") return "TH / Thai";
@@ -274,7 +295,7 @@ function parseRecheckIssues(value) {
 }
 
 function translationRecheckStatusFromRow(row) {
-  if (Number(row?.stale_flag || 0) === 1 || String(row?.status || "").trim().toLowerCase() === "stale") return "stale";
+  if (isTranslationRowStale(row)) return "stale";
   const raw = String(row?.translation_recheck_status || "").trim().toLowerCase();
   if (["passed", "warning", "failed", "stale"].includes(raw)) return raw;
   return "not_checked";
@@ -292,7 +313,7 @@ function translationRecheckStatusLabel(value) {
 function getTranslationRecheckEligibility(row) {
   const translationStatus = String(row?.translation_status || "").trim().toLowerCase();
   const automaticCheckStatus = String(row?.automatic_check_status || "").trim().toLowerCase();
-  const stale = Number(row?.stale_flag || 0) === 1 || String(row?.translation_recheck_status || "").trim().toLowerCase() === "stale";
+  const stale = isTranslationRowStale(row) || String(row?.translation_recheck_status || "").trim().toLowerCase() === "stale";
   if (stale) {
     return { eligible: false, reason: "Translation is stale" };
   }
@@ -358,6 +379,7 @@ function buildTranslationRecheckRows() {
       rechecked_at: live?.rechecked_at || null,
       repair_attempt_count: Number(live?.repair_attempt_count || 0) || 0,
       stale_flag: Number(live?.stale_flag || 0) || 0,
+      source_fingerprint: String(live?.source_fingerprint || "").trim(),
     };
   });
 }
@@ -365,9 +387,19 @@ function buildTranslationRecheckRows() {
 function getTranslationRecheckGateState() {
   const rows = buildTranslationRecheckRows();
   const counts = translationRecheckStatusCounts(rows);
+  if (!hasLiveReadiness()) {
+    const blockingLangs = rows.map((row) => String(row?.lang || "").trim().toUpperCase()).filter(Boolean);
+    return {
+      rows,
+      counts,
+      blockingRows: rows,
+      blockingLangs,
+      allReady: false,
+    };
+  }
   const blockingRows = rows.filter((row) => {
     const automaticPassed = String(row?.automatic_check_status || "").trim().toLowerCase() === "passed";
-    const notStale = Number(row?.stale_flag || 0) === 0 && String(row?.translation_recheck_status || "") !== "stale";
+    const notStale = !isTranslationRowStale(row) && String(row?.translation_recheck_status || "") !== "stale";
     const recheckPassed = String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed";
     return !(automaticPassed && notStale && recheckPassed);
   });
@@ -381,7 +413,7 @@ function getTranslationRecheckGateState() {
 }
 
 function translationStatusFromRepoRow(row) {
-  if (Number(row?.stale_flag || 0) === 1) return "stale";
+  if (isTranslationRowStale(row)) return "stale";
   if (
     String(row?.translation_status || "").trim().toLowerCase() === "ready"
     && String(row?.automatic_check_status || "").trim().toLowerCase() === "passed"
@@ -431,6 +463,7 @@ function buildRepoTranslationStatusRows() {
     status: translationStatusFromRepoRow(row),
     translation_status: String(row?.translation_status || "").trim().toLowerCase() || "-",
     automatic_check_status: String(row?.automatic_check_status || "").trim().toLowerCase() || "-",
+    source_fingerprint: String(row?.source_fingerprint || "").trim(),
     source_kind: String(row?.source_kind || "").trim().toLowerCase() || "-",
     failure_reason: translationFailureReasonFromRow(row),
     issues: translationIssuesFromRow(row),
@@ -482,9 +515,11 @@ function buildTranslationRows() {
     return readinessRows.map((row) => {
       const lang = String(row?.lang || "").trim().toLowerCase();
       const live = repoByLang.get(lang) || null;
-      return {
-        lang,
-        status: String(row?.status || "not_ready").trim().toLowerCase(),
+    return {
+      lang,
+      status: live && isTranslationRowStale(live)
+        ? "stale"
+        : String(row?.status || "not_ready").trim().toLowerCase(),
         translation_status: String(live?.translation_status || "").trim().toLowerCase() || "-",
         automatic_check_status: String(live?.automatic_check_status || "").trim().toLowerCase() || "-",
         source_kind: String(live?.source_kind || "").trim().toLowerCase() || "-",
@@ -495,7 +530,10 @@ function buildTranslationRows() {
     });
   }
 
-  return buildRepoTranslationStatusRows();
+  return buildRepoTranslationStatusRows().map((row) => ({
+    ...row,
+    status: String(row?.status || "").trim().toLowerCase() === "stale" ? "stale" : "not_ready",
+  }));
 }
 
 function getTranslationGateState() {
@@ -847,6 +885,21 @@ async function refreshArticleProcess() {
   state.articleProcess = await api(`/api/items/${state.itemId}/article-process`);
 }
 
+async function loadCurrentReadiness() {
+  state.readiness = await api(`/api/items/${state.itemId}/export-readiness`);
+  return state.readiness;
+}
+
+async function reloadCurrentReadinessSoft() {
+  try {
+    await loadCurrentReadiness();
+    return true;
+  } catch (err) {
+    setBanner(`โหลดสถานะความพร้อมไม่สำเร็จ: ${String(err?.message || "unknown error")}`, "error");
+    return false;
+  }
+}
+
 async function transitionArticle(status, note = "") {
   setBusy(true);
   setBanner("กำลังอัปเดตสถานะ...", "loading");
@@ -920,7 +973,13 @@ async function generateTranslations() {
     const failureSummary = summarizeTranslationFailures(result?.per_language_status || result?.result?.languages || []);
     state.readiness = result?.readiness || state.readiness;
     await refreshTranslations();
+    await reloadCurrentReadinessSoft();
     renderSyncSummary();
+    renderTranslationSummary();
+    renderTranslationRecheckPanel();
+    renderTranslationReviewSummary();
+    renderReviewChecklist();
+    applyActionGuards();
     if (generatedCount > 0 && failedCount > 0) {
       setInlineStatus("translation-status", `สร้างคำแปลแล้ว ${generatedCount} ภาษา และมีปัญหา ${failedCount} ภาษา${failureSummary ? `: ${failureSummary}` : ""}`);
       return;
@@ -937,6 +996,11 @@ async function generateTranslations() {
   } finally {
     setTranslationGenerateLoading(false);
     setBusy(false);
+    renderSyncSummary();
+    renderTranslationSummary();
+    renderTranslationRecheckPanel();
+    renderTranslationReviewSummary();
+    renderReviewChecklist();
     applyActionGuards();
   }
 }
@@ -1143,6 +1207,7 @@ async function init() {
   }
   try {
     await loadWorkspace();
+    await reloadCurrentReadinessSoft();
     if (!canApproveArticle()) {
       window.location.replace(roleArticleFallbackUrl());
       return;

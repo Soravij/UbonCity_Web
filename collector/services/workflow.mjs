@@ -1,4 +1,5 @@
 ﻿import fs from "fs/promises";
+import crypto from "crypto";
 import path from "path";
 import { cleanReviewsAndContent } from "../cleaner/review-cleaner.mjs";
 import { generateContentDrafts } from "../ai/generate-content.mjs";
@@ -292,12 +293,33 @@ function buildInternalLinkSuggestions(currentItem, candidates) {
   return suggestions;
 }
 
-function buildSourceFingerprint(article) {
-  return [
-    Number(article?.content_item_id || 0),
-    Number(article?.draft_id || 0),
-    Number(article?.review_report_id || 0),
-  ].join(":");
+export function buildSourceFingerprint(article) {
+  const normalized = normalizeTranslationSource(article);
+  const payload = {
+    source_kind: String(normalized?.source_kind || "").trim().toLowerCase() || "",
+    source_lang: String(normalized?.source_lang || "th").trim().toLowerCase() || "th",
+    category: String(normalized?.category || "").trim().toLowerCase() || "",
+    slug: String(normalized?.slug || "").trim(),
+    title: String(normalized?.title || "").trim(),
+    excerpt: String(normalized?.excerpt || "").trim(),
+    body: String(normalized?.body || "").trim(),
+    meta_title: String(normalized?.meta_title || "").trim(),
+    meta_description: String(normalized?.meta_description || "").trim(),
+  };
+  const digest = crypto.createHash("sha1").update(JSON.stringify(payload)).digest("hex");
+  return `v2:${digest}`;
+}
+
+export function isTranslationSourceFingerprintMismatch(row, currentSourceFingerprint = "") {
+  const current = String(currentSourceFingerprint || "").trim();
+  if (!current) return false;
+  return String(row?.source_fingerprint || "").trim() !== current;
+}
+
+export function isTranslationRowStale(row, currentSourceFingerprint = "") {
+  return isTranslationSourceFingerprintMismatch(row, currentSourceFingerprint)
+    || Number(row?.stale_flag || 0) === 1
+    || String(row?.translation_status || "").trim().toLowerCase() === "stale";
 }
 
 function validateImageWorkflowReady(repo, itemId) {
@@ -1072,10 +1094,24 @@ async function runSemanticTranslationRecheck(aiConfig, article, translationRow) 
   }
 }
 
+export function isTranslationTechnicalReady(row, currentSourceFingerprint = "") {
+  return String(row?.translation_status || "").trim().toLowerCase() === "ready"
+    && String(row?.automatic_check_status || "").trim().toLowerCase() === "passed"
+    && !isTranslationRowStale(row, currentSourceFingerprint);
+}
+
+export function isTranslationRecheckPassed(row, currentSourceFingerprint = "") {
+  return isTranslationTechnicalReady(row, currentSourceFingerprint)
+    && String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed";
+}
+
+export function getCurrentTranslationSourceFingerprint(repo, contentItemId) {
+  return buildSourceFingerprint(buildTranslationSourceForItem(repo, contentItemId));
+}
+
 async function runTranslationRecheckForRow(repo, article, translationRow, aiConfig) {
-  const eligibility = String(translationRow?.translation_status || "").trim().toLowerCase() === "ready"
-    && String(translationRow?.automatic_check_status || "").trim().toLowerCase() === "passed"
-    && Number(translationRow?.stale_flag || 0) === 0;
+  const currentSourceFingerprint = buildSourceFingerprint(article);
+  const eligibility = isTranslationTechnicalReady(translationRow, currentSourceFingerprint);
   if (!eligibility) {
     return repo.updateTranslationRecheck(article.content_item_id, translationRow.lang, {
       translation_recheck_status: "not_checked",
@@ -1247,16 +1283,25 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
         });
 
         if (check.status === "passed") {
-          const savedRow = repo.getTranslation(article.content_item_id, lang);
-          const recheckResult = savedRow
-            ? await runTranslationRecheckForRow(repo, article, savedRow, aiConfig)
-            : null;
+          repo.updateTranslationRecheck(article.content_item_id, lang, {
+            translation_recheck_status: "not_checked",
+            translation_recheck_score: null,
+            accuracy_score: null,
+            fluency_score: null,
+            term_score: null,
+            back_translation_th: null,
+            recheck_summary_th: null,
+            recheck_issues: [],
+            recheck_model: null,
+            rechecked_at: null,
+            repair_attempt_count: 0,
+          });
           generatedCount += 1;
           languageResults.push({
             lang,
             status: "generated",
             failure_reason: null,
-            translation_recheck_status: recheckResult?.translation_recheck_status || "not_checked",
+            translation_recheck_status: "not_checked",
           });
           traceTranslationDiagnostics("translation_attempt_success", {
             ...diagnostics,
@@ -1442,9 +1487,10 @@ export async function rerunProblemTranslations(repo, actorEmail, options = {}) {
   );
   const rows = contentItemId ? repo.listTranslations(contentItemId) : repo.listTranslations();
 
-  const pass = rows.filter((row) => row.translation_status === "ready" && row.automatic_check_status === "passed" && Number(row.stale_flag || 0) === 0).length;
+  const currentSourceFingerprint = contentItemId ? getCurrentTranslationSourceFingerprint(repo, contentItemId) : "";
+  const pass = rows.filter((row) => isTranslationTechnicalReady(row, currentSourceFingerprint)).length;
   const failed = rows.filter((row) => row.translation_status === "failed" || row.automatic_check_status === "failed" || row.translation_status === "check_failed").length;
-  const stale = rows.filter((row) => Number(row.stale_flag || 0) === 1 || row.translation_status === "stale").length;
+  const stale = rows.filter((row) => isTranslationRowStale(row, currentSourceFingerprint)).length;
   const pending = Math.max(0, rows.length - pass - failed - stale);
 
   return {
@@ -1471,6 +1517,7 @@ export async function rerunTranslationRecheck(repo, actorEmail, options = {}) {
   }
 
   const article = buildTranslationSourceForItem(repo, contentItemId);
+  const currentSourceFingerprint = buildSourceFingerprint(article);
   const rows = repo
     .listTranslations(contentItemId)
     .filter((row) => !langFilter || String(row?.lang || "").trim().toLowerCase() === langFilter);
@@ -1479,11 +1526,7 @@ export async function rerunTranslationRecheck(repo, actorEmail, options = {}) {
     throw new Error("translation locale not found");
   }
 
-  const eligibleRows = rows.filter((row) =>
-    String(row?.translation_status || "").trim().toLowerCase() === "ready"
-    && String(row?.automatic_check_status || "").trim().toLowerCase() === "passed"
-    && Number(row?.stale_flag || 0) === 0
-  );
+  const eligibleRows = rows.filter((row) => isTranslationTechnicalReady(row, currentSourceFingerprint));
 
   if (!eligibleRows.length) {
     throw new Error("translation locale is not eligible for recheck");

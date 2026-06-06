@@ -28,6 +28,10 @@ import { createRepository, hasRecognizedEvaluationOverrideInput } from "../db/re
 import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/index.mjs";
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import {
+  getCurrentTranslationSourceFingerprint,
+  isTranslationRowStale as isWorkflowTranslationRowStale,
+  isTranslationTechnicalReady as isWorkflowTranslationTechnicalReady,
+  isTranslationRecheckPassed as isWorkflowTranslationRecheckPassed,
   applyReviewAction,
   compensateReleaseAfterSyncFailure,
   parseImportText,
@@ -4438,6 +4442,24 @@ function buildBackendSyncPayload(options = {}) {
     throw new Error("COLLECTOR_PUBLIC_BASE_URL is required for backend lifecycle sync.");
   }
   const contentItemId = Number(options?.contentItemId || options?.content_item_id || 0) || null;
+  const currentSourceFingerprint = contentItemId ? getCurrentTranslationSourceFingerprint(repo, contentItemId) : "";
+  const fingerprintByItemId = new Map();
+  function getFingerprintForTranslation(row) {
+    if (contentItemId) {
+      return currentSourceFingerprint;
+    }
+    const sourceContentItemId = Number(row?.source_content_item_id || 0) || 0;
+    if (!sourceContentItemId) {
+      return "";
+    }
+    if (!fingerprintByItemId.has(sourceContentItemId)) {
+      fingerprintByItemId.set(
+        sourceContentItemId,
+        getCurrentTranslationSourceFingerprint(repo, sourceContentItemId),
+      );
+    }
+    return fingerprintByItemId.get(sourceContentItemId) || "";
+  }
   const published = repo
     .listPublishedArticles()
     .filter((row) => !contentItemId || Number(row.content_item_id || 0) === contentItemId)
@@ -4477,7 +4499,7 @@ function buildBackendSyncPayload(options = {}) {
 
   const translations = repo
     .listTranslations(contentItemId)
-    .filter((t) => isTranslationRecheckPassed(t))
+    .filter((t) => isTranslationRecheckPassed(t, getFingerprintForTranslation(t)))
     .map((t) => ({
       source_content_item_id: t.source_content_item_id,
       lang: t.lang,
@@ -4536,9 +4558,10 @@ function buildReviewIngestPayload(options = {}) {
     throw new Error("content fields are incomplete for admin review ingest");
   }
 
+  const currentSourceFingerprint = contentItemId ? getCurrentTranslationSourceFingerprint(repo, contentItemId) : "";
   const translationLangs = repo
     .listTranslations(contentItemId)
-    .filter((t) => isTranslationRecheckPassed(t))
+    .filter((t) => isTranslationRecheckPassed(t, currentSourceFingerprint))
     .map((t) => String(t.lang || "").trim().toLowerCase())
     .filter(Boolean);
 
@@ -4698,6 +4721,7 @@ function buildEventAdminQueuePayload(options = {}) {
   const content = reviewPayload?.content || {};
   const sourceBaseUrl = String(reviewPayload?.source_base_url || options?.sourceBaseUrl || resolveCollectorPublicBaseUrl()).trim();
   const mediaManifest = rewriteMediaManifestForBase(reviewPayload?.media_manifest || {}, sourceBaseUrl);
+  const currentSourceFingerprint = contentItemId ? getCurrentTranslationSourceFingerprint(repo, contentItemId) : "";
 
   return {
     source_system: String(reviewPayload?.source_system || "collector-app").trim().toLowerCase() || "collector-app",
@@ -4729,7 +4753,7 @@ function buildEventAdminQueuePayload(options = {}) {
     },
     translations_snapshot: repo
       .listTranslations(contentItemId)
-      .filter((t) => isTranslationRecheckPassed(t))
+      .filter((t) => isTranslationRecheckPassed(t, currentSourceFingerprint))
       .map((t) => ({
         lang: String(t.lang || "").trim().toLowerCase(),
         title: t.translated_title,
@@ -4739,7 +4763,7 @@ function buildEventAdminQueuePayload(options = {}) {
       })),
     translation_langs: repo
       .listTranslations(contentItemId)
-      .filter((t) => isTranslationRecheckPassed(t))
+      .filter((t) => isTranslationRecheckPassed(t, currentSourceFingerprint))
       .map((t) => String(t.lang || "").trim().toLowerCase())
       .filter(Boolean),
   };
@@ -6344,15 +6368,12 @@ function parseTargetLangs() {
     .filter(Boolean);
 }
 
-function isTranslationTechnicalReady(row) {
-  return String(row?.translation_status || "").trim().toLowerCase() === "ready"
-    && String(row?.automatic_check_status || "").trim().toLowerCase() === "passed"
-    && Number(row?.stale_flag || 0) === 0;
+function isTranslationTechnicalReady(row, currentSourceFingerprint = "") {
+  return isWorkflowTranslationTechnicalReady(row, currentSourceFingerprint);
 }
 
-function isTranslationRecheckPassed(row) {
-  return isTranslationTechnicalReady(row)
-    && String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed";
+function isTranslationRecheckPassed(row, currentSourceFingerprint = "") {
+  return isWorkflowTranslationRecheckPassed(row, currentSourceFingerprint);
 }
 
 function getRequiredTranslationRecheckBlockers(contentItemId, readiness = null) {
@@ -6361,6 +6382,11 @@ function getRequiredTranslationRecheckBlockers(contentItemId, readiness = null) 
   const sourceLang = String(item?.lang || "th").trim().toLowerCase() || "th";
   const requiredLocales = parseTargetLangs().filter((lang) => lang !== sourceLang);
   const liveTranslationRows = repo.listTranslations(contentItemId);
+  const currentSourceFingerprint = String(
+    exportReadiness?.current_source_fingerprint
+    || getCurrentTranslationSourceFingerprint(repo, contentItemId)
+    || ""
+  ).trim();
   const liveByLang = new Map(
     liveTranslationRows.map((row) => [String(row?.lang || "").trim().toLowerCase(), row]),
   );
@@ -6370,7 +6396,7 @@ function getRequiredTranslationRecheckBlockers(contentItemId, readiness = null) 
     if (!live) {
       return { lang, reason: "missing translation" };
     }
-    if (Number(live?.stale_flag || 0) === 1 || String(live?.translation_status || "").trim().toLowerCase() === "stale") {
+    if (isWorkflowTranslationRowStale(live, currentSourceFingerprint)) {
       return { lang, reason: "translation is stale" };
     }
     if (String(live?.translation_status || "").trim().toLowerCase() !== "ready") {
@@ -6385,7 +6411,7 @@ function getRequiredTranslationRecheckBlockers(contentItemId, readiness = null) 
         reason: `translation recheck is not passed (${String(live?.translation_recheck_status || "not_checked").trim().toLowerCase() || "not_checked"})`,
       };
     }
-    if (!isTranslationRecheckPassed(live)) {
+    if (!isTranslationRecheckPassed(live, currentSourceFingerprint)) {
       return { lang, reason: "translation recheck gate is not satisfied" };
     }
     return null;
@@ -6451,13 +6477,14 @@ function buildExportReadiness(contentItemId) {
 
   const targetLangs = parseTargetLangs().filter((lang) => lang !== String(item.lang || "th").toLowerCase());
   const rows = repo.listTranslations(contentItemId);
+  const currentSourceFingerprint = getCurrentTranslationSourceFingerprint(repo, contentItemId);
   const translationByLang = new Map(rows.map((row) => [String(row.lang || "").toLowerCase(), row]));
 
   const translations = targetLangs.map((lang) => {
     const row = translationByLang.get(lang);
     if (!row) return { lang, status: "not_ready" };
 
-    if (Number(row.stale_flag || 0) === 1 || String(row.translation_status || "") === "stale") {
+    if (isWorkflowTranslationRowStale(row, currentSourceFingerprint)) {
       return { lang, status: "stale" };
     }
     if (String(row.translation_status || "") === "ready" && String(row.automatic_check_status || "") === "passed") {
@@ -6478,14 +6505,19 @@ function buildExportReadiness(contentItemId) {
   };
 
   const translationRecheckCounts = {
-    passed: rows.filter((row) => String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed").length,
+    passed: rows.filter((row) => isTranslationRecheckPassed(row, currentSourceFingerprint)).length,
     warning: rows.filter((row) => String(row?.translation_recheck_status || "").trim().toLowerCase() === "warning").length,
     failed: rows.filter((row) => String(row?.translation_recheck_status || "").trim().toLowerCase() === "failed").length,
-    not_checked: rows.filter((row) => !String(row?.translation_recheck_status || "").trim() || String(row?.translation_recheck_status || "").trim().toLowerCase() === "not_checked").length,
+    stale: rows.filter((row) => isWorkflowTranslationRowStale(row, currentSourceFingerprint)).length,
+    not_checked: rows.filter((row) =>
+      !isWorkflowTranslationRowStale(row, currentSourceFingerprint)
+      && (!String(row?.translation_recheck_status || "").trim() || String(row?.translation_recheck_status || "").trim().toLowerCase() === "not_checked")
+    ).length,
   };
 
   return {
     content_item_id: contentItemId,
+    current_source_fingerprint: currentSourceFingerprint,
     source_ready: sourceIssues.length === 0,
     source_issues: sourceIssues,
     editorial_ready: editorialIssues.length === 0,
