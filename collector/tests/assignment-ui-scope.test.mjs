@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const indexHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "index.html"), "utf8");
@@ -86,14 +87,109 @@ return normalizeAssignmentSubmissionEditorialPayload;`
   })
 );
 
-const hasAssignmentSubmissionAccessForTest = new Function(
-  `${extractNamedFunctionSource(indexServer, "hasAssignmentSubmissionAccess")}; return hasAssignmentSubmissionAccess;`
-)();
-
 const normalizeAssignmentRowForTest = new Function(
   "parseJson",
   `${extractNamedFunctionSource(repositoryJs, "normalizeAssignmentRow")}; return normalizeAssignmentRow;`
 )(parseJsonForTest);
+
+function loadAssignmentManagementScopeHooks(users = [], options = {}) {
+  const userMap = new Map(
+    (Array.isArray(users) ? users : []).map((row) => [Number(row?.id || 0), {
+      id: Number(row?.id || 0) || 0,
+      role: String(row?.role || "").trim().toLowerCase(),
+      managed_by_user_id: Number(row?.managed_by_user_id || 0) || 0,
+    }])
+  );
+  const itemMap = new Map(
+    (Array.isArray(options?.items) ? options.items : []).map((row) => [Number(row?.id || 0), { ...row, id: Number(row?.id || 0) || 0 }])
+  );
+  const assignmentsByItemId = new Map();
+  (Array.isArray(options?.assignments) ? options.assignments : []).forEach((row) => {
+    const itemId = Number(row?.content_item_id || row?.item_id || 0) || 0;
+    if (!itemId) return;
+    if (!assignmentsByItemId.has(itemId)) assignmentsByItemId.set(itemId, []);
+    assignmentsByItemId.get(itemId).push(row);
+  });
+  const context = {
+    db: {
+      prepare(sql) {
+        return {
+          get(...args) {
+            if (/SELECT role FROM users/i.test(sql)) {
+              const row = userMap.get(Number(args[0] || 0));
+              return row ? { role: row.role } : undefined;
+            }
+            if (/role IN \('freelance', 'editor'\) AND managed_by_user_id=\?/i.test(sql)) {
+              const workerId = Number(args[0] || 0) || 0;
+              const managerId = Number(args[1] || 0) || 0;
+              const row = userMap.get(workerId);
+              if (!row || !["freelance", "editor"].includes(row.role)) return undefined;
+              return row.managed_by_user_id === managerId ? { id: row.id } : undefined;
+            }
+            if (/SELECT id, managed_by_user_id FROM users WHERE id=\?/i.test(sql)) {
+              const row = userMap.get(Number(args[0] || 0));
+              return row ? { id: row.id, managed_by_user_id: row.managed_by_user_id } : undefined;
+            }
+            return undefined;
+          },
+        };
+      },
+    },
+    repo: {
+      getItem(itemId) {
+        return itemMap.get(Number(itemId || 0)) || null;
+      },
+      listAssignmentsByItem(itemId) {
+        return assignmentsByItemId.get(Number(itemId || 0)) || [];
+      },
+    },
+    normalizeUserRole(value, fallback = "user") {
+      const normalized = String(value || "").trim().toLowerCase();
+      return normalized || fallback;
+    },
+    normalizePolicyRole(value, fallback = "user") {
+      const normalized = String(value || "").trim().toLowerCase();
+      return normalized || fallback;
+    },
+    console,
+  };
+  const source = `
+${extractNamedFunctionSource(indexServer, "actorPolicyRole")}
+${extractNamedFunctionSource(indexServer, "isManagedContributorByUser")}
+${extractNamedFunctionSource(indexServer, "getUserAssignmentRole")}
+${extractNamedFunctionSource(indexServer, "isOwnerUser")}
+${extractNamedFunctionSource(indexServer, "getAuthUserId")}
+${extractNamedFunctionSource(indexServer, "canAssignToUserByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canSeeUserByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canSeeManagedWorkForUser")}
+${extractNamedFunctionSource(indexServer, "canSeeAssignmentByManagementLine")}
+${extractNamedFunctionSource(indexServer, "filterAssignmentsByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canClaimItemByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canTakeOverItemByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canMutateItemByManagementLine")}
+${extractNamedFunctionSource(indexServer, "hasAssignmentAccess")}
+${extractNamedFunctionSource(indexServer, "hasAssignmentSubmissionAccess")}
+${extractNamedFunctionSource(indexServer, "listEditorialAssignmentsByItem")}
+${extractNamedFunctionSource(indexServer, "getPrimaryEditorialAssignment")}
+${extractNamedFunctionSource(indexServer, "hasItemBriefAccess")}
+globalThis.__assignmentScopeHooks = {
+  canAssignToUserByManagementLine,
+  canSeeUserByManagementLine,
+  canSeeManagedWorkForUser,
+  canSeeAssignmentByManagementLine,
+  filterAssignmentsByManagementLine,
+  canClaimItemByManagementLine,
+  canTakeOverItemByManagementLine,
+  canMutateItemByManagementLine,
+  hasAssignmentAccess,
+  hasAssignmentSubmissionAccess,
+  hasItemBriefAccess,
+};
+`;
+  context.globalThis = context;
+  vm.runInNewContext(source, context, { filename: "assignment-scope-hooks.js" });
+  return context.__assignmentScopeHooks;
+}
 
 test("assignment HTML removes readiness-only controls and keeps execution-only controls", () => {
   const forbiddenSnippets = [
@@ -605,26 +701,325 @@ test("work-lane article payload prefill keeps only current field-pack prompts an
 });
 
 test("assignment submission access is limited to assignee or external assigner only", () => {
+  const { hasAssignmentSubmissionAccess } = loadAssignmentManagementScopeHooks([
+    { id: 3, role: "user", managed_by_user_id: 0 },
+    { id: 12, role: "freelance", managed_by_user_id: 3 },
+  ]);
   assert.equal(
-    hasAssignmentSubmissionAccessForTest(
-      { authUser: { id: 12 } },
+    hasAssignmentSubmissionAccess(
+      { authUser: { id: 12, role: "freelance" } },
       { assignee_user_id: 12, assigned_by_user_id: 3 }
     ),
     true
   );
   assert.equal(
-    hasAssignmentSubmissionAccessForTest(
-      { authUser: { id: 3 } },
+    hasAssignmentSubmissionAccess(
+      { authUser: { id: 3, role: "user" } },
       { assignee_user_id: 12, assigned_by_user_id: 3 }
     ),
-    false
+    true
   );
   assert.equal(
-    hasAssignmentSubmissionAccessForTest(
-      { authUser: { id: 3 } },
+    hasAssignmentSubmissionAccess(
+      { authUser: { id: 3, role: "user" } },
       { assignee_user_id: null, assigned_by_user_id: 3 }
     ),
     true
+  );
+});
+
+test("assignment management-line helpers keep admin scoped and owner global", () => {
+  const {
+    canAssignToUserByManagementLine,
+    canSeeManagedWorkForUser,
+    canSeeAssignmentByManagementLine,
+    hasAssignmentAccess,
+    hasAssignmentSubmissionAccess,
+  } = loadAssignmentManagementScopeHooks([
+    { id: 1, role: "owner", managed_by_user_id: 0 },
+    { id: 10, role: "admin", managed_by_user_id: 1 },
+    { id: 11, role: "user", managed_by_user_id: 10 },
+    { id: 12, role: "freelance", managed_by_user_id: 11 },
+    { id: 20, role: "admin", managed_by_user_id: 1 },
+    { id: 21, role: "user", managed_by_user_id: 20 },
+    { id: 30, role: "editor", managed_by_user_id: 10 },
+  ]);
+
+  const adminReq = { authUser: { id: 10, role: "admin" } };
+  const ownerReq = { authUser: { id: 1, role: "owner" } };
+  const editorReq = { authUser: { id: 30, role: "editor" } };
+
+  const subtreeAssignment = { assignment_kind: "field", assignee_user_id: 12, assigned_by_user_id: 11 };
+  const outOfScopeAssignedByVisible = { assignment_kind: "field", assignee_user_id: 21, assigned_by_user_id: 11 };
+  const ownerAssignment = { assignment_kind: "field", assignee_user_id: 1, assigned_by_user_id: 1 };
+  const otherBranchAssignment = { assignment_kind: "field", assignee_user_id: 21, assigned_by_user_id: 20 };
+  const externalByOwner = { assignment_kind: "field", assignee_user_id: null, assigned_by_user_id: 1 };
+
+  assert.equal(canAssignToUserByManagementLine(adminReq.authUser, 12), true);
+  assert.equal(canAssignToUserByManagementLine(adminReq.authUser, 10), false);
+  assert.equal(canAssignToUserByManagementLine(adminReq.authUser, 21), false);
+  assert.equal(canAssignToUserByManagementLine(adminReq.authUser, 1), false);
+  assert.equal(canSeeManagedWorkForUser(adminReq.authUser, 12), true);
+  assert.equal(canSeeManagedWorkForUser(adminReq.authUser, 10), false);
+  assert.equal(canSeeManagedWorkForUser(adminReq.authUser, 10, { allowSelf: true }), true);
+  assert.equal(canSeeManagedWorkForUser(adminReq.authUser, 21), false);
+
+  assert.equal(canSeeAssignmentByManagementLine(adminReq.authUser, subtreeAssignment), true);
+  assert.equal(hasAssignmentAccess(adminReq, subtreeAssignment, "admin"), true);
+  assert.equal(hasAssignmentSubmissionAccess(adminReq, subtreeAssignment, "admin"), true);
+
+  assert.equal(canSeeAssignmentByManagementLine(adminReq.authUser, outOfScopeAssignedByVisible), false);
+  assert.equal(hasAssignmentAccess(adminReq, outOfScopeAssignedByVisible, "admin"), false);
+
+  assert.equal(canSeeAssignmentByManagementLine(adminReq.authUser, ownerAssignment), false);
+  assert.equal(hasAssignmentAccess(adminReq, ownerAssignment, "admin"), false);
+  assert.equal(hasAssignmentSubmissionAccess(adminReq, ownerAssignment, "admin"), false);
+
+  assert.equal(canSeeAssignmentByManagementLine(adminReq.authUser, otherBranchAssignment), false);
+  assert.equal(hasAssignmentAccess(adminReq, otherBranchAssignment, "admin"), false);
+  assert.equal(hasAssignmentSubmissionAccess(adminReq, otherBranchAssignment, "admin"), false);
+
+  assert.equal(canSeeAssignmentByManagementLine(adminReq.authUser, externalByOwner), false);
+  assert.equal(hasAssignmentAccess(adminReq, externalByOwner, "admin"), false);
+
+  assert.equal(hasAssignmentAccess(ownerReq, ownerAssignment, "owner"), true);
+  assert.equal(hasAssignmentSubmissionAccess(ownerReq, ownerAssignment, "owner"), true);
+
+  assert.equal(hasAssignmentAccess(editorReq, { assignment_kind: "editorial", assignee_user_id: 30, assigned_by_user_id: 10 }, "editor"), true);
+  assert.equal(hasAssignmentAccess(editorReq, { assignment_kind: "field", assignee_user_id: 30, assigned_by_user_id: 10 }, "editor"), false);
+});
+
+test("item brief access follows assignment and claim scope instead of global admin/user visibility", () => {
+  const {
+    hasItemBriefAccess,
+  } = loadAssignmentManagementScopeHooks(
+    [
+      { id: 1, role: "owner", managed_by_user_id: 0 },
+      { id: 10, role: "admin", managed_by_user_id: 1 },
+      { id: 11, role: "user", managed_by_user_id: 10 },
+      { id: 12, role: "freelance", managed_by_user_id: 11 },
+      { id: 20, role: "admin", managed_by_user_id: 1 },
+      { id: 21, role: "user", managed_by_user_id: 20 },
+    ],
+    {
+      items: [
+        { id: 100, claimed_by_user_id: 11 },
+        { id: 101, claimed_by_user_id: 1 },
+        { id: 102, claimed_by_user_id: 10 },
+        { id: 103, claimed_by_user_id: 0 },
+      ],
+      assignments: [
+        { id: 500, content_item_id: 100, assignment_kind: "field", assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" },
+        { id: 501, content_item_id: 101, assignment_kind: "field", assignee_user_id: 1, assigned_by_user_id: 1, state: "assigned" },
+        { id: 502, content_item_id: 103, assignment_kind: "field", assignee_user_id: 21, assigned_by_user_id: 20, state: "assigned" },
+      ],
+    }
+  );
+
+  assert.equal(hasItemBriefAccess({ authUser: { id: 10, role: "admin" } }, 100, "admin"), true);
+  assert.equal(hasItemBriefAccess({ authUser: { id: 10, role: "admin" } }, 101, "admin"), false);
+  assert.equal(hasItemBriefAccess({ authUser: { id: 10, role: "admin" } }, 103, "admin"), false);
+  assert.equal(hasItemBriefAccess({ authUser: { id: 10, role: "admin" } }, 102, "admin"), false);
+  assert.equal(hasItemBriefAccess({ authUser: { id: 10, role: "admin" } }, 999, "admin"), false);
+
+  assert.equal(hasItemBriefAccess({ authUser: { id: 11, role: "user" } }, 102, "user"), false);
+  assert.equal(hasItemBriefAccess({ authUser: { id: 11, role: "user" } }, 100, "user"), true);
+
+  assert.equal(hasItemBriefAccess({ authUser: { id: 1, role: "owner" } }, 101, "owner"), true);
+});
+
+test("claim and takeover helpers do not let admin or user manufacture scope", () => {
+  const {
+    canClaimItemByManagementLine,
+    canTakeOverItemByManagementLine,
+    canMutateItemByManagementLine,
+  } = loadAssignmentManagementScopeHooks(
+    [
+      { id: 1, role: "owner", managed_by_user_id: 0 },
+      { id: 10, role: "admin", managed_by_user_id: 1 },
+      { id: 11, role: "user", managed_by_user_id: 10 },
+      { id: 12, role: "freelance", managed_by_user_id: 11 },
+      { id: 20, role: "admin", managed_by_user_id: 1 },
+      { id: 21, role: "user", managed_by_user_id: 20 },
+    ],
+    {
+      items: [
+        { id: 200, claimed_by_user_id: 11 },
+        { id: 201, claimed_by_user_id: 1 },
+        { id: 202, claimed_by_user_id: 21 },
+        { id: 203, claimed_by_user_id: 0 },
+        { id: 204, claimed_by_user_id: 0 },
+      ],
+      assignments: [
+        { id: 600, content_item_id: 203, assignment_kind: "field", assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" },
+        { id: 601, content_item_id: 204, assignment_kind: "field", assignee_user_id: 21, assigned_by_user_id: 20, state: "assigned" },
+      ],
+    }
+  );
+
+  assert.equal(canClaimItemByManagementLine({ id: 10, role: "admin" }, { id: 203, claimed_by_user_id: 0 }), true);
+  assert.equal(canClaimItemByManagementLine({ id: 10, role: "admin" }, { id: 204, claimed_by_user_id: 0 }), false);
+  assert.equal(canClaimItemByManagementLine({ id: 10, role: "admin" }, { id: 201, claimed_by_user_id: 1 }), false);
+  assert.equal(canClaimItemByManagementLine({ id: 11, role: "user" }, { id: 203, claimed_by_user_id: 0 }), true);
+  assert.equal(canClaimItemByManagementLine({ id: 11, role: "user" }, { id: 204, claimed_by_user_id: 0 }), false);
+  assert.equal(canClaimItemByManagementLine({ id: 1, role: "owner" }, { id: 204, claimed_by_user_id: 0 }), true);
+
+  assert.equal(canTakeOverItemByManagementLine({ id: 10, role: "admin" }, { id: 200, claimed_by_user_id: 11 }), true);
+  assert.equal(canTakeOverItemByManagementLine({ id: 10, role: "admin" }, { id: 201, claimed_by_user_id: 1 }), false);
+  assert.equal(canTakeOverItemByManagementLine({ id: 10, role: "admin" }, { id: 202, claimed_by_user_id: 21 }), false);
+  assert.equal(canTakeOverItemByManagementLine({ id: 1, role: "owner" }, { id: 201, claimed_by_user_id: 1 }), true);
+
+  assert.equal(canMutateItemByManagementLine({ id: 10, role: "admin" }, { id: 203, claimed_by_user_id: 0 }), true);
+  assert.equal(canMutateItemByManagementLine({ id: 10, role: "admin" }, { id: 204, claimed_by_user_id: 0 }), false);
+  assert.equal(canMutateItemByManagementLine({ id: 10, role: "admin" }, { id: 201, claimed_by_user_id: 1 }), false);
+  assert.equal(canMutateItemByManagementLine({ id: 1, role: "owner" }, { id: 204, claimed_by_user_id: 0 }), true);
+});
+
+test("assignment routes use management-line scope helpers instead of global admin visibility", () => {
+  const requiredSnippets = [
+    "function canAssignToUserByManagementLine(authUser, targetUserId) {",
+    "function canSeeUserByManagementLine(authUser, targetUserId) {",
+    "function canSeeManagedWorkForUser(authUser, targetUserId, options) {",
+    "function canSeeAssignmentByManagementLine(authUser, assignment) {",
+    "function hasItemBriefAccess(req, contentItemId, role = actorPolicyRole(req)) {",
+    "function filterAssignmentsByManagementLine(authUser, assignments = []) {",
+    "function canClaimItemByManagementLine(authUser, item) {",
+    "function canTakeOverItemByManagementLine(authUser, item) {",
+    "function canMutateItemByManagementLine(authUser, item, options) {",
+    "function ensureItemMutationAccess(req, res, item, options = {}) {",
+    'if (role === "admin") return canSeeAssignmentByManagementLine(req.authUser, assignment);',
+    'if (assigneeUserId > 0) return canSeeManagedWorkForUser(authUser, assigneeUserId);',
+    'const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;',
+    'if (claimedByUserId > 0 && canSeeManagedWorkForUser(req.authUser, claimedByUserId)) {',
+    'if (!canClaimItemByManagementLine(req.authUser, decoratedCurrent)) {',
+    'if (!canTakeOverPrepClaim(actorRole, claimantRole) || !canTakeOverItemByManagementLine(req.authUser, decoratedCurrent)) {',
+    'if (!ensureItemMutationAccess(req, res, item)) {',
+    'if (!ensureItemBriefReadAccess(req, res, item)) {',
+    'app.get("/api/items/:id/readiness/latest", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/approved-context", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {',
+    'app.get("/api/items/:id/brief/latest", requireRole("owner", "admin", "user"), (req, res) => {',
+    'app.get("/api/items/:id/field-pack/current", requireRole("owner", "admin", "editor", "freelance", "user"), (req, res) => {',
+    'app.post("/api/assets/upload", requireRole("owner", "admin", "editor", "user"), uploadRateLimit, upload.array("file", 20), async (req, res) => {',
+    'app.put("/api/transport-map-routes/:id", requireRole("owner", "admin", "user"), (req, res) => {',
+    'const assignments = buildManagedAssignmentsForActor(req.authUser?.id, authRole, limit);',
+    'const assignments = filterAssignmentsByManagementLine(',
+    'filterAssignmentsByManagementLine(\n        authUser,',
+    'filterAssignmentsByManagementLine(\n      { id: actorUserId, role },',
+    'assigner cannot assign work outside the management subtree',
+    'assigner cannot assign article work outside the management subtree',
+  ];
+  for (const snippet of requiredSnippets) {
+    assert.equal(indexServer.includes(snippet), true, `assignment scope helper snippet should exist: ${snippet}`);
+  }
+
+  const forbiddenSnippets = [
+    'if (role === "owner" || role === "admin") return true;',
+    'if (role === "owner" || role === "admin") return true',
+    'if (authRole === "owner" || authRole === "admin") {',
+    'if (role === "owner" || role === "admin" || role === "user") return true;',
+    'if (role === "owner" || role === "admin" || role === "user") {',
+    'if ((role === "editor" || role === "freelance") && !hasItemBriefAccess(req, id, role)) {',
+    'canSeeManagedWorkForUser(req.authUser, claimedByUserId, { allowSelf: true })',
+    'repo.claimItem(id, actorId, { claim_note: req.body?.claim_note })',
+    'repo.takeOverItemClaim(id, actorId, { claim_note: req.body?.claim_note })',
+    'const assignments = repo.listAssignments(limit);',
+  ];
+  assert.equal(
+    indexServer.includes('if (authRole === "owner") {\r\n      const assignments = repo.listAssignments(limit);')
+      || indexServer.includes('if (authRole === "owner") {\n      const assignments = repo.listAssignments(limit);'),
+    true,
+    "owner-only global assignments branch should remain"
+  );
+  assert.equal(
+    indexServer.includes('if (authRole === "owner" || authRole === "admin") {\r\n      const assignments = repo.listAssignments(limit);')
+      || indexServer.includes('if (authRole === "owner" || authRole === "admin") {\n      const assignments = repo.listAssignments(limit);'),
+    false,
+    "admin should no longer share owner global assignments branch"
+  );
+  for (const snippet of forbiddenSnippets.slice(0, 3)) {
+    assert.equal(indexServer.includes(snippet), false, `legacy global visibility snippet should be removed: ${snippet}`);
+  }
+  assert.equal(
+    indexServer.includes('if (!canClaimItemByManagementLine(req.authUser, decoratedCurrent)) {\r\n    res.status(403).json({ error: "forbidden" });')
+      || indexServer.includes('if (!canClaimItemByManagementLine(req.authUser, decoratedCurrent)) {\n    res.status(403).json({ error: "forbidden" });'),
+    true,
+    "claim route should deny before mutation"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!canClaimItemByManagementLine(req.authUser, decoratedCurrent)) {')
+      < indexServer.indexOf('repo.claimItem(id, actorId, { claim_note: req.body?.claim_note })'),
+    true,
+    "claim helper must run before repo.claimItem"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!canTakeOverPrepClaim(actorRole, claimantRole) || !canTakeOverItemByManagementLine(req.authUser, decoratedCurrent)) {')
+      < indexServer.indexOf('repo.takeOverItemClaim(id, actorId, { claim_note: req.body?.claim_note })'),
+    true,
+    "takeover helper must run before repo.takeOverItemClaim"
+  );
+  assert.equal(
+    indexServer.includes('app.post("/api/items/:id/claim", requireRole("owner", "admin", "user"), (req, res) => {'),
+    true,
+    "claim route must allow owner"
+  );
+  assert.equal(
+    indexServer.includes('app.post("/api/items/:id/field-packs", requireRole("owner", "admin", "user"), (req, res) => {\r\n')
+      || indexServer.includes('app.post("/api/items/:id/field-packs", requireRole("owner", "admin", "user"), (req, res) => {\n'),
+    true,
+    "field-pack create route should still be present"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const fieldPack = repo.createFieldPack({'),
+    true,
+    "field-pack create must guard subtree mutation before create"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const fieldPack = repo.updateFieldPack(fieldPackId, {'),
+    true,
+    "field-pack update must guard subtree mutation before update"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const agentEngine = createAgentGenerationEngine(aiConfig);'),
+    true,
+    "field-pack regenerate must guard subtree mutation before regenerate"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const status = repo.setContentAssetSelected(id, assetId, selected);'),
+    true,
+    "asset selected route must guard subtree mutation before update"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
+      < indexServer.indexOf('const status = repo.setContentAssetRole(id, assetId, role);'),
+    true,
+    "asset role route must guard subtree mutation before update"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureComposerMediaEditAccess(req, res, item)) {')
+      < indexServer.indexOf('const requestedRole = String(req.body.role || "gallery");'),
+    true,
+    "asset upload route must stay behind subtree-aware media mutation guard"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureComposerMediaEditAccess(req, res, item)) {')
+      < indexServer.indexOf('const assetUid = crypto.randomUUID();'),
+    true,
+    "asset register route must stay behind subtree-aware media mutation guard"
+  );
+  assert.equal(
+    indexServer.indexOf('if (!ensureItemMutationAccess(req, res, current)) {')
+      < indexServer.indexOf('const routePayload = normalizeTransportRoutePayload(req.body || null, current);'),
+    true,
+    "transport route update must guard subtree mutation before update"
+  );
+  assert.equal(
+    indexServer.includes('if ((role === "admin" || role === "user") && canMutateItemByManagementLine(req.authUser, item)) {'),
+    true,
+    "composer edit helper must use subtree helper for admin/user instead of role-global allow"
   );
 });
 

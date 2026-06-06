@@ -2396,9 +2396,10 @@ function isSupportedMediaSignature(buffer, mimeType) {
 }
 
 function hasAssignmentSubmissionAccess(req, assignment, role = actorPolicyRole(req)) {
-  const actorId = Number(req.authUser?.id || 0);
+  const actorId = getAuthUserId(req.authUser);
   if (!actorId) return false;
-  if (role === "owner" || role === "admin") return true;
+  if (role === "owner") return true;
+  if (role === "admin") return canSeeAssignmentByManagementLine(req.authUser, assignment);
   const assignmentKind = String(assignment?.assignment_kind || "").trim().toLowerCase();
   const assigneeUserId = Number(assignment?.assignee_user_id || 0);
   if (assigneeUserId > 0) {
@@ -2406,7 +2407,7 @@ function hasAssignmentSubmissionAccess(req, assignment, role = actorPolicyRole(r
       if (role === "editor") return assignmentKind === "editorial";
       return true;
     }
-    return role === "user" && isManagedContributorByUser(actorId, assigneeUserId);
+    return role === "user" && canSeeAssignmentByManagementLine(req.authUser, assignment);
   }
   const assignedByUserId = Number(assignment?.assigned_by_user_id || 0);
   return role === "user" && assignedByUserId > 0 && assignedByUserId === actorId;
@@ -2668,13 +2669,83 @@ function getUserAssignmentRole(userId) {
   return String(db.prepare("SELECT role FROM users WHERE id=? LIMIT 1").get(id)?.role || "").trim().toLowerCase();
 }
 
+function getAuthUserId(authUser) {
+  return Number(authUser?.id || 0) || 0;
+}
+
+function canAssignToUserByManagementLine(authUser, targetUserId) {
+  const actorId = getAuthUserId(authUser);
+  const targetId = Number(targetUserId || 0) || 0;
+  const actorRole = normalizeUserRole(authUser?.role, "user");
+  if (!actorId || !targetId) return false;
+  if (isOwnerUser(authUser)) return true;
+  if (!["admin", "user"].includes(actorRole)) return false;
+  if (actorId === targetId) return false;
+  return canSeeUserByManagementLine(authUser, targetId);
+}
+
+function canSeeUserByManagementLine(authUser, targetUserId) {
+  const actorId = getAuthUserId(authUser);
+  const targetId = Number(targetUserId || 0) || 0;
+  const actorRole = normalizeUserRole(authUser?.role, "user");
+  if (!actorId || !targetId) return false;
+  if (isOwnerUser(authUser)) return true;
+  if (actorId === targetId) return true;
+  if (!["admin", "user"].includes(actorRole)) return false;
+
+  let currentId = targetId;
+  const visited = new Set();
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    const row = db.prepare("SELECT id, managed_by_user_id FROM users WHERE id=? LIMIT 1").get(currentId);
+    if (!row) return false;
+    const managerId = Number(row?.managed_by_user_id || 0) || 0;
+    if (!managerId) return false;
+    if (managerId === actorId) return true;
+    currentId = managerId;
+  }
+  return false;
+}
+
+function canSeeManagedWorkForUser(authUser, targetUserId, options) {
+  const actorId = getAuthUserId(authUser);
+  const targetId = Number(targetUserId || 0) || 0;
+  const actorRole = normalizeUserRole(authUser?.role, "user");
+  const allowSelf = options && options.allowSelf === true;
+  if (!actorId || !targetId) return false;
+  if (isOwnerUser(authUser)) return true;
+  if (actorRole === "editor" || actorRole === "freelance") return allowSelf && actorId === targetId;
+  if (allowSelf && actorId === targetId) return true;
+  if (!["admin", "user"].includes(actorRole)) return false;
+  return canAssignToUserByManagementLine(authUser, targetId);
+}
+
+function canSeeAssignmentByManagementLine(authUser, assignment) {
+  if (!assignment || typeof assignment !== "object") return false;
+  if (isOwnerUser(authUser)) return true;
+  const actorId = getAuthUserId(authUser);
+  if (!actorId) return false;
+  const assigneeUserId = Number(assignment?.assignee_user_id || 0) || 0;
+  const assignedByUserId = Number(assignment?.assigned_by_user_id || 0) || 0;
+
+  if (assigneeUserId > 0) return canSeeManagedWorkForUser(authUser, assigneeUserId);
+  if (!assignedByUserId) return false;
+  return assignedByUserId === actorId;
+}
+
+function filterAssignmentsByManagementLine(authUser, assignments = []) {
+  if (isOwnerUser(authUser)) return Array.isArray(assignments) ? assignments : [];
+  return (Array.isArray(assignments) ? assignments : []).filter((assignment) => canSeeAssignmentByManagementLine(authUser, assignment));
+}
+
 function hasAssignmentAccess(req, assignment, role = actorPolicyRole(req)) {
   const assignmentKind = String(assignment?.assignment_kind || "").trim().toLowerCase();
   const assignmentAssigneeId = Number(assignment?.assignee_user_id || 0);
   const assignedByUserId = Number(assignment?.assigned_by_user_id || 0);
-  const actorId = Number(req.authUser?.id || 0);
-  if (role === "owner" || role === "admin") return true;
+  const actorId = getAuthUserId(req.authUser);
+  if (role === "owner") return true;
   if (!actorId) return false;
+  if (role === "admin") return canSeeAssignmentByManagementLine(req.authUser, assignment);
   if (!assignmentAssigneeId) {
     return role === "user" && assignedByUserId === actorId;
   }
@@ -2682,7 +2753,7 @@ function hasAssignmentAccess(req, assignment, role = actorPolicyRole(req)) {
     if (role === "editor") return assignmentKind === "editorial";
     return true;
   }
-  if (role === "user") return isManagedContributorByUser(actorId, assignmentAssigneeId);
+  if (role === "user") return canSeeAssignmentByManagementLine(req.authUser, assignment);
   return false;
 }
 
@@ -3185,14 +3256,18 @@ function buildReviewAssignmentsForActor(actorUserId, role, limit = 50, options =
     ).slice(0, safeLimit);
   }
   if (role === "admin" || role === "user") {
+    const authUser = { id: actorUserId, role };
     const scopeUserIds = listManagedScopeUserIds(actorUserId, role);
     if (!scopeUserIds.length) {
       return [];
     }
     const scopeSet = new Set(scopeUserIds.map((value) => Number(value || 0)).filter(Boolean));
     return sortAssignmentsForList(
-      repo
-        .listAssignmentsByScopeUserIds(Array.from(scopeSet), safeLimit)
+      filterAssignmentsByManagementLine(
+        authUser,
+        repo
+          .listAssignmentsByScopeUserIds(Array.from(scopeSet), safeLimit)
+      )
         .filter((row) => reviewStates.has(String(row?.state || "").trim().toLowerCase()))
     ).slice(0, safeLimit);
   }
@@ -3218,14 +3293,29 @@ function buildManagedAssignmentsForActor(actorUserId, role, limit = 50) {
   }
   const scopeSet = new Set(scopeUserIds.map((value) => Number(value || 0)).filter(Boolean));
   return sortAssignmentsForList(
-    repo.listAssignmentsByScopeUserIds(Array.from(scopeSet), limit)
+    filterAssignmentsByManagementLine(
+      { id: actorUserId, role },
+      repo.listAssignmentsByScopeUserIds(Array.from(scopeSet), limit)
+    )
   ).slice(0, Math.max(1, Math.min(200, Number(limit) || 50)));
 }
 
 function hasItemBriefAccess(req, contentItemId, role = actorPolicyRole(req)) {
   const id = Number(contentItemId || 0);
   if (!id) return false;
-  if (role === "owner" || role === "admin" || role === "user") return true;
+  if (role === "owner") return true;
+  const item = repo.getItem(id);
+  if (!item) return false;
+  const actorId = getAuthUserId(req.authUser);
+  if (!actorId) return false;
+  const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;
+  if (claimedByUserId > 0 && canSeeManagedWorkForUser(req.authUser, claimedByUserId)) {
+    return true;
+  }
+  const primaryAssignment = getPrimaryEditorialAssignment(id);
+  if (primaryAssignment?.id && canSeeAssignmentByManagementLine(req.authUser, primaryAssignment)) {
+    return true;
+  }
   const assignments = repo.listAssignmentsByItem(id);
   return (Array.isArray(assignments) ? assignments : []).some((assignment) => hasAssignmentAccess(req, assignment, role));
 }
@@ -3261,6 +3351,64 @@ function getPrepClaimRoleRank(role = "") {
 
 function canTakeOverPrepClaim(actorRole = "", claimantRole = "") {
   return getPrepClaimRoleRank(actorRole) > getPrepClaimRoleRank(claimantRole);
+}
+
+function canClaimItemByManagementLine(authUser, item) {
+  if (!item || typeof item !== "object") return false;
+  if (isOwnerUser(authUser)) return true;
+  const actorRole = normalizeUserRole(authUser?.role, "user");
+  if (actorRole !== "admin" && actorRole !== "user") return false;
+  const itemId = Number(item?.id || 0) || 0;
+  if (!itemId) return false;
+  const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;
+  if (claimedByUserId > 0) {
+    return canSeeManagedWorkForUser(authUser, claimedByUserId);
+  }
+  const primaryAssignment = getPrimaryEditorialAssignment(itemId);
+  if (primaryAssignment?.id) {
+    return canSeeAssignmentByManagementLine(authUser, primaryAssignment);
+  }
+  const assignments = repo.listAssignmentsByItem(itemId);
+  if (Array.isArray(assignments) && assignments.length) {
+    return assignments.some((assignment) => canSeeAssignmentByManagementLine(authUser, assignment));
+  }
+  return false;
+}
+
+function canTakeOverItemByManagementLine(authUser, item) {
+  if (!item || typeof item !== "object") return false;
+  if (isOwnerUser(authUser)) return true;
+  const actorRole = normalizeUserRole(authUser?.role, "user");
+  if (actorRole !== "admin" && actorRole !== "user") return false;
+  const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;
+  if (!claimedByUserId) return false;
+  return canSeeManagedWorkForUser(authUser, claimedByUserId);
+}
+
+function canMutateItemByManagementLine(authUser, item, options) {
+  if (!item || typeof item !== "object") return false;
+  if (isOwnerUser(authUser)) return true;
+  const actorRole = normalizeUserRole(authUser?.role, "user");
+  if (actorRole !== "admin" && actorRole !== "user") return false;
+  const itemId = Number(item?.id || 0) || 0;
+  if (!itemId) return false;
+  const mutationOptions = options && typeof options === "object" ? options : {};
+  const allowSelf = mutationOptions.allowSelf === true;
+  const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;
+  if (claimedByUserId > 0 && canSeeManagedWorkForUser(authUser, claimedByUserId, { allowSelf })) {
+    return true;
+  }
+  const assignments = repo.listAssignmentsByItem(itemId);
+  if (Array.isArray(assignments) && assignments.length) {
+    return assignments.some((assignment) => {
+      const assigneeUserId = Number(assignment?.assignee_user_id || 0) || 0;
+      if (assigneeUserId > 0) {
+        return canSeeManagedWorkForUser(authUser, assigneeUserId, { allowSelf });
+      }
+      return false;
+    });
+  }
+  return false;
 }
 
 function listUsersByIds(ids = []) {
@@ -3364,20 +3512,38 @@ function hasEditorialAssignmentAccess(req, item, allowedStates = new Set()) {
   });
 }
 
-function ensureArticleComposerEditAccess(req, res, item) {
+function ensureItemMutationAccess(req, res, item, options = {}) {
   const role = actorPolicyRole(req);
-  if (role === "owner" || role === "admin" || role === "user") {
+  if (role === "owner") {
     return true;
   }
-  if (role !== "editor") {
-    res.status(403).json({ error: "role นี้ไม่มีสิทธิ์แก้บทความในขั้นนี้" });
-    return false;
+  if ((role === "admin" || role === "user") && canMutateItemByManagementLine(req.authUser, item, options)) {
+    return true;
   }
-  if (!hasEditorialAssignmentEditAccess(req, item)) {
+  if ((role === "editor" || role === "freelance") && options.allowAssignedSelf === true && hasEditorialAssignmentEditAccess(req, item)) {
+    return true;
+  }
+  res.status(403).json({ error: "role นี้ไม่มีสิทธิ์แก้บทความในขั้นนี้" });
+  return false;
+}
+
+function ensureArticleComposerEditAccess(req, res, item) {
+  const role = actorPolicyRole(req);
+  if (role === "owner") {
+    return true;
+  }
+  if ((role === "admin" || role === "user") && canMutateItemByManagementLine(req.authUser, item)) {
+    return true;
+  }
+  if (role === "editor" && hasEditorialAssignmentEditAccess(req, item)) {
+    return true;
+  }
+  if (role === "editor") {
     res.status(403).json({ error: "editor ต้องมี editorial assignment ที่ยัง active จึงจะแก้บทความได้" });
     return false;
   }
-  return true;
+  res.status(403).json({ error: "role นี้ไม่มีสิทธิ์แก้บทความในขั้นนี้" });
+  return false;
 }
 
 function ensureArticleProcessTransitionAccess(req, res, item, nextStatus) {
@@ -3590,10 +3756,7 @@ async function finalizeArticleProcessReadyForSync(req, item, currentStatus, note
 }
 
 function ensureComposerMediaEditAccess(req, res, item) {
-  if (hasPrepItemEditAccess(req, item)) {
-    return true;
-  }
-  return ensureArticleComposerEditAccess(req, res, item);
+  return ensureItemMutationAccess(req, res, item);
 }
 
 function normalizeArticleProcessStatus(value, fallback = "") {
@@ -7732,7 +7895,7 @@ app.put("/api/transport-map-routes/:id", requireRole("owner", "admin", "user"), 
     res.status(404).json({ error: "Transport route not found" });
     return;
   }
-  if (!ensureArticleComposerEditAccess(req, res, current)) {
+  if (!ensureItemMutationAccess(req, res, current)) {
     return;
   }
 
@@ -7876,7 +8039,7 @@ app.post("/api/transport-map-routes/:id/release-main", requireRole("owner", "adm
   }
 });
 
-app.post("/api/items/:id/claim", requireRole("admin", "user"), (req, res) => {
+app.post("/api/items/:id/claim", requireRole("owner", "admin", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -7891,6 +8054,10 @@ app.post("/api/items/:id/claim", requireRole("admin", "user"), (req, res) => {
   const decoratedCurrent = attachSingleItemClaimUser(current);
   if (Number(decoratedCurrent?.claimed_by_user_id || 0) === actorId) {
     res.json({ ok: true, item: decoratedCurrent });
+    return;
+  }
+  if (!canClaimItemByManagementLine(req.authUser, decoratedCurrent)) {
+    res.status(403).json({ error: "forbidden" });
     return;
   }
   if (Number(decoratedCurrent?.claimed_by_user_id || 0) > 0) {
@@ -7991,7 +8158,7 @@ app.post("/api/items/:id/takeover", requireRole("admin"), (req, res) => {
     return;
   }
   const claimantRole = String(decoratedCurrent?.claimed_by_user?.role || "").trim().toLowerCase();
-  if (!canTakeOverPrepClaim(actorRole, claimantRole)) {
+  if (!canTakeOverPrepClaim(actorRole, claimantRole) || !canTakeOverItemByManagementLine(req.authUser, decoratedCurrent)) {
     res.status(403).json({
       error: claimantRole === "owner"
         ? "admin ไม่สามารถ takeover งานที่ owner ถืออยู่"
@@ -8589,7 +8756,7 @@ app.post("/api/items/:id/intelligence-model", requireRole("admin"), (req, res) =
   }
 });
 
-app.get("/api/items/:id/readiness/latest", requireRole("admin", "user"), (req, res) => {
+app.get("/api/items/:id/readiness/latest", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -8598,6 +8765,9 @@ app.get("/api/items/:id/readiness/latest", requireRole("admin", "user"), (req, r
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
   const latest = repo.getLatestReadinessBriefByItem(id);
@@ -8605,7 +8775,7 @@ app.get("/api/items/:id/readiness/latest", requireRole("admin", "user"), (req, r
   res.json({ item_id: id, readiness: latest?.readiness_json || null, snapshot: latest || null, drift });
 });
 
-app.get("/api/items/:id/brief/latest", requireRole("admin", "user"), (req, res) => {
+app.get("/api/items/:id/brief/latest", requireRole("owner", "admin", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -8614,6 +8784,9 @@ app.get("/api/items/:id/brief/latest", requireRole("admin", "user"), (req, res) 
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
   const latest = repo.getLatestReadinessBriefByItem(id);
@@ -9089,7 +9262,7 @@ app.post("/api/items/:id/assignments/from-readiness", requireRole("owner"), (req
       res.status(400).json({ error: "assignment_kind is required when assigning work to an internal user" });
       return;
     }
-    if (!canAssignInternalWork(role, req.authUser?.id, assigneeRole, assigneeId)) {
+    if (!canAssignInternalWork(role, req.authUser?.id, assigneeRole, assigneeId) || !canAssignToUserByManagementLine(req.authUser, assigneeId)) {
       res.status(403).json({ error: "assigner role cannot assign internal work to the selected user" });
       return;
     }
@@ -9286,12 +9459,9 @@ app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "a
   }
 
   const role = actorPolicyRole(req);
-  if (!isExternalAssignee && role === "user") {
-    const isSelfAssignee = Number(req.authUser?.id || 0) === assigneeId;
-    if (!isSelfAssignee && !isManagedContributorByUser(req.authUser?.id, assigneeId)) {
-      res.status(403).json({ error: "user can assign article work only to managed contributor accounts or self" });
-      return;
-    }
+  if (!isExternalAssignee && !canAssignToUserByManagementLine(req.authUser, assigneeId)) {
+    res.status(403).json({ error: "assigner cannot assign article work outside the management subtree" });
+    return;
   }
   if (!isExternalAssignee && !canAssignInternalWork(role, req.authUser?.id, assigneeRole, assigneeId)) {
     res.status(403).json({ error: "assigner role cannot assign article work to the selected user" });
@@ -9490,14 +9660,11 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
       res.status(400).json({ error: "assignment_kind is required when assigning work to an internal user" });
       return;
     }
-    if (role === "user" && assigneeId) {
-      const isSelfAssignee = Number(req.authUser?.id || 0) === assigneeId;
-      if (!isSelfAssignee && !isManagedContributorByUser(req.authUser?.id, assigneeId)) {
-        res.status(403).json({ error: "user can assign work only to managed contributor accounts or self" });
+    if (assigneeId) {
+      if (!canAssignToUserByManagementLine(req.authUser, assigneeId)) {
+        res.status(403).json({ error: "assigner cannot assign work outside the management subtree" });
         return;
       }
-    }
-    if (assigneeId) {
       if (!canAssignInternalWork(role, req.authUser?.id, assigneeRole, assigneeId)) {
         res.status(403).json({ error: "assigner role cannot assign internal work to the selected user" });
         return;
@@ -9710,7 +9877,10 @@ app.get("/api/assignments/mine", requireRole("owner", "admin", "editor", "freela
     return;
   }
   if (assignedByMe) {
-    const assignments = repo.listExternalAssignmentsByAssigner(req.authUser?.id, limit);
+    const assignments = filterAssignmentsByManagementLine(
+      req.authUser,
+      repo.listExternalAssignmentsByAssigner(req.authUser?.id, limit)
+    );
     res.json({ assignments });
     return;
   }
@@ -9721,8 +9891,13 @@ app.get("/api/assignments/mine", requireRole("owner", "admin", "editor", "freela
       res.json({ assignments });
       return;
     }
-    if (authRole === "owner" || authRole === "admin") {
+    if (authRole === "owner") {
       const assignments = repo.listAssignments(limit);
+      res.json({ assignments });
+      return;
+    }
+    if (authRole === "admin" || authRole === "user") {
+      const assignments = buildManagedAssignmentsForActor(req.authUser?.id, authRole, limit);
       res.json({ assignments });
       return;
     }
@@ -9733,11 +9908,18 @@ app.get("/api/assignments/mine", requireRole("owner", "admin", "editor", "freela
     res.status(403).json({ error: "role can view assignments only for itself" });
     return;
   }
-  if (role === "user" && Number(assigneeId || 0) !== Number(req.authUser?.id || 0) && !isManagedContributorByUser(req.authUser?.id, assigneeId)) {
-    res.status(403).json({ error: "user can view assignments only for managed contributor accounts" });
+  if (
+    (role === "admin" || role === "user")
+    && Number(assigneeId || 0) !== Number(req.authUser?.id || 0)
+    && !canSeeManagedWorkForUser(req.authUser, assigneeId)
+  ) {
+    res.status(403).json({ error: `${role} can view assignments only inside management scope` });
     return;
   }
-  const assignments = repo.listAssignmentsByAssignee(assigneeId, limit);
+  const assignments = filterAssignmentsByManagementLine(
+    req.authUser,
+    repo.listAssignmentsByAssignee(assigneeId, limit)
+  );
   res.json({ assignments });
 });
 
@@ -11267,9 +11449,7 @@ app.get("/api/items/:id/approved-context", requireRole("owner", "admin", "editor
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  const role = actorPolicyRole(req);
-  if ((role === "editor" || role === "freelance") && !hasItemBriefAccess(req, id, role)) {
-    res.status(403).json({ error: "forbidden" });
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11337,7 +11517,7 @@ app.patch("/api/items/:id/approved-context/:contextId", requireRole("admin", "us
   }
 });
 
-app.get("/api/items/:id/field-pack/current", (req, res) => {
+app.get("/api/items/:id/field-pack/current", requireRole("owner", "admin", "editor", "freelance", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -11347,6 +11527,9 @@ app.get("/api/items/:id/field-pack/current", (req, res) => {
   const item = repo.getItem(id);
   if (!item) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
     return;
   }
 
@@ -11366,7 +11549,7 @@ app.post("/api/items/:id/field-packs", requireRole("owner", "admin", "user"), (r
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  if (!ensureArticleComposerEditAccess(req, res, item)) {
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
 
@@ -11407,7 +11590,7 @@ app.put("/api/field-packs/:fieldPackId", requireRole("owner", "admin", "user"), 
       res.status(404).json({ error: "Item not found" });
       return;
     }
-    if (!ensureArticleComposerEditAccess(req, res, item)) {
+    if (!ensureItemMutationAccess(req, res, item)) {
       return;
     }
     const fieldPack = repo.updateFieldPack(fieldPackId, {
@@ -11479,7 +11662,7 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  if (!ensureArticleComposerEditAccess(req, res, item)) {
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
 
@@ -12237,7 +12420,7 @@ app.patch("/api/items/:id/assets/:assetId/selected", requireRole("owner", "admin
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  if (!ensureComposerMediaEditAccess(req, res, item)) {
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   const targetAsset = repo.listContentAssetsByItem(id, { onlySelected: false }).find((row) => Number(row?.asset_id || 0) === assetId) || null;
@@ -12278,7 +12461,7 @@ app.patch("/api/items/:id/assets/:assetId/role", requireRole("owner", "admin", "
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  if (!ensureComposerMediaEditAccess(req, res, item)) {
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   const targetAsset = repo.listContentAssetsByItem(id, { onlySelected: false }).find((row) => Number(row?.asset_id || 0) === assetId) || null;
@@ -12363,7 +12546,7 @@ app.post("/api/items/:id/field-pack/return-to-clean", requireRole("owner", "admi
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  if (!ensureArticleComposerEditAccess(req, res, item)) {
+  if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
   if (!ensurePrepItemEditAccess(req, res, item)) {
