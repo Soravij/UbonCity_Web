@@ -182,6 +182,94 @@ Canonical rule:
 - Role capability defines allowed actions inside the assigned subtree.
 - Management line defines which accounts and work items belong to that subtree.
 
+## Management-line assignment and item scope
+
+Management tree:
+
+```text
+owner
+└── admin
+    └── user
+        ├── editor
+        └── freelance
+```
+
+### Assignment target policy
+
+- `owner`
+  - Can assign globally.
+- `admin`
+  - Can assign only to descendants inside that admin branch.
+- `user`
+  - Can assign only to descendants inside that user branch.
+- `editor`
+  - Cannot assign.
+- `freelance`
+  - Cannot assign.
+
+Canonical restrictions:
+
+- `admin` and `user` cannot assign upward.
+- `admin` and `user` cannot assign across branch.
+- `admin` and `user` should not assign to self by default unless an explicit flow says otherwise.
+- When `assignee_user_id` is present, descendant scope to the assignee is the source of truth.
+
+### Assignment visibility policy
+
+- `owner`
+  - Sees all assignments.
+- `admin`
+  - Sees assignments only inside that admin descendant subtree.
+- `user`
+  - Sees assignments only inside that user descendant subtree.
+- `editor`
+  - Self scope only or explicit assigned workflow context.
+- `freelance`
+  - Self scope only or explicit assigned workflow context.
+
+Canonical rules:
+
+- If `assignee_user_id` exists, assignee scope is authoritative.
+- `assigned_by_user_id` must not open visibility to an out-of-scope assignee.
+- External or unassigned assignment visibility must fail closed unless a route explicitly allows it.
+
+### Item and work context policy
+
+- `owner`
+  - Can read and mutate all item context.
+- `admin`
+  - Can read and mutate only items inside descendant subtree.
+- `user`
+  - Can read and mutate only items inside descendant subtree.
+- `editor`
+  - No generic item-context access. Only explicit assigned or self workflow context where allowed.
+- `freelance`
+  - No generic item-context access. Only explicit assigned or self workflow context where allowed.
+
+Canonical rules:
+
+- Generic item-context read routes must use a subtree-aware read guard.
+- Item mutation and recompute routes must use a subtree-aware mutation guard.
+- `claim`, `takeover`, `delete`, `recompute`, `generate`, `release`, `review`, and translation routes must not allow direct-hit cross-branch access.
+- `claim` and `takeover` must not create scope.
+
+### Equivalent allowed guards
+
+- `ensureItemBriefReadAccess`
+  - Canonical guard for item read context.
+- `ensureItemMutationAccess`
+  - Canonical guard for item mutation and recompute.
+- `ensureArticleProcessTransitionAccess`
+  - Canonical guard for article process transitions.
+- `canClaimItemByManagementLine`
+  - Canonical guard for claim.
+- `canTakeOverItemByManagementLine`
+  - Canonical guard for takeover.
+- Self-held release flow
+  - Acceptable equivalent guard for releasing a claim already held by actor.
+- Owner-only routes
+  - Do not require subtree checks.
+
 ### Contributor management
 
 Visible to:
