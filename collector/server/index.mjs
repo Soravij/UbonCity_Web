@@ -40,6 +40,7 @@ import {
   returnFieldPackToClean,
   reviewInternalLink,
   rerunProblemTranslations,
+  repairTranslationFromRecheckIssues,
   rerunTranslationRecheck,
   runAiDraftStage,
   runCleanStage,
@@ -12183,6 +12184,40 @@ app.post("/api/items/:id/translations/:lang/recheck", requireRole("admin", "owne
     });
   } catch (err) {
     res.status(400).json({ error: String(err?.message || "Cannot run translation recheck") });
+  }
+});
+
+app.post("/api/items/:id/translations/:lang/repair", requireRole("admin", "owner"), async (req, res) => {
+  const id = Number(req.params.id || 0);
+  const lang = String(req.params.lang || "").trim().toLowerCase();
+  if (!id || !lang) {
+    res.status(400).json({ error: "Invalid item id or locale" });
+    return;
+  }
+
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+
+  try {
+    const aiConfig = getEffectiveAiConfig();
+    const translation = await repairTranslationFromRecheckIssues(repo, id, lang, aiConfig, actorEmail(req));
+    const readiness = buildExportReadiness(id);
+    res.json({
+      ok: true,
+      translation,
+      translations: repo.listTranslations(id),
+      readiness,
+      result: {
+        content_item_id: id,
+        lang,
+        translation_recheck_status: String(translation?.translation_recheck_status || "not_checked").trim().toLowerCase() || "not_checked",
+      },
+    });
+  } catch (err) {
+    res.status(400).json({ error: String(err?.message || "Cannot repair translation from recheck issues") });
   }
 });
 

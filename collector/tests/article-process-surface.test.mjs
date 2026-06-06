@@ -162,6 +162,7 @@ test("article process routes exist with dedicated surface area", () => {
   assert.match(source, /app\.post\("\/api\/items\/:id\/recover-problem-translations", requireRole\("admin", "owner"\)/);
   assert.match(source, /app\.post\("\/api\/items\/:id\/generate-translations", requireRole\("admin", "owner"\)/);
   assert.match(source, /app\.post\("\/api\/items\/:id\/translations\/:lang\/recheck", requireRole\("admin", "owner"\)/);
+  assert.match(source, /app\.post\("\/api\/items\/:id\/translations\/:lang\/repair", requireRole\("admin", "owner"\)/);
   assert.match(source, /app\.get\("\/api\/translations", requireRole\("owner", "admin", "editor", "user"\)/);
   assert.match(source, /content_item_id is required/);
   assert.match(source, /app\.get\("\/api\/translation-runs", requireRole\("owner", "admin"\)/);

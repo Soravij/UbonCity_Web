@@ -196,6 +196,76 @@ test("updateTranslationRecheck throws when the translation row does not exist", 
   }
 });
 
+test("repository exposes updateTranslationRepairResult", () => {
+  const ctx = createTestContext();
+  try {
+    assert.equal(typeof ctx.repo.updateTranslationRepairResult, "function");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("updateTranslationRepairResult persists translated fields and resets recheck fields", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem();
+    ctx.repo.upsertTranslation({
+      source_content_item_id: item.id,
+      source_published_article_id: null,
+      source_draft_id: null,
+      source_review_report_id: null,
+      source_fingerprint: "fingerprint-1",
+      lang: "en",
+      translated_title: "title-en",
+      translated_excerpt: "excerpt-en",
+      translated_body: "body-en",
+      translated_meta_title: "meta-title-en",
+      translated_meta_description: "meta-description-en",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      automatic_check_report: { status: "passed", issues: [] },
+      translation_recheck_status: "warning",
+      translation_recheck_score: 7.4,
+      accuracy_score: 7.1,
+      fluency_score: 7.5,
+      term_score: 7.3,
+      back_translation_th: "back translation",
+      recheck_summary_th: "summary",
+      recheck_issues: [{ type: "term", problem_th: "term mismatch" }],
+      recheck_model: "openai:gpt-5.4-mini",
+      rechecked_at: "2026-06-05T07:10:00.000Z",
+      repair_attempt_count: 1,
+      stale_flag: 0,
+      translator_engine: "openai",
+      translator_model: "gpt-5.4-mini",
+    });
+
+    const updated = ctx.repo.updateTranslationRepairResult(item.id, "EN", {
+      source_fingerprint: "fingerprint-2",
+      translated_title: "repaired title",
+      translated_excerpt: "repaired excerpt",
+      translated_body: "repaired body",
+      translated_meta_title: "repaired meta title",
+      translated_meta_description: "repaired meta description",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      automatic_check_report: { status: "passed", issues: [] },
+      repair_attempt_count: 2,
+    });
+
+    assert.equal(updated.translated_title, "repaired title");
+    assert.equal(updated.source_fingerprint, "fingerprint-2");
+    assert.equal(updated.translation_recheck_status, "not_checked");
+    assert.equal(updated.translation_recheck_score, null);
+    assert.equal(updated.back_translation_th, null);
+    assert.equal(updated.recheck_summary_th, null);
+    assert.deepEqual(updated.recheck_issues, []);
+    assert.equal(updated.repair_attempt_count, 2);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("repository migration adds recheck columns to existing nullable-source table that lacks them", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-translation-recheck-migrate-nullable-"));
   const dbPath = path.join(tempDir, "test.sqlite");
