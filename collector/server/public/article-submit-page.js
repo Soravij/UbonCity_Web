@@ -890,6 +890,16 @@ async function loadCurrentReadiness() {
   return state.readiness;
 }
 
+async function reloadCurrentReadinessSoft() {
+  try {
+    await loadCurrentReadiness();
+    return true;
+  } catch (err) {
+    setBanner(`โหลดสถานะความพร้อมไม่สำเร็จ: ${String(err?.message || "unknown error")}`, "error");
+    return false;
+  }
+}
+
 async function transitionArticle(status, note = "") {
   setBusy(true);
   setBanner("กำลังอัปเดตสถานะ...", "loading");
@@ -963,7 +973,13 @@ async function generateTranslations() {
     const failureSummary = summarizeTranslationFailures(result?.per_language_status || result?.result?.languages || []);
     state.readiness = result?.readiness || state.readiness;
     await refreshTranslations();
+    await reloadCurrentReadinessSoft();
     renderSyncSummary();
+    renderTranslationSummary();
+    renderTranslationRecheckPanel();
+    renderTranslationReviewSummary();
+    renderReviewChecklist();
+    applyActionGuards();
     if (generatedCount > 0 && failedCount > 0) {
       setInlineStatus("translation-status", `สร้างคำแปลแล้ว ${generatedCount} ภาษา และมีปัญหา ${failedCount} ภาษา${failureSummary ? `: ${failureSummary}` : ""}`);
       return;
@@ -980,6 +996,11 @@ async function generateTranslations() {
   } finally {
     setTranslationGenerateLoading(false);
     setBusy(false);
+    renderSyncSummary();
+    renderTranslationSummary();
+    renderTranslationRecheckPanel();
+    renderTranslationReviewSummary();
+    renderReviewChecklist();
     applyActionGuards();
   }
 }
@@ -1186,11 +1207,7 @@ async function init() {
   }
   try {
     await loadWorkspace();
-    try {
-      await loadCurrentReadiness();
-    } catch (err) {
-      setBanner(`โหลดสถานะความพร้อมไม่สำเร็จ: ${String(err?.message || "unknown error")}`, "error");
-    }
+    await reloadCurrentReadinessSoft();
     if (!canApproveArticle()) {
       window.location.replace(roleArticleFallbackUrl());
       return;

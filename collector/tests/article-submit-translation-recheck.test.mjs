@@ -83,6 +83,7 @@ globalThis.__articleSubmitTestHooks = {
   buildTranslationRows,
   refreshTranslations,
   loadCurrentReadiness,
+  generateTranslations,
   renderTranslationSummary,
   renderTranslationRecheckPanel,
   renderTranslationReviewSummary,
@@ -1166,6 +1167,75 @@ test("initial article-submit load still renders when export readiness fetch fail
   assert.equal(elements.get("btn-send-main-site").disabled, true);
   assert.equal(elements.get("btn-refresh-readiness").disabled, false);
   assert.match(String(banners[0]?.message || ""), /โหลดสถานะความพร้อมไม่สำเร็จ/);
+});
+
+test("generate translations reloads live readiness and enables eligible recheck without manual refresh", async () => {
+  const apiCalls = [];
+  let harnessHooks = null;
+  let currentTranslations = [
+    {
+      lang: "en",
+      source_fingerprint: "old-fingerprint",
+      translation_status: "ready",
+      automatic_check_status: "passed",
+      stale_flag: 1,
+      translation_recheck_status: "passed",
+    },
+  ];
+  const { hooks, elements } = loadHarness({
+    api: async (url) => {
+      apiCalls.push(url);
+      if (url === "/api/items/48/generate-translations") {
+        currentTranslations = [
+          {
+            lang: "en",
+            source_fingerprint: "current-fingerprint",
+            translation_status: "ready",
+            automatic_check_status: "passed",
+            stale_flag: 0,
+            translation_recheck_status: "not_checked",
+          },
+        ];
+        return {
+          generated_count: 1,
+          failed_count: 0,
+        };
+      }
+      if (url === "/api/items/48/export-readiness") {
+        return {
+          current_source_fingerprint: "current-fingerprint",
+          translations: [{ lang: "en", status: "passed" }],
+        };
+      }
+      return {};
+    },
+    loadTranslations: async () => {
+      harnessHooks.state.translations = currentTranslations;
+      return currentTranslations;
+    },
+  });
+  harnessHooks = hooks;
+  elements.set("translation-package-actions", createElement("translation-package-actions"));
+  elements.set("btn-generate-translations", createElement("btn-generate-translations"));
+  hooks.state.readiness = {
+    current_source_fingerprint: "current-fingerprint",
+    translations: [{ lang: "en", status: "stale" }],
+  };
+  hooks.state.translations = currentTranslations;
+
+  await hooks.generateTranslations();
+
+  const recheckHtml = elements.get("translation-recheck-panel").innerHTML;
+  const finalHtml = elements.get("translation-review-summary").innerHTML;
+  assert.deepEqual(apiCalls, [
+    "/api/items/48/generate-translations",
+    "/api/items/48/export-readiness",
+  ]);
+  assert.equal(hooks.state.readiness?.current_source_fingerprint, "current-fingerprint");
+  assert.equal(hooks.state.translations[0]?.translation_recheck_status, "not_checked");
+  assert.match(recheckHtml, /data-translation-recheck-lang="en"(?![^>]*disabled)/);
+  assert.match(finalHtml, /blocked/);
+  assert.equal(elements.get("btn-send-main-site").disabled, true);
 });
 
 test("translation package button label resets from stale to missing state", () => {
