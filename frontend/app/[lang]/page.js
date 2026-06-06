@@ -145,7 +145,10 @@ export default async function LangHome({ params }) {
   });
 
   const resolvedBlocks = Array.isArray(homepageLayout?.resolved_blocks) ? homepageLayout.resolved_blocks : [];
-  const hasPublishedCurationLayout = resolvedBlocks.length > 0;
+  const hasPublishedCurationLayout =
+    Boolean(homepageLayout?.published_at) &&
+    homepageLayout?.source !== "draft_fallback" &&
+    resolvedBlocks.length > 0;
 
   return (
     <section className="home-page-flow">
@@ -232,3 +235,5 @@ export default async function LangHome({ params }) {
     </section>
   );
 }
+
+
