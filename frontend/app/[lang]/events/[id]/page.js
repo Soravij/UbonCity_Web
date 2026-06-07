@@ -5,6 +5,7 @@ import {
   buildAbsoluteUrl,
   buildBreadcrumbJsonLd,
   buildEventJsonLd,
+  buildRobotsMetadata,
   buildSeoMetadata,
   buildWebPageJsonLd,
   pickPrimaryImage,
@@ -35,17 +36,21 @@ export async function generateMetadata({ params }) {
     return {
       title: "Event | UBONCITY.COM",
       description: "Ubon Ratchathani events",
+      robots: buildRobotsMetadata(),
     };
   }
 
-  return buildSeoMetadata({
+  return {
+    ...buildSeoMetadata({
     title: event.meta_title || event.title || "Event",
     description: event.meta_description || event.summary || event.description || "",
     canonicalPath: `/${activeLang}/events/${id}`,
     lang: activeLang,
     siteUrl: getSiteUrl(),
     image: pickPrimaryImage(event),
-  });
+    }),
+    robots: buildRobotsMetadata(),
+  };
 }
 
 export default async function EventDetailPage({ params }) {

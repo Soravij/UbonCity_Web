@@ -7,8 +7,10 @@ import {
   buildBreadcrumbJsonLd,
   buildEventJsonLd,
   buildPlaceJsonLd,
+  buildRobotsMetadata,
   buildSeoMetadata,
   buildWebPageJsonLd,
+  isIndexingEnabled,
   pickPrimaryImage,
   stripHtmlToPlainText,
 } from "../lib/schemaMetadata.js";
@@ -73,6 +75,45 @@ test("buildSeoMetadata adds canonical openGraph twitter with safe fallbacks", ()
   assert.equal(metadata.twitter.card, "summary_large_image");
   assert.deepEqual(metadata.openGraph.images, [{ url: "https://cdn.example.com/cover.jpg" }]);
   assert.deepEqual(metadata.twitter.images, ["https://cdn.example.com/cover.jpg"]);
+});
+
+test("buildRobotsMetadata returns noindex when NEXT_PUBLIC_INDEXING is false", () => {
+  const previous = process.env.NEXT_PUBLIC_INDEXING;
+  process.env.NEXT_PUBLIC_INDEXING = "false";
+
+  try {
+    assert.equal(isIndexingEnabled(), false);
+    assert.deepEqual(buildRobotsMetadata(), {
+      index: false,
+      follow: false,
+    });
+  } finally {
+    if (previous === undefined) {
+      delete process.env.NEXT_PUBLIC_INDEXING;
+    } else {
+      process.env.NEXT_PUBLIC_INDEXING = previous;
+    }
+  }
+});
+
+test("buildRobotsMetadata does not force noindex by default or when true", () => {
+  const previous = process.env.NEXT_PUBLIC_INDEXING;
+
+  try {
+    delete process.env.NEXT_PUBLIC_INDEXING;
+    assert.equal(isIndexingEnabled(), true);
+    assert.equal(buildRobotsMetadata(), undefined);
+
+    process.env.NEXT_PUBLIC_INDEXING = "true";
+    assert.equal(isIndexingEnabled(), true);
+    assert.equal(buildRobotsMetadata(), undefined);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.NEXT_PUBLIC_INDEXING;
+    } else {
+      process.env.NEXT_PUBLIC_INDEXING = previous;
+    }
+  }
 });
 
 test("schema entity name prefers real title before meta_title", () => {
@@ -160,6 +201,7 @@ test("web page and breadcrumb helpers omit undefined values", () => {
 test("place page source wires seo metadata and json-ld helper", () => {
   const source = fs.readFileSync(path.resolve("app/[lang]/[category]/[slug]/page.js"), "utf8");
   assert.match(source, /buildSeoMetadata/);
+  assert.match(source, /buildRobotsMetadata/);
   assert.match(source, /buildPlaceJsonLd/);
   assert.match(source, /buildBreadcrumbJsonLd/);
   assert.match(source, /buildWebPageJsonLd/);
@@ -168,6 +210,7 @@ test("place page source wires seo metadata and json-ld helper", () => {
 test("event page source wires seo metadata and avoids unconditional event json-ld", () => {
   const source = fs.readFileSync(path.resolve("app/[lang]/events/[id]/page.js"), "utf8");
   assert.match(source, /buildSeoMetadata/);
+  assert.match(source, /buildRobotsMetadata/);
   assert.match(source, /buildBreadcrumbJsonLd/);
   assert.match(source, /buildWebPageJsonLd/);
   assert.match(source, /buildEventJsonLd/);

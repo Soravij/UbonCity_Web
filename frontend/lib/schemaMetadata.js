@@ -88,6 +88,18 @@ function compactObject(value) {
   return compactValue(value) || {};
 }
 
+export function isIndexingEnabled() {
+  return process.env.NEXT_PUBLIC_INDEXING !== "false";
+}
+
+export function buildRobotsMetadata() {
+  if (isIndexingEnabled()) return undefined;
+  return {
+    index: false,
+    follow: false,
+  };
+}
+
 function pickDescription(entity = {}) {
   return sanitizeDescription(
     entity?.meta_description || entity?.summary || entity?.excerpt || entity?.description || entity?.body || ""

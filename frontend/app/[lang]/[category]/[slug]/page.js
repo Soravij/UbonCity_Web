@@ -5,6 +5,7 @@ import {
   buildAbsoluteUrl,
   buildBreadcrumbJsonLd,
   buildPlaceJsonLd,
+  buildRobotsMetadata,
   buildSeoMetadata,
   buildWebPageJsonLd,
   pickPrimaryImage,
@@ -49,17 +50,21 @@ export async function generateMetadata({ params }) {
     return {
       title: `${copy?.nav?.[category] || category} | UBONCITY.COM`,
       description: "Ubon Ratchathani travel content",
+      robots: buildRobotsMetadata(),
     };
   }
 
-  return buildSeoMetadata({
+  return {
+    ...buildSeoMetadata({
     title: place.meta_title || place.title || "UBONCITY.COM",
     description: place.meta_description || place.summary || place.description || "",
     canonicalPath: `/${activeLang}/${category}/${slug}`,
     lang: activeLang,
     siteUrl: getSiteUrl(),
     image: pickPrimaryImage(place),
-  });
+    }),
+    robots: buildRobotsMetadata(),
+  };
 }
 
 export default async function PlaceDetailPage({ params }) {
