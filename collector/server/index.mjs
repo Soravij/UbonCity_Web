@@ -3420,6 +3420,158 @@ function listUsersByIds(ids = []) {
     .all(...userIds);
 }
 
+function buildItemWorkScopeState(item, assignment) {
+  const publicationState = String(item?.publication_state || item?.workflow_status || "").trim().toLowerCase();
+  const productionState = String(item?.production_state || "").trim().toLowerCase();
+  if (publicationState === "published" || publicationState === "completed" || productionState === "completed" || productionState === "ready_for_publish") {
+    return "published_or_completed";
+  }
+  const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;
+  const assigneeUserId = Number(assignment?.assignee_user_id || 0) || 0;
+  const hasAssignment = assigneeUserId > 0 || Number(assignment?.assigned_by_user_id || 0) > 0 || String(assignment?.assignee_name || "").trim().length > 0;
+  if (claimedByUserId > 0 && hasAssignment) return "claimed_and_assigned";
+  if (assigneeUserId > 0 || hasAssignment) return "assigned";
+  if (claimedByUserId > 0) return "claimed";
+  return "raw_pool";
+}
+
+function canSeeRawPoolInItemsQueue(authUser) {
+  if (isOwnerUser(authUser)) return true;
+  const actorRole = normalizeUserRole(authUser?.role, "");
+  return actorRole === "admin" || actorRole === "user";
+}
+
+function isItemVisibleToActor(authUser, item, assignment) {
+  if (!item || typeof item !== "object") return false;
+  if (isOwnerUser(authUser)) return true;
+  const actorId = getAuthUserId(authUser);
+  if (!actorId) return false;
+  const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;
+  if (claimedByUserId > 0) {
+    return claimedByUserId === actorId || canSeeManagedWorkForUser(authUser, claimedByUserId);
+  }
+  const assigneeUserId = Number(assignment?.assignee_user_id || 0) || 0;
+  if (assigneeUserId > 0) {
+    return assigneeUserId === actorId || canSeeManagedWorkForUser(authUser, assigneeUserId);
+  }
+  const assignedByUserId = Number(assignment?.assigned_by_user_id || 0) || 0;
+  if (assignedByUserId > 0 || String(assignment?.assignee_name || "").trim().length > 0) {
+    return assignedByUserId > 0 && assignedByUserId === actorId;
+  }
+  return canSeeRawPoolInItemsQueue(authUser);
+}
+
+function buildViewerScopeReason(authUser, item, assignment) {
+  if (isOwnerUser(authUser)) return "owner_global";
+  const actorId = getAuthUserId(authUser);
+  if (!actorId) return "out_of_scope";
+  const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;
+  if (claimedByUserId > 0) {
+    if (claimedByUserId === actorId) return "claimed_by_me";
+    if (canSeeManagedWorkForUser(authUser, claimedByUserId)) return "claimed_by_descendant";
+    return "out_of_scope";
+  }
+  const assigneeUserId = Number(assignment?.assignee_user_id || 0) || 0;
+  if (assigneeUserId > 0) {
+    if (assigneeUserId === actorId) return "assigned_to_me";
+    if (canSeeManagedWorkForUser(authUser, assigneeUserId)) return "assigned_to_descendant";
+  }
+  const assignedByUserId = Number(assignment?.assigned_by_user_id || 0) || 0;
+  if (assignedByUserId > 0 && assignedByUserId === actorId && !assigneeUserId) {
+    return "assigned_by_me_external";
+  }
+  if (assigneeUserId > 0 || assignedByUserId > 0) return "out_of_scope";
+
+  if (canSeeRawPoolInItemsQueue(authUser)) {
+    return "raw_pool_visible";
+  }
+  return "out_of_scope";
+}
+
+function buildItemCurrentHolder(item) {
+  const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;
+  if (!claimedByUserId) return null;
+  const claimedBy = item?.claimed_by_user || null;
+  return {
+    claimed_by_user_id: claimedByUserId,
+    claimed_by: claimedBy
+      ? {
+          id: Number(claimedBy.id || 0) || null,
+          email: String(claimedBy.email || "").trim() || null,
+          display_name: String(claimedBy.display_name || "").trim() || null,
+          role: String(claimedBy.role || "").trim().toLowerCase() || null,
+        }
+      : null,
+  };
+}
+
+function buildItemAssignmentOwner(assignment, userById = new Map()) {
+  if (!assignment || typeof assignment !== "object") return null;
+  const assigneeUserId = Number(assignment?.assignee_user_id || 0) || 0;
+  const assignedByUserId = Number(assignment?.assigned_by_user_id || 0) || 0;
+  const assigneeUser = assigneeUserId ? userById.get(assigneeUserId) || null : null;
+  const assignedByUser = assignedByUserId ? userById.get(assignedByUserId) || null : null;
+  return {
+    assignee_user_id: assigneeUserId || null,
+    assignee: assigneeUserId || String(assignment?.assignee_name || "").trim()
+      ? {
+          id: assigneeUserId || null,
+          email: String(assignment?.assignee_email || assigneeUser?.email || "").trim().toLowerCase() || null,
+          display_name: String(assignment?.assignee_display_name || assignment?.assignee_name || assigneeUser?.display_name || "").trim() || null,
+          role: String(assigneeUser?.role || "").trim().toLowerCase() || null,
+        }
+      : null,
+    assigned_by_user_id: assignedByUserId || null,
+    assigned_by: assignedByUserId
+      ? {
+          id: assignedByUserId,
+          email: String(assignment?.assigned_by_email || assignedByUser?.email || "").trim().toLowerCase() || null,
+          display_name: String(assignment?.assigned_by_display_name || assignedByUser?.display_name || "").trim() || null,
+          role: String(assignedByUser?.role || "").trim().toLowerCase() || null,
+        }
+      : null,
+  };
+}
+
+function resolveItemScopeContext(item) {
+  if (!item || typeof item !== "object") return item;
+  const itemId = Number(item?.id || 0) || 0;
+  const listAssignments = itemId && typeof repo?.listAssignmentsByItem === "function"
+    ? (Array.isArray(repo.listAssignmentsByItem(itemId)) ? repo.listAssignmentsByItem(itemId) : [])
+    : [];
+  const primaryAssignment = itemId
+    ? (typeof getPrimaryEditorialAssignment === "function" ? getPrimaryEditorialAssignment(itemId) : null) || listAssignments[0] || null
+    : null;
+  const assignmentUserIds = [
+    Number(primaryAssignment?.assignee_user_id || 0) || 0,
+    Number(primaryAssignment?.assigned_by_user_id || 0) || 0,
+  ].filter(Boolean);
+  return {
+    primaryAssignment,
+    assignmentUserIds,
+  };
+}
+
+function attachItemScopeMetadata(authUser, item, scopeContext = null) {
+  if (!item || typeof item !== "object") return item;
+  const resolvedScope = scopeContext && typeof scopeContext === "object"
+    ? scopeContext
+    : resolveItemScopeContext(item);
+  const primaryAssignment = resolvedScope?.primaryAssignment || null;
+  const assignmentUserIds = [
+    ...(Array.isArray(resolvedScope?.assignmentUserIds) ? resolvedScope.assignmentUserIds : []),
+  ];
+  const assignmentUsers = listUsersByIds(assignmentUserIds);
+  const userById = new Map(assignmentUsers.map((row) => [Number(row?.id || 0), row]));
+  return sanitizeItemForResponse({
+    ...item,
+    item_work_scope_state: buildItemWorkScopeState(item, primaryAssignment),
+    viewer_scope_reason: buildViewerScopeReason(authUser, item, primaryAssignment),
+    current_holder: buildItemCurrentHolder(item),
+    assignment_owner: buildItemAssignmentOwner(primaryAssignment, userById),
+  });
+}
+
 function attachItemClaimUsers(items = []) {
   const rows = Array.isArray(items) ? items : [];
   const claimedIds = rows.map((item) => Number(item?.claimed_by_user_id || 0)).filter(Boolean);
@@ -7557,8 +7709,17 @@ app.get("/api/items", (req, res) => {
   }
   const status = String(req.query.status || "").trim();
   const includeBulkPreview = isAdminLikeUser(req.authUser);
+  const decorateVisibleItems = (items) => attachItemClaimUsers(items)
+    .flatMap((item) => {
+      const scopeContext = resolveItemScopeContext(item);
+      if (!isItemVisibleToActor(req.authUser, item, scopeContext?.primaryAssignment || null)) {
+        return [];
+      }
+      return [attachItemScopeMetadata(req.authUser, item, scopeContext)];
+    })
+    ;
   if (!status) {
-    res.json(attachItemMatchFields(attachItemClaimUsers(repo.listItems()), { includeBulkPreview }));
+    res.json(attachItemMatchFields(decorateVisibleItems(repo.listItems()), { includeBulkPreview }));
     return;
   }
 
@@ -7567,7 +7728,7 @@ app.get("/api/items", (req, res) => {
     .map((x) => x.trim())
     .filter(Boolean);
 
-  res.json(attachItemMatchFields(attachItemClaimUsers(repo.listItemsByStatus(statuses)), { includeBulkPreview }));
+  res.json(attachItemMatchFields(decorateVisibleItems(repo.listItemsByStatus(statuses)), { includeBulkPreview }));
 });
 
 app.post("/api/items/bulk-delete", requireRole("admin", "owner"), (req, res) => {
@@ -7668,10 +7829,10 @@ app.get("/api/items/:id", requireRole("owner", "admin", "editor", "user", "freel
   }
 
   const officialReference = repo.getOfficialReferenceByItem(id);
-  const responseItem = attachSingleItemClaimUser({
+  const responseItem = attachItemScopeMetadata(req.authUser, attachSingleItemClaimUser({
     ...attachWorkflowHeadFields(item),
     official_reference: officialReference,
-  });
+  }));
   res.json(isOtherTransportItem(responseItem) ? attachOtherTransportMetadataToItem(responseItem) : responseItem);
 });
 
@@ -8057,7 +8218,7 @@ app.post("/api/items/:id/claim", requireRole("owner", "admin", "user"), (req, re
     return;
   }
   const actorId = Number(req.authUser?.id || 0) || 0;
-  const decoratedCurrent = attachSingleItemClaimUser(current);
+  const decoratedCurrent = attachItemScopeMetadata(req.authUser, attachSingleItemClaimUser(current));
   if (Number(decoratedCurrent?.claimed_by_user_id || 0) === actorId) {
     res.json({ ok: true, item: decoratedCurrent });
     return;
@@ -8085,7 +8246,7 @@ app.post("/api/items/:id/claim", requireRole("owner", "admin", "user"), (req, re
       content_item_id: id,
       claimed_by_user_id: actorId,
     });
-    res.json({ ok: true, item: claimed });
+    res.json({ ok: true, item: attachItemScopeMetadata(req.authUser, claimed) });
   } catch (err) {
     const msg = String(err?.message || "Cannot claim item");
     const status = /already claimed/i.test(msg) ? 409 : /not found/i.test(msg) ? 404 : 400;
@@ -8105,7 +8266,7 @@ app.post("/api/items/:id/release", requireRole("admin", "user"), (req, res) => {
     return;
   }
   const actorId = Number(req.authUser?.id || 0) || 0;
-  const decoratedCurrent = attachSingleItemClaimUser(current);
+  const decoratedCurrent = attachItemScopeMetadata(req.authUser, attachSingleItemClaimUser(current));
   const claimedByUserId = Number(decoratedCurrent?.claimed_by_user_id || 0) || 0;
   if (!claimedByUserId) {
     res.status(409).json({ error: "รายการนี้ยังไม่มีผู้รับงาน", item: decoratedCurrent });
@@ -8123,7 +8284,7 @@ app.post("/api/items/:id/release", requireRole("admin", "user"), (req, res) => {
   }
 
   try {
-    const released = attachSingleItemClaimUser(repo.releaseItemClaim(id, actorId));
+    const released = attachItemScopeMetadata(req.authUser, attachSingleItemClaimUser(repo.releaseItemClaim(id, actorId)));
     repo.logAudit(actorEmail(req), "item.claim_release", "content_item", String(id), {
       content_item_id: id,
       released_by_user_id: actorId,
@@ -8152,7 +8313,7 @@ app.post("/api/items/:id/takeover", requireRole("admin"), (req, res) => {
     return;
   }
   const actorId = Number(req.authUser?.id || 0) || 0;
-  const decoratedCurrent = attachSingleItemClaimUser(current);
+  const decoratedCurrent = attachItemScopeMetadata(req.authUser, attachSingleItemClaimUser(current));
   const actorRole = actorPolicyRole(req);
   const claimedByUserId = Number(decoratedCurrent?.claimed_by_user_id || 0) || 0;
   if (!claimedByUserId) {
@@ -8182,7 +8343,7 @@ app.post("/api/items/:id/takeover", requireRole("admin"), (req, res) => {
       previous_claimed_by_user_id: Number(decoratedCurrent?.claimed_by_user_id || 0) || null,
       claimed_by_user_id: actorId,
     });
-    res.json({ ok: true, item: taken });
+    res.json({ ok: true, item: attachItemScopeMetadata(req.authUser, taken) });
   } catch (err) {
     const msg = String(err?.message || "Cannot take over item");
     const status = /not found/i.test(msg) ? 404 : 400;

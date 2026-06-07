@@ -88,6 +88,34 @@ function getItemClaimHolderLabel(item = state.item) {
   return claimedByUserId ? `user #${claimedByUserId}` : "";
 }
 
+function getItemAssignmentOwnerLabel(item = state.item) {
+  const assignee = item?.assignment_owner?.assignee || null;
+  if (assignee) {
+    return String(assignee.display_name || assignee.email || `user #${Number(assignee.id || 0)}`).trim();
+  }
+  return "";
+}
+
+function getItemAssignedByLabel(item = state.item) {
+  const assignedBy = item?.assignment_owner?.assigned_by || null;
+  if (assignedBy) {
+    return String(assignedBy.display_name || assignedBy.email || `user #${Number(assignedBy.id || 0)}`).trim();
+  }
+  return "";
+}
+
+function getViewerScopeReasonLabel(item = state.item) {
+  const reason = String(item?.viewer_scope_reason || "").trim().toLowerCase();
+  if (reason === "owner_global") return "owner global";
+  if (reason === "raw_pool_visible") return "raw pool";
+  if (reason === "claimed_by_me") return "claimed by me";
+  if (reason === "claimed_by_descendant") return "claimed by descendant";
+  if (reason === "assigned_to_me") return "assigned to me";
+  if (reason === "assigned_to_descendant") return "assigned to descendant";
+  if (reason === "assigned_by_me_external") return "assigned by me";
+  return "out of scope";
+}
+
 function canEditCurrentItem() {
   const role = String(state.user?.role || "").toLowerCase();
   if (role !== "owner" && role !== "admin" && role !== "user") return false;
@@ -437,6 +465,7 @@ function setPreparationEditingDisabled(disabled) {
   });
 }
 
+
 function renderItemClaimBanner() {
   const banner = qs("item-claim-banner");
   const statusNode = qs("item-claim-status");
@@ -447,22 +476,37 @@ function renderItemClaimBanner() {
 
   const role = String(state.user?.role || "").toLowerCase();
   const holderLabel = getItemClaimHolderLabel();
+  const assigneeLabel = getItemAssignmentOwnerLabel();
+  const assignedByLabel = getItemAssignedByLabel();
+  const scopeState = String(state.item?.item_work_scope_state || "").trim().toLowerCase();
+  const scopeReasonLabel = getViewerScopeReasonLabel();
   const claimedAt = String(state.item?.claimed_at || "").trim();
-  const claimedSuffix = claimedAt ? ` | เวลา claim ${claimedAt}` : "";
+  const claimedSuffix = claimedAt ? ` | claimed at ${claimedAt}` : "";
+  const chips = [];
 
   if (canEditCurrentItem()) {
-    statusNode.textContent = `คุณกำลังแก้ไข item นี้อยู่${claimedSuffix}`;
+    chips.push(`<span class="intake-chip">Claimed by ${escapeHtml(holderLabel || "you")} / รับงานโดย ${escapeHtml(holderLabel || "you")}${escapeHtml(claimedSuffix)}</span>`);
+    if (assigneeLabel) chips.push(`<span class="intake-chip">Assigned to ${escapeHtml(assigneeLabel)} / มอบหมายให้ ${escapeHtml(assigneeLabel)}</span>`);
+    if (assignedByLabel) chips.push(`<span class="intake-chip">Assigned by ${escapeHtml(assignedByLabel)} / ผู้มอบหมาย ${escapeHtml(assignedByLabel)}</span>`);
+    chips.push(`<span class="intake-chip">Visible because: ${escapeHtml(scopeReasonLabel)}</span>`);
   } else if (canClaimCurrentItem()) {
-    statusNode.textContent = "รายการนี้ยังไม่ถูก claim สามารถกด Claim เพื่อเริ่มทำงานได้";
+    chips.push('<span class="intake-chip">Raw pool / ยังไม่มีผู้รับงาน</span>');
+    chips.push(`<span class="intake-chip">Visible because: ${escapeHtml(scopeReasonLabel)}</span>`);
   } else if (Number(state.item?.claimed_by_user_id || 0) > 0) {
-    statusNode.textContent = holderLabel
-      ? `รายการนี้ถูก claim โดย ${holderLabel}${claimedSuffix}`
-      : `รายการนี้ถูก claim โดยผู้ใช้อื่น${claimedSuffix}`;
+    chips.push(holderLabel
+      ? `<span class="intake-chip">Claimed by ${escapeHtml(holderLabel)} / รับงานโดย ${escapeHtml(holderLabel)}${escapeHtml(claimedSuffix)}</span>`
+      : `<span class="intake-chip">Claimed by another user / รับงานโดยผู้ใช้อื่น${escapeHtml(claimedSuffix)}</span>`);
+    if ((scopeState === "assigned" || scopeState === "claimed_and_assigned") && assigneeLabel) {
+      chips.push(`<span class="intake-chip">Assigned to ${escapeHtml(assigneeLabel)} / มอบหมายให้ ${escapeHtml(assigneeLabel)}</span>`);
+    }
+    if ((scopeState === "assigned" || scopeState === "claimed_and_assigned") && assignedByLabel) {
+      chips.push(`<span class="intake-chip">Assigned by ${escapeHtml(assignedByLabel)} / ผู้มอบหมาย ${escapeHtml(assignedByLabel)}</span>`);
+    }
+    chips.push(`<span class="intake-chip">Visible because: ${escapeHtml(scopeReasonLabel)}</span>`);
   } else {
-    statusNode.textContent = role === "editor"
-      ? "role นี้ยังไม่สามารถ claim เพื่อแก้ไขรายการได้"
-      : "ไม่สามารถแก้ไขรายการนี้ได้";
+    chips.push(`<span class="intake-chip">Visible because: ${escapeHtml(scopeReasonLabel)}</span>`);
   }
+  statusNode.innerHTML = `<span class="intake-chip-row">${chips.join("")}</span>`;
 
   if (claimBtn) claimBtn.classList.toggle("hidden", !canClaimCurrentItem());
   if (releaseBtn) releaseBtn.classList.toggle("hidden", !canReleaseCurrentItem());

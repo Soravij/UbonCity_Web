@@ -4367,15 +4367,55 @@ function canTakeOverPreparationItem(item) {
   return getRoleRank(actorRole) > getRoleRank(claimantRole);
 }
 
+function getItemAssignmentOwnerLabel(item) {
+  const assignee = item?.assignment_owner?.assignee || null;
+  if (assignee) {
+    return String(assignee.display_name || assignee.email || `user #${Number(assignee.id || 0)}`).trim();
+  }
+  return "";
+}
+
+function getItemAssignedByLabel(item) {
+  const assignedBy = item?.assignment_owner?.assigned_by || null;
+  if (assignedBy) {
+    return String(assignedBy.display_name || assignedBy.email || `user #${Number(assignedBy.id || 0)}`).trim();
+  }
+  return "";
+}
+
+function getViewerScopeReasonLabel(item) {
+  const reason = String(item?.viewer_scope_reason || "").trim().toLowerCase();
+  if (reason === "owner_global") return "owner global";
+  if (reason === "raw_pool_visible") return "raw pool";
+  if (reason === "claimed_by_me") return "claimed by me";
+  if (reason === "claimed_by_descendant") return "claimed by descendant";
+  if (reason === "assigned_to_me") return "assigned to me";
+  if (reason === "assigned_to_descendant") return "assigned to descendant";
+  if (reason === "assigned_by_me_external") return "assigned by me";
+  return "out of scope";
+}
+
 function formatPreparationClaimBadge(item) {
   const holderLabel = getItemClaimHolderLabel(item);
-  if (!Number(item?.claimed_by_user_id || 0)) {
-    return '<span class="intake-chip">ยังไม่มีผู้รับงาน</span>';
+  const assigneeLabel = getItemAssignmentOwnerLabel(item);
+  const assignedByLabel = getItemAssignedByLabel(item);
+  const scopeState = String(item?.item_work_scope_state || "").trim().toLowerCase();
+  const chips = [];
+
+  if (scopeState === "raw_pool" || !Number(item?.claimed_by_user_id || 0)) {
+    chips.push('<span class="intake-chip">Raw pool / ยังไม่มีผู้รับงาน</span>');
   }
-  if (Number(item?.claimed_by_user_id || 0) === Number(state.user?.id || 0)) {
-    return '<span class="intake-chip">คุณรับงานนี้อยู่</span>';
+  if (scopeState === "claimed" || scopeState === "claimed_and_assigned" || Number(item?.claimed_by_user_id || 0) > 0) {
+    chips.push(`<span class="intake-chip">Claimed by ${escapeHtml(holderLabel || "unknown")} / รับงานโดย ${escapeHtml(holderLabel || "unknown")}</span>`);
   }
-  return `<span class="intake-chip">${escapeHtml(holderLabel || "มีผู้รับงานแล้ว")}</span>`;
+  if ((scopeState === "assigned" || scopeState === "claimed_and_assigned") && assigneeLabel) {
+    chips.push(`<span class="intake-chip">Assigned to ${escapeHtml(assigneeLabel)} / มอบหมายให้ ${escapeHtml(assigneeLabel)}</span>`);
+  }
+  if ((scopeState === "assigned" || scopeState === "claimed_and_assigned") && assignedByLabel) {
+    chips.push(`<span class="intake-chip">Assigned by ${escapeHtml(assignedByLabel)} / ผู้มอบหมาย ${escapeHtml(assignedByLabel)}</span>`);
+  }
+  chips.push(`<span class="intake-chip">Visible because: ${escapeHtml(getViewerScopeReasonLabel(item))}</span>`);
+  return `<div class="intake-chip-row">${chips.join("")}</div>`;
 }
 
 function normalizeDashboardWorkflowStage(workflowInput) {
