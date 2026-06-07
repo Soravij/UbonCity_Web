@@ -191,6 +191,107 @@ globalThis.__assignmentScopeHooks = {
   return context.__assignmentScopeHooks;
 }
 
+function loadItemOwnershipScopeHooks(users = [], options = {}) {
+  const userMap = new Map(
+    (Array.isArray(users) ? users : []).map((row) => [Number(row?.id || 0), {
+      id: Number(row?.id || 0) || 0,
+      email: String(row?.email || "").trim().toLowerCase() || null,
+      display_name: String(row?.display_name || "").trim() || null,
+      role: String(row?.role || "").trim().toLowerCase(),
+      managed_by_user_id: Number(row?.managed_by_user_id || 0) || 0,
+    }])
+  );
+  const context = {
+    db: {
+      prepare(sql) {
+        return {
+          get(...args) {
+            if (/SELECT role FROM users/i.test(sql)) {
+              const row = userMap.get(Number(args[0] || 0));
+              return row ? { role: row.role } : undefined;
+            }
+            if (/role IN \('freelance', 'editor'\) AND managed_by_user_id=\?/i.test(sql)) {
+              const workerId = Number(args[0] || 0) || 0;
+              const managerId = Number(args[1] || 0) || 0;
+              const row = userMap.get(workerId);
+              if (!row || !["freelance", "editor"].includes(row.role)) return undefined;
+              return row.managed_by_user_id === managerId ? { id: row.id } : undefined;
+            }
+            if (/SELECT id, managed_by_user_id FROM users WHERE id=\?/i.test(sql)) {
+              const row = userMap.get(Number(args[0] || 0));
+              return row ? { id: row.id, managed_by_user_id: row.managed_by_user_id } : undefined;
+            }
+            return undefined;
+          },
+          all(...args) {
+            if (/SELECT id, email, display_name, role FROM users WHERE id IN/i.test(sql)) {
+              return args
+                .map((value) => userMap.get(Number(value || 0)))
+                .filter(Boolean)
+                .map((row) => ({
+                  id: row.id,
+                  email: row.email,
+                  display_name: row.display_name,
+                  role: row.role,
+                }));
+            }
+            return [];
+          },
+        };
+      },
+    },
+    repo: {
+      listAssignmentsByItem(itemId) {
+        return (options.assignmentsByItemId && options.assignmentsByItemId.get(Number(itemId || 0))) || [];
+      },
+    },
+    sanitizeItemForResponse(item) {
+      return item;
+    },
+    normalizeUserRole(value, fallback = "user") {
+      const normalized = String(value || "").trim().toLowerCase();
+      return normalized || fallback;
+    },
+    normalizePolicyRole(value, fallback = "user") {
+      const normalized = String(value || "").trim().toLowerCase();
+      return normalized || fallback;
+    },
+    console,
+  };
+  const source = `
+${extractNamedFunctionSource(indexServer, "actorPolicyRole")}
+${extractNamedFunctionSource(indexServer, "isManagedContributorByUser")}
+${extractNamedFunctionSource(indexServer, "getUserAssignmentRole")}
+${extractNamedFunctionSource(indexServer, "isOwnerUser")}
+${extractNamedFunctionSource(indexServer, "getAuthUserId")}
+${extractNamedFunctionSource(indexServer, "canAssignToUserByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canSeeUserByManagementLine")}
+${extractNamedFunctionSource(indexServer, "canSeeManagedWorkForUser")}
+${extractNamedFunctionSource(indexServer, "canSeeAssignmentByManagementLine")}
+${extractNamedFunctionSource(indexServer, "filterAssignmentsByManagementLine")}
+${extractNamedFunctionSource(indexServer, "listUsersByIds")}
+${extractNamedFunctionSource(indexServer, "buildItemWorkScopeState")}
+${extractNamedFunctionSource(indexServer, "canSeeRawPoolInItemsQueue")}
+${extractNamedFunctionSource(indexServer, "isItemVisibleToActor")}
+${extractNamedFunctionSource(indexServer, "buildViewerScopeReason")}
+${extractNamedFunctionSource(indexServer, "buildItemCurrentHolder")}
+${extractNamedFunctionSource(indexServer, "buildItemAssignmentOwner")}
+${extractNamedFunctionSource(indexServer, "resolveItemScopeContext")}
+${extractNamedFunctionSource(indexServer, "attachItemScopeMetadata")}
+globalThis.__itemScopeHooks = {
+  buildItemWorkScopeState,
+  isItemVisibleToActor,
+  buildViewerScopeReason,
+  buildItemCurrentHolder,
+  buildItemAssignmentOwner,
+  attachItemScopeMetadata,
+};
+`;
+  context.globalThis = context;
+  vm.runInNewContext(source, context, { filename: "item-scope-hooks.js" });
+  return context.__itemScopeHooks;
+}
+
 test("assignment HTML removes readiness-only controls and keeps execution-only controls", () => {
   const forbiddenSnippets = [
     'id="btn-assignment-create-from-readiness"',
@@ -384,6 +485,11 @@ test("process-1 UI exposes claim controls in item pages and raw queue", () => {
     "function canTakeOverPreparationItem(item) {",
     'const claimantRole = String(item?.claimed_by_user?.role || "").trim().toLowerCase();',
     "<th>ผู้รับงาน</th>",
+    "Visible because:",
+    "Raw pool / ยังไม่มีผู้รับงาน",
+    "Claimed by",
+    "Assigned to",
+    "Assigned by",
     'data-action="claim-item"',
     'data-action="release-item"',
     'data-action="takeover-item"',
@@ -442,6 +548,261 @@ test("item claim repository support exists for process-1 locking", () => {
   for (const snippet of requiredRepositorySnippets) {
     assert.equal(repositoryJs.includes(snippet), true, `repository should include item claim support snippet: ${snippet}`);
   }
+});
+
+test("item ownership scope metadata distinguishes raw pool, claim, assignment, and viewer reason", () => {
+  const hooks = loadItemOwnershipScopeHooks([
+    { id: 1, role: "owner", email: "owner@example.com", display_name: "Owner Root" },
+    { id: 10, role: "admin", managed_by_user_id: 1, email: "admin@example.com", display_name: "Admin One" },
+    { id: 11, role: "user", managed_by_user_id: 10, email: "user@example.com", display_name: "Collector User" },
+    { id: 12, role: "editor", managed_by_user_id: 11, email: "editor@example.com", display_name: "Editor Child" },
+    { id: 20, role: "admin", managed_by_user_id: 1, email: "other-admin@example.com", display_name: "Other Admin" },
+    { id: 21, role: "user", managed_by_user_id: 20, email: "other-user@example.com", display_name: "Other User" },
+  ], {
+    assignmentsByItemId: new Map([
+      [200, [{
+        id: 901,
+        content_item_id: 200,
+        assignment_kind: "editorial",
+        assignee_user_id: 12,
+        assigned_by_user_id: 11,
+        assignee_display_name: "Editor Child",
+        assignee_email: "editor@example.com",
+        assigned_by_display_name: "Collector User",
+        assigned_by_email: "user@example.com",
+        state: "assigned",
+      }]],
+    ]),
+  });
+
+  assert.equal(hooks.buildItemWorkScopeState({ workflow_status: "raw", claimed_by_user_id: null }, null), "raw_pool");
+  assert.equal(hooks.buildItemWorkScopeState({ workflow_status: "cleaned", claimed_by_user_id: 11 }, null), "claimed");
+  assert.equal(
+    hooks.buildItemWorkScopeState({ workflow_status: "ready_for_content", claimed_by_user_id: 11 }, { assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" }),
+    "claimed_and_assigned"
+  );
+  assert.equal(
+    hooks.buildItemWorkScopeState({ workflow_status: "ready_for_publish", publication_state: "published", claimed_by_user_id: 11 }, { assignee_user_id: 12, assigned_by_user_id: 11, state: "accepted" }),
+    "published_or_completed"
+  );
+
+  assert.equal(
+    hooks.buildViewerScopeReason({ id: 1, role: "owner" }, { id: 100, claimed_by_user_id: null, workflow_status: "raw" }, null),
+    "owner_global"
+  );
+  assert.equal(
+    hooks.buildViewerScopeReason({ id: 11, role: "user" }, { id: 101, claimed_by_user_id: null, workflow_status: "raw" }, null),
+    "raw_pool_visible"
+  );
+  assert.equal(
+    hooks.buildViewerScopeReason({ id: 11, role: "user" }, { id: 102, claimed_by_user_id: 11, workflow_status: "cleaned" }, null),
+    "claimed_by_me"
+  );
+  assert.equal(
+    hooks.buildViewerScopeReason({ id: 10, role: "admin" }, { id: 103, claimed_by_user_id: 11, workflow_status: "cleaned" }, null),
+    "claimed_by_descendant"
+  );
+  assert.equal(
+    hooks.buildViewerScopeReason(
+      { id: 12, role: "editor" },
+      { id: 202, claimed_by_user_id: null, workflow_status: "ready_for_content" },
+      { assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" }
+    ),
+    "assigned_to_me"
+  );
+  assert.equal(
+    hooks.buildViewerScopeReason(
+      { id: 11, role: "user" },
+      { id: 200, claimed_by_user_id: 11, workflow_status: "ready_for_content" },
+      { assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" }
+    ),
+    "claimed_by_me"
+  );
+  assert.equal(
+    hooks.buildViewerScopeReason(
+      { id: 10, role: "admin" },
+      { id: 200, claimed_by_user_id: 11, workflow_status: "ready_for_content" },
+      { assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" }
+    ),
+    "claimed_by_descendant"
+  );
+  assert.equal(
+    hooks.buildViewerScopeReason(
+      { id: 11, role: "user" },
+      { id: 201, claimed_by_user_id: null, workflow_status: "ready_for_content" },
+      { assignee_user_id: null, assigned_by_user_id: 11, assignee_name: "External Agent", state: "assigned" }
+    ),
+    "assigned_by_me_external"
+  );
+  assert.equal(
+    hooks.buildViewerScopeReason(
+      { id: 20, role: "admin" },
+      { id: 200, claimed_by_user_id: 11, workflow_status: "ready_for_content" },
+      { assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" }
+    ),
+    "out_of_scope"
+  );
+});
+
+test("item ownership scope metadata exposes holder and assignment owner details without broadening access", () => {
+  const hooks = loadItemOwnershipScopeHooks([
+    { id: 1, role: "owner", email: "owner@example.com", display_name: "Owner Root" },
+    { id: 10, role: "admin", managed_by_user_id: 1, email: "admin@example.com", display_name: "Admin One" },
+    { id: 11, role: "user", managed_by_user_id: 10, email: "user@example.com", display_name: "Collector User" },
+    { id: 12, role: "editor", managed_by_user_id: 11, email: "editor@example.com", display_name: "Editor Child" },
+  ], {
+    assignmentsByItemId: new Map([
+      [200, [{
+        id: 901,
+        content_item_id: 200,
+        assignment_kind: "editorial",
+        assignee_user_id: 12,
+        assigned_by_user_id: 11,
+        assignee_display_name: "Editor Child",
+        assignee_email: "editor@example.com",
+        assigned_by_display_name: "Collector User",
+        assigned_by_email: "user@example.com",
+        state: "assigned",
+      }]],
+    ]),
+  });
+
+  const decorated = hooks.attachItemScopeMetadata(
+    { id: 10, role: "admin" },
+    {
+      id: 200,
+      workflow_status: "ready_for_content",
+      claimed_by_user_id: 11,
+      claimed_by_user: {
+        id: 11,
+        email: "user@example.com",
+        display_name: "Collector User",
+        role: "user",
+      },
+      publication_state: "draft",
+      production_state: "content_in_progress",
+    }
+  );
+
+  assert.equal(decorated.item_work_scope_state, "claimed_and_assigned");
+  assert.equal(decorated.viewer_scope_reason, "claimed_by_descendant");
+  assert.deepEqual(JSON.parse(JSON.stringify(decorated.current_holder)), {
+    claimed_by_user_id: 11,
+    claimed_by: {
+      id: 11,
+      email: "user@example.com",
+      display_name: "Collector User",
+      role: "user",
+    },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(decorated.assignment_owner)), {
+    assignee_user_id: 12,
+    assignee: {
+      id: 12,
+      email: "editor@example.com",
+      display_name: "Editor Child",
+      role: "editor",
+    },
+    assigned_by_user_id: 11,
+    assigned_by: {
+      id: 11,
+      email: "user@example.com",
+      display_name: "Collector User",
+      role: "user",
+    },
+  });
+});
+
+test("item queue visibility is controlled by explicit visibility helper, not viewer_scope_reason labels", () => {
+  assert.equal(
+    indexServer.includes('.filter((item) => String(item?.viewer_scope_reason || "out_of_scope") !== "out_of_scope")'),
+    false,
+    "/api/items should not filter by viewer_scope_reason"
+  );
+
+  const hooks = loadItemOwnershipScopeHooks([
+    { id: 1, role: "owner", email: "owner@example.com", display_name: "Owner Root" },
+    { id: 10, role: "admin", managed_by_user_id: 1, email: "admin@example.com", display_name: "Admin One" },
+    { id: 11, role: "user", managed_by_user_id: 10, email: "user@example.com", display_name: "Collector User" },
+    { id: 12, role: "editor", managed_by_user_id: 11, email: "editor@example.com", display_name: "Editor Child" },
+    { id: 20, role: "admin", managed_by_user_id: 1, email: "other-admin@example.com", display_name: "Other Admin" },
+  ], {
+    assignmentsByItemId: new Map([
+      [200, [{
+        id: 901,
+        content_item_id: 200,
+        assignment_kind: "editorial",
+        assignee_user_id: 12,
+        assigned_by_user_id: 11,
+        assignee_display_name: "Editor Child",
+        assignee_email: "editor@example.com",
+        assigned_by_display_name: "Collector User",
+        assigned_by_email: "user@example.com",
+        state: "assigned",
+      }]],
+    ]),
+  });
+
+  assert.equal(
+    hooks.isItemVisibleToActor({ id: 11, role: "user" }, { id: 100, claimed_by_user_id: null, workflow_status: "raw" }, null),
+    true,
+    "raw pool should remain visible to internal users"
+  );
+  assert.equal(
+    hooks.isItemVisibleToActor(
+      { id: 10, role: "admin" },
+      { id: 200, claimed_by_user_id: 11, workflow_status: "ready_for_content" },
+      { assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" }
+    ),
+    true,
+    "manager ancestor should still see claimed descendant work"
+  );
+  assert.equal(
+    hooks.isItemVisibleToActor(
+      { id: 20, role: "admin" },
+      { id: 200, claimed_by_user_id: 11, workflow_status: "ready_for_content" },
+      { assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" }
+    ),
+    false,
+    "cross-branch admin should stay out of scope"
+  );
+  assert.equal(
+    hooks.isItemVisibleToActor(
+      { id: 12, role: "editor" },
+      { id: 201, claimed_by_user_id: null, workflow_status: "ready_for_content" },
+      { assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" }
+    ),
+    true,
+    "assignee should still see assigned work without a claim"
+  );
+  assert.equal(
+    hooks.isItemVisibleToActor({ id: 12, role: "editor" }, { id: 300, claimed_by_user_id: null, workflow_status: "raw" }, null),
+    false,
+    "editor should not be encoded as raw-pool-visible for /api/items helper"
+  );
+  assert.equal(
+    hooks.isItemVisibleToActor({ id: 30, role: "freelance" }, { id: 301, claimed_by_user_id: null, workflow_status: "raw" }, null),
+    false,
+    "freelance should not be encoded as raw-pool-visible for /api/items helper"
+  );
+  assert.equal(
+    hooks.buildViewerScopeReason({ id: 12, role: "editor" }, { id: 300, claimed_by_user_id: null, workflow_status: "raw" }, null),
+    "out_of_scope",
+    "editor should not receive raw_pool_visible label for /api/items helper policy"
+  );
+  assert.equal(
+    hooks.buildViewerScopeReason({ id: 30, role: "freelance" }, { id: 301, claimed_by_user_id: null, workflow_status: "raw" }, null),
+    "out_of_scope",
+    "freelance should not receive raw_pool_visible label for /api/items helper policy"
+  );
+});
+
+test("item editor keeps only the active ownership claim banner implementation", () => {
+  assert.equal(
+    itemEditorJs.includes("function renderItemClaimBannerLegacy()"),
+    false,
+    "legacy claim banner implementation should be removed"
+  );
 });
 
 test("legacy from-readiness route is locked behind owner-only emergency policy", () => {
