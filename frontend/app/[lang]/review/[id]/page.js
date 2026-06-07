@@ -6,6 +6,12 @@ import { getLangContent, normalizeLang } from "@/lib/site";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
+export const metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 function escapeRegExp(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

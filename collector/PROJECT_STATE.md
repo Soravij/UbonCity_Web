@@ -1,6 +1,6 @@
 # PROJECT_STATE
 
-Last Updated: 2026-06-06
+Last Updated: 2026-06-07
 
 ## Active Branch
 
@@ -14,6 +14,25 @@ Current completed main baseline:
 - Assignment and item management-line scope enforcement merged
 
 ## Recent Completed Work
+
+### 2026-06-07
+
+Branch / PR:
+- merged to `main`
+
+Status:
+- manual UAT completed
+
+Summary:
+- user/admin UAT passed for visibility scope
+- user/admin do not see out-of-scope work
+- admin system/user checks show only the team created/managed by that admin account
+- item ownership labels are visible for raw pool / claimed / assigned / visible reason
+- crawler / Google Maps API permissions remain owner-only
+
+Checks and tests:
+- manual visibility-scope UAT passed for `user` and `admin`
+- `collector/tests/assignment-ui-scope.test.mjs` still has known legacy failures unrelated to this patch
 
 ### 2026-06-06
 

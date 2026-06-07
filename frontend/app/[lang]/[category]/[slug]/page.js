@@ -1,6 +1,14 @@
 import Link from "next/link";
 import PlaceDetailContent from "@/components/PlaceDetailContent";
 import { getPlaceDetail } from "@/lib/api";
+import {
+  buildAbsoluteUrl,
+  buildBreadcrumbJsonLd,
+  buildPlaceJsonLd,
+  buildSeoMetadata,
+  buildWebPageJsonLd,
+  pickPrimaryImage,
+} from "@/lib/schemaMetadata";
 import { getLangContent, normalizeLang } from "@/lib/site";
 
 const DETAIL_COPY = {
@@ -16,10 +24,26 @@ const DETAIL_COPY = {
   },
 };
 
+function getSiteUrl() {
+  return String(process.env.NEXT_PUBLIC_SITE_URL || "").trim().replace(/\/+$/, "");
+}
+
+function JsonLdScript({ data, id }) {
+  if (!data || !Object.keys(data).length) return null;
+  return (
+    <script
+      id={id}
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }}
+    />
+  );
+}
+
 export async function generateMetadata({ params }) {
   const { lang, category, slug } = await params;
-  const place = await getPlaceDetail(category, slug, lang);
-  const copy = getLangContent(lang);
+  const activeLang = normalizeLang(lang);
+  const place = await getPlaceDetail(category, slug, activeLang);
+  const copy = getLangContent(activeLang);
 
   if (!place) {
     return {
@@ -28,16 +52,14 @@ export async function generateMetadata({ params }) {
     };
   }
 
-  const title = String(place.meta_title || place.title || "UBONCITY.COM").trim();
-  const description = String(place.meta_description || place.description || "").replace(/\s+/g, " ").trim();
-
-  return {
-    title: `${title} | UBONCITY.COM`,
-    description: description.slice(0, 160),
-    alternates: {
-      canonical: `/${lang}/${category}/${slug}`,
-    },
-  };
+  return buildSeoMetadata({
+    title: place.meta_title || place.title || "UBONCITY.COM",
+    description: place.meta_description || place.summary || place.description || "",
+    canonicalPath: `/${activeLang}/${category}/${slug}`,
+    lang: activeLang,
+    siteUrl: getSiteUrl(),
+    image: pickPrimaryImage(place),
+  });
 }
 
 export default async function PlaceDetailPage({ params }) {
@@ -49,6 +71,8 @@ export default async function PlaceDetailPage({ params }) {
   ]);
   const categoryLabel = copy?.nav?.[category] || category || "-";
   const detailCopy = DETAIL_COPY[activeLang] || DETAIL_COPY.en;
+  const canonicalPath = `/${activeLang}/${category}/${slug}`;
+  const canonicalUrl = buildAbsoluteUrl(canonicalPath, getSiteUrl());
 
   if (!place) {
     return (
@@ -65,5 +89,28 @@ export default async function PlaceDetailPage({ params }) {
     );
   }
 
-  return <PlaceDetailContent place={place} activeLang={activeLang} category={category} categoryLabel={categoryLabel} />;
+  const webPageJsonLd = buildWebPageJsonLd({
+    title: place.meta_title || place.title || "UBONCITY.COM",
+    description: place.meta_description || place.summary || place.description || "",
+    canonicalUrl,
+  });
+  const breadcrumbJsonLd = buildBreadcrumbJsonLd([
+    { name: copy?.siteTitle || "UBONCITY.COM", url: buildAbsoluteUrl(`/${activeLang}`, getSiteUrl()) },
+    { name: categoryLabel, url: buildAbsoluteUrl(`/${activeLang}/${category}`, getSiteUrl()) },
+    { name: String(place?.title || "").trim(), url: canonicalUrl },
+  ]);
+  const placeJsonLd = buildPlaceJsonLd({
+    place,
+    category,
+    canonicalUrl,
+  });
+
+  return (
+    <>
+      <JsonLdScript id="place-webpage-jsonld" data={webPageJsonLd} />
+      <JsonLdScript id="place-breadcrumb-jsonld" data={breadcrumbJsonLd} />
+      <JsonLdScript id="place-entity-jsonld" data={placeJsonLd} />
+      <PlaceDetailContent place={place} activeLang={activeLang} category={category} categoryLabel={categoryLabel} />
+    </>
+  );
 }

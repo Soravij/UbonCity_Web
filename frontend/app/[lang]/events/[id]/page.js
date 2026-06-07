@@ -1,7 +1,30 @@
 import Link from "next/link";
 import EventDetailContent from "@/components/EventDetailContent";
 import { getEventDetail } from "@/lib/api";
+import {
+  buildAbsoluteUrl,
+  buildBreadcrumbJsonLd,
+  buildEventJsonLd,
+  buildSeoMetadata,
+  buildWebPageJsonLd,
+  pickPrimaryImage,
+} from "@/lib/schemaMetadata";
 import { getLangContent, normalizeLang } from "@/lib/site";
+
+function getSiteUrl() {
+  return String(process.env.NEXT_PUBLIC_SITE_URL || "").trim().replace(/\/+$/, "");
+}
+
+function JsonLdScript({ data, id }) {
+  if (!data || !Object.keys(data).length) return null;
+  return (
+    <script
+      id={id}
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }}
+    />
+  );
+}
 
 export async function generateMetadata({ params }) {
   const { lang, id } = await params;
@@ -15,16 +38,14 @@ export async function generateMetadata({ params }) {
     };
   }
 
-  const title = String(event.meta_title || event.title || "Event").trim();
-  const description = String(event.meta_description || event.description || "").replace(/\s+/g, " ").trim();
-
-  return {
-    title: `${title} | UBONCITY.COM`,
-    description: description.slice(0, 160),
-    alternates: {
-      canonical: `/${activeLang}/events/${id}`,
-    },
-  };
+  return buildSeoMetadata({
+    title: event.meta_title || event.title || "Event",
+    description: event.meta_description || event.summary || event.description || "",
+    canonicalPath: `/${activeLang}/events/${id}`,
+    lang: activeLang,
+    siteUrl: getSiteUrl(),
+    image: pickPrimaryImage(event),
+  });
 }
 
 export default async function EventDetailPage({ params }) {
@@ -32,6 +53,8 @@ export default async function EventDetailPage({ params }) {
   const activeLang = normalizeLang(lang);
   const copy = getLangContent(activeLang);
   const event = await getEventDetail(id, activeLang);
+  const canonicalPath = `/${activeLang}/events/${id}`;
+  const canonicalUrl = buildAbsoluteUrl(canonicalPath, getSiteUrl());
 
   if (!event) {
     return (
@@ -44,5 +67,27 @@ export default async function EventDetailPage({ params }) {
     );
   }
 
-  return <EventDetailContent event={event} activeLang={activeLang} />;
+  const webPageJsonLd = buildWebPageJsonLd({
+    title: event.meta_title || event.title || "Event",
+    description: event.meta_description || event.summary || event.description || "",
+    canonicalUrl,
+  });
+  const breadcrumbJsonLd = buildBreadcrumbJsonLd([
+    { name: copy?.siteTitle || "UBONCITY.COM", url: buildAbsoluteUrl(`/${activeLang}`, getSiteUrl()) },
+    { name: "Events", url: buildAbsoluteUrl(`/${activeLang}`, getSiteUrl()) },
+    { name: String(event?.title || "").trim(), url: canonicalUrl },
+  ]);
+  const eventJsonLd = buildEventJsonLd({ event, canonicalUrl });
+
+  return (
+    <>
+      <JsonLdScript id="event-webpage-jsonld" data={webPageJsonLd} />
+      <JsonLdScript id="event-breadcrumb-jsonld" data={breadcrumbJsonLd} />
+      {(() => {
+        if (!eventJsonLd) return null;
+        return <JsonLdScript id="event-entity-jsonld" data={eventJsonLd} />;
+      })()}
+      <EventDetailContent event={event} activeLang={activeLang} />
+    </>
+  );
 }
