@@ -132,7 +132,7 @@ async function upsertPublishedPlace(connection, content, slug) {
         category_id, slug, image, is_approved, latitude, longitude, map_url, google_place_id,
         transport_subtype, transport_contact_name, transport_contact_phone, phone, line_url, facebook_url, website_url, primary_cta, tracking_entity_type, tracking_entity_id,
         transport_contact_details, transport_link_url
-      ) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         categoryId,
         resolvedSlug,
