@@ -42,6 +42,7 @@ const workspaceState = {
   mediaCollapsed: true,
   systemInfoCollapsed: true,
   dirty: false,
+  articleSuggestionBusy: false,
   seoSuggestionBusy: false,
 };
 
@@ -293,6 +294,15 @@ function setWorkspaceDirty(nextDirty = true) {
   renderWorkspaceSaveState();
 }
 
+function setArticleSuggestionBusy(isBusy) {
+  workspaceState.articleSuggestionBusy = isBusy === true;
+  const button = qs("btn-generate-article-draft");
+  if (button) {
+    button.disabled = state.busy || workspaceState.articleSuggestionBusy || !canEditArticle();
+    button.textContent = workspaceState.articleSuggestionBusy ? "Generating..." : "Generate Article Draft";
+  }
+}
+
 function setSeoSuggestionBusy(isBusy) {
   workspaceState.seoSuggestionBusy = isBusy === true;
   const button = qs("btn-generate-seo-metadata");
@@ -320,11 +330,13 @@ function setBusy(isBusy, label = "Save") {
     "btn-insert-video",
     "btn-preview-desktop",
     "btn-preview-mobile",
+    "btn-generate-article-draft",
     "btn-generate-seo-metadata",
   ].forEach((id) => {
     const node = qs(id);
     if (node) node.disabled = state.busy;
   });
+  setArticleSuggestionBusy(workspaceState.articleSuggestionBusy);
   setSeoSuggestionBusy(workspaceState.seoSuggestionBusy);
   renderWorkspaceSaveState();
 }
@@ -382,6 +394,75 @@ function collectSeoSuggestionPayload() {
     item_type: String(item.type || "").trim(),
     item_category: String(item.category || "").trim(),
     lang: String(item.lang || "th").trim().toLowerCase() || "th",
+  };
+}
+
+function collectArticleSuggestionPayload() {
+  const item = state.item || {};
+  const draft = latestDraft();
+  const titleInput = qs("article-title");
+  const excerptInput = qs("article-excerpt");
+  const slugInput = qs("article-slug");
+  const bodyInput = qs("article-body");
+  const title = String(titleInput ? (titleInput.value ?? "") : (draft?.draft_title ?? item.title ?? "")).trim();
+  const excerpt = String(excerptInput ? (excerptInput.value ?? "") : (draft?.excerpt ?? item.summary ?? "")).trim();
+  const slug = String(slugInput ? (slugInput.value ?? "") : (item.slug ?? "")).trim();
+  const bodyHtml = String(bodyInput ? (bodyInput.value ?? "") : (draft?.body ?? item.description_clean ?? item.description_raw ?? "")).trim();
+  const bodyBlocksText = (Array.isArray(workspaceState.bodyBlocks) ? workspaceState.bodyBlocks : [])
+    .map((block) => {
+      const parts = [
+        String(block?.text || "").trim(),
+        String(block?.caption || "").trim(),
+        String(block?.alt || "").trim(),
+      ].filter(Boolean);
+      return parts.join(" ");
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  return {
+    title,
+    excerpt,
+    slug,
+    body: bodyHtml,
+    body_blocks_text: stripHtmlToPlainText(bodyBlocksText || bodyHtml, 5000),
+    meta_title: String(qs("article-meta-title")?.value ?? draft?.meta_title ?? item.meta_title ?? "").trim(),
+    meta_description: String(qs("article-meta-description")?.value ?? draft?.meta_description ?? item.meta_description ?? "").trim(),
+    item_type: String(item.type || "").trim(),
+    item_category: String(item.category || "").trim(),
+    lang: String(item.lang || "th").trim().toLowerCase() || "th",
+    field_pack: state.fieldPack && typeof state.fieldPack === "object" ? state.fieldPack : null,
+    publishable_source: state.articleProcess?.publishable_source && typeof state.articleProcess.publishable_source === "object"
+      ? state.articleProcess.publishable_source
+      : null,
+  };
+}
+
+function normalizeArticleSuggestionBodyValue(value, maxLen) {
+  let text = String(value ?? "").replace(/\r\n/g, "\n").trim();
+  if (!text) return "";
+  if (/^```[a-z0-9_-]*\s*\n/i.test(text) && /\n```$/i.test(text)) {
+    text = text
+      .replace(/^```[a-z0-9_-]*\s*\n/i, "")
+      .replace(/\n```$/i, "")
+      .trim();
+  }
+  return text.length > maxLen ? text.slice(0, maxLen).trim() : text;
+}
+
+function normalizeArticleSuggestionPayload(payload = {}) {
+  const editorNotes = Array.isArray(payload?.editor_notes)
+    ? payload.editor_notes
+      .map((row) => normalizeSeoSuggestionValue(row, 280))
+      .filter(Boolean)
+      .slice(0, 12)
+    : [];
+  return {
+    title: normalizeSeoSuggestionValue(payload?.title, 160),
+    excerpt: normalizeSeoSuggestionValue(payload?.excerpt, 320),
+    body: normalizeArticleSuggestionBodyValue(payload?.body, 16000),
+    suggested_slug: normalizeSeoSuggestionValue(payload?.suggested_slug, 140),
+    editor_notes: editorNotes,
   };
 }
 
@@ -1169,6 +1250,25 @@ function deleteBlock(blockId) {
   refreshComposerFromBlocks();
 }
 
+function applyGeneratedArticleDraft(suggestion) {
+  const titleNode = qs("article-title");
+  const excerptNode = qs("article-excerpt");
+  const bodyNode = qs("article-body");
+  if (!titleNode || !excerptNode || !bodyNode) {
+    throw new Error("Article workspace fields are not ready");
+  }
+  titleNode.value = suggestion.title;
+  excerptNode.value = suggestion.excerpt;
+  bodyNode.value = suggestion.body;
+  workspaceState.bodyBlocks = buildBlocksFromBody(suggestion.body);
+  renderBlocks();
+  setWorkspaceDirty(true);
+  renderPreview();
+  renderReviewChecklist();
+  renderStatusChip();
+  applyActionGuards();
+}
+
 function renderHeroAndAssets() {
   const assets = Array.isArray(state.assets) ? state.assets : [];
   ensureSelectedAssetId();
@@ -1300,6 +1400,8 @@ function applyActionGuards() {
   if (saveBtn) saveBtn.disabled = state.busy || !editable;
   const reviewSaveBtn = qs("btn-save-before-review");
   if (reviewSaveBtn) reviewSaveBtn.disabled = state.busy || !editable;
+  const articleBtn = qs("btn-generate-article-draft");
+  if (articleBtn) articleBtn.disabled = state.busy || workspaceState.articleSuggestionBusy || !editable;
   const seoBtn = qs("btn-generate-seo-metadata");
   if (seoBtn) seoBtn.disabled = state.busy || workspaceState.seoSuggestionBusy || !editable;
 }
@@ -1397,6 +1499,7 @@ function applyEditorWorkspaceView() {
   if (videoInput) videoInput.placeholder = "\u0e27\u0e32\u0e07\u0e25\u0e34\u0e07\u0e01\u0e4c YouTube/Vimeo \u0e41\u0e25\u0e49\u0e27\u0e01\u0e14\u0e41\u0e17\u0e23\u0e01\u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d";
   const insertVideo = qs("btn-insert-video");
   if (insertVideo) insertVideo.textContent = "\u0e41\u0e17\u0e23\u0e01\u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d";
+  setArticleSuggestionBusy(workspaceState.articleSuggestionBusy);
   setSeoSuggestionBusy(workspaceState.seoSuggestionBusy);
   const previewDesktop = qs("btn-preview-desktop");
   if (previewDesktop) previewDesktop.textContent = "\u0e40\u0e14\u0e2a\u0e01\u0e4c\u0e17\u0e47\u0e2d\u0e1b";
@@ -1548,6 +1651,49 @@ async function generateSeoMetadataSuggestion() {
   }
 }
 
+async function generateArticleDraftSuggestion() {
+  setArticleSuggestionBusy(true);
+  setInlineStatus("article-draft-status", "Generating article draft...", "loading");
+  try {
+    const payload = collectArticleSuggestionPayload();
+    if (!payload.title && !payload.excerpt && !payload.body && !payload.body_blocks_text && !payload.field_pack && !payload.publishable_source) {
+      throw new Error("Please add source material before generating an article draft");
+    }
+
+    const result = await api(`/api/items/${state.itemId}/article-suggestion`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const suggestion = normalizeArticleSuggestionPayload(result?.suggestion || {});
+    if (!suggestion.title || !suggestion.excerpt || !suggestion.body) {
+      throw new Error("Article Agent returned no usable draft content");
+    }
+
+    const currentTitle = String(qs("article-title")?.value || "").trim();
+    const currentExcerpt = String(qs("article-excerpt")?.value || "").trim();
+    const currentBody = String(qs("article-body")?.value || "").trim();
+    const hasExistingContent = Boolean(currentTitle || currentExcerpt || currentBody);
+    if (hasExistingContent) {
+      const confirmed = window.confirm("Replace existing Title / Excerpt / Body with Article Agent draft? This may replace body content.");
+      if (!confirmed) {
+        setInlineStatus("article-draft-status", "Kept existing article content");
+        return;
+      }
+    }
+
+    applyGeneratedArticleDraft(suggestion);
+    setInlineStatus(
+      "article-draft-status",
+      suggestion.editor_notes.length > 0
+        ? `Article draft applied locally. Notes: ${suggestion.editor_notes.join(" | ")}`
+        : "Article draft applied locally"
+    );
+  } finally {
+    setArticleSuggestionBusy(false);
+    applyActionGuards();
+  }
+}
+
 async function transitionArticle(status, note = "") {
   setBusy(true);
   setWorkspaceBanner("Updating workflow...", "loading");
@@ -1650,6 +1796,13 @@ function wire() {
       setInlineStatus("review-status", "บันทึกแล้ว");
     } catch (err) {
       setInlineStatus("review-status", err.message, "error");
+    }
+  });
+  qs("btn-generate-article-draft")?.addEventListener("click", async () => {
+    try {
+      await generateArticleDraftSuggestion();
+    } catch (err) {
+      setInlineStatus("article-draft-status", err.message, "error");
     }
   });
   qs("btn-generate-seo-metadata")?.addEventListener("click", async () => {

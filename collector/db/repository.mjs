@@ -8179,18 +8179,27 @@ function normalizeStateValue(value, stateGroup) {
     finishGenerationRunStmt.run(status, Number(outputCount || 0), Number(errorCount || 0), message || null, runUid);
   }
 
+  function hasOwnDraftField(source, key) {
+    return Boolean(source) && Object.prototype.hasOwnProperty.call(source, key);
+  }
+
+  function readDraftField(source, key, fallback = "") {
+    if (hasOwnDraftField(source, key)) return source[key];
+    return fallback;
+  }
+
   function saveDraft(contentItemId, generationRunUid, draft = {}) {
     upsertDraftStmt.run(
       contentItemId,
       generationRunUid,
-      draft.draft_title || "Untitled draft",
-      draft.excerpt || null,
-      draft.body || "",
-      draft.meta_title || null,
-      draft.meta_description || null,
+      String(readDraftField(draft, "draft_title", "Untitled draft") ?? ""),
+      String(readDraftField(draft, "excerpt", "") ?? ""),
+      String(readDraftField(draft, "body", "") ?? ""),
+      String(readDraftField(draft, "meta_title", "") ?? ""),
+      String(readDraftField(draft, "meta_description", "") ?? ""),
       JSON.stringify(draft.suggested_related || []),
       draft.ai_quality_score ?? null,
-      draft.status || "generated"
+      String(readDraftField(draft, "status", "generated") || "generated")
     );
 
     return latestDraftByItem(contentItemId);

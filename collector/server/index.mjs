@@ -54,6 +54,7 @@ import {
   createAgentGenerationEngine,
 } from "../services/agent-generation.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
+import { buildArticleSuggestionPrompt, buildArticleSuggestionRequestContext, normalizeArticleSuggestion } from "../services/article-agent.mjs";
 import { buildSeoSuggestionPrompt, buildSeoSuggestionRequestContext, normalizeSeoSuggestion } from "../services/seo-agent.mjs";
 
 const ARTICLE_AGENT_KEY = "article_agent";
@@ -5952,6 +5953,22 @@ function normalizeSeoSuggestionRequestBody(body = {}, item = null) {
   return buildSeoSuggestionRequestContext(body, item, sanitizeArticleRichTextHtml);
 }
 
+function normalizeArticleSuggestionRequestBody(body = {}, item = null) {
+  const selectedAssets = Array.isArray(body?.selected_assets) ? body.selected_assets : null;
+  return buildArticleSuggestionRequestContext(body, item, sanitizeArticleRichTextHtml, selectedAssets);
+}
+
+function hasOwnRequestField(source, key) {
+  return Boolean(source) && Object.prototype.hasOwnProperty.call(source, key);
+}
+
+function readSubmittedStringField(source, key, fallback = "") {
+  if (hasOwnRequestField(source, key)) {
+    return String(source[key] ?? "");
+  }
+  return String(fallback ?? "");
+}
+
 async function buildAiCollectQueries(topic, category, lang = "th", maxQueries = 5) {
   const safeTopic = String(topic || "").trim();
   if (!safeTopic) return [];
@@ -8477,20 +8494,29 @@ app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "u
     const draftPayload = req.body?.draft && typeof req.body.draft === "object"
       ? { ...(req.body.draft || {}) }
       : null;
+    const itemBodyWasProvided = hasOwnRequestField(incomingItemPayload, "description_clean")
+      || hasOwnRequestField(incomingItemPayload, "description_raw");
+    const draftBodyWasProvided = hasOwnRequestField(draftPayload, "body");
     const sanitizedBody = sanitizeArticleRichTextHtml(
-      draftPayload?.body
-      || itemPayload.description_clean
-      || itemPayload.description_raw
-      || current.description_clean
-      || current.description_raw
-      || ""
+      draftBodyWasProvided
+        ? draftPayload.body
+        : itemBodyWasProvided
+          ? (hasOwnRequestField(incomingItemPayload, "description_clean")
+              ? incomingItemPayload.description_clean
+              : incomingItemPayload.description_raw)
+          : (current.description_clean ?? current.description_raw ?? "")
     );
     itemPayload.description_clean = sanitizedBody;
     itemPayload.description_raw = sanitizedBody;
-    itemPayload.slug = normalizeCollectorSlug(
-      itemPayload.slug || itemPayload.title || current.slug || current.title || "",
-      `item-${id}`
-    );
+    if (hasOwnRequestField(incomingItemPayload, "slug")) {
+      const requestedSlug = String(incomingItemPayload.slug ?? "").trim();
+      itemPayload.slug = requestedSlug ? normalizeCollectorSlug(requestedSlug, `item-${id}`) : "";
+    } else {
+      itemPayload.slug = normalizeCollectorSlug(
+        itemPayload.slug || itemPayload.title || current.slug || current.title || "",
+        `item-${id}`
+      );
+    }
     if (otherTransportMetaPayload) {
       itemPayload.source_entity_id = otherTransportMetaPayload.subtype;
     }
@@ -8514,12 +8540,26 @@ app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "u
         || latestDraft?.generation_run_uid
         || `manual-editor-${id}`
       ).trim() || `manual-editor-${id}`;
+      const draftTitleWasProvided = hasOwnRequestField(draftPayload, "draft_title");
+      const draftExcerptWasProvided = hasOwnRequestField(draftPayload, "excerpt");
+      const draftMetaTitleWasProvided = hasOwnRequestField(draftPayload, "meta_title");
+      const draftMetaDescriptionWasProvided = hasOwnRequestField(draftPayload, "meta_description");
       savedDraft = repo.saveDraft(id, generationRunUid, {
-        draft_title: String(draftPayload.draft_title || itemPayload.title || current.title || "Untitled draft").trim() || "Untitled draft",
-        excerpt: String(draftPayload.excerpt || itemPayload.summary || current.summary || "").trim(),
-        body: String(draftPayload.body || itemPayload.description_clean || itemPayload.description_raw || current.description_clean || current.description_raw || "").trim(),
-        meta_title: String(draftPayload.meta_title || itemPayload.meta_title || current.meta_title || "").trim() || null,
-        meta_description: String(draftPayload.meta_description || itemPayload.meta_description || current.meta_description || "").trim() || null,
+        draft_title: draftTitleWasProvided
+          ? readSubmittedStringField(draftPayload, "draft_title").trim()
+          : (String(itemPayload.title ?? current.title ?? "Untitled draft").trim() || "Untitled draft"),
+        excerpt: draftExcerptWasProvided
+          ? readSubmittedStringField(draftPayload, "excerpt").trim()
+          : String(itemPayload.summary ?? current.summary ?? "").trim(),
+        body: draftBodyWasProvided
+          ? readSubmittedStringField(draftPayload, "body").trim()
+          : String(itemPayload.description_clean ?? itemPayload.description_raw ?? current.description_clean ?? current.description_raw ?? "").trim(),
+        meta_title: draftMetaTitleWasProvided
+          ? readSubmittedStringField(draftPayload, "meta_title").trim()
+          : String(itemPayload.meta_title ?? current.meta_title ?? "").trim(),
+        meta_description: draftMetaDescriptionWasProvided
+          ? readSubmittedStringField(draftPayload, "meta_description").trim()
+          : String(itemPayload.meta_description ?? current.meta_description ?? "").trim(),
         suggested_related: Array.isArray(draftPayload.suggested_related)
           ? draftPayload.suggested_related
           : (latestDraft?.suggested_related || []),
@@ -8600,6 +8640,84 @@ app.post("/api/items/:id/seo-suggestion", requireRole("owner", "admin", "editor"
     });
   } catch (err) {
     const msg = String(err?.message || "Cannot generate SEO metadata suggestions");
+    const status = /configured|required/i.test(msg) ? 409 : /invalid|empty|json/i.test(msg) ? 400 : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
+app.post("/api/items/:id/article-suggestion", requireRole("owner", "admin", "editor", "user"), async (req, res) => {
+  const id = Number(req.params.id || 0);
+  if (!id) {
+    res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureArticleComposerEditAccess(req, res, item)) {
+    return;
+  }
+
+  const aiConfig = getEffectiveAiConfig();
+  if (!aiConfig?.enabled) {
+    res.status(409).json({ error: "AI backend is not configured for article suggestions" });
+    return;
+  }
+
+  const articleAgentProfile = getEffectiveAgentProfile(ARTICLE_AGENT_KEY);
+  if (!articleAgentProfile?.profile_text) {
+    res.status(409).json({ error: "Article Agent profile is not available" });
+    return;
+  }
+
+  const latestDraft = repo.latestDraftByItem(id) || null;
+  const fieldPack = repo.getCurrentFieldPackByItem(id) || null;
+  const processPayload = buildArticleProcessPayload(req, item);
+  const selectedAssets = repo.listContentAssetsByItem(id, { onlySelected: true });
+  const source = req.body && typeof req.body === "object" && !Array.isArray(req.body)
+    ? {
+        ...req.body,
+        field_pack: req.body.field_pack && typeof req.body.field_pack === "object" ? req.body.field_pack : fieldPack,
+        publishable_source: req.body.publishable_source && typeof req.body.publishable_source === "object"
+          ? req.body.publishable_source
+          : processPayload?.publishable_source || null,
+        selected_assets: selectedAssets,
+        latest_draft: req.body.latest_draft && typeof req.body.latest_draft === "object" ? req.body.latest_draft : latestDraft,
+      }
+    : {
+        field_pack: fieldPack,
+        publishable_source: processPayload?.publishable_source || null,
+        selected_assets: selectedAssets,
+        latest_draft: latestDraft,
+      };
+  const promptInput = normalizeArticleSuggestionRequestBody(source, item);
+  if (!promptInput.title && !promptInput.excerpt && !promptInput.body_html && !promptInput.body_blocks_text && !promptInput.field_pack && !promptInput.publishable_source) {
+    res.status(400).json({ error: "title, excerpt, body, or source material is required before generating article draft" });
+    return;
+  }
+
+  try {
+    const result = await executeBackendAiJson({
+      aiConfig,
+      featureKey: "articleGenerator",
+      task: "article_draft_suggestion",
+      prompt: buildArticleSuggestionPrompt(promptInput, articleAgentProfile.profile_text),
+    });
+    const parsed = result?.parsed || parseJsonLike(String(result?.outputText || ""));
+    const suggestion = normalizeArticleSuggestion(parsed);
+    if (!suggestion || !suggestion.title || !suggestion.excerpt || !suggestion.body) {
+      throw new Error("Article Agent returned empty or invalid JSON suggestions");
+    }
+    res.json({
+      ok: true,
+      suggestion,
+      agent_key: ARTICLE_AGENT_KEY,
+    });
+  } catch (err) {
+    const msg = String(err?.message || "Cannot generate article draft suggestions");
     const status = /configured|required/i.test(msg) ? 409 : /invalid|empty|json/i.test(msg) ? 400 : 500;
     res.status(status).json({ error: msg });
   }

@@ -473,26 +473,32 @@ export function fillField(id, value) {
   if (node) node.value = String(value ?? "");
 }
 
+function readWorkspaceFieldValue(id, fallback = "") {
+  const node = qs(id);
+  if (node) return String(node.value ?? "").trim();
+  return String(fallback ?? "").trim();
+}
+
 export function collectWorkspacePayload() {
   const draft = latestDraft();
   const item = state.item || {};
-  const title = String(qs("article-title")?.value || draft?.draft_title || item.title || "").trim();
-  const excerpt = String(qs("article-excerpt")?.value || draft?.excerpt || item.summary || "").trim();
+  const title = readWorkspaceFieldValue("article-title", draft?.draft_title ?? item.title ?? "");
+  const excerpt = readWorkspaceFieldValue("article-excerpt", draft?.excerpt ?? item.summary ?? "");
   const slug = normalizeWorkspaceSlug(
-    String(qs("article-slug")?.value || item.slug || title || "").trim(),
+    readWorkspaceFieldValue("article-slug", item.slug ?? title ?? ""),
     `item-${Number(item?.id || 0) || "workspace"}`
   );
-  const metaTitle = String(qs("article-meta-title")?.value || draft?.meta_title || item.meta_title || "").trim();
-  const metaDescription = String(qs("article-meta-description")?.value || draft?.meta_description || item.meta_description || "").trim();
-  const body = String(qs("article-body")?.value || draft?.body || item.description_clean || item.description_raw || "").trim();
+  const metaTitle = readWorkspaceFieldValue("article-meta-title", draft?.meta_title ?? item.meta_title ?? "");
+  const metaDescription = readWorkspaceFieldValue("article-meta-description", draft?.meta_description ?? item.meta_description ?? "");
+  const body = readWorkspaceFieldValue("article-body", draft?.body ?? item.description_clean ?? item.description_raw ?? "");
   const currentOtherTransport = currentOtherTransportMeta();
   const otherTransportMeta = isOtherTransportItem(item)
     ? {
-        subtype: String(qs("other-transport-type")?.value || currentOtherTransport.subtype || item.source_entity_id || "other").trim().toLowerCase() || "other",
-        contact_name: String(qs("other-transport-contact-name")?.value || currentOtherTransport.contact_name || "").trim(),
-        contact_details: String(qs("other-transport-contact-details")?.value || currentOtherTransport.contact_details || "").trim(),
-        phone: String(qs("other-transport-phone")?.value || currentOtherTransport.phone || "").trim(),
-        link_url: sanitizeUrl(String(qs("other-transport-link")?.value || currentOtherTransport.link_url || "").trim()),
+        subtype: readWorkspaceFieldValue("other-transport-type", currentOtherTransport.subtype ?? item.source_entity_id ?? "other").toLowerCase() || "other",
+        contact_name: readWorkspaceFieldValue("other-transport-contact-name", currentOtherTransport.contact_name ?? ""),
+        contact_details: readWorkspaceFieldValue("other-transport-contact-details", currentOtherTransport.contact_details ?? ""),
+        phone: readWorkspaceFieldValue("other-transport-phone", currentOtherTransport.phone ?? ""),
+        link_url: sanitizeUrl(readWorkspaceFieldValue("other-transport-link", currentOtherTransport.link_url ?? "")),
         thumbnail_mode: "cover_asset",
       }
     : null;

@@ -302,6 +302,41 @@ test("saveItemWithFieldPack rejects field pack id from another item", () => {
   }
 });
 
+test("saveDraft preserves intentionally cleared string fields", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Draft Empty String Place");
+    const saved = ctx.repo.saveDraft(item.id, "run-empty-fields", {
+      draft_title: "",
+      excerpt: "",
+      body: "",
+      meta_title: "",
+      meta_description: "",
+      status: "generated",
+    });
+
+    assert.equal(saved.draft_title, "");
+    assert.equal(saved.excerpt, "");
+    assert.equal(saved.body, "");
+    assert.equal(saved.meta_title, "");
+    assert.equal(saved.meta_description, "");
+
+    const row = ctx.db.prepare(`
+      SELECT draft_title, excerpt, body, meta_title, meta_description
+      FROM content_drafts
+      WHERE content_item_id=? AND generation_run_uid=?
+    `).get(item.id, "run-empty-fields");
+
+    assert.equal(row?.draft_title, "");
+    assert.equal(row?.excerpt, "");
+    assert.equal(row?.body, "");
+    assert.equal(row?.meta_title, "");
+    assert.equal(row?.meta_description, "");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("buildAssignmentHandoffPreview prefers current field pack over readiness brief fallback", () => {
   const ctx = createTestContext();
   try {

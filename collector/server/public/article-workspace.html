@@ -39,8 +39,12 @@
                 <h2 class="section-title">ข้อมูลหลักของบทความ</h2>
                 <p class="muted">แก้ไขหัวข้อ คำอธิบาย และข้อมูลหลักของบทความ</p>
               </div>
-              <div id="article-status-chip" class="workflow-badge workflow-badge-cleaned"></div>
+              <div class="toolbar compact-toolbar">
+                <button id="btn-generate-article-draft" type="button">Generate Article Draft</button>
+                <div id="article-status-chip" class="workflow-badge workflow-badge-cleaned"></div>
+              </div>
             </div>
+            <div id="article-draft-status" class="status"></div>
             <div class="grid">
               <div class="full-span">
                 <label>ชื่อบทความ</label>
