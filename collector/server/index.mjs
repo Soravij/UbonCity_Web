@@ -55,6 +55,32 @@ import {
 } from "../services/agent-generation.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 
+const ARTICLE_AGENT_KEY = "article_agent";
+const DEFAULT_ARTICLE_AGENT_PROFILE = [
+  "คุณคือ Article Agent สำหรับ UbonCity มีหน้าที่ร่างบทความท่องเที่ยวจากข้อมูลที่มีอยู่ เช่น field pack, Q&A, media, handoff, และข้อมูลสถานที่หรืออีเวนต์",
+  "",
+  "เขียนภาษาไทยให้อ่านง่าย เป็นธรรมชาติ ไม่ขายของ ไม่เขียนเหมือนโฆษณา และเหมาะกับนักท่องเที่ยวจริง",
+  "",
+  "ใช้เฉพาะข้อมูลที่มีหลักฐานหรือได้รับการยืนยันแล้ว ถ้าข้อมูลไม่ชัวร์ให้เขียนอย่างระมัดระวังหรือเว้นไว้ให้ editor ตรวจ ไม่แต่งข้อเท็จจริงเพิ่มเอง",
+  "",
+  "เน้นโครงเรื่องที่ช่วยให้คนอ่านตัดสินใจได้ว่า ที่นี่เหมาะกับใคร ไปทำอะไรได้ จุดเด่นจริงคืออะไร และควรรู้อะไรก่อนไป",
+].join("\n");
+
+const SEO_AGENT_KEY = "seo_agent";
+const DEFAULT_SEO_AGENT_PROFILE = [
+  "คุณคือ SEO Agent สำหรับ UbonCity มีหน้าที่สร้างหรือปรับ metadata จากบทความที่ editor แก้แล้วใน Article Workspace",
+  "",
+  "เขียนเพื่อคนอ่านจริงก่อน search engine ไม่ยัด keyword ไม่ทำให้เหมือนโฆษณา และไม่แต่งข้อเท็จจริงเพิ่ม",
+  "",
+  "meta title ต้องชัด อ่านรู้เรื่อง เป็นธรรมชาติ และควรยาวประมาณ 45-65 ตัวอักษรถ้าเป็นไปได้",
+  "",
+  "meta description ต้องสรุปว่าบทความหรือสถานที่นี้มีประโยชน์กับผู้อ่านอย่างไร และช่วยให้เขาตัดสินใจอะไรได้ ควรยาวประมาณ 120-155 ตัวอักษรถ้าเป็นไปได้",
+  "",
+  "ถ้าข้อมูลในบทความไม่พอหรือยังไม่ชัวร์ ห้ามนำไปใช้เป็น metadata แบบฟันธง",
+  "",
+  "SEO Agent เป็น suggestion-only: เติมข้อเสนอในช่อง metadata เพื่อให้คนตรวจและกด save เอง ไม่ auto-save ไม่ auto-publish",
+].join("\n");
+
 const app = express();
 const port = Number(process.env.PORT || 5060);
 const bindHost = String(process.env.COLLECTOR_BIND_HOST || "127.0.0.1").trim() || "127.0.0.1";
@@ -246,6 +272,16 @@ const AGENT_PROFILE_DEFINITIONS = Object.freeze({
     agent_key: FIELD_PACK_AGENT_KEY,
     display_name: "Field Pack Agent",
     default_profile_text: DEFAULT_FIELD_PACK_AGENT_PROFILE,
+  },
+  [ARTICLE_AGENT_KEY]: {
+    agent_key: ARTICLE_AGENT_KEY,
+    display_name: "Article Agent",
+    default_profile_text: DEFAULT_ARTICLE_AGENT_PROFILE,
+  },
+  [SEO_AGENT_KEY]: {
+    agent_key: SEO_AGENT_KEY,
+    display_name: "SEO Agent",
+    default_profile_text: DEFAULT_SEO_AGENT_PROFILE,
   },
 });
 const AGENT_PROFILE_MAX_LENGTH = 8000;
