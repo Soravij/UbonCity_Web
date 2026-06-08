@@ -42,6 +42,7 @@ const workspaceState = {
   mediaCollapsed: true,
   systemInfoCollapsed: true,
   dirty: false,
+  seoSuggestionBusy: false,
 };
 
 function nextBlockId() {
@@ -292,6 +293,15 @@ function setWorkspaceDirty(nextDirty = true) {
   renderWorkspaceSaveState();
 }
 
+function setSeoSuggestionBusy(isBusy) {
+  workspaceState.seoSuggestionBusy = isBusy === true;
+  const button = qs("btn-generate-seo-metadata");
+  if (button) {
+    button.disabled = state.busy || workspaceState.seoSuggestionBusy || !canEditArticle();
+    button.textContent = workspaceState.seoSuggestionBusy ? "Generating..." : "Generate SEO Metadata";
+  }
+}
+
 function setBusy(isBusy, label = "Save") {
   state.busy = Boolean(isBusy);
   const saveBtn = qs("btn-save-workspace");
@@ -310,11 +320,88 @@ function setBusy(isBusy, label = "Save") {
     "btn-insert-video",
     "btn-preview-desktop",
     "btn-preview-mobile",
+    "btn-generate-seo-metadata",
   ].forEach((id) => {
     const node = qs(id);
     if (node) node.disabled = state.busy;
   });
+  setSeoSuggestionBusy(workspaceState.seoSuggestionBusy);
   renderWorkspaceSaveState();
+}
+
+function stripHtmlToPlainText(value, maxLen = 5000) {
+  const text = String(value || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  return text.length > maxLen ? text.slice(0, maxLen).trim() : text;
+}
+
+function collectSeoSuggestionPayload() {
+  const item = state.item || {};
+  const draft = latestDraft();
+  const titleInput = qs("article-title");
+  const excerptInput = qs("article-excerpt");
+  const slugInput = qs("article-slug");
+  const bodyInput = qs("article-body");
+  const metaTitleInput = qs("article-meta-title");
+  const metaDescriptionInput = qs("article-meta-description");
+  const title = String(titleInput ? (titleInput.value ?? "") : (draft?.draft_title ?? item.title ?? "")).trim();
+  const excerpt = String(excerptInput ? (excerptInput.value ?? "") : (draft?.excerpt ?? item.summary ?? "")).trim();
+  const slug = String(slugInput ? (slugInput.value ?? "") : (item.slug ?? "")).trim();
+  const bodyHtml = String(bodyInput ? (bodyInput.value ?? "") : (draft?.body ?? item.description_clean ?? item.description_raw ?? "")).trim();
+  const bodyBlocksText = (Array.isArray(workspaceState.bodyBlocks) ? workspaceState.bodyBlocks : [])
+    .map((block) => {
+      const parts = [
+        String(block?.text || "").trim(),
+        String(block?.caption || "").trim(),
+        String(block?.alt || "").trim(),
+      ].filter(Boolean);
+      return parts.join(" ");
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  return {
+    title,
+    excerpt,
+    slug,
+    body: bodyHtml,
+    body_blocks_text: stripHtmlToPlainText(bodyBlocksText || bodyHtml, 5000),
+    meta_title: String(metaTitleInput ? (metaTitleInput.value ?? "") : (draft?.meta_title ?? item.meta_title ?? "")).trim(),
+    meta_description: String(metaDescriptionInput ? (metaDescriptionInput.value ?? "") : (draft?.meta_description ?? item.meta_description ?? "")).trim(),
+    item_type: String(item.type || "").trim(),
+    item_category: String(item.category || "").trim(),
+    lang: String(item.lang || "th").trim().toLowerCase() || "th",
+  };
+}
+
+function normalizeSeoSuggestionValue(value, maxLen) {
+  const text = String(value || "")
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  return text.length > maxLen ? text.slice(0, maxLen).trim() : text;
+}
+
+function normalizeSeoSuggestionPayload(payload = {}) {
+  return {
+    meta_title: normalizeSeoSuggestionValue(payload?.meta_title, 120),
+    meta_description: normalizeSeoSuggestionValue(payload?.meta_description, 220),
+    suggested_slug: normalizeSeoSuggestionValue(payload?.suggested_slug, 140),
+  };
 }
 
 function parseObjectJson(value) {
@@ -1213,6 +1300,8 @@ function applyActionGuards() {
   if (saveBtn) saveBtn.disabled = state.busy || !editable;
   const reviewSaveBtn = qs("btn-save-before-review");
   if (reviewSaveBtn) reviewSaveBtn.disabled = state.busy || !editable;
+  const seoBtn = qs("btn-generate-seo-metadata");
+  if (seoBtn) seoBtn.disabled = state.busy || workspaceState.seoSuggestionBusy || !editable;
 }
 
 function isEditorWorkspaceUser() {
@@ -1308,6 +1397,7 @@ function applyEditorWorkspaceView() {
   if (videoInput) videoInput.placeholder = "\u0e27\u0e32\u0e07\u0e25\u0e34\u0e07\u0e01\u0e4c YouTube/Vimeo \u0e41\u0e25\u0e49\u0e27\u0e01\u0e14\u0e41\u0e17\u0e23\u0e01\u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d";
   const insertVideo = qs("btn-insert-video");
   if (insertVideo) insertVideo.textContent = "\u0e41\u0e17\u0e23\u0e01\u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d";
+  setSeoSuggestionBusy(workspaceState.seoSuggestionBusy);
   const previewDesktop = qs("btn-preview-desktop");
   if (previewDesktop) previewDesktop.textContent = "\u0e40\u0e14\u0e2a\u0e01\u0e4c\u0e17\u0e47\u0e2d\u0e1b";
   const previewMobile = qs("btn-preview-mobile");
@@ -1396,6 +1486,64 @@ async function saveWorkspace() {
     setWorkspaceBanner("Article saved");
   } finally {
     setBusy(false);
+    applyActionGuards();
+  }
+}
+
+async function generateSeoMetadataSuggestion() {
+  setSeoSuggestionBusy(true);
+  setInlineStatus("seo-metadata-status", "Generating SEO metadata...", "loading");
+  try {
+    const payload = collectSeoSuggestionPayload();
+    if (!payload.title && !payload.excerpt && !payload.body && !payload.body_blocks_text) {
+      throw new Error("Please add title, excerpt, or body before generating SEO metadata");
+    }
+
+    const result = await api(`/api/items/${state.itemId}/seo-suggestion`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const suggestion = normalizeSeoSuggestionPayload(result?.suggestion || {});
+    if (!suggestion.meta_title && !suggestion.meta_description) {
+      throw new Error("SEO Agent returned no usable meta suggestions");
+    }
+
+    const currentMetaTitle = String(qs("article-meta-title")?.value || "").trim();
+    const currentMetaDescription = String(qs("article-meta-description")?.value || "").trim();
+    const nextMetaTitle = suggestion.meta_title;
+    const nextMetaDescription = suggestion.meta_description;
+    const hasExistingMeta = Boolean(currentMetaTitle || currentMetaDescription);
+
+    if (hasExistingMeta) {
+      const confirmed = window.confirm("Replace existing Meta Title / Meta Description with SEO Agent suggestions?");
+      if (!confirmed) {
+        setInlineStatus("seo-metadata-status", "Kept existing metadata");
+        return;
+      }
+    }
+
+    let applied = false;
+    if (nextMetaTitle && qs("article-meta-title")) {
+      qs("article-meta-title").value = nextMetaTitle;
+      applied = true;
+    }
+    if (nextMetaDescription && qs("article-meta-description")) {
+      qs("article-meta-description").value = nextMetaDescription;
+      applied = true;
+    }
+    if (!applied) {
+      throw new Error("SEO Agent returned no usable meta suggestions");
+    }
+
+    setWorkspaceDirty(true);
+    renderPreview();
+    renderReviewChecklist();
+    renderMetaDescriptionGuidance();
+    renderStatusChip();
+    applyActionGuards();
+    setInlineStatus("seo-metadata-status", "SEO metadata applied locally");
+  } finally {
+    setSeoSuggestionBusy(false);
     applyActionGuards();
   }
 }
@@ -1502,6 +1650,13 @@ function wire() {
       setInlineStatus("review-status", "บันทึกแล้ว");
     } catch (err) {
       setInlineStatus("review-status", err.message, "error");
+    }
+  });
+  qs("btn-generate-seo-metadata")?.addEventListener("click", async () => {
+    try {
+      await generateSeoMetadataSuggestion();
+    } catch (err) {
+      setInlineStatus("seo-metadata-status", err.message, "error");
     }
   });
   qs("article-title")?.addEventListener("input", () => {

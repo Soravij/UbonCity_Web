@@ -54,6 +54,7 @@ import {
   createAgentGenerationEngine,
 } from "../services/agent-generation.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
+import { buildSeoSuggestionPrompt, buildSeoSuggestionRequestContext, normalizeSeoSuggestion } from "../services/seo-agent.mjs";
 
 const ARTICLE_AGENT_KEY = "article_agent";
 const DEFAULT_ARTICLE_AGENT_PROFILE = [
@@ -5947,6 +5948,10 @@ function parseJsonLike(raw) {
   }
 }
 
+function normalizeSeoSuggestionRequestBody(body = {}, item = null) {
+  return buildSeoSuggestionRequestContext(body, item, sanitizeArticleRichTextHtml);
+}
+
 async function buildAiCollectQueries(topic, category, lang = "th", maxQueries = 5) {
   const safeTopic = String(topic || "").trim();
   if (!safeTopic) return [];
@@ -8539,6 +8544,64 @@ app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "u
     const message = String(err?.message || "Failed to save editor work");
     const status = /not found/i.test(message) ? 404 : /conflict|constraint/i.test(message) ? 409 : 400;
     res.status(status).json({ error: message });
+  }
+});
+
+app.post("/api/items/:id/seo-suggestion", requireRole("owner", "admin", "editor", "user"), async (req, res) => {
+  const id = Number(req.params.id || 0);
+  if (!id) {
+    res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureArticleComposerEditAccess(req, res, item)) {
+    return;
+  }
+
+  const aiConfig = getEffectiveAiConfig();
+  if (!aiConfig?.enabled) {
+    res.status(409).json({ error: "AI backend is not configured for SEO suggestions" });
+    return;
+  }
+
+  const seoAgentProfile = getEffectiveAgentProfile(SEO_AGENT_KEY);
+  if (!seoAgentProfile?.profile_text) {
+    res.status(409).json({ error: "SEO Agent profile is not available" });
+    return;
+  }
+
+  const promptInput = normalizeSeoSuggestionRequestBody(req.body, item);
+  if (!promptInput.title && !promptInput.excerpt && !promptInput.body_plain_text) {
+    res.status(400).json({ error: "title, excerpt, or body is required before generating SEO metadata" });
+    return;
+  }
+
+  try {
+    const result = await executeBackendAiJson({
+      aiConfig,
+      featureKey: "seoAgent",
+      task: "seo_metadata_suggestion",
+      prompt: buildSeoSuggestionPrompt(promptInput, seoAgentProfile.profile_text),
+    });
+    const parsed = result?.parsed || parseJsonLike(String(result?.outputText || ""));
+    const suggestion = normalizeSeoSuggestion(parsed);
+    if (!suggestion) {
+      throw new Error("SEO Agent returned empty or invalid JSON suggestions");
+    }
+    res.json({
+      ok: true,
+      suggestion,
+      agent_key: SEO_AGENT_KEY,
+    });
+  } catch (err) {
+    const msg = String(err?.message || "Cannot generate SEO metadata suggestions");
+    const status = /configured|required/i.test(msg) ? 409 : /invalid|empty|json/i.test(msg) ? 400 : 500;
+    res.status(status).json({ error: msg });
   }
 });
 
