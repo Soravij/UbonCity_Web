@@ -55,6 +55,7 @@ import {
 } from "../services/agent-generation.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildArticleSuggestionPrompt, buildArticleSuggestionRequestContext, normalizeArticleSuggestion } from "../services/article-agent.mjs";
+import { planBulkItemDelete } from "../services/raw-delete.mjs";
 import { buildSeoSuggestionPrompt, buildSeoSuggestionRequestContext, normalizeSeoSuggestion } from "../services/seo-agent.mjs";
 
 const ARTICLE_AGENT_KEY = "article_agent";
@@ -1783,6 +1784,31 @@ function formatItemBlockerSummary(rows = []) {
   return (Array.isArray(rows) ? rows : [])
     .map((row) => `#${row.item_id} ${row.title || ""}: ${row.blockers.map((entry) => entry.label).join(", ")}`)
     .join(" | ");
+}
+
+function hardDeleteRawOnlyItemAndSweepAssets(itemId, actorEmailValue) {
+  const result = repo.hardDeleteRawOnlyItem(itemId, actorEmailValue);
+  const deletedAssetIds = Array.isArray(result?.deleted_asset_ids) ? result.deleted_asset_ids : [];
+  let sweptAssets = 0;
+  let sweptFiles = 0;
+  const skippedAssets = [];
+  for (const assetId of deletedAssetIds) {
+    const cleanup = deleteAssetIfUnused(assetId);
+    if (cleanup?.deleted_asset) sweptAssets += 1;
+    if (cleanup?.deleted_file) sweptFiles += 1;
+    if (!cleanup?.deleted_asset && Array.isArray(cleanup?.blocked_references) && cleanup.blocked_references.length > 0) {
+      skippedAssets.push({
+        asset_id: Number(assetId || 0) || 0,
+        blocked_references: cleanup.blocked_references,
+      });
+    }
+  }
+  return {
+    ...result,
+    swept_assets: sweptAssets,
+    swept_files: sweptFiles,
+    skipped_assets: skippedAssets,
+  };
 }
 
 function assertItemsCanBeDeleted(items = []) {
@@ -7804,17 +7830,28 @@ app.post("/api/items/bulk-delete", requireRole("admin", "owner"), (req, res) => 
   }
 
   try {
-    assertItemsCanBeDeleted(rows);
-    for (const id of ids) {
-      repo.deleteItem(id, actorEmail(req));
+    const plan = planBulkItemDelete(rows, {
+      getRawOnlyHardDeleteEligibility: (itemId) => repo.getRawOnlyHardDeleteEligibility(itemId),
+      getMergeBlockersForItem,
+    });
+    if (!plan.ok) {
+      res.status(400).json({ error: `cannot delete items with dependency blockers: ${formatItemBlockerSummary(plan.blocked_rows)}` });
+      return;
     }
+    const deletedIds = [];
+    for (const action of plan.actions) {
+      if (action.mode === "hard") {
+        hardDeleteRawOnlyItemAndSweepAssets(action.item_id, actorEmail(req));
+      } else {
+        repo.deleteItem(action.item_id, actorEmail(req));
+      }
+      deletedIds.push(action.item_id);
+    }
+    res.json({ ok: true, deleted_count: deletedIds.length, ids: deletedIds });
   } catch (err) {
     const message = err instanceof Error ? err.message : "delete failed";
     res.status(400).json({ error: message });
-    return;
   }
-
-  res.json({ ok: true, deleted_count: ids.length, ids });
 });
 
 app.post("/api/items/bulk-category", requireRole("admin", "owner"), (req, res) => {
@@ -13041,6 +13078,17 @@ app.delete("/api/items/:id", requireRole("admin", "owner"), (req, res) => {
     return;
   }
   if (!ensureItemMutationAccess(req, res, current)) {
+    return;
+  }
+  const rawOnlyEligibility = repo.getRawOnlyHardDeleteEligibility(id);
+  if (rawOnlyEligibility?.eligible) {
+    try {
+      hardDeleteRawOnlyItemAndSweepAssets(id, actorEmail(req));
+      res.json({ ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "delete failed";
+      res.status(400).json({ error: message });
+    }
     return;
   }
   try {

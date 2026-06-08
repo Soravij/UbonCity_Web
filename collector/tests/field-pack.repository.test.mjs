@@ -128,6 +128,96 @@ function createTestContext() {
     };
   }
 
+  function createRawOnlyAutoDependencies(itemId, suffix = "raw") {
+    const item = repo.getItem(itemId);
+    const sourceResult = db.prepare(`
+      INSERT INTO source_records (content_item_id, source_type, source_name, source_url, source_entity_id, payload_json)
+      VALUES (?, 'google_search', 'raw-import', ?, ?, '{}')
+    `).run(
+      itemId,
+      `https://example.com/raw-${suffix}`,
+      `entity-${suffix}`
+    );
+    const sourceRecordId = Number(sourceResult.lastInsertRowid || 0) || 0;
+    db.prepare(`
+      INSERT INTO evidence_blocks (
+        content_item_id, block_type, source_type, source_record_type, source_record_id,
+        source_url, source_label, lang, attribution_text, text_value, payload_json, status
+      ) VALUES (?, 'fact', 'import', 'source_records', ?, ?, 'raw-import', 'th', 'Collected source signal', ?, '{}', 'active')
+    `).run(
+      itemId,
+      String(sourceRecordId),
+      `https://example.com/raw-${suffix}`,
+      `Raw evidence ${suffix}`
+    );
+    db.prepare(`
+      INSERT INTO content_workflow_transitions (
+        content_item_id, assignment_id, state_group, from_state, to_state, actor_email, actor_role, reason_code, note
+      ) VALUES (?, NULL, 'production', NULL, 'collected', 'system@local', 'system', 'collect_import_created', 'raw import created')
+    `).run(itemId);
+    const linkedAsset = createContentAsset(itemId, `raw-${suffix}`);
+    return {
+      source_record_id: sourceRecordId,
+      asset_id: linkedAsset.asset_id,
+      content_asset_id: linkedAsset.content_asset_id,
+      item_title: item?.title || "",
+    };
+  }
+
+  function createRawReview(itemId, suffix = "raw-review") {
+    const result = db.prepare(`
+      INSERT INTO reviews_raw (content_item_id, review_text, source_name, source_url)
+      VALUES (?, ?, 'test-review', ?)
+    `).run(itemId, `Review ${suffix}`, `https://example.com/review-${suffix}`);
+    return Number(result.lastInsertRowid || 0) || 0;
+  }
+
+  function createQualityCheck(itemId, suffix = "quality") {
+    const result = db.prepare(`
+      INSERT INTO quality_checks (content_item_id, check_name, status, reason)
+      VALUES (?, ?, 'needs_review', ?)
+    `).run(itemId, `check-${suffix}`, `reason-${suffix}`);
+    return Number(result.lastInsertRowid || 0) || 0;
+  }
+
+  function createApprovedContextBlock(itemId, suffix = "context") {
+    const evidenceResult = db.prepare(`
+      INSERT INTO evidence_blocks (
+        content_item_id, block_type, source_type, source_url, source_label, lang,
+        attribution_text, text_value, payload_json, status
+      ) VALUES (?, 'fact', 'manual', ?, ?, 'th', 'tester', ?, '{}', 'active')
+    `).run(
+      itemId,
+      `https://example.com/context-${suffix}`,
+      `Context ${suffix}`,
+      `Evidence ${suffix}`
+    );
+    const evidenceBlockId = Number(evidenceResult.lastInsertRowid || 0) || 0;
+    const approvedResult = db.prepare(`
+      INSERT INTO approved_context_blocks (
+        content_item_id, evidence_block_id, context_type, selected_text, note, editor_note,
+        sort_order, confidence, status, approved_by
+      ) VALUES (?, ?, 'fact', ?, NULL, NULL, 0, 0.9, 'active', 'tester@local')
+    `).run(itemId, evidenceBlockId, `Selected ${suffix}`);
+    return {
+      evidence_block_id: evidenceBlockId,
+      approved_context_block_id: Number(approvedResult.lastInsertRowid || 0) || 0,
+    };
+  }
+
+  function createInternalLinkSuggestion(sourceItemId, targetItemId, suffix = "link") {
+    repo.saveInternalLinkSuggestions(sourceItemId, [
+      {
+        target_content_item_id: targetItemId,
+        anchor_text: `Anchor ${suffix}`,
+        relevance_score: 5,
+        reason: `Reason ${suffix}`,
+        status: "suggested",
+      },
+    ]);
+    return repo.listInternalLinkSuggestions(sourceItemId);
+  }
+
   function createUser(suffix = "field-pack") {
     const email = `${suffix}-${Date.now()}-${Math.floor(Math.random() * 100000)}@local.test`;
     const result = db.prepare(`
@@ -150,6 +240,11 @@ function createTestContext() {
     createSnapshot,
     createReadinessBrief,
     createContentAsset,
+    createRawOnlyAutoDependencies,
+    createRawReview,
+    createQualityCheck,
+    createApprovedContextBlock,
+    createInternalLinkSuggestion,
     createUser,
   };
 }
@@ -332,6 +427,173 @@ test("saveDraft preserves intentionally cleared string fields", () => {
     assert.equal(row?.body, "");
     assert.equal(row?.meta_title, "");
     assert.equal(row?.meta_description, "");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("raw-only item with automatic import dependencies can be hard deleted safely", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Raw Only Delete Candidate");
+    const linked = ctx.createRawOnlyAutoDependencies(item.id, "safe-delete");
+
+    const eligibility = ctx.repo.getRawOnlyHardDeleteEligibility(item.id);
+    assert.equal(eligibility.eligible, true);
+
+    const result = ctx.repo.hardDeleteRawOnlyItem(item.id, "tester@local");
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.deleted_asset_ids, [linked.asset_id]);
+    assert.equal(ctx.repo.getItem(item.id), null);
+
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM content_items WHERE id=?").get(item.id)?.c, 0);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM source_records WHERE content_item_id=?").get(item.id)?.c, 0);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM evidence_blocks WHERE content_item_id=?").get(item.id)?.c, 0);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM content_workflow_models WHERE content_item_id=?").get(item.id)?.c, 0);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM content_workflow_transitions WHERE content_item_id=?").get(item.id)?.c, 0);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assets WHERE content_item_id=?").get(item.id)?.c, 0);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM assets WHERE id=?").get(linked.asset_id)?.c, 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("raw-only hard delete eligibility is blocked by drafts field packs reviews published translations claims and assignments", () => {
+  const ctx = createTestContext();
+  try {
+    const draftItem = ctx.createItem("Draft Blocker");
+    ctx.repo.saveDraft(draftItem.id, "run-draft-blocker", {
+      draft_title: "Draft blocker",
+      excerpt: "excerpt",
+      body: "body",
+      status: "generated",
+    });
+    assert.equal(ctx.repo.getRawOnlyHardDeleteEligibility(draftItem.id).eligible, false);
+    assert.equal(
+      ctx.repo.getRawOnlyHardDeleteEligibility(draftItem.id).blockers.some((entry) => entry.key === "content_drafts"),
+      true
+    );
+
+    const reviewItem = ctx.createItem("Review Blocker");
+    const reviewDraft = ctx.createDraft(reviewItem.id, "review");
+    ctx.repo.addReviewReport(reviewItem.id, reviewDraft.id, {
+      duplication_score: 1,
+      seo_risk_score: 1,
+      metadata_score: 1,
+      grounding_score: 1,
+      ai_quality_score: 1,
+      total_score: 5,
+      issues: [],
+      report: { summary: "review blocker" },
+      status: "pending",
+    });
+    assert.equal(
+      ctx.repo.getRawOnlyHardDeleteEligibility(reviewItem.id).blockers.some((entry) => entry.key === "review_reports"),
+      true
+    );
+
+    const fieldPackItem = ctx.createItem("Field Pack Blocker");
+    ctx.repo.createFieldPack({
+      content_item_id: fieldPackItem.id,
+      ai_summary: "field pack blocker",
+    });
+    assert.equal(
+      ctx.repo.getRawOnlyHardDeleteEligibility(fieldPackItem.id).blockers.some((entry) => entry.key === "field_packs"),
+      true
+    );
+
+    const publishedItem = ctx.createItem("Published Blocker");
+    ctx.repo.savePublishedArticle({
+      content_item_id: publishedItem.id,
+      draft_id: null,
+      review_report_id: null,
+      slug: "published-blocker",
+      title: "Published Blocker",
+      excerpt: "excerpt",
+      body: "body",
+      meta_title: "Published Blocker",
+      meta_description: "desc",
+      related: [],
+      internal_links: [],
+      status: "published",
+    });
+    ctx.db.prepare(`
+      INSERT INTO content_translations (
+        source_content_item_id, source_published_article_id, source_draft_id, source_review_report_id,
+        source_fingerprint, lang, translated_title, translated_excerpt, translated_body,
+        translated_meta_title, translated_meta_description, translation_status, automatic_check_status
+      ) VALUES (?, NULL, NULL, NULL, 'fp', 'en', 't', 'e', 'b', 'mt', 'md', 'ready', 'passed')
+    `).run(publishedItem.id);
+    const publishedEligibility = ctx.repo.getRawOnlyHardDeleteEligibility(publishedItem.id);
+    assert.equal(publishedEligibility.blockers.some((entry) => entry.key === "published_articles"), true);
+    assert.equal(publishedEligibility.blockers.some((entry) => entry.key === "content_translations"), true);
+
+    const claimedItem = ctx.createItem("Claimed Blocker");
+    const claimedUser = ctx.createUser("claimed-blocker");
+    ctx.db.prepare("UPDATE content_items SET claimed_by_user_id=? WHERE id=?").run(claimedUser.id, claimedItem.id);
+    assert.equal(
+      ctx.repo.getRawOnlyHardDeleteEligibility(claimedItem.id).blockers.some((entry) => entry.key === "claimed_item"),
+      true
+    );
+
+    const assignmentItem = ctx.createItem("Assignment Blocker");
+    ctx.createReadinessBrief(assignmentItem.id, "assignment");
+    const assignee = ctx.createUser("assignment-blocker");
+    ctx.repo.createAssignmentFromReadiness(
+      assignmentItem.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    assert.equal(
+      ctx.repo.getRawOnlyHardDeleteEligibility(assignmentItem.id).blockers.some((entry) => entry.key === "content_assignments"),
+      true
+    );
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("raw-only hard delete eligibility is blocked by reviews_raw quality_checks approved_context draft_input_snapshots and internal_link_suggestions", () => {
+  const ctx = createTestContext();
+  try {
+    const reviewItem = ctx.createItem("Raw Review Blocker");
+    ctx.createRawReview(reviewItem.id, "review-block");
+    assert.equal(
+      ctx.repo.getRawOnlyHardDeleteEligibility(reviewItem.id).blockers.some((entry) => entry.key === "reviews_raw"),
+      true
+    );
+
+    const qualityItem = ctx.createItem("Quality Check Blocker");
+    ctx.createQualityCheck(qualityItem.id, "quality-block");
+    assert.equal(
+      ctx.repo.getRawOnlyHardDeleteEligibility(qualityItem.id).blockers.some((entry) => entry.key === "quality_checks"),
+      true
+    );
+
+    const approvedContextItem = ctx.createItem("Approved Context Blocker");
+    ctx.createApprovedContextBlock(approvedContextItem.id, "context-block");
+    assert.equal(
+      ctx.repo.getRawOnlyHardDeleteEligibility(approvedContextItem.id).blockers.some((entry) => entry.key === "approved_context_blocks"),
+      true
+    );
+
+    const snapshotItem = ctx.createItem("Snapshot Blocker");
+    ctx.createSnapshot(snapshotItem.id, "snapshot-block");
+    assert.equal(
+      ctx.repo.getRawOnlyHardDeleteEligibility(snapshotItem.id).blockers.some((entry) => entry.key === "draft_input_snapshots"),
+      true
+    );
+
+    const sourceItem = ctx.createItem("Link Source Blocker");
+    const targetItem = ctx.createItem("Link Target Blocker");
+    ctx.createInternalLinkSuggestion(sourceItem.id, targetItem.id, "link-block");
+
+    const sourceEligibility = ctx.repo.getRawOnlyHardDeleteEligibility(sourceItem.id);
+    const targetEligibility = ctx.repo.getRawOnlyHardDeleteEligibility(targetItem.id);
+    assert.equal(sourceEligibility.blockers.some((entry) => entry.key === "internal_link_sources"), true);
+    assert.equal(targetEligibility.blockers.some((entry) => entry.key === "internal_link_targets"), true);
   } finally {
     ctx.cleanup();
   }

@@ -84,6 +84,13 @@ const REFERENCE_CLEANUP_CANDIDATE_DEFS = Object.freeze([
   { key: "internal_link_targets", label_th: "internal link ปลายทาง", table: "internal_link_suggestions", where: "target_content_item_id=?" },
 ]);
 const REFERENCE_CLEANUP_CANDIDATE_KEYS = new Set(REFERENCE_CLEANUP_CANDIDATE_DEFS.map((entry) => entry.key));
+const RAW_ONLY_HARD_DELETE_ALLOWED_REFERENCE_KEYS = new Set([
+  "source_records",
+  "evidence_blocks",
+  "content_workflow_models",
+  "content_workflow_transitions",
+  "content_assets",
+]);
 const REFERENCE_HARD_BLOCKER_DEFS = Object.freeze([
   { key: "assignments", label_th: "มี assignment งานอยู่", sql: "SELECT COUNT(*) AS c FROM content_assignments WHERE content_item_id=?", hint: "ต้องปิด assignment ก่อนผ่านหน้าส่งงาน" },
   { key: "published_articles", label_th: "เผยแพร่ขึ้นเว็บแล้ว", sql: "SELECT COUNT(*) AS c FROM published_articles WHERE content_item_id=?", hint: "ต้อง unpublish จาก backend ก่อน" },
@@ -4078,6 +4085,151 @@ export function createRepository(db) {
   function deleteItem(id, actorEmail = "system@local") {
     softDeleteStmt.run(id);
     logAudit(actorEmail, "item.delete", "content_item", String(id), null);
+  }
+
+  function getRawOnlyHardDeleteEligibility(itemId) {
+    const id = Number(itemId || 0) || 0;
+    if (!id) {
+      return { eligible: false, item: null, workflow_model: null, blockers: [{ key: "invalid_item_id", count: 0 }] };
+    }
+
+    const item = db.prepare(`
+      SELECT id, item_uid, type, category, title, workflow_status, claimed_by_user_id, is_deleted
+      FROM content_items
+      WHERE id=?
+      LIMIT 1
+    `).get(id) || null;
+    if (!item) {
+      return { eligible: false, item: null, workflow_model: null, blockers: [{ key: "item_not_found", count: 0 }] };
+    }
+
+    const workflowModel = getWorkflowModelByItem(id);
+    const blockers = [];
+    const addBlocker = (key, count = 0) => blockers.push({ key, count: Number(count || 0) || 0 });
+
+    if (Number(item.is_deleted || 0) !== 0) addBlocker("already_deleted");
+    if (String(item.workflow_status || "").trim().toLowerCase() !== "raw") addBlocker("workflow_status_not_raw");
+    if (Number(item.claimed_by_user_id || 0) > 0) addBlocker("claimed_item");
+
+    if (!workflowModel) {
+      addBlocker("workflow_model_missing");
+    } else {
+      if (String(workflowModel.production_state || "").trim().toLowerCase() !== "collected") addBlocker("production_state_not_collected");
+      if (String(workflowModel.publication_state || "").trim().toLowerCase() !== "draft") addBlocker("publication_state_not_draft");
+      if (Number(workflowModel.current_draft_id || 0) > 0) addBlocker("current_draft_exists");
+      if (Number(workflowModel.current_review_report_id || 0) > 0) addBlocker("current_review_exists");
+      if (Number(workflowModel.current_field_pack_id || 0) > 0) addBlocker("current_field_pack_exists");
+    }
+
+    const downstreamChecks = [
+      ["content_drafts", "SELECT COUNT(*) AS c FROM content_drafts WHERE content_item_id=?"],
+      ["review_reports", "SELECT COUNT(*) AS c FROM review_reports WHERE content_item_id=?"],
+      ["field_packs", "SELECT COUNT(*) AS c FROM field_packs WHERE content_item_id=?"],
+      ["published_articles", "SELECT COUNT(*) AS c FROM published_articles WHERE content_item_id=?"],
+      ["reviews_raw", "SELECT COUNT(*) AS c FROM reviews_raw WHERE content_item_id=?"],
+      ["quality_checks", "SELECT COUNT(*) AS c FROM quality_checks WHERE content_item_id=?"],
+      ["content_translations", "SELECT COUNT(*) AS c FROM content_translations WHERE source_content_item_id=?"],
+      ["content_assignments", "SELECT COUNT(*) AS c FROM content_assignments WHERE content_item_id=?"],
+      ["content_assignment_submissions", "SELECT COUNT(*) AS c FROM content_assignment_submissions WHERE content_item_id=?"],
+      ["content_assignment_handoff_snapshots", "SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots WHERE content_item_id=?"],
+      ["content_versions", "SELECT COUNT(*) AS c FROM content_versions WHERE content_item_id=?"],
+      ["approved_context_blocks", "SELECT COUNT(*) AS c FROM approved_context_blocks WHERE content_item_id=?"],
+      ["draft_input_snapshots", "SELECT COUNT(*) AS c FROM draft_input_snapshots WHERE content_item_id=?"],
+      ["content_readiness_briefs", "SELECT COUNT(*) AS c FROM content_readiness_briefs WHERE content_item_id=?"],
+      ["content_execution_controls", "SELECT COUNT(*) AS c FROM content_execution_controls WHERE content_item_id=?"],
+      ["content_execution_channels", "SELECT COUNT(*) AS c FROM content_execution_channels WHERE content_item_id=?"],
+      ["search_enrichment_records", "SELECT COUNT(*) AS c FROM search_enrichment_records WHERE content_item_id=?"],
+      ["place_intelligence_scores", "SELECT COUNT(*) AS c FROM place_intelligence_scores WHERE content_item_id=?"],
+      ["social_signal_sources", "SELECT COUNT(*) AS c FROM social_signal_sources WHERE content_item_id=?"],
+      ["social_momentum_snapshots", "SELECT COUNT(*) AS c FROM social_momentum_snapshots WHERE content_item_id=?"],
+      ["content_direction_reports", "SELECT COUNT(*) AS c FROM content_direction_reports WHERE content_item_id=?"],
+      ["review_actions", "SELECT COUNT(*) AS c FROM review_actions WHERE content_item_id=?"],
+      ["content_intelligence_models", "SELECT COUNT(*) AS c FROM content_intelligence_models WHERE content_item_id=?"],
+      ["internal_link_sources", "SELECT COUNT(*) AS c FROM internal_link_suggestions WHERE content_item_id=?"],
+      ["internal_link_targets", "SELECT COUNT(*) AS c FROM internal_link_suggestions WHERE target_content_item_id=?"],
+      ["staging_items", "SELECT COUNT(*) AS c FROM staging_items WHERE content_item_id=?"],
+    ];
+    const downstreamCheckKeys = new Set(downstreamChecks.map(([key]) => key));
+    for (const entry of REFERENCE_CLEANUP_CANDIDATE_DEFS) {
+      if (RAW_ONLY_HARD_DELETE_ALLOWED_REFERENCE_KEYS.has(entry.key)) continue;
+      if (downstreamCheckKeys.has(entry.key)) continue;
+      downstreamChecks.push([entry.key, `SELECT COUNT(*) AS c FROM ${entry.table} WHERE ${entry.where}`]);
+      downstreamCheckKeys.add(entry.key);
+    }
+
+    for (const [key, sql] of downstreamChecks) {
+      const count = Number(db.prepare(sql).get(id)?.c || 0) || 0;
+      if (count > 0) addBlocker(key, count);
+    }
+
+    return {
+      eligible: blockers.length === 0,
+      item: {
+        id: Number(item.id || 0) || 0,
+        item_uid: item.item_uid || null,
+        type: item.type || null,
+        category: item.category || null,
+        title: item.title || null,
+        workflow_status: item.workflow_status || null,
+        claimed_by_user_id: Number(item.claimed_by_user_id || 0) || null,
+        is_deleted: Number(item.is_deleted || 0) || 0,
+      },
+      workflow_model: workflowModel || null,
+      blockers,
+    };
+  }
+
+  function hardDeleteRawOnlyItem(itemId, actorEmail = "system@local") {
+    const eligibility = getRawOnlyHardDeleteEligibility(itemId);
+    if (!eligibility?.eligible || !eligibility?.item) {
+      const err = new Error("item is not eligible for raw-only hard delete");
+      err.statusCode = 409;
+      err.eligibility = eligibility;
+      throw err;
+    }
+
+    const id = Number(eligibility.item.id || 0) || 0;
+    const linkedAssetIds = db.prepare("SELECT asset_id FROM content_assets WHERE content_item_id=?").all(id)
+      .map((row) => Number(row?.asset_id || 0) || 0)
+      .filter((value) => value > 0);
+
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      logAudit(actorEmail, "item.hard_delete_raw", "content_item", String(id), {
+        snapshot: {
+          id,
+          item_uid: eligibility.item.item_uid || null,
+          title: eligibility.item.title || null,
+          type: eligibility.item.type || null,
+          category: eligibility.item.category || null,
+          workflow_status: eligibility.item.workflow_status || null,
+        },
+        workflow_model: eligibility.workflow_model
+          ? {
+              production_state: eligibility.workflow_model.production_state || null,
+              publication_state: eligibility.workflow_model.publication_state || null,
+              current_draft_id: Number(eligibility.workflow_model.current_draft_id || 0) || null,
+              current_review_report_id: Number(eligibility.workflow_model.current_review_report_id || 0) || null,
+              current_field_pack_id: Number(eligibility.workflow_model.current_field_pack_id || 0) || null,
+            }
+          : null,
+        linked_asset_ids: linkedAssetIds,
+      });
+      db.prepare("DELETE FROM content_items WHERE id=?").run(id);
+      db.exec("COMMIT");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {}
+      throw error;
+    }
+
+    return {
+      ok: true,
+      item_id: id,
+      deleted_asset_ids: [...new Set(linkedAssetIds)],
+      snapshot: eligibility.item,
+    };
   }
 
   function updateItemsCategory(ids = [], category = "", actorEmail = "system@local") {
@@ -10571,6 +10723,8 @@ function normalizeStateValue(value, stateGroup) {
     listItemsByStatus,
     getItem,
     deleteItem,
+    getRawOnlyHardDeleteEligibility,
+    hardDeleteRawOnlyItem,
     updateItemsCategory,
     setWorkflowStatus,
     ensureWorkflowModel,
