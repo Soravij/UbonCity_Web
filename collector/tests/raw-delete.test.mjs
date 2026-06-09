@@ -52,3 +52,34 @@ test("planBulkItemDelete plans hard delete for safe raw-only items and soft dele
     { item_id: 33, mode: "soft" },
   ]);
 });
+
+test("planBulkItemDelete blocks bulk delete when content_assignment_submission_deliverables blocks raw-only hard delete", () => {
+  const result = planBulkItemDelete(
+    [
+      { id: 44, title: "Raw Item With Deliverables" },
+    ],
+    {
+      getRawOnlyHardDeleteEligibility(itemId) {
+        if (Number(itemId) === 44) {
+          return {
+            eligible: false,
+            item: { id: 44, title: "Raw Item With Deliverables", workflow_status: "raw" },
+            blockers: [{ key: "content_assignment_submission_deliverables", count: 3 }],
+          };
+        }
+        return { eligible: true };
+      },
+      getMergeBlockersForItem(itemId) {
+        if (Number(itemId) === 44) {
+          return [{ key: "content_assignment_submission_deliverables", count: 3 }];
+        }
+        return [];
+      },
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.actions, []);
+  assert.equal(result.blocked_rows.length, 1);
+  assert.equal(result.blocked_rows[0].item_id, 44);
+});

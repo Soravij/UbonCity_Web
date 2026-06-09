@@ -4131,6 +4131,7 @@ export function createRepository(db) {
       ["content_translations", "SELECT COUNT(*) AS c FROM content_translations WHERE source_content_item_id=?"],
       ["content_assignments", "SELECT COUNT(*) AS c FROM content_assignments WHERE content_item_id=?"],
       ["content_assignment_submissions", "SELECT COUNT(*) AS c FROM content_assignment_submissions WHERE content_item_id=?"],
+      ["content_assignment_submission_deliverables", "SELECT COUNT(*) AS c FROM content_assignment_submission_deliverables WHERE content_item_id=?"],
       ["content_assignment_handoff_snapshots", "SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots WHERE content_item_id=?"],
       ["content_versions", "SELECT COUNT(*) AS c FROM content_versions WHERE content_item_id=?"],
       ["approved_context_blocks", "SELECT COUNT(*) AS c FROM approved_context_blocks WHERE content_item_id=?"],
