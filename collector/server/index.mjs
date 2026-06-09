@@ -7838,16 +7838,41 @@ app.post("/api/items/bulk-delete", requireRole("admin", "owner"), (req, res) => 
       res.status(400).json({ error: `cannot delete items with dependency blockers: ${formatItemBlockerSummary(plan.blocked_rows)}` });
       return;
     }
-    const deletedIds = [];
+
+    const hardItemIds = [];
+    const softItemIds = [];
     for (const action of plan.actions) {
       if (action.mode === "hard") {
-        hardDeleteRawOnlyItemAndSweepAssets(action.item_id, actorEmail(req));
+        hardItemIds.push(action.item_id);
       } else {
-        repo.deleteItem(action.item_id, actorEmail(req));
+        softItemIds.push(action.item_id);
       }
-      deletedIds.push(action.item_id);
     }
-    res.json({ ok: true, deleted_count: deletedIds.length, ids: deletedIds });
+
+    const result = repo.bulkDeleteItems(hardItemIds, softItemIds, actorEmail(req));
+    const deletedIds = Array.isArray(result?.deleted_ids) ? result.deleted_ids : [];
+    const deletedAssetIds = Array.isArray(result?.deleted_asset_ids) ? result.deleted_asset_ids : [];
+
+    let assetsCleaned = 0;
+    const assetCleanupErrors = [];
+    for (const assetId of deletedAssetIds) {
+      try {
+        const cleanup = deleteAssetIfUnused(assetId);
+        if (cleanup?.deleted_asset) assetsCleaned += 1;
+      } catch (sweepErr) {
+        assetCleanupErrors.push(String(sweepErr?.message || sweepErr || "asset cleanup failed"));
+      }
+    }
+
+    const responsePayload = { ok: true, deleted_count: deletedIds.length, ids: deletedIds };
+    if (assetsCleaned > 0) {
+      responsePayload.assets_cleaned = assetsCleaned;
+    }
+    if (assetCleanupErrors.length > 0) {
+      responsePayload.asset_cleanup_failed_count = assetCleanupErrors.length;
+      responsePayload.asset_cleanup_errors = assetCleanupErrors;
+    }
+    res.json(responsePayload);
   } catch (err) {
     const message = err instanceof Error ? err.message : "delete failed";
     res.status(400).json({ error: message });

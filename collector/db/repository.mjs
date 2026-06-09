@@ -4233,6 +4233,72 @@ export function createRepository(db) {
     };
   }
 
+  function bulkDeleteItems(hardItemIds = [], softItemIds = [], actorEmail = "system@local") {
+    const hardIds = Array.isArray(hardItemIds)
+      ? hardItemIds.map((id) => Number(id || 0)).filter((id) => id > 0)
+      : [];
+    const softIds = Array.isArray(softItemIds)
+      ? softItemIds.map((id) => Number(id || 0)).filter((id) => id > 0)
+      : [];
+
+    const linkedAssetIds = [];
+
+    return runInTransaction(db, () => {
+      const deletedIds = [];
+
+      for (const id of hardIds) {
+        const eligibility = getRawOnlyHardDeleteEligibility(id);
+        if (!eligibility?.eligible || !eligibility?.item) {
+          const err = new Error("item is not eligible for raw-only hard delete");
+          err.statusCode = 409;
+          err.eligibility = eligibility;
+          throw err;
+        }
+
+        const assetIds = db.prepare("SELECT asset_id FROM content_assets WHERE content_item_id=?").all(id)
+          .map((row) => Number(row?.asset_id || 0) || 0)
+          .filter((value) => value > 0);
+
+        linkedAssetIds.push(...assetIds);
+
+        logAudit(actorEmail, "item.hard_delete_raw", "content_item", String(id), {
+          snapshot: {
+            id,
+            item_uid: eligibility.item.item_uid || null,
+            title: eligibility.item.title || null,
+            type: eligibility.item.type || null,
+            category: eligibility.item.category || null,
+            workflow_status: eligibility.item.workflow_status || null,
+          },
+          workflow_model: eligibility.workflow_model
+            ? {
+                production_state: eligibility.workflow_model.production_state || null,
+                publication_state: eligibility.workflow_model.publication_state || null,
+                current_draft_id: Number(eligibility.workflow_model.current_draft_id || 0) || null,
+                current_review_report_id: Number(eligibility.workflow_model.current_review_report_id || 0) || null,
+                current_field_pack_id: Number(eligibility.workflow_model.current_field_pack_id || 0) || null,
+              }
+            : null,
+          linked_asset_ids: assetIds,
+        });
+
+        db.prepare("DELETE FROM content_items WHERE id=?").run(id);
+        deletedIds.push(id);
+      }
+
+      for (const id of softIds) {
+        softDeleteStmt.run(id);
+        logAudit(actorEmail, "item.delete", "content_item", String(id), null);
+        deletedIds.push(id);
+      }
+
+      return {
+        deleted_ids: deletedIds,
+        deleted_asset_ids: [...new Set(linkedAssetIds)],
+      };
+    });
+  }
+
   function updateItemsCategory(ids = [], category = "", actorEmail = "system@local") {
     const normalizedCategory = String(category || "").trim().toLowerCase();
     const itemIds = Array.isArray(ids)
@@ -10726,6 +10792,7 @@ function normalizeStateValue(value, stateGroup) {
     deleteItem,
     getRawOnlyHardDeleteEligibility,
     hardDeleteRawOnlyItem,
+    bulkDeleteItems,
     updateItemsCategory,
     setWorkflowStatus,
     ensureWorkflowModel,
