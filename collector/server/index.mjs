@@ -13055,10 +13055,6 @@ app.patch("/api/items/:id/assets/:assetId/selected", requireRole("owner", "admin
   }
   const targetAsset = repo.listContentAssetsByItem(id, { onlySelected: false }).find((row) => Number(row?.asset_id || 0) === assetId) || null;
   const wantsSelected = selected === true || selected === 1 || selected === "1";
-  if (wantsSelected && !isCollectorControlledLocalAssetRow(targetAsset)) {
-    res.status(400).json({ error: "usable article media must be selected from uploaded local assets" });
-    return;
-  }
 
   try {
     const status = repo.setContentAssetSelected(id, assetId, selected);
@@ -13096,10 +13092,6 @@ app.patch("/api/items/:id/assets/:assetId/role", requireRole("owner", "admin", "
   }
   const targetAsset = repo.listContentAssetsByItem(id, { onlySelected: false }).find((row) => Number(row?.asset_id || 0) === assetId) || null;
   const promotesUsableRole = role === "cover" || role === "gallery" || role === "inline";
-  if (promotesUsableRole && !isCollectorControlledLocalAssetRow(targetAsset)) {
-    res.status(400).json({ error: "usable article media must be selected from uploaded local assets" });
-    return;
-  }
 
   try {
     const status = repo.setContentAssetRole(id, assetId, role);
