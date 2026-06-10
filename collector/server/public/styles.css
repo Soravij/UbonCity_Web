@@ -1856,13 +1856,19 @@ label {
 }
 
 #table-raw .raw-title-column,
-#table-raw .raw-title-cell {
+#table-raw .raw-title-cell,
+#table-raw-intake .raw-title-column,
+#table-raw-intake .raw-title-cell,
+#table-raw-review .raw-title-column,
+#table-raw-review .raw-title-cell {
   width: 220px;
   min-width: 220px;
   max-width: 220px;
 }
 
-#table-raw .raw-main-text {
+#table-raw .raw-main-text,
+#table-raw-intake .raw-main-text,
+#table-raw-review .raw-main-text {
   display: inline-block;
   max-width: 220px;
   overflow: hidden;
@@ -1871,11 +1877,15 @@ label {
   vertical-align: top;
 }
 
-#table-raw .raw-title-cell {
+#table-raw .raw-title-cell,
+#table-raw-intake .raw-title-cell,
+#table-raw-review .raw-title-cell {
   white-space: normal;
 }
 
-#table-raw .raw-title-cell .raw-main-text {
+#table-raw .raw-title-cell .raw-main-text,
+#table-raw-intake .raw-title-cell .raw-main-text,
+#table-raw-review .raw-title-cell .raw-main-text {
   display: -webkit-box;
   max-width: 100%;
   white-space: normal;
