@@ -1979,11 +1979,6 @@ function clearEvidenceForm() {
 }
 
 async function runAiDraftFromApprovedContext(saveCurrentItem) {
-  if (!state.imageWorkflow?.is_ready_for_ai_draft) {
-    renderCleanAiGuard();
-    setStatus("ยังส่งให้ Agent ไม่ได้: เงื่อนไขยังไม่ครบ", true);
-    return;
-  }
 
   setStatus("กำลังบันทึกข้อมูลและเตรียมส่งให้ Agent...");
   await saveCurrentItem();
@@ -2054,18 +2049,14 @@ function renderCleanAiGuard() {
   if (!box) return;
   const editGuard = getEditPermissionGuard();
 
-  const status = state.imageWorkflow || {
-    is_ready_for_ai_draft: false,
-    missing_requirements: ["Select at least 1 image", "Set a cover image"],
-  };
 
-  const missing = Array.isArray(status.missing_requirements) ? status.missing_requirements.map((msg) => normalizeGuardMessage(msg)) : [];
+  const missing = [];
   missing.push(...getAgentBlockingMessages());
   if (!editGuard.allowed) {
     missing.push(editGuard.reason);
   }
 
-  const ready = editGuard.allowed && status.is_ready_for_ai_draft && getAgentBlockingMessages().length === 0;
+  const ready = editGuard.allowed && getAgentBlockingMessages().length === 0;
   if (nextBtn) nextBtn.disabled = !ready;
   if (runBtn) runBtn.disabled = !ready;
 

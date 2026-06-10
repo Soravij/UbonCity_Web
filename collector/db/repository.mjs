@@ -1,4 +1,4 @@
-﻿import { randomUUID } from "crypto";
+import { randomUUID } from "crypto";
 
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
 
@@ -9676,24 +9676,54 @@ function normalizeStateValue(value, stateGroup) {
 
   function getImageWorkflowStatus(contentItemId) {
     const rows = db
-      .prepare("SELECT asset_id, role, selected_in_clean, is_cover FROM content_assets WHERE content_item_id=?")
+      .prepare(`
+        SELECT ca.asset_id, ca.role, ca.selected_in_clean, ca.is_cover,
+               a.storage_disk, a.storage_path, a.mime_type
+        FROM content_assets ca
+        LEFT JOIN assets a ON a.id = ca.asset_id
+        WHERE ca.content_item_id=?
+      `)
       .all(contentItemId);
+
+    const isLocal = (r) => {
+      const disk = String(r?.storage_disk || "").trim().toLowerCase();
+      const path = String(r?.storage_path || "").trim();
+      const mime = String(r?.mime_type || "").trim().toLowerCase();
+      if (!["local", "nas"].includes(disk)) return false;
+      if (!path || /^https?:\/\//i.test(path)) return false;
+      if (mime && !mime.startsWith("image/")) return false;
+      return true;
+    };
 
     const selected = rows.filter((r) => Number(r.selected_in_clean || 0) === 1 && String(r.role || "") !== "unused");
     const covers = rows.filter((r) => Number(r.is_cover || 0) === 1 || String(r.role || "") === "cover");
+
+    const localSelected = selected.filter((r) => isLocal(r));
+    const localCovers = covers.filter((r) => isLocal(r));
 
     const missing = [];
     if (selected.length < 1) missing.push("ต้องเลือกภาพอย่างน้อย 1 ภาพ");
     if (covers.length < 1) missing.push("ต้องตั้งภาพปก");
     if (covers.length > 1) missing.push("ต้องมีภาพปกเพียง 1 ภาพ");
 
+    const localMissing = [];
+    if (localSelected.length < 1) localMissing.push("ต้องเลือกภาพ local อย่างน้อย 1 ภาพ");
+    if (localCovers.length < 1) localMissing.push("ต้องตั้งภาพปกจาก local assets");
+    if (localCovers.length > 1) localMissing.push("ต้องมีภาพปก local เพียง 1 ภาพ");
+
+    const isPublishReady = localMissing.length === 0 && missing.length === 0;
+
     return {
       content_item_id: Number(contentItemId),
       selected_count: selected.length,
       cover_count: covers.length,
+      local_selected_count: localSelected.length,
+      local_cover_count: localCovers.length,
       is_ready_for_ai_draft: missing.length === 0,
+      is_ready_for_publish: isPublishReady,
       missing_requirements: missing,
-      cover_asset_id: covers[0]?.asset_id || null,
+      missing_local_requirements: localMissing,
+      cover_asset_id: localCovers[0]?.asset_id || covers[0]?.asset_id || null,
     };
   }
 

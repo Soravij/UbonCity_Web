@@ -6883,8 +6883,8 @@ function buildExportReadiness(contentItemId) {
     && (productionState === "ready_for_publish" || productionState === "submitted_for_admin_review");
 
   const sourceIssues = [];
-  if (!image.cover_count) sourceIssues.push("Missing cover image");
-  if (!image.selected_count) sourceIssues.push("Select at least 1 image");
+  if (!image.local_cover_count) sourceIssues.push("Missing local cover image");
+  if (!image.local_selected_count) sourceIssues.push("Select at least 1 local image");
   if (!body) sourceIssues.push("Missing body content");
   if (!metaTitle) sourceIssues.push("Missing meta title");
   if (!metaDesc) sourceIssues.push("Missing meta description");
@@ -6959,6 +6959,8 @@ function buildExportReadiness(contentItemId) {
     field_flow_issues: fieldFlowIssues,
     source_checks: {
       has_cover: image.cover_count > 0,
+      has_local_cover: image.local_cover_count > 0,
+      has_local_selected_image: image.local_selected_count > 0,
       has_selected_image: image.selected_count > 0,
       has_body: Boolean(body),
       has_meta_title: Boolean(metaTitle),
@@ -13053,10 +13055,6 @@ app.patch("/api/items/:id/assets/:assetId/selected", requireRole("owner", "admin
   }
   const targetAsset = repo.listContentAssetsByItem(id, { onlySelected: false }).find((row) => Number(row?.asset_id || 0) === assetId) || null;
   const wantsSelected = selected === true || selected === 1 || selected === "1";
-  if (wantsSelected && !isCollectorControlledLocalAssetRow(targetAsset)) {
-    res.status(400).json({ error: "usable article media must be selected from uploaded local assets" });
-    return;
-  }
 
   try {
     const status = repo.setContentAssetSelected(id, assetId, selected);
@@ -13094,10 +13092,6 @@ app.patch("/api/items/:id/assets/:assetId/role", requireRole("owner", "admin", "
   }
   const targetAsset = repo.listContentAssetsByItem(id, { onlySelected: false }).find((row) => Number(row?.asset_id || 0) === assetId) || null;
   const promotesUsableRole = role === "cover" || role === "gallery" || role === "inline";
-  if (promotesUsableRole && !isCollectorControlledLocalAssetRow(targetAsset)) {
-    res.status(400).json({ error: "usable article media must be selected from uploaded local assets" });
-    return;
-  }
 
   try {
     const status = repo.setContentAssetRole(id, assetId, role);
@@ -13622,17 +13616,9 @@ app.post("/api/run/ai-draft", requireRole("admin", "user"), workflowRateLimit, a
     repo.logAudit(actorEmail(req), "asset.cleanup.purge_unused_before_generate", "content_item", String(contentItemId), cleanup);
   }
 
-  const status = buildImageWorkflowState(contentItemId);
-  if (!status.is_ready_for_ai_draft) {
-    res.status(400).json({
-      error: "Agent blocked: image requirements are not met",
-      content_item_id: contentItemId,
-      image_workflow: status,
-      cleanup,
-    });
-    return;
-  }
-
+  // Clean / Field Pack Draft stage does not hard-block on missing images or cover.
+  // Media at this stage is optional/reference/evidence.
+  // Submit Admin Review / Release Main still hard-blocks without local usable media.
   const preview = buildCleanStructuredContext(repo, contentItemId);
   const minimum = validateCleanMinimum(repo, contentItemId);
   if (!minimum.ok) {
