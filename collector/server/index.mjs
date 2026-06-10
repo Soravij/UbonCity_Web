@@ -1,4 +1,4 @@
-﻿import "dotenv/config";
+import "dotenv/config";
 import crypto from "crypto";
 import { once } from "events";
 import fsSync from "fs";
@@ -3417,6 +3417,29 @@ function canTakeOverPrepClaim(actorRole = "", claimantRole = "") {
   return getPrepClaimRoleRank(actorRole) > getPrepClaimRoleRank(claimantRole);
 }
 
+function isClaimableRawPoolItem(item) {
+  if (!item || typeof item !== "object") return false;
+  // Deleted items are never claimable.
+  if (Number(item.is_deleted || 0) === 1) return false;
+  // Use item_work_scope_state when available (set by attachItemScopeMetadata before permission check).
+  const scopeState = String(item.item_work_scope_state || "").trim().toLowerCase();
+  if (scopeState) {
+    return scopeState === "raw_pool";
+  }
+  // Fallback: fail closed - only allow truly raw/collected/draft states.
+  // item_work_scope_state is not available here, so we inspect individual workflow fields.
+  const publicationState = String(item.publication_state || "").trim().toLowerCase();
+  const productionState = String(item.production_state || "").trim().toLowerCase();
+  const workflowStatus = String(item.workflow_status || "").trim().toLowerCase();
+  const allowedPublication = new Set(["", "draft", "raw"]);
+  const allowedProduction = new Set(["", "collected", "raw"]);
+  const allowedWorkflow = new Set(["", "raw"]);
+  if (!allowedPublication.has(publicationState)) return false;
+  if (!allowedProduction.has(productionState)) return false;
+  if (!allowedWorkflow.has(workflowStatus)) return false;
+  return true;
+}
+
 function canClaimItemByManagementLine(authUser, item) {
   if (!item || typeof item !== "object") return false;
   if (isOwnerUser(authUser)) return true;
@@ -3436,7 +3459,9 @@ function canClaimItemByManagementLine(authUser, item) {
   if (Array.isArray(assignments) && assignments.length) {
     return assignments.some((assignment) => canSeeAssignmentByManagementLine(authUser, assignment));
   }
-  return false;
+  // Truly raw pool item: no claimant, no assignment, not deleted, not published/completed.
+  // Internal staff (admin/user) can claim to create initial ownership/scope.
+  return isClaimableRawPoolItem(item);
 }
 
 function canTakeOverItemByManagementLine(authUser, item) {
