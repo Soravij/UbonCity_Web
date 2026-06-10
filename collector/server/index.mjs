@@ -7818,6 +7818,7 @@ app.get("/api/items", (req, res) => {
   }
   const status = String(req.query.status || "").trim();
   const includeBulkPreview = isAdminLikeUser(req.authUser);
+  const debugItemId = Number(req.query.debug_item || 0) || 0;
   const decorateVisibleItems = (items) => attachItemClaimUsers(items)
     .flatMap((item) => {
       const scopeContext = resolveItemScopeContext(item);
@@ -7828,7 +7829,39 @@ app.get("/api/items", (req, res) => {
     })
     ;
   if (!status) {
-    res.json(attachItemMatchFields(decorateVisibleItems(repo.listItems()), { includeBulkPreview }));
+    const rawItems = repo.listItems();
+    const decorated = decorateVisibleItems(rawItems);
+    const response = attachItemMatchFields(decorated, { includeBulkPreview });
+    if (debugItemId === 37) {
+      const authUser = req.authUser || {};
+      console.log("[DEBUG_ITEM_37] auth:", JSON.stringify({ id: authUser.id, email: authUser.email, role: authUser.role }));
+      console.log("[DEBUG_ITEM_37] rawItems count:", rawItems.length);
+      const raw37 = rawItems.find((it) => Number(it?.id || 0) === 37);
+      if (raw37) {
+        console.log("[DEBUG_ITEM_37] raw37 fields:", JSON.stringify({ id: raw37.id, title: raw37.title, workflow_status: raw37.workflow_status, claimed_by_user_id: raw37.claimed_by_user_id, is_deleted: raw37.is_deleted, updated_at: raw37.updated_at }));
+      } else {
+        console.log("[DEBUG_ITEM_37] raw37: NOT FOUND in repo.listItems()");
+      }
+      console.log("[DEBUG_ITEM_37] decorated count:", decorated.length);
+      const vis37 = response.find((it) => Number(it?.id || 0) === 37);
+      if (vis37) {
+        console.log("[DEBUG_ITEM_37] response includes id 37: YES");
+      } else {
+        console.log("[DEBUG_ITEM_37] response includes id 37: NO");
+        const dec37 = decorated.find((it) => Number(it?.id || 0) === 37);
+        if (dec37) {
+          console.log("[DEBUG_ITEM_37] dec37 scope:", JSON.stringify({ item_work_scope_state: dec37.item_work_scope_state, viewer_scope_reason: dec37.viewer_scope_reason }));
+        } else if (raw37) {
+          const claimed = attachItemClaimUsers([raw37])[0];
+          const scopeCtx = resolveItemScopeContext(claimed);
+          const reason = buildViewerScopeReason(req.authUser, claimed, scopeCtx?.primaryAssignment || null);
+          console.log("[DEBUG_ITEM_37] excluded37 viewer_scope_reason:", reason);
+          const claimedByUserId = Number(claimed?.claimed_by_user_id || 0) || 0;
+          console.log("[DEBUG_ITEM_37] excluded37 claimed_by_user_id:", claimedByUserId, "isOwner:", isOwnerUser(req.authUser));
+        }
+      }
+    }
+    res.json(response);
     return;
   }
 
