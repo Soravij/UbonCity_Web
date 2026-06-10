@@ -4395,6 +4395,13 @@ function getViewerScopeReasonLabel(item) {
   return "out of scope";
 }
 
+function shortDisplay(label) {
+  const value = String(label || "").trim();
+  if (!value) return "";
+  if (value.includes("@")) return value.split("@")[0].trim();
+  return value;
+}
+
 function formatPreparationClaimBadge(item) {
   const holderLabel = getItemClaimHolderLabel(item);
   const assigneeLabel = getItemAssignmentOwnerLabel(item);
@@ -4403,18 +4410,17 @@ function formatPreparationClaimBadge(item) {
   const chips = [];
 
   if (scopeState === "raw_pool" || !Number(item?.claimed_by_user_id || 0)) {
-    chips.push('<span class="intake-chip">Raw pool / ยังไม่มีผู้รับงาน</span>');
+    chips.push('<span class="intake-chip">ยังไม่มีผู้รับงาน</span>');
   }
   if (scopeState === "claimed" || scopeState === "claimed_and_assigned" || Number(item?.claimed_by_user_id || 0) > 0) {
-    chips.push(`<span class="intake-chip">Claimed by ${escapeHtml(holderLabel || "unknown")} / รับงานโดย ${escapeHtml(holderLabel || "unknown")}</span>`);
+    chips.push(`<span class="intake-chip">รับงานโดย ${escapeHtml(shortDisplay(holderLabel) || "unknown")}</span>`);
   }
   if ((scopeState === "assigned" || scopeState === "claimed_and_assigned") && assigneeLabel) {
-    chips.push(`<span class="intake-chip">Assigned to ${escapeHtml(assigneeLabel)} / มอบหมายให้ ${escapeHtml(assigneeLabel)}</span>`);
+    chips.push(`<span class="intake-chip">มอบหมายให้ ${escapeHtml(shortDisplay(assigneeLabel))}</span>`);
   }
   if ((scopeState === "assigned" || scopeState === "claimed_and_assigned") && assignedByLabel) {
-    chips.push(`<span class="intake-chip">Assigned by ${escapeHtml(assignedByLabel)} / ผู้มอบหมาย ${escapeHtml(assignedByLabel)}</span>`);
+    chips.push(`<span class="intake-chip">ผู้มอบหมาย ${escapeHtml(shortDisplay(assignedByLabel))}</span>`);
   }
-  chips.push(`<span class="intake-chip">Visible because: ${escapeHtml(getViewerScopeReasonLabel(item))}</span>`);
   return `<div class="intake-chip-row">${chips.join("")}</div>`;
 }
 
