@@ -5,6 +5,10 @@
   currentOtherTransportMeta,
   currentAssignmentState,
   currentReviewNote,
+  defaultConfirmedCtaContact,
+  defaultConfirmedTaxonomy,
+  applyArticleSuggestionFieldValues,
+  applySeoSuggestionFieldValues,
   embedOrientation,
   ensureSelectedAssetId,
   escapeHtml,
@@ -15,6 +19,7 @@
   isImageAsset,
   latestDraft,
   loadWorkspace,
+  normalizeCommaSeparatedTags,
   normalizeEmbedUrl,
   otherTransportSubtypeLabel,
   primaryAssignment,
@@ -41,6 +46,7 @@ const workspaceState = {
   nextBlockId: 1,
   mediaCollapsed: true,
   systemInfoCollapsed: true,
+  confirmedMetaCollapsed: true,
   dirty: false,
   articleSuggestionBusy: false,
   seoSuggestionBusy: false,
@@ -1078,15 +1084,40 @@ function renderMediaLibraryVisibility() {
   if (workspaceState.mediaCollapsed) hideArticleAssetHoverPreview();
 }
 
+function renderConfirmedMetaVisibility() {
+  const content = qs("confirmed-meta-section");
+  const button = qs("btn-toggle-confirmed-meta");
+  if (!content || !button) return;
+  content.classList.toggle("hidden", workspaceState.confirmedMetaCollapsed);
+  button.setAttribute("aria-expanded", workspaceState.confirmedMetaCollapsed ? "false" : "true");
+  button.textContent = workspaceState.confirmedMetaCollapsed ? "แสดงข้อมูลยืนยัน" : "ซ่อนข้อมูลยืนยัน";
+}
+
 function renderWorkspaceFields() {
   const item = state.item || {};
   const draft = latestDraft();
+  const confirmedCtaContact = draft?.confirmed_cta_contact_json && typeof draft.confirmed_cta_contact_json === "object"
+    ? draft.confirmed_cta_contact_json
+    : defaultConfirmedCtaContact();
+  const confirmedTaxonomy = draft?.confirmed_taxonomy_json && typeof draft.confirmed_taxonomy_json === "object"
+    ? draft.confirmed_taxonomy_json
+    : defaultConfirmedTaxonomy();
   const bodyValue = draft?.body || item.description_clean || item.description_raw || "";
   fillField("article-title", draft?.draft_title || item.title || "");
   fillField("article-excerpt", draft?.excerpt || item.summary || "");
   fillField("article-slug", item.slug || "");
   fillField("article-meta-title", draft?.meta_title || item.meta_title || "");
   fillField("article-meta-description", draft?.meta_description || item.meta_description || "");
+  fillField("confirmed-phone", confirmedCtaContact.phone || "");
+  fillField("confirmed-line-url", confirmedCtaContact.line_url || "");
+  fillField("confirmed-facebook-url", confirmedCtaContact.facebook_url || "");
+  fillField("confirmed-website-url", confirmedCtaContact.website_url || "");
+  fillField("confirmed-primary-cta", confirmedCtaContact.primary_cta || "");
+  fillField("confirmed-category", confirmedTaxonomy.category || "");
+  fillField("confirmed-subtype", confirmedTaxonomy.subtype || "");
+  fillField("confirmed-tags", Array.isArray(confirmedTaxonomy.tags) ? confirmedTaxonomy.tags.join(", ") : "");
+  fillField("confirmed-meta-status", draft?.confirmed_meta_status || "not_started");
+  fillField("confirmed-note", draft?.confirmed_note || "");
   fillField("article-body", bodyValue);
   if (isOtherTransportItem(item)) {
     const meta = currentOtherTransportMeta();
@@ -1257,9 +1288,14 @@ function applyGeneratedArticleDraft(suggestion) {
   if (!titleNode || !excerptNode || !bodyNode) {
     throw new Error("Article workspace fields are not ready");
   }
-  titleNode.value = suggestion.title;
-  excerptNode.value = suggestion.excerpt;
-  bodyNode.value = suggestion.body;
+  const nextValues = applyArticleSuggestionFieldValues({
+    title: titleNode.value,
+    excerpt: excerptNode.value,
+    body: bodyNode.value,
+  }, suggestion);
+  titleNode.value = nextValues.title;
+  excerptNode.value = nextValues.excerpt;
+  bodyNode.value = nextValues.body;
   workspaceState.bodyBlocks = buildBlocksFromBody(suggestion.body);
   renderBlocks();
   setWorkspaceDirty(true);
@@ -1480,6 +1516,16 @@ function applyEditorWorkspaceView() {
     ["article-slug", "Slug"],
     ["article-meta-title", "Meta Title"],
     ["article-meta-description", "Meta Description"],
+    ["confirmed-phone", "\u0e40\u0e1a\u0e2d\u0e23\u0e4c\u0e42\u0e17\u0e23"],
+    ["confirmed-line-url", "\u0e25\u0e34\u0e07\u0e01\u0e4c LINE"],
+    ["confirmed-facebook-url", "\u0e25\u0e34\u0e07\u0e01\u0e4c Facebook"],
+    ["confirmed-website-url", "\u0e25\u0e34\u0e07\u0e01\u0e4c\u0e40\u0e27\u0e47\u0e1a\u0e44\u0e0b\u0e15\u0e4c"],
+    ["confirmed-primary-cta", "\u0e1b\u0e38\u0e48\u0e21\u0e2b\u0e25\u0e31\u0e01"],
+    ["confirmed-category", "\u0e2b\u0e21\u0e27\u0e14\u0e2b\u0e25\u0e31\u0e01"],
+    ["confirmed-subtype", "\u0e2b\u0e21\u0e27\u0e14\u0e22\u0e48\u0e2d"],
+    ["confirmed-tags", "\u0e41\u0e17\u0e47\u0e01"],
+    ["confirmed-meta-status", "\u0e2a\u0e16\u0e32\u0e19\u0e30"],
+    ["confirmed-note", "\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e1b\u0e23\u0e30\u0e01\u0e2d\u0e1a"],
   ];
   labels.forEach(([id, text]) => {
     const label = qs(id)?.closest("div")?.querySelector("label");
@@ -1507,6 +1553,8 @@ function applyEditorWorkspaceView() {
   if (previewMobile) previewMobile.textContent = "\u0e21\u0e37\u0e2d\u0e16\u0e37\u0e2d";
   const mediaToggle = qs("btn-toggle-media-library");
   if (mediaToggle) mediaToggle.textContent = workspaceState.mediaCollapsed ? "\u0e41\u0e2a\u0e14\u0e07\u0e04\u0e25\u0e31\u0e07\u0e23\u0e39\u0e1b" : "\u0e0b\u0e48\u0e2d\u0e19\u0e04\u0e25\u0e31\u0e07\u0e23\u0e39\u0e1b";
+  const confirmedMetaToggle = qs("btn-toggle-confirmed-meta");
+  if (confirmedMetaToggle) confirmedMetaToggle.textContent = workspaceState.confirmedMetaCollapsed ? "\u0e41\u0e2a\u0e14\u0e07\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19" : "\u0e0b\u0e48\u0e2d\u0e19\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19";
   const systemToggle = qs("btn-toggle-writer-system-info");
   if (systemToggle) systemToggle.textContent = workspaceState.systemInfoCollapsed ? "\u0e41\u0e2a\u0e14\u0e07\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e23\u0e30\u0e1a\u0e1a" : "\u0e0b\u0e48\u0e2d\u0e19\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e23\u0e30\u0e1a\u0e1a";
   const selfCheckCard = qs("review-checklist")?.closest(".article-preview-review-card") || null;
@@ -1542,6 +1590,7 @@ function renderAll(options = {}) {
   renderBlocks();
   renderHeroAndAssets();
   renderMediaLibraryVisibility();
+  renderConfirmedMetaVisibility();
   renderOtherTransportPanel();
   renderPreview();
   renderReviewChecklist();
@@ -1625,13 +1674,23 @@ async function generateSeoMetadataSuggestion() {
       }
     }
 
+    const metaTitleNode = qs("article-meta-title");
+    const metaDescriptionNode = qs("article-meta-description");
+    const nextValues = applySeoSuggestionFieldValues({
+      meta_title: String(metaTitleNode?.value || ""),
+      meta_description: String(metaDescriptionNode?.value || ""),
+    }, {
+      meta_title: nextMetaTitle,
+      meta_description: nextMetaDescription,
+    });
+
     let applied = false;
-    if (nextMetaTitle && qs("article-meta-title")) {
-      qs("article-meta-title").value = nextMetaTitle;
+    if (nextMetaTitle && metaTitleNode) {
+      metaTitleNode.value = nextValues.meta_title;
       applied = true;
     }
-    if (nextMetaDescription && qs("article-meta-description")) {
-      qs("article-meta-description").value = nextMetaDescription;
+    if (nextMetaDescription && metaDescriptionNode) {
+      metaDescriptionNode.value = nextValues.meta_description;
       applied = true;
     }
     if (!applied) {
@@ -1831,6 +1890,31 @@ function wire() {
       applyActionGuards();
     });
   });
+  ["confirmed-phone", "confirmed-line-url", "confirmed-facebook-url", "confirmed-website-url", "confirmed-category", "confirmed-subtype", "confirmed-note"].forEach((id) => {
+    qs(id)?.addEventListener("input", () => {
+      setWorkspaceDirty(true);
+      renderStatusChip();
+      applyActionGuards();
+    });
+  });
+  qs("confirmed-tags")?.addEventListener("change", () => {
+    fillField("confirmed-tags", normalizeCommaSeparatedTags(qs("confirmed-tags")?.value || "").join(", "));
+    setWorkspaceDirty(true);
+    renderStatusChip();
+    applyActionGuards();
+  });
+  qs("confirmed-tags")?.addEventListener("input", () => {
+    setWorkspaceDirty(true);
+    renderStatusChip();
+    applyActionGuards();
+  });
+  ["confirmed-primary-cta", "confirmed-meta-status"].forEach((id) => {
+    qs(id)?.addEventListener("change", () => {
+      setWorkspaceDirty(true);
+      renderStatusChip();
+      applyActionGuards();
+    });
+  });
   ["other-transport-type", "other-transport-contact-name", "other-transport-contact-details", "other-transport-phone", "other-transport-link"].forEach((id) => {
     ["input", "change"].forEach((eventName) => {
       qs(id)?.addEventListener(eventName, () => {
@@ -1885,6 +1969,10 @@ function wire() {
   qs("btn-toggle-media-library")?.addEventListener("click", () => {
     workspaceState.mediaCollapsed = !workspaceState.mediaCollapsed;
     renderMediaLibraryVisibility();
+  });
+  qs("btn-toggle-confirmed-meta")?.addEventListener("click", () => {
+    workspaceState.confirmedMetaCollapsed = !workspaceState.confirmedMetaCollapsed;
+    renderConfirmedMetaVisibility();
   });
   qs("btn-toggle-writer-system-info")?.addEventListener("click", () => {
     workspaceState.systemInfoCollapsed = !workspaceState.systemInfoCollapsed;
