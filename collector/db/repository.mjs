@@ -767,6 +767,21 @@ function normalizeRequestedCheckAnswerType(value) {
     : "text";
 }
 
+function normalizeRequestedCheckReturnKey(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  return raw
+    .split(".")
+    .map((part) => String(part || "")
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, ""))
+    .filter(Boolean)
+    .join(".");
+}
+
 function normalizeRequestedCheckSource(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const kind = String(value.kind || "").trim().toLowerCase() || null;
@@ -1084,17 +1099,38 @@ function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName) {
   return normalizeJsonSafeValue(rawValue);
 }
 
+function inferRequestedCheckAnswerTypeFromReturnRow(row) {
+  const explicitAnswerType = String(row?.answer_type || "").trim().toLowerCase();
+  if (explicitAnswerType) return normalizeRequestedCheckAnswerType(explicitAnswerType);
+  const value = row?.value;
+  if (Array.isArray(value)) return "multi_select";
+  if (value && typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "number") || Object.prototype.hasOwnProperty.call(value, "unit")) {
+      return "number_with_unit";
+    }
+    return "text";
+  }
+  if (typeof value === "boolean") {
+    return (row?.condition_note || row?.note) ? "boolean_with_conditions" : "boolean";
+  }
+  if (!hasMeaningfulValue(value) && (row?.condition_note || row?.note)) {
+    return "note_only";
+  }
+  return "text";
+}
+
 function normalizeRequestedCheckReturnEntry(rawValue, fieldName) {
   const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
   const checked = Boolean(row.checked);
-  const answerType = normalizeRequestedCheckAnswerType(row.answer_type);
+  const answerType = inferRequestedCheckAnswerTypeFromReturnRow(row);
   const evidence = normalizeFieldReturnEvidence(row, fieldName);
+  const evidenceText = row.evidence == null ? null : String(row.evidence || "").trim() || null;
   const note = row.note == null ? null : String(row.note || "").trim() || null;
   const conditionNote = row.condition_note == null ? null : String(row.condition_note || "").trim() || null;
   const value = checked
     ? normalizeRequestedCheckReturnValue(row.value, answerType, `${fieldName}.value`)
     : (answerType === "multi_select" ? null : null);
-  const hasEvidence = evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url);
+  const hasEvidence = evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url) || Boolean(evidenceText);
   const hasCondition = Boolean(conditionNote);
   const hasNote = Boolean(note);
   const found = checked && (
@@ -1109,6 +1145,7 @@ function normalizeRequestedCheckReturnEntry(rawValue, fieldName) {
     answer_type: answerType,
     value: checked ? value : null,
     condition_note: checked ? conditionNote : null,
+    evidence: checked ? evidenceText : null,
     note,
     evidence_deliverable_id: checked ? evidence.evidence_deliverable_id : null,
     evidence_source_url: checked ? evidence.evidence_source_url : null,
@@ -1121,7 +1158,7 @@ function normalizeRequestedCheckReturns(value, fieldName = "field_return_payload
     : parseJson(value, null);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
   return Object.entries(parsed).reduce((acc, [key, row]) => {
-    const normalizedKey = String(key || "").trim().toLowerCase();
+    const normalizedKey = normalizeRequestedCheckReturnKey(key);
     if (!normalizedKey) return acc;
     acc[normalizedKey] = normalizeRequestedCheckReturnEntry(row, `${fieldName}.${normalizedKey}`);
     return acc;
