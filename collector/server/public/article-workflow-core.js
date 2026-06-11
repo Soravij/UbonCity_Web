@@ -473,6 +473,55 @@ export function fillField(id, value) {
   if (node) node.value = String(value ?? "");
 }
 
+export function defaultConfirmedCtaContact() {
+  return {
+    phone: null,
+    line_url: null,
+    facebook_url: null,
+    website_url: null,
+    primary_cta: null,
+  };
+}
+
+export function defaultConfirmedTaxonomy() {
+  return {
+    category: null,
+    subtype: null,
+    tags: [],
+  };
+}
+
+export function normalizeCommaSeparatedTags(rawValue) {
+  const seen = new Set();
+  return String(rawValue || "")
+    .split(",")
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .filter((part) => {
+      const key = part.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+export function applyArticleSuggestionFieldValues(currentValues = {}, suggestion = {}) {
+  return {
+    ...currentValues,
+    title: String(suggestion?.title || ""),
+    excerpt: String(suggestion?.excerpt || ""),
+    body: String(suggestion?.body || ""),
+  };
+}
+
+export function applySeoSuggestionFieldValues(currentValues = {}, suggestion = {}) {
+  return {
+    ...currentValues,
+    meta_title: String(suggestion?.meta_title || ""),
+    meta_description: String(suggestion?.meta_description || ""),
+  };
+}
+
 function readWorkspaceFieldValue(id, fallback = "") {
   const node = qs(id);
   if (node) return String(node.value ?? "").trim();
@@ -491,6 +540,27 @@ export function collectWorkspacePayload() {
   const metaTitle = readWorkspaceFieldValue("article-meta-title", draft?.meta_title ?? item.meta_title ?? "");
   const metaDescription = readWorkspaceFieldValue("article-meta-description", draft?.meta_description ?? item.meta_description ?? "");
   const body = readWorkspaceFieldValue("article-body", draft?.body ?? item.description_clean ?? item.description_raw ?? "");
+  const confirmedCtaContact = {
+    phone: readWorkspaceFieldValue("confirmed-phone", draft?.confirmed_cta_contact_json?.phone ?? ""),
+    line_url: readWorkspaceFieldValue("confirmed-line-url", draft?.confirmed_cta_contact_json?.line_url ?? ""),
+    facebook_url: readWorkspaceFieldValue("confirmed-facebook-url", draft?.confirmed_cta_contact_json?.facebook_url ?? ""),
+    website_url: readWorkspaceFieldValue("confirmed-website-url", draft?.confirmed_cta_contact_json?.website_url ?? ""),
+    primary_cta: readWorkspaceFieldValue("confirmed-primary-cta", draft?.confirmed_cta_contact_json?.primary_cta ?? ""),
+  };
+  const confirmedTaxonomy = {
+    category: readWorkspaceFieldValue("confirmed-category", draft?.confirmed_taxonomy_json?.category ?? ""),
+    subtype: readWorkspaceFieldValue("confirmed-subtype", draft?.confirmed_taxonomy_json?.subtype ?? ""),
+    tags: normalizeCommaSeparatedTags(
+      readWorkspaceFieldValue(
+        "confirmed-tags",
+        Array.isArray(draft?.confirmed_taxonomy_json?.tags)
+          ? draft.confirmed_taxonomy_json.tags.join(", ")
+          : ""
+      )
+    ),
+  };
+  const confirmedMetaStatus = readWorkspaceFieldValue("confirmed-meta-status", draft?.confirmed_meta_status ?? "not_started") || "not_started";
+  const confirmedNote = readWorkspaceFieldValue("confirmed-note", draft?.confirmed_note ?? "");
   const currentOtherTransport = currentOtherTransportMeta();
   const otherTransportMeta = isOtherTransportItem(item)
     ? {
@@ -519,6 +589,10 @@ export function collectWorkspacePayload() {
       body,
       meta_title: metaTitle,
       meta_description: metaDescription,
+      confirmed_cta_contact_json: confirmedCtaContact,
+      confirmed_taxonomy_json: confirmedTaxonomy,
+      confirmed_meta_status: confirmedMetaStatus,
+      confirmed_note: confirmedNote,
       status: "generated",
     },
   };

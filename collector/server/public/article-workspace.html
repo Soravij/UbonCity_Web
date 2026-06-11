@@ -263,6 +263,95 @@
             </div>
           </div>
 
+          <div class="card article-work-card article-card-meta">
+            <div class="article-section-head">
+              <div>
+                <h2 class="section-title">ยืนยันข้อมูลใช้งานหน้าเว็บ</h2>
+                <p class="muted">ยืนยันช่องทางติดต่อ หมวดหมู่ และสถานะข้อมูลที่พร้อมใช้ในหน้าปลายทาง โดยยังไม่เผยแพร่หรือส่งต่ออัตโนมัติ</p>
+              </div>
+              <div class="toolbar compact-toolbar">
+                <button id="btn-toggle-confirmed-meta" type="button" class="utility-action" aria-expanded="false">แสดงข้อมูลยืนยัน</button>
+              </div>
+            </div>
+            <div id="confirmed-meta-section" class="hidden">
+              <div class="article-section-head article-subsection-head">
+                <div>
+                  <h3 class="section-title">ช่องทางติดต่อและปุ่มหลัก</h3>
+                  <p class="muted">ใช้สำหรับยืนยันข้อมูลที่ editor ต้องการเก็บไว้แยกจากเนื้อหาบทความ</p>
+                </div>
+              </div>
+              <div class="grid">
+                <div>
+                  <label>เบอร์โทร</label>
+                  <input id="confirmed-phone" inputmode="tel" />
+                </div>
+                <div>
+                  <label>ลิงก์ LINE</label>
+                  <input id="confirmed-line-url" placeholder="https://..." />
+                </div>
+                <div>
+                  <label>ลิงก์ Facebook</label>
+                  <input id="confirmed-facebook-url" placeholder="https://..." />
+                </div>
+                <div>
+                  <label>ลิงก์เว็บไซต์</label>
+                  <input id="confirmed-website-url" placeholder="https://..." />
+                </div>
+                <div>
+                  <label>ปุ่มหลัก</label>
+                  <select id="confirmed-primary-cta">
+                    <option value="">ยังไม่เลือก</option>
+                    <option value="map">แผนที่</option>
+                    <option value="phone">โทร</option>
+                    <option value="line">LINE</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="article-section-head article-subsection-head">
+                <div>
+                  <h3 class="section-title">หมวดหมู่และแท็ก</h3>
+                  <p class="muted">ใช้บันทึกหมวดหลัก หมวดย่อย และแท็กที่ editor ยืนยันแล้ว</p>
+                </div>
+              </div>
+              <div class="grid">
+                <div>
+                  <label>หมวดหลัก</label>
+                  <input id="confirmed-category" />
+                </div>
+                <div>
+                  <label>หมวดย่อย</label>
+                  <input id="confirmed-subtype" />
+                </div>
+                <div class="full-span">
+                  <label>แท็ก</label>
+                  <input id="confirmed-tags" placeholder="คั่นด้วยเครื่องหมายจุลภาค" />
+                </div>
+              </div>
+
+              <div class="article-section-head article-subsection-head">
+                <div>
+                  <h3 class="section-title">สถานะการยืนยัน</h3>
+                  <p class="muted">ใช้ติดตามว่าข้อมูลส่วนนี้อยู่ระหว่างตรวจหรือยืนยันแล้ว</p>
+                </div>
+              </div>
+              <div class="grid">
+                <div>
+                  <label>สถานะ</label>
+                  <select id="confirmed-meta-status">
+                    <option value="not_started">ยังไม่เริ่ม</option>
+                    <option value="in_review">กำลังทวน</option>
+                    <option value="confirmed">ยืนยันแล้ว</option>
+                  </select>
+                </div>
+                <div class="full-span">
+                  <label>บันทึกประกอบ</label>
+                  <textarea id="confirmed-note" rows="3" placeholder="จดเหตุผลหรือข้อสังเกตเพิ่มเติม"></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="card article-work-card article-card-media">
             <div class="article-section-head">
               <div>
