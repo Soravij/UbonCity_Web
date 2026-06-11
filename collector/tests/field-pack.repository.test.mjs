@@ -432,6 +432,164 @@ test("saveDraft preserves intentionally cleared string fields", () => {
   }
 });
 
+test("saveDraft round-trips confirmed metadata json and status fields", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Draft Confirmed Metadata Place");
+    const reviewer = ctx.createUser("draft-confirmed");
+    const saved = ctx.repo.saveDraft(item.id, "run-confirmed-metadata", {
+      draft_title: "Draft confirmed metadata",
+      excerpt: "excerpt",
+      body: "body",
+      status: "generated",
+      confirmed_cta_contact_json: {
+        phone: "0812345678",
+        line_url: "https://line.me/ti/p/test-line",
+        facebook_url: "https://facebook.com/test-place",
+        website_url: "https://example.com/test-place",
+        primary_cta: "phone",
+      },
+      confirmed_taxonomy_json: {
+        category: "attractions",
+        subtype: "museum",
+        tags: ["family", "art", "family"],
+      },
+      confirmed_meta_status: "confirmed",
+      confirmed_by_user_id: reviewer.id,
+      confirmed_at: "2026-06-11T10:30:00.000Z",
+      confirmed_note: "editor confirmed",
+    });
+
+    assert.deepEqual(saved.confirmed_cta_contact_json, {
+      phone: "0812345678",
+      line_url: "https://line.me/ti/p/test-line",
+      facebook_url: "https://facebook.com/test-place",
+      website_url: "https://example.com/test-place",
+      primary_cta: "phone",
+    });
+    assert.deepEqual(saved.confirmed_taxonomy_json, {
+      category: "attractions",
+      subtype: "museum",
+      tags: ["family", "art"],
+    });
+    assert.equal(saved.confirmed_meta_status, "confirmed");
+    assert.equal(saved.confirmed_by_user_id, reviewer.id);
+    assert.equal(saved.confirmed_at, "2026-06-11T10:30:00.000Z");
+    assert.equal(saved.confirmed_note, "editor confirmed");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("createFieldPack round-trips AI and curated metadata with curation state", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Field Pack Metadata Place");
+    const curator = ctx.createUser("field-pack-curator");
+    const pack = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      ai_summary: "metadata pack",
+      ai_cta_contact_json: {
+        phone: "0822222222",
+        line_url: "https://line.me/ti/p/field-pack",
+        facebook_url: "https://facebook.com/field-pack",
+        website_url: "https://example.com/field-pack",
+        primary_cta: "line",
+        source: ["official_site", "staff_chat", "official_site"],
+        confidence: "verified",
+        note: "ai suggestion",
+      },
+      ai_taxonomy_json: {
+        category: "restaurants",
+        subtype: "noodle-shop",
+        tags: ["late-night", "local", "late-night"],
+        source: ["ai_profile"],
+        confidence: "medium",
+        note: "taxonomy suggestion",
+      },
+      curated_cta_contact_json: {
+        phone: { checked: true, found: false, value: "0822222222", source: ["call"], note: "curated phone" },
+        line_url: { checked: true, found: false, value: "https://line.me/ti/p/field-pack", source: ["line"], note: null },
+        facebook_url: { checked: false, found: true, value: null, source: [], note: null },
+        website_url: { checked: true, found: true, value: "https://example.com/field-pack", source: ["web"], note: null },
+        primary_cta: { checked: true, found: false, value: "line", note: "best CTA" },
+      },
+      curated_taxonomy_json: {
+        category: { checked: true, found: false, value: "restaurants", note: null },
+        subtype: { checked: true, found: false, value: "noodle-shop", note: "confirmed subtype" },
+        tags: { checked: true, found: false, value: ["local", "late-night", "local"], note: null },
+      },
+      curation_status: "curated",
+      curated_by_user_id: curator.id,
+      curated_at: "2026-06-11T11:00:00.000Z",
+      curation_note: "curation complete",
+    });
+
+    assert.equal(pack.curation_status, "curated");
+    assert.equal(pack.curated_by_user_id, curator.id);
+    assert.equal(pack.curated_at, "2026-06-11T11:00:00.000Z");
+    assert.equal(pack.curation_note, "curation complete");
+    assert.equal(pack.ai_cta_contact_json.primary_cta, "line");
+    assert.deepEqual(pack.ai_cta_contact_json.source, ["official_site", "staff_chat"]);
+    assert.deepEqual(pack.ai_taxonomy_json.tags, ["late-night", "local"]);
+    assert.equal(pack.curated_cta_contact_json.phone.found, true);
+    assert.equal(pack.curated_cta_contact_json.facebook_url.found, false);
+    assert.equal(pack.curated_cta_contact_json.primary_cta.found, true);
+    assert.equal(pack.curated_taxonomy_json.category.found, true);
+    assert.deepEqual(pack.curated_taxonomy_json.tags.value, ["local", "late-night"]);
+    assert.equal(pack.curated_taxonomy_json.tags.found, true);
+    const preview = ctx.repo.buildAssignmentHandoffPreview(item.id);
+    assert.equal(Object.prototype.hasOwnProperty.call(preview.handoff_package || {}, "ai_cta_contact_json"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(preview.handoff_package || {}, "curated_cta_contact_json"), false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("field pack metadata defaults stay safe on legacy-style null or invalid values", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Field Pack Metadata Defaults");
+    const result = ctx.db.prepare(`
+      INSERT INTO field_packs (
+        content_item_id, status, is_current, ai_summary, ai_highlights_json, ai_unknowns_json,
+        editor_summary, verified_facts_json, uncertain_facts_json, story_angle, field_notes,
+        social_hook, social_shot_emphasis_json, social_on_camera_points_json, social_caption_angle,
+        writer_ready, writer_angle, writer_key_points_json, writer_notes, updated_by,
+        ai_cta_contact_json, ai_taxonomy_json, curated_cta_contact_json, curated_taxonomy_json
+      ) VALUES (?, 'draft', 1, NULL, '[]', '[]', NULL, '[]', '[]', NULL, NULL, NULL, '[]', '[]', NULL, 0, NULL, '[]', NULL, NULL, ?, ?, ?, ?)
+    `).run(item.id, "{bad", "{bad", "[]", "not-json");
+    const bundle = ctx.repo.getFieldPackBundleById(Number(result.lastInsertRowid || 0));
+    assert.deepEqual(bundle.ai_cta_contact_json, {
+      phone: null,
+      line_url: null,
+      facebook_url: null,
+      website_url: null,
+      primary_cta: null,
+      source: [],
+      confidence: "unknown",
+      note: null,
+    });
+    assert.deepEqual(bundle.ai_taxonomy_json, {
+      category: null,
+      subtype: null,
+      tags: [],
+      source: [],
+      confidence: "unknown",
+      note: null,
+    });
+    assert.equal(bundle.curation_status, "not_started");
+    assert.equal(bundle.curated_by_user_id, null);
+    assert.equal(bundle.curated_at, null);
+    assert.equal(bundle.curation_note, null);
+    assert.equal(bundle.curated_cta_contact_json.phone.found, false);
+    assert.equal(bundle.curated_taxonomy_json.tags.found, false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("raw-only item with automatic import dependencies can be hard deleted safely", () => {
   const ctx = createTestContext();
   try {
@@ -903,6 +1061,78 @@ test("resubmitted assignment merges incoming media payload into the existing sub
       resubmitted.media_payload_json.assets.map((asset) => asset.public_url),
       ["/media/uploads/photo-one.jpg", "/media/uploads/video-two.mp4"]
     );
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission round-trips normalized field return payload and ignores client found", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Field Return Payload");
+    const assignee = ctx.createUser("field-return-payload");
+    ctx.createReadinessBrief(item.id, "field-return-payload");
+    const fieldPack = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      field_pack_checklists: [
+        { checklist_type: "must_verify_fact", item_text: "verify phone" },
+        { checklist_type: "must_capture", item_text: "capture storefront", capture_type: "photo" },
+      ],
+    });
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const verifyChecklistId = Number(fieldPack.checklists[0]?.id || 0);
+    const captureChecklistId = Number(fieldPack.checklists[1]?.id || 0);
+
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        checklist_results: [
+          {
+            checklist_id: verifyChecklistId,
+            checked: true,
+            found: false,
+            value: "0811111111",
+            note: "confirmed phone",
+          },
+          {
+            checklist_id: captureChecklistId,
+            checked: true,
+            found: false,
+            value: null,
+            evidence_source_url: "https://example.com/evidence/photo-1",
+          },
+        ],
+        cta_return: {
+          phone: { checked: true, found: false, value: "0811111111" },
+        },
+        taxonomy_return: {
+          category: { checked: true, found: false, value: "attractions" },
+        },
+        note: "field return note",
+      },
+    });
+
+    assert.equal(Array.isArray(submission.field_return_payload_json?.checklist_results), true);
+    assert.equal(submission.field_return_payload_json.checklist_results[0].found, true);
+    assert.equal(submission.field_return_payload_json.checklist_results[1].found, true);
+    assert.equal(
+      submission.field_return_payload_json.checklist_results[1].evidence_source_url,
+      "https://example.com/evidence/photo-1"
+    );
+
+    const fetched = ctx.repo.getAssignmentSubmissionById(submission.id);
+    assert.equal(fetched.field_return_payload_json.checklist_results[0].found, true);
+    assert.equal(fetched.field_return_payload_json.note, "field return note");
   } finally {
     ctx.cleanup();
   }

@@ -527,10 +527,18 @@ CREATE TABLE IF NOT EXISTS content_drafts (
   meta_description TEXT,
   suggested_related_json TEXT,
   ai_quality_score INTEGER,
+  confirmed_cta_contact_json TEXT NOT NULL DEFAULT '{}',
+  confirmed_taxonomy_json TEXT NOT NULL DEFAULT '{}',
+  confirmed_meta_status TEXT NOT NULL DEFAULT 'not_started'
+    CHECK (confirmed_meta_status IN ('not_started', 'in_review', 'confirmed')),
+  confirmed_by_user_id INTEGER,
+  confirmed_at TEXT,
+  confirmed_note TEXT,
   status TEXT NOT NULL DEFAULT 'generated',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
+  FOREIGN KEY(confirmed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   UNIQUE(content_item_id, generation_run_uid)
 );
 
@@ -580,6 +588,15 @@ CREATE TABLE IF NOT EXISTS field_packs (
   social_shot_emphasis_json TEXT NOT NULL DEFAULT '[]',
   social_on_camera_points_json TEXT NOT NULL DEFAULT '[]',
   social_caption_angle TEXT,
+  ai_cta_contact_json TEXT NOT NULL DEFAULT '{}',
+  ai_taxonomy_json TEXT NOT NULL DEFAULT '{}',
+  curated_cta_contact_json TEXT NOT NULL DEFAULT '{}',
+  curated_taxonomy_json TEXT NOT NULL DEFAULT '{}',
+  curation_status TEXT NOT NULL DEFAULT 'not_started'
+    CHECK (curation_status IN ('not_started', 'in_review', 'curated')),
+  curated_by_user_id INTEGER,
+  curated_at TEXT,
+  curation_note TEXT,
   writer_ready INTEGER NOT NULL DEFAULT 0
     CHECK (writer_ready IN (0, 1)),
   writer_angle TEXT,
@@ -592,7 +609,8 @@ CREATE TABLE IF NOT EXISTS field_packs (
   FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
   FOREIGN KEY(source_draft_id) REFERENCES content_drafts(id) ON DELETE SET NULL,
   FOREIGN KEY(source_review_report_id) REFERENCES review_reports(id) ON DELETE SET NULL,
-  FOREIGN KEY(source_draft_input_snapshot_id) REFERENCES draft_input_snapshots(id) ON DELETE SET NULL
+  FOREIGN KEY(source_draft_input_snapshot_id) REFERENCES draft_input_snapshots(id) ON DELETE SET NULL,
+  FOREIGN KEY(curated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_field_packs_current_per_item
@@ -986,6 +1004,7 @@ CREATE TABLE IF NOT EXISTS content_assignment_submissions (
   submission_state TEXT NOT NULL DEFAULT 'submitted',
   article_payload_json TEXT,
   media_payload_json TEXT,
+  field_return_payload_json TEXT,
   contributor_note TEXT,
   reviewer_note TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
