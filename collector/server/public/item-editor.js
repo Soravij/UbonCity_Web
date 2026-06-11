@@ -2534,6 +2534,320 @@ function buildFieldPackDefaults() {
   };
 }
 
+const REQUESTED_CHECK_GROUP_TEMPLATES = [
+  {
+    group_key: "cta_contact",
+    group_label: "CTA/ติดต่อ",
+    checks: [
+      { key: "phone", label: "เบอร์โทร", answer_type: "phone", instruction: "ขอเบอร์ที่ติดต่อได้จริง", condition_prompt: "", evidence_required: true },
+      { key: "line_url", label: "ลิงก์ LINE", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์ที่ใช้ได้จริง", condition_prompt: "", evidence_required: false },
+      { key: "facebook_url", label: "ลิงก์ Facebook", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์เพจที่ถูกต้อง", condition_prompt: "", evidence_required: false },
+      { key: "website_url", label: "ลิงก์เว็บไซต์", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์เว็บไซต์หลัก", condition_prompt: "", evidence_required: false },
+      { key: "primary_cta", label: "CTA หลัก", answer_type: "select", instruction: "ยืนยันว่าควรพาคนไปกดอะไรเป็นหลัก", condition_prompt: "", evidence_required: false },
+    ],
+  },
+  {
+    group_key: "taxonomy",
+    group_label: "หมวดหมู่",
+    checks: [
+      { key: "category", label: "หมวดหลัก", answer_type: "text", instruction: "ยืนยันหมวดหลักของสถานที่", condition_prompt: "", evidence_required: false },
+      { key: "subtype", label: "หมวดย่อย", answer_type: "text", instruction: "ยืนยันหมวดย่อยที่ตรงที่สุด", condition_prompt: "", evidence_required: false },
+      { key: "tags", label: "แท็ก", answer_type: "multi_select", instruction: "ดูว่ามีแท็กไหนควรเติม", condition_prompt: "", evidence_required: false },
+    ],
+  },
+];
+
+const REQUESTED_CHECK_ANSWER_TYPE_OPTIONS = [
+  ["text", "ข้อความ"],
+  ["url", "ลิงก์"],
+  ["phone", "เบอร์โทร"],
+  ["select", "เลือก 1 ค่า"],
+  ["multi_select", "เลือกหลายค่า"],
+  ["boolean", "ใช่/ไม่ใช่"],
+  ["boolean_with_conditions", "ใช่/ไม่ใช่ พร้อมเงื่อนไข"],
+  ["number_with_unit", "ตัวเลขพร้อมหน่วย"],
+  ["hours", "เวลาเปิดปิด"],
+  ["note_only", "บันทึกอย่างเดียว"],
+];
+
+function getRequestedCheckDefaultGroupLabel(groupKey) {
+  const normalized = String(groupKey || "").trim().toLowerCase();
+  const template = REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === normalized);
+  if (template?.group_label) return template.group_label;
+  if (normalized === "custom") return "เช็กเพิ่ม";
+  return normalized || "custom";
+}
+
+function normalizeRequestedCheckKey(rawKey) {
+  return String(rawKey || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function formatRequestedCheckSuggestedValue(value, answerType = "text") {
+  if (value == null) return "";
+  if (answerType === "multi_select" && Array.isArray(value)) return value.join("\n");
+  if ((answerType === "boolean" || answerType === "boolean_with_conditions") && typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  if (answerType === "number_with_unit" && value && typeof value === "object" && !Array.isArray(value)) {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value || "");
+}
+
+function parseRequestedCheckSuggestedValue(rawValue, answerType = "text") {
+  const text = String(rawValue || "").trim();
+  if (!text) return null;
+  if (answerType === "multi_select") return parseLineList(text);
+  if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+    if (text === "true") return true;
+    if (text === "false") return false;
+    return null;
+  }
+  if (answerType === "number_with_unit") {
+    try {
+      return JSON.parse(text);
+    } catch {
+      const numeric = Number(text);
+      return Number.isFinite(numeric) ? { number: numeric, unit: null } : null;
+    }
+  }
+  if (answerType === "select" && text.includes("\n")) return text.split("\n")[0].trim() || null;
+  return text;
+}
+
+function mergeRequestedChecksForSave(uiState = {}, existingState = {}) {
+  const existingGroups = new Map(
+    (Array.isArray(existingState?.groups) ? existingState.groups : []).map((group) => [String(group.group_key || "").trim().toLowerCase(), group])
+  );
+  const uiGroups = new Map(
+    (Array.isArray(uiState?.groups) ? uiState.groups : []).map((group) => [String(group.group_key || "").trim().toLowerCase(), group])
+  );
+  const orderedGroupKeys = Array.from(new Set([
+    ...REQUESTED_CHECK_GROUP_TEMPLATES.map((group) => group.group_key),
+    ...uiGroups.keys(),
+  ])).filter((groupKey) => uiGroups.has(groupKey));
+
+  return {
+    version: 1,
+    groups: orderedGroupKeys.map((groupKey) => {
+      const existingGroup = existingGroups.get(groupKey) || {};
+      const uiGroup = uiGroups.get(groupKey) || {};
+      const templateChecks = REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === groupKey)?.checks || [];
+      const existingChecks = new Map(
+        (Array.isArray(existingGroup.checks) ? existingGroup.checks : []).map((check) => [normalizeRequestedCheckKey(check.key), check])
+      );
+      const uiChecks = Array.isArray(uiGroup.checks) ? uiGroup.checks : [];
+      const normalizedKeys = uiChecks.map((uiCheck, index) => {
+        if (groupKey !== "custom") return String(templateChecks[index]?.key || "").trim().toLowerCase();
+        return normalizeRequestedCheckKey(uiCheck?.key);
+      });
+      if (normalizedKeys.some((key) => !key)) {
+        throw new Error(`Requested check key is required for group "${groupKey}"`);
+      }
+      const seenKeys = new Set();
+      normalizedKeys.forEach((key) => {
+        if (seenKeys.has(key)) throw new Error(`Duplicate requested check key "${key}" in group "${groupKey}"`);
+        seenKeys.add(key);
+      });
+      return {
+        group_key: groupKey,
+        group_label: getRequestedCheckDefaultGroupLabel(groupKey),
+        // Save is driven by rows still present in the editor. Missing rows are deletions.
+        checks: uiChecks.map((uiCheck, index) => {
+          const checkKey = normalizedKeys[index];
+          const existingCheck = existingChecks.get(checkKey) || {};
+          return {
+            key: checkKey,
+            requested: uiCheck.requested === true,
+            label: String(uiCheck.label || existingCheck.label || "").trim(),
+            instruction: String(uiCheck.instruction || existingCheck.instruction || "").trim(),
+            answer_type: String(uiCheck.answer_type || existingCheck.answer_type || "text").trim() || "text",
+            suggested_value: Object.prototype.hasOwnProperty.call(existingCheck, "suggested_value")
+              ? existingCheck.suggested_value
+              : null,
+            condition_prompt: uiCheck.condition_prompt == null
+              ? (existingCheck.condition_prompt ?? null)
+              : String(uiCheck.condition_prompt || "").trim() || null,
+            evidence_required: uiCheck.evidence_required === true,
+            source: Object.prototype.hasOwnProperty.call(existingCheck, "source")
+              ? existingCheck.source
+              : null,
+          };
+        }).filter((check) => check.key || check.label || check.instruction || check.requested || check.suggested_value != null || check.source != null),
+      };
+    }).filter((group) => Array.isArray(group.checks) && group.checks.length > 0),
+  };
+}
+
+function buildRequestedChecksEditorState(fieldPack = {}) {
+  const saved = fieldPack?.requested_checks_json && typeof fieldPack.requested_checks_json === "object"
+    ? fieldPack.requested_checks_json
+    : { version: 1, groups: [] };
+  const savedGroups = new Map(
+    (Array.isArray(saved.groups) ? saved.groups : []).map((group) => [String(group.group_key || "").trim().toLowerCase(), group])
+  );
+  const aiCta = fieldPack?.ai_cta_contact_json && typeof fieldPack.ai_cta_contact_json === "object" ? fieldPack.ai_cta_contact_json : {};
+  const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object" ? fieldPack.ai_taxonomy_json : {};
+  const sourceMeta = {
+    kind: "ai",
+    confidence: aiCta.confidence || aiTaxonomy.confidence || "unknown",
+    note: null,
+  };
+
+  const groups = REQUESTED_CHECK_GROUP_TEMPLATES.map((template) => {
+    const savedGroup = savedGroups.get(template.group_key) || {};
+    const savedChecks = new Map(
+      (Array.isArray(savedGroup.checks) ? savedGroup.checks : []).map((check) => [String(check.key || "").trim().toLowerCase(), check])
+    );
+    return {
+      group_key: template.group_key,
+      group_label: template.group_label,
+      checks: template.checks.map((check) => {
+        const savedCheck = savedChecks.get(check.key) || {};
+        const aiSuggestedValue = template.group_key === "cta_contact"
+          ? aiCta[check.key]
+          : aiTaxonomy[check.key];
+        return {
+          key: check.key,
+          requested: savedCheck.requested === true,
+          label: String(savedCheck.label || check.label || "").trim(),
+          instruction: String(savedCheck.instruction || check.instruction || "").trim(),
+          answer_type: String(savedCheck.answer_type || check.answer_type || "text").trim() || "text",
+          suggested_value: Object.prototype.hasOwnProperty.call(savedCheck, "suggested_value")
+            ? savedCheck.suggested_value
+            : (aiSuggestedValue ?? null),
+          condition_prompt: savedCheck.condition_prompt == null
+            ? (String(check.condition_prompt || "").trim() || null)
+            : String(savedCheck.condition_prompt || "").trim() || null,
+          evidence_required: savedCheck.evidence_required === true || check.evidence_required === true,
+          source: savedCheck.source || (aiSuggestedValue != null ? sourceMeta : null),
+        };
+      }),
+    };
+  });
+
+  const customGroup = savedGroups.get("custom");
+  groups.push({
+    group_key: "custom",
+    group_label: String(customGroup?.group_label || "เช็กเพิ่ม").trim() || "เช็กเพิ่ม",
+    checks: (Array.isArray(customGroup?.checks) ? customGroup.checks : []).map((check, index) => ({
+      key: String(check.key || `custom_${index + 1}`).trim().toLowerCase() || `custom_${index + 1}`,
+      requested: check.requested === true,
+      label: String(check.label || "").trim(),
+      instruction: String(check.instruction || "").trim(),
+      answer_type: String(check.answer_type || "text").trim() || "text",
+      suggested_value: Object.prototype.hasOwnProperty.call(check, "suggested_value") ? check.suggested_value : null,
+      condition_prompt: check.condition_prompt == null ? null : String(check.condition_prompt || "").trim() || null,
+      evidence_required: check.evidence_required === true,
+      source: check.source || null,
+    })),
+  });
+
+  return {
+    version: 1,
+    groups,
+  };
+}
+
+function renderRequestedChecksEditor(fieldPack = {}) {
+  const root = qs("fp-requested-checks-editor");
+  if (!root) return;
+  const stateValue = buildRequestedChecksEditorState(fieldPack);
+
+  root.innerHTML = stateValue.groups.map((group) => `
+    <details class="secondary-panel" open>
+      <summary>${escapeHtml(group.group_label)}</summary>
+      <div class="grid" data-requested-group="${escapeHtml(group.group_key)}">
+        ${(Array.isArray(group.checks) ? group.checks : []).map((check, index) => `
+          <div class="full-span secondary-panel" data-requested-check-row data-check-key="${escapeHtml(check.key)}">
+            <label><input type="checkbox" data-check-field="requested" ${check.requested ? "checked" : ""} /> เลือกให้ทีมหน้างานเช็ก</label>
+            <div class="grid">
+              <div>
+                <label>รหัสรายการ</label>
+                <input data-check-field="key" value="${escapeHtml(check.key)}" ${group.group_key === "custom" ? "" : "readonly"} />
+              </div>
+              <div>
+                <label>ประเภทคำตอบ</label>
+                <select data-check-field="answer_type">${REQUESTED_CHECK_ANSWER_TYPE_OPTIONS
+                  .map(([value, label]) => `<option value="${escapeHtml(value)}" ${check.answer_type === value ? "selected" : ""}>${escapeHtml(label)}</option>`)
+                  .join("")}</select>
+              </div>
+              <div>
+                <label><input type="checkbox" data-check-field="evidence_required" ${check.evidence_required ? "checked" : ""} /> ต้องมีหลักฐาน</label>
+              </div>
+              <div class="full-span">
+                <label>ชื่อที่จะแสดง</label>
+                <input data-check-field="label" value="${escapeHtml(check.label)}" placeholder="ชื่อรายการ" />
+              </div>
+              <div class="full-span">
+                <label>คำสั่งให้ทีมหน้างาน</label>
+                <textarea data-check-field="instruction" placeholder="สิ่งที่อยากให้ช่วยเช็ก">${escapeHtml(check.instruction)}</textarea>
+              </div>
+              <div class="full-span">
+                <label>ค่าที่ AI แนะนำไว้</label>
+                <div class="field-help">${escapeHtml(formatRequestedCheckSuggestedValue(check.suggested_value, check.answer_type) || "ยังไม่มีค่าที่ AI แนะนำไว้")}</div>
+              </div>
+              <div class="full-span">
+                <label>เงื่อนไขเพิ่มเติม</label>
+                <textarea data-check-field="condition_prompt" placeholder="เช่น ถ้ามีข้อจำกัดให้ระบุ">${escapeHtml(String(check.condition_prompt || ""))}</textarea>
+              </div>
+              <div class="full-span">
+                <label>ที่มาคำแนะนำ</label>
+                <div class="field-help">${escapeHtml(check.source ? JSON.stringify(check.source) : "ไม่มี provenance")}</div>
+              </div>
+              ${group.group_key === "custom"
+                ? `<div><button type="button" class="utility-action" data-action="remove-requested-check">ลบรายการนี้</button></div>`
+                : ""}
+            </div>
+          </div>
+        `).join("")}
+        ${group.group_key === "custom"
+          ? `<div class="full-span"><button type="button" class="utility-action" data-action="add-requested-check">เพิ่มรายการเช็กเอง</button></div>`
+          : ""}
+      </div>
+    </details>
+  `).join("");
+
+  root.querySelectorAll("textarea").forEach((node) => autosizeTextarea(node));
+}
+
+function readRequestedChecksEditorState() {
+  const root = qs("fp-requested-checks-editor");
+  if (!root) return { version: 1, groups: [] };
+  const groups = Array.from(root.querySelectorAll("[data-requested-group]")).map((groupNode) => {
+    const groupKey = String(groupNode.getAttribute("data-requested-group") || "").trim().toLowerCase();
+    const groupLabel = getRequestedCheckDefaultGroupLabel(groupKey);
+    const checks = Array.from(groupNode.querySelectorAll("[data-requested-check-row]")).map((rowNode) => {
+      const answerType = String(rowNode.querySelector("[data-check-field='answer_type']")?.value || "text").trim() || "text";
+      return {
+        key: String(rowNode.querySelector("[data-check-field='key']")?.value || "").trim().toLowerCase(),
+        requested: rowNode.querySelector("[data-check-field='requested']")?.checked === true,
+        label: String(rowNode.querySelector("[data-check-field='label']")?.value || "").trim(),
+        instruction: String(rowNode.querySelector("[data-check-field='instruction']")?.value || "").trim(),
+        answer_type: answerType,
+        condition_prompt: String(rowNode.querySelector("[data-check-field='condition_prompt']")?.value || "").trim() || null,
+        evidence_required: rowNode.querySelector("[data-check-field='evidence_required']")?.checked === true,
+      };
+    }).filter((check) => check.key || check.label || check.instruction || check.requested);
+    return {
+      group_key: groupKey,
+      group_label: groupLabel,
+      checks,
+    };
+  });
+  return {
+    version: 1,
+    groups,
+  };
+}
+
 function getDraftSelectedImageAssets() {
   return (Array.isArray(state.assets) ? state.assets : []).filter((row) => {
     const selected = Number(row?.selected_in_clean || 0) === 1 && String(row?.role || "") !== "unused";
@@ -2758,6 +3072,7 @@ function fillFieldPackForm(fieldPack = null) {
   if (qs("fp-writer-assigned-role")) qs("fp-writer-assigned-role").value = writerAssignment.assigned_role;
   if (qs("fp-writer-due-at")) qs("fp-writer-due-at").value = writerAssignment.due_at;
   if (qs("fp-writer-assignment-note")) qs("fp-writer-assignment-note").value = writerAssignment.note;
+  renderRequestedChecksEditor(pack);
   renderFieldPackMediaHintEditor(pack);
   autosizeFieldPackTextareas();
   renderFieldProgressControl();
@@ -2808,6 +3123,7 @@ function readFieldPackFormState() {
     social_shot_emphasis: parseLineList(qs("fp-social-shot-emphasis")?.value || ""),
     social_on_camera_points: parseLineList(qs("fp-social-on-camera-points")?.value || ""),
     social_caption_angle: String(qs("fp-social-caption-angle")?.value || "").trim(),
+    requested_checks_json: readRequestedChecksEditorState(),
     references_text: String(qs("fp-references")?.value || "").trim(),
     writer_references_text: String(qs("fp-writer-references")?.value || "").trim(),
     external_media_hints_text: String(qs("fp-external-media-hints")?.value || "").trim(),
@@ -2847,6 +3163,7 @@ function buildFieldPackTopLevelPayload(pack) {
     social_shot_emphasis: pack.social_shot_emphasis,
     social_on_camera_points: pack.social_on_camera_points,
     social_caption_angle: pack.social_caption_angle,
+    requested_checks_json: pack.requested_checks_json,
   };
 }
 
@@ -2895,8 +3212,15 @@ function buildFieldPackAssignmentPayload(pack, existing = state.fieldPack || {})
 function buildFieldPackApiPayload() {
   const pack = readFieldPackFormState();
   const existing = state.fieldPack || {};
+  const requestedChecks = mergeRequestedChecksForSave(
+    pack.requested_checks_json,
+    buildRequestedChecksEditorState(existing)
+  );
   return {
-    ...buildFieldPackTopLevelPayload(pack),
+    ...buildFieldPackTopLevelPayload({
+      ...pack,
+      requested_checks_json: requestedChecks,
+    }),
     field_pack_checklists: buildFieldPackChecklistPayload(pack, existing),
     field_pack_references: buildFieldPackReferencePayload(pack),
     field_pack_media_hints: buildFieldPackMediaHintPayload(pack, existing),
@@ -4484,6 +4808,7 @@ function wire() {
     "fp-social-shot-emphasis",
     "fp-social-on-camera-points",
     "fp-social-caption-angle",
+    "fp-requested-checks-editor",
     "fp-references",
     "fp-writer-references",
     "fp-external-media-hints",
@@ -4543,6 +4868,50 @@ function wire() {
   });
   qs("fp-media-hints-editor")?.addEventListener("input", renderStepFourGuides);
   qs("fp-media-hints-editor")?.addEventListener("change", renderStepFourGuides);
+  qs("fp-requested-checks-editor")?.addEventListener("input", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLTextAreaElement) autosizeTextarea(target);
+    applyEditorActionGuards();
+    renderStepFourGuides();
+  });
+  qs("fp-requested-checks-editor")?.addEventListener("change", () => {
+    applyEditorActionGuards();
+    renderStepFourGuides();
+  });
+  qs("fp-requested-checks-editor")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const groupNode = target.closest("[data-requested-group]");
+    if (!groupNode) return;
+    if (target.getAttribute("data-action") === "add-requested-check") {
+      const current = readRequestedChecksEditorState();
+      const customGroup = current.groups.find((group) => group.group_key === "custom");
+      const nextIndex = Array.isArray(customGroup?.checks) ? customGroup.checks.length + 1 : 1;
+      if (!customGroup) {
+        current.groups.push({ group_key: "custom", group_label: "เช็กเพิ่ม", checks: [] });
+      }
+      current.groups.find((group) => group.group_key === "custom").checks.push({
+        key: `custom_${nextIndex}`,
+        requested: false,
+        label: "",
+        instruction: "",
+        answer_type: "text",
+        suggested_value: null,
+        condition_prompt: null,
+        evidence_required: false,
+        source: null,
+      });
+      renderRequestedChecksEditor({ requested_checks_json: current });
+      applyEditorActionGuards();
+      renderStepFourGuides();
+      return;
+    }
+    if (target.getAttribute("data-action") === "remove-requested-check") {
+      target.closest("[data-requested-check-row]")?.remove();
+      applyEditorActionGuards();
+      renderStepFourGuides();
+    }
+  });
 
 
 

@@ -677,11 +677,19 @@ function defaultCuratedTaxonomy() {
   };
 }
 
+function defaultRequestedChecksJson() {
+  return {
+    version: 1,
+    groups: [],
+  };
+}
+
 function defaultFieldReturnPayload() {
   return {
     checklist_results: [],
     cta_return: {},
     taxonomy_return: {},
+    requested_check_returns: {},
     note: null,
   };
 }
@@ -730,6 +738,107 @@ function normalizeJsonSourceList(value, fieldName) {
 function normalizeOptionalUrlValue(value, fieldName) {
   if (value == null || value === "") return null;
   return normalizeHttpUrl(value, fieldName);
+}
+
+function normalizeJsonSafeValue(value) {
+  if (value == null) return null;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRequestedCheckAnswerType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return [
+    "text",
+    "url",
+    "phone",
+    "select",
+    "multi_select",
+    "boolean",
+    "boolean_with_conditions",
+    "number_with_unit",
+    "hours",
+    "note_only",
+  ].includes(normalized)
+    ? normalized
+    : "text";
+}
+
+function normalizeRequestedCheckSource(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const kind = String(value.kind || "").trim().toLowerCase() || null;
+  const confidence = value.confidence == null ? null : normalizeConfidenceValue(value.confidence);
+  const note = value.note == null ? null : String(value.note || "").trim() || null;
+  if (!kind && !confidence && !note) return null;
+  const next = {};
+  if (kind) next.kind = kind;
+  if (confidence) next.confidence = confidence;
+  if (note) next.note = note;
+  return next;
+}
+
+function normalizeRequestedCheckValueByAnswerType(value, answerType, fieldName) {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    if (answerType === "url") {
+      try {
+        return normalizeOptionalUrlValue(value, fieldName);
+      } catch {
+        return String(value || "").trim() || null;
+      }
+    }
+    return String(value || "").trim() || null;
+  }
+  return normalizeJsonSafeValue(value);
+}
+
+function normalizeRequestedChecksJson(value, fieldName = "requested_checks_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultRequestedChecksJson();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  const groupsRaw = Array.isArray(parsed.groups) ? parsed.groups : [];
+  return {
+    version: 1,
+    groups: groupsRaw
+      .map((group, groupIndex) => {
+        if (!group || typeof group !== "object" || Array.isArray(group)) return null;
+        const groupKey = String(group.group_key || "").trim().toLowerCase();
+        if (!["cta_contact", "taxonomy", "custom"].includes(groupKey)) return null;
+        const checksRaw = Array.isArray(group.checks) ? group.checks : [];
+        const checks = checksRaw
+          .map((check, checkIndex) => {
+            if (!check || typeof check !== "object" || Array.isArray(check)) return null;
+            const answerType = normalizeRequestedCheckAnswerType(check.answer_type);
+            return {
+              key: String(check.key || "").trim().toLowerCase() || `check_${groupIndex}_${checkIndex}`,
+              requested: Boolean(check.requested),
+              label: String(check.label || "").trim() || "",
+              instruction: String(check.instruction || "").trim() || "",
+              answer_type: answerType,
+              suggested_value: normalizeRequestedCheckValueByAnswerType(
+                check.suggested_value,
+                answerType,
+                `${fieldName}.groups[${groupIndex}].checks[${checkIndex}].suggested_value`
+              ),
+              condition_prompt: check.condition_prompt == null ? null : String(check.condition_prompt || "").trim() || null,
+              evidence_required: Boolean(check.evidence_required),
+              source: normalizeRequestedCheckSource(check.source),
+            };
+          })
+          .filter(Boolean);
+        return {
+          group_key: groupKey,
+          group_label: String(group.group_label || "").trim() || groupKey,
+          checks,
+        };
+      })
+      .filter(Boolean),
+  };
 }
 
 function hasMeaningfulValue(value) {
@@ -945,6 +1054,80 @@ function normalizeFieldReturnTaxonomyJson(value, fieldName = "field_return_paylo
   };
 }
 
+function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName) {
+  if (rawValue == null) {
+    return answerType === "multi_select" ? [] : null;
+  }
+  try {
+    if (answerType === "url") return normalizeOptionalUrlValue(rawValue, fieldName);
+    if (["text", "phone", "select", "hours"].includes(answerType)) {
+      return String(rawValue || "").trim() || null;
+    }
+    if (answerType === "multi_select") {
+      return Array.isArray(rawValue) ? normalizeStringListInput(rawValue, fieldName) : [];
+    }
+    if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+      return typeof rawValue === "boolean" ? rawValue : null;
+    }
+    if (answerType === "number_with_unit") {
+      if (typeof rawValue === "number" && Number.isFinite(rawValue)) return { number: rawValue, unit: null };
+      if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) return null;
+      const numeric = Number(rawValue.number);
+      return Number.isFinite(numeric)
+        ? { number: numeric, unit: rawValue.unit == null ? null : String(rawValue.unit || "").trim() || null }
+        : null;
+    }
+    if (answerType === "note_only") return null;
+  } catch {
+    return answerType === "multi_select" ? [] : null;
+  }
+  return normalizeJsonSafeValue(rawValue);
+}
+
+function normalizeRequestedCheckReturnEntry(rawValue, fieldName) {
+  const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
+  const checked = Boolean(row.checked);
+  const answerType = normalizeRequestedCheckAnswerType(row.answer_type);
+  const evidence = normalizeFieldReturnEvidence(row, fieldName);
+  const note = row.note == null ? null : String(row.note || "").trim() || null;
+  const conditionNote = row.condition_note == null ? null : String(row.condition_note || "").trim() || null;
+  const value = checked
+    ? normalizeRequestedCheckReturnValue(row.value, answerType, `${fieldName}.value`)
+    : (answerType === "multi_select" ? null : null);
+  const hasEvidence = evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url);
+  const hasCondition = Boolean(conditionNote);
+  const hasNote = Boolean(note);
+  const found = checked && (
+    hasMeaningfulValue(value)
+    || hasEvidence
+    || (answerType === "note_only" && (hasNote || hasCondition))
+    || (answerType === "boolean_with_conditions" && (value === true || hasCondition))
+  );
+  return {
+    checked,
+    found,
+    answer_type: answerType,
+    value: checked ? value : null,
+    condition_note: checked ? conditionNote : null,
+    note,
+    evidence_deliverable_id: checked ? evidence.evidence_deliverable_id : null,
+    evidence_source_url: checked ? evidence.evidence_source_url : null,
+  };
+}
+
+function normalizeRequestedCheckReturns(value, fieldName = "field_return_payload_json.requested_check_returns") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  return Object.entries(parsed).reduce((acc, [key, row]) => {
+    const normalizedKey = String(key || "").trim().toLowerCase();
+    if (!normalizedKey) return acc;
+    acc[normalizedKey] = normalizeRequestedCheckReturnEntry(row, `${fieldName}.${normalizedKey}`);
+    return acc;
+  }, {});
+}
+
 function normalizeFieldReturnPayloadJson(value, fieldName = "field_return_payload_json") {
   const parsed = value && typeof value === "object" && !Array.isArray(value)
     ? value
@@ -977,6 +1160,7 @@ function normalizeFieldReturnPayloadJson(value, fieldName = "field_return_payloa
     checklist_results: checklistResults,
     cta_return: normalizeFieldReturnCtaJson(parsed.cta_return, `${fieldName}.cta_return`),
     taxonomy_return: normalizeFieldReturnTaxonomyJson(parsed.taxonomy_return, `${fieldName}.taxonomy_return`),
+    requested_check_returns: normalizeRequestedCheckReturns(parsed.requested_check_returns, `${fieldName}.requested_check_returns`),
     note: parsed.note == null ? null : String(parsed.note || "").trim() || null,
   };
 }
@@ -1717,6 +1901,7 @@ function normalizeFieldPackRow(row) {
     writer_key_points_json: parseJson(row.writer_key_points_json, []),
     ai_cta_contact_json: normalizeAiCtaContactJson(row.ai_cta_contact_json),
     ai_taxonomy_json: normalizeAiTaxonomyJson(row.ai_taxonomy_json),
+    requested_checks_json: normalizeRequestedChecksJson(row.requested_checks_json),
     curated_cta_contact_json: normalizeCuratedCtaContactJson(row.curated_cta_contact_json),
     curated_taxonomy_json: normalizeCuratedTaxonomyJson(row.curated_taxonomy_json),
     curation_status: normalizeCurationStatusValue(row.curation_status),
@@ -1778,6 +1963,7 @@ function buildFieldPackEditableState(row) {
     social_caption_angle: row.social_caption_angle,
     ai_cta_contact_json: row.ai_cta_contact_json,
     ai_taxonomy_json: row.ai_taxonomy_json,
+    requested_checks_json: row.requested_checks_json,
     curated_cta_contact_json: row.curated_cta_contact_json,
     curated_taxonomy_json: row.curated_taxonomy_json,
     curation_status: row.curation_status,
@@ -1840,6 +2026,7 @@ function normalizeFieldPackPayload(payload = {}, options = {}) {
     social_caption_angle: payload?.social_caption_angle == null ? null : String(payload.social_caption_angle || "").trim() || null,
     ai_cta_contact_json: JSON.stringify(normalizeAiCtaContactJson(payload?.ai_cta_contact_json)),
     ai_taxonomy_json: JSON.stringify(normalizeAiTaxonomyJson(payload?.ai_taxonomy_json)),
+    requested_checks_json: JSON.stringify(normalizeRequestedChecksJson(payload?.requested_checks_json)),
     curated_cta_contact_json: JSON.stringify(normalizeCuratedCtaContactJson(payload?.curated_cta_contact_json)),
     curated_taxonomy_json: JSON.stringify(normalizeCuratedTaxonomyJson(payload?.curated_taxonomy_json)),
     curation_status: normalizeCurationStatusValue(payload?.curation_status),
@@ -3047,6 +3234,9 @@ function ensureFieldPackMetadataSupport(db) {
   if (!names.has("ai_taxonomy_json")) {
     db.exec("ALTER TABLE field_packs ADD COLUMN ai_taxonomy_json TEXT NOT NULL DEFAULT '{}';");
   }
+  if (!names.has("requested_checks_json")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN requested_checks_json TEXT NOT NULL DEFAULT '{\"version\":1,\"groups\":[]}';");
+  }
   if (!names.has("curated_cta_contact_json")) {
     db.exec("ALTER TABLE field_packs ADD COLUMN curated_cta_contact_json TEXT NOT NULL DEFAULT '{}';");
   }
@@ -3457,10 +3647,10 @@ export function createRepository(db) {
       editor_summary, verified_facts_json, uncertain_facts_json,
       story_angle, field_notes, social_hook, social_shot_emphasis_json,
       social_on_camera_points_json, social_caption_angle,
-      ai_cta_contact_json, ai_taxonomy_json, curated_cta_contact_json, curated_taxonomy_json,
+      ai_cta_contact_json, ai_taxonomy_json, requested_checks_json, curated_cta_contact_json, curated_taxonomy_json,
       curation_status, curated_by_user_id, curated_at, curation_note,
       writer_ready, writer_angle, writer_key_points_json, writer_notes, updated_by, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
   `);
 
   const updateFieldPackStmt = db.prepare(`
@@ -3485,6 +3675,7 @@ export function createRepository(db) {
       social_caption_angle=?,
       ai_cta_contact_json=?,
       ai_taxonomy_json=?,
+      requested_checks_json=?,
       curated_cta_contact_json=?,
       curated_taxonomy_json=?,
       curation_status=?,
@@ -8298,6 +8489,22 @@ function normalizeStateValue(value, stateGroup) {
     return next;
   }
 
+  function buildRequestedChecksHandoffPayload(requestedChecks) {
+    const normalized = normalizeRequestedChecksJson(requestedChecks);
+    const groups = normalized.groups
+      .map((group) => ({
+        group_key: group.group_key,
+        group_label: group.group_label,
+        checks: (Array.isArray(group.checks) ? group.checks : []).filter((check) => check?.requested === true),
+      }))
+      .filter((group) => group.checks.length > 0);
+    if (!groups.length) return null;
+    return {
+      version: 1,
+      groups,
+    };
+  }
+
   function buildFieldPackHandoffPackage(item, fieldPack, governance, readinessSnapshot = null) {
     const verifiedFacts = uniqueTextList(fieldPack?.verified_facts_json || [], 12);
     const uncertainFacts = uniqueTextList([
@@ -8317,6 +8524,7 @@ function normalizeStateValue(value, stateGroup) {
     const recommendedHook = String(fieldPack?.social_hook || "").trim() || null;
     const socialCaptionAngle = String(fieldPack?.social_caption_angle || "").trim() || null;
     const fieldNotes = String(fieldPack?.field_notes || "").trim() || null;
+    const requestedChecks = buildRequestedChecksHandoffPayload(fieldPack?.requested_checks_json);
 
     return finalizeAssignmentHandoffPackage({
       brief_summary: briefSummary,
@@ -8337,6 +8545,7 @@ function normalizeStateValue(value, stateGroup) {
       references: generalReferences,
       writer_references: writerReferences,
       media_hints: mediaHints,
+      ...(requestedChecks ? { requested_checks: requestedChecks } : {}),
       writer_ready: Boolean(fieldPack?.writer_ready),
       writer_notes: String(fieldPack?.writer_notes || "").trim() || null,
       source: {
@@ -9268,6 +9477,7 @@ function normalizeStateValue(value, stateGroup) {
       normalized.social_caption_angle,
       normalized.ai_cta_contact_json,
       normalized.ai_taxonomy_json,
+      normalized.requested_checks_json,
       normalized.curated_cta_contact_json,
       normalized.curated_taxonomy_json,
       normalized.curation_status,
@@ -9482,6 +9692,7 @@ function normalizeStateValue(value, stateGroup) {
       normalized.social_caption_angle,
       normalized.ai_cta_contact_json,
       normalized.ai_taxonomy_json,
+      normalized.requested_checks_json,
       normalized.curated_cta_contact_json,
       normalized.curated_taxonomy_json,
       normalized.curation_status,

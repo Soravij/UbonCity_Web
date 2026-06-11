@@ -799,6 +799,254 @@ test("buildAssignmentHandoffPreview prefers current field pack over readiness br
   }
 });
 
+test("field pack requested_checks_json round-trips and preserves curator-owned configuration", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Checks Round Trip");
+    const pack = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "draft",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            group_label: "CTA/ติดต่อ",
+            checks: [
+              {
+                key: "phone",
+                requested: true,
+                label: "เบอร์โทร",
+                instruction: "ขอเบอร์ที่ติดต่อได้จริง",
+                answer_type: "phone",
+                suggested_value: "0812345678",
+                condition_prompt: "",
+                evidence_required: true,
+                source: { kind: "ai", confidence: "medium" },
+                found: true,
+              },
+            ],
+          },
+          {
+            group_key: "custom",
+            group_label: "เช็กเพิ่ม",
+            checks: [
+              {
+                key: "parking",
+                requested: false,
+                label: "ที่จอดรถ",
+                instruction: "ถ้ามีให้ระบุจำนวนคร่าว ๆ",
+                answer_type: "boolean_with_conditions",
+                suggested_value: { available: true },
+                condition_prompt: "ถ้ามีจำกัดให้ระบุเงื่อนไข",
+                evidence_required: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    assert.deepEqual(pack.requested_checks_json, {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/ติดต่อ",
+          checks: [
+            {
+              key: "phone",
+              requested: true,
+              label: "เบอร์โทร",
+              instruction: "ขอเบอร์ที่ติดต่อได้จริง",
+              answer_type: "phone",
+              suggested_value: "0812345678",
+              condition_prompt: null,
+              evidence_required: true,
+              source: { kind: "ai", confidence: "medium" },
+            },
+          ],
+        },
+        {
+          group_key: "custom",
+          group_label: "เช็กเพิ่ม",
+          checks: [
+            {
+              key: "parking",
+              requested: false,
+              label: "ที่จอดรถ",
+              instruction: "ถ้ามีให้ระบุจำนวนคร่าว ๆ",
+              answer_type: "boolean_with_conditions",
+              suggested_value: { available: true },
+              condition_prompt: "ถ้ามีจำกัดให้ระบุเงื่อนไข",
+              evidence_required: false,
+              source: null,
+            },
+          ],
+        },
+      ],
+    });
+
+    const updated = ctx.repo.updateFieldPack(pack.id, {
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            group_label: "CTA/ติดต่อ",
+            checks: [
+              {
+                key: "phone",
+                requested: true,
+                label: "เบอร์โทร",
+                instruction: "ยืนยันเบอร์ล่าสุด",
+                answer_type: "phone",
+                suggested_value: "0899999999",
+                evidence_required: true,
+              },
+            ],
+          },
+        ],
+      },
+      updated_by: "tester@local",
+    });
+
+    assert.equal(updated.requested_checks_json.groups[0].checks[0].instruction, "ยืนยันเบอร์ล่าสุด");
+    assert.equal(updated.requested_checks_json.groups[0].checks[0].requested, true);
+    assert.equal(Object.prototype.hasOwnProperty.call(updated.requested_checks_json.groups[0].checks[0], "found"), false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("field pack does not auto-create requested checks from AI suggestions", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("AI Suggestion Ownership");
+    const pack = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "draft",
+      ai_cta_contact_json: {
+        phone: "0811111111",
+        line_url: "https://line.me/ti/p/test",
+        primary_cta: "line",
+      },
+      ai_taxonomy_json: {
+        category: "attractions",
+        subtype: "museum",
+        tags: ["family"],
+      },
+    });
+
+    assert.deepEqual(pack.requested_checks_json, {
+      version: 1,
+      groups: [],
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("buildAssignmentHandoffPreview includes only requested=true requested checks", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Checks Handoff");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "พร้อมลงพื้นที่",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            group_label: "CTA/ติดต่อ",
+            checks: [
+              {
+                key: "phone",
+                requested: true,
+                label: "เบอร์โทร",
+                instruction: "ยืนยันเบอร์",
+                answer_type: "phone",
+                suggested_value: "0812345678",
+                evidence_required: true,
+                source: { kind: "ai", confidence: "medium" },
+              },
+              {
+                key: "line_url",
+                requested: false,
+                label: "ลิงก์ LINE",
+                instruction: "มีหรือไม่",
+                answer_type: "url",
+                suggested_value: "https://line.me/ti/p/example",
+                evidence_required: false,
+              },
+            ],
+          },
+          {
+            group_key: "custom",
+            group_label: "เช็กเพิ่ม",
+            checks: [
+              {
+                key: "parking",
+                requested: true,
+                label: "ที่จอดรถ",
+                instruction: "ดูว่าจอดรถได้กี่คัน",
+                answer_type: "boolean_with_conditions",
+                condition_prompt: "ถ้ามีจำกัดให้ระบุเงื่อนไข",
+                evidence_required: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const preview = ctx.repo.buildAssignmentHandoffPreview(item.id);
+    assert.deepEqual(preview.handoff_package?.requested_checks, {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/ติดต่อ",
+          checks: [
+            {
+              key: "phone",
+              requested: true,
+              label: "เบอร์โทร",
+              instruction: "ยืนยันเบอร์",
+              answer_type: "phone",
+              suggested_value: "0812345678",
+              condition_prompt: null,
+              evidence_required: true,
+              source: { kind: "ai", confidence: "medium" },
+            },
+          ],
+        },
+        {
+          group_key: "custom",
+          group_label: "เช็กเพิ่ม",
+          checks: [
+            {
+              key: "parking",
+              requested: true,
+              label: "ที่จอดรถ",
+              instruction: "ดูว่าจอดรถได้กี่คัน",
+              answer_type: "boolean_with_conditions",
+              suggested_value: null,
+              condition_prompt: "ถ้ามีจำกัดให้ระบุเงื่อนไข",
+              evidence_required: false,
+              source: null,
+            },
+          ],
+        },
+      ],
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("buildAssignmentHandoffPreview falls back to readiness snapshot when current field pack is still draft", () => {
   const ctx = createTestContext();
   try {
@@ -863,6 +1111,72 @@ test("createAssignmentFromReadiness uses field pack handoff without readiness sn
     assert.deepEqual(result.assignment.brief_json?.expected_deliverables, ["photos", "videos", "caption_draft", "script_draft", "raw_notes"]);
     assert.equal(result.handoff.readiness_brief_id, null);
     assert.equal(result.handoff.handoff_package_json?.source?.field_pack_id > 0, true);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("createAssignmentFromReadiness snapshots requested checks through existing handoff package", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Checks Snapshot");
+    const assignee = ctx.createUser("requested-checks-snapshot");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "พร้อมส่งทีมหน้างาน",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "taxonomy",
+            group_label: "หมวดหมู่",
+            checks: [
+              {
+                key: "tags",
+                requested: true,
+                label: "แท็ก",
+                instruction: "ดูว่ามีแท็กไหนควรเติม",
+                answer_type: "multi_select",
+                suggested_value: ["family", "late-night"],
+                evidence_required: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+
+    assert.deepEqual(result.handoff.handoff_package_json?.requested_checks, {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "หมวดหมู่",
+          checks: [
+            {
+              key: "tags",
+              requested: true,
+              label: "แท็ก",
+              instruction: "ดูว่ามีแท็กไหนควรเติม",
+              answer_type: "multi_select",
+              suggested_value: ["family", "late-night"],
+              condition_prompt: null,
+              evidence_required: false,
+              source: null,
+            },
+          ],
+        },
+      ],
+    });
   } finally {
     ctx.cleanup();
   }
