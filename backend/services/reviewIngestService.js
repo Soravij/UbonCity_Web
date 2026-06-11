@@ -238,7 +238,7 @@ async function storeUploadedImageToBackendStorage(file, sourceUrl, sourceBaseUrl
   };
 }
 
-function sanitizeContentPayload(payload = {}) {
+export function sanitizeContentPayload(payload = {}) {
   const contentType = normalizeContentType(payload.content_type);
   const publicEntityType =
     payload.public_entity_type == null || payload.public_entity_type === ""
@@ -294,6 +294,59 @@ function sanitizeContentPayload(payload = {}) {
       ? payload.translation_langs.map((entry) => String(entry || "").trim().toLowerCase()).filter(Boolean)
       : [],
   };
+}
+
+function hasOwnContentField(source, key) {
+  return Boolean(source) && Object.prototype.hasOwnProperty.call(source, key);
+}
+
+export function mergeExistingReviewContentCtaFields(existingRow = {}, content = {}, rawContentPayload = {}) {
+  const existing = existingRow && typeof existingRow === "object" ? existingRow : {};
+  const raw = rawContentPayload && typeof rawContentPayload === "object" ? rawContentPayload : {};
+  return {
+    phone: hasOwnContentField(raw, "phone") ? content.phone : (existing.phone ?? null),
+    line_url: hasOwnContentField(raw, "line_url") ? content.line_url : (existing.line_url ?? null),
+    facebook_url: hasOwnContentField(raw, "facebook_url") ? content.facebook_url : (existing.facebook_url ?? null),
+    website_url: hasOwnContentField(raw, "website_url") ? content.website_url : (existing.website_url ?? null),
+    primary_cta: hasOwnContentField(raw, "primary_cta") ? content.primary_cta : (existing.primary_cta ?? null),
+  };
+}
+
+export function buildReviewContentInsertParams({
+  sourceSystem,
+  sourceContentItemId,
+  content,
+  currentBatchUid,
+} = {}) {
+  return [
+    sourceSystem, sourceContentItemId, content.content_type, "pending_review", content.lang, content.category,
+    content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
+    content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url,
+    content.google_place_id, content.transport_subtype, content.transport_contact_name, content.transport_contact_phone,
+    content.phone, content.line_url, content.facebook_url, content.website_url, content.primary_cta, content.tracking_entity_type, content.tracking_entity_id,
+    content.transport_contact_details, content.transport_link_url, content.slug, content.slug ? 1 : 0,
+    content.public_entity_type, content.public_entity_id, currentBatchUid,
+    JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
+  ];
+}
+
+export function buildReviewContentUpdateParams({
+  existing = null,
+  content,
+  rawContentPayload,
+  currentBatchUid,
+  reviewContentId,
+} = {}) {
+  const preservedCtaFields = mergeExistingReviewContentCtaFields(existing, content, rawContentPayload);
+  return [
+    content.lang, content.category, content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
+    content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url, content.google_place_id,
+    content.transport_subtype, content.transport_contact_name, content.transport_contact_phone, preservedCtaFields.phone, preservedCtaFields.line_url, preservedCtaFields.facebook_url, preservedCtaFields.website_url,
+    preservedCtaFields.primary_cta, content.tracking_entity_type, content.tracking_entity_id, content.transport_contact_details,
+    content.transport_link_url, content.slug, content.slug ? 1 : 0, content.public_entity_type, content.public_entity_id,
+    currentBatchUid, JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
+    reviewContentId,
+  ];
 }
 
 function flattenMediaManifest(manifest = {}) {
@@ -424,7 +477,8 @@ export async function ingestReviewContent(payload, options = {}) {
     throw new Error("source_content_item_id must be positive");
   }
   const sourceBaseUrl = normalizeBaseUrl(payload?.source_base_url);
-  const content = sanitizeContentPayload(payload?.content || {});
+  const rawContentPayload = payload?.content && typeof payload.content === "object" ? payload.content : {};
+  const content = sanitizeContentPayload(rawContentPayload);
   const mediaQueue = flattenMediaManifest(payload?.media_manifest || {});
   const uploadedFiles = Array.isArray(options?.uploadedFiles) ? options.uploadedFiles : [];
   const uploadedFileMap = buildUploadedFileMap(uploadedFiles, options?.mediaIndex || null);
@@ -457,16 +511,12 @@ export async function ingestReviewContent(payload, options = {}) {
           transport_contact_details, transport_link_url, slug, slug_locked, public_entity_type, public_entity_id,
           current_batch_uid, review_payload_json
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [
-          sourceSystem, sourceContentItemId, content.content_type, "pending_review", content.lang, content.category,
-          content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
-          content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url,
-          content.google_place_id, content.transport_subtype, content.transport_contact_name, content.transport_contact_phone,
-          content.phone, content.line_url, content.facebook_url, content.website_url, content.primary_cta, content.tracking_entity_type, content.tracking_entity_id,
-          content.transport_contact_details, content.transport_link_url, content.slug, content.slug ? 1 : 0,
-          content.public_entity_type, content.public_entity_id, currentBatchUid,
-          JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
-        ]
+        buildReviewContentInsertParams({
+          sourceSystem,
+          sourceContentItemId,
+          content,
+          currentBatchUid,
+        })
       );
       reviewContentId = Number(insertResult.insertId || 0) || 0;
     } else {
@@ -481,15 +531,13 @@ export async function ingestReviewContent(payload, options = {}) {
              transport_link_url=?, slug=?, slug_locked=?, public_entity_type=?, public_entity_id=?,
              current_batch_uid=?, review_payload_json=?, updated_at=CURRENT_TIMESTAMP
          WHERE id=?`,
-        [
-          content.lang, content.category, content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
-          content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url, content.google_place_id,
-          content.transport_subtype, content.transport_contact_name, content.transport_contact_phone, content.phone, content.line_url, content.facebook_url, content.website_url,
-          content.primary_cta, content.tracking_entity_type, content.tracking_entity_id, content.transport_contact_details,
-          content.transport_link_url, content.slug, content.slug ? 1 : 0, content.public_entity_type, content.public_entity_id,
-          currentBatchUid, JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
+        buildReviewContentUpdateParams({
+          existing,
+          content,
+          rawContentPayload,
+          currentBatchUid,
           reviewContentId,
-        ]
+        })
       );
     }
 
