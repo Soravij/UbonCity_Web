@@ -590,6 +590,7 @@ CREATE TABLE IF NOT EXISTS field_packs (
   social_caption_angle TEXT,
   ai_cta_contact_json TEXT NOT NULL DEFAULT '{}',
   ai_taxonomy_json TEXT NOT NULL DEFAULT '{}',
+  requested_checks_json TEXT NOT NULL DEFAULT '{"version":1,"groups":[]}',
   curated_cta_contact_json TEXT NOT NULL DEFAULT '{}',
   curated_taxonomy_json TEXT NOT NULL DEFAULT '{}',
   curation_status TEXT NOT NULL DEFAULT 'not_started'

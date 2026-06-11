@@ -111,6 +111,7 @@ test("repository migration adds schema foundation columns for field packs drafts
     createRepository(ctx.db);
 
     assert.equal(readColumnNames(ctx.db, "field_packs").includes("ai_cta_contact_json"), true);
+    assert.equal(readColumnNames(ctx.db, "field_packs").includes("requested_checks_json"), true);
     assert.equal(readColumnNames(ctx.db, "field_packs").includes("curation_status"), true);
     assert.equal(readColumnNames(ctx.db, "content_assignment_submissions").includes("field_return_payload_json"), true);
     assert.equal(readColumnNames(ctx.db, "content_drafts").includes("confirmed_cta_contact_json"), true);
@@ -151,7 +152,41 @@ test("legacy field pack rows load with safe metadata defaults after migration", 
       confidence: "unknown",
       note: null,
     });
+    assert.deepEqual(pack.requested_checks_json, {
+      version: 1,
+      groups: [],
+    });
     assert.equal(pack.curation_status, "not_started");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("invalid requested_checks_json on legacy field pack row loads as safe default", () => {
+  const ctx = createDbContext("collector-schema-foundation-requested-checks-defaults-");
+  try {
+    createLegacyFieldPacksTable(ctx.db);
+    ctx.db.prepare(`
+      INSERT INTO content_items (
+        item_uid, type, category, lang, title, normalized_title, slug, description_raw, workflow_status
+      ) VALUES ('legacy-requested-checks-item', 'place', 'attractions', 'th', 'Legacy Requested Checks', 'legacy requested checks', 'legacy-requested-checks', 'raw', 'raw')
+    `).run();
+    const itemId = Number(ctx.db.prepare("SELECT id FROM content_items WHERE item_uid='legacy-requested-checks-item'").get()?.id || 0);
+
+    const repo = createRepository(ctx.db);
+    ctx.db.prepare(`
+      INSERT INTO field_packs (
+        content_item_id, status, is_current, ai_summary, ai_highlights_json, ai_unknowns_json,
+        verified_facts_json, uncertain_facts_json, social_shot_emphasis_json, social_on_camera_points_json,
+        requested_checks_json, writer_ready, writer_key_points_json
+      ) VALUES (?, 'draft', 1, 'legacy pack', '[]', '[]', '[]', '[]', '[]', '[]', ?, 0, '[]')
+    `).run(itemId, "{not-json");
+
+    const pack = repo.getCurrentFieldPackByItem(itemId);
+    assert.deepEqual(pack.requested_checks_json, {
+      version: 1,
+      groups: [],
+    });
   } finally {
     ctx.cleanup();
   }
@@ -204,6 +239,7 @@ test("legacy draft and submission rows load with safe metadata defaults after mi
       checklist_results: [],
       cta_return: {},
       taxonomy_return: {},
+      requested_check_returns: {},
       note: null,
     });
   } finally {
@@ -425,6 +461,107 @@ test("field return taxonomy_return invalid tags value normalizes to empty array 
       note: null,
       evidence_deliverable_id: null,
       evidence_source_url: null,
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("field return requested_check_returns normalizes conditions and recomputes found safely", () => {
+  const ctx = createDbContext("collector-schema-foundation-requested-check-returns-");
+  try {
+    const repo = createRepository(ctx.db);
+    const item = repo.createItemWithWorkflowHead({
+      type: "place",
+      category: "attractions",
+      lang: "th",
+      title: "Requested Check Return Item",
+      description_raw: "raw",
+      source_type: "manual",
+      source_name: "manual",
+      source_url: "https://example.com/requested-check-return",
+    }).item;
+    ctx.db.prepare("INSERT INTO users (email, display_name, password_hash, role) VALUES ('requested-check-user@local', 'Requested Check User', 'hash', 'user')").run();
+    const userId = Number(ctx.db.prepare("SELECT id FROM users WHERE email='requested-check-user@local'").get()?.id || 0);
+    ctx.db.prepare(`
+      INSERT INTO content_assignments (
+        assignment_uid, content_item_id, assignment_kind, assignee_user_id, assigned_by_user_id, state
+      ) VALUES ('requested-check-return-assignment', ?, 'field', ?, ?, 'assigned')
+    `).run(item.id, userId, userId);
+    const assignmentId = Number(ctx.db.prepare("SELECT id FROM content_assignments WHERE assignment_uid='requested-check-return-assignment'").get()?.id || 0);
+    const submissionResult = ctx.db.prepare(`
+      INSERT INTO content_assignment_submissions (
+        assignment_id, content_item_id, submitted_by_user_id, submission_state, field_return_payload_json
+      ) VALUES (?, ?, ?, 'submitted', ?)
+    `).run(
+      assignmentId,
+      item.id,
+      userId,
+      JSON.stringify({
+        checklist_results: [],
+        cta_return: {},
+        taxonomy_return: {},
+        requested_check_returns: {
+          pet_friendly: {
+            checked: true,
+            found: false,
+            answer_type: "boolean_with_conditions",
+            value: true,
+            condition_note: "รับเฉพาะสัตว์เล็กไม่เกิน 10 กก.",
+          },
+          parking: {
+            checked: true,
+            found: false,
+            answer_type: "note_only",
+            value: "ignored",
+            evidence_source_url: "https://example.com/evidence/parking",
+            note: "จอดได้ประมาณ 5 คัน",
+          },
+          opening_hours: {
+            checked: false,
+            found: true,
+            answer_type: "hours",
+            value: "10:00-18:00",
+            condition_note: "should clear",
+            evidence_deliverable_id: 5,
+            note: "unchecked",
+          },
+        },
+      })
+    );
+
+    const submission = repo.getAssignmentSubmissionById(Number(submissionResult.lastInsertRowid || 0));
+    assert.deepEqual(submission.field_return_payload_json.requested_check_returns, {
+      pet_friendly: {
+        checked: true,
+        found: true,
+        answer_type: "boolean_with_conditions",
+        value: true,
+        condition_note: "รับเฉพาะสัตว์เล็กไม่เกิน 10 กก.",
+        note: null,
+        evidence_deliverable_id: null,
+        evidence_source_url: null,
+      },
+      parking: {
+        checked: true,
+        found: true,
+        answer_type: "note_only",
+        value: null,
+        condition_note: null,
+        note: "จอดได้ประมาณ 5 คัน",
+        evidence_deliverable_id: null,
+        evidence_source_url: "https://example.com/evidence/parking",
+      },
+      opening_hours: {
+        checked: false,
+        found: false,
+        answer_type: "hours",
+        value: null,
+        condition_note: null,
+        note: "unchecked",
+        evidence_deliverable_id: null,
+        evidence_source_url: null,
+      },
     });
   } finally {
     ctx.cleanup();

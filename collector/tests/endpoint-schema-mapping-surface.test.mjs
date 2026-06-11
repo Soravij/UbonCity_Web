@@ -183,6 +183,7 @@ test("assignment submission repository path still works with and without field_r
       checklist_results: [],
       cta_return: {},
       taxonomy_return: {},
+      requested_check_returns: {},
       note: null,
     });
     assert.deepEqual(first.article_payload_json, { body: "draft body" });
