@@ -62,6 +62,7 @@ import {
   buildFieldPackUpdatePayloadFromAgent,
   mergeConfirmedDraftMetadata,
 } from "./endpoint-schema-mapping.mjs";
+import { buildReviewIngestContentPayload } from "./review-ingest-mapping.mjs";
 
 const ARTICLE_AGENT_KEY = "article_agent";
 const DEFAULT_ARTICLE_AGENT_PROFILE = [
@@ -5028,27 +5029,23 @@ function buildReviewIngestPayload(options = {}) {
     source_content_item_id: contentItemId,
     source_base_url: sourceBaseUrl,
     content: {
-      content_type: contentType,
-      lang: sourceLang,
-      category: contentType === "event" ? "event" : (String(item?.category || "").trim().toLowerCase() || "attractions"),
-      slug: normalizeCollectorSlug(item?.slug || "", `item-${contentItemId}`),
-      title,
-      excerpt,
-      body: rewrittenBody,
-      meta_title: metaTitle,
-      meta_description: metaDescription,
-      event_period_text: contentType === "event" ? String(item?.event_period_text || "").trim() || null : null,
-      location_text: contentType === "event" ? String(item?.location_text || "").trim() || null : null,
-      latitude: Number.isFinite(Number(item?.latitude)) ? Number(item.latitude) : null,
-      longitude: Number.isFinite(Number(item?.longitude)) ? Number(item.longitude) : null,
-      map_url: String(item?.map_url || "").trim() || null,
-      google_place_id: String(item?.google_place_id || "").trim() || null,
-      transport_subtype: otherTransportMeta?.subtype || null,
-      transport_contact_name: otherTransportMeta?.contact_name || null,
-      transport_contact_phone: otherTransportMeta?.phone || null,
-      transport_contact_details: otherTransportMeta?.contact_details || null,
-      transport_link_url: otherTransportMeta?.link_url || null,
-      translation_langs: translationLangs,
+      ...buildReviewIngestContentPayload({
+        contentType,
+        sourceLang,
+        item: {
+          ...item,
+          // Confirmed CTA/contact remains place-first and draft-owned only.
+          slug: normalizeCollectorSlug(item?.slug || "", `item-${contentItemId}`),
+        },
+        latestDraft,
+        title,
+        excerpt,
+        rewrittenBody,
+        metaTitle,
+        metaDescription,
+        otherTransportMeta,
+        translationLangs,
+      }),
     },
     media_manifest: {
       ...mediaManifest,

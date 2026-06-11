@@ -64,6 +64,18 @@ function buildApproveWarnings(content) {
   return warnings;
 }
 
+export function mapReviewContentCtaFieldsToPlaceRecord(content = {}) {
+  return {
+    phone: content.phone ?? null,
+    line_url: content.line_url ?? null,
+    facebook_url: content.facebook_url ?? null,
+    website_url: content.website_url ?? null,
+    primary_cta: content.primary_cta ?? null,
+    tracking_entity_type: content.tracking_entity_type ?? null,
+    tracking_entity_id: content.tracking_entity_id ?? null,
+  };
+}
+
 async function ensureUniquePlaceSlug(connection, initialSlug, excludePlaceId = null) {
   const base = slugify(initialSlug);
   let candidate = base;
@@ -90,6 +102,7 @@ async function upsertPublishedPlace(connection, content, slug) {
 
   let placeId = null;
   let resolvedSlug = null;
+  const placeCtaFields = mapReviewContentCtaFieldsToPlaceRecord(content);
   if (existingRows.length) {
     placeId = Number(existingRows[0].id || 0) || null;
     const existingSlug = String(existingRows[0].slug || "").trim() || null;
@@ -112,13 +125,13 @@ async function upsertPublishedPlace(connection, content, slug) {
         content.transport_subtype,
         content.transport_contact_name,
         content.transport_contact_phone,
-        content.phone,
-        content.line_url,
-        content.facebook_url,
-        content.website_url,
-        content.primary_cta,
-        content.tracking_entity_type,
-        content.tracking_entity_id,
+        placeCtaFields.phone,
+        placeCtaFields.line_url,
+        placeCtaFields.facebook_url,
+        placeCtaFields.website_url,
+        placeCtaFields.primary_cta,
+        placeCtaFields.tracking_entity_type,
+        placeCtaFields.tracking_entity_id,
         content.transport_contact_details,
         content.transport_link_url,
         placeId,
@@ -144,13 +157,13 @@ async function upsertPublishedPlace(connection, content, slug) {
         content.transport_subtype,
         content.transport_contact_name,
         content.transport_contact_phone,
-        content.phone,
-        content.line_url,
-        content.facebook_url,
-        content.website_url,
-        content.primary_cta,
-        content.tracking_entity_type,
-        content.tracking_entity_id,
+        placeCtaFields.phone,
+        placeCtaFields.line_url,
+        placeCtaFields.facebook_url,
+        placeCtaFields.website_url,
+        placeCtaFields.primary_cta,
+        placeCtaFields.tracking_entity_type,
+        placeCtaFields.tracking_entity_id,
         content.transport_contact_details,
         content.transport_link_url,
       ]
