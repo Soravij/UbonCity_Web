@@ -627,6 +627,411 @@ function normalizeStringListInput(value, fieldName) {
   }
   return out;
 }
+
+const CTA_CONTACT_KEYS = Object.freeze(["phone", "line_url", "facebook_url", "website_url"]);
+const TAXONOMY_KEYS = Object.freeze(["category", "subtype"]);
+const CONFIDENCE_VALUES = new Set(["unknown", "low", "medium", "high", "verified"]);
+const CURATION_STATUS_VALUES = new Set(["not_started", "in_review", "curated"]);
+const CONFIRMED_META_STATUS_VALUES = new Set(["not_started", "in_review", "confirmed"]);
+const PRIMARY_CTA_VALUES = new Set(["map", "phone", "line"]);
+
+function defaultAiCtaContact() {
+  return {
+    phone: null,
+    line_url: null,
+    facebook_url: null,
+    website_url: null,
+    primary_cta: null,
+    source: [],
+    confidence: "unknown",
+    note: null,
+  };
+}
+
+function defaultAiTaxonomy() {
+  return {
+    category: null,
+    subtype: null,
+    tags: [],
+    source: [],
+    confidence: "unknown",
+    note: null,
+  };
+}
+
+function defaultCuratedCtaContact() {
+  return {
+    phone: { checked: false, found: false, value: null, source: [], note: null },
+    line_url: { checked: false, found: false, value: null, source: [], note: null },
+    facebook_url: { checked: false, found: false, value: null, source: [], note: null },
+    website_url: { checked: false, found: false, value: null, source: [], note: null },
+    primary_cta: { checked: false, found: false, value: null, note: null },
+  };
+}
+
+function defaultCuratedTaxonomy() {
+  return {
+    category: { checked: false, found: false, value: null, note: null },
+    subtype: { checked: false, found: false, value: null, note: null },
+    tags: { checked: false, found: false, value: [], note: null },
+  };
+}
+
+function defaultFieldReturnPayload() {
+  return {
+    checklist_results: [],
+    cta_return: {},
+    taxonomy_return: {},
+    note: null,
+  };
+}
+
+function defaultConfirmedCtaContact() {
+  return {
+    phone: null,
+    line_url: null,
+    facebook_url: null,
+    website_url: null,
+    primary_cta: null,
+  };
+}
+
+function defaultConfirmedTaxonomy() {
+  return {
+    category: null,
+    subtype: null,
+    tags: [],
+  };
+}
+
+function normalizeConfidenceValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CONFIDENCE_VALUES.has(normalized) ? normalized : "unknown";
+}
+
+function normalizePrimaryCtaValue(value, fieldName) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (!PRIMARY_CTA_VALUES.has(normalized)) {
+    throw new Error(`${fieldName} must be one of: map, phone, line`);
+  }
+  return normalized;
+}
+
+function normalizeJsonSourceList(value, fieldName) {
+  if (value == null || value === "") return [];
+  try {
+    return normalizeStringListInput(Array.isArray(value) ? value : JSON.stringify(value), fieldName);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeOptionalUrlValue(value, fieldName) {
+  if (value == null || value === "") return null;
+  return normalizeHttpUrl(value, fieldName);
+}
+
+function hasMeaningfulValue(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  return String(value || "").trim().length > 0;
+}
+
+function normalizeAiCtaContactJson(value, fieldName = "ai_cta_contact_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultAiCtaContact();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    phone: parsed.phone == null ? null : String(parsed.phone || "").trim() || null,
+    line_url: normalizeOptionalUrlValue(parsed.line_url, `${fieldName}.line_url`),
+    facebook_url: normalizeOptionalUrlValue(parsed.facebook_url, `${fieldName}.facebook_url`),
+    website_url: normalizeOptionalUrlValue(parsed.website_url, `${fieldName}.website_url`),
+    primary_cta: normalizePrimaryCtaValue(parsed.primary_cta, `${fieldName}.primary_cta`),
+    source: normalizeJsonSourceList(parsed.source, `${fieldName}.source`),
+    confidence: normalizeConfidenceValue(parsed.confidence),
+    note: parsed.note == null ? null : String(parsed.note || "").trim() || null,
+  };
+}
+
+function normalizeAiTaxonomyJson(value, fieldName = "ai_taxonomy_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultAiTaxonomy();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    category: parsed.category == null ? null : String(parsed.category || "").trim() || null,
+    subtype: parsed.subtype == null ? null : String(parsed.subtype || "").trim() || null,
+    tags: normalizeJsonSourceList(parsed.tags, `${fieldName}.tags`),
+    source: normalizeJsonSourceList(parsed.source, `${fieldName}.source`),
+    confidence: normalizeConfidenceValue(parsed.confidence),
+    note: parsed.note == null ? null : String(parsed.note || "").trim() || null,
+  };
+}
+
+function normalizeCuratedCtaFieldValue(rawValue, fieldName, kind = "text") {
+  const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
+  const checked = Boolean(row.checked);
+  let value = null;
+  if (kind === "url") value = normalizeOptionalUrlValue(row.value, `${fieldName}.value`);
+  else if (kind === "primary_cta") value = normalizePrimaryCtaValue(row.value, `${fieldName}.value`);
+  else value = row.value == null ? null : String(row.value || "").trim() || null;
+  return {
+    checked,
+    found: checked && hasMeaningfulValue(value),
+    value,
+    source: kind === "primary_cta" ? undefined : normalizeJsonSourceList(row.source, `${fieldName}.source`),
+    note: row.note == null ? null : String(row.note || "").trim() || null,
+  };
+}
+
+function normalizeCuratedCtaContactJson(value, fieldName = "curated_cta_contact_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultCuratedCtaContact();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    phone: normalizeCuratedCtaFieldValue(parsed.phone, `${fieldName}.phone`, "text"),
+    line_url: normalizeCuratedCtaFieldValue(parsed.line_url, `${fieldName}.line_url`, "url"),
+    facebook_url: normalizeCuratedCtaFieldValue(parsed.facebook_url, `${fieldName}.facebook_url`, "url"),
+    website_url: normalizeCuratedCtaFieldValue(parsed.website_url, `${fieldName}.website_url`, "url"),
+    primary_cta: (() => {
+      const normalized = normalizeCuratedCtaFieldValue(parsed.primary_cta, `${fieldName}.primary_cta`, "primary_cta");
+      return {
+        checked: normalized.checked,
+        found: normalized.found,
+        value: normalized.value,
+        note: normalized.note,
+      };
+    })(),
+  };
+}
+
+function normalizeCuratedTaxonomyJson(value, fieldName = "curated_taxonomy_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultCuratedTaxonomy();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  const normalizeEntry = (rawValue, entryFieldName, isArray = false) => {
+    const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
+    const checked = Boolean(row.checked);
+    const valueNormalized = isArray
+      ? normalizeJsonSourceList(row.value, `${entryFieldName}.value`)
+      : row.value == null ? null : String(row.value || "").trim() || null;
+    return {
+      checked,
+      found: checked && hasMeaningfulValue(valueNormalized),
+      value: valueNormalized,
+      note: row.note == null ? null : String(row.note || "").trim() || null,
+    };
+  };
+  return {
+    category: normalizeEntry(parsed.category, `${fieldName}.category`),
+    subtype: normalizeEntry(parsed.subtype, `${fieldName}.subtype`),
+    tags: normalizeEntry(parsed.tags, `${fieldName}.tags`, true),
+  };
+}
+
+function normalizeFieldReturnEvidence(rawValue, fieldName) {
+  const evidenceDeliverableId = rawValue?.evidence_deliverable_id == null || rawValue.evidence_deliverable_id === ""
+    ? null
+    : Number(rawValue.evidence_deliverable_id || 0) || null;
+  let evidenceSourceUrl = null;
+  try {
+    evidenceSourceUrl = normalizeOptionalUrlValue(rawValue?.evidence_source_url, `${fieldName}.evidence_source_url`);
+  } catch {
+    evidenceSourceUrl = null;
+  }
+  return {
+    evidence_deliverable_id: evidenceDeliverableId,
+    evidence_source_url: evidenceSourceUrl,
+  };
+}
+
+function normalizeFieldReturnCtaEntry(rawValue, fieldName, kind = "text") {
+  const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
+  const checked = Boolean(row.checked);
+  const evidence = normalizeFieldReturnEvidence(row, fieldName);
+  let value = null;
+  if (checked) {
+    try {
+      if (kind === "url") value = normalizeOptionalUrlValue(row.value, `${fieldName}.value`);
+      else if (kind === "primary_cta") value = normalizePrimaryCtaValue(row.value, `${fieldName}.value`);
+      else value = row.value == null ? null : String(row.value || "").trim() || null;
+    } catch {
+      value = null;
+    }
+  }
+  return {
+    checked,
+    found: checked && (hasMeaningfulValue(value) || evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url)),
+    value: checked ? value : null,
+    note: row.note == null ? null : String(row.note || "").trim() || null,
+    evidence_deliverable_id: evidence.evidence_deliverable_id,
+    evidence_source_url: evidence.evidence_source_url,
+  };
+}
+
+function defaultFieldReturnCtaShape() {
+  return {
+    phone: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    line_url: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    facebook_url: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    website_url: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    primary_cta: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+  };
+}
+
+function normalizeFieldReturnCtaJson(value, fieldName = "field_return_payload_json.cta_return") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultFieldReturnCtaShape();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    phone: normalizeFieldReturnCtaEntry(parsed.phone, `${fieldName}.phone`, "text"),
+    line_url: normalizeFieldReturnCtaEntry(parsed.line_url, `${fieldName}.line_url`, "url"),
+    facebook_url: normalizeFieldReturnCtaEntry(parsed.facebook_url, `${fieldName}.facebook_url`, "url"),
+    website_url: normalizeFieldReturnCtaEntry(parsed.website_url, `${fieldName}.website_url`, "url"),
+    primary_cta: normalizeFieldReturnCtaEntry(parsed.primary_cta, `${fieldName}.primary_cta`, "primary_cta"),
+  };
+}
+
+function normalizeFieldReturnTaxonomyEntry(rawValue, fieldName, isTags = false) {
+  const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
+  const checked = Boolean(row.checked);
+  const evidence = normalizeFieldReturnEvidence(row, fieldName);
+  let value = isTags ? [] : null;
+  if (checked) {
+    try {
+      if (isTags) value = Array.isArray(row.value) ? normalizeStringListInput(row.value, `${fieldName}.value`) : [];
+      else value = row.value == null ? null : String(row.value || "").trim() || null;
+    } catch {
+      value = isTags ? [] : null;
+    }
+  }
+  return {
+    checked,
+    found: checked && (hasMeaningfulValue(value) || evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url)),
+    value: checked ? value : (isTags ? [] : null),
+    note: row.note == null ? null : String(row.note || "").trim() || null,
+    evidence_deliverable_id: evidence.evidence_deliverable_id,
+    evidence_source_url: evidence.evidence_source_url,
+  };
+}
+
+function defaultFieldReturnTaxonomyShape() {
+  return {
+    category: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    subtype: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    tags: { checked: false, found: false, value: [], note: null, evidence_deliverable_id: null, evidence_source_url: null },
+  };
+}
+
+function normalizeFieldReturnTaxonomyJson(value, fieldName = "field_return_payload_json.taxonomy_return") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultFieldReturnTaxonomyShape();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    category: normalizeFieldReturnTaxonomyEntry(parsed.category, `${fieldName}.category`, false),
+    subtype: normalizeFieldReturnTaxonomyEntry(parsed.subtype, `${fieldName}.subtype`, false),
+    tags: normalizeFieldReturnTaxonomyEntry(parsed.tags, `${fieldName}.tags`, true),
+  };
+}
+
+function normalizeFieldReturnPayloadJson(value, fieldName = "field_return_payload_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultFieldReturnPayload();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  const checklistResultsRaw = Array.isArray(parsed.checklist_results) ? parsed.checklist_results : [];
+  const checklistResults = checklistResultsRaw
+    .map((row, index) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+      const checked = Boolean(row.checked);
+      const evidence = normalizeFieldReturnEvidence(row, `${fieldName}.checklist_results[${index}]`);
+      const valueNormalized = row.value == null
+        ? null
+        : Array.isArray(row.value)
+          ? normalizeJsonSourceList(row.value, `${fieldName}.checklist_results[${index}].value`)
+          : String(row.value || "").trim() || null;
+      return {
+        checklist_id: row.checklist_id == null || row.checklist_id === "" ? null : Number(row.checklist_id || 0) || null,
+        checked,
+        found: checked && (hasMeaningfulValue(valueNormalized) || evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url)),
+        value: checked ? valueNormalized : null,
+        note: row.note == null ? null : String(row.note || "").trim() || null,
+        evidence_deliverable_id: evidence.evidence_deliverable_id,
+        evidence_source_url: evidence.evidence_source_url,
+      };
+    })
+    .filter(Boolean);
+  return {
+    checklist_results: checklistResults,
+    cta_return: normalizeFieldReturnCtaJson(parsed.cta_return, `${fieldName}.cta_return`),
+    taxonomy_return: normalizeFieldReturnTaxonomyJson(parsed.taxonomy_return, `${fieldName}.taxonomy_return`),
+    note: parsed.note == null ? null : String(parsed.note || "").trim() || null,
+  };
+}
+
+function normalizeConfirmedCtaContactJson(value, fieldName = "confirmed_cta_contact_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultConfirmedCtaContact();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    phone: parsed.phone == null ? null : String(parsed.phone || "").trim() || null,
+    line_url: normalizeOptionalUrlValue(parsed.line_url, `${fieldName}.line_url`),
+    facebook_url: normalizeOptionalUrlValue(parsed.facebook_url, `${fieldName}.facebook_url`),
+    website_url: normalizeOptionalUrlValue(parsed.website_url, `${fieldName}.website_url`),
+    primary_cta: normalizePrimaryCtaValue(parsed.primary_cta, `${fieldName}.primary_cta`),
+  };
+}
+
+function normalizeConfirmedTaxonomyJson(value, fieldName = "confirmed_taxonomy_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultConfirmedTaxonomy();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    category: parsed.category == null ? null : String(parsed.category || "").trim() || null,
+    subtype: parsed.subtype == null ? null : String(parsed.subtype || "").trim() || null,
+    tags: normalizeJsonSourceList(parsed.tags, `${fieldName}.tags`),
+  };
+}
+
+function normalizeCurationStatusValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CURATION_STATUS_VALUES.has(normalized) ? normalized : "not_started";
+}
+
+function normalizeConfirmedMetaStatusValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CONFIRMED_META_STATUS_VALUES.has(normalized) ? normalized : "not_started";
+}
+
+function normalizeContentDraftRow(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    suggested_related: parseJson(row.suggested_related_json, []),
+    confirmed_cta_contact_json: normalizeConfirmedCtaContactJson(row.confirmed_cta_contact_json),
+    confirmed_taxonomy_json: normalizeConfirmedTaxonomyJson(row.confirmed_taxonomy_json),
+    confirmed_meta_status: normalizeConfirmedMetaStatusValue(row.confirmed_meta_status),
+    confirmed_by_user_id: Number(row.confirmed_by_user_id || 0) || null,
+    confirmed_at: row.confirmed_at || null,
+    confirmed_note: row.confirmed_note == null ? null : String(row.confirmed_note || "").trim() || null,
+  };
+}
 function normalizeSearchEnrichmentRow(row) {
   if (!row) return null;
   return {
@@ -764,6 +1169,7 @@ function normalizeAssignmentSubmissionRow(row) {
     ...row,
     article_payload_json: parseJson(row.article_payload_json, null),
     media_payload_json: parseJson(row.media_payload_json, null),
+    field_return_payload_json: normalizeFieldReturnPayloadJson(row.field_return_payload_json),
   };
 }
 
@@ -1309,6 +1715,14 @@ function normalizeFieldPackRow(row) {
     social_shot_emphasis_json: parseJson(row.social_shot_emphasis_json, []),
     social_on_camera_points_json: parseJson(row.social_on_camera_points_json, []),
     writer_key_points_json: parseJson(row.writer_key_points_json, []),
+    ai_cta_contact_json: normalizeAiCtaContactJson(row.ai_cta_contact_json),
+    ai_taxonomy_json: normalizeAiTaxonomyJson(row.ai_taxonomy_json),
+    curated_cta_contact_json: normalizeCuratedCtaContactJson(row.curated_cta_contact_json),
+    curated_taxonomy_json: normalizeCuratedTaxonomyJson(row.curated_taxonomy_json),
+    curation_status: normalizeCurationStatusValue(row.curation_status),
+    curated_by_user_id: Number(row.curated_by_user_id || 0) || null,
+    curated_at: row.curated_at || null,
+    curation_note: row.curation_note == null ? null : String(row.curation_note || "").trim() || null,
   };
 }
 
@@ -1362,6 +1776,14 @@ function buildFieldPackEditableState(row) {
     social_shot_emphasis: Array.isArray(row.social_shot_emphasis_json) ? row.social_shot_emphasis_json : [],
     social_on_camera_points: Array.isArray(row.social_on_camera_points_json) ? row.social_on_camera_points_json : [],
     social_caption_angle: row.social_caption_angle,
+    ai_cta_contact_json: row.ai_cta_contact_json,
+    ai_taxonomy_json: row.ai_taxonomy_json,
+    curated_cta_contact_json: row.curated_cta_contact_json,
+    curated_taxonomy_json: row.curated_taxonomy_json,
+    curation_status: row.curation_status,
+    curated_by_user_id: row.curated_by_user_id,
+    curated_at: row.curated_at,
+    curation_note: row.curation_note,
     writer_ready: row.writer_ready,
     writer_angle: row.writer_angle,
     writer_key_points: Array.isArray(row.writer_key_points_json) ? row.writer_key_points_json : [],
@@ -1416,6 +1838,14 @@ function normalizeFieldPackPayload(payload = {}, options = {}) {
     social_shot_emphasis_json: JSON.stringify(normalizeStringListInput(payload?.social_shot_emphasis_json ?? payload?.social_shot_emphasis ?? [], "social_shot_emphasis_json")),
     social_on_camera_points_json: JSON.stringify(normalizeStringListInput(payload?.social_on_camera_points_json ?? payload?.social_on_camera_points ?? [], "social_on_camera_points_json")),
     social_caption_angle: payload?.social_caption_angle == null ? null : String(payload.social_caption_angle || "").trim() || null,
+    ai_cta_contact_json: JSON.stringify(normalizeAiCtaContactJson(payload?.ai_cta_contact_json)),
+    ai_taxonomy_json: JSON.stringify(normalizeAiTaxonomyJson(payload?.ai_taxonomy_json)),
+    curated_cta_contact_json: JSON.stringify(normalizeCuratedCtaContactJson(payload?.curated_cta_contact_json)),
+    curated_taxonomy_json: JSON.stringify(normalizeCuratedTaxonomyJson(payload?.curated_taxonomy_json)),
+    curation_status: normalizeCurationStatusValue(payload?.curation_status),
+    curated_by_user_id: payload?.curated_by_user_id == null || payload.curated_by_user_id === "" ? null : Number(payload.curated_by_user_id || 0) || null,
+    curated_at: payload?.curated_at == null || payload.curated_at === "" ? null : toNullableDateIso(payload.curated_at, "curated_at"),
+    curation_note: payload?.curation_note == null ? null : String(payload.curation_note || "").trim() || null,
     writer_ready: toBooleanInt(payload?.writer_ready ?? 0, "writer_ready"),
     writer_angle: payload?.writer_angle == null ? null : String(payload.writer_angle || "").trim() || null,
     writer_key_points_json: JSON.stringify(normalizeStringListInput(payload?.writer_key_points_json ?? payload?.writer_key_points ?? [], "writer_key_points_json")),
@@ -2604,6 +3034,71 @@ function ensureItemClaimSupport(db) {
     db.exec("ALTER TABLE content_items ADD COLUMN location_text TEXT;");
   }
 }
+
+function ensureFieldPackMetadataSupport(db) {
+  const cols = db.prepare("PRAGMA table_info(field_packs)").all();
+  if (!Array.isArray(cols) || !cols.length) return;
+  const names = new Set(cols.map((c) => String(c?.name || "").trim()));
+  // Legacy SQLite upgrades stay additive here. schema.sql remains the canonical source
+  // for CHECK/FK parity on fresh databases, while repository normalizers enforce values.
+  if (!names.has("ai_cta_contact_json")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN ai_cta_contact_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("ai_taxonomy_json")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN ai_taxonomy_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("curated_cta_contact_json")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curated_cta_contact_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("curated_taxonomy_json")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curated_taxonomy_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("curation_status")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curation_status TEXT NOT NULL DEFAULT 'not_started';");
+  }
+  if (!names.has("curated_by_user_id")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curated_by_user_id INTEGER;");
+  }
+  if (!names.has("curated_at")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curated_at TEXT;");
+  }
+  if (!names.has("curation_note")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curation_note TEXT;");
+  }
+}
+
+function ensureAssignmentSubmissionFieldReturnSupport(db) {
+  const cols = db.prepare("PRAGMA table_info(content_assignment_submissions)").all();
+  if (!Array.isArray(cols) || !cols.length) return;
+  const names = new Set(cols.map((c) => String(c?.name || "").trim()));
+  if (!names.has("field_return_payload_json")) {
+    db.exec("ALTER TABLE content_assignment_submissions ADD COLUMN field_return_payload_json TEXT;");
+  }
+}
+
+function ensureContentDraftConfirmedMetaSupport(db) {
+  const cols = db.prepare("PRAGMA table_info(content_drafts)").all();
+  if (!Array.isArray(cols) || !cols.length) return;
+  const names = new Set(cols.map((c) => String(c?.name || "").trim()));
+  if (!names.has("confirmed_cta_contact_json")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_cta_contact_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("confirmed_taxonomy_json")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_taxonomy_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("confirmed_meta_status")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_meta_status TEXT NOT NULL DEFAULT 'not_started';");
+  }
+  if (!names.has("confirmed_by_user_id")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_by_user_id INTEGER;");
+  }
+  if (!names.has("confirmed_at")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_at TEXT;");
+  }
+  if (!names.has("confirmed_note")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_note TEXT;");
+  }
+}
 export function createRepository(db) {
   ensureLifecycleColumns(db);
   ensureTranslationTables(db);
@@ -2615,6 +3110,9 @@ export function createRepository(db) {
   ensureUsersProfileSupport(db);
   ensureItemClaimSupport(db);
   ensureAssignmentTableSupport(db);
+  ensureFieldPackMetadataSupport(db);
+  ensureAssignmentSubmissionFieldReturnSupport(db);
+  ensureContentDraftConfirmedMetaSupport(db);
   ensureAssignmentSubmissionDraftTableSupport(db);
   ensureFieldPackAssignmentForeignKeySupport(db);
   const insertItemStmt = db.prepare(`
@@ -2885,8 +3383,10 @@ export function createRepository(db) {
   const upsertDraftStmt = db.prepare(`
     INSERT INTO content_drafts (
       content_item_id, generation_run_uid, draft_title, excerpt, body,
-      meta_title, meta_description, suggested_related_json, ai_quality_score, status, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      meta_title, meta_description, suggested_related_json, ai_quality_score,
+      confirmed_cta_contact_json, confirmed_taxonomy_json, confirmed_meta_status,
+      confirmed_by_user_id, confirmed_at, confirmed_note, status, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(content_item_id, generation_run_uid) DO UPDATE SET
       draft_title=excluded.draft_title,
       excerpt=excluded.excerpt,
@@ -2895,6 +3395,12 @@ export function createRepository(db) {
       meta_description=excluded.meta_description,
       suggested_related_json=excluded.suggested_related_json,
       ai_quality_score=excluded.ai_quality_score,
+      confirmed_cta_contact_json=excluded.confirmed_cta_contact_json,
+      confirmed_taxonomy_json=excluded.confirmed_taxonomy_json,
+      confirmed_meta_status=excluded.confirmed_meta_status,
+      confirmed_by_user_id=excluded.confirmed_by_user_id,
+      confirmed_at=excluded.confirmed_at,
+      confirmed_note=excluded.confirmed_note,
       status=excluded.status,
       updated_at=CURRENT_TIMESTAMP
   `);
@@ -2951,8 +3457,10 @@ export function createRepository(db) {
       editor_summary, verified_facts_json, uncertain_facts_json,
       story_angle, field_notes, social_hook, social_shot_emphasis_json,
       social_on_camera_points_json, social_caption_angle,
+      ai_cta_contact_json, ai_taxonomy_json, curated_cta_contact_json, curated_taxonomy_json,
+      curation_status, curated_by_user_id, curated_at, curation_note,
       writer_ready, writer_angle, writer_key_points_json, writer_notes, updated_by, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
   `);
 
   const updateFieldPackStmt = db.prepare(`
@@ -2975,6 +3483,14 @@ export function createRepository(db) {
       social_shot_emphasis_json=?,
       social_on_camera_points_json=?,
       social_caption_angle=?,
+      ai_cta_contact_json=?,
+      ai_taxonomy_json=?,
+      curated_cta_contact_json=?,
+      curated_taxonomy_json=?,
+      curation_status=?,
+      curated_by_user_id=?,
+      curated_at=?,
+      curation_note=?,
       writer_ready=?,
       writer_angle=?,
       writer_key_points_json=?,
@@ -3623,8 +4139,9 @@ export function createRepository(db) {
   const insertAssignmentSubmissionStmt = db.prepare(`
     INSERT INTO content_assignment_submissions (
       assignment_id, content_item_id, submitted_by_user_id, submission_state,
-      article_payload_json, media_payload_json, contributor_note, reviewer_note, reviewed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      article_payload_json, media_payload_json, field_return_payload_json,
+      contributor_note, reviewer_note, reviewed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const updateAssignmentSubmissionStmt = db.prepare(`
     UPDATE content_assignment_submissions
@@ -3633,6 +4150,7 @@ export function createRepository(db) {
       submission_state=?,
       article_payload_json=?,
       media_payload_json=?,
+      field_return_payload_json=?,
       contributor_note=COALESCE(?, contributor_note),
       reviewer_note=COALESCE(?, reviewer_note),
       reviewed_at=COALESCE(?, reviewed_at)
@@ -5292,6 +5810,12 @@ function normalizeStateValue(value, stateGroup) {
     }
     const articlePayload = payload.article_payload_json == null ? null : parseJsonInputStrict(payload.article_payload_json, "article_payload_json", "object");
     const mediaPayload = payload.media_payload_json == null ? null : parseJsonInputStrict(payload.media_payload_json, "media_payload_json", "object");
+    const fieldReturnPayload = payload.field_return_payload_json == null
+      ? null
+      : normalizeFieldReturnPayloadJson(
+        parseJsonInputStrict(payload.field_return_payload_json, "field_return_payload_json", "object"),
+        "field_return_payload_json"
+      );
     const contributorNote = payload.contributor_note == null ? null : String(payload.contributor_note || "").trim() || null;
     const reviewerNote = payload.reviewer_note == null ? null : String(payload.reviewer_note || "").trim() || null;
     const reviewedAt = payload.reviewed_at == null || payload.reviewed_at === "" ? null : toNullableDateIso(payload.reviewed_at, "reviewed_at");
@@ -5308,11 +5832,15 @@ function normalizeStateValue(value, stateGroup) {
         const nextMediaPayload = mediaPayload == null
           ? latestSubmission.media_payload_json
           : mergeAssignmentSubmissionMediaPayload(latestSubmission.media_payload_json, mediaPayload);
+        const nextFieldReturnPayload = fieldReturnPayload == null
+          ? latestSubmission.field_return_payload_json
+          : fieldReturnPayload;
         updateAssignmentSubmissionStmt.run(
           submittedByUserId,
           submissionState,
           nextArticlePayload ? JSON.stringify(nextArticlePayload) : null,
           nextMediaPayload ? JSON.stringify(nextMediaPayload) : null,
+          nextFieldReturnPayload ? JSON.stringify(nextFieldReturnPayload) : null,
           contributorNote,
           reviewerNote,
           reviewedAt,
@@ -5332,6 +5860,7 @@ function normalizeStateValue(value, stateGroup) {
       submissionState,
       articlePayload ? JSON.stringify(articlePayload) : null,
       mediaPayload ? JSON.stringify(mediaPayload) : null,
+      fieldReturnPayload ? JSON.stringify(fieldReturnPayload) : null,
       contributorNote,
       reviewerNote,
       reviewedAt
@@ -8408,6 +8937,8 @@ function normalizeStateValue(value, stateGroup) {
   }
 
   function saveDraft(contentItemId, generationRunUid, draft = {}) {
+    const confirmedCtaContact = normalizeConfirmedCtaContactJson(draft.confirmed_cta_contact_json);
+    const confirmedTaxonomy = normalizeConfirmedTaxonomyJson(draft.confirmed_taxonomy_json);
     upsertDraftStmt.run(
       contentItemId,
       generationRunUid,
@@ -8418,6 +8949,12 @@ function normalizeStateValue(value, stateGroup) {
       String(readDraftField(draft, "meta_description", "") ?? ""),
       JSON.stringify(draft.suggested_related || []),
       draft.ai_quality_score ?? null,
+      JSON.stringify(confirmedCtaContact),
+      JSON.stringify(confirmedTaxonomy),
+      normalizeConfirmedMetaStatusValue(draft.confirmed_meta_status),
+      draft.confirmed_by_user_id == null || draft.confirmed_by_user_id === "" ? null : Number(draft.confirmed_by_user_id || 0) || null,
+      draft.confirmed_at == null || draft.confirmed_at === "" ? null : toNullableDateIso(draft.confirmed_at, "confirmed_at"),
+      draft.confirmed_note == null ? null : String(draft.confirmed_note || "").trim() || null,
       String(readDraftField(draft, "status", "generated") || "generated")
     );
 
@@ -8425,12 +8962,7 @@ function normalizeStateValue(value, stateGroup) {
   }
 
   function latestDraftByItem(contentItemId) {
-    const row = latestDraftByItemStmt.get(contentItemId);
-    if (!row) return null;
-    return {
-      ...row,
-      suggested_related: parseJson(row.suggested_related_json, []),
-    };
+    return normalizeContentDraftRow(latestDraftByItemStmt.get(contentItemId));
   }
 
   function listDrafts(status = "") {
@@ -8439,10 +8971,9 @@ function normalizeStateValue(value, stateGroup) {
       : `SELECT d.*, c.title AS item_title, wm.production_state, wm.publication_state FROM content_drafts d JOIN content_items c ON c.id=d.content_item_id LEFT JOIN content_workflow_models wm ON wm.content_item_id=c.id ORDER BY d.id DESC`;
     const rows = status ? db.prepare(sql).all(status) : db.prepare(sql).all();
     return rows.map((row) => ({
-      ...row,
+      ...normalizeContentDraftRow(row),
       workflow_head_derived_status: deriveWorkflowStatusFromRowStates(row),
       workflow_head_status_source: "workflow_head",
-      suggested_related: parseJson(row.suggested_related_json, []),
     }));
   }
 
@@ -8735,6 +9266,14 @@ function normalizeStateValue(value, stateGroup) {
       normalized.social_shot_emphasis_json,
       normalized.social_on_camera_points_json,
       normalized.social_caption_angle,
+      normalized.ai_cta_contact_json,
+      normalized.ai_taxonomy_json,
+      normalized.curated_cta_contact_json,
+      normalized.curated_taxonomy_json,
+      normalized.curation_status,
+      normalized.curated_by_user_id,
+      normalized.curated_at,
+      normalized.curation_note,
       normalized.writer_ready,
       normalized.writer_angle,
       normalized.writer_key_points_json,
@@ -8941,6 +9480,14 @@ function normalizeStateValue(value, stateGroup) {
       normalized.social_shot_emphasis_json,
       normalized.social_on_camera_points_json,
       normalized.social_caption_angle,
+      normalized.ai_cta_contact_json,
+      normalized.ai_taxonomy_json,
+      normalized.curated_cta_contact_json,
+      normalized.curated_taxonomy_json,
+      normalized.curation_status,
+      normalized.curated_by_user_id,
+      normalized.curated_at,
+      normalized.curation_note,
       normalized.writer_ready,
       normalized.writer_angle,
       normalized.writer_key_points_json,
