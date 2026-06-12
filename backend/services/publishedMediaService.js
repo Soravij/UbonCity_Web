@@ -76,11 +76,21 @@ export async function cleanupPublishedMediaFilesBestEffort(filePaths = []) {
   }
 }
 
-function buildAssetPublicUrl(fileName) {
-  const name = String(fileName || "").trim();
-  if (!name) return null;
+function normalizeUploadRelativePath(storagePath, fileName) {
+  const normalizedStoragePath = String(storagePath || "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  if (/^uploads\//i.test(normalizedStoragePath)) {
+    return normalizedStoragePath.replace(/^\/+/, "");
+  }
+  const normalizedFileName = String(fileName || "").trim().replace(/^\/+/, "");
+  if (!normalizedFileName) return "";
+  return `uploads/${normalizedFileName}`;
+}
+
+function buildAssetPublicUrl(asset) {
+  const relativePath = normalizeUploadRelativePath(asset?.storage_path, asset?.file_name);
+  if (!relativePath) return null;
   const base = String(process.env.BACKEND_PUBLIC_URL || "").trim().replace(/\/+$/, "");
-  return base ? `${base}/uploads/${name}` : `/uploads/${name}`;
+  return base ? `${base}/${relativePath}` : `/${relativePath}`;
 }
 
 export async function replaceEntityMediaWithReviewBatch(executor, {
@@ -154,7 +164,7 @@ export async function replaceEntityMediaWithReviewBatch(executor, {
     );
     positionByUsage[usageType] += 1;
 
-    const publicUrl = buildAssetPublicUrl(asset?.file_name);
+    const publicUrl = buildAssetPublicUrl(asset);
     if (!publicUrl) continue;
     if (usageType === "cover" && !published.cover_url) published.cover_url = publicUrl;
     if (usageType === "gallery") published.gallery_urls.push(publicUrl);
