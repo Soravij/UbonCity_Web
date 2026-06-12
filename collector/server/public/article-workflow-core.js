@@ -1109,47 +1109,36 @@ export function renderPreview() {
   const hero = previewMedia.hero;
   const galleryAssets = previewMedia.gallery;
   const body = bodyToPreviewHtml(qs("article-body")?.value || latestDraft()?.body || state.item?.description_clean || "");
+  const draft = latestDraft();
   const otherTransportMeta = currentOtherTransportMeta();
-  const contactRows = isOtherTransportItem()
-    ? [
-        { label: "ประเภท", value: otherTransportSubtypeLabel(otherTransportMeta.subtype) },
-        { label: "ผู้ติดต่อ", value: otherTransportMeta.contact_name },
-        { label: "เบอร์โทร", value: otherTransportMeta.phone },
-        { label: "ลิงก์", value: otherTransportMeta.link_url },
-        { label: "ช่องทางติดต่อ", value: otherTransportMeta.contact_details },
-      ].filter((row) => Boolean(String(row.value || "").trim()))
-    : [];
+  const ctaContact = {
+    primary_cta: draft?.confirmed_cta_contact_json?.primary_cta || "",
+    phone: draft?.confirmed_cta_contact_json?.phone || "",
+    line_url: draft?.confirmed_cta_contact_json?.line_url || "",
+    facebook_url: draft?.confirmed_cta_contact_json?.facebook_url || "",
+    website_url: draft?.confirmed_cta_contact_json?.website_url || "",
+  };
 
-  root.innerHTML = `
-    ${hero ? `<img class="preview-cover" src="${escapeHtml(hero)}" alt="preview hero" />` : ""}
-    <h2 class="preview-title">${escapeHtml(title)}</h2>
-    ${excerpt ? `<p class="preview-excerpt">${escapeHtml(excerpt)}</p>` : ""}
-    ${contactRows.length ? `
-      <div class="readiness-summary">
-        ${contactRows.map((row) => `
-          <div class="summary-row">
-            <strong>${escapeHtml(row.label)}</strong>
-            <span>${escapeHtml(row.value)}</span>
-          </div>
-        `).join("")}
-      </div>
-    ` : ""}
-    <div class="preview-body">${body}</div>
-    ${galleryAssets.length ? `
-      <section class="preview-gallery-section">
-        <h3 class="preview-gallery-title">ภาพเพิ่มเติม</h3>
-        <div class="preview-gallery">
-          ${galleryAssets.map((url, index) => `
-            <button type="button" class="preview-gallery-item${index === 0 ? " is-featured" : ""}${index % 5 === 2 ? " is-tall" : ""}" data-full-url="${escapeHtml(url)}" data-alt="gallery image ${index + 1}">
-              <span class="preview-gallery-item-frame">
-                <img src="${escapeHtml(url)}" alt="gallery image ${index + 1}" />
-              </span>
-            </button>
-          `).join("")}
-        </div>
-      </section>
-    ` : ""}
-  `;
+  root.innerHTML = buildRuntimeArticlePreviewModel({
+    title,
+    excerpt,
+    bodyHtml: body,
+    slug: String(qs("article-slug")?.value || draft?.slug || state.item?.slug || "").trim(),
+    hero,
+    galleryAssets,
+    metaTitle: String(qs("article-meta-title")?.value || draft?.meta_title || state.item?.meta_title || "").trim(),
+    metaDescription: String(qs("article-meta-description")?.value || draft?.meta_description || state.item?.meta_description || "").trim(),
+    ctaContact,
+    isOtherTransport: isOtherTransportItem(),
+    otherTransportMeta: {
+      subtype: otherTransportMeta.subtype || "",
+      subtype_label: otherTransportSubtypeLabel(otherTransportMeta.subtype),
+      contact_name: otherTransportMeta.contact_name || "",
+      phone: otherTransportMeta.phone || "",
+      link_url: otherTransportMeta.link_url || "",
+      contact_details: otherTransportMeta.contact_details || "",
+    },
+  });
   ensurePreviewGalleryLightbox();
 }
 
@@ -1180,8 +1169,4 @@ export async function loadWorkspace() {
   state.translations = Array.isArray(translations) ? translations : [];
 }
 
-
-
-
-
-
+import { buildRuntimeArticlePreviewModel } from "./article-preview-render.js";
