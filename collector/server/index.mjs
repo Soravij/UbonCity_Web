@@ -4182,20 +4182,58 @@ function getPrimaryEditorialAssignment(itemId) {
 
 function buildArticleProcessPayload(req, item) {
   const isDebugDiagnosticsEnabled = String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
+  const itemType = String(item?.type || "").trim().toLowerCase();
   const workflowModel = repo.ensureWorkflowModel(Number(item?.id || 0) || 0);
   const publishableSource = repo.buildPublishableSourceByItem(Number(item?.id || 0) || 0);
   const latestDraft = buildArticleProcessDraftPreview(item, workflowModel, publishableSource);
+  const rawFieldReturnEvidence = itemType === "place"
+    ? repo.buildFieldReturnEvidenceByItem(Number(item?.id || 0) || 0)
+    : { version: 1, items: [] };
   const workflowTransitions = repo.listWorkflowTransitionsByItem(Number(item?.id || 0) || 0, 12);
   const baseArticleStatus = deriveArticleProcessStatus(item, workflowModel, publishableSource);
   const articleStatus = deriveQueuedArticleProcessStatus(item, workflowModel, workflowTransitions, baseArticleStatus);
   const editorialAssignments = listEditorialAssignmentsByItem(item?.id);
   const activeEditorialAssignment = getPrimaryEditorialAssignment(item?.id);
   const role = actorPolicyRole(req);
+  const fieldReturnSubmitters = new Map(
+    listUsersByIds(
+      Array.isArray(rawFieldReturnEvidence?.items)
+        ? rawFieldReturnEvidence.items.map((row) => Number(row?.submitted_by_user_id || 0)).filter(Boolean)
+        : []
+    ).map((row) => [Number(row?.id || 0), row])
+  );
+  const fieldReturnEvidence = {
+    version: 1,
+    items: Array.isArray(rawFieldReturnEvidence?.items)
+      ? rawFieldReturnEvidence.items.map((row) => {
+        const submitter = fieldReturnSubmitters.get(Number(row?.submitted_by_user_id || 0)) || null;
+        const submittedBy = submitter
+          ? String(submitter.display_name || submitter.email || `user #${Number(submitter.id || 0)}`).trim()
+          : null;
+        return {
+          key: String(row?.key || "").trim(),
+          group_key: String(row?.group_key || "").trim() || "other",
+          check_key: String(row?.check_key || "").trim() || String(row?.key || "").trim(),
+          label: String(row?.label || "").trim() || String(row?.check_key || row?.key || "").trim(),
+          checked: row?.checked === true,
+          found: row?.found === true,
+          value: row?.value ?? null,
+          condition_note: row?.condition_note ?? null,
+          evidence: row?.evidence ?? null,
+          note: row?.note ?? null,
+          submitted_at: row?.submitted_at || null,
+          submitted_by: submittedBy,
+          assignment_id: Number(row?.assignment_id || 0) || null,
+        };
+      })
+      : [],
+  };
   return {
     item_id: Number(item?.id || 0) || 0,
     status: articleStatus,
     workflow_model: workflowModel,
     latest_draft: latestDraft,
+    field_return_evidence: fieldReturnEvidence,
     publishable_source: publishableSource?.source || null,
     publishable_source_ready: Boolean(publishableSource?.ready_for_publish_source),
     publishable_source_issues: Array.isArray(publishableSource?.issues) ? publishableSource.issues : [],
