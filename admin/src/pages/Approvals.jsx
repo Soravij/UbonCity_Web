@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE_URL, api, authHeaders } from "../api/api";
+import { buildApprovalContentPreviewModel, buildApprovalsReviewIngestPayload } from "./approvalsPreview.js";
 
 const CATEGORIES = ["attractions", "activities", "hotels", "cafes", "restaurants", "transport"];
 const DELETE_CONTENT_TARGET_STORAGE_KEY = "delete_content_target";
@@ -93,42 +94,15 @@ function isLegacyReviewItem(item) {
 }
 
 function buildReviewIngestPayload(item) {
+  const rawPayload = buildApprovalsReviewIngestPayload(item);
   const snapshot = item?.article_snapshot || {};
   const media = snapshot?.media_manifest || {};
   const coverSource = pickMediaSourceUrl(media?.cover);
   const legacyFallbackCover = resolveLegacyFallbackCoverUrl(item);
   const gallery = Array.isArray(media?.gallery) ? media.gallery : [];
   const inline = Array.isArray(media?.inline) ? media.inline : [];
-  const sourceBaseUrl = String(snapshot?.source_base_url || item?.source_base_url || resolveCollectorBaseUrl()).trim();
   return {
-    source_system: "collector-app",
-    source_content_item_id: Number(item?.source_content_item_id || 0) || 0,
-    source_base_url: sourceBaseUrl,
-    content: {
-      content_type: item?.source_content_type === "event" ? "event" : "place",
-      lang: String(item?.source_lang || "th").trim().toLowerCase() || "th",
-      category: item?.source_content_type === "event" ? "event" : (snapshot?.category || item?.category || "attractions"),
-      slug: snapshot?.slug || item?.slug || null,
-      title: snapshot?.title || item?.title || "",
-      body: snapshot?.description || item?.description || "",
-      excerpt: snapshot?.excerpt || null,
-      meta_title: snapshot?.meta_title || item?.meta_title || null,
-      meta_description: snapshot?.meta_description || item?.meta_description || null,
-      event_period_text: snapshot?.event_period_text || null,
-      location_text: snapshot?.location_text || null,
-      latitude: snapshot?.latitude ?? null,
-      longitude: snapshot?.longitude ?? null,
-      map_url: snapshot?.map_url || null,
-      google_place_id: snapshot?.google_place_id || null,
-      transport_subtype: snapshot?.transport_subtype || null,
-      transport_contact_name: snapshot?.transport_contact_name || null,
-      transport_contact_phone: snapshot?.transport_contact_phone || null,
-      transport_contact_details: snapshot?.transport_contact_details || null,
-      transport_link_url: snapshot?.transport_link_url || null,
-      public_entity_type: item?.source_content_type === "event" ? "event" : "place",
-      public_entity_id: Number(item?.entity_id || item?.local_entity_id || 0) || null,
-      translation_langs: Array.isArray(item?.translation_langs) ? item.translation_langs : [],
-    },
+    ...rawPayload,
     media_manifest: {
       cover: (coverSource || legacyFallbackCover) ? { source_url: coverSource || legacyFallbackCover, role: "cover", selected: true } : null,
       gallery: gallery.map((entry) => pickMediaSourceUrl(entry)).filter(Boolean).map((source_url) => ({ source_url, role: "gallery", selected: true })),
@@ -183,11 +157,18 @@ function normalizeReviewContentDetailAsQueueItem(baseItem, reviewContent) {
     category: reviewContent?.content_type === "event" ? "event" : (reviewContent?.category || baseItem?.category || null),
     title: reviewContent?.title || baseItem?.title || "",
     description: reviewContent?.body || baseItem?.description || "",
+    excerpt: reviewContent?.excerpt || baseItem?.excerpt || null,
     meta_title: reviewContent?.meta_title || baseItem?.meta_title || null,
     meta_description: reviewContent?.meta_description || baseItem?.meta_description || null,
+    phone: reviewContent?.phone || baseItem?.phone || null,
+    line_url: reviewContent?.line_url || baseItem?.line_url || null,
+    facebook_url: reviewContent?.facebook_url || baseItem?.facebook_url || null,
+    website_url: reviewContent?.website_url || baseItem?.website_url || null,
+    primary_cta: reviewContent?.primary_cta || baseItem?.primary_cta || null,
     effective_cover_image: reviewContent?.effective_cover_image || reviewContent?.image || baseItem?.effective_cover_image || null,
     media_cover_image: reviewContent?.effective_cover_image || reviewContent?.image || baseItem?.media_cover_image || null,
     image: reviewContent?.effective_cover_image || reviewContent?.image || baseItem?.image || null,
+    media_gallery_images: Array.isArray(reviewContent?.media_gallery_images) ? reviewContent.media_gallery_images : (Array.isArray(baseItem?.media_gallery_images) ? baseItem.media_gallery_images : []),
     article_snapshot: {
       category: reviewContent?.content_type === "event" ? "event" : (reviewContent?.category || baseItem?.category || null),
       slug: reviewContent?.slug || null,
@@ -196,6 +177,11 @@ function normalizeReviewContentDetailAsQueueItem(baseItem, reviewContent) {
       excerpt: reviewContent?.excerpt || null,
       meta_title: reviewContent?.meta_title || null,
       meta_description: reviewContent?.meta_description || null,
+      phone: reviewContent?.phone || null,
+      line_url: reviewContent?.line_url || null,
+      facebook_url: reviewContent?.facebook_url || null,
+      website_url: reviewContent?.website_url || null,
+      primary_cta: reviewContent?.primary_cta || null,
       event_period_text: reviewContent?.event_period_text || null,
       location_text: reviewContent?.location_text || null,
       latitude: reviewContent?.latitude ?? null,
@@ -898,6 +884,7 @@ export default function Approvals({ token, onPendingChanged, onNavigate }) {
             {filteredItems.map((item) => {
               const isExpanded = expandedReviewId === item.review_id;
               const detail = detailMap[item.review_id] || item;
+              const preview = buildApprovalContentPreviewModel(detail);
               const note = reviewNotes[item.review_id] || "";
               const historyOpen = Boolean(historyOpenMap[item.review_id]);
               const busyApprove = approvingId === `approve-${item.pending_type}-${item.review_id}`;
@@ -928,9 +915,66 @@ export default function Approvals({ token, onPendingChanged, onNavigate }) {
                     <div className="approvals-inline-panel">
                       {expandedLoadingId === item.review_id ? <p className="muted">Loading detail...</p> : null}
                       <div className="approvals-preview-alert warning">
-                        Decision panel only. Use Open Review Page to inspect real rendered output.
+                        พรีวิวนี้เป็นแบบอ่านอย่างเดียวสำหรับตรวจอนุมัติ การตัดสินใจยังใช้ปุ่มเดิมด้านล่าง
                       </div>
                       <p className="muted">Review ID {detail.review_id || "-"} | Source {detail.source_content_item_id || "-"} | {pendingTypeLabel(detail)} / {pendingCategoryLabel(detail)}</p>
+                      <div className="approvals-detail-main">
+                        <section>
+                          <p className="muted approvals-preview-kicker">เนื้อหาบทความ</p>
+                          <h3 className="approvals-preview-title">{preview.article.title}</h3>
+                          <p className="muted approvals-preview-paragraph">{preview.article.excerpt}</p>
+                          <p className="muted approvals-preview-paragraph">Slug: {preview.article.slug}</p>
+                          {preview.media.coverUrl ? (
+                            <div className="approvals-preview-media-frame" style={{ marginBottom: 12 }}>
+                              <img className="approvals-preview-media" src={preview.media.coverUrl} alt="ภาพปกบทความ" />
+                            </div>
+                          ) : (
+                            <p className="muted approvals-preview-paragraph">รูปภาพปก: ยังไม่ได้ระบุ</p>
+                          )}
+                          <div className="approvals-preview-body" dangerouslySetInnerHTML={{ __html: preview.article.bodyHtml }} />
+                        </section>
+
+                        <section>
+                          <p className="muted approvals-preview-kicker">SEO</p>
+                          <dl style={{ margin: 0, display: "grid", gap: 10 }}>
+                            {preview.seo.map((row) => (
+                              <div key={row.label}>
+                                <dt style={{ fontWeight: 600 }}>{row.label}</dt>
+                                <dd style={{ margin: "4px 0 0" }}>{row.value}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </section>
+
+                        <section>
+                          <p className="muted approvals-preview-kicker">CTA / ช่องทางติดต่อ</p>
+                          <dl style={{ margin: 0, display: "grid", gap: 10 }}>
+                            {preview.cta.map((row) => (
+                              <div key={row.label}>
+                                <dt style={{ fontWeight: 600 }}>{row.label}</dt>
+                                <dd style={{ margin: "4px 0 0" }}>
+                                  {row.href ? <a href={row.href} target="_blank" rel="noreferrer noopener">{row.value}</a> : row.value}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </section>
+
+                        <section>
+                          <p className="muted approvals-preview-kicker">รูปภาพ / สื่อ</p>
+                          {preview.media.galleryUrls.length ? (
+                            <div style={{ display: "grid", gap: 10 }}>
+                              {preview.media.galleryUrls.map((url, index) => (
+                                <div key={`${url}-${index}`} className="approvals-preview-inline-media-frame">
+                                  <img className="approvals-preview-inline-media" src={url} alt={`ภาพเพิ่มเติม ${index + 1}`} />
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="muted approvals-preview-paragraph">ยังไม่ได้ระบุ</p>
+                          )}
+                        </section>
+                      </div>
                       <label style={{ display: "block", marginBottom: 6 }}>Decision note</label>
                       <textarea rows={3} value={note} onChange={(e) => setReviewNotes((current) => ({ ...current, [item.review_id]: e.target.value }))} placeholder="Add decision note" readOnly={activeTab !== "pending"} />
                       <div style={{ marginTop: 10 }}>
