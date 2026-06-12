@@ -2,6 +2,7 @@
   api,
   canEditArticle,
   collectWorkspacePayload,
+  computeSubmitReadiness,
   currentOtherTransportMeta,
   currentAssignmentState,
   currentReviewNote,
@@ -1316,6 +1317,7 @@ function refreshComposerFromBlocks() {
   renderBlocks();
   renderPreview();
   renderReviewChecklist();
+  renderSubmitReadiness();
   renderStatusChip();
   applyActionGuards();
 }
@@ -1324,6 +1326,7 @@ function refreshComposerDerivedState() {
   syncBodyFromBlocks();
   renderPreview();
   renderReviewChecklist();
+  renderSubmitReadiness();
   renderStatusChip();
   applyActionGuards();
 }
@@ -1379,6 +1382,7 @@ function applyGeneratedArticleDraft(suggestion) {
   setWorkspaceDirty(true);
   renderPreview();
   renderReviewChecklist();
+  renderSubmitReadiness();
   renderStatusChip();
   applyActionGuards();
 }
@@ -1481,6 +1485,99 @@ function renderReviewChecklist() {
       <span>${escapeHtml(row.label)}</span>
     </label>
   `).join("");
+}
+
+function renderSubmitReadiness() {
+  const statusNode = qs("submit-readiness-status");
+  const root = qs("submit-readiness-panel");
+  if (!statusNode || !root) return;
+  const readiness = computeSubmitReadiness();
+  state.readiness = readiness;
+
+  if (readiness.blockers.length > 0) {
+    statusNode.className = "status error";
+    statusNode.textContent = "ต้องแก้รายการสำคัญก่อนส่งตรวจ";
+  } else if (readiness.warnings.length > 0) {
+    statusNode.className = "status warn";
+    statusNode.textContent = "ยังมีรายการที่ควรตรวจอีกครั้งก่อนส่งตรวจ";
+  } else {
+    statusNode.className = "status ok";
+    statusNode.textContent = "พร้อมส่งตรวจ";
+  }
+
+  const renderRows = (title, rows, emptyText) => `
+    <section class="article-brief-section">
+      <h3>${escapeHtml(title)}</h3>
+      ${rows.length > 0 ? `
+        <div class="readiness-summary">
+          ${rows.map((row) => `
+            <div class="summary-row">
+              <strong>${escapeHtml(row.label)}</strong>
+              <span>
+                ${escapeHtml(row.message)}
+                ${row.target ? ` <button type="button" class="utility-action" data-readiness-target="${escapeHtml(row.target)}">ไปแก้ไข</button>` : ""}
+              </span>
+            </div>
+          `).join("")}
+        </div>
+      ` : `<p class="muted">${escapeHtml(emptyText)}</p>`}
+    </section>
+  `;
+
+  root.innerHTML = [
+    renderRows("ต้องแก้ก่อนส่ง", readiness.blockers, "ไม่มีรายการที่บล็อกการส่ง"),
+    renderRows("ควรตรวจอีกครั้ง", readiness.warnings, "ไม่มีคำเตือนเพิ่มเติม"),
+    renderRows("พร้อมแล้ว / ข้อมูลที่ยืนยันแล้ว", readiness.info, "ยังไม่มีข้อมูลสรุปเพิ่มเติม"),
+  ].join("");
+}
+
+function focusReadinessTarget(target) {
+  const targetKey = String(target || "").trim();
+  if (!targetKey) return false;
+
+  const confirmedMetaTargets = new Set([
+    "confirmed-meta-section",
+    "confirmed-phone",
+    "confirmed-line-url",
+    "confirmed-facebook-url",
+    "confirmed-website-url",
+    "confirmed-primary-cta",
+    "confirmed-category",
+    "confirmed-subtype",
+    "confirmed-tags",
+    "confirmed-meta-status",
+    "confirmed-note",
+    "field-return-evidence-panel",
+    "field-return-evidence-status",
+  ]);
+
+  if (confirmedMetaTargets.has(targetKey) && workspaceState.confirmedMetaCollapsed) {
+    workspaceState.confirmedMetaCollapsed = false;
+    renderConfirmedMetaVisibility();
+  }
+
+  const node = qs(targetKey) || (confirmedMetaTargets.has(targetKey) ? qs("confirmed-meta-section") : null);
+  if (!node) return false;
+  if (typeof node.scrollIntoView === "function") {
+    node.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+  if (typeof node.focus === "function") {
+    try {
+      node.focus();
+    } catch {}
+  }
+  return true;
+}
+
+function handleSubmitReadinessTargetClick(event) {
+  const actionNode = event?.target?.closest?.("[data-readiness-target]");
+  if (!actionNode) return false;
+  if (typeof event?.preventDefault === "function") event.preventDefault();
+  return focusReadinessTarget(actionNode.dataset.readinessTarget || "");
+}
+
+function registerSubmitReadinessTargetDelegation(root = qs("submit-readiness-panel")) {
+  root?.addEventListener("click", handleSubmitReadinessTargetClick);
 }
 
 function renderMetaDescriptionGuidance() {
@@ -1646,8 +1743,8 @@ function applyEditorWorkspaceView() {
   if (submitCard) {
     const title = submitCard.querySelector(".section-title");
     const help = submitCard.querySelector(".muted");
-    if (title) title.textContent = "\u0e2a\u0e48\u0e07\u0e40\u0e02\u0e49\u0e32\u0e04\u0e34\u0e27\u0e15\u0e23\u0e27\u0e08";
-    if (help) help.textContent = "\u0e40\u0e21\u0e37\u0e48\u0e2d\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e41\u0e25\u0e49\u0e27 \u0e04\u0e48\u0e2d\u0e22\u0e2a\u0e48\u0e07\u0e1a\u0e17\u0e04\u0e27\u0e32\u0e21\u0e40\u0e02\u0e49\u0e32\u0e04\u0e34\u0e27\u0e15\u0e23\u0e27\u0e08\u0e08\u0e32\u0e01\u0e2a\u0e48\u0e27\u0e19\u0e19\u0e35\u0e49";
+    if (title) title.textContent = "\u0e04\u0e27\u0e32\u0e21\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e15\u0e23\u0e27\u0e08";
+    if (help) help.textContent = "\u0e2a\u0e23\u0e38\u0e1b\u0e08\u0e38\u0e14\u0e17\u0e35\u0e48\u0e15\u0e49\u0e2d\u0e07\u0e41\u0e01\u0e49 \u0e08\u0e38\u0e14\u0e17\u0e35\u0e48\u0e04\u0e27\u0e23\u0e17\u0e27\u0e19 \u0e41\u0e25\u0e30\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19 \u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e40\u0e02\u0e49\u0e32\u0e04\u0e34\u0e27\u0e15\u0e23\u0e27\u0e08";
   }
   const submitBtn = qs("btn-submit-review");
   if (submitBtn) submitBtn.textContent = "\u0e2a\u0e48\u0e07\u0e40\u0e02\u0e49\u0e32\u0e04\u0e34\u0e27\u0e15\u0e23\u0e27\u0e08";
@@ -1673,6 +1770,7 @@ function renderAll(options = {}) {
   renderOtherTransportPanel();
   renderPreview();
   renderReviewChecklist();
+  renderSubmitReadiness();
   renderMetaDescriptionGuidance();
   applyEditorWorkspaceView();
   applyActionGuards();
@@ -1695,6 +1793,7 @@ async function refreshAssets() {
   renderOtherTransportPanel();
   renderPreview();
   renderReviewChecklist();
+  renderSubmitReadiness();
   applyEditorWorkspaceView();
   applyActionGuards();
   renderWorkspaceSaveState();
@@ -1779,6 +1878,7 @@ async function generateSeoMetadataSuggestion() {
     setWorkspaceDirty(true);
     renderPreview();
     renderReviewChecklist();
+    renderSubmitReadiness();
     renderMetaDescriptionGuidance();
     renderStatusChip();
     applyActionGuards();
@@ -1939,6 +2039,7 @@ function applyFieldReturnEvidenceByKey(key) {
   fillField("confirmed-website-url", nextValues.website_url || "");
   fillField("confirmed-primary-cta", nextValues.primary_cta || "");
   setWorkspaceDirty(true);
+  renderSubmitReadiness();
   renderStatusChip();
   applyActionGuards();
   setInlineStatus("field-return-evidence-status", "คัดลอกค่ามาไว้ในข้อมูลยืนยันแล้ว กรุณากดบันทึก");
@@ -1953,6 +2054,26 @@ function handleFieldReturnEvidencePanelClick(event) {
   } catch (err) {
     setInlineStatus("field-return-evidence-status", err.message, "error");
     return false;
+  }
+}
+
+async function handleSubmitReviewClick() {
+  try {
+    const validation = validateWorkspace();
+    if (!validation.ok) throw new Error(`Missing: ${validation.missing.join(", ")}`);
+    const readiness = computeSubmitReadiness();
+    state.readiness = readiness;
+    if (Array.isArray(readiness?.warnings) && readiness.warnings.length > 0) {
+      const confirmed = window.confirm("ยังมีรายการที่ควรตรวจอีกครั้ง ต้องการส่งตรวจต่อหรือไม่?");
+      if (!confirmed) return;
+    }
+    const note = currentReviewNote() || "submitted from article workspace";
+    await saveWorkspace();
+    await submitWorkspaceForReview(note);
+    window.location.href = reviewUrl();
+    setInlineStatus("review-status", "ส่งเข้าตรวจแล้ว");
+  } catch (err) {
+    setInlineStatus("review-status", err.message, "error");
   }
 }
 
@@ -2000,12 +2121,14 @@ function wire() {
     }
     renderPreview();
     renderReviewChecklist();
+    renderSubmitReadiness();
   });
   ["article-excerpt", "article-slug", "article-meta-title", "article-meta-description"].forEach((id) => {
     qs(id)?.addEventListener("input", () => {
       setWorkspaceDirty(true);
       renderPreview();
       renderReviewChecklist();
+      renderSubmitReadiness();
       renderMetaDescriptionGuidance();
       renderStatusChip();
       applyActionGuards();
@@ -2014,6 +2137,7 @@ function wire() {
   ["confirmed-phone", "confirmed-line-url", "confirmed-facebook-url", "confirmed-website-url", "confirmed-category", "confirmed-subtype", "confirmed-note"].forEach((id) => {
     qs(id)?.addEventListener("input", () => {
       setWorkspaceDirty(true);
+      renderSubmitReadiness();
       renderStatusChip();
       applyActionGuards();
     });
@@ -2021,17 +2145,20 @@ function wire() {
   qs("confirmed-tags")?.addEventListener("change", () => {
     fillField("confirmed-tags", normalizeCommaSeparatedTags(qs("confirmed-tags")?.value || "").join(", "));
     setWorkspaceDirty(true);
+    renderSubmitReadiness();
     renderStatusChip();
     applyActionGuards();
   });
   qs("confirmed-tags")?.addEventListener("input", () => {
     setWorkspaceDirty(true);
+    renderSubmitReadiness();
     renderStatusChip();
     applyActionGuards();
   });
   ["confirmed-primary-cta", "confirmed-meta-status"].forEach((id) => {
     qs(id)?.addEventListener("change", () => {
       setWorkspaceDirty(true);
+      renderSubmitReadiness();
       renderStatusChip();
       applyActionGuards();
     });
@@ -2043,6 +2170,7 @@ function wire() {
         renderOtherTransportPanel();
         renderPreview();
         renderReviewChecklist();
+        renderSubmitReadiness();
         renderStatusChip();
         applyActionGuards();
       });
@@ -2054,6 +2182,7 @@ function wire() {
     renderBlocks();
     renderPreview();
     renderReviewChecklist();
+    renderSubmitReadiness();
     renderStatusChip();
     applyActionGuards();
   });
@@ -2100,6 +2229,7 @@ function wire() {
     renderWriterSystemInfo();
   });
   qs("field-return-evidence-panel")?.addEventListener("click", handleFieldReturnEvidencePanelClick);
+  registerSubmitReadinessTargetDelegation();
   qs("asset-library")?.addEventListener("click", async (event) => {
     const actionNode = event.target.closest("[data-action]");
     if (!actionNode) return;
@@ -2181,17 +2311,7 @@ function wire() {
     event.returnValue = "";
   });
   qs("btn-submit-review")?.addEventListener("click", async () => {
-    try {
-      const validation = validateWorkspace();
-      if (!validation.ok) throw new Error(`Missing: ${validation.missing.join(", ")}`);
-      const note = currentReviewNote() || "submitted from article workspace";
-      await saveWorkspace();
-      await submitWorkspaceForReview(note);
-      window.location.href = reviewUrl();
-      setInlineStatus("review-status", "Submitted for review");
-    } catch (err) {
-      setInlineStatus("review-status", err.message, "error");
-    }
+    await handleSubmitReviewClick();
   });
 }
 

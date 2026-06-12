@@ -164,6 +164,7 @@ async function createPageHarness({ itemType = "place", evidenceItems = [], confi
     setWorkspaceDirty() {
       dirtyCalls += 1;
     },
+    renderSubmitReadiness() {},
     renderStatusChip() {},
     applyActionGuards() {},
   };
