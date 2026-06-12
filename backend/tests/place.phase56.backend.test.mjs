@@ -725,7 +725,7 @@ test("phase 5-6 backend targeted coverage", async (t) => {
         source_url: "",
         storage_disk: "local",
         file_name: "gallery-22.jpg",
-        storage_path: "uploads/gallery-22.jpg",
+        storage_path: "uploads/published/gallery/gallery-22.jpg",
       },
       {
         place_id: 22,
@@ -734,7 +734,7 @@ test("phase 5-6 backend targeted coverage", async (t) => {
         source_url: "",
         storage_disk: "local",
         file_name: "inline-usage-22.jpg",
-        storage_path: "uploads/inline-usage-22.jpg",
+        storage_path: "uploads/published/inline/inline-usage-22.jpg",
       },
     ];
 
@@ -752,8 +752,8 @@ test("phase 5-6 backend targeted coverage", async (t) => {
       assert.equal(item.decision_thumbnail_image, "https://api.test.local/uploads/published-thumb-22.jpg");
       assert.equal(item.effective_cover_image, "https://api.test.local/uploads/published-cover-22.jpg");
       assert.equal(item.effective_thumbnail_image, "https://api.test.local/uploads/published-thumb-22.jpg");
-      assert.deepEqual(item.media_gallery_images, ["https://api.test.local/uploads/gallery-22.jpg"]);
-      assert.deepEqual(item.media_inline_images, ["https://api.test.local/uploads/inline-usage-22.jpg"]);
+      assert.deepEqual(item.media_gallery_images, ["https://api.test.local/uploads/published/gallery/gallery-22.jpg"]);
+      assert.deepEqual(item.media_inline_images, ["https://api.test.local/uploads/published/inline/inline-usage-22.jpg"]);
       assert.match(item.description, /https:\/\/api\.test\.local\/uploads\/inline-22\.jpg/);
     });
   });
