@@ -339,6 +339,10 @@ export function isOtherTransportItem(item = state.item) {
   return String(item?.type || "").trim().toLowerCase() === "other_transport";
 }
 
+export function isPlaceItem(item = state.item) {
+  return String(item?.type || "").trim().toLowerCase() === "place";
+}
+
 export function otherTransportSubtypeLabel(value) {
   const key = String(value || "").trim().toLowerCase();
   return OTHER_TRANSPORT_SUBTYPES[key] || OTHER_TRANSPORT_SUBTYPES.other;
@@ -489,6 +493,69 @@ export function defaultConfirmedTaxonomy() {
     subtype: null,
     tags: [],
   };
+}
+
+export function defaultFieldReturnEvidence() {
+  return {
+    version: 1,
+    items: [],
+  };
+}
+
+export function fieldReturnEvidence() {
+  const raw = state.articleProcess?.field_return_evidence;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return defaultFieldReturnEvidence();
+  const items = Array.isArray(raw.items) ? raw.items : [];
+  return {
+    version: 1,
+    items: items
+      .filter((row) => row && typeof row === "object" && !Array.isArray(row))
+      .map((row) => ({
+        key: String(row.key || "").trim().toLowerCase(),
+        group_key: String(row.group_key || "").trim().toLowerCase() || "other",
+        check_key: String(row.check_key || "").trim().toLowerCase() || String(row.key || "").trim().toLowerCase(),
+        label: String(row.label || "").trim() || String(row.check_key || row.key || "").trim(),
+        checked: row.checked === true,
+        found: row.found === true,
+        value: row.value ?? null,
+        condition_note: String(row.condition_note || "").trim() || null,
+        evidence: String(row.evidence || "").trim() || null,
+        note: String(row.note || "").trim() || null,
+        submitted_at: String(row.submitted_at || "").trim() || null,
+        submitted_by: String(row.submitted_by || "").trim() || null,
+        assignment_id: Number(row.assignment_id || 0) || null,
+      })),
+  };
+}
+
+export function canApplyFieldReturnEvidenceToConfirmedCta(item, currentItem = state.item) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+  if (!isPlaceItem(currentItem)) return false;
+  const key = String(item.key || "").trim().toLowerCase();
+  if (!["cta_contact.phone", "cta_contact.line_url", "cta_contact.facebook_url", "cta_contact.website_url", "cta_contact.primary_cta"].includes(key)) {
+    return false;
+  }
+  if (item.found !== true) return false;
+  if (key === "cta_contact.primary_cta") {
+    const primaryCta = String(item.value || "").trim().toLowerCase();
+    return ["map", "phone", "line"].includes(primaryCta);
+  }
+  return String(item.value || "").trim().length > 0;
+}
+
+export function applyFieldReturnEvidenceToConfirmedCta(currentValues = {}, item, currentItem = state.item) {
+  const nextValues = {
+    ...defaultConfirmedCtaContact(),
+    ...(currentValues && typeof currentValues === "object" && !Array.isArray(currentValues) ? currentValues : {}),
+  };
+  if (!canApplyFieldReturnEvidenceToConfirmedCta(item, currentItem)) return nextValues;
+  const key = String(item.key || "").trim().toLowerCase();
+  if (key === "cta_contact.phone") nextValues.phone = String(item.value || "").trim();
+  if (key === "cta_contact.line_url") nextValues.line_url = String(item.value || "").trim();
+  if (key === "cta_contact.facebook_url") nextValues.facebook_url = String(item.value || "").trim();
+  if (key === "cta_contact.website_url") nextValues.website_url = String(item.value || "").trim();
+  if (key === "cta_contact.primary_cta") nextValues.primary_cta = String(item.value || "").trim().toLowerCase();
+  return nextValues;
 }
 
 export function normalizeCommaSeparatedTags(rawValue) {

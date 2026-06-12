@@ -5,9 +5,12 @@
   currentOtherTransportMeta,
   currentAssignmentState,
   currentReviewNote,
+  canApplyFieldReturnEvidenceToConfirmedCta,
   defaultConfirmedCtaContact,
   defaultConfirmedTaxonomy,
+  fieldReturnEvidence,
   applyArticleSuggestionFieldValues,
+  applyFieldReturnEvidenceToConfirmedCta,
   applySeoSuggestionFieldValues,
   embedOrientation,
   ensureSelectedAssetId,
@@ -36,6 +39,7 @@
   setBanner,
   setInlineStatus,
   slugify,
+  isPlaceItem,
   isOtherTransportItem,
   state,
   validateWorkspace,
@@ -1093,6 +1097,80 @@ function renderConfirmedMetaVisibility() {
   button.textContent = workspaceState.confirmedMetaCollapsed ? "แสดงข้อมูลยืนยัน" : "ซ่อนข้อมูลยืนยัน";
 }
 
+function fieldReturnEvidenceGroupLabel(groupKey) {
+  if (groupKey === "cta_contact") return "CTA / ช่องทางติดต่อ";
+  if (groupKey === "taxonomy") return "หมวดหมู่";
+  return "เช็กอื่น ๆ";
+}
+
+function renderFieldReturnEvidenceValue(value) {
+  if (Array.isArray(value)) {
+    const rows = value.map((entry) => String(entry || "").trim()).filter(Boolean);
+    return rows.length ? rows.map((entry) => escapeHtml(entry)).join(", ") : "-";
+  }
+  if (value && typeof value === "object") {
+    return escapeHtml(JSON.stringify(value));
+  }
+  const text = String(value ?? "").trim();
+  return text ? escapeHtml(text) : "-";
+}
+
+function renderFieldReturnEvidencePanel() {
+  const root = qs("field-return-evidence-panel");
+  if (!root) return;
+  const evidence = fieldReturnEvidence();
+  const items = (Array.isArray(evidence?.items) ? evidence.items : []).filter((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    if (String(item.group_key || "").trim().toLowerCase() === "cta_contact" && !isPlaceItem(state.item)) {
+      return false;
+    }
+    return true;
+  });
+  if (!items.length) {
+    root.innerHTML = '<p class="muted">ยังไม่มีข้อมูลที่คนเช็กส่งกลับ</p>';
+    setInlineStatus("field-return-evidence-status", "");
+    return;
+  }
+  const grouped = new Map([
+    ["cta_contact", []],
+    ["taxonomy", []],
+    ["other", []],
+  ]);
+  for (const item of items) {
+    const groupKey = item.group_key === "cta_contact" || item.group_key === "taxonomy" ? item.group_key : "other";
+    grouped.get(groupKey).push(item);
+  }
+  root.innerHTML = Array.from(grouped.entries())
+    .filter(([, rows]) => rows.length > 0)
+    .map(([groupKey, rows]) => `
+      <section class="article-brief-section">
+        <h3>${escapeHtml(fieldReturnEvidenceGroupLabel(groupKey))}</h3>
+        <ul>
+          ${rows.map((item) => {
+            const canApply = canApplyFieldReturnEvidenceToConfirmedCta(item, state.item);
+            const submittedMeta = [item.submitted_at ? formatDateTime(item.submitted_at) : "", item.submitted_by || ""].filter(Boolean).join(" · ");
+            return `
+              <li>
+                <strong>${escapeHtml(item.label || item.key)}</strong>
+                <div class="summary-row"><strong>คีย์</strong><span>${escapeHtml(item.key)}</span></div>
+                <div class="summary-row"><strong>ตรวจแล้ว</strong><span>${item.checked ? "ใช่" : "ไม่ใช่"}</span></div>
+                <div class="summary-row"><strong>${item.found ? "พบข้อมูล" : "ไม่พบข้อมูล"}</strong><span>${item.found ? "ใช่" : "ไม่ใช่"}</span></div>
+                <div class="summary-row"><strong>ค่าที่พบ</strong><span>${renderFieldReturnEvidenceValue(item.value)}</span></div>
+                <div class="summary-row"><strong>เงื่อนไข/ข้อจำกัด</strong><span>${escapeHtml(item.condition_note || "-")}</span></div>
+                <div class="summary-row"><strong>หลักฐาน/แหล่งที่มา</strong><span>${escapeHtml(item.evidence || "-")}</span></div>
+                <div class="summary-row"><strong>หมายเหตุ</strong><span>${escapeHtml(item.note || "-")}</span></div>
+                <div class="summary-row"><strong>ส่งกลับเมื่อ</strong><span>${escapeHtml(submittedMeta || "-")}</span></div>
+                ${canApply ? `<div class="toolbar compact-toolbar"><button type="button" class="utility-action" data-action="apply-field-return-evidence" data-field-return-key="${escapeHtml(item.key)}">ใช้ค่านี้</button></div>` : ""}
+              </li>
+            `;
+          }).join("")}
+        </ul>
+      </section>
+    `)
+    .join("");
+  setInlineStatus("field-return-evidence-status", "แสดงข้อมูลที่คนเช็กส่งกลับแบบอ่านอย่างเดียว");
+}
+
 function renderWorkspaceFields() {
   const item = state.item || {};
   const draft = latestDraft();
@@ -1586,6 +1664,7 @@ function renderAll(options = {}) {
   renderWriterBrief();
   renderFieldPackEvidencePanel();
   renderTaxonomyReviewPanel();
+  renderFieldReturnEvidencePanel();
   renderWriterSystemInfo();
   renderBlocks();
   renderHeroAndAssets();
@@ -1835,6 +1914,48 @@ function insertVideoEmbed() {
   input.value = "";
 }
 
+function applyFieldReturnEvidenceByKey(key) {
+  const evidence = fieldReturnEvidence();
+  const item = (Array.isArray(evidence?.items) ? evidence.items : []).find((row) => String(row?.key || "").trim().toLowerCase() === String(key || "").trim().toLowerCase()) || null;
+  if (!canApplyFieldReturnEvidenceToConfirmedCta(item, state.item)) return false;
+  const currentValues = {
+    phone: String(qs("confirmed-phone")?.value || ""),
+    line_url: String(qs("confirmed-line-url")?.value || ""),
+    facebook_url: String(qs("confirmed-facebook-url")?.value || ""),
+    website_url: String(qs("confirmed-website-url")?.value || ""),
+    primary_cta: String(qs("confirmed-primary-cta")?.value || ""),
+  };
+  const nextValues = applyFieldReturnEvidenceToConfirmedCta(currentValues, item, state.item);
+  const nextFieldName = String(item.key || "").trim().toLowerCase().split(".")[1] || "";
+  const currentValue = String(currentValues[nextFieldName] || "").trim();
+  const nextValue = String(nextValues[nextFieldName] || "").trim();
+  if (currentValue && currentValue !== nextValue) {
+    const confirmed = window.confirm("มีค่าที่ยืนยันไว้แล้ว ต้องการแทนที่ด้วยค่าที่คนเช็กส่งกลับหรือไม่?");
+    if (!confirmed) return false;
+  }
+  fillField("confirmed-phone", nextValues.phone || "");
+  fillField("confirmed-line-url", nextValues.line_url || "");
+  fillField("confirmed-facebook-url", nextValues.facebook_url || "");
+  fillField("confirmed-website-url", nextValues.website_url || "");
+  fillField("confirmed-primary-cta", nextValues.primary_cta || "");
+  setWorkspaceDirty(true);
+  renderStatusChip();
+  applyActionGuards();
+  setInlineStatus("field-return-evidence-status", "คัดลอกค่ามาไว้ในข้อมูลยืนยันแล้ว กรุณากดบันทึก");
+  return true;
+}
+
+function handleFieldReturnEvidencePanelClick(event) {
+  const actionNode = event?.target?.closest?.("[data-action='apply-field-return-evidence']");
+  if (!actionNode) return false;
+  try {
+    return applyFieldReturnEvidenceByKey(actionNode.dataset.fieldReturnKey || "");
+  } catch (err) {
+    setInlineStatus("field-return-evidence-status", err.message, "error");
+    return false;
+  }
+}
+
 function wire() {
   qs("btn-back-home")?.addEventListener("click", () => {
     window.location.href = "/";
@@ -1978,6 +2099,7 @@ function wire() {
     workspaceState.systemInfoCollapsed = !workspaceState.systemInfoCollapsed;
     renderWriterSystemInfo();
   });
+  qs("field-return-evidence-panel")?.addEventListener("click", handleFieldReturnEvidencePanelClick);
   qs("asset-library")?.addEventListener("click", async (event) => {
     const actionNode = event.target.closest("[data-action]");
     if (!actionNode) return;

@@ -1394,6 +1394,28 @@ function normalizeAssignmentSubmissionRow(row) {
   };
 }
 
+function fieldReturnEvidenceLabelFromKey(groupKey, checkKey) {
+  const normalizedGroupKey = String(groupKey || "").trim().toLowerCase();
+  const normalizedCheckKey = String(checkKey || "").trim().toLowerCase();
+  if (normalizedGroupKey === "cta_contact") {
+    if (normalizedCheckKey === "phone") return "เบอร์โทร";
+    if (normalizedCheckKey === "line_url") return "ลิงก์ LINE";
+    if (normalizedCheckKey === "facebook_url") return "ลิงก์ Facebook";
+    if (normalizedCheckKey === "website_url") return "ลิงก์เว็บไซต์";
+    if (normalizedCheckKey === "primary_cta") return "ปุ่มหลัก";
+  }
+  if (normalizedGroupKey === "taxonomy") {
+    if (normalizedCheckKey === "category") return "หมวดหลัก";
+    if (normalizedCheckKey === "subtype") return "หมวดย่อย";
+    if (normalizedCheckKey === "tags") return "แท็ก";
+  }
+  return normalizedCheckKey
+    .split(/[_\-.]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function normalizeAssignmentSubmissionDraftRow(row) {
   if (!row) return null;
   return {
@@ -2949,13 +2971,14 @@ function ensureFieldPackAssignmentForeignKeySupport(db) {
           contributor_note TEXT,
           reviewer_note TEXT,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           reviewed_at TEXT,
           FOREIGN KEY(assignment_id) REFERENCES content_assignments(id) ON DELETE CASCADE,
           FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
           FOREIGN KEY(submitted_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
         );
       `,
-      insertColumns: "id, assignment_id, content_item_id, submitted_by_user_id, submission_state, article_payload_json, media_payload_json, contributor_note, reviewer_note, created_at, reviewed_at",
+      insertColumns: "id, assignment_id, content_item_id, submitted_by_user_id, submission_state, article_payload_json, media_payload_json, contributor_note, reviewer_note, created_at, updated_at, reviewed_at",
       indexSql: [
         "CREATE INDEX IF NOT EXISTS idx_assignment_submissions_assignment ON content_assignment_submissions(assignment_id, created_at DESC);",
         "CREATE INDEX IF NOT EXISTS idx_assignment_submissions_item ON content_assignment_submissions(content_item_id, created_at DESC);",
@@ -3300,6 +3323,10 @@ function ensureAssignmentSubmissionFieldReturnSupport(db) {
   const names = new Set(cols.map((c) => String(c?.name || "").trim()));
   if (!names.has("field_return_payload_json")) {
     db.exec("ALTER TABLE content_assignment_submissions ADD COLUMN field_return_payload_json TEXT;");
+  }
+  if (!names.has("updated_at")) {
+    db.exec("ALTER TABLE content_assignment_submissions ADD COLUMN updated_at TEXT;");
+    db.exec("UPDATE content_assignment_submissions SET updated_at=COALESCE(updated_at, created_at, CURRENT_TIMESTAMP);");
   }
 }
 
@@ -4368,8 +4395,8 @@ export function createRepository(db) {
     INSERT INTO content_assignment_submissions (
       assignment_id, content_item_id, submitted_by_user_id, submission_state,
       article_payload_json, media_payload_json, field_return_payload_json,
-      contributor_note, reviewer_note, reviewed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      contributor_note, reviewer_note, created_at, updated_at, reviewed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const updateAssignmentSubmissionStmt = db.prepare(`
     UPDATE content_assignment_submissions
@@ -4381,7 +4408,8 @@ export function createRepository(db) {
       field_return_payload_json=?,
       contributor_note=COALESCE(?, contributor_note),
       reviewer_note=COALESCE(?, reviewer_note),
-      reviewed_at=COALESCE(?, reviewed_at)
+      reviewed_at=COALESCE(?, reviewed_at),
+      updated_at=?
     WHERE id=?
   `);
 
@@ -6054,6 +6082,7 @@ function normalizeStateValue(value, stateGroup) {
         ? normalizeAssignmentSubmissionRow(getAssignmentSubmissionByIdStmt.get(latestSubmissionId))
         : null;
       if (latestSubmission && Number(latestSubmission.assignment_id || 0) === assignmentId) {
+        const updatedAt = toBangkokSqlTimestamp();
         const nextArticlePayload = articlePayload == null
           ? latestSubmission.article_payload_json
           : mergeAssignmentSubmissionObjectPayload(latestSubmission.article_payload_json, articlePayload);
@@ -6072,6 +6101,7 @@ function normalizeStateValue(value, stateGroup) {
           contributorNote,
           reviewerNote,
           reviewedAt,
+          updatedAt,
           latestSubmissionId
         );
         setAssignmentLatestSubmission(assignmentId, latestSubmissionId);
@@ -6081,6 +6111,7 @@ function normalizeStateValue(value, stateGroup) {
       }
     }
 
+    const createdAt = toBangkokSqlTimestamp();
     const res = insertAssignmentSubmissionStmt.run(
       assignmentId,
       Number(assignment.content_item_id),
@@ -6091,6 +6122,8 @@ function normalizeStateValue(value, stateGroup) {
       fieldReturnPayload ? JSON.stringify(fieldReturnPayload) : null,
       contributorNote,
       reviewerNote,
+      createdAt,
+      createdAt,
       reviewedAt
     );
     const submissionId = Number(res.lastInsertRowid || 0);
@@ -8951,6 +8984,56 @@ function normalizeStateValue(value, stateGroup) {
     };
   }
 
+  function buildFieldReturnEvidenceByItem(contentItemId) {
+    const itemId = Number(contentItemId || 0) || 0;
+    const empty = { version: 1, items: [] };
+    if (!itemId) return empty;
+    const assignments = listAssignmentsByItem(itemId);
+    if (!assignments.length) return empty;
+    const items = assignments
+      .map((assignment) => {
+        const assignmentId = Number(assignment?.id || 0) || 0;
+        const latestSubmissionId = Number(assignment?.latest_submission_id || 0) || 0;
+        if (!assignmentId || !latestSubmissionId) return [];
+        const submission = getAssignmentSubmissionById(latestSubmissionId);
+        const returns = submission?.field_return_payload_json?.requested_check_returns;
+        if (!returns || typeof returns !== "object") return [];
+        const submittedAt = submission?.updated_at || submission?.created_at || null;
+        return Object.entries(returns).map(([key, entry]) => {
+          const normalizedKey = String(key || "").trim().toLowerCase();
+          const [groupKey = "", ...rest] = normalizedKey.split(".");
+          const checkKey = rest.join(".").trim().toLowerCase();
+          return {
+            key: normalizedKey,
+            group_key: groupKey || "other",
+            check_key: checkKey || normalizedKey,
+            label: fieldReturnEvidenceLabelFromKey(groupKey, checkKey || normalizedKey),
+            checked: entry?.checked === true,
+            found: entry?.found === true,
+            value: entry?.value ?? null,
+            condition_note: String(entry?.condition_note || "").trim() || null,
+            evidence: String(entry?.evidence || "").trim() || null,
+            note: String(entry?.note || "").trim() || null,
+            submitted_at: submittedAt,
+            submitted_by_user_id: Number(submission?.submitted_by_user_id || 0) || null,
+            assignment_id: assignmentId,
+            submission_id: latestSubmissionId,
+          };
+        });
+      })
+      .flat()
+      .sort((a, b) => {
+        const aTime = Date.parse(a?.submitted_at || "") || 0;
+        const bTime = Date.parse(b?.submitted_at || "") || 0;
+        if (bTime !== aTime) return bTime - aTime;
+        return (Number(b?.submission_id || 0) || 0) - (Number(a?.submission_id || 0) || 0);
+      });
+    return {
+      version: 1,
+      items,
+    };
+  }
+
   function createAssignmentFromReadiness(
     contentItemId,
     payload = {},
@@ -11642,6 +11725,7 @@ function normalizeStateValue(value, stateGroup) {
     listExternalAssignmentsByAssigner,
     buildAssignmentHandoffPreview,
     buildPublishableSourceByItem,
+    buildFieldReturnEvidenceByItem,
     buildGovernanceSummaryByItem,
     updateAssignmentState,
     updateAssignmentMediaResetPolicy,
