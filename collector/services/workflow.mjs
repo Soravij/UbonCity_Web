@@ -970,6 +970,43 @@ function mergeTranslationRecheckStatus(modelStatus, derivedStatus) {
   return rank[normalizedModelStatus] > rank[normalizedDerivedStatus] ? normalizedModelStatus : normalizedDerivedStatus;
 }
 
+function translationRecheckIssueSeverityRank(value = "") {
+  const severity = String(value || "").trim().toLowerCase();
+  if (severity === "high") return 3;
+  if (severity === "medium") return 2;
+  if (severity === "low") return 1;
+  return 0;
+}
+
+function weakestTranslationRecheckArea(scores = {}) {
+  const areas = [
+    ["accuracy", scores.accuracy_score],
+    ["fluency", scores.fluency_score],
+    ["term", scores.term_score],
+  ]
+    .map(([type, value]) => [type, Number.isFinite(Number(value)) ? Number(value) : null])
+    .filter(([, value]) => value != null);
+  if (!areas.length) return "accuracy";
+  areas.sort((left, right) => left[1] - right[1]);
+  return areas[0][0];
+}
+
+function capTranslationRecheckScoreBySeverity(score, issues = [], targetTypes = null) {
+  const numericScore = Number.isFinite(Number(score)) ? Number(score) : null;
+  if (numericScore == null) return null;
+  const relevantIssues = Array.isArray(issues)
+    ? issues.filter((issue) => {
+      if (!Array.isArray(targetTypes) || !targetTypes.length) return true;
+      return targetTypes.includes(String(issue?.type || "").trim().toLowerCase());
+    })
+    : [];
+  const hasHigh = relevantIssues.some((issue) => translationRecheckIssueSeverityRank(issue?.severity) >= 3);
+  if (hasHigh) return Math.min(numericScore, 6);
+  const hasMedium = relevantIssues.some((issue) => translationRecheckIssueSeverityRank(issue?.severity) >= 2);
+  if (hasMedium) return Math.min(numericScore, 8);
+  return numericScore;
+}
+
 function normalizeTranslationRecheckResult(raw, provider = "", model = "") {
   const parsed = raw && typeof raw === "object" ? raw : parseTranslationRecheckJson(raw);
   if (!parsed || typeof parsed !== "object") {
@@ -986,24 +1023,71 @@ function normalizeTranslationRecheckResult(raw, provider = "", model = "") {
     term_score: termScore,
   }, issues);
   const modelStatus = String(parsed.status || "").trim().toLowerCase();
-  const finalStatus = mergeTranslationRecheckStatus(modelStatus, derivedStatus);
+  let finalStatus = mergeTranslationRecheckStatus(modelStatus, derivedStatus);
+  if (issues.length) {
+    const highestSeverity = Math.max(...issues.map((issue) => translationRecheckIssueSeverityRank(issue?.severity)), 0);
+    if (highestSeverity >= 3) {
+      finalStatus = "failed";
+    } else if (finalStatus === "passed") {
+      finalStatus = "warning";
+    }
+  }
+  let normalizedIssues = [...issues];
+  if ((finalStatus === "warning" || finalStatus === "failed") && normalizedIssues.length === 0) {
+    const weakestArea = weakestTranslationRecheckArea({
+      accuracy_score: accuracyScore,
+      fluency_score: fluencyScore,
+      term_score: termScore,
+    });
+    normalizedIssues = [{
+      type: weakestArea,
+      severity: finalStatus === "failed" ? "high" : "medium",
+      source_text: "",
+      target_text: "",
+      problem_th: finalStatus === "failed"
+        ? "ผลตรวจได้สถานะ failed หรือคะแนนต่ำ แต่โมเดลไม่ได้ให้ issue แบบเป็นโครงสร้าง"
+        : "ผลตรวจได้สถานะ warning หรือคะแนนต่ำ แต่โมเดลไม่ได้ให้ issue แบบเป็นโครงสร้าง",
+      suggestion_th: `กรุณาตรวจซ้ำหรือซ่อมคำแปลในด้าน${weakestArea === "fluency" ? "ความลื่นไหล" : weakestArea === "term" ? "ความสม่ำเสมอของคำศัพท์/ชื่อเฉพาะ" : "ความถูกต้องของความหมาย"}เป็นพิเศษ`,
+    }];
+  }
   const overallScore = clampTranslationRecheckScore(parsed.overall_score);
   const fallbackScoreSource = [accuracyScore, fluencyScore, termScore].filter((value) => value != null);
-  const computedOverallScore = overallScore != null
+  let normalizedAccuracyScore = capTranslationRecheckScoreBySeverity(accuracyScore, normalizedIssues, ["accuracy"]);
+  let normalizedFluencyScore = capTranslationRecheckScoreBySeverity(fluencyScore, normalizedIssues, ["fluency"]);
+  let normalizedTermScore = capTranslationRecheckScoreBySeverity(termScore, normalizedIssues, ["term"]);
+  let computedOverallScore = overallScore != null
     ? overallScore
     : fallbackScoreSource.length
       ? Math.round((fallbackScoreSource.reduce((sum, value) => sum + value, 0) / fallbackScoreSource.length) * 10) / 10
       : null;
+  computedOverallScore = capTranslationRecheckScoreBySeverity(computedOverallScore, normalizedIssues);
+  if (finalStatus === "failed" && computedOverallScore != null) {
+    computedOverallScore = Math.min(computedOverallScore, 6);
+  } else if (finalStatus === "warning" && computedOverallScore != null) {
+    computedOverallScore = Math.min(computedOverallScore, 8);
+  }
+  if (finalStatus === "failed") {
+    normalizedAccuracyScore = normalizedAccuracyScore == null ? null : Math.min(normalizedAccuracyScore, 6);
+    normalizedFluencyScore = normalizedFluencyScore == null ? null : Math.min(normalizedFluencyScore, 6);
+    normalizedTermScore = normalizedTermScore == null ? null : Math.min(normalizedTermScore, 6);
+  } else if (finalStatus === "warning") {
+    normalizedAccuracyScore = normalizedAccuracyScore == null ? null : Math.min(normalizedAccuracyScore, 8);
+    normalizedFluencyScore = normalizedFluencyScore == null ? null : Math.min(normalizedFluencyScore, 8);
+    normalizedTermScore = normalizedTermScore == null ? null : Math.min(normalizedTermScore, 8);
+  }
+  if (finalStatus === "passed") {
+    normalizedIssues = [];
+  }
 
   return {
     translation_recheck_status: finalStatus,
     translation_recheck_score: computedOverallScore,
-    accuracy_score: accuracyScore,
-    fluency_score: fluencyScore,
-    term_score: termScore,
+    accuracy_score: normalizedAccuracyScore,
+    fluency_score: normalizedFluencyScore,
+    term_score: normalizedTermScore,
     back_translation_th: String(parsed.back_translation_th || "").trim(),
     recheck_summary_th: String(parsed.summary_th || "").trim(),
-    recheck_issues: issues,
+    recheck_issues: normalizedIssues,
     recheck_model: [String(provider || "").trim(), String(model || "").trim()].filter(Boolean).join(":") || null,
   };
 }
@@ -1015,6 +1099,10 @@ function buildTranslationRecheckPrompt(article, translationRow) {
     "Compare Thai source content against the target translation and produce a Thai-readable evaluation.",
     "Check only: accuracy, fluency, term/name consistency, and a literal Thai back translation.",
     "If unsure, be conservative: prefer warning or failed rather than passed.",
+    "If status is warning or failed, issues must contain at least one actionable issue.",
+    "Do not return passed if any issue exists.",
+    "Do not return overall_score 9-10 for warning or failed.",
+    "Scores must match severity and the weakest area.",
     "Return ONLY valid JSON with this exact shape:",
     JSON.stringify({
       status: "passed|warning|failed",
@@ -1716,6 +1804,33 @@ export async function repairTranslationFromRecheckIssues(repo, contentItemId, la
   }
 
   return saved;
+}
+
+export async function repairAndRecheckTranslationFromIssues(repo, contentItemId, lang, aiConfig, actorEmail = "system@local") {
+  const repairedTranslation = await repairTranslationFromRecheckIssues(repo, contentItemId, lang, aiConfig, actorEmail);
+  const automaticCheckStatus = String(repairedTranslation?.automatic_check_status || "").trim().toLowerCase();
+  if (automaticCheckStatus !== "passed") {
+    return {
+      translation: repairedTranslation,
+      recheck_result: {
+        content_item_id: Number(contentItemId || 0) || 0,
+        locales: [],
+        completed_count: 0,
+        skipped_reason: "technical_qa_failed_after_repair",
+      },
+    };
+  }
+
+  const recheckResult = await rerunTranslationRecheck(repo, actorEmail, {
+    aiConfig,
+    content_item_id: contentItemId,
+    lang,
+  });
+  const refreshedTranslation = repo.getTranslation(contentItemId, lang) || repairedTranslation;
+  return {
+    translation: refreshedTranslation,
+    recheck_result: recheckResult,
+  };
 }
 
 export async function runCleanStage(repo, actorEmail) {

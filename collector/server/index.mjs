@@ -40,7 +40,7 @@ import {
   returnFieldPackToClean,
   reviewInternalLink,
   rerunProblemTranslations,
-  repairTranslationFromRecheckIssues,
+  repairAndRecheckTranslationFromIssues,
   rerunTranslationRecheck,
   runAiDraftStage,
   runCleanStage,
@@ -13018,7 +13018,8 @@ app.post("/api/items/:id/translations/:lang/repair", requireRole("admin", "owner
 
   try {
     const aiConfig = getEffectiveAiConfig();
-    const translation = await repairTranslationFromRecheckIssues(repo, id, lang, aiConfig, actorEmail(req));
+    const repairResult = await repairAndRecheckTranslationFromIssues(repo, id, lang, aiConfig, actorEmail(req));
+    const translation = repairResult?.translation || null;
     const readiness = buildExportReadiness(id);
     res.json({
       ok: true,
@@ -13026,7 +13027,11 @@ app.post("/api/items/:id/translations/:lang/repair", requireRole("admin", "owner
       translations: repo.listTranslations(id),
       readiness,
       result: {
-        content_item_id: id,
+        ...(repairResult?.recheck_result || {
+          content_item_id: id,
+          locales: [],
+          completed_count: 0,
+        }),
         lang,
         translation_recheck_status: String(translation?.translation_recheck_status || "not_checked").trim().toLowerCase() || "not_checked",
       },
