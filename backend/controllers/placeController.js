@@ -383,8 +383,8 @@ function buildMediaPublicUrl(req, asset) {
   const base = configuredBase || `${req.protocol}://${req.get("host")}`;
 
   if (storageDisk === "external") return sourceUrl;
-  if (fileName) return `${base}/uploads/${fileName}`;
   if (storagePath) return `${base}/${storagePath}`;
+  if (fileName) return `${base}/uploads/${fileName}`;
   return sourceUrl || "";
 }
 
