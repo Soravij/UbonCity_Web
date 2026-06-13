@@ -53,6 +53,12 @@ function normalizeImportedMediaUrl(value) {
   return "";
 }
 
+function toGoogleMapsPhotoProxyUrl(photoName) {
+  const name = String(photoName || "").trim();
+  if (!name) return "";
+  return `/api/google-maps/photo?name=${encodeURIComponent(name)}&maxWidthPx=1400&maxHeightPx=1400`;
+}
+
 function collectImportedMediaCandidate(list, seen, url, options = {}) {
   const normalizedUrl = normalizeImportedMediaUrl(url);
   if (!normalizedUrl) return false;
@@ -93,10 +99,10 @@ function extractImportedMediaCandidatesFromPayload(payload, options = {}) {
         continue;
       }
       if (!row || typeof row !== "object" || Array.isArray(row)) continue;
-      pushCandidate(row.photo_url || row.url || row.uri || row.image_url || row.src, {
+      pushCandidate(row.photo_url || row.url || row.uri || row.image_url || row.src || toGoogleMapsPhotoProxyUrl(row.photo_name), {
         mime_type: row.mime_type,
-        width: row.width,
-        height: row.height,
+        width: row.width ?? row.width_px,
+        height: row.height ?? row.height_px,
         role_hint: row.role,
       });
     }
@@ -110,8 +116,8 @@ function extractImportedMediaCandidatesFromPayload(payload, options = {}) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     pushCandidate(value.image_url || value.media_url || value.url || value.uri || value.src, {
       mime_type: value.mime_type,
-      width: value.width,
-      height: value.height,
+      width: value.width ?? value.width_px,
+      height: value.height ?? value.height_px,
       role_hint: value.role,
     });
   };
@@ -130,6 +136,8 @@ function extractImportedMediaCandidatesFromPayload(payload, options = {}) {
 
   collectPhotoArray(payloadObject.extracted_metadata_photos);
   collectImageObject(payloadObject.extracted_metadata_image);
+  collectPhotoArray(payloadObject.extracted_metadata?.photos);
+  collectImageObject(payloadObject.extracted_metadata?.image);
 
   return out;
 }

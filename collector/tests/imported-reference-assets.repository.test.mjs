@@ -12,7 +12,7 @@ process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "ImportedMedia!Test1"
 function createTestContext() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-imported-media-"));
   const dbPath = path.join(tempDir, "test.sqlite");
-  const schemaPath = path.resolve("D:\\UbonCity_Web\\collector\\database\\schema.sql");
+  const schemaPath = path.resolve(import.meta.dirname, "..", "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   const repo = createRepository(db);
 
@@ -107,6 +107,49 @@ test("repairImportedReferenceAssetsForItem promotes raw and source-record media 
     assert.equal(
       importedAssets.every((row) => Number(row.selected_in_clean || 0) === 1),
       true
+    );
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("repairImportedReferenceAssetsForItem supports runtime extracted_metadata image and google photo_name shapes", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem();
+
+    ctx.db.prepare(`
+      INSERT INTO source_records (content_item_id, source_type, source_name, source_url, source_entity_id, payload_json)
+      VALUES (?, 'wongnai', 'wongnai.com', ?, ?, ?)
+    `).run(
+      item.id,
+      "https://www.wongnai.com/restaurants/runtime-shape",
+      null,
+      JSON.stringify({
+        extracted_metadata: {
+          image: "https://img.wongnai.com/p/800x0/2024/01/01/runtime-image.jpg",
+          photos: [
+            {
+              photo_name: "places/abc/photos/runtime-photo",
+              width_px: 1080,
+              height_px: 810,
+            },
+          ],
+        },
+      })
+    );
+
+    const diagnostics = ctx.repo.repairImportedReferenceAssetsForItem(item.id, {
+      apply: true,
+      actorEmail: "tester@local",
+      limit: 25,
+    });
+
+    const importedAssets = ctx.repo.listImportedReferenceAssetsByItem(item.id);
+    assert.equal(diagnostics.added_count, 3);
+    assert.ok(importedAssets.some((row) => row.public_url.includes("runtime-image.jpg")));
+    assert.ok(
+      importedAssets.some((row) => row.public_url === "/api/google-maps/photo?name=places%2Fabc%2Fphotos%2Fruntime-photo&maxWidthPx=1400&maxHeightPx=1400")
     );
   } finally {
     ctx.cleanup();
