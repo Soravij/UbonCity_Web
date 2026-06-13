@@ -63,6 +63,19 @@ function setTranslationGenerateLoading(isLoading) {
   stateNode.className = "translation-generate-state hidden";
 }
 
+function isCollectorLockedAfterAdminReview(status = getArticleStatus()) {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "submitted_for_admin_review" || normalized === "synced_to_admin";
+}
+
+function lockedCollectorWorkflowMessage() {
+  return "งานนี้ถูกส่งเข้า Admin Review แล้ว ไม่สามารถส่งกลับ workflow จาก Collector ได้";
+}
+
+function lockedTranslationMessage() {
+  return "งานนี้ถูกส่งเข้า Admin Review แล้ว ไม่สามารถแก้คำแปลจาก Collector ได้";
+}
+
 function normalizeReviewActionCopy() {
   const isOtherTransport = isOtherTransportItem();
   const reviewDescription = document.querySelector(".article-card-review > .article-section-head .muted");
@@ -118,6 +131,7 @@ function renderReviewArticleSummary() {
     ${isOtherTransportItem() ? `<div class="summary-row"><strong>ประเภทขนส่ง</strong><span>${escapeHtml(otherTransportSubtypeLabel(otherTransportMeta.subtype))}</span></div>` : ""}
     ${publishableSource ? `<div class="summary-row"><strong>Publishable source</strong><span>${escapeHtml(`assignment #${Number(publishableSource.assignment_id || 0) || "-"} / submission #${Number(publishableSource.latest_submission_id || 0) || "-"}`)}</span></div>` : ""}
     <div class="summary-row"><strong>สถานะล่าสุด</strong><span>${escapeHtml(draft?.status || latestStatus || "-")}</span></div>
+    ${isCollectorLockedAfterAdminReview() ? '<p class="warn">ส่งเข้า Admin Review แล้ว - รอการจัดการต่อใน Admin Panel</p>' : ""}
   `;
 }
 
@@ -209,6 +223,7 @@ function renderSyncSummary() {
     <div class="summary-row"><strong>Source article</strong><span class="ok">approved</span></div>
     <div class="summary-row"><strong>Package source</strong><span class="${readiness.source_ready ? "ok" : "fail"}">${readiness.source_ready ? "ready for translation workflow" : "source package incomplete"}</span></div>
     <div class="summary-row"><strong>Workflow status</strong><span>${escapeHtml(approvalLabel)}</span></div>
+    ${isCollectorLockedAfterAdminReview(status) ? '<p class="warn">ส่งเข้า Admin Review แล้ว - รอการจัดการต่อใน Admin Panel</p>' : ""}
     ${issues.length ? `<ul>${issues.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>` : '<p class="muted">ไม่มีประเด็นค้าง</p>'}
   `;
 }
@@ -915,17 +930,19 @@ function renderTranslationRecheckPanel() {
 
 function applyActionGuards() {
   const status = getArticleStatus();
+  const locked = isCollectorLockedAfterAdminReview(status);
   const validation = validateWorkspace();
   const translationGate = getTranslationGateState();
   const translationRecheckGate = getTranslationRecheckGateState();
 
   const revisionBtn = qs("btn-request-revision");
-  if (revisionBtn) revisionBtn.disabled = state.busy || !canApproveArticle() || !["ready_for_review", "ready_for_sync", "submitted_for_admin_review"].includes(status);
+  if (revisionBtn) revisionBtn.disabled = state.busy || locked || !canApproveArticle() || !["ready_for_review", "ready_for_sync"].includes(status);
 
   const approveBtn = qs("btn-approve-sync");
   if (approveBtn) {
     approveBtn.disabled = state.busy
       || !canApproveArticle()
+      || locked
       || status !== "ready_for_review"
       || !validation.ok
       || !translationGate.allReady
@@ -936,6 +953,7 @@ function applyActionGuards() {
   if (syncBtn) {
     syncBtn.disabled = state.busy
       || !canSyncArticle()
+      || locked
       || status !== "ready_for_sync"
       || !translationGate.allReady
       || !translationRecheckGate.allReady;
@@ -945,7 +963,14 @@ function applyActionGuards() {
   if (readinessBtn) readinessBtn.disabled = state.busy || !canSyncArticle();
 
   const generateTranslationsBtn = qs("btn-generate-translations");
-  if (generateTranslationsBtn) generateTranslationsBtn.disabled = state.busy || !canManageTranslations();
+  if (generateTranslationsBtn) generateTranslationsBtn.disabled = state.busy || locked || !canManageTranslations();
+
+  document.querySelectorAll("[data-translation-recheck-lang]").forEach((button) => {
+    button.disabled = button.disabled || locked;
+  });
+  document.querySelectorAll("[data-translation-repair-lang]").forEach((button) => {
+    button.disabled = button.disabled || locked;
+  });
 }
 
 function renderAll(options = {}) {
@@ -986,6 +1011,7 @@ async function reloadCurrentReadinessSoft() {
 }
 
 async function transitionArticle(status, note = "") {
+  if (isCollectorLockedAfterAdminReview()) throw new Error(lockedCollectorWorkflowMessage());
   setBusy(true);
   setBanner("กำลังอัปเดตสถานะ...", "loading");
   try {
@@ -1003,6 +1029,7 @@ async function transitionArticle(status, note = "") {
 }
 
 async function requestEditorialRevision(note = "") {
+  if (isCollectorLockedAfterAdminReview()) throw new Error(lockedCollectorWorkflowMessage());
   const assignment = primaryAssignment();
   const assignmentId = Number(assignment?.id || 0) || 0;
   if (!assignmentId) {
@@ -1048,6 +1075,7 @@ async function refreshTranslations() {
 }
 
 async function generateTranslations() {
+  if (isCollectorLockedAfterAdminReview()) throw new Error(lockedTranslationMessage());
   setTranslationGenerateLoading(true);
   setBusy(true);
   setInlineStatus("translation-status", "กำลังสร้างคำแปล...", "loading");
@@ -1168,6 +1196,7 @@ function mergeSingleLocaleReadiness(currentReadiness, nextReadiness, lang) {
 
 async function runTranslationRecheck(lang) {
   const normalizedLang = String(lang || "").trim().toLowerCase();
+  if (isCollectorLockedAfterAdminReview()) throw new Error(lockedTranslationMessage());
   if (!normalizedLang || state.busy || state.translationRecheckBusyLang) return;
   setBusy(true);
   state.translationRecheckBusyLang = normalizedLang;
@@ -1215,6 +1244,7 @@ async function runTranslationRecheck(lang) {
 
 async function runTranslationRepair(lang) {
   const normalizedLang = String(lang || "").trim().toLowerCase();
+  if (isCollectorLockedAfterAdminReview()) throw new Error(lockedTranslationMessage());
   if (!normalizedLang || state.busy || state.translationRepairBusyLang) return;
   setBusy(true);
   state.translationRepairBusyLang = normalizedLang;
@@ -1281,6 +1311,7 @@ async function runTranslationRepair(lang) {
 }
 
 async function sendToMainSite() {
+  if (isCollectorLockedAfterAdminReview()) throw new Error(lockedCollectorWorkflowMessage());
   setBusy(true);
   setBanner("กำลังส่งเข้า Admin Review...", "loading");
   try {
@@ -1310,6 +1341,10 @@ function wire() {
     window.location.href = `/article-intake.html?id=${state.itemId}`;
   });
   qs("btn-open-workspace")?.addEventListener("click", () => {
+    if (isCollectorLockedAfterAdminReview()) {
+      setBanner("ส่งเข้า Admin Review แล้ว - เปิดดูได้แบบ read-only เท่านั้น", "error");
+      return;
+    }
     window.location.href = workspaceUrl();
   });
   qs("btn-open-review-preview")?.addEventListener("click", () => {
@@ -1320,6 +1355,7 @@ function wire() {
   });
   qs("btn-request-revision")?.addEventListener("click", async () => {
     try {
+      if (isCollectorLockedAfterAdminReview()) throw new Error(lockedCollectorWorkflowMessage());
       await requestEditorialRevision(currentReviewNote() || "ส่งกลับเพื่อแก้ไข");
       window.location.href = workspaceUrl();
       setInlineStatus("review-status", "ส่งกลับแก้ไขแล้ว");
@@ -1329,6 +1365,7 @@ function wire() {
   });
   qs("btn-approve-sync")?.addEventListener("click", async () => {
     try {
+      if (isCollectorLockedAfterAdminReview()) throw new Error(lockedCollectorWorkflowMessage());
       const validation = validateWorkspace();
       if (!validation.ok) throw new Error(`Missing: ${validation.missing.join(", ")}`);
       const translationGate = getTranslationGateState();
@@ -1348,6 +1385,7 @@ function wire() {
   });
   qs("btn-send-main-site")?.addEventListener("click", async () => {
     try {
+      if (isCollectorLockedAfterAdminReview()) throw new Error(lockedCollectorWorkflowMessage());
       await sendToMainSite();
     } catch (err) {
       setBanner(err.message, "error");
@@ -1355,6 +1393,7 @@ function wire() {
   });
   qs("btn-generate-translations")?.addEventListener("click", async () => {
     try {
+      if (isCollectorLockedAfterAdminReview()) throw new Error(lockedTranslationMessage());
       await generateTranslations();
     } catch (err) {
       setInlineStatus("translation-status", err.message, "error");

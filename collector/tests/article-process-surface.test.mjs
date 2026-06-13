@@ -180,7 +180,15 @@ test("article process uses semantic status helpers without mutating legacy assig
   assert.match(source, /function deriveArticleProcessStatus\(item, workflowModel = null, publishableSource = null\)/);
   assert.match(source, /function mapArticleProcessStatusToWorkflowPatch\(status\)/);
   assert.match(source, /function buildArticleProcessPayload\(req, item\)/);
+  assert.match(source, /function isCollectorAdminReviewLockedStatus\(status\)/);
   assert.match(source, /app\.post\("\/api\/items\/:id\/assignments", requireRole\("admin", "user"\),/);
+});
+
+test("collector backend blocks workflow loops after admin-review handoff", () => {
+  assert.match(source, /submitted_for_admin_review: new Set\(\[\]\)/);
+  assert.match(source, /synced_to_admin: new Set\(\[\]\)/);
+  assert.match(source, /if \(isCollectorAdminReviewLockedStatus\(currentStatus\)\) \{\s*res\.status\(409\)\.json\(\{ error: "งานนี้ถูกส่งเข้า Admin Review แล้ว ไม่สามารถส่งกลับ workflow จาก Collector ได้" }\);\s*return;\s*}/);
+  assert.match(source, /if \(isCollectorAdminReviewLockedStatus\(processStatus\)\) \{\s*res\.status\(409\)\.json\(\{\s*error: "งานนี้ถูกส่งเข้า Admin Review แล้ว ไม่สามารถส่งกลับ workflow จาก Collector ได้",\s*status: processStatus,/);
 });
 
 test("release-main and admin-review use required locale translation recheck gate", () => {
@@ -466,8 +474,7 @@ test("required locale translation recheck gate blocks fingerprint mismatch even 
 });
 
 test("composer media helper no longer emits prep-claim errors before article access fallback", () => {
-  assert.match(source, /function hasPrepItemEditAccess\(req, item\)/);
-  assert.match(source, /function ensureComposerMediaEditAccess\(req, res, item\) \{\s*if \(hasPrepItemEditAccess\(req, item\)\) \{\s*return true;\s*\}\s*return ensureArticleComposerEditAccess\(req, res, item\);\s*\}/);
+  assert.match(source, /function ensureComposerMediaEditAccess\(req, res, item\) \{\s*return ensureItemMutationAccess\(req, res, item\);\s*\}/);
   assert.doesNotMatch(source, /function ensureComposerMediaEditAccess\(req, res, item\) \{\s*if \(ensurePrepItemEditAccess\(req, res, item\)\)/);
 });
 

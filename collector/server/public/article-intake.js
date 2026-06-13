@@ -13,6 +13,7 @@ const INTAKE_GROUPS = [
   { key: "needs_attention", label: "ต้องจัดการตอนนี้", empty: "ยังไม่มีงานที่ต้องจัดการตอนนี้" },
   { key: "drafting", label: "กำลังเขียน", empty: "ยังไม่มีงานที่กำลังเขียน" },
   { key: "review", label: "รอตรวจและอนุมัติ", empty: "ยังไม่มีงานที่รอตรวจและอนุมัติ" },
+  { key: "admin_review", label: "รอ Admin Review", empty: "ยังไม่มีงานที่ส่งเข้า Admin Review" },
   { key: "done", label: "เสร็จแล้ว", empty: "ยังไม่มีงานที่เสร็จแล้ว" },
 ];
 
@@ -155,6 +156,19 @@ function processForItem(itemId) {
   return state.processByItemId[Number(itemId || 0)] || null;
 }
 
+function articleProcessStatusForItem(item) {
+  const process = processForItem(item?.id);
+  const processStatus = normalizedValue(process?.status);
+  if (processStatus === "submitted_for_admin_review") return "submitted_for_admin_review";
+  if (processStatus === "synced_to_admin") return "synced_to_admin";
+  if (processStatus) return processStatus;
+  const productionState = normalizedValue(item?.production_state);
+  if (productionState === "submitted_for_admin_review") return "submitted_for_admin_review";
+  const publicationState = normalizedValue(item?.publication_state);
+  if (publicationState === "published") return "synced_to_admin";
+  return "";
+}
+
 function primaryAssignmentForItem(itemId) {
   const fallbackAssignment = state.editorAssignmentByItemId?.[Number(itemId || 0)] || null;
   const process = processForItem(itemId);
@@ -203,8 +217,22 @@ function articleStatusLabel(status = articleStatus()) {
   return "กำลังเขียนบทความ";
 }
 
+function isAdminReviewLockedStatus(status = articleStatus()) {
+  const normalized = normalizedValue(status);
+  return normalized === "submitted_for_admin_review" || normalized === "synced_to_admin";
+}
+
 function shouldOpenReviewSurface(status = articleStatus()) {
-  return status === "ready_for_review" || status === "ready_for_sync" || status === "submitted_for_admin_review";
+  return status === "ready_for_review" || status === "ready_for_sync";
+}
+
+function shouldOpenLockedInspectionSurface(status = articleStatus()) {
+  return isAdminReviewLockedStatus(status);
+}
+
+function isLockedQueueGroup(groupKey = "") {
+  const normalized = normalizedValue(groupKey);
+  return normalized === "admin_review" || normalized === "done" || normalized === "published" || normalized === "locked";
 }
 
 function canOpenWorkspaceSurface(status = articleStatus()) {
@@ -259,9 +287,10 @@ function renderStatusSummary() {
     return;
   }
   const assignment = primaryAssignment();
+  const locked = isAdminReviewLockedStatus();
   const nextStepLabel = isEditorUser()
-    ? (shouldOpenReviewSurface() ? "รอผลตรวจ" : "เปิดหน้าเขียนบทความ")
-    : (shouldOpenReviewSurface() ? "เปิดหน้าตรวจและอนุมัติ" : "เปิดหน้าเขียนบทความ");
+    ? (locked ? "ส่งเข้า Admin Review แล้ว" : shouldOpenReviewSurface() ? "รอผลตรวจ" : "เปิดหน้าเขียนบทความ")
+    : (locked ? "รอ Admin Review" : shouldOpenReviewSurface() ? "เปิดหน้าตรวจและอนุมัติ" : "เปิดหน้าเขียนบทความ");
   box.classList.remove("hidden");
   box.innerHTML = `
     <div class="summary-row"><strong>สถานะปัจจุบัน</strong><span>${escapeHtml(articleStatusLabel())}</span></div>
@@ -362,7 +391,7 @@ function renderActivityLog() {
 function derivedArticleWorkflowStatus(item, process = processForItem(item?.id)) {
   const processStatus = normalizedValue(process?.status);
   if (processStatus === "synced_to_admin") return "published";
-  if (processStatus === "submitted_for_admin_review") return "approved";
+  if (processStatus === "submitted_for_admin_review") return "submitted_for_admin_review";
   if (processStatus === "ready_for_sync") return "approved";
   if (processStatus === "ready_for_review") return "in_review";
   if (processStatus === "revision_requested") return "needs_revision";
@@ -373,6 +402,7 @@ function derivedArticleWorkflowStatus(item, process = processForItem(item?.id)) 
   if (publicationState === "ready_for_sync" || publicationState === "approved") return "approved";
 
   const productionState = normalizedValue(item?.production_state);
+  if (productionState === "submitted_for_admin_review") return "submitted_for_admin_review";
   if (productionState === "in_review" || productionState === "review") return "in_review";
   if (productionState === "needs_revision") return "needs_revision";
   if (
@@ -390,6 +420,7 @@ function isArticleQueueCandidate(item) {
   const workflowStatus = derivedArticleWorkflowStatus(item);
   const assignmentState = normalizedValue(item?.assignment_state);
   if (assignmentState === "accepted") return true;
+  if (workflowStatus === "submitted_for_admin_review" || workflowStatus === "published") return true;
   return ARTICLE_FLOW_STATUSES.includes(workflowStatus);
 }
 
@@ -415,11 +446,14 @@ function queueStageMeta(item) {
   if (workflowStatus === "in_review") {
     return { stageLabel: "ตรวจและอนุมัติ", note: "รอตรวจ final review" };
   }
+  if (workflowStatus === "submitted_for_admin_review") {
+    return { stageLabel: "รอ Admin Review", note: "ส่งเข้า Admin Review แล้ว เปิดดูได้แบบ inspection เท่านั้น" };
+  }
   if (workflowStatus === "approved" || workflowStatus === "unpublished") {
     return { stageLabel: "ตรวจและอนุมัติ", note: "อนุมัติแล้ว และส่งเข้า Admin Review แล้ว" };
   }
   if (workflowStatus === "published") {
-    return { stageLabel: "ตรวจและอนุมัติ", note: "เผยแพร่ขึ้นเว็บหลักแล้ว" };
+    return { stageLabel: "เผยแพร่แล้ว", note: "งานนี้เสร็จสิ้นแล้ว เปิดดูได้แบบ inspection เท่านั้น" };
   }
   return { stageLabel: "รับงาน", note: "-" };
 }
@@ -434,7 +468,9 @@ function queueRows() {
   const selfId = Number(state.user?.id || 0) || 0;
   return rows.filter((item) => {
     const group = queueGroupKey(item);
-    if (group !== "drafting" && group !== "review") return false;
+    if (group !== "drafting" && group !== "review" && group !== "admin_review" && group !== "done") return false;
+    const status = articleProcessStatusForItem(item) || derivedArticleWorkflowStatus(item);
+    if (isAdminReviewLockedStatus(status) || isLockedQueueGroup(group)) return true;
     const assignment = primaryAssignmentForItem(item?.id);
     return Number(assignment?.assignee_user_id || 0) === selfId;
   });
@@ -453,11 +489,14 @@ function queueGroupKey(item) {
   if (workflowStatus === "content_in_progress" || workflowStatus === "needs_revision") {
     return "drafting";
   }
+  if (workflowStatus === "submitted_for_admin_review") {
+    return "admin_review";
+  }
   if (workflowStatus === "in_review" || workflowStatus === "approved" || workflowStatus === "unpublished") {
     return "review";
   }
   if (workflowStatus === "published") {
-    return "review";
+    return "done";
   }
   return "needs_attention";
 }
@@ -475,9 +514,7 @@ function workspaceUrl(itemId = state.itemId) {
 }
 
 function reviewUrl(itemId = state.itemId) {
-  return isEditorUser()
-    ? workspaceUrl(itemId)
-    : `/article-submit.html?id=${Number(itemId || 0) || 0}`;
+  return `/article-submit.html?id=${Number(itemId || 0) || 0}`;
 }
 
 function eventWorkspaceUrl(itemId = state.itemId) {
@@ -485,19 +522,31 @@ function eventWorkspaceUrl(itemId = state.itemId) {
 }
 
 function eventReviewUrl(itemId = state.itemId) {
-  return isEditorUser()
-    ? eventWorkspaceUrl(itemId)
-    : `/event-submit.html?id=${Number(itemId || 0) || 0}`;
+  return `/event-submit.html?id=${Number(itemId || 0) || 0}`;
+}
+
+function lockedInspectionUrl(item) {
+  const id = Number(item?.id || 0) || 0;
+  if (!id) return "/";
+  return isEventItem(item) ? `/event-submit.html?id=${id}` : `/article-submit.html?id=${id}`;
 }
 
 function primaryEntryUrl(item) {
-  const status = derivedArticleWorkflowStatus(item);
+  const processStatus = articleProcessStatusForItem(item);
+  const workflowStatus = derivedArticleWorkflowStatus(item);
   const workspaceHref = isEventItem(item) ? eventWorkspaceUrl(Number(item?.id || 0)) : workspaceUrl(Number(item?.id || 0));
   const reviewHref = isEventItem(item) ? eventReviewUrl(Number(item?.id || 0)) : reviewUrl(Number(item?.id || 0));
+  if (isAdminReviewLockedStatus(processStatus || workflowStatus)) return lockedInspectionUrl(item);
   if (isEditorUser()) {
     return workspaceHref;
   }
-  if (status === "in_review" || status === "approved" || status === "unpublished") {
+  if (
+    processStatus === "ready_for_review"
+    || processStatus === "ready_for_sync"
+    || workflowStatus === "in_review"
+    || workflowStatus === "approved"
+    || workflowStatus === "unpublished"
+  ) {
     return reviewHref;
   }
   return workspaceHref;
@@ -516,6 +565,12 @@ function queueActionMeta(item) {
       ? { label: "\u0e15\u0e34\u0e14\u0e15\u0e32\u0e21\u0e2a\u0e16\u0e32\u0e19\u0e30", mode: "open" }
       : { label: "\u0e44\u0e1b\u0e2b\u0e19\u0e49\u0e32\u0e15\u0e23\u0e27\u0e08", mode: "open" };
   }
+  if (group === "admin_review") {
+    return { label: "รอ Admin Review", mode: "open" };
+  }
+  if (group === "done") {
+    return { label: "ดูสถานะ", mode: "open" };
+  }
   return { label: "\u0e14\u0e39\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14", mode: "open" };
 }
 
@@ -531,7 +586,7 @@ function renderQueue() {
       : "ยังไม่มีงานที่เข้าสู่ article flow");
 
   const visibleGroups = isEditorUser()
-    ? INTAKE_GROUPS.filter((group) => group.key === "drafting" || group.key === "review")
+    ? INTAKE_GROUPS.filter((group) => group.key === "drafting" || group.key === "review" || group.key === "admin_review" || group.key === "done")
     : INTAKE_GROUPS;
   const grouped = new Map(visibleGroups.map((group) => [group.key, []]));
   rows.forEach((item) => {

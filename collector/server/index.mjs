@@ -2629,8 +2629,8 @@ const ARTICLE_PROCESS_TRANSITIONS = Object.freeze({
   revision_requested: new Set(["drafting", "ready_for_review"]),
   ready_for_review: new Set(["revision_requested", "ready_for_sync"]),
   ready_for_sync: new Set(["revision_requested", "submitted_for_admin_review"]),
-  submitted_for_admin_review: new Set(["revision_requested"]),
-  synced_to_admin: new Set(["revision_requested", "submitted_for_admin_review"]),
+  submitted_for_admin_review: new Set([]),
+  synced_to_admin: new Set([]),
 });
 const ASSIGNMENT_STATE_AUDIT_ACTIONS = Object.freeze({
   request_revision: "assignment.state.request_revision",
@@ -2658,6 +2658,11 @@ function normalizeUserRole(value, fallback = "user") {
 
 function isOwnerUser(user) {
   return String(user?.role || "").toLowerCase() === "owner";
+}
+
+function isCollectorAdminReviewLockedStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "submitted_for_admin_review" || normalized === "synced_to_admin";
 }
 
 function normalizePolicyRole(value, fallback = "user") {
@@ -8880,6 +8885,10 @@ app.post("/api/items/:id/article-process/transition", requireRole("owner", "admi
   const workflowModel = repo.ensureWorkflowModel(id);
   const publishableSource = repo.buildPublishableSourceByItem(id);
   const currentStatus = deriveArticleProcessStatus(item, workflowModel, publishableSource);
+  if (isCollectorAdminReviewLockedStatus(currentStatus)) {
+    res.status(409).json({ error: "งานนี้ถูกส่งเข้า Admin Review แล้ว ไม่สามารถส่งกลับ workflow จาก Collector ได้" });
+    return;
+  }
   if (!canTransitionArticleProcess(currentStatus, nextStatus)) {
     res.status(409).json({ error: `invalid article process transition: ${currentStatus} -> ${nextStatus}` });
     return;
@@ -10132,6 +10141,13 @@ app.post("/api/items/:id/article-editorial-assignments/:assignmentId/request-rev
   }
 
   try {
+    const workflowModel = repo.ensureWorkflowModel(id);
+    const publishableSource = repo.buildPublishableSourceByItem(id);
+    const currentStatus = deriveArticleProcessStatus(item, workflowModel, publishableSource);
+    if (isCollectorAdminReviewLockedStatus(currentStatus)) {
+      res.status(409).json({ error: "งานนี้ถูกส่งเข้า Admin Review แล้ว ไม่สามารถส่งกลับ workflow จาก Collector ได้" });
+      return;
+    }
     const reasonCode = String(req.body?.reason_code || "").trim().toLowerCase() || "article_revision_requested";
     const note = String(req.body?.note || "").trim() || "revision requested from article process";
     const updatedAssignment = repo.updateAssignmentState(assignmentId, "revision_requested", actorEmail(req), {
@@ -12786,6 +12802,13 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
       workflowTransitions,
       deriveArticleProcessStatus(item, workflowModel, publishableSource),
     );
+    if (isCollectorAdminReviewLockedStatus(processStatus)) {
+      res.status(409).json({
+        error: "งานนี้ถูกส่งเข้า Admin Review แล้ว ไม่สามารถส่งกลับ workflow จาก Collector ได้",
+        status: processStatus,
+      });
+      return;
+    }
     if (processStatus !== "ready_for_sync") {
       res.status(409).json({
         error: "item is not ready_for_sync",
