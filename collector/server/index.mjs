@@ -5957,27 +5957,18 @@ function buildRemoteFileName(url) {
 }
 
 function bridgeCollectedMediaToAssets(contentItemId, rawItem, options = {}) {
-  const limit = Math.max(1, Math.min(MAX_IMAGES_PER_ITEM, Number(options?.limit || MAX_IMAGES_PER_ITEM)));
-  const candidates = toRemoteMediaCandidates(rawItem, limit);
-  if (!candidates.length) {
-    return { added: 0, skipped: 0, total_candidates: 0 };
-  }
-  if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
-    try {
-      console.error("[external media kept as reference only]", JSON.stringify({
-        content_item_id: Number(contentItemId || 0) || 0,
-        total_candidates: candidates.length,
-        skipped: candidates.map((media) => ({
-          url: String(media?.url || "").trim() || null,
-          mime_type: String(media?.mime_type || "").trim().toLowerCase() || null,
-          reason: "external_reference_only",
-        })),
-      }));
-    } catch {
-      console.error("[external media kept as reference only]");
-    }
-  }
-  return { added: 0, skipped: candidates.length, total_candidates: candidates.length, external_reference_only: true };
+  const diagnostics = repo.repairImportedReferenceAssetsForItem(contentItemId, {
+    apply: true,
+    actorEmail: "system@local",
+    limit: options?.limit || MAX_IMAGES_PER_ITEM,
+    rawItem,
+  });
+  return {
+    added: Number(diagnostics?.added_count || 0) || 0,
+    skipped: Array.isArray(diagnostics?.skipped_media) ? diagnostics.skipped_media.length : 0,
+    total_candidates: Number(diagnostics?.candidate_count || 0) || 0,
+    diagnostics,
+  };
 }
 
 function resolveStoragePath(storagePath) {
@@ -12442,7 +12433,36 @@ app.get("/api/items/:id/image-workflow", requireRole("owner", "admin", "editor",
 
   const status = buildImageWorkflowState(id);
   const assets = repo.listContentAssetsByItem(id);
-  res.json({ item_id: id, status, assets });
+  const importedMediaDiagnostics = repo.repairImportedReferenceAssetsForItem(id, { apply: false, limit: MAX_IMAGES_PER_ITEM });
+  res.json({ item_id: id, status, assets, imported_media_diagnostics: importedMediaDiagnostics });
+});
+app.post("/api/items/:id/assets/repair-imported-media", requireRole("admin", "owner"), (req, res) => {
+  const id = Number(req.params.id || 0);
+  if (!id) {
+    res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
+    return;
+  }
+
+  try {
+    const apply = req.body?.apply !== false;
+    const diagnostics = repo.repairImportedReferenceAssetsForItem(id, {
+      apply,
+      actorEmail: actorEmail(req),
+      limit: MAX_IMAGES_PER_ITEM,
+    });
+    res.json({ ok: true, item_id: id, diagnostics });
+  } catch (err) {
+    res.status(400).json({ error: String(err?.message || "Cannot repair imported media") });
+  }
 });
 
 app.get("/api/items/:id/assets/cleanup-eligibility", requireRole("admin", "owner"), (req, res) => {
