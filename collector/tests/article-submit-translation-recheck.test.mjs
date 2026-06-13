@@ -320,7 +320,6 @@ test("translation recheck locale cards show status-specific default actions and 
   assert.match(html, /data-translation-recheck-lang="en"/);
   assert.match(html, /<strong>Score:<\/strong> 8.4\/10/);
   assert.match(html, /<button type="button" class="utility-action" data-translation-repair-lang="zh"[^>]*>ซ่อมคำแปลแล้วตรวจซ้ำ<\/button>/);
-  assert.match(html, /Repair & recheck/);
   assert.match(html, /Back translation/);
   assert.match(html, /แปลกลับไทยของ zh/);
   assert.match(html, /มีความคลาดเคลื่อนของความหมายบางจุด/);
@@ -329,11 +328,12 @@ test("translation recheck locale cards show status-specific default actions and 
   assert.doesNotMatch(html, /View back translation/);
   assert.doesNotMatch(html, /View issues/);
   assert.doesNotMatch(html, /Recheck again/);
+  assert.doesNotMatch(html, /Repair & recheck/);
   assert.doesNotMatch(html, /Repair translation/);
   assert.doesNotMatch(html, /<button type="button" class="utility-action" disabled>Regenerate<\/button>/);
 });
 
-test("warning or failed row with recheck issues shows enabled Repair & recheck button", () => {
+test("warning or failed row with recheck issues shows enabled Thai repair button only", () => {
   const { hooks, elements } = loadHarness();
   hooks.state.readiness = {
     current_source_fingerprint: "current-fingerprint",
@@ -356,7 +356,7 @@ test("warning or failed row with recheck issues shows enabled Repair & recheck b
   const html = elements.get("translation-recheck-panel").innerHTML;
   assert.match(html, /data-translation-repair-lang="en"(?![^>]*disabled)/);
   assert.match(html, /ซ่อมคำแปลแล้วตรวจซ้ำ/);
-  assert.match(html, /Repair & recheck/);
+  assert.doesNotMatch(html, /Repair & recheck/);
 });
 
 test("stale row disables repair and recheck and tells user to regenerate translations first", () => {
@@ -380,7 +380,7 @@ test("stale row disables repair and recheck and tells user to regenerate transla
   hooks.renderTranslationRecheckPanel();
 
   const html = elements.get("translation-recheck-panel").innerHTML;
-  assert.match(html, /data-translation-repair-lang="en" disabled>ซ่อมคำแปลแล้วตรวจซ้ำ<\/button>/);
+  assert.doesNotMatch(html, /data-translation-repair-lang="en"/);
   assert.doesNotMatch(html, /data-translation-recheck-lang="en"(?![^>]*disabled)/);
   assert.match(html, /Translation is stale/);
   assert.match(html, /Regenerate translations first/);
@@ -931,7 +931,7 @@ test("recheck action immediately renders passed result even if refreshTranslatio
   assert.doesNotMatch(html, /Not checked/);
 });
 
-test("warning and failed eligible rows show enabled Repair & recheck", () => {
+test("warning and failed eligible rows show enabled Thai repair button only", () => {
   for (const recheckStatus of ["warning", "failed"]) {
     const { hooks, elements } = loadHarness();
     hooks.state.readiness = { translations: [{ lang: "lo", status: "passed" }] };
@@ -949,6 +949,7 @@ test("warning and failed eligible rows show enabled Repair & recheck", () => {
     assert.match(html, /data-translation-repair-lang="lo"[^>]*>ซ่อมคำแปลแล้วตรวจซ้ำ<\/button>/);
     assert.doesNotMatch(html, /data-translation-repair-lang="lo" disabled>ซ่อมคำแปลแล้วตรวจซ้ำ<\/button>/);
     assert.doesNotMatch(html, /Recheck again/);
+    assert.doesNotMatch(html, /Repair & recheck/);
   }
 });
 
@@ -971,7 +972,7 @@ test("global busy disables eligible Repair & recheck buttons", () => {
   assert.match(html, /data-translation-repair-lang="lo" disabled>ซ่อมคำแปลแล้วตรวจซ้ำ<\/button>/);
 });
 
-test("warning rows that are not eligible show disabled Repair & recheck and the correct reason", () => {
+test("warning rows that are not eligible show the correct next action and reason", () => {
   const rows = [
     { lang: "lo", translation_status: "ready", automatic_check_status: "failed", stale_flag: 0, translation_recheck_status: "warning", recheck_issues: [{ problem_th: "needs repair" }], expected: /Technical QA must pass first/ },
     { lang: "zh", translation_status: "ready", automatic_check_status: "passed", stale_flag: 1, translation_recheck_status: "warning", expected: /Translation is stale/ },
@@ -986,12 +987,34 @@ test("warning rows that are not eligible show disabled Repair & recheck and the 
     const html = elements.get("translation-recheck-panel").innerHTML;
     assert.match(html, row.expected);
     if (Number(row.stale_flag || 0) === 1) {
-      assert.match(html, /data-translation-repair-lang="zh" disabled>ซ่อมคำแปลแล้วตรวจซ้ำ<\/button>/);
+      assert.doesNotMatch(html, /data-translation-repair-lang="zh"/);
       assert.match(html, /Regenerate translations first/);
       continue;
     }
     assert.match(html, new RegExp(`data-translation-repair-lang="${row.lang}" disabled>ซ่อมคำแปลแล้วตรวจซ้ำ<\\/button>`));
   }
+});
+
+test("failed row with empty issues falls back to enabled Recheck again", () => {
+  const { hooks, elements } = loadHarness();
+  hooks.state.readiness = { translations: [{ lang: "en", status: "passed" }] };
+  hooks.state.translations = [{
+    lang: "en",
+    translation_status: "ready",
+    automatic_check_status: "passed",
+    stale_flag: 0,
+    translation_recheck_status: "failed",
+    recheck_issues: [],
+    translation_recheck_score: 5,
+  }];
+
+  hooks.renderTranslationRecheckPanel();
+
+  const html = elements.get("translation-recheck-panel").innerHTML;
+  assert.match(html, /data-translation-recheck-lang="en"(?![^>]*disabled)/);
+  assert.match(html, />Recheck again<\/button>/);
+  assert.match(html, /ผลตรวจไม่พบ issue ที่ใช้ซ่อมได้ กรุณาตรวจซ้ำ/);
+  assert.doesNotMatch(html, /data-translation-repair-lang="en"/);
 });
 
 test("if only result.locales is returned for requested LO, UI applies status and score only", async () => {

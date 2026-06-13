@@ -369,6 +369,213 @@ test("rerunTranslationRecheck normalizes stored result fields for an eligible lo
   assert.equal(row.recheck_issues[0]?.type, "term");
 });
 
+test("rerunTranslationRecheck synthesizes actionable issue for failed result with no issues", async () => {
+  const repo = createRepo(155);
+  const aiConfig = createAiConfig();
+  const currentFingerprint = workflow.getCurrentTranslationSourceFingerprint(repo, 155);
+  repo.upsertTranslation({
+    source_content_item_id: 155,
+    source_published_article_id: null,
+    source_draft_id: 855,
+    source_review_report_id: null,
+    source_fingerprint: currentFingerprint,
+    lang: "en",
+    translated_title: "title-en",
+    translated_excerpt: "excerpt-en with enough text",
+    translated_body: "body-en with enough text for semantic recheck normalization.",
+    translated_meta_title: "meta-title-en",
+    translated_meta_description: "meta-description-en with enough text",
+    translation_status: "ready",
+    automatic_check_status: "passed",
+    automatic_check_report: { status: "passed", issues: [] },
+    translation_recheck_status: "not_checked",
+    stale_flag: 0,
+    translator_engine: "openai",
+    translator_model: "gpt-5.4-mini",
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options = {}) => {
+    const body = JSON.parse(String(options.body || "{}"));
+    assert.equal(body.task, "translation_recheck");
+    return Response.json({
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      output_text: JSON.stringify({
+        status: "failed",
+        overall_score: 5,
+        accuracy_score: 5,
+        fluency_score: 5,
+        term_score: 5,
+        back_translation_th: "แปลกลับไทย",
+        summary_th: "ไม่มี issue แบบโครงสร้าง",
+        issues: [],
+      }),
+    });
+  };
+
+  try {
+    await rerunTranslationRecheck(repo, "admin@uboncity.local", {
+      content_item_id: 155,
+      lang: "en",
+      aiConfig,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const row = repo.getTranslation(155, "en");
+  assert.equal(row.translation_recheck_status, "failed");
+  assert.equal(row.translation_recheck_score <= 6, true);
+  assert.equal(Array.isArray(row.recheck_issues), true);
+  assert.equal(row.recheck_issues.length > 0, true);
+  assert.equal(row.recheck_issues[0]?.severity, "high");
+});
+
+test("rerunTranslationRecheck caps failed 10/10 results by severity and score type", async () => {
+  const repo = createRepo(156);
+  const aiConfig = createAiConfig();
+  const currentFingerprint = workflow.getCurrentTranslationSourceFingerprint(repo, 156);
+  repo.upsertTranslation({
+    source_content_item_id: 156,
+    source_published_article_id: null,
+    source_draft_id: 856,
+    source_review_report_id: null,
+    source_fingerprint: currentFingerprint,
+    lang: "en",
+    translated_title: "title-en",
+    translated_excerpt: "excerpt-en with enough text",
+    translated_body: "body-en with enough text for semantic recheck normalization.",
+    translated_meta_title: "meta-title-en",
+    translated_meta_description: "meta-description-en with enough text",
+    translation_status: "ready",
+    automatic_check_status: "passed",
+    automatic_check_report: { status: "passed", issues: [] },
+    translation_recheck_status: "not_checked",
+    stale_flag: 0,
+    translator_engine: "openai",
+    translator_model: "gpt-5.4-mini",
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options = {}) => {
+    const body = JSON.parse(String(options.body || "{}"));
+    assert.equal(body.task, "translation_recheck");
+    return Response.json({
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      output_text: JSON.stringify({
+        status: "failed",
+        overall_score: 10,
+        accuracy_score: 10,
+        fluency_score: 10,
+        term_score: 10,
+        back_translation_th: "แปลกลับไทย",
+        summary_th: "มีปัญหาความหมาย",
+        issues: [
+          {
+            type: "accuracy",
+            severity: "high",
+            source_text: "ต้นฉบับ",
+            target_text: "ปลายทาง",
+            problem_th: "ความหมายเพี้ยน",
+            suggestion_th: "แก้ให้ตรงต้นฉบับ",
+          },
+        ],
+      }),
+    });
+  };
+
+  try {
+    await rerunTranslationRecheck(repo, "admin@uboncity.local", {
+      content_item_id: 156,
+      lang: "en",
+      aiConfig,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const row = repo.getTranslation(156, "en");
+  assert.equal(row.translation_recheck_status, "failed");
+  assert.equal(row.translation_recheck_score <= 6, true);
+  assert.equal(row.accuracy_score <= 6, true);
+});
+
+test("rerunTranslationRecheck downgrades passed results when issues exist and prompt includes consistency rules", async () => {
+  const repo = createRepo(157);
+  const aiConfig = createAiConfig();
+  const currentFingerprint = workflow.getCurrentTranslationSourceFingerprint(repo, 157);
+  repo.upsertTranslation({
+    source_content_item_id: 157,
+    source_published_article_id: null,
+    source_draft_id: 857,
+    source_review_report_id: null,
+    source_fingerprint: currentFingerprint,
+    lang: "en",
+    translated_title: "title-en",
+    translated_excerpt: "excerpt-en with enough text",
+    translated_body: "body-en with enough text for semantic recheck normalization.",
+    translated_meta_title: "meta-title-en",
+    translated_meta_description: "meta-description-en with enough text",
+    translation_status: "ready",
+    automatic_check_status: "passed",
+    automatic_check_report: { status: "passed", issues: [] },
+    translation_recheck_status: "not_checked",
+    stale_flag: 0,
+    translator_engine: "openai",
+    translator_model: "gpt-5.4-mini",
+  });
+
+  const originalFetch = globalThis.fetch;
+  let capturedPrompt = "";
+  globalThis.fetch = async (_url, options = {}) => {
+    const body = JSON.parse(String(options.body || "{}"));
+    assert.equal(body.task, "translation_recheck");
+    capturedPrompt = String(body.prompt || "");
+    return Response.json({
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      output_text: JSON.stringify({
+        status: "passed",
+        overall_score: 10,
+        accuracy_score: 10,
+        fluency_score: 10,
+        term_score: 10,
+        back_translation_th: "แปลกลับไทย",
+        summary_th: "มี issue ชื่อเฉพาะ",
+        issues: [
+          {
+            type: "term",
+            severity: "medium",
+            source_text: "อุบลราชธานี",
+            target_text: "Ubon",
+            problem_th: "ชื่อย่อเกินไป",
+            suggestion_th: "ใช้ชื่อเต็มให้คงที่",
+          },
+        ],
+      }),
+    });
+  };
+
+  try {
+    await rerunTranslationRecheck(repo, "admin@uboncity.local", {
+      content_item_id: 157,
+      lang: "en",
+      aiConfig,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const row = repo.getTranslation(157, "en");
+  assert.equal(row.translation_recheck_status, "warning");
+  assert.equal(row.translation_recheck_score <= 8, true);
+  assert.equal(capturedPrompt.includes("If status is warning or failed, issues must contain at least one actionable issue."), true);
+  assert.equal(capturedPrompt.includes("Do not return passed if any issue exists."), true);
+  assert.equal(capturedPrompt.includes("Do not return overall_score 9-10 for warning or failed."), true);
+});
+
 test("rerunTranslationRecheck rejects locales that did not pass technical QA", async () => {
   const repo = createRepo(56);
   const currentFingerprint = workflow.getCurrentTranslationSourceFingerprint(repo, 56);

@@ -854,23 +854,27 @@ function renderTranslationRecheckPanel() {
         const repairBusy = isTranslationRepairBusy(row.lang);
         const recheckDisabled = state.busy || rowBusy || !canManageTranslations() || !recheckEligibility.eligible;
         const repairDisabled = state.busy || repairBusy || !canManageTranslations() || !repairEligibility.eligible;
+        const missingRepairableIssues = (row.translation_recheck_status === "failed" || row.translation_recheck_status === "warning")
+          && String(row.automatic_check_status || "").trim().toLowerCase() === "passed"
+          && (!Array.isArray(row.recheck_issues) || row.recheck_issues.length === 0);
         const defaultActionHtml = row.translation_recheck_status === "passed"
           ? `<span class="translation-recheck-action-note">View technical details below</span>`
           : row.translation_recheck_status === "stale"
             ? `
-              <button type="button" class="utility-action" data-translation-repair-lang="${escapeHtml(String(row.lang || ""))}" disabled>ซ่อมคำแปลแล้วตรวจซ้ำ</button>
-              <span class="translation-recheck-action-note">Repair & recheck</span>
               <span class="translation-recheck-action-note">Translation is stale. Regenerate translations first.</span>
             `
             : row.translation_recheck_status === "failed" || row.translation_recheck_status === "warning"
-              ? repairEligibility.eligible
+              ? missingRepairableIssues
+                ? `
+                  <button type="button" class="utility-action" data-translation-recheck-lang="${escapeHtml(String(row.lang || ""))}" ${recheckDisabled ? "disabled" : ""}>Recheck again</button>
+                  <span class="translation-recheck-action-note">ผลตรวจไม่พบ issue ที่ใช้ซ่อมได้ กรุณาตรวจซ้ำ</span>
+                `
+                : repairEligibility.eligible
                 ? `
                   <button type="button" class="utility-action" data-translation-repair-lang="${escapeHtml(String(row.lang || ""))}" ${repairDisabled ? "disabled" : ""}>ซ่อมคำแปลแล้วตรวจซ้ำ</button>
-                  <span class="translation-recheck-action-note">Repair & recheck</span>
                 `
                 : `
                   <button type="button" class="utility-action" data-translation-repair-lang="${escapeHtml(String(row.lang || ""))}" disabled>ซ่อมคำแปลแล้วตรวจซ้ำ</button>
-                  <span class="translation-recheck-action-note">Repair & recheck</span>
                   <span class="translation-recheck-action-note">${escapeHtml(repairEligibility.reason || recheckEligibility.reason)}</span>
                 `
               : `
