@@ -310,15 +310,20 @@ function translationRecheckStatusLabel(value) {
   return "Not checked";
 }
 
+function isMissingTranslationStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  return !status || status === "-" || status === "missing" || status === "not_ready" || status === "not_generated";
+}
+
 function getTranslationRecheckEligibility(row) {
   const translationStatus = String(row?.translation_status || "").trim().toLowerCase();
   const automaticCheckStatus = String(row?.automatic_check_status || "").trim().toLowerCase();
   const stale = isTranslationRowStale(row) || String(row?.translation_recheck_status || "").trim().toLowerCase() === "stale";
-  if (stale) {
-    return { eligible: false, reason: "Translation is stale" };
-  }
-  if (translationStatus !== "ready") {
+  if (isMissingTranslationStatus(translationStatus)) {
     return { eligible: false, reason: "Translation is missing" };
+  }
+  if (stale) {
+    return { eligible: false, reason: "Translation is stale. Regenerate translations first" };
   }
   if (automaticCheckStatus !== "passed") {
     return { eligible: false, reason: "Technical QA must pass first" };
@@ -342,6 +347,24 @@ function getTranslationRepairEligibility(row) {
   return { eligible: true, reason: "" };
 }
 
+function getTranslationRecheckBlockReason(row) {
+  const translationStatus = String(row?.translation_status || "").trim().toLowerCase();
+  if (isMissingTranslationStatus(translationStatus)) {
+    return "missing translation";
+  }
+  if (isTranslationRowStale(row) || String(row?.translation_recheck_status || "").trim().toLowerCase() === "stale") {
+    return "stale translation";
+  }
+  if (String(row?.automatic_check_status || "").trim().toLowerCase() !== "passed") {
+    return "technical QA failed";
+  }
+  const recheckStatus = translationRecheckStatusFromRow(row);
+  if (recheckStatus === "not_checked") return "not_checked";
+  if (recheckStatus === "warning") return "warning";
+  if (recheckStatus === "failed") return "failed";
+  return "";
+}
+
 function isTranslationRecheckBusy(lang = "") {
   return String(state.translationRecheckBusyLang || "").trim().toLowerCase() === String(lang || "").trim().toLowerCase();
 }
@@ -352,13 +375,31 @@ function isTranslationRepairBusy(lang = "") {
 
 function validateRecheckResponseLocale(response, requestedLang) {
   const normalizedRequestedLang = String(requestedLang || "").trim().toLowerCase();
+  const directLocaleCandidates = [
+    response?.result?.lang,
+    response?.result?.locale,
+    response?.result?.target_lang,
+    response?.lang,
+    response?.locale,
+    response?.target_lang,
+  ]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (directLocaleCandidates.some((lang) => lang !== normalizedRequestedLang)) {
+    return { ok: false, reason: "Recheck returned a different locale than requested", matchedLocale: null };
+  }
   const localeResults = Array.isArray(response?.result?.locales) ? response.result.locales : [];
+  const localeResultLangs = localeResults
+    .map((row) => String(row?.lang || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (localeResultLangs.length > 0 && localeResultLangs.some((lang) => lang !== normalizedRequestedLang)) {
+    return { ok: false, reason: "Recheck returned a different locale than requested", matchedLocale: null };
+  }
   if (localeResults.length > 0) {
     const matchedLocale = localeResults.find((row) => String(row?.lang || "").trim().toLowerCase() === normalizedRequestedLang) || null;
     if (!matchedLocale) {
       return { ok: false, reason: "Recheck returned a different locale than requested", matchedLocale: null };
     }
-    return { ok: true, reason: "", matchedLocale: normalizedRequestedLang };
   }
 
   const translation = response?.translation && typeof response.translation === "object"
@@ -369,7 +410,6 @@ function validateRecheckResponseLocale(response, requestedLang) {
     if (translationLang !== normalizedRequestedLang) {
       return { ok: false, reason: "Recheck returned a different locale than requested", matchedLocale: null };
     }
-    return { ok: true, reason: "", matchedLocale: normalizedRequestedLang };
   }
 
   const translations = Array.isArray(response?.translations) ? response.translations : [];
@@ -378,6 +418,9 @@ function validateRecheckResponseLocale(response, requestedLang) {
     if (!matchedTranslation) {
       return { ok: false, reason: "Recheck returned a different locale than requested", matchedLocale: null };
     }
+  }
+
+  if (directLocaleCandidates.length || localeResults.length || translation || translations.length) {
     return { ok: true, reason: "", matchedLocale: normalizedRequestedLang };
   }
 
@@ -418,6 +461,10 @@ function getTranslationRecheckGateState() {
       rows,
       counts,
       blockingRows: rows,
+      blockingReasons: rows.map((row) => ({
+        lang: String(row?.lang || "").trim().toUpperCase(),
+        reason: getTranslationRecheckBlockReason(row),
+      })).filter((row) => row.lang && row.reason),
       blockingLangs,
       allReady: false,
     };
@@ -432,6 +479,10 @@ function getTranslationRecheckGateState() {
     rows,
     counts,
     blockingRows,
+    blockingReasons: blockingRows.map((row) => ({
+      lang: String(row?.lang || "").trim().toUpperCase(),
+      reason: getTranslationRecheckBlockReason(row),
+    })).filter((row) => row.lang && row.reason),
     blockingLangs: blockingRows.map((row) => String(row?.lang || "").trim().toUpperCase()).filter(Boolean),
     allReady: rows.length > 0 && blockingRows.length === 0,
   };
@@ -747,6 +798,9 @@ function renderTranslationReviewSummary() {
       <div class="summary-row"><strong>Translation Package</strong><span class="${packageReady ? "ok" : "fail"}">${packageReady ? "complete" : "not complete"}</span></div>
       <div class="summary-row"><strong>Translation Recheck</strong><span class="${recheckGate.allReady ? "ok" : "fail"}">${recheckGate.allReady ? "passed" : "not passed"}</span></div>
       <div class="summary-row"><strong>Final send</strong><span class="${recheckGate.allReady ? "ok" : "fail"}">${recheckGate.allReady ? "ready" : "blocked"}</span></div>
+      ${recheckGate.allReady
+        ? ""
+        : recheckGate.blockingReasons.map((row) => `<div class="summary-row"><strong>${escapeHtml(row.lang)}</strong><span>${escapeHtml(row.reason)}</span></div>`).join("")}
     </div>
     <p class="muted">Send is blocked until every required locale passes translation recheck.</p>
   `;
@@ -804,21 +858,20 @@ function renderTranslationRecheckPanel() {
           ? `<span class="translation-recheck-action-note">View technical details below</span>`
           : row.translation_recheck_status === "stale"
             ? `
-              <button type="button" class="utility-action" disabled>Regenerate</button>
-              <span class="translation-recheck-action-note">Translation is stale</span>
+              <button type="button" class="utility-action" data-translation-repair-lang="${escapeHtml(String(row.lang || ""))}" disabled>ซ่อมคำแปลแล้วตรวจซ้ำ</button>
+              <span class="translation-recheck-action-note">Repair & recheck</span>
+              <span class="translation-recheck-action-note">Translation is stale. Regenerate translations first.</span>
             `
             : row.translation_recheck_status === "failed" || row.translation_recheck_status === "warning"
-              ? recheckEligibility.eligible
+              ? repairEligibility.eligible
                 ? `
-                  <button type="button" class="utility-action" data-translation-recheck-lang="${escapeHtml(String(row.lang || ""))}" ${recheckDisabled ? "disabled" : ""}>Recheck again</button>
-                  <button type="button" class="utility-action" data-translation-repair-lang="${escapeHtml(String(row.lang || ""))}" ${repairDisabled ? "disabled" : ""}>Repair translation</button>
-                  <button type="button" class="utility-action" disabled>Regenerate</button>
+                  <button type="button" class="utility-action" data-translation-repair-lang="${escapeHtml(String(row.lang || ""))}" ${repairDisabled ? "disabled" : ""}>ซ่อมคำแปลแล้วตรวจซ้ำ</button>
+                  <span class="translation-recheck-action-note">Repair & recheck</span>
                 `
                 : `
-                  <button type="button" class="utility-action" data-translation-recheck-lang="${escapeHtml(String(row.lang || ""))}" disabled>Recheck again</button>
-                  <span class="translation-recheck-action-note">${escapeHtml(recheckEligibility.reason)}</span>
-                  <button type="button" class="utility-action" data-translation-repair-lang="${escapeHtml(String(row.lang || ""))}" ${repairDisabled ? "disabled" : ""}>Repair translation</button>
-                  <button type="button" class="utility-action" disabled>Regenerate</button>
+                  <button type="button" class="utility-action" data-translation-repair-lang="${escapeHtml(String(row.lang || ""))}" disabled>ซ่อมคำแปลแล้วตรวจซ้ำ</button>
+                  <span class="translation-recheck-action-note">Repair & recheck</span>
+                  <span class="translation-recheck-action-note">${escapeHtml(repairEligibility.reason || recheckEligibility.reason)}</span>
                 `
               : `
                 <button type="button" class="utility-action" data-translation-recheck-lang="${escapeHtml(String(row.lang || ""))}" ${recheckDisabled ? "disabled" : ""}>Recheck</button>
@@ -1034,18 +1087,15 @@ async function generateTranslations() {
 }
 
 function applyImmediateTranslationRecheckResult(result, fallbackLang = "") {
-  const translationsFromResponse = Array.isArray(result?.translations) ? result.translations : null;
-  if (translationsFromResponse) {
-    state.translations = translationsFromResponse;
-    return;
-  }
-
   const translationFromResponse = result?.translation && typeof result.translation === "object"
     ? result.translation
     : null;
   const localeResults = Array.isArray(result?.result?.locales) ? result.result.locales : [];
   const normalizedFallbackLang = String(fallbackLang || "").trim().toLowerCase();
-  if (!translationFromResponse && !localeResults.length) return;
+  const translationsFromResponse = Array.isArray(result?.translations)
+    ? result.translations.filter((row) => String(row?.lang || "").trim().toLowerCase() === normalizedFallbackLang)
+    : [];
+  if (!translationFromResponse && !localeResults.length && !translationsFromResponse.length) return;
 
   const nextRows = Array.isArray(state.translations) ? [...state.translations] : [];
   const updateByLang = new Map(
@@ -1053,6 +1103,10 @@ function applyImmediateTranslationRecheckResult(result, fallbackLang = "") {
       .map((row) => [String(row?.lang || "").trim().toLowerCase(), row])
       .filter(([lang]) => lang),
   );
+  for (const row of translationsFromResponse) {
+    const responseLang = String(row?.lang || "").trim().toLowerCase();
+    if (responseLang) updateByLang.set(responseLang, row);
+  }
   if (translationFromResponse) {
     const responseLang = String(translationFromResponse?.lang || normalizedFallbackLang).trim().toLowerCase();
     if (responseLang) updateByLang.set(responseLang, translationFromResponse);
@@ -1068,6 +1122,44 @@ function applyImmediateTranslationRecheckResult(result, fallbackLang = "") {
   }
 
   state.translations = nextRows;
+}
+
+function mergeSingleLocaleReadiness(currentReadiness, nextReadiness, lang) {
+  if ((!currentReadiness || typeof currentReadiness !== "object") && (!nextReadiness || typeof nextReadiness !== "object")) {
+    return currentReadiness;
+  }
+
+  if (!nextReadiness || typeof nextReadiness !== "object") {
+    return currentReadiness;
+  }
+
+  const normalizedLang = String(lang || "").trim().toLowerCase();
+  const currentObject = currentReadiness && typeof currentReadiness === "object" ? currentReadiness : {};
+  if (!Array.isArray(currentObject?.translations)) {
+    return currentReadiness;
+  }
+  const mergedReadiness = { ...currentObject };
+  const currentTranslations = Array.isArray(currentObject?.translations)
+    ? currentObject.translations.map((row) => ({ ...row }))
+    : [];
+  const nextTranslations = Array.isArray(nextReadiness?.translations) ? nextReadiness.translations : [];
+  const localeRow = nextTranslations.find((row) => String(row?.lang || "").trim().toLowerCase() === normalizedLang);
+
+  if (!localeRow) {
+    mergedReadiness.translations = currentTranslations;
+    return mergedReadiness;
+  }
+
+  const existingIndex = currentTranslations.findIndex(
+    (row) => String(row?.lang || "").trim().toLowerCase() === normalizedLang,
+  );
+  if (existingIndex >= 0) {
+    currentTranslations[existingIndex] = { ...currentTranslations[existingIndex], ...localeRow };
+  } else {
+    currentTranslations.push({ ...localeRow });
+  }
+  mergedReadiness.translations = currentTranslations;
+  return mergedReadiness;
 }
 
 async function runTranslationRecheck(lang) {
@@ -1091,7 +1183,7 @@ async function runTranslationRecheck(lang) {
       setInlineStatus("review-status", localeValidation.reason, "error");
       return;
     }
-    state.readiness = result?.readiness || state.readiness;
+    state.readiness = mergeSingleLocaleReadiness(state.readiness, result?.readiness, normalizedLang);
     renderSyncSummary();
     applyImmediateTranslationRecheckResult(result, normalizedLang);
     renderTranslationSummary();
@@ -1124,7 +1216,7 @@ async function runTranslationRepair(lang) {
   state.translationRepairBusyLang = normalizedLang;
   renderTranslationRecheckPanel();
   applyActionGuards();
-  setInlineStatus("review-status", `Repairing translation for ${normalizedLang.toUpperCase()}...`, "loading");
+  setInlineStatus("review-status", "กำลังซ่อมคำแปลและตรวจซ้ำ...", "loading");
   try {
     const result = await api(`/api/items/${state.itemId}/translations/${encodeURIComponent(normalizedLang)}/repair`, {
       method: "POST",
@@ -1138,7 +1230,7 @@ async function runTranslationRepair(lang) {
       setInlineStatus("review-status", localeValidation.reason, "error");
       return;
     }
-    state.readiness = result?.readiness || state.readiness;
+    state.readiness = mergeSingleLocaleReadiness(state.readiness, result?.readiness, normalizedLang);
     applyImmediateTranslationRecheckResult(result, normalizedLang);
     renderSyncSummary();
     renderTranslationSummary();
@@ -1146,11 +1238,18 @@ async function runTranslationRepair(lang) {
     renderTranslationReviewSummary();
     renderReviewChecklist();
     applyActionGuards();
+    const repairHasCompletedCount = result?.result && Object.prototype.hasOwnProperty.call(result.result, "completed_count");
+    const repairCompletedCount = repairHasCompletedCount ? Number(result?.result?.completed_count || 0) || 0 : null;
+    const repairSkippedReason = String(result?.result?.skipped_reason || "").trim().toLowerCase();
     try {
       await refreshTranslations();
     } catch (error) {
       await reloadCurrentReadinessSoft();
-      setInlineStatus("review-status", `Translation repair updated for ${normalizedLang.toUpperCase()} (refresh pending)`, "error");
+      if (repairSkippedReason === "technical_qa_failed_after_repair" || repairCompletedCount === 0) {
+        setInlineStatus("review-status", "ซ่อมคำแปลแล้ว แต่ Technical QA ยังไม่ผ่าน จึงยังไม่ได้ตรวจซ้ำ", "error");
+        return;
+      }
+      setInlineStatus("review-status", `ซ่อมคำแปลแล้วตรวจซ้ำ (${normalizedLang.toUpperCase()}) แต่ยัง refresh ไม่ครบ`, "error");
       return;
     }
     await reloadCurrentReadinessSoft();
@@ -1160,7 +1259,11 @@ async function runTranslationRepair(lang) {
     renderTranslationReviewSummary();
     renderReviewChecklist();
     applyActionGuards();
-    setInlineStatus("review-status", `Translation repaired for ${normalizedLang.toUpperCase()}`);
+    if (repairSkippedReason === "technical_qa_failed_after_repair" || repairCompletedCount === 0) {
+      setInlineStatus("review-status", "ซ่อมคำแปลแล้ว แต่ Technical QA ยังไม่ผ่าน จึงยังไม่ได้ตรวจซ้ำ", "error");
+      return;
+    }
+    setInlineStatus("review-status", `ซ่อมคำแปลแล้วตรวจซ้ำ ${normalizedLang.toUpperCase()} เรียบร้อย`);
   } finally {
     setBusy(false);
     state.translationRepairBusyLang = "";

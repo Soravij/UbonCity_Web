@@ -1718,6 +1718,33 @@ export async function repairTranslationFromRecheckIssues(repo, contentItemId, la
   return saved;
 }
 
+export async function repairAndRecheckTranslationFromIssues(repo, contentItemId, lang, aiConfig, actorEmail = "system@local") {
+  const repairedTranslation = await repairTranslationFromRecheckIssues(repo, contentItemId, lang, aiConfig, actorEmail);
+  const automaticCheckStatus = String(repairedTranslation?.automatic_check_status || "").trim().toLowerCase();
+  if (automaticCheckStatus !== "passed") {
+    return {
+      translation: repairedTranslation,
+      recheck_result: {
+        content_item_id: Number(contentItemId || 0) || 0,
+        locales: [],
+        completed_count: 0,
+        skipped_reason: "technical_qa_failed_after_repair",
+      },
+    };
+  }
+
+  const recheckResult = await rerunTranslationRecheck(repo, actorEmail, {
+    aiConfig,
+    content_item_id: contentItemId,
+    lang,
+  });
+  const refreshedTranslation = repo.getTranslation(contentItemId, lang) || repairedTranslation;
+  return {
+    translation: refreshedTranslation,
+    recheck_result: recheckResult,
+  };
+}
+
 export async function runCleanStage(repo, actorEmail) {
   const runUid = repo.createPipelineRun("clean", "running", 0, 0, "Cleaner started");
   const rawItems = repo.listItemsByWorkflowHead({ production_states: ["collected"] });
