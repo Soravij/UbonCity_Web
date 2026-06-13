@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import path from "path";
 
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
 
@@ -42,6 +43,103 @@ function parseAssetPublicUrl(storagePath) {
   if (googleProxy) return googleProxy;
   if (/^https?:\/\//i.test(value)) return value;
   return `/media/${value.replace(/\\/g, "/")}`;
+}
+
+function normalizeImportedMediaUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text)) return text;
+  if (/^\/api\//i.test(text)) return text;
+  return "";
+}
+
+function toGoogleMapsPhotoProxyUrl(photoName) {
+  const name = String(photoName || "").trim();
+  if (!name) return "";
+  return `/api/google-maps/photo?name=${encodeURIComponent(name)}&maxWidthPx=1400&maxHeightPx=1400`;
+}
+
+function collectImportedMediaCandidate(list, seen, url, options = {}) {
+  const normalizedUrl = normalizeImportedMediaUrl(url);
+  if (!normalizedUrl) return false;
+  const key = normalizedUrl.toLowerCase();
+  if (seen.has(key)) return false;
+  seen.add(key);
+  list.push({
+    url: normalizedUrl,
+    mime_type: String(options.mime_type || "").trim().toLowerCase() || null,
+    width: Number.isFinite(Number(options.width)) ? Number(options.width) : null,
+    height: Number.isFinite(Number(options.height)) ? Number(options.height) : null,
+    checksum: String(options.checksum || "").trim() || null,
+    role_hint: String(options.role_hint || "").trim().toLowerCase() || null,
+    source_kind: String(options.source_kind || "").trim().toLowerCase() || null,
+    source_name: String(options.source_name || "").trim() || null,
+  });
+  return true;
+}
+
+function extractImportedMediaCandidatesFromPayload(payload, options = {}) {
+  const out = [];
+  const seen = new Set();
+  const sourceKind = String(options.source_kind || "source_record").trim().toLowerCase() || "source_record";
+  const sourceName = String(options.source_name || "").trim() || null;
+  const pushCandidate = (url, extra = {}) => collectImportedMediaCandidate(out, seen, url, {
+    ...extra,
+    source_kind: sourceKind,
+    source_name: sourceName,
+  });
+
+  const payloadObject = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : null;
+  if (!payloadObject) return out;
+
+  const collectPhotoArray = (rows = []) => {
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (typeof row === "string") {
+        pushCandidate(row);
+        continue;
+      }
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      pushCandidate(row.photo_url || row.url || row.uri || row.image_url || row.src || toGoogleMapsPhotoProxyUrl(row.photo_name), {
+        mime_type: row.mime_type,
+        width: row.width ?? row.width_px,
+        height: row.height ?? row.height_px,
+        role_hint: row.role,
+      });
+    }
+  };
+
+  const collectImageObject = (value) => {
+    if (typeof value === "string") {
+      pushCandidate(value);
+      return;
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    pushCandidate(value.image_url || value.media_url || value.url || value.uri || value.src, {
+      mime_type: value.mime_type,
+      width: value.width ?? value.width_px,
+      height: value.height ?? value.height_px,
+      role_hint: value.role,
+    });
+  };
+
+  const normalized = payloadObject.normalized_json && typeof payloadObject.normalized_json === "object"
+    ? payloadObject.normalized_json
+    : payloadObject.payload_json?.normalized_json && typeof payloadObject.payload_json.normalized_json === "object"
+      ? payloadObject.payload_json.normalized_json
+      : null;
+
+  if (normalized) {
+    pushCandidate(normalized.image, { role_hint: "cover" });
+    collectPhotoArray(normalized.photos);
+    collectPhotoArray(normalized.images);
+  }
+
+  collectPhotoArray(payloadObject.extracted_metadata_photos);
+  collectImageObject(payloadObject.extracted_metadata_image);
+  collectPhotoArray(payloadObject.extracted_metadata?.photos);
+  collectImageObject(payloadObject.extracted_metadata?.image);
+
+  return out;
 }
 
 const EVIDENCE_BLOCK_TYPES = new Set(["fact", "social_proof", "review_snippet", "media", "mention", "editor_note"]);
@@ -9803,6 +9901,236 @@ function normalizeStateValue(value, stateGroup) {
     };
   }
 
+  function listImportedReferenceAssetsByItem(contentItemId) {
+    return listContentAssetsByItem(contentItemId, { onlySelected: false }).filter((row) => {
+      const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
+      const storagePath = String(row?.storage_path || "").trim();
+      return storageDisk === "remote" && Boolean(normalizeImportedMediaUrl(storagePath));
+    });
+  }
+
+  function repairImportedReferenceAssetsForItem(contentItemId, options = {}) {
+    const itemId = Number(contentItemId || 0) || 0;
+    if (!itemId) throw new Error("invalid content_item_id");
+    const item = getItem(itemId);
+    if (!item) throw new Error("item not found");
+
+    const apply = options?.apply === true;
+    const limit = Math.max(1, Math.min(50, Number(options?.limit || 25) || 25));
+    const actor = String(options?.actorEmail || "system@local").trim() || "system@local";
+    const rawItem = options?.rawItem && typeof options.rawItem === "object" ? options.rawItem : null;
+    const sourceRecords = listSourceRecordsByItem(itemId);
+
+    const matchUrls = new Set(
+      [
+        String(item?.source_url || "").trim(),
+        String(item?.map_url || "").trim(),
+        ...sourceRecords.map((row) => String(row?.source_url || "").trim()),
+      ].filter(Boolean)
+    );
+    const matchEntities = new Set(
+      [
+        String(item?.google_place_id || "").trim(),
+        ...sourceRecords.map((row) => String(row?.source_entity_id || "").trim()),
+      ].filter(Boolean)
+    );
+
+    const rawMediaRows = db.prepare(`
+      SELECT
+        srm.media_url,
+        srm.checksum,
+        srm.mime_type,
+        srm.width,
+        srm.height,
+        srm.metadata_json,
+        sri.source_url,
+        sri.source_ref,
+        sri.normalized_json
+      FROM source_raw_media srm
+      JOIN source_raw_items sri ON sri.id = srm.raw_item_id
+      WHERE srm.media_url IS NOT NULL
+        AND srm.media_url <> ''
+      ORDER BY srm.id DESC
+      LIMIT 2000
+    `).all();
+
+    const candidateList = [];
+    const seenCandidateUrls = new Set();
+    const skipped = [];
+    const skip = (url, reason) => {
+      const normalizedUrl = normalizeImportedMediaUrl(url);
+      skipped.push({
+        url: normalizedUrl || String(url || "").trim() || null,
+        reason: String(reason || "").trim() || "unknown",
+      });
+    };
+
+    if (String(item?.image_url || "").trim()) {
+      collectImportedMediaCandidate(candidateList, seenCandidateUrls, item.image_url, {
+        role_hint: "cover",
+        source_kind: "item_image_url",
+        source_name: item?.source_name || null,
+      });
+    }
+
+    if (rawItem) {
+      const rawCandidates = [
+        ...extractImportedMediaCandidatesFromPayload({ normalized_json: rawItem?.normalized_json || null }, {
+          source_kind: "raw_item_payload",
+          source_name: rawItem?.source_type || item?.source_name || null,
+        }),
+        ...((Array.isArray(rawItem?.media) ? rawItem.media : []).map((media) => ({
+          url: media?.media_url || media?.url,
+          mime_type: media?.mime_type || null,
+          width: media?.width,
+          height: media?.height,
+          checksum: media?.checksum || null,
+          role_hint: media?.metadata_json?.role || media?.role || null,
+          source_kind: "raw_item_media",
+          source_name: rawItem?.source_type || item?.source_name || null,
+        }))),
+      ];
+      for (const candidate of rawCandidates) {
+        if (!collectImportedMediaCandidate(candidateList, seenCandidateUrls, candidate.url, candidate)) {
+          skip(candidate.url, "duplicate_candidate");
+        }
+      }
+    }
+
+    for (const row of sourceRecords) {
+      const extracted = extractImportedMediaCandidatesFromPayload(row?.payload_json, {
+        source_kind: "source_record_payload",
+        source_name: row?.source_name || row?.source_type || null,
+      });
+      for (const candidate of extracted) {
+        if (!collectImportedMediaCandidate(candidateList, seenCandidateUrls, candidate.url, candidate)) {
+          skip(candidate.url, "duplicate_candidate");
+        }
+      }
+    }
+
+    let matchedRawMediaCount = 0;
+    for (const row of rawMediaRows) {
+      const sourceUrl = String(row?.source_url || "").trim();
+      const sourceRef = String(row?.source_ref || "").trim();
+      const normalized = parseJson(row?.normalized_json, null);
+      const placeId = String(normalized?.google_place_id || "").trim();
+      if (
+        !matchUrls.has(sourceUrl)
+        && !matchEntities.has(sourceRef)
+        && !matchEntities.has(placeId)
+      ) {
+        continue;
+      }
+      matchedRawMediaCount += 1;
+      const metadata = parseJson(row?.metadata_json, null);
+      const added = collectImportedMediaCandidate(candidateList, seenCandidateUrls, row?.media_url, {
+        mime_type: row?.mime_type,
+        width: row?.width,
+        height: row?.height,
+        checksum: row?.checksum,
+        role_hint: metadata?.role,
+        source_kind: "source_raw_media",
+        source_name: sourceUrl || sourceRef || placeId || null,
+      });
+      if (!added) {
+        skip(row?.media_url, "duplicate_candidate");
+      }
+    }
+
+    const existingAssets = listContentAssetsByItem(itemId, { onlySelected: false });
+    const existingUrlKeys = new Set(
+      existingAssets.map((row) => normalizeImportedMediaUrl(row?.public_url || row?.storage_path || "")).filter(Boolean).map((url) => url.toLowerCase())
+    );
+    const hasExistingCover = existingAssets.some((row) => Number(row?.is_cover || 0) === 1 || String(row?.role || "").trim().toLowerCase() === "cover");
+    const importedAssetCountBefore = listImportedReferenceAssetsByItem(itemId).length;
+
+    const insertAssetStmt = db.prepare(`
+      INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
+      VALUES (?, 'remote', ?, ?, ?, NULL, ?)
+    `);
+    const insertContentAssetStmt = db.prepare(`
+      INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const nextSortOrder = Number(
+      db.prepare("SELECT COALESCE(MAX(sort_order), 0) AS max_sort FROM content_assets WHERE content_item_id=?").get(itemId)?.max_sort || 0
+    );
+
+    const addedAssets = [];
+    let addedCount = 0;
+    let rawCoverAssigned = hasExistingCover;
+    let sortOrder = nextSortOrder;
+
+    for (const candidate of candidateList.slice(0, limit)) {
+      const normalizedUrl = normalizeImportedMediaUrl(candidate.url);
+      if (!normalizedUrl) {
+        skip(candidate.url, "invalid_media_url");
+        continue;
+      }
+      if (candidate.mime_type && !candidate.mime_type.startsWith("image/")) {
+        skip(normalizedUrl, "non_image_mime");
+        continue;
+      }
+      const key = normalizedUrl.toLowerCase();
+      if (existingUrlKeys.has(key)) {
+        skip(normalizedUrl, "existing_asset");
+        continue;
+      }
+
+      const shouldBeCover = !rawCoverAssigned && String(item?.image_url || "").trim() === normalizedUrl;
+      const role = shouldBeCover ? "cover" : "gallery";
+      const selectedInClean = 1;
+      const isCover = shouldBeCover ? 1 : 0;
+      const placementType = "gallery";
+
+      if (apply) {
+        sortOrder += 1;
+        const fileName = path.basename(normalizedUrl.split("?")[0] || "remote-image.jpg") || "remote-image.jpg";
+        const assetResult = insertAssetStmt.run(
+          randomUUID(),
+          normalizedUrl,
+          fileName,
+          candidate.mime_type || null,
+          candidate.checksum || null
+        );
+        const assetId = Number(assetResult.lastInsertRowid || 0) || 0;
+        insertContentAssetStmt.run(itemId, assetId, role, selectedInClean, isCover, placementType, sortOrder);
+        addedAssets.push({
+          asset_id: assetId,
+          url: normalizedUrl,
+          role,
+          selected_in_clean: selectedInClean,
+          is_cover: isCover,
+        });
+        existingUrlKeys.add(key);
+        addedCount += 1;
+        rawCoverAssigned = rawCoverAssigned || shouldBeCover;
+      }
+    }
+
+    const importedAssetCountAfter = apply ? listImportedReferenceAssetsByItem(itemId).length : importedAssetCountBefore + addedCount;
+    const diagnostics = {
+      content_item_id: itemId,
+      item_title: String(item?.title || "").trim() || null,
+      raw_media_count: matchedRawMediaCount,
+      source_record_count: sourceRecords.length,
+      imported_asset_count: importedAssetCountAfter,
+      imported_asset_count_before: importedAssetCountBefore,
+      candidate_count: candidateList.length,
+      added_count: addedCount,
+      skipped_media: skipped,
+      added_assets: addedAssets,
+      apply,
+    };
+
+    if (apply && addedCount > 0) {
+      logAudit(actor, "asset.imported_reference.repair", "content_item", String(itemId), diagnostics);
+    }
+
+    return diagnostics;
+  }
+
   function evaluateContentAssetCleanupEligibility(contentItemId, options = {}) {
     const itemId = Number(contentItemId || 0) || 0;
     if (!itemId) throw new Error("invalid content_item_id");
@@ -10966,6 +11294,8 @@ function normalizeStateValue(value, stateGroup) {
     setContentAssetRole,
     setContentAssetSelected,
     listApprovedImageContext,
+    listImportedReferenceAssetsByItem,
+    repairImportedReferenceAssetsForItem,
     evaluateContentAssetCleanupEligibility,
     listPostAssignmentAiInputCleanupCandidates,
     getDeletedItemReferenceGroups,
