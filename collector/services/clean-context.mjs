@@ -131,9 +131,10 @@ export function buildCleanStructuredContext(repo, contentItemId, options = {}) {
     .slice(0, evidenceLimit)
     .map((row) => normalizeEvidenceBlock(row));
 
-  const selectedAssets = repo
-    .listContentAssetsByItem(contentItemId, { onlySelected: true })
-    .filter((row) => isCollectorControlledLocalAsset(row));
+  const selectedAssets = repo.listContentAssetsByItem(contentItemId, { onlySelected: true });
+  const referenceAssets = repo
+    .listContentAssetsByItem(contentItemId, { selectedReferenceMedia: true })
+    .filter((row) => !isCollectorControlledLocalAsset(row));
   const selectedUrls = selectedAssets.map((row) => String(row.public_url || "").trim()).filter(Boolean);
   const galleryUrls = selectedAssets
     .filter((row) => String(row.role || "").trim().toLowerCase() === "gallery")
@@ -150,6 +151,17 @@ export function buildCleanStructuredContext(repo, contentItemId, options = {}) {
     selected_urls: selectedUrls,
     gallery_urls: galleryUrls,
     inline_urls: inlineUrls,
+  };
+  const referenceMediaContext = {
+    selected_urls: referenceAssets.map((row) => String(row.public_url || "").trim()).filter(Boolean),
+    selected_count: referenceAssets.length,
+    assets: referenceAssets.map((row) => ({
+      asset_id: Number(row.asset_id || 0) || null,
+      role: row.role || "unused",
+      selected_in_clean: Number(row.selected_in_clean || 0),
+      is_cover: Number(row.is_cover || 0),
+      public_url: row.public_url || "",
+    })),
   };
   const completeness = computeCompleteness(item, approvedBlocks, normalizedImageContext);
 
@@ -190,10 +202,11 @@ export function buildCleanStructuredContext(repo, contentItemId, options = {}) {
         public_url: row.public_url || "",
       })),
     },
+    reference_media_context: referenceMediaContext,
     completeness,
     evidence_policy: {
       primary_source: "approved_context",
-      secondary_sources: ["item", "image_context"],
+      secondary_sources: ["item", "image_context", "reference_media_context"],
       supporting_sources: ["evidence_blocks"],
       external_links_policy: "reference_only",
     },
@@ -726,6 +739,17 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
       ...(eventDateMissing ? ["event_date_hints"] : []),
     ]),
   };
+  const referenceMediaHints = Array.isArray(context.reference_media_context?.assets)
+    ? context.reference_media_context.assets
+      .map((row, index) => ({
+        url: String(row?.public_url || "").trim() || null,
+        kind: "reference",
+        caption: null,
+        selected: Number(row?.selected_in_clean || 0) === 1,
+        item_order: index,
+      }))
+      .filter((row) => row.url)
+    : [];
 
   return {
     taxonomy_version: "page_curation_taxonomy_v1",
@@ -763,6 +787,7 @@ export function buildFieldPackContractFromCleanContext(cleanContext) {
     restaurant_profile: restaurantProfile,
     hotel_profile: hotelProfile,
     event_profile: eventProfile,
+    reference_media_hints: referenceMediaHints,
     verification,
     provenance: {
       contract_version: "field_pack_contract_v1",

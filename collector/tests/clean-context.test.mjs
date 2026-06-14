@@ -28,9 +28,46 @@ function createMockRepo({
       if (!item || Number(item.id) !== Number(contentItemId)) return [];
       return evidenceBlocks.map((row) => ({ ...row }));
     },
-    listContentAssetsByItem(contentItemId) {
+    listContentAssetsByItem(contentItemId, options = {}) {
       if (!item || Number(item.id) !== Number(contentItemId)) return [];
-      return selectedAssets.map((row) => ({ ...row }));
+      const mapped = selectedAssets.map((row) => ({ ...row }));
+      if (options?.selectedReferenceMedia === true) {
+        return mapped.filter((row) => {
+          const role = String(row.role || "").trim().toLowerCase();
+          const storageDisk = String(row.storage_disk || "").trim().toLowerCase();
+          const storagePath = String(row.storage_path || "").trim();
+          const mimeType = String(row.mime_type || "").trim().toLowerCase();
+          const isLocalUsable = (!storageDisk && !storagePath && !mimeType)
+            || (
+              ["local", "nas"].includes(storageDisk)
+              && Boolean(storagePath)
+              && !/^https?:\/\//i.test(storagePath)
+              && (!mimeType || mimeType.startsWith("image/"))
+            );
+          return Number(row.selected_in_clean || 0) === 1
+            && !isLocalUsable
+            && ["unused", "reference"].includes(role);
+        });
+      }
+      if (options?.onlySelected === true) {
+        return mapped.filter((row) => {
+          const role = String(row.role || "").trim().toLowerCase();
+          const storageDisk = String(row.storage_disk || "").trim().toLowerCase();
+          const storagePath = String(row.storage_path || "").trim();
+          const mimeType = String(row.mime_type || "").trim().toLowerCase();
+          const isLocalUsable = (!storageDisk && !storagePath && !mimeType)
+            || (
+              ["local", "nas"].includes(storageDisk)
+              && Boolean(storagePath)
+              && !/^https?:\/\//i.test(storagePath)
+              && (!mimeType || mimeType.startsWith("image/"))
+            );
+          return Number(row.selected_in_clean || 0) === 1
+            && isLocalUsable
+            && ["cover", "gallery", "inline"].includes(role);
+        });
+      }
+      return mapped;
     },
     listApprovedImageContext(contentItemId) {
       if (!item || Number(item.id) !== Number(contentItemId)) {
@@ -201,6 +238,7 @@ test("buildCleanStructuredContext matches structured context v1 contract", () =>
     "approved_context",
     "evidence_blocks",
     "image_context",
+    "reference_media_context",
     "completeness",
     "evidence_policy",
     "task",
@@ -225,7 +263,7 @@ test("buildCleanStructuredContext matches structured context v1 contract", () =>
   assert.equal(Object.hasOwn(context.item, "description_raw"), false);
   assert.equal(Object.hasOwn(context.item, "summary"), false);
   assert.equal(context.evidence_policy.primary_source, "approved_context");
-  assert.deepEqual(context.evidence_policy.secondary_sources, ["item", "image_context"]);
+  assert.deepEqual(context.evidence_policy.secondary_sources, ["item", "image_context", "reference_media_context"]);
   assert.deepEqual(context.evidence_policy.supporting_sources, ["evidence_blocks"]);
   assert.equal(context.task.mode, "agent_generation_from_clean");
   assert.equal(context.task.output_contract, "existing");
@@ -357,6 +395,52 @@ test("buildCleanStructuredContext excludes external reference assets from image 
     context.image_context.assets.some((row) => String(row?.public_url || "").includes("fbcdn.net")),
     false
   );
+});
+
+test("buildCleanStructuredContext keeps external selected assets in reference-only media context", () => {
+  const repo = createMockRepo({
+    item: createBaseItem(),
+    approvedContext: [
+      createApprovedBlock(1, 101),
+    ],
+    evidenceBlocks: [
+      createEvidenceBlock(101),
+    ],
+    selectedAssets: [
+      {
+        asset_id: 1101,
+        role: "cover",
+        selected_in_clean: 1,
+        is_cover: 1,
+        public_url: "/media/uploads/local-cover.jpg",
+        storage_disk: "local",
+        storage_path: "uploads/local-cover.jpg",
+        mime_type: "image/jpeg",
+      },
+      {
+        asset_id: 1102,
+        role: "unused",
+        selected_in_clean: 1,
+        is_cover: 0,
+        public_url: "https://scontent.fubp1-1.fna.fbcdn.net/external.jpg",
+        storage_disk: "remote",
+        storage_path: "https://scontent.fubp1-1.fna.fbcdn.net/external.jpg",
+        mime_type: "image/jpeg",
+      },
+    ],
+  });
+
+  const context = buildCleanStructuredContext(repo, 59);
+  const contract = buildFieldPackContractFromCleanContext(context);
+
+  assert.equal(context.image_context.cover_url, "/media/uploads/local-cover.jpg");
+  assert.deepEqual(context.image_context.selected_urls, ["/media/uploads/local-cover.jpg"]);
+  assert.equal(context.image_context.assets.some((row) => String(row.public_url || "").includes("fbcdn.net")), false);
+  assert.equal(context.reference_media_context.selected_count, 1);
+  assert.deepEqual(context.reference_media_context.selected_urls, ["https://scontent.fubp1-1.fna.fbcdn.net/external.jpg"]);
+  assert.equal(contract.reference_media_hints.length, 1);
+  assert.equal(contract.reference_media_hints[0].url, "https://scontent.fubp1-1.fna.fbcdn.net/external.jpg");
+  assert.equal(contract.reference_media_hints[0].kind, "reference");
 });
 
 test("buildCleanStructuredContext ignores external imageContext fallback when no local usable asset exists", () => {

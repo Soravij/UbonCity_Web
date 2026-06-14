@@ -13978,6 +13978,14 @@ app.get("/api/assets", (req, res) => {
     return;
   }
 
+  if (contentItemId > 0 && onlySelected) {
+    rows = repo
+      .listContentAssetsByItem(contentItemId, { onlySelected: true })
+      .filter((row) => (localOnly ? isCollectorControlledLocalAssetRow(row) : true));
+    res.json(rows);
+    return;
+  }
+
   if (contentItemId > 0) {
     rows = db
       .prepare(`
@@ -14013,8 +14021,7 @@ app.get("/api/assets", (req, res) => {
       placement_type: String(row.placement_type || "unused"),
       public_url: parseAssetPathForUrl(row.storage_path),
     }))
-    .filter((row) => (localOnly ? isCollectorControlledLocalAssetRow(row) : true))
-    .filter((row) => (onlySelected ? row.selected_in_clean === 1 && row.role !== "unused" : true));
+    .filter((row) => (localOnly ? isCollectorControlledLocalAssetRow(row) : true));
 
   res.json(mapped);
 });

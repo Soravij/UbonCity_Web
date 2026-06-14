@@ -9780,6 +9780,7 @@ function normalizeStateValue(value, stateGroup) {
 
   function listContentAssetsByItem(contentItemId, options = {}) {
     const onlySelected = options?.onlySelected === true;
+    const selectedReferenceMedia = options?.selectedReferenceMedia === true;
     const rows = db
       .prepare(`
         SELECT ca.*, a.storage_disk, a.storage_path, a.file_name, a.mime_type, a.size_bytes, a.checksum
@@ -9798,8 +9799,21 @@ function normalizeStateValue(value, stateGroup) {
       public_url: parseAssetPublicUrl(row.storage_path),
     }));
 
+    if (selectedReferenceMedia) {
+      return mapped.filter((row) => {
+        if (row.selected_in_clean !== 1) return false;
+        if (isCollectorControlledLocalAssetRow(row)) return false;
+        const role = String(row.role || "").trim().toLowerCase();
+        return role === "unused" || role === "reference";
+      });
+    }
     if (!onlySelected) return mapped;
-    return mapped.filter((row) => row.selected_in_clean === 1 && row.role !== "unused");
+    return mapped.filter((row) => {
+      if (row.selected_in_clean !== 1) return false;
+      if (!isCollectorControlledLocalAssetRow(row)) return false;
+      const role = String(row.role || "").trim().toLowerCase();
+      return role === "cover" || role === "gallery" || role === "inline";
+    });
   }
 
   function getImageWorkflowStatus(contentItemId) {
@@ -9813,16 +9827,14 @@ function normalizeStateValue(value, stateGroup) {
       `)
       .all(contentItemId);
 
-    const selected = rows.filter((r) => Number(r.selected_in_clean || 0) === 1 && String(r.role || "") !== "unused");
+    const selected = rows.filter((r) => Number(r.selected_in_clean || 0) === 1);
     const covers = rows.filter((r) => Number(r.is_cover || 0) === 1 || String(r.role || "") === "cover");
 
     const localSelected = selected.filter((r) => isCollectorControlledLocalAssetRow(r));
     const localCovers = covers.filter((r) => isCollectorControlledLocalAssetRow(r));
 
     const missing = [];
-    if (selected.length < 1) missing.push("ต้องเลือกภาพอย่างน้อย 1 ภาพ");
-    if (covers.length < 1) missing.push("ต้องตั้งภาพปก");
-    if (covers.length > 1) missing.push("ต้องมีภาพปกเพียง 1 ภาพ");
+    if (selected.length < 1) missing.push("ต้องเลือกรูปอย่างน้อย 1 รูปเพื่อส่งให้ AI ดู");
 
     const localMissing = [];
     if (localSelected.length < 1) localMissing.push("ต้องเลือกภาพ local อย่างน้อย 1 ภาพ");
@@ -9898,7 +9910,8 @@ function normalizeStateValue(value, stateGroup) {
 
     const yes = selected === true || selected === 1 || selected === "1";
     if (yes && !isCollectorControlledLocalAssetRow(target)) {
-      db.prepare("UPDATE content_assets SET selected_in_clean=0, role='unused', placement_type='unused', is_cover=0 WHERE content_item_id=? AND asset_id=?").run(contentItemId, assetId);
+      const referenceRole = String(target.role || "").trim().toLowerCase() === "reference" ? "reference" : "unused";
+      db.prepare("UPDATE content_assets SET selected_in_clean=1, role=?, placement_type='unused', is_cover=0 WHERE content_item_id=? AND asset_id=?").run(referenceRole, contentItemId, assetId);
       return getImageWorkflowStatus(contentItemId);
     }
     if (!yes && (Number(target.is_cover || 0) === 1 || String(target.role || "") === "cover")) {
@@ -11434,9 +11447,6 @@ function deriveExpectedDeliverablesFromHandoff(handoffPackage) {
   }
   return normalizeAssignmentDeliverableTypeList(derived);
 }
-
-
-
 
 
 

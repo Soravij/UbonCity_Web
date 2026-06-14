@@ -191,7 +191,7 @@ function applyEditorActionGuards() {
     saveAiContextBtn.disabled = saveBtn ? saveBtn.disabled : !editGuard.allowed;
     saveAiContextBtn.title = saveBtn ? String(saveBtn.title || "") : (editGuard.allowed ? "" : editGuard.reason);
   }
-  if (isCleanMode) {
+  if (cleanMode) {
     const nextAiBtn = qs("btn-next-ai");
     const runAiBtn = qs("btn-run-ai-context");
     const uploadBtn = qs("btn-upload-asset");
@@ -1928,7 +1928,7 @@ async function loadEvidenceContextAndPreview() {
     api(`/api/items/${state.itemId}/evidence-blocks`),
     api(`/api/items/${state.itemId}/approved-context`),
   ];
-  if (isCleanMode) {
+  if (cleanMode) {
     requests.push(api(`/api/items/${state.itemId}/draft-input-preview`));
   }
   const [evidence, context, previewRes] = await Promise.all(requests);
@@ -2568,12 +2568,24 @@ function buildFieldPackDefaults() {
 
 function getDraftSelectedImageAssets() {
   return (Array.isArray(state.assets) ? state.assets : []).filter((row) => {
-    const selected = Number(row?.selected_in_clean || 0) === 1 && String(row?.role || "") !== "unused";
+    const selected = Number(row?.selected_in_clean || 0) === 1 && isCollectorControlledLocalAssetForUi(row);
     const mimeType = String(row?.mime_type || "").toLowerCase();
     return selected && (!mimeType || mimeType.startsWith("image/"));
   });
 }
 
+function getDraftSelectedReferenceMediaHints() {
+  return (Array.isArray(state.assets) ? state.assets : [])
+    .filter((row) => Number(row?.selected_in_clean || 0) === 1 && !isCollectorControlledLocalAssetForUi(row))
+    .map((row) => ({
+      content_asset_id: null,
+      url: sanitizeUrl(row?.public_url || ""),
+      kind: "reference",
+      caption: String(row?.file_name || row?.storage_path || "").trim() || null,
+      selected: true,
+    }))
+    .filter((row) => row.url);
+}
 function renderFieldPackMediaHintEditor(fieldPack = null) {
   const root = qs("fp-media-hints-editor");
   if (!root) return;
@@ -2906,7 +2918,7 @@ function buildFieldPackReferencePayload(pack) {
 }
 
 function buildFieldPackMediaHintPayload(pack, existing = state.fieldPack || {}) {
-  const externalMediaHints = parseExternalMediaHintLines(pack.external_media_hints_text);
+  const externalMediaHints = [...parseExternalMediaHintLines(pack.external_media_hints_text), ...getDraftSelectedReferenceMediaHints()];
   const allowedContentAssetIds = getDraftSelectedImageAssets().map((row) => Number(row.id || 0)).filter(Boolean);
   return preserveMediaHints(
     existing.media_hints,
@@ -4020,7 +4032,18 @@ function roleLabel(row) {
   if (role === "cover") return "cover";
   if (role === "inline") return "inline";
   if (role === "gallery") return "gallery";
+  if (role === "reference") return "reference";
   return "unused";
+}
+
+function isCollectorControlledLocalAssetForUi(row) {
+  const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
+  const storagePath = String(row?.storage_path || "").trim();
+  const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+  if (!["local", "nas"].includes(storageDisk)) return false;
+  if (!storagePath || /^https?:\/\//i.test(storagePath)) return false;
+  if (mimeType && !mimeType.startsWith("image/")) return false;
+  return true;
 }
 
 function roleDisplayLabel(role) {
@@ -4031,15 +4054,22 @@ function roleDisplayLabel(role) {
   return "ไม่ได้ใช้";
 }
 
-function renderAssetBadges(row) {
+function renderAssetBadges(row, { cleanMode = isCleanMode } = {}) {
   const badges = [];
   const role = roleLabel(row);
-  const selected = Number(row.selected_in_clean || 0) === 1 && role !== "unused";
+  const selected = Number(row.selected_in_clean || 0) === 1;
   const isCover = Number(row.is_cover || 0) === 1 || role === "cover";
+  const isReferenceOnly = !isCollectorControlledLocalAssetForUi(row) || role === "reference" || role === "unused";
+
+  if (cleanMode) {
+    badges.push(`<span class="asset-badge ${selected ? "state-on" : "state-off"}">${selected ? "ส่งให้ AI" : "ยังไม่ส่งให้ AI"}</span>`);
+    badges.push(`<span class="asset-badge ${isReferenceOnly ? "role-reference" : `role-${role}`}">${isReferenceOnly ? "reference-only" : roleDisplayLabel(role)}</span>`);
+    return badges.join(" ");
+  }
 
   badges.push(`<span class="asset-badge role-${role}">${roleDisplayLabel(role)}</span>`);
   badges.push(`<span class="asset-badge ${selected ? "state-on" : "state-off"}">${selected ? "เลือกแล้ว" : "ยังไม่เลือก"}</span>`);
-  if (isCover) {
+  if (isCover && !isReferenceOnly) {
     badges.push('<span class="asset-badge state-cover">ปก</span>');
   }
   return badges.join(" ");
@@ -4064,17 +4094,15 @@ function renderAssetsTable(rows) {
   }
 
   rows.forEach((row) => {
-    const selected = Number(row.selected_in_clean || 0) === 1 && String(row.role || "") !== "unused";
+    const selected = Number(row.selected_in_clean || 0) === 1;
     const displayName = String(row.file_name || row.storage_path || "-");
     const assetId = Number(row.asset_id || 0) || 0;
-
     const previewUrl = sanitizeUrl(row.public_url || "");
     const preview = previewUrl ? `<img class="asset-thumb" src="${escapeHtml(previewUrl)}" alt="asset" />` : "-";
 
     const actions = [];
     if (isCleanMode) {
-      actions.push(`<button data-action="toggle-select" data-id="${assetId}"${disabledAttr}${disabledTitleAttr}>${selected ? "ยกเลิกเลือก" : "เลือก"}</button>`);
-      actions.push(`<button data-action="set-cover" data-id="${assetId}"${disabledAttr}${disabledTitleAttr}>ตั้งเป็นภาพปก</button>`);
+      actions.push(`<button data-action="toggle-select" data-id="${assetId}"${disabledAttr}${disabledTitleAttr}>${selected ? "ไม่ส่งให้ AI" : "ส่งให้ AI ดู"}</button>`);
     }
     if (isCleanMode && isOwnerUser()) {
       actions.push(`<button data-action="delete-asset" data-id="${assetId}" class="fail"${disabledAttr}${disabledTitleAttr}>ลบ</button>`);
@@ -4105,48 +4133,22 @@ function renderAssetsTable(rows) {
     img.addEventListener("mouseleave", hideAssetHoverPreview);
   });
 
-  const resolveAssetUrl = (asset) => {
-    if (asset?.public_url) return String(asset.public_url).trim();
-    const rawPath = String(asset?.storage_path || "").trim();
-    if (!rawPath) return "";
-    if (/^https?:\/\//i.test(rawPath)) return rawPath;
-    if (rawPath.startsWith("/")) return rawPath;
-    return `/${rawPath.replace(/^\.?\//, "")}`;
-  };
-
   tbody.querySelectorAll("button[data-action]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = Number(btn.dataset.id || 0);
       if (!id) return;
-
       const asset = rows.find((r) => Number(r.asset_id || 0) === id);
-      const url = resolveAssetUrl(asset);
       const action = btn.dataset.action;
 
       try {
         if (action === "toggle-select") {
-          const nextSelected = !(Number(asset?.selected_in_clean || 0) === 1 && String(asset?.role || "") !== "unused");
+          const nextSelected = Number(asset?.selected_in_clean || 0) !== 1;
           await api(`/api/items/${state.itemId}/assets/${id}/selected`, {
             method: "PATCH",
             body: JSON.stringify({ selected: nextSelected }),
           });
           await refreshAssets();
-          setAssetStatus(nextSelected ? `เลือก asset ${id} แล้ว` : `ยกเลิกเลือก asset ${id} แล้ว`);
-          return;
-        }
-
-        if (action === "set-cover") {
-          await api(`/api/items/${state.itemId}/assets/${id}/role`, {
-            method: "PATCH",
-            body: JSON.stringify({ role: "cover" }),
-          });
-          if (url) {
-            qs("e-image").value = url;
-            if (qs("e-image-readonly")) qs("e-image-readonly").value = url;
-            updateCoverPreview();
-          }
-          await refreshAssets();
-          setAssetStatus(`ตั้ง asset ${id} เป็นภาพปกแล้ว`);
+          setAssetStatus(nextSelected ? `ส่ง asset ${id} ให้ AI ดูแล้ว` : `เอา asset ${id} ออกจากชุดอ้างอิง AI แล้ว`);
           return;
         }
 
@@ -4744,9 +4746,6 @@ function wire() {
     setStatus(err.message, true);
   }
 })();
-
-
-
 
 
 

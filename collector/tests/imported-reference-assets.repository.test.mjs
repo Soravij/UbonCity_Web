@@ -8,6 +8,7 @@ import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 
 process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "ImportedMedia!Test1";
+const indexServer = fs.readFileSync(path.resolve(import.meta.dirname, "..", "server", "index.mjs"), "utf8");
 
 function createTestContext() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-imported-media-"));
@@ -200,5 +201,123 @@ test("repairImportedReferenceAssetsForItem dry run reports skips for existing im
     assert.ok(diagnostics.skipped_media.some((row) => row.reason === "existing_asset"));
   } finally {
     ctx.cleanup();
+  }
+});
+
+test("setContentAssetSelected keeps imported external assets as reference-only while allowing clean selection", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem();
+
+    ctx.db.prepare(`
+      INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
+      VALUES ('remote-selected-1', 'remote', ?, 'reference.jpg', 'image/jpeg', NULL, 'sum-reference')
+    `).run("https://img.wongnai.com/p/800x0/2024/01/01/reference.jpg");
+    const assetId = Number(ctx.db.prepare("SELECT id FROM assets WHERE asset_uid='remote-selected-1'").get()?.id || 0) || 0;
+    ctx.db.prepare(`
+      INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order)
+      VALUES (?, ?, 'unused', 0, 0, 'unused', 0)
+    `).run(item.id, assetId);
+
+    ctx.repo.setContentAssetSelected(item.id, assetId, true);
+
+    const selected = ctx.repo.listContentAssetsByItem(item.id, { onlySelected: false }).find((row) => Number(row.asset_id || 0) === assetId);
+    assert.equal(Number(selected?.selected_in_clean || 0), 1);
+    assert.equal(String(selected?.role || ""), "unused");
+    assert.equal(Number(selected?.is_cover || 0), 0);
+    assert.equal(String(selected?.placement_type || ""), "unused");
+
+    const usableSelected = ctx.repo.listContentAssetsByItem(item.id, { onlySelected: true });
+    assert.equal(usableSelected.some((row) => Number(row.asset_id || 0) === assetId), false);
+
+    const referenceSelected = ctx.repo.listContentAssetsByItem(item.id, { selectedReferenceMedia: true });
+    assert.equal(referenceSelected.some((row) => Number(row.asset_id || 0) === assetId), true);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("selectedReferenceMedia excludes local usable selected assets", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem();
+
+    ctx.db.prepare(`
+      INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
+      VALUES ('local-selected-1', 'local', 'uploads/local-selected-1.jpg', 'local-selected-1.jpg', 'image/jpeg', NULL, 'sum-local-selected-1')
+    `).run();
+    const assetId = Number(ctx.db.prepare("SELECT id FROM assets WHERE asset_uid='local-selected-1'").get()?.id || 0) || 0;
+    ctx.db.prepare(`
+      INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order)
+      VALUES (?, ?, 'gallery', 1, 0, 'gallery', 0)
+    `).run(item.id, assetId);
+
+    const usableSelected = ctx.repo.listContentAssetsByItem(item.id, { onlySelected: true });
+    assert.equal(usableSelected.some((row) => Number(row.asset_id || 0) === assetId), true);
+
+    const referenceSelected = ctx.repo.listContentAssetsByItem(item.id, { selectedReferenceMedia: true });
+    assert.equal(referenceSelected.some((row) => Number(row.asset_id || 0) === assetId), false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("repository onlySelected contract excludes external reference assets", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem();
+
+    ctx.db.prepare(`
+      INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
+      VALUES ('local-api-selected-1', 'local', 'uploads/local-api-selected-1.jpg', 'local-api-selected-1.jpg', 'image/jpeg', NULL, 'sum-local-api-selected-1')
+    `).run();
+    const localAssetId = Number(ctx.db.prepare("SELECT id FROM assets WHERE asset_uid='local-api-selected-1'").get()?.id || 0) || 0;
+    ctx.db.prepare(`
+      INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order)
+      VALUES (?, ?, 'gallery', 1, 0, 'gallery', 0)
+    `).run(item.id, localAssetId);
+
+    ctx.db.prepare(`
+      INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
+      VALUES ('remote-api-selected-1', 'remote', ?, 'remote-api-selected-1.jpg', 'image/jpeg', NULL, 'sum-remote-api-selected-1')
+    `).run("https://img.wongnai.com/p/800x0/2024/01/01/remote-api-selected-1.jpg");
+    const remoteAssetId = Number(ctx.db.prepare("SELECT id FROM assets WHERE asset_uid='remote-api-selected-1'").get()?.id || 0) || 0;
+    ctx.db.prepare(`
+      INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order)
+      VALUES (?, ?, 'reference', 1, 0, 'unused', 1)
+    `).run(item.id, remoteAssetId);
+
+    const onlySelectedRows = ctx.repo.listContentAssetsByItem(item.id, { onlySelected: true });
+
+    assert.deepEqual(
+      onlySelectedRows.map((row) => Number(row.asset_id || 0)),
+      [localAssetId]
+    );
+    assert.equal(
+      onlySelectedRows.some((row) => Number(row.asset_id || 0) === remoteAssetId),
+      false
+    );
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("api assets route only_selected branch delegates to repository source contract", () => {
+  // TODO: replace this with a true route integration test once collector exposes
+  // a reusable Express app/server harness for GET /api/assets.
+  const requiredSnippets = [
+    "if (contentItemId > 0 && onlySelected) {",
+    ".listContentAssetsByItem(contentItemId, { onlySelected: true })",
+    "res.json(rows);",
+  ];
+  for (const snippet of requiredSnippets) {
+    assert.equal(indexServer.includes(snippet), true, `expected index.mjs to delegate only_selected route snippet: ${snippet}`);
+  }
+
+  const forbiddenSnippets = [
+    '.filter((row) => (onlySelected ? row.selected_in_clean === 1 && row.role !== "unused" : true));',
+  ];
+  for (const snippet of forbiddenSnippets) {
+    assert.equal(indexServer.includes(snippet), false, `expected index.mjs to drop legacy only_selected route filter: ${snippet}`);
   }
 });

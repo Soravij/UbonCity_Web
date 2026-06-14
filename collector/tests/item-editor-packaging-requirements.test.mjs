@@ -6,6 +6,7 @@ import path from "node:path";
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const itemEditorJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.js"), "utf8");
 const itemEditorHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.html"), "utf8");
+const cleanItemHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "clean-item.html"), "utf8");
 
 function extractFunctionSource(source, functionName) {
   const marker = `function ${functionName}`;
@@ -360,4 +361,30 @@ test("hover preview caches failed external images and falls back silently", () =
   for (const snippet of requiredSnippets) {
     assert.equal(itemEditorJs.includes(snippet), true, `expected item-editor.js to include silent hover preview fallback snippet: ${snippet}`);
   }
+});
+
+test("clean asset table uses AI reference wording and removes cover action", () => {
+  const requiredSnippets = [
+    'selected ? "ไม่ส่งให้ AI" : "ส่งให้ AI ดู"',
+    '"ส่งให้ AI"',
+    '"reference-only"',
+    'Number(row.selected_in_clean || 0) === 1',
+  ];
+  for (const snippet of requiredSnippets) {
+    assert.equal(itemEditorJs.includes(snippet), true, `expected clean asset workflow snippet in item-editor.js: ${snippet}`);
+  }
+
+  const forbiddenSnippets = [
+    'data-action="set-cover"',
+    'if (action === "set-cover")',
+    'qs("e-image").value = url;',
+  ];
+  for (const snippet of forbiddenSnippets) {
+    assert.equal(itemEditorJs.includes(snippet), false, `expected clean asset workflow to drop legacy cover snippet: ${snippet}`);
+  }
+});
+
+test("clean page copy explains AI reference-only image usage", () => {
+  const requiredSnippet = "ขั้นนี้เลือกรูปเพื่อให้ AI/Field Pack ใช้เป็นภาพอ้างอิงเท่านั้น รูปปกสำหรับเผยแพร่ให้เลือกใหม่ใน Article Workspace หรือขั้น Publish จากไฟล์ local/backend-controlled media";
+  assert.equal(cleanItemHtml.includes(requiredSnippet), true, "clean-item.html should explain reference-only media policy");
 });
