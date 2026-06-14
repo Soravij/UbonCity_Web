@@ -5956,21 +5956,6 @@ function buildRemoteFileName(url) {
   }
 }
 
-function bridgeCollectedMediaToAssets(contentItemId, rawItem, options = {}) {
-  const diagnostics = repo.repairImportedReferenceAssetsForItem(contentItemId, {
-    apply: true,
-    actorEmail: "system@local",
-    limit: options?.limit || MAX_IMAGES_PER_ITEM,
-    rawItem,
-  });
-  return {
-    added: Number(diagnostics?.added_count || 0) || 0,
-    skipped: Array.isArray(diagnostics?.skipped_media) ? diagnostics.skipped_media.length : 0,
-    total_candidates: Number(diagnostics?.candidate_count || 0) || 0,
-    diagnostics,
-  };
-}
-
 function resolveStoragePath(storagePath) {
   if (path.isAbsolute(storagePath)) return storagePath;
   return path.join(dirs.mediaDir, storagePath);
@@ -6307,13 +6292,14 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
       sourceType: adapter,
       sourceRecords,
     });
-    const bridged = bridgeCollectedMediaToAssets(existingItemId, rawItem, { limit: MAX_IMAGES_PER_ITEM });
+    const referenceMediaCount = repo.listReferenceMediaByItem(existingItemId).length;
 
     return {
       mode: "merge",
       item: repo.getItem(existingItemId),
       seeded_evidence_count: Number(seeded?.added || 0),
-      bridged_image_count: Number(bridged?.added || 0),
+      bridged_image_count: 0,
+      reference_media_count: referenceMediaCount,
     };
   }
 
@@ -6337,13 +6323,14 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
     sourceType: adapter,
     sourceRecords,
   });
-  const bridged = bridgeCollectedMediaToAssets(savedItem.id, rawItem, { limit: MAX_IMAGES_PER_ITEM });
+  const referenceMediaCount = repo.listReferenceMediaByItem(savedItem.id).length;
 
   return {
     mode: "new",
     item: savedItem,
     seeded_evidence_count: Number(seeded?.added || 0),
-    bridged_image_count: Number(bridged?.added || 0),
+    bridged_image_count: 0,
+    reference_media_count: referenceMediaCount,
   };
 }
 
@@ -6355,6 +6342,7 @@ function importCollectedRawItemsTxn(payloads) {
   let skippedCount = 0;
   let seededEvidenceCount = 0;
   let bridgedImageCount = 0;
+  let referenceMediaCount = 0;
   const results = [];
 
   for (const payload of payloads) {
@@ -6380,6 +6368,7 @@ function importCollectedRawItemsTxn(payloads) {
     if (imported.mode === "merge") mergedCount += 1;
     seededEvidenceCount += Number(imported.seeded_evidence_count || 0);
     bridgedImageCount += Number(imported.bridged_image_count || 0);
+    referenceMediaCount += Number(imported.reference_media_count || 0);
     results.push({
       raw_item_id: rawItemId,
       decision: imported.mode,
@@ -6395,6 +6384,7 @@ function importCollectedRawItemsTxn(payloads) {
       skipped_count: skippedCount,
       seeded_evidence_count: seededEvidenceCount,
       bridged_image_count: bridgedImageCount,
+      reference_media_count: referenceMediaCount,
       results,
     };
     db.exec("COMMIT");
@@ -12501,15 +12491,15 @@ app.post("/api/items/:id/assets/repair-imported-media", requireRole("admin", "ow
   }
 
   try {
-    const apply = req.body?.apply !== false;
-    const diagnostics = repo.repairImportedReferenceAssetsForItem(id, {
-      apply,
-      actorEmail: actorEmail(req),
-      limit: MAX_IMAGES_PER_ITEM,
+    res.status(410).json({
+      error: "legacy imported media repair is deprecated by reference media policy v2",
+      code: "REFERENCE_MEDIA_POLICY_V2",
     });
-    res.json({ ok: true, item_id: id, diagnostics });
   } catch (err) {
-    res.status(400).json({ error: String(err?.message || "Cannot repair imported media") });
+    res.status(410).json({
+      error: "legacy imported media repair is deprecated by reference media policy v2",
+      code: "REFERENCE_MEDIA_POLICY_V2",
+    });
   }
 });
 
@@ -13519,6 +13509,7 @@ app.post("/api/source-raw-items/import", requireRole("admin"), workflowRateLimit
       skipped_count: result.skipped_count,
       seeded_evidence_count: result.seeded_evidence_count,
       bridged_image_count: result.bridged_image_count,
+      reference_media_count: result.reference_media_count,
       results: result.results,
     });
   } catch (err) {
@@ -13561,7 +13552,8 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
 
     let rawCount = 0;
     let importedCount = 0;
-    let bridgedImageCount = 0;
+  let bridgedImageCount = 0;
+  let referenceMediaCount = 0;
     let signalSummary = summarizeCollectSignals([]);
     let seededEvidenceCount = 0;
 
@@ -13626,9 +13618,8 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
               sourceRecords,
             });
             seededEvidenceCount += Number(seeded?.added || 0);
-
-            const bridged = bridgeCollectedMediaToAssets(savedItem.id, item, { limit: MAX_IMAGES_PER_ITEM });
-            bridgedImageCount += Number(bridged?.added || 0);
+            const referenceMedia = repo.listReferenceMediaByItem(savedItem.id);
+            referenceMediaCount += Number(referenceMedia.length || 0);
           }
 
           importedCount += 1;
@@ -13645,6 +13636,7 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
         raw_count: rawCount,
         imported_count: importedCount,
         bridged_image_count: bridgedImageCount,
+        reference_media_count: referenceMediaCount,
         seeded_evidence_count: seededEvidenceCount,
         signal_summary: signalSummary,
         auto_import: autoImport,
