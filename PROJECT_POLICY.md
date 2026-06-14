@@ -36,13 +36,12 @@ Placeholders:
 
 ## 4. Clean / Agent Draft Policy
 
-- Clean stage can select media.
-- Clean stage can set cover.
-- Clean stage can send AI Draft / Agent workflow.
-- Clean / Agent Draft must not hard-block only because selected media or cover is not local publish-ready.
+- Clean stage can select reference media for AI / Field Pack context.
+- Clean stage must not set cover or promote media into publish roles.
+- Clean / Agent Draft must not hard-block only because selected reference media is not local publish-ready.
 - Need at least 1 approved context remains a valid hard blocker for Agent draft.
-- Missing image/cover can be warning/soft readiness, not an early hard blocker.
-- Clean media selection/cover is workflow context only and does not automatically mean publish-safe.
+- Missing local publish media can be warning/soft readiness at Clean stage, not an early hard blocker.
+- Clean media selection is workflow context only and does not automatically mean publish-safe.
 
 ## 5. Media Policy
 
@@ -50,9 +49,11 @@ Placeholders:
 
 #### Reference / Evidence Media
 
-- Allowed in Raw Data, Clean Prep, AI analysis, Field Pack drafting, internal planning.
+- Reference media and publish media are separate domains.
+- Allowed in Raw Data, Clean Prep, AI analysis, Field Pack drafting, and internal planning.
 - May include external URLs/images, Google/search/social references, and other research references.
 - Must remain reference-only.
+- Must not be materialized into `assets` / `content_assets`.
 - Must not become cover/gallery/inline publish media automatically.
 - Must not be treated as rights-verified.
 - Must not be synced to public frontend as publish media.
@@ -60,12 +61,14 @@ Placeholders:
 #### Usable / Publish Media
 
 - Used for Article Workspace cover/gallery/inline images, Admin Review, final handoff, publish/export, public frontend.
-- Must come from selected local collector content_assets or another approved local/backend-controlled source.
+- Must come from selected local/backend-controlled `assets` + `content_assets` only.
 - Eligible publish media must be collector/backend-controlled local/nas assets:
   - storage_disk in local or nas
   - non-http(s) storage_path
   - image mime type when available
 - External/reference media cannot be used as publish media unless manually rights-verified, imported into controlled local/backend storage, and selected as a local usable asset.
+- `image_context` must contain only local/backend-controlled selected assets.
+- `reference_media_context` may contain selected external/reference media and is reference-only, not rights-verified, not publish media, and not approved cover/gallery/inline media.
 
 ### Stage-specific Media Blocker Policy
 
@@ -73,7 +76,7 @@ Placeholders:
   - Reference media OK.
   - No hard block only because local publish media is missing.
 - Clean / Agent Draft:
-  - Select/set cover allowed for workflow continuity.
+  - Select reference media only.
   - No local publish-ready hard block.
   - Approved context remains required.
 - Article Workspace:
@@ -97,12 +100,23 @@ Placeholders:
 
 ### Current Implemented Media Behavior
 
-- Clean select works.
-- Clean set cover works.
-- Clean AI Draft works.
+- Clean reference-media select works.
+- Clean no longer sets cover in reference-media flow.
+- Clean AI Draft works using reference media and approved context.
 - Publish/Admin Review local media readiness remains enforced through local_selected_count/local_cover_count/buildExportReadiness.
 - Early PATCH selected/role routes must not block Clean workflow only because asset is not local publish-ready.
 - Late publish/admin-review readiness must still block non-local publish media.
+- `repairImportedReferenceAssetsForItem()` is legacy/deprecated and must not be used by active server/import/Clean/Agent flow.
+- `POST /api/items/:id/assets/repair-imported-media` is deprecated and returns 410 `REFERENCE_MEDIA_POLICY_V2`.
+
+### Reference Media Policy v2 Contract
+
+- Clean reference media endpoint is `GET /api/items/:id/reference-media`.
+- Reference media selection is stored in `content_reference_media_selections`.
+- `reference_media_id` is a stable synthetic id in format `rm:<url_hash>` from normalized URL.
+- Clean selection/toggle must use `reference_media_id`, not `asset_id`, `content_asset_id`, or `selected_in_clean`.
+- Import/collect flow must not bridge external media into `assets` / `content_assets`.
+- Under policy v2, `bridged_image_count` remains `0` and `reference_media_count` may be returned for imported reference candidates.
 
 ## 6. Article / SEO Agent Policy
 
@@ -165,7 +179,7 @@ Placeholders:
 - Runtime smoke required for workflow changes.
 - For media changes, test:
   - Clean select
-  - Clean set cover
+  - Clean reference-media select
   - Clean AI Draft
   - Submit Admin Review publish readiness
 

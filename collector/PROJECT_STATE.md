@@ -1,19 +1,39 @@
 # PROJECT_STATE
 
-Last Updated: 2026-06-07
+Last Updated: 2026-06-14
 
 ## Active Branch
 
-`main`
+`fix/reference-media-policy-v2`
 
-Current completed main baseline:
-- Translation stale gate merged
-- Translation repair merged
-- AI policy rows merged
-- Frontweb homepage draft-fallback issue fixed
-- Assignment and item management-line scope enforcement merged
+Current baseline:
+- `1136009` Add reference media policy v2
+- `e001837` Wire reference media into draft preview
+- `d08184d` Disable legacy imported media materialization
 
 ## Recent Completed Work
+
+### 2026-06-14
+
+Branch / PR:
+- `fix/reference-media-policy-v2`
+
+Status:
+- runtime smoke passed
+
+Summary:
+- reference media and publish media are now separate domains
+- `/api/items/32/reference-media` returns `rm:<hash>` reference media rows
+- Clean page can select reference media for Agent
+- image-workflow shows `ai_reference_selected_count`
+- `/api/assets` no longer mixes external/reference media
+- active materialization path is closed
+- `repairImportedReferenceAssetsForItem` is not used by active server/import/Clean/Agent flow
+
+Known remaining:
+- P3 UX flicker after toggling reference media selection
+- cause: PATCH selected then reload reference-media table/workflow summary
+- keep as later polish backlog
 
 ### 2026-06-07
 
