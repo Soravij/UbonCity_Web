@@ -13,7 +13,8 @@ function createMockRepo({
   approvedContext = [],
   evidenceBlocks = [],
   selectedAssets = [],
-  imageContext = null,
+  selectedReferenceMedia = [],
+  localImageContext = null,
 } = {}) {
   return {
     getItem(contentItemId) {
@@ -32,13 +33,25 @@ function createMockRepo({
       if (!item || Number(item.id) !== Number(contentItemId)) return [];
       return selectedAssets.map((row) => ({ ...row }));
     },
-    listApprovedImageContext(contentItemId) {
+    listApprovedLocalImageContext(contentItemId) {
       if (!item || Number(item.id) !== Number(contentItemId)) {
-        return { cover_url: null, selected_urls: [], gallery_urls: [], inline_urls: [] };
+        return { cover_url: null, selected_urls: [], gallery_urls: [], inline_urls: [], assets: [] };
       }
-      return imageContext
-        ? { ...imageContext }
-        : { cover_url: null, selected_urls: [], gallery_urls: [], inline_urls: [] };
+      return localImageContext
+        ? {
+            ...localImageContext,
+            selected_urls: Array.isArray(localImageContext.selected_urls) ? [...localImageContext.selected_urls] : [],
+            gallery_urls: Array.isArray(localImageContext.gallery_urls) ? [...localImageContext.gallery_urls] : [],
+            inline_urls: Array.isArray(localImageContext.inline_urls) ? [...localImageContext.inline_urls] : [],
+            assets: Array.isArray(localImageContext.assets) ? localImageContext.assets.map((row) => ({ ...row })) : [],
+          }
+        : { cover_url: null, selected_urls: [], gallery_urls: [], inline_urls: [], assets: [] };
+    },
+    listReferenceMediaByItem(contentItemId, options = {}) {
+      if (!item || Number(item.id) !== Number(contentItemId)) return [];
+      const rows = selectedReferenceMedia.map((row) => ({ ...row }));
+      if (options?.selectedOnly === true) return rows.filter((row) => row.selected_for_ai === true);
+      return rows;
     },
   };
 }
@@ -136,11 +149,20 @@ test("buildCleanStructuredContext returns full completeness for rich clean conte
         public_url: "https://example.com/cover.jpg",
       },
     ],
-    imageContext: {
+    localImageContext: {
       cover_url: "https://example.com/cover.jpg",
       selected_urls: ["https://example.com/cover.jpg"],
       gallery_urls: ["https://example.com/cover.jpg"],
       inline_urls: [],
+      assets: [
+        {
+          asset_id: 901,
+          role: "cover",
+          selected_in_clean: 1,
+          is_cover: 1,
+          public_url: "https://example.com/cover.jpg",
+        },
+      ],
     },
   });
 
@@ -183,11 +205,20 @@ test("buildCleanStructuredContext matches structured context v1 contract", () =>
         public_url: "https://example.com/cover.jpg",
       },
     ],
-    imageContext: {
+    localImageContext: {
       cover_url: "https://example.com/cover.jpg",
       selected_urls: ["https://example.com/cover.jpg"],
       gallery_urls: ["https://example.com/cover.jpg"],
       inline_urls: [],
+      assets: [
+        {
+          asset_id: 1001,
+          role: "cover",
+          selected_in_clean: 1,
+          is_cover: 1,
+          public_url: "https://example.com/cover.jpg",
+        },
+      ],
     },
   });
 
@@ -201,6 +232,7 @@ test("buildCleanStructuredContext matches structured context v1 contract", () =>
     "approved_context",
     "evidence_blocks",
     "image_context",
+    "reference_media_context",
     "completeness",
     "evidence_policy",
     "task",
@@ -232,6 +264,42 @@ test("buildCleanStructuredContext matches structured context v1 contract", () =>
   assert.equal(context.task.must_ground_in_approved_context, true);
   assert.equal(context.image_context.selected_count, 1);
   assert.equal(context.image_context.cover_count, 1);
+});
+
+test("buildCleanStructuredContext keeps selected reference media outside image_context", () => {
+  const repo = createMockRepo({
+    item: createBaseItem(),
+    approvedContext: [createApprovedBlock(1, 801)],
+    evidenceBlocks: [createEvidenceBlock(801, { block_type: "media" })],
+    selectedAssets: [],
+    selectedReferenceMedia: [
+      {
+        reference_media_id: "rm:1234567890abcdef",
+        source_kind: "evidence_block",
+        source_label: "facebook",
+        url: "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg",
+        preview_url: "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg",
+        file_name: "example.jpg",
+        selected_for_ai: true,
+        is_external: true,
+      },
+    ],
+    localImageContext: {
+      cover_url: null,
+      selected_urls: [],
+      gallery_urls: [],
+      inline_urls: [],
+      assets: [],
+    },
+  });
+
+  const context = buildCleanStructuredContext(repo, 59);
+
+  assert.equal(context.image_context.selected_count, 0);
+  assert.equal(context.image_context.cover_url, null);
+  assert.equal(context.reference_media_context.selected_count, 1);
+  assert.deepEqual(context.reference_media_context.selected_urls, ["https://scontent.fubp1-1.fna.fbcdn.net/example.jpg"]);
+  assert.equal(context.reference_media_context.assets[0].reference_media_id, "rm:1234567890abcdef");
 });
 
 test("buildCleanStructuredContext keeps all active evidence blocks from clean state", () => {
@@ -335,11 +403,20 @@ test("buildCleanStructuredContext is stable across repeated calls with same repo
         public_url: "https://example.com/gallery.jpg",
       },
     ],
-    imageContext: {
+    localImageContext: {
       cover_url: null,
       selected_urls: ["https://example.com/gallery.jpg"],
       gallery_urls: ["https://example.com/gallery.jpg"],
       inline_urls: [],
+      assets: [
+        {
+          asset_id: 999,
+          role: "gallery",
+          selected_in_clean: 1,
+          is_cover: 0,
+          public_url: "https://example.com/gallery.jpg",
+        },
+      ],
     },
   });
 
@@ -347,6 +424,111 @@ test("buildCleanStructuredContext is stable across repeated calls with same repo
   const second = buildCleanStructuredContext(repo, 59);
 
   assert.deepEqual(second, first);
+});
+
+test("buildCleanStructuredContext excludes polluted external content assets from image_context", () => {
+  const repo = createMockRepo({
+    item: createBaseItem(),
+    approvedContext: [createApprovedBlock(1, 901)],
+    evidenceBlocks: [createEvidenceBlock(901)],
+    selectedAssets: [
+      {
+        asset_id: 1101,
+        role: "gallery",
+        selected_in_clean: 1,
+        is_cover: 0,
+        public_url: "https://static2.wongnai.com/static2/images/XWU7FL1.png",
+        storage_disk: "remote",
+        storage_path: "https://static2.wongnai.com/static2/images/XWU7FL1.png",
+        mime_type: "image/png",
+      },
+    ],
+    localImageContext: {
+      cover_url: null,
+      selected_urls: [],
+      gallery_urls: [],
+      inline_urls: [],
+      assets: [],
+    },
+  });
+
+  const context = buildCleanStructuredContext(repo, 59);
+
+  assert.equal(context.image_context.cover_url, null);
+  assert.equal(context.image_context.cover_count, 0);
+  assert.equal(context.image_context.selected_count, 0);
+  assert.deepEqual(context.image_context.selected_urls, []);
+  assert.deepEqual(context.image_context.gallery_urls, []);
+  assert.deepEqual(context.image_context.assets, []);
+  assert.ok(context.completeness.quality_gaps.includes("image_context"));
+});
+
+test("buildCleanStructuredContext keeps only local publish assets in image_context when polluted rows exist", () => {
+  const localUrl = "/media/uploads/local-gallery.jpg";
+  const repo = createMockRepo({
+    item: createBaseItem(),
+    approvedContext: [createApprovedBlock(1, 902)],
+    evidenceBlocks: [createEvidenceBlock(902)],
+    selectedAssets: [
+      {
+        asset_id: 1201,
+        role: "gallery",
+        selected_in_clean: 1,
+        is_cover: 0,
+        public_url: "https://static2.wongnai.com/static2/images/XWU7FL1.png",
+        storage_disk: "remote",
+        storage_path: "https://static2.wongnai.com/static2/images/XWU7FL1.png",
+        mime_type: "image/png",
+      },
+      {
+        asset_id: 1202,
+        role: "gallery",
+        selected_in_clean: 1,
+        is_cover: 0,
+        public_url: localUrl,
+        storage_disk: "local",
+        storage_path: "uploads/local-gallery.jpg",
+        mime_type: "image/jpeg",
+      },
+    ],
+    selectedReferenceMedia: [
+      {
+        reference_media_id: "rm:1234567890abcdef",
+        source_kind: "evidence_block",
+        source_label: "facebook",
+        url: "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg",
+        preview_url: "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg",
+        file_name: "example.jpg",
+        selected_for_ai: true,
+        is_external: true,
+      },
+    ],
+    localImageContext: {
+      cover_url: null,
+      selected_urls: [localUrl],
+      gallery_urls: [localUrl],
+      inline_urls: [],
+      assets: [
+        {
+          asset_id: 1202,
+          role: "gallery",
+          selected_in_clean: 1,
+          is_cover: 0,
+          public_url: localUrl,
+        },
+      ],
+    },
+  });
+
+  const context = buildCleanStructuredContext(repo, 59);
+
+  assert.deepEqual(context.image_context.selected_urls, [localUrl]);
+  assert.deepEqual(context.image_context.gallery_urls, [localUrl]);
+  assert.equal(context.image_context.selected_count, 1);
+  assert.equal(context.image_context.assets.length, 1);
+  assert.equal(context.image_context.assets[0].asset_id, 1202);
+  assert.deepEqual(context.reference_media_context.selected_urls, ["https://scontent.fubp1-1.fna.fbcdn.net/example.jpg"]);
+  assert.equal(context.reference_media_context.selected_count, 1);
 });
 
 test("field pack contract does not add hotel or event blockers to cafe/place items", () => {

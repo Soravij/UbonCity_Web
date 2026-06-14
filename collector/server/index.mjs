@@ -12432,9 +12432,57 @@ app.get("/api/items/:id/image-workflow", requireRole("owner", "admin", "editor",
   }
 
   const status = buildImageWorkflowState(id);
-  const assets = repo.listContentAssetsByItem(id);
-  const importedMediaDiagnostics = repo.repairImportedReferenceAssetsForItem(id, { apply: false, limit: MAX_IMAGES_PER_ITEM });
-  res.json({ item_id: id, status, assets, imported_media_diagnostics: importedMediaDiagnostics });
+  const assets = repo.listContentAssetsByItem(id).filter((row) => isCollectorControlledLocalAssetRow(row));
+  const referenceMedia = repo.listReferenceMediaByItem(id);
+  res.json({ item_id: id, status, assets, reference_media: referenceMedia });
+});
+
+app.get("/api/items/:id/reference-media", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
+  const id = Number(req.params.id || 0);
+  if (!id) {
+    res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
+    return;
+  }
+
+  res.json(repo.listReferenceMediaByItem(id));
+});
+
+app.patch("/api/items/:id/reference-media/:referenceMediaId/selected", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {
+  const id = Number(req.params.id || 0);
+  const referenceMediaId = String(req.params.referenceMediaId || "").trim();
+  const selected = req.body?.selected;
+  if (!id || !referenceMediaId) {
+    res.status(400).json({ error: "Invalid reference media payload" });
+    return;
+  }
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
+    return;
+  }
+
+  try {
+    const row = repo.setReferenceMediaSelected(id, referenceMediaId, selected);
+    repo.logAudit(actorEmail(req), "reference_media.select", "content_item", String(id), {
+      reference_media_id: referenceMediaId,
+      selected: selected === true || selected === 1 || selected === "1",
+    });
+    res.json({ ok: true, reference_media: row });
+  } catch (err) {
+    const message = String(err?.message || "Update failed");
+    res.status(message.includes("not found") ? 404 : 400).json({ error: message });
+  }
 });
 app.post("/api/items/:id/assets/repair-imported-media", requireRole("admin", "owner"), (req, res) => {
   const id = Number(req.params.id || 0);
@@ -14013,7 +14061,7 @@ app.get("/api/assets", (req, res) => {
       placement_type: String(row.placement_type || "unused"),
       public_url: parseAssetPathForUrl(row.storage_path),
     }))
-    .filter((row) => (localOnly ? isCollectorControlledLocalAssetRow(row) : true))
+    .filter((row) => isCollectorControlledLocalAssetRow(row))
     .filter((row) => (onlySelected ? row.selected_in_clean === 1 && row.role !== "unused" : true));
 
   res.json(mapped);

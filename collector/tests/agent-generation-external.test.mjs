@@ -45,6 +45,19 @@ function createItem(overrides = {}) {
         inline_urls: [],
         selected_count: 1,
       },
+      reference_media_context: {
+        selected_urls: ["https://example.com/reference.jpg"],
+        selected_count: 1,
+        assets: [
+          {
+            reference_media_id: "rm:1234567890abcdef",
+            source_kind: "evidence_block",
+            source_label: "facebook",
+            url: "https://example.com/reference.jpg",
+            preview_url: "https://example.com/reference.jpg",
+          },
+        ],
+      },
       completeness: {
         has_minimum_required: true,
         minimum_missing: [],
@@ -98,6 +111,8 @@ test("field pack prompt blocks article output and requires handoff contract", ()
   const prompt = buildFieldPackPrompt(createItem({ agent_profile: { profile_text: "use a practical field producer tone" } }));
   assert.match(prompt, /field_pack/);
   assert.match(prompt, /NOT an article-writing task/);
+  assert.match(prompt, /reference-only/);
+  assert.match(prompt, /not rights-verified/);
   assert.match(prompt, /must_capture/);
   assert.match(prompt, /capture_type/);
   assert.match(prompt, /Never output description_clean/);
@@ -134,7 +149,7 @@ test("external agent engine normalizes visual context and field pack responses",
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
-    if (String(url) === "https://example.com/photo.jpg") {
+    if (String(url) === "https://example.com/photo.jpg" || String(url) === "https://example.com/reference.jpg") {
       return new Response("fake-image-bytes", {
         status: 200,
         headers: {
@@ -188,11 +203,12 @@ test("external agent engine normalizes visual context and field pack responses",
     assert.equal(calls[0].url, "https://agent.example/run");
     assert.equal(calls[0].authorization, "Bearer secret-token");
     assert.equal(calls[0].body.task, "generate_visual_context");
-    assert.equal(calls[0].body.images.length, 1);
+    assert.equal(calls[0].body.images.length, 2);
     assert.equal(calls[1].body.task, "generate_field_pack");
     assert.equal(calls[1].body.agent_profile.profile_text, "custom tone profile");
     assert.equal(calls[1].body.prompt_input.agent_profile.profile_text, "custom tone profile");
     assert.equal(calls[1].body.visual_context.visual_summary, "mock garden mood");
+    assert.equal(calls[1].body.prompt_input.reference_media_context.selected_count, 1);
     assert.equal(calls[2].body.task, "revise_field_pack");
     assert.equal(calls[2].body.agent_profile.profile_text, "custom tone profile");
     assert.equal(calls[2].body.previous_field_pack.ai_summary, "field brief");

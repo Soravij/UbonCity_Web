@@ -239,7 +239,13 @@ function hasVisualContext(context) {
 
 function collectVisualImageUrls(item, limit = 5) {
   const max = Math.max(1, Math.min(5, Number(limit || 5)));
-  const list = Array.isArray(item?.visual_image_urls) ? item.visual_image_urls : [];
+  const structuredReferenceMedia = Array.isArray(item?.structured_context?.reference_media_context?.selected_urls)
+    ? item.structured_context.reference_media_context.selected_urls
+    : [];
+  const list = [
+    ...structuredReferenceMedia,
+    ...(Array.isArray(item?.visual_image_urls) ? item.visual_image_urls : []),
+  ];
   const out = [];
   const seen = new Set();
   for (const raw of list) {
@@ -317,6 +323,9 @@ function buildPromptInput(item) {
   const approvedContext = Array.isArray(context?.approved_context) ? context.approved_context : [];
   const evidenceBlocks = Array.isArray(context?.evidence_blocks) ? context.evidence_blocks : [];
   const imageContext = context?.image_context && typeof context.image_context === "object" ? context.image_context : {};
+  const referenceMediaContext = context?.reference_media_context && typeof context.reference_media_context === "object"
+    ? context.reference_media_context
+    : {};
   const completeness = context?.completeness && typeof context.completeness === "object" ? context.completeness : {};
   const evidencePolicy = context?.evidence_policy && typeof context.evidence_policy === "object" ? context.evidence_policy : {};
   const task = context?.task && typeof context.task === "object" ? context.task : {};
@@ -372,6 +381,11 @@ function buildPromptInput(item) {
       cover_count: Number(imageContext?.cover_count || 0) || 0,
       assets: Array.isArray(imageContext?.assets) ? imageContext.assets : [],
     },
+    reference_media_context: {
+      selected_urls: toArray(referenceMediaContext?.selected_urls),
+      selected_count: Number(referenceMediaContext?.selected_count || 0) || 0,
+      assets: Array.isArray(referenceMediaContext?.assets) ? referenceMediaContext.assets : [],
+    },
     completeness: {
       has_minimum_required: Boolean(completeness?.has_minimum_required),
       completeness_level: toText(completeness?.completeness_level),
@@ -414,6 +428,7 @@ function buildPromptInput(item) {
       approved_context: approvedContext.length,
       evidence_blocks: evidenceBlocks.length,
       selected_images: Array.isArray(imageContext?.selected_urls) ? imageContext.selected_urls.length : 0,
+      reference_media: Array.isArray(referenceMediaContext?.selected_urls) ? referenceMediaContext.selected_urls.length : 0,
     },
     visual_image_count: collectVisualImageUrls(item, 5).length,
   };
@@ -454,6 +469,8 @@ function buildFieldPackPrompt(item) {
     "Use approved_context as the PRIMARY source of truth.",
     "Use item for identity and factual anchoring.",
     "Use image_context and visual_context only for visible cues and shot planning.",
+    "Use reference_media_context only as reference-only visual context for planning.",
+    "reference_media_context is not rights-verified, not publish media, and must not be treated as cover/gallery/inline approval.",
     "Use evidence_blocks only as a clue layer to enrich specificity; never let evidence_blocks override approved_context.",
     "If evidence is thin, put unknowns into ai_unknowns or must_verify_fact. Do not invent facts.",
     "Write action-oriented instructions for a field/content team.",
@@ -496,6 +513,7 @@ function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote
     "For capture_type=video, ensure each item is an executable video shot, not a broad topic.",
     "Do not output broad topic-style video items. Every video item must be directly shootable by a field team.",
     "If revision_note conflicts with approved_context, keep approved_context and put the conflict into ai_unknowns or must_verify_fact.",
+    "Treat any reference_media_context as reference-only, not rights-verified, not publish media, and not cover/gallery approval.",
     "Keep the revised pack action-oriented and directly usable in Place Step 4 and Handoff.",
     "Do not paste raw URLs into text fields.",
     "No markdown fences.",

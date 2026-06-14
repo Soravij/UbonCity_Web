@@ -901,7 +901,7 @@ function formatExternalMediaHintLines(items = []) {
 
 function normalizeMediaHintPayloadUrl(rawUrl, contentAssetId = 0) {
   const text = String(rawUrl || "").trim();
-  if (!text && Number(contentAssetId || 0) > 0) return null;
+  if (Number(contentAssetId || 0) > 0) return null;
   return text || null;
 }
 
@@ -992,10 +992,13 @@ function preserveMediaHints(existingMediaHints = [], selectedMediaHints = [], ex
 
   const selectedRows = (Array.isArray(selectedMediaHints) ? selectedMediaHints : []).map((row, index) => ({
     ...row,
+    url: normalizeMediaHintPayloadUrl(row?.url, row?.content_asset_id),
     item_order: index,
   }));
   const externalRows = (Array.isArray(externalMediaHints) ? externalMediaHints : []).map((row, index) => ({
     ...row,
+    content_asset_id: null,
+    url: normalizeMediaHintPayloadUrl(row?.url, null),
     item_order: selectedRows.length + index,
   }));
   return [...selectedRows, ...externalRows, ...preservedUnseen];
@@ -3999,8 +4002,21 @@ function roleDisplayLabel(role) {
   return "ไม่ได้ใช้";
 }
 
-function renderAssetBadges(row) {
+function isReferenceMediaRow(row) {
+  return Boolean(String(row?.reference_media_id || "").trim());
+}
+
+function renderAssetBadges(row, { cleanMode = isCleanMode } = {}) {
   const badges = [];
+  if (cleanMode && isReferenceMediaRow(row)) {
+    badges.push(
+      Number(row?.selected_for_ai || 0) === 1
+        ? '<span class="workflow-badge workflow-badge-sent">ส่งให้ Agent</span>'
+        : '<span class="muted">ยังไม่ถูกเลือกส่งให้ Agent</span>'
+    );
+    badges.push('<span class="muted">ภาพอ้างอิงเท่านั้น</span>');
+    return badges.join(" ");
+  }
   const role = roleLabel(row);
   const selected = Number(row.selected_in_clean || 0) === 1 && role !== "unused";
   const isCover = Number(row.is_cover || 0) === 1 || role === "cover";
@@ -4026,33 +4042,35 @@ function renderAssetsTable(rows) {
 
   if (!Array.isArray(rows) || !rows.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = '<td colspan="6" class="muted">ยังไม่มีไฟล์ asset ที่เลือกไว้สำหรับ AI</td>';
+    tr.innerHTML = isCleanMode
+      ? '<td colspan="6" class="muted">ยังไม่มีรูปอ้างอิงสำหรับ Agent</td>'
+      : '<td colspan="6" class="muted">ยังไม่มีไฟล์ asset ที่เลือกไว้สำหรับ AI</td>';
     tbody.appendChild(tr);
     return;
   }
 
   rows.forEach((row) => {
-    const selected = Number(row.selected_in_clean || 0) === 1 && String(row.role || "") !== "unused";
-    const displayName = String(row.file_name || row.storage_path || "-");
+    const isReferenceRow = isReferenceMediaRow(row);
+    const selected = isReferenceRow
+      ? Number(row.selected_for_ai || 0) === 1
+      : Number(row.selected_in_clean || 0) === 1 && String(row.role || "") !== "unused";
+    const displayName = String(row.file_name || row.storage_path || row.reference_media_id || "-");
     const assetId = Number(row.asset_id || 0) || 0;
+    const rowId = isReferenceRow ? String(row.reference_media_id || "").trim() : String(assetId || 0);
 
-    const previewUrl = sanitizeUrl(row.public_url || "");
+    const previewUrl = sanitizeUrl(row.preview_url || row.url || row.public_url || "");
     const preview = previewUrl ? `<img class="asset-thumb" src="${escapeHtml(previewUrl)}" alt="asset" />` : "-";
 
     const actions = [];
     if (isCleanMode) {
-      actions.push(`<button data-action="toggle-select" data-id="${assetId}"${disabledAttr}${disabledTitleAttr}>${selected ? "ยกเลิกเลือก" : "เลือก"}</button>`);
-      actions.push(`<button data-action="set-cover" data-id="${assetId}"${disabledAttr}${disabledTitleAttr}>ตั้งเป็นภาพปก</button>`);
-    }
-    if (isCleanMode && isOwnerUser()) {
-      actions.push(`<button data-action="delete-asset" data-id="${assetId}" class="fail"${disabledAttr}${disabledTitleAttr}>ลบ</button>`);
+      actions.push(`<button data-action="toggle-select" data-id="${escapeHtml(rowId)}"${disabledAttr}${disabledTitleAttr}>${selected ? "ถอนจาก Agent" : "อนุมัติให้ Agent"}</button>`);
     }
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${Number(row.id) || 0}</td>
+      <td>${escapeHtml(rowId || "-")}</td>
       <td>${Number(row.content_item_id) || "-"}</td>
-      <td>${renderAssetBadges(row)}</td>
+      <td>${renderAssetBadges(row, { cleanMode: isCleanMode })}</td>
       <td class="asset-file-cell"><span class="asset-file-text" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span></td>
       <td>${preview}</td>
       <td>${actions.join(" ") || "-"}</td>
@@ -4074,6 +4092,8 @@ function renderAssetsTable(rows) {
   });
 
   const resolveAssetUrl = (asset) => {
+    if (asset?.preview_url) return String(asset.preview_url).trim();
+    if (asset?.url) return String(asset.url).trim();
     if (asset?.public_url) return String(asset.public_url).trim();
     const rawPath = String(asset?.storage_path || "").trim();
     if (!rawPath) return "";
@@ -4085,14 +4105,30 @@ function renderAssetsTable(rows) {
   tbody.querySelectorAll("button[data-action]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = Number(btn.dataset.id || 0);
-      if (!id) return;
-
-      const asset = rows.find((r) => Number(r.asset_id || 0) === id);
+      const referenceMediaId = String(btn.dataset.id || "").trim();
+      const asset = isCleanMode
+        ? rows.find((r) => String(r.reference_media_id || "").trim() === referenceMediaId)
+        : rows.find((r) => Number(r.asset_id || 0) === id);
+      if (!asset) return;
       const url = resolveAssetUrl(asset);
       const action = btn.dataset.action;
 
       try {
         if (action === "toggle-select") {
+          if (isCleanMode) {
+            const nextSelected = Number(asset?.selected_for_ai || 0) !== 1;
+            await api(`/api/items/${state.itemId}/reference-media/${encodeURIComponent(referenceMediaId)}/selected`, {
+              method: "PATCH",
+              body: JSON.stringify({ selected: nextSelected }),
+            });
+            await refreshAssets();
+            setAssetStatus(
+              nextSelected
+                ? `ส่ง asset ${referenceMediaId} ให้ Agent ใช้เป็นภาพอ้างอิงแล้ว`
+                : `ถอน asset ${referenceMediaId} ออกจาก Agent แล้ว`
+            );
+            return;
+          }
           const nextSelected = !(Number(asset?.selected_in_clean || 0) === 1 && String(asset?.role || "") !== "unused");
           await api(`/api/items/${state.itemId}/assets/${id}/selected`, {
             method: "PATCH",
@@ -4100,21 +4136,6 @@ function renderAssetsTable(rows) {
           });
           await refreshAssets();
           setAssetStatus(nextSelected ? `เลือก asset ${id} แล้ว` : `ยกเลิกเลือก asset ${id} แล้ว`);
-          return;
-        }
-
-        if (action === "set-cover") {
-          await api(`/api/items/${state.itemId}/assets/${id}/role`, {
-            method: "PATCH",
-            body: JSON.stringify({ role: "cover" }),
-          });
-          if (url) {
-            qs("e-image").value = url;
-            if (qs("e-image-readonly")) qs("e-image-readonly").value = url;
-            updateCoverPreview();
-          }
-          await refreshAssets();
-          setAssetStatus(`ตั้ง asset ${id} เป็นภาพปกแล้ว`);
           return;
         }
 
@@ -4133,9 +4154,12 @@ function renderAssetsTable(rows) {
 
 async function refreshAssets() {
   if (isCleanMode) {
-    const data = await api(`/api/items/${state.itemId}/image-workflow`);
-    state.imageWorkflow = data?.status || null;
-    state.assets = Array.isArray(data?.assets) ? data.assets : [];
+    const [workflowData, referenceRows] = await Promise.all([
+      api(`/api/items/${state.itemId}/image-workflow`),
+      api(`/api/items/${state.itemId}/reference-media`),
+    ]);
+    state.imageWorkflow = workflowData?.status || null;
+    state.assets = Array.isArray(referenceRows) ? referenceRows : [];
     renderAssetsTable(state.assets);
     renderCleanAiGuard();
     return;
