@@ -120,8 +120,12 @@ export function buildCleanStructuredContext(repo, contentItemId, options = {}) {
     .slice(0, evidenceLimit)
     .map((row) => normalizeEvidenceBlock(row));
 
-  const selectedAssets = repo.listContentAssetsByItem(contentItemId, { onlySelected: true });
-  const imageContext = repo.listApprovedImageContext(contentItemId);
+  const selectedReferenceMedia = typeof repo.listReferenceMediaByItem === "function"
+    ? repo.listReferenceMediaByItem(contentItemId, { selectedOnly: true })
+    : [];
+  const imageContext = typeof repo.listApprovedLocalImageContext === "function"
+    ? repo.listApprovedLocalImageContext(contentItemId)
+    : { cover_url: null, selected_urls: [], gallery_urls: [], inline_urls: [], assets: [] };
   const completeness = computeCompleteness(item, approvedBlocks, imageContext);
 
   return {
@@ -153,12 +157,26 @@ export function buildCleanStructuredContext(repo, contentItemId, options = {}) {
       inline_urls: Array.isArray(imageContext?.inline_urls) ? imageContext.inline_urls : [],
       selected_count: Array.isArray(imageContext?.selected_urls) ? imageContext.selected_urls.length : 0,
       cover_count: imageContext?.cover_url ? 1 : 0,
-      assets: selectedAssets.map((row) => ({
+      assets: Array.isArray(imageContext?.assets) ? imageContext.assets.map((row) => ({
         asset_id: Number(row.asset_id || 0) || null,
         role: row.role || "gallery",
         selected_in_clean: Number(row.selected_in_clean || 0),
         is_cover: Number(row.is_cover || 0),
         public_url: row.public_url || "",
+      })) : [],
+    },
+    reference_media_context: {
+      selected_urls: selectedReferenceMedia.map((row) => String(row?.url || "").trim()).filter(Boolean),
+      selected_count: selectedReferenceMedia.length,
+      assets: selectedReferenceMedia.map((row) => ({
+        reference_media_id: row.reference_media_id || "",
+        source_kind: row.source_kind || "",
+        source_label: row.source_label || "",
+        url: row.url || "",
+        preview_url: row.preview_url || row.url || "",
+        file_name: row.file_name || "",
+        selected_for_ai: Boolean(row.selected_for_ai),
+        is_external: Boolean(row.is_external),
       })),
     },
     completeness,

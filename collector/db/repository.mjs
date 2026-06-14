@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import path from "path";
 
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
@@ -51,6 +51,67 @@ function normalizeImportedMediaUrl(value) {
   if (/^https?:\/\//i.test(text)) return text;
   if (/^\/api\//i.test(text)) return text;
   return "";
+}
+
+function normalizeReferenceMediaUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  try {
+    const parsed = new URL(text, "http://collector.local");
+    if (parsed.pathname === "/api/google-maps/photo") {
+      const name = String(parsed.searchParams.get("name") || "").trim();
+      if (!/^places\/[^/?#]+\/photos\/[^/?#]+$/i.test(name)) return "";
+      return `/api/google-maps/photo?name=${encodeURIComponent(name)}`;
+    }
+
+    if (!/^https?:$/i.test(parsed.protocol)) return "";
+    parsed.hash = "";
+    const params = [...parsed.searchParams.entries()].sort(([a], [b]) => a.localeCompare(b));
+    parsed.search = "";
+    for (const [key, val] of params) {
+      parsed.searchParams.append(key, val);
+    }
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function getReferenceMediaIdFromUrl(value) {
+  const normalized = normalizeReferenceMediaUrl(value);
+  if (!normalized) return "";
+  const hash = createHash("sha1").update(normalized).digest("hex").slice(0, 16);
+  return `rm:${hash}`;
+}
+
+function inferReferenceMediaMimeType(url) {
+  const normalizedUrl = normalizeReferenceMediaUrl(url);
+  if (!normalizedUrl) return null;
+  if (/^\/api\/google-maps\/photo\?name=/i.test(normalizedUrl)) return "image/jpeg";
+  const lowerUrl = normalizedUrl.toLowerCase().split("?")[0];
+  if (lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg")) return "image/jpeg";
+  if (lowerUrl.endsWith(".png")) return "image/png";
+  if (lowerUrl.endsWith(".webp")) return "image/webp";
+  if (lowerUrl.endsWith(".gif")) return "image/gif";
+  if (lowerUrl.endsWith(".svg")) return "image/svg+xml";
+  if (lowerUrl.endsWith(".avif")) return "image/avif";
+  return null;
+}
+
+function looksLikeReferenceImageUrl(value, options = {}) {
+  const normalized = normalizeReferenceMediaUrl(value);
+  if (!normalized) return false;
+
+  const mimeType = String(options.mime_type || "").trim().toLowerCase();
+  const mediaType = String(options.media_type || "").trim().toLowerCase();
+  const assetType = String(options.asset_type || "").trim().toLowerCase();
+
+  if (mimeType.startsWith("image/")) return true;
+  if (mediaType === "image") return true;
+  if (assetType === "image") return true;
+  if (/^\/api\/google-maps\/photo\?name=/i.test(normalized)) return true;
+  return /\.(avif|gif|jpe?g|png|svg|webp)$/i.test(normalized.split("?")[0]);
 }
 
 function toGoogleMapsPhotoProxyUrl(photoName) {
@@ -2055,6 +2116,25 @@ function ensureContentAssetWorkflowColumns(db) {
   `);
 }
 
+function ensureReferenceMediaSelectionTable(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS content_reference_media_selections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content_item_id INTEGER NOT NULL,
+      reference_media_id TEXT NOT NULL,
+      selected_for_ai INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
+      UNIQUE(content_item_id, reference_media_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_content_reference_media_selections_item
+    ON content_reference_media_selections(content_item_id);
+    CREATE INDEX IF NOT EXISTS idx_content_reference_media_selections_selected
+    ON content_reference_media_selections(content_item_id, selected_for_ai);
+  `);
+}
+
 function ensureFieldPackTables(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS field_packs (
@@ -2706,6 +2786,7 @@ export function createRepository(db) {
   ensureLifecycleColumns(db);
   ensureTranslationTables(db);
   ensureContentAssetWorkflowColumns(db);
+  ensureReferenceMediaSelectionTable(db);
   ensureFieldPackTables(db);
   ensureWorkflowHeadColumns(db);
   ensureAgentProfileTables(db);
@@ -9714,8 +9795,8 @@ function normalizeStateValue(value, stateGroup) {
         getItem,
         listApprovedContextBlocks,
         listEvidenceBlocks,
-        listContentAssetsByItem,
-        listApprovedImageContext,
+        listReferenceMediaByItem,
+        listApprovedLocalImageContext,
       },
       contentItemId
     );
@@ -9795,6 +9876,7 @@ function normalizeStateValue(value, stateGroup) {
 
     const selected = rows.filter((r) => Number(r.selected_in_clean || 0) === 1 && String(r.role || "") !== "unused");
     const covers = rows.filter((r) => Number(r.is_cover || 0) === 1 || String(r.role || "") === "cover");
+    const selectedReferenceMedia = listReferenceMediaByItem(contentItemId, { selectedOnly: true });
 
     const localSelected = selected.filter((r) => isLocal(r));
     const localCovers = covers.filter((r) => isLocal(r));
@@ -9810,17 +9892,26 @@ function normalizeStateValue(value, stateGroup) {
     if (localCovers.length > 1) localMissing.push("ต้องมีภาพปก local เพียง 1 ภาพ");
 
     const isPublishReady = localMissing.length === 0 && missing.length === 0;
+    const aiMissing = [];
+    if (selectedReferenceMedia.length < 1 && localSelected.length < 1) {
+      aiMissing.push("ต้องเลือกภาพอ้างอิงหรือภาพ local อย่างน้อย 1 ภาพสำหรับ Agent");
+    }
+    const publishMissing = [];
+    if (localSelected.length < 1) publishMissing.push("ต้องเลือกภาพ local อย่างน้อย 1 ภาพ");
+    if (localCovers.length < 1) publishMissing.push("ต้องตั้งภาพปกจาก local assets");
+    if (localCovers.length > 1) publishMissing.push("ต้องมีภาพปก local เพียง 1 ภาพ");
 
     return {
       content_item_id: Number(contentItemId),
-      selected_count: selected.length,
+      ai_reference_selected_count: selectedReferenceMedia.length,
+      selected_count: selected.length + selectedReferenceMedia.length,
       cover_count: covers.length,
       local_selected_count: localSelected.length,
       local_cover_count: localCovers.length,
-      is_ready_for_ai_draft: missing.length === 0,
-      is_ready_for_publish: isPublishReady,
-      missing_requirements: missing,
-      missing_local_requirements: localMissing,
+      is_ready_for_ai_draft: aiMissing.length === 0,
+      is_ready_for_publish: publishMissing.length === 0 && isPublishReady,
+      missing_requirements: aiMissing,
+      missing_local_requirements: publishMissing,
       cover_asset_id: localCovers[0]?.asset_id || covers[0]?.asset_id || null,
     };
   }
@@ -9898,6 +9989,259 @@ function normalizeStateValue(value, stateGroup) {
       selected_urls: rows.map((row) => row.public_url).filter(Boolean),
       gallery_urls: rows.filter((row) => row.role === "gallery").map((row) => row.public_url).filter(Boolean),
       inline_urls: rows.filter((row) => row.role === "inline").map((row) => row.public_url).filter(Boolean),
+    };
+  }
+
+  function isApprovedLocalPublishAssetRow(row) {
+    const role = String(row?.role || "").trim().toLowerCase();
+    const disk = String(row?.storage_disk || "").trim().toLowerCase();
+    const storagePath = String(row?.storage_path || "").trim();
+    const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+    if (Number(row?.selected_in_clean || 0) !== 1) return false;
+    if (!["cover", "gallery", "inline"].includes(role)) return false;
+    if (!["local", "nas"].includes(disk)) return false;
+    if (!storagePath || /^https?:\/\//i.test(storagePath)) return false;
+    if (mimeType && !mimeType.startsWith("image/")) return false;
+    return Boolean(parseAssetPublicUrl(storagePath));
+  }
+
+  function listApprovedLocalImageContext(contentItemId) {
+    const rows = listContentAssetsByItem(contentItemId, { onlySelected: true })
+      .filter((row) => isApprovedLocalPublishAssetRow(row));
+    const cover = rows.find((row) => Number(row.is_cover || 0) === 1 || row.role === "cover") || null;
+    return {
+      cover_url: cover?.public_url || null,
+      selected_urls: rows.map((row) => row.public_url).filter(Boolean),
+      gallery_urls: rows.filter((row) => row.role === "gallery").map((row) => row.public_url).filter(Boolean),
+      inline_urls: rows.filter((row) => row.role === "inline").map((row) => row.public_url).filter(Boolean),
+      assets: rows.map((row) => ({
+        asset_id: Number(row.asset_id || 0) || null,
+        role: row.role || "gallery",
+        selected_in_clean: Number(row.selected_in_clean || 0),
+        is_cover: Number(row.is_cover || 0),
+        public_url: row.public_url || "",
+        storage_disk: row.storage_disk || "",
+        storage_path: row.storage_path || "",
+        mime_type: row.mime_type || "",
+      })),
+    };
+  }
+
+  function collectReferenceMediaCandidatesByItem(contentItemId) {
+    const itemId = Number(contentItemId || 0) || 0;
+    if (!itemId) throw new Error("invalid content_item_id");
+    const item = getItem(itemId);
+    if (!item) throw new Error("item not found");
+
+    const sourceRecords = listSourceRecordsByItem(itemId);
+    const matchUrls = new Set(
+      [
+        String(item?.source_url || "").trim(),
+        String(item?.map_url || "").trim(),
+        ...sourceRecords.map((row) => String(row?.source_url || "").trim()),
+      ].filter(Boolean)
+    );
+    const matchEntities = new Set(
+      [
+        String(item?.google_place_id || "").trim(),
+        ...sourceRecords.map((row) => String(row?.source_entity_id || "").trim()),
+      ].filter(Boolean)
+    );
+
+    const candidateByUrl = new Map();
+    const sourcePriority = {
+      item_image_url: 0,
+      evidence_block: 1,
+      source_raw_media: 2,
+    };
+    const maybeAddCandidate = (candidate) => {
+      const normalizedUrl = normalizeReferenceMediaUrl(candidate?.url);
+      if (!normalizedUrl) return false;
+      if (!looksLikeReferenceImageUrl(normalizedUrl, candidate?.metadata || {})) return false;
+      const referenceMediaId = getReferenceMediaIdFromUrl(normalizedUrl);
+      if (!referenceMediaId) return false;
+      const next = {
+        reference_media_id: referenceMediaId,
+        content_item_id: itemId,
+        source_kind: String(candidate?.source_kind || "").trim() || "reference_media",
+        source_label: String(candidate?.source_label || candidate?.source_kind || "").trim() || null,
+        source_id: candidate?.source_id ?? null,
+        url: normalizedUrl,
+        preview_url: normalizedUrl,
+        file_name: path.basename(normalizedUrl.split("?")[0] || "reference-image.jpg") || "reference-image.jpg",
+        selected_for_ai: false,
+        is_external: true,
+        _priority: Number(sourcePriority[String(candidate?.source_kind || "").trim()] ?? 99),
+      };
+      const existing = candidateByUrl.get(normalizedUrl);
+      if (!existing || next._priority < existing._priority) {
+        candidateByUrl.set(normalizedUrl, next);
+      }
+      return true;
+    };
+
+    maybeAddCandidate({
+      source_kind: "item_image_url",
+      source_label: item?.source_name || "item image",
+      source_id: itemId,
+      url: item?.image_url,
+      metadata: {
+        mime_type: inferReferenceMediaMimeType(item?.image_url),
+        media_type: "image",
+        asset_type: "image",
+      },
+    });
+
+    const evidenceRows = db.prepare(`
+      SELECT
+        eb.id,
+        eb.source_type,
+        eb.source_label,
+        eb.text_value,
+        eb.payload_json,
+        eb.status
+      FROM evidence_blocks eb
+      WHERE eb.content_item_id = ?
+        AND LOWER(COALESCE(eb.status, 'active')) IN ('active', 'approved', 'ready')
+      ORDER BY eb.id DESC
+    `).all(itemId);
+
+    for (const row of evidenceRows) {
+      const payload = parseJson(row?.payload_json, null);
+      const evidenceCandidates = [
+        {
+          url: payload?.media_url,
+          metadata: {
+            mime_type: payload?.mime_type || "",
+            media_type: payload?.media_type || "",
+            asset_type: payload?.asset_type || "",
+          },
+        },
+        {
+          url: payload?.image_url,
+          metadata: {
+            mime_type: payload?.mime_type || "",
+            media_type: payload?.media_type || "",
+            asset_type: payload?.asset_type || "",
+          },
+        },
+        { url: payload?.url, metadata: {} },
+        { url: row?.text_value, metadata: {} },
+      ];
+      for (const candidate of evidenceCandidates) {
+        const candidateUrl = String(candidate?.url || "").trim();
+        if (!candidateUrl) continue;
+        maybeAddCandidate({
+          source_kind: "evidence_block",
+          source_label: row?.source_label || row?.source_type || "evidence",
+          source_id: Number(row?.id || 0) || null,
+          url: candidateUrl,
+          metadata: {
+            mime_type: String(candidate?.metadata?.mime_type || "").trim().toLowerCase() || inferReferenceMediaMimeType(candidateUrl),
+            media_type: String(candidate?.metadata?.media_type || "").trim().toLowerCase(),
+            asset_type: String(candidate?.metadata?.asset_type || "").trim().toLowerCase(),
+          },
+        });
+      }
+    }
+
+    const rawMediaRows = db.prepare(`
+      SELECT
+        srm.id,
+        srm.media_url,
+        srm.mime_type,
+        srm.metadata_json,
+        sri.source_url,
+        sri.source_ref,
+        sri.normalized_json
+      FROM source_raw_media srm
+      JOIN source_raw_items sri ON sri.id = srm.raw_item_id
+      WHERE srm.media_url IS NOT NULL
+        AND srm.media_url <> ''
+      ORDER BY srm.id DESC
+    `).all();
+
+    for (const row of rawMediaRows) {
+      const sourceUrl = String(row?.source_url || "").trim();
+      const sourceRef = String(row?.source_ref || "").trim();
+      const normalized = parseJson(row?.normalized_json, null);
+      const placeId = String(normalized?.google_place_id || "").trim();
+      if (!matchUrls.has(sourceUrl) && !matchEntities.has(sourceRef) && !matchEntities.has(placeId)) {
+        continue;
+      }
+      const metadata = parseJson(row?.metadata_json, null);
+      maybeAddCandidate({
+        source_kind: "source_raw_media",
+        source_label: sourceUrl || sourceRef || placeId || "source raw media",
+        source_id: Number(row?.id || 0) || null,
+        url: row?.media_url,
+        metadata: {
+          mime_type: String(row?.mime_type || "").trim().toLowerCase() || inferReferenceMediaMimeType(row?.media_url),
+          media_type: String(metadata?.media_type || "").trim().toLowerCase(),
+          asset_type: String(metadata?.asset_type || "").trim().toLowerCase(),
+        },
+      });
+    }
+
+    return [...candidateByUrl.values()]
+      .sort((left, right) => {
+        if (left._priority !== right._priority) return left._priority - right._priority;
+        return String(left.reference_media_id || "").localeCompare(String(right.reference_media_id || ""));
+      })
+      .map(({ _priority, ...row }) => row);
+  }
+
+  function listReferenceMediaByItem(contentItemId, options = {}) {
+    const rows = collectReferenceMediaCandidatesByItem(contentItemId);
+    const selectedOnly = options?.selectedOnly === true;
+    const selectionRows = db.prepare(`
+      SELECT reference_media_id, selected_for_ai
+      FROM content_reference_media_selections
+      WHERE content_item_id=?
+    `).all(Number(contentItemId || 0) || 0);
+    const selectedLookup = new Map(
+      selectionRows.map((row) => [String(row.reference_media_id || "").trim(), Number(row.selected_for_ai || 0) === 1])
+    );
+
+    const mapped = rows.map((row) => ({
+      ...row,
+      selected_for_ai: selectedLookup.get(String(row.reference_media_id || "").trim()) === true,
+    }));
+    if (!selectedOnly) return mapped;
+    return mapped.filter((row) => row.selected_for_ai === true);
+  }
+
+  function setReferenceMediaSelected(contentItemId, referenceMediaId, selected) {
+    const itemId = Number(contentItemId || 0) || 0;
+    if (!itemId) throw new Error("invalid content_item_id");
+    const refId = String(referenceMediaId || "").trim();
+    if (!refId) throw new Error("reference media id is required");
+
+    const candidate = collectReferenceMediaCandidatesByItem(itemId).find((row) => String(row.reference_media_id || "").trim() === refId);
+    if (!candidate) {
+      throw new Error("reference media not found for item");
+    }
+
+    const yes = selected === true || selected === 1 || selected === "1";
+    if (yes) {
+      db.prepare(`
+        INSERT INTO content_reference_media_selections (content_item_id, reference_media_id, selected_for_ai)
+        VALUES (?, ?, 1)
+        ON CONFLICT(content_item_id, reference_media_id)
+        DO UPDATE SET selected_for_ai=excluded.selected_for_ai, updated_at=CURRENT_TIMESTAMP
+      `).run(itemId, refId);
+    } else {
+      db.prepare(`
+        INSERT INTO content_reference_media_selections (content_item_id, reference_media_id, selected_for_ai)
+        VALUES (?, ?, 0)
+        ON CONFLICT(content_item_id, reference_media_id)
+        DO UPDATE SET selected_for_ai=0, updated_at=CURRENT_TIMESTAMP
+      `).run(itemId, refId);
+    }
+
+    return {
+      ...candidate,
+      selected_for_ai: yes,
     };
   }
 
@@ -11294,6 +11638,13 @@ function normalizeStateValue(value, stateGroup) {
     setContentAssetRole,
     setContentAssetSelected,
     listApprovedImageContext,
+    listApprovedLocalImageContext,
+    normalizeReferenceMediaUrl,
+    getReferenceMediaIdFromUrl,
+    looksLikeReferenceImageUrl,
+    collectReferenceMediaCandidatesByItem,
+    listReferenceMediaByItem,
+    setReferenceMediaSelected,
     listImportedReferenceAssetsByItem,
     repairImportedReferenceAssetsForItem,
     evaluateContentAssetCleanupEligibility,

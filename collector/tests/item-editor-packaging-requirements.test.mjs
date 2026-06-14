@@ -6,6 +6,7 @@ import path from "node:path";
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const itemEditorJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.js"), "utf8");
 const itemEditorHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.html"), "utf8");
+const cleanItemHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "clean-item.html"), "utf8");
 
 function extractFunctionSource(source, functionName) {
   const marker = `function ${functionName}`;
@@ -267,6 +268,46 @@ test("internal asset media hints clear payload urls while external hints keep th
     "https://example.com/photo.jpg",
     "external media hints should preserve their explicit URLs"
   );
+});
+
+test("clean reference media table uses dedicated reference-media routes", () => {
+  const renderAssetsTableSource = extractFunctionSource(itemEditorJs, "renderAssetsTable");
+  const refreshAssetsSource = extractFunctionSource(itemEditorJs, "refreshAssets");
+
+  assert.equal(renderAssetsTableSource.includes('/reference-media/${encodeURIComponent(referenceMediaId)}/selected'), true);
+  assert.equal(renderAssetsTableSource.includes('/assets/${id}/selected'), true, "non-clean asset selection path should still exist");
+  assert.equal(renderAssetsTableSource.includes('data-action="set-cover"'), false);
+  assert.equal(renderAssetsTableSource.includes("ตั้งเป็นภาพปก"), false);
+  assert.equal(refreshAssetsSource.includes("api(`/api/items/${state.itemId}/reference-media`)"), true);
+});
+
+test("clean reference badges use workflow badge pattern and always mark reference-only", () => {
+  const renderAssetBadgesSource = extractFunctionSource(itemEditorJs, "renderAssetBadges");
+  assert.equal(itemEditorJs.includes("workflow-badge workflow-badge-sent"), true);
+  assert.equal(itemEditorJs.includes("ส่งให้ Agent"), true);
+  assert.equal(itemEditorJs.includes("ยังไม่ถูกเลือกส่งให้ Agent"), true);
+  assert.equal(itemEditorJs.includes("ภาพอ้างอิงเท่านั้น"), true);
+  assert.equal(itemEditorJs.includes("roleDisplayLabel(role)"), true, "non-clean role badges should still exist");
+});
+
+test("clean page source removes cover UI and cover role selector", () => {
+  const forbiddenSnippets = [
+    "<label>รูปปก</label>",
+    "<label>ลิงก์รูปปก</label>",
+    'option value="cover"',
+  ];
+  for (const snippet of forbiddenSnippets) {
+    assert.equal(cleanItemHtml.includes(snippet), false, `expected clean-item.html to drop: ${snippet}`);
+  }
+
+  const requiredSnippets = [
+    "รูปอ้างอิงสำหรับ AI / Field Pack",
+    "สถานะ Agent",
+    'id="asset-role" type="hidden" value="gallery"',
+  ];
+  for (const snippet of requiredSnippets) {
+    assert.equal(cleanItemHtml.includes(snippet), true, `expected clean-item.html to include: ${snippet}`);
+  }
 });
 
 test("preserveMediaHints strips stale urls from internal asset rows", () => {
