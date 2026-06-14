@@ -398,12 +398,28 @@ test("clean asset table uses AI reference wording and removes cover action", () 
   assert.equal(/if\s*\(\s*isReferenceOnly\s*\)\s*\{[\s\S]*ภาพอ้างอิงเท่านั้น/.test(cleanModeBlock[0]), false, "clean render block should not gate reference-only copy on isReferenceOnly");
 });
 
-test("clean asset table does not render external images or hover preview them", () => {
+test("clean asset table can render external/reference thumbnails without restoring cover actions", () => {
   const renderAssetsTableSource = extractFunctionSource(itemEditorJs, "renderAssetsTable");
-  assert.equal(renderAssetsTableSource.includes('const isLocalPreview = isCollectorControlledLocalAssetForUi(row) && previewUrl;'), true, "clean asset table should gate previews to local controlled images");
-  assert.equal(renderAssetsTableSource.includes('<span class="muted">ภาพภายนอก</span> <a href="${escapeHtml(previewUrl)}" target="_blank" rel="noreferrer">เปิดต้นทาง</a>'), true, "clean asset table should render external media as link text instead of img src");
-  assert.equal(renderAssetsTableSource.includes('showAssetHoverPreview(src, event)'), true, "local preview hover wiring should remain for real thumbnails");
-  assert.equal(renderAssetsTableSource.includes('tbody.querySelectorAll("img.asset-thumb")'), true, "hover preview should only bind to rendered thumbnails");
+  assert.equal(itemEditorJs.includes("function getAssetPreviewUrl(row) {"), true, "clean asset table should use a dedicated preview-url helper");
+  assert.equal(itemEditorJs.includes("row?.public_url,"), true, "preview helper should include public_url");
+  assert.equal(itemEditorJs.includes("row?.preview_url,"), true, "preview helper should include preview_url");
+  assert.equal(itemEditorJs.includes("row?.image_url,"), true, "preview helper should include image_url");
+  assert.equal(itemEditorJs.includes("row?.thumbnail_url,"), true, "preview helper should include thumbnail_url");
+  assert.equal(itemEditorJs.includes("row?.source_url,"), false, "preview helper should not use source_url as a default thumbnail candidate");
+  assert.equal(renderAssetsTableSource.includes('<img class="asset-thumb" src="${escapeHtml(previewUrl)}" alt="asset" loading="lazy" referrerpolicy="no-referrer" />'), true, "clean asset table should render thumbnails for previewable external/reference media");
+  assert.equal(renderAssetsTableSource.includes('const sourceLinkUrl = sanitizeUrl(row.source_url || "");'), true, "source_url should remain link-only for opening the origin");
+  assert.equal(renderAssetsTableSource.includes('failedHoverPreviewUrls.add(src);'), true, "failed thumbnails should mark hover preview urls as failed");
+  assert.equal(renderAssetsTableSource.includes('failedAssetThumbUrls.add(src);'), true, "failed thumbnails should mark thumbnail urls as failed");
+  assert.equal(renderAssetsTableSource.includes('img.dataset.previewBroken = "1";'), true, "failed thumbnails should mark the image as broken for future hover guards");
+  assert.equal(renderAssetsTableSource.includes('if (img.dataset.previewBroken === "1" || failedHoverPreviewUrls.has(src)) return;'), true, "hover should skip broken or failed preview urls");
+  const forbiddenSnippets = [
+    'data-action="set-cover"',
+    'if (action === "set-cover")',
+    'qs("e-image").value = url;',
+  ];
+  for (const snippet of forbiddenSnippets) {
+    assert.equal(itemEditorJs.includes(snippet), false, `clean asset workflow should still avoid legacy cover/image mutation snippet: ${snippet}`);
+  }
 });
 
 test("api helper surfaces readable backend error details", () => {

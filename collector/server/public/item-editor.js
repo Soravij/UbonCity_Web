@@ -22,6 +22,7 @@ const state = {
   busyButtons: [],
 };
 const failedHoverPreviewUrls = new Set();
+const failedAssetThumbUrls = new Set();
 
 const isCleanMode = /\/clean-item\.html$/i.test(String(window.location.pathname || ""));
 
@@ -259,6 +260,31 @@ function sanitizeUrl(value) {
   if (/\s/.test(raw)) return "";
   if (/^(?:www\.)?[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:[\/?#].*)?$/i.test(raw)) {
     return `https://${raw.replace(/^\/+/, "")}`;
+  }
+  return "";
+}
+
+function getAssetPreviewUrl(row) {
+  const directCandidates = [
+    row?.public_url,
+    row?.preview_url,
+    row?.image_url,
+    row?.thumbnail_url,
+  ];
+  for (const candidate of directCandidates) {
+    const safeUrl = sanitizeUrl(candidate || "");
+    if (safeUrl) return safeUrl;
+  }
+
+  const storagePath = String(row?.storage_path || "").trim();
+  const safeStorageUrl = sanitizeUrl(storagePath);
+  const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+  const mediaType = String(row?.media_type || "").trim().toLowerCase();
+  const assetType = String(row?.asset_type || "").trim().toLowerCase();
+  const looksLikeImagePath = /\.(avif|gif|jpe?g|png|svg|webp)(?:[?#].*)?$/i.test(storagePath);
+  const hasImageSignal = mimeType.startsWith("image/") || mediaType === "image" || assetType === "image";
+  if (safeStorageUrl && (looksLikeImagePath || hasImageSignal)) {
+    return safeStorageUrl;
   }
   return "";
 }
@@ -4130,13 +4156,14 @@ function renderAssetsTable(rows) {
     const selected = Number(row.selected_in_clean || 0) === 1;
     const displayName = String(row.file_name || row.storage_path || "-");
     const assetId = Number(row.asset_id || 0) || 0;
-    const previewUrl = sanitizeUrl(row.public_url || "");
-    const isLocalPreview = isCollectorControlledLocalAssetForUi(row) && previewUrl;
-    const preview = isLocalPreview
-      ? `<img class="asset-thumb" src="${escapeHtml(previewUrl)}" alt="asset" />`
-      : previewUrl
-        ? `<span class="muted">ภาพภายนอก</span> <a href="${escapeHtml(previewUrl)}" target="_blank" rel="noreferrer">เปิดต้นทาง</a>`
-        : '<span class="muted">ภาพภายนอก</span>';
+    const previewUrl = getAssetPreviewUrl(row);
+    const sourceLinkUrl = sanitizeUrl(row.source_url || "");
+    const previewFailed = previewUrl && (failedAssetThumbUrls.has(previewUrl) || failedHoverPreviewUrls.has(previewUrl));
+    const preview = previewUrl && !previewFailed
+      ? `<img class="asset-thumb" src="${escapeHtml(previewUrl)}" alt="asset" loading="lazy" referrerpolicy="no-referrer" />`
+      : sourceLinkUrl
+        ? `<span class="muted">${previewFailed ? "โหลดรูปไม่ได้" : "ไม่มีรูปตัวอย่าง"}</span> <a href="${escapeHtml(sourceLinkUrl)}" target="_blank" rel="noreferrer">เปิดต้นทาง</a>`
+        : `<span class="muted">${previewFailed ? "โหลดรูปไม่ได้" : "ไม่มีรูปตัวอย่าง"}</span>`;
 
     const actions = [];
     if (isCleanMode) {
@@ -4160,8 +4187,16 @@ function renderAssetsTable(rows) {
 
   tbody.querySelectorAll("img.asset-thumb").forEach((img) => {
     const src = img.getAttribute("src") || "";
-    setImageWithFallback(img, src);
-    img.addEventListener("mouseenter", (event) => showAssetHoverPreview(src, event));
+    setImageWithFallback(img, src, () => {
+      failedHoverPreviewUrls.add(src);
+      failedAssetThumbUrls.add(src);
+      img.dataset.previewBroken = "1";
+    });
+    if (img.dataset.previewBroken === "1" || failedHoverPreviewUrls.has(src)) return;
+    img.addEventListener("mouseenter", (event) => {
+      if (img.dataset.previewBroken === "1" || failedHoverPreviewUrls.has(src)) return;
+      showAssetHoverPreview(src, event);
+    });
     img.addEventListener("mousemove", (event) => {
       const box = document.getElementById("asset-hover-preview");
       if (box && !box.classList.contains("hidden")) {
@@ -4784,8 +4819,6 @@ function wire() {
     setStatus(err.message, true);
   }
 })();
-
-
 
 
 
