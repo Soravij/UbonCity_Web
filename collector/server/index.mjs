@@ -13987,6 +13987,11 @@ app.get("/api/assets", (req, res) => {
   }
 
   if (contentItemId > 0) {
+    repo.repairImportedReferenceAssetsForItem(contentItemId, {
+      apply: true,
+      actorEmail: actorEmail(req),
+      limit: 50,
+    });
     rows = db
       .prepare(`
       SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type,

@@ -204,6 +204,136 @@ test("repairImportedReferenceAssetsForItem dry run reports skips for existing im
   }
 });
 
+test("repairImportedReferenceAssetsForItem materializes evidence block media without promoting publish state", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem();
+    ctx.db.prepare("UPDATE content_items SET image_url='' WHERE id=?").run(item.id);
+    ctx.db.prepare("DELETE FROM source_records WHERE content_item_id=?").run(item.id);
+
+    const insertEvidence = ctx.db.prepare(`
+      INSERT INTO evidence_blocks (
+        content_item_id, block_type, source_type, source_url, source_label, attribution_text,
+        text_value, numeric_value, list_value_json, payload_json, lang, status
+      ) VALUES (?, ?, ?, ?, ?, '', ?, NULL, NULL, ?, 'th', 'active')
+    `);
+
+    insertEvidence.run(
+      item.id,
+      "media",
+      "google_maps",
+      null,
+      "google_maps",
+      "/api/google-maps/photo?name=places%2Fabc%2Fphotos%2Fevidence-photo",
+      JSON.stringify({ field: "image", media_url: "/api/google-maps/photo?name=places%2Fabc%2Fphotos%2Fevidence-photo" })
+    );
+    insertEvidence.run(
+      item.id,
+      "media",
+      "wongnai",
+      null,
+      "wongnai.com",
+      "https://static2.wongnai.com/static2/images/XWU7FL1.png",
+      JSON.stringify({ field: "image", media_url: "https://static2.wongnai.com/static2/images/XWU7FL1.png" })
+    );
+    insertEvidence.run(
+      item.id,
+      "media",
+      "facebook",
+      null,
+      "facebook",
+      "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg",
+      JSON.stringify({ field: "image", media_url: "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg" })
+    );
+    insertEvidence.run(
+      item.id,
+      "media",
+      "facebook",
+      null,
+      "facebook",
+      "https://www.facebook.com/p/example-post",
+      JSON.stringify({ field: "image", media_url: "https://www.facebook.com/p/example-post" })
+    );
+    insertEvidence.run(
+      item.id,
+      "media",
+      "wongnai",
+      null,
+      "wongnai.com",
+      "https://www.wongnai.com/restaurants/example",
+      JSON.stringify({ field: "image", media_url: "https://www.wongnai.com/restaurants/example" })
+    );
+    insertEvidence.run(
+      item.id,
+      "media",
+      "google_maps",
+      null,
+      "google_maps",
+      "https://maps.google.com/?cid=123",
+      JSON.stringify({ field: "image", media_url: "https://maps.google.com/?cid=123" })
+    );
+    insertEvidence.run(
+      item.id,
+      "media",
+      "wongnai",
+      null,
+      "wongnai.com",
+      "https://www.wongnai.com/restaurants/2447403Vt-test",
+      JSON.stringify({ field: "image", media_url: "https://static2.wongnai.com/static2/images/XWU7FL1.png" })
+    );
+    insertEvidence.run(
+      item.id,
+      "media",
+      "facebook",
+      null,
+      "facebook",
+      "https://www.facebook.com/p/some-page",
+      JSON.stringify({
+        field: "image",
+        media_url: "https://static2.wongnai.com/static2/images/XWU7FL1-extra.png",
+        mime_type: "image/png",
+      })
+    );
+
+    const diagnostics = ctx.repo.repairImportedReferenceAssetsForItem(item.id, {
+      apply: true,
+      actorEmail: "tester@local",
+      limit: 25,
+    });
+
+    const importedAssets = ctx.repo.listImportedReferenceAssetsByItem(item.id);
+    const itemAfter = ctx.repo.getItem(item.id);
+
+    assert.equal(diagnostics.added_count, 4);
+    assert.equal(importedAssets.length, 4);
+    assert.ok(importedAssets.some((row) => row.public_url.includes("/api/google-maps/photo?name=places%2Fabc%2Fphotos%2Fevidence-photo")));
+    assert.ok(importedAssets.some((row) => row.public_url.includes("XWU7FL1.png")));
+    assert.ok(importedAssets.some((row) => row.public_url.includes("XWU7FL1-extra.png")));
+    assert.ok(importedAssets.some((row) => row.public_url.includes("fbcdn.net/example.jpg")));
+    assert.equal(importedAssets.some((row) => row.public_url.includes("facebook.com/p/example-post")), false);
+    assert.equal(importedAssets.some((row) => row.public_url.includes("facebook.com/p/some-page")), false);
+    assert.equal(importedAssets.some((row) => row.public_url.includes("wongnai.com/restaurants/example")), false);
+    assert.equal(importedAssets.some((row) => row.public_url.includes("wongnai.com/restaurants/2447403Vt-test")), false);
+    assert.equal(importedAssets.some((row) => row.public_url.includes("maps.google.com/?cid=123")), false);
+    assert.equal(diagnostics.skipped_media.some((row) => row.reason === "non_image_url"), true);
+    assert.equal(importedAssets.every((row) => String(row.role || "") === "unused"), true);
+    assert.equal(importedAssets.every((row) => Number(row.selected_in_clean || 0) === 0), true);
+    assert.equal(importedAssets.every((row) => Number(row.is_cover || 0) === 0), true);
+    assert.equal(importedAssets.every((row) => String(row.placement_type || "") === "unused"), true);
+    assert.equal(String(itemAfter?.image_url || "").trim(), "");
+
+    const rerun = ctx.repo.repairImportedReferenceAssetsForItem(item.id, {
+      apply: true,
+      actorEmail: "tester@local",
+      limit: 25,
+    });
+    assert.equal(rerun.added_count, 0);
+    assert.equal(ctx.repo.listImportedReferenceAssetsByItem(item.id).length, importedAssets.length);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("setContentAssetSelected keeps imported external assets as reference-only while allowing clean selection", () => {
   const ctx = createTestContext();
   try {
@@ -319,5 +449,16 @@ test("api assets route only_selected branch delegates to repository source contr
   ];
   for (const snippet of forbiddenSnippets) {
     assert.equal(indexServer.includes(snippet), false, `expected index.mjs to drop legacy only_selected route filter: ${snippet}`);
+  }
+});
+
+test("api assets route non-only-selected branch triggers imported reference lazy repair", () => {
+  const requiredSnippets = [
+    "repo.repairImportedReferenceAssetsForItem(contentItemId, {",
+    "apply: true,",
+    "limit: 50,",
+  ];
+  for (const snippet of requiredSnippets) {
+    assert.equal(indexServer.includes(snippet), true, `expected index.mjs to lazily repair imported reference assets snippet: ${snippet}`);
   }
 });

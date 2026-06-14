@@ -142,6 +142,40 @@ function extractImportedMediaCandidatesFromPayload(payload, options = {}) {
   return out;
 }
 
+function inferImportedMediaMimeType(url) {
+  const normalizedUrl = normalizeImportedMediaUrl(url);
+  if (!normalizedUrl) return null;
+  if (/^\/api\/google-maps\/photo(?:[/?]|$)/i.test(normalizedUrl)) return "image/jpeg";
+  const lowerUrl = normalizedUrl.toLowerCase().split("?")[0];
+  if (lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg")) return "image/jpeg";
+  if (lowerUrl.endsWith(".png")) return "image/png";
+  if (lowerUrl.endsWith(".webp")) return "image/webp";
+  if (lowerUrl.endsWith(".gif")) return "image/gif";
+  if (lowerUrl.endsWith(".svg")) return "image/svg+xml";
+  return null;
+}
+
+function looksLikeImportedImageUrl(value, options = {}) {
+  const url = String(value || "").trim();
+  if (!url) return false;
+
+  const mimeType = String(options.mime_type || "").trim().toLowerCase();
+  const mediaType = String(options.media_type || "").trim().toLowerCase();
+  const assetType = String(options.asset_type || "").trim().toLowerCase();
+
+  if (mimeType.startsWith("image/")) return true;
+  if (mediaType === "image") return true;
+  if (assetType === "image") return true;
+
+  try {
+    const parsed = new URL(url, "http://collector.local");
+    if (parsed.pathname === "/api/google-maps/photo") return true;
+    return /\.(avif|gif|jpe?g|png|svg|webp)$/i.test(parsed.pathname);
+  } catch {
+    return /\.(avif|gif|jpe?g|png|svg|webp)(?:[?#].*)?$/i.test(url);
+  }
+}
+
 const EVIDENCE_BLOCK_TYPES = new Set(["fact", "social_proof", "review_snippet", "media", "mention", "editor_note"]);
 const EVIDENCE_SOURCE_TYPES = new Set(["manual", "google_maps", "google_search", "editor", "import", "future_social"]);
 const APPROVED_CONTEXT_STATUSES = new Set(["active", "inactive"]);
@@ -10008,6 +10042,21 @@ function normalizeStateValue(value, stateGroup) {
       ORDER BY srm.id DESC
       LIMIT 2000
     `).all();
+    const evidenceMediaRows = db.prepare(`
+      SELECT
+        eb.id,
+        eb.block_type,
+        eb.source_type,
+        eb.source_label,
+        eb.text_value,
+        eb.payload_json,
+        eb.status
+      FROM evidence_blocks eb
+      WHERE eb.content_item_id = ?
+        AND LOWER(COALESCE(eb.status, 'active')) IN ('active', 'approved', 'ready')
+      ORDER BY eb.id DESC
+      LIMIT 2000
+    `).all(itemId);
 
     const candidateList = [];
     const seenCandidateUrls = new Set();
@@ -10060,6 +10109,67 @@ function normalizeStateValue(value, stateGroup) {
       for (const candidate of extracted) {
         if (!collectImportedMediaCandidate(candidateList, seenCandidateUrls, candidate.url, candidate)) {
           skip(candidate.url, "duplicate_candidate");
+        }
+      }
+    }
+
+    for (const row of evidenceMediaRows) {
+      const payload = parseJson(row?.payload_json, null);
+      const blockType = String(row?.block_type || "").trim().toLowerCase();
+      const payloadField = String(payload?.field || "").trim().toLowerCase();
+      const evidenceCandidates = [
+        {
+          url: payload?.media_url,
+          source_field: "payload.media_url",
+          metadata: {
+            mime_type: payload?.mime_type || "",
+            media_type: payload?.media_type || "",
+            asset_type: payload?.asset_type || "",
+          },
+        },
+        {
+          url: payload?.image_url,
+          source_field: "payload.image_url",
+          metadata: {
+            mime_type: payload?.mime_type || "",
+            media_type: payload?.media_type || "",
+            asset_type: payload?.asset_type || "",
+          },
+        },
+        {
+          url: payload?.url,
+          source_field: "payload.url",
+          metadata: {},
+        },
+        {
+          url: row?.text_value,
+          source_field: "text_value",
+          metadata: {},
+        },
+      ];
+      const looksLikeMediaEvidence = blockType === "media" || payloadField === "image" || evidenceCandidates.some((candidate) => normalizeImportedMediaUrl(candidate?.url));
+      if (!looksLikeMediaEvidence) continue;
+
+      for (const candidate of evidenceCandidates) {
+        const candidateUrl = candidate?.url;
+        if (!candidateUrl) continue;
+        const candidateMimeType = String(candidate?.metadata?.mime_type || "").trim().toLowerCase() || inferImportedMediaMimeType(candidateUrl);
+        const candidateMetadata = {
+          mime_type: candidateMimeType,
+          media_type: String(candidate?.metadata?.media_type || "").trim().toLowerCase(),
+          asset_type: String(candidate?.metadata?.asset_type || "").trim().toLowerCase(),
+        };
+        if (!looksLikeImportedImageUrl(candidateUrl, candidateMetadata)) {
+          skip(candidateUrl, "non_image_url");
+          continue;
+        }
+        const added = collectImportedMediaCandidate(candidateList, seenCandidateUrls, candidateUrl, {
+          mime_type: candidateMetadata.mime_type || inferImportedMediaMimeType(candidateUrl),
+          source_kind: "evidence_block",
+          source_name: row?.source_label || row?.source_type || null,
+        });
+        if (!added) {
+          skip(candidateUrl, "duplicate_candidate");
         }
       }
     }
@@ -10166,6 +10276,7 @@ function normalizeStateValue(value, stateGroup) {
       item_title: String(item?.title || "").trim() || null,
       raw_media_count: matchedRawMediaCount,
       source_record_count: sourceRecords.length,
+      evidence_media_count: evidenceMediaRows.length,
       imported_asset_count: importedAssetCountAfter,
       imported_asset_count_before: importedAssetCountBefore,
       candidate_count: candidateList.length,
@@ -11447,11 +11558,6 @@ function deriveExpectedDeliverablesFromHandoff(handoffPackage) {
   }
   return normalizeAssignmentDeliverableTypeList(derived);
 }
-
-
-
-
-
 
 
 
