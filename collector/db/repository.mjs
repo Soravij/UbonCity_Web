@@ -2033,6 +2033,25 @@ function ensureContentAssetWorkflowColumns(db) {
 
   db.exec(`
     UPDATE content_assets
+    SET role='unused',
+        selected_in_clean=0,
+        is_cover=0,
+        placement_type='unused'
+    WHERE asset_id IN (
+      SELECT id
+      FROM assets
+      WHERE LOWER(TRIM(COALESCE(storage_disk, ''))) NOT IN ('local','nas')
+         OR TRIM(COALESCE(storage_path, ''))=''
+         OR LOWER(TRIM(COALESCE(storage_path, ''))) LIKE 'http://%'
+         OR LOWER(TRIM(COALESCE(storage_path, ''))) LIKE 'https://%'
+         OR (
+           TRIM(COALESCE(mime_type, ''))<>''
+           AND LOWER(TRIM(COALESCE(mime_type, ''))) NOT LIKE 'image/%'
+         )
+    )
+      AND (selected_in_clean<>0 OR is_cover<>0 OR role<>'unused' OR placement_type<>'unused');
+
+    UPDATE content_assets
     SET selected_in_clean = CASE WHEN role IN ('cover','gallery','inline') THEN 1 ELSE 0 END
     WHERE selected_in_clean IS NULL OR selected_in_clean NOT IN (0,1);
 
@@ -2715,6 +2734,17 @@ export function createRepository(db) {
   ensureAssignmentTableSupport(db);
   ensureAssignmentSubmissionDraftTableSupport(db);
   ensureFieldPackAssignmentForeignKeySupport(db);
+
+  function isCollectorControlledLocalAssetRow(row) {
+    const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
+    const storagePath = String(row?.storage_path || "").trim();
+    const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+    if (!["local", "nas"].includes(storageDisk)) return false;
+    if (!storagePath || /^https?:\/\//i.test(storagePath)) return false;
+    if (mimeType && !mimeType.startsWith("image/")) return false;
+    return true;
+  }
+
   const insertItemStmt = db.prepare(`
     INSERT INTO content_items (
       item_uid, type, category, lang, title, normalized_title, slug,
@@ -9783,21 +9813,11 @@ function normalizeStateValue(value, stateGroup) {
       `)
       .all(contentItemId);
 
-    const isLocal = (r) => {
-      const disk = String(r?.storage_disk || "").trim().toLowerCase();
-      const path = String(r?.storage_path || "").trim();
-      const mime = String(r?.mime_type || "").trim().toLowerCase();
-      if (!["local", "nas"].includes(disk)) return false;
-      if (!path || /^https?:\/\//i.test(path)) return false;
-      if (mime && !mime.startsWith("image/")) return false;
-      return true;
-    };
-
     const selected = rows.filter((r) => Number(r.selected_in_clean || 0) === 1 && String(r.role || "") !== "unused");
     const covers = rows.filter((r) => Number(r.is_cover || 0) === 1 || String(r.role || "") === "cover");
 
-    const localSelected = selected.filter((r) => isLocal(r));
-    const localCovers = covers.filter((r) => isLocal(r));
+    const localSelected = selected.filter((r) => isCollectorControlledLocalAssetRow(r));
+    const localCovers = covers.filter((r) => isCollectorControlledLocalAssetRow(r));
 
     const missing = [];
     if (selected.length < 1) missing.push("ต้องเลือกภาพอย่างน้อย 1 ภาพ");
@@ -9833,10 +9853,21 @@ function normalizeStateValue(value, stateGroup) {
     }
 
     const target = db
-      .prepare("SELECT * FROM content_assets WHERE content_item_id=? AND asset_id=? LIMIT 1")
+      .prepare(`
+        SELECT ca.*, a.storage_disk, a.storage_path, a.mime_type
+        FROM content_assets ca
+        LEFT JOIN assets a ON a.id = ca.asset_id
+        WHERE ca.content_item_id=? AND ca.asset_id=?
+        LIMIT 1
+      `)
       .get(contentItemId, assetId);
     if (!target) {
       throw new Error("Asset mapping not found");
+    }
+
+    if (!isCollectorControlledLocalAssetRow(target)) {
+      db.prepare("UPDATE content_assets SET role='unused', selected_in_clean=0, is_cover=0, placement_type='unused' WHERE content_item_id=? AND asset_id=?").run(contentItemId, assetId);
+      return getImageWorkflowStatus(contentItemId);
     }
 
     if (nextRole === "cover") {
@@ -9853,13 +9884,23 @@ function normalizeStateValue(value, stateGroup) {
 
   function setContentAssetSelected(contentItemId, assetId, selected) {
     const target = db
-      .prepare("SELECT * FROM content_assets WHERE content_item_id=? AND asset_id=? LIMIT 1")
+      .prepare(`
+        SELECT ca.*, a.storage_disk, a.storage_path, a.mime_type
+        FROM content_assets ca
+        LEFT JOIN assets a ON a.id = ca.asset_id
+        WHERE ca.content_item_id=? AND ca.asset_id=?
+        LIMIT 1
+      `)
       .get(contentItemId, assetId);
     if (!target) {
       throw new Error("Asset mapping not found");
     }
 
     const yes = selected === true || selected === 1 || selected === "1";
+    if (yes && !isCollectorControlledLocalAssetRow(target)) {
+      db.prepare("UPDATE content_assets SET selected_in_clean=0, role='unused', placement_type='unused', is_cover=0 WHERE content_item_id=? AND asset_id=?").run(contentItemId, assetId);
+      return getImageWorkflowStatus(contentItemId);
+    }
     if (!yes && (Number(target.is_cover || 0) === 1 || String(target.role || "") === "cover")) {
       const fallbackCover = db
         .prepare(`
@@ -9891,7 +9932,8 @@ function normalizeStateValue(value, stateGroup) {
   }
 
   function listApprovedImageContext(contentItemId) {
-    const rows = listContentAssetsByItem(contentItemId, { onlySelected: true });
+    const rows = listContentAssetsByItem(contentItemId, { onlySelected: true })
+      .filter((row) => isCollectorControlledLocalAssetRow(row));
     const cover = rows.find((row) => Number(row.is_cover || 0) === 1 || row.role === "cover") || null;
     return {
       cover_url: cover?.public_url || null,
@@ -10042,7 +10084,6 @@ function normalizeStateValue(value, stateGroup) {
     const existingUrlKeys = new Set(
       existingAssets.map((row) => normalizeImportedMediaUrl(row?.public_url || row?.storage_path || "")).filter(Boolean).map((url) => url.toLowerCase())
     );
-    const hasExistingCover = existingAssets.some((row) => Number(row?.is_cover || 0) === 1 || String(row?.role || "").trim().toLowerCase() === "cover");
     const importedAssetCountBefore = listImportedReferenceAssetsByItem(itemId).length;
 
     const insertAssetStmt = db.prepare(`
@@ -10059,7 +10100,6 @@ function normalizeStateValue(value, stateGroup) {
 
     const addedAssets = [];
     let addedCount = 0;
-    let rawCoverAssigned = hasExistingCover;
     let sortOrder = nextSortOrder;
 
     for (const candidate of candidateList.slice(0, limit)) {
@@ -10078,11 +10118,10 @@ function normalizeStateValue(value, stateGroup) {
         continue;
       }
 
-      const shouldBeCover = !rawCoverAssigned && String(item?.image_url || "").trim() === normalizedUrl;
-      const role = shouldBeCover ? "cover" : "gallery";
-      const selectedInClean = 1;
-      const isCover = shouldBeCover ? 1 : 0;
-      const placementType = "gallery";
+      const role = "unused";
+      const selectedInClean = 0;
+      const isCover = 0;
+      const placementType = "unused";
 
       if (apply) {
         sortOrder += 1;
@@ -10105,7 +10144,6 @@ function normalizeStateValue(value, stateGroup) {
         });
         existingUrlKeys.add(key);
         addedCount += 1;
-        rawCoverAssigned = rawCoverAssigned || shouldBeCover;
       }
     }
 

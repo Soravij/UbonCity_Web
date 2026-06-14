@@ -21,6 +21,7 @@ const state = {
   pageBusy: false,
   busyButtons: [],
 };
+const failedHoverPreviewUrls = new Set();
 
 const isCleanMode = /\/clean-item\.html$/i.test(String(window.location.pathname || ""));
 
@@ -389,7 +390,7 @@ function ensureAssetHoverPreview() {
   box = document.createElement("div");
   box.id = "asset-hover-preview";
   box.className = "asset-hover-preview hidden";
-  box.innerHTML = '<img alt="asset preview" loading="lazy" />';
+  box.innerHTML = '<img alt="asset preview" loading="lazy" /><div class="muted hidden" data-role="placeholder">preview unavailable</div>';
   document.body.appendChild(box);
   return box;
 }
@@ -410,8 +411,31 @@ function showAssetHoverPreview(url, event) {
   if (!safeUrl) return;
   const box = ensureAssetHoverPreview();
   const img = box.querySelector("img");
+  const placeholder = box.querySelector('[data-role="placeholder"]');
   if (!img) return;
+  if (failedHoverPreviewUrls.has(safeUrl)) {
+    img.removeAttribute("src");
+    img.classList.add("hidden");
+    if (placeholder) placeholder.classList.remove("hidden");
+    box.classList.remove("hidden");
+    positionAssetHoverPreview(box, event);
+    return;
+  }
+  img.onerror = () => {
+    failedHoverPreviewUrls.add(safeUrl);
+    img.removeAttribute("src");
+    img.classList.add("hidden");
+    if (placeholder) placeholder.classList.remove("hidden");
+    hideAssetHoverPreview();
+  };
+  img.onload = () => {
+    img.classList.remove("hidden");
+    if (placeholder) placeholder.classList.add("hidden");
+    positionAssetHoverPreview(box, event);
+  };
   img.src = safeUrl;
+  img.classList.remove("hidden");
+  if (placeholder) placeholder.classList.add("hidden");
   box.classList.remove("hidden");
   positionAssetHoverPreview(box, event);
 }
@@ -419,6 +443,10 @@ function showAssetHoverPreview(url, event) {
 function hideAssetHoverPreview() {
   const box = document.getElementById("asset-hover-preview");
   if (!box) return;
+  const img = box.querySelector("img");
+  const placeholder = box.querySelector('[data-role="placeholder"]');
+  if (img) img.classList.add("hidden");
+  if (placeholder) placeholder.classList.add("hidden");
   box.classList.add("hidden");
 }
 
@@ -900,8 +928,8 @@ function formatExternalMediaHintLines(items = []) {
 }
 
 function normalizeMediaHintPayloadUrl(rawUrl, contentAssetId = 0) {
+  if (Number(contentAssetId || 0) > 0) return null;
   const text = String(rawUrl || "").trim();
-  if (!text && Number(contentAssetId || 0) > 0) return null;
   return text || null;
 }
 
@@ -992,10 +1020,14 @@ function preserveMediaHints(existingMediaHints = [], selectedMediaHints = [], ex
 
   const selectedRows = (Array.isArray(selectedMediaHints) ? selectedMediaHints : []).map((row, index) => ({
     ...row,
+    content_asset_id: Number(row?.content_asset_id || 0) || null,
+    url: normalizeMediaHintPayloadUrl(row?.url, row?.content_asset_id),
     item_order: index,
   }));
   const externalRows = (Array.isArray(externalMediaHints) ? externalMediaHints : []).map((row, index) => ({
     ...row,
+    content_asset_id: null,
+    url: normalizeMediaHintPayloadUrl(row?.url, null),
     item_order: selectedRows.length + index,
   }));
   return [...selectedRows, ...externalRows, ...preservedUnseen];
@@ -2037,7 +2069,7 @@ function updateCoverPreview() {
     img.classList.add("hidden");
     return;
   }
-  setImageWithFallback(img, url, () => setStatus("Cover preview image cannot be loaded.", true));
+  setImageWithFallback(img, url);
   img.classList.remove("hidden");
 }
 

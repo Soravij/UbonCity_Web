@@ -284,13 +284,60 @@ test("preserveMediaHints strips stale urls from internal asset rows", () => {
         item_order: 0,
       },
     ],
-    [],
-    [],
+    [
+      {
+        content_asset_id: 17,
+        url: "/media/items/42/selected-stale.jpg",
+        kind: "cover",
+        caption: "selected stale",
+        selected: true,
+      },
+    ],
+    [
+      {
+        content_asset_id: null,
+        url: "https://cdn.example.com/reference.jpg",
+        kind: "reference",
+        caption: "external",
+        selected: true,
+      },
+      {
+        content_asset_id: 44,
+        url: "https://cdn.example.com/mistaken-asset.jpg",
+        kind: "reference",
+        caption: "mistaken asset id",
+        selected: true,
+      },
+    ],
     [],
     [91]
   );
 
   assert.deepEqual(rows, [
+    {
+      content_asset_id: 17,
+      url: null,
+      kind: "cover",
+      caption: "selected stale",
+      selected: true,
+      item_order: 0,
+    },
+    {
+      content_asset_id: null,
+      url: "https://cdn.example.com/reference.jpg",
+      kind: "reference",
+      caption: "external",
+      selected: true,
+      item_order: 1,
+    },
+    {
+      content_asset_id: null,
+      url: "https://cdn.example.com/mistaken-asset.jpg",
+      kind: "reference",
+      caption: "mistaken asset id",
+      selected: true,
+      item_order: 2,
+    },
     {
       content_asset_id: 91,
       url: null,
@@ -300,4 +347,17 @@ test("preserveMediaHints strips stale urls from internal asset rows", () => {
       item_order: 0,
     },
   ]);
+});
+
+test("hover preview caches failed external images and falls back silently", () => {
+  const requiredSnippets = [
+    "const failedHoverPreviewUrls = new Set();",
+    "failedHoverPreviewUrls.has(safeUrl)",
+    "failedHoverPreviewUrls.add(safeUrl);",
+    "data-role=\"placeholder\"",
+    "hideAssetHoverPreview();",
+  ];
+  for (const snippet of requiredSnippets) {
+    assert.equal(itemEditorJs.includes(snippet), true, `expected item-editor.js to include silent hover preview fallback snippet: ${snippet}`);
+  }
 });

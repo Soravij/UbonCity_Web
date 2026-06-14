@@ -63,6 +63,17 @@ function hasApprovedContextContent(block) {
   return Boolean(String(block?.selected_text || "").trim()) || block?.selected_numeric != null || list.length > 0;
 }
 
+function isCollectorControlledLocalAsset(row) {
+  const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
+  const storagePath = String(row?.storage_path || "").trim();
+  const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+  if (!storageDisk && !storagePath && !mimeType) return true;
+  if (!["local", "nas"].includes(storageDisk)) return false;
+  if (!storagePath || /^https?:\/\//i.test(storagePath)) return false;
+  if (mimeType && !mimeType.startsWith("image/")) return false;
+  return true;
+}
+
 function computeCompleteness(item, approvedBlocks, imageContext) {
   const hasTitle = Boolean(String(item?.title || "").trim());
   const hasReference = hasTraceableReference(item);
@@ -120,9 +131,27 @@ export function buildCleanStructuredContext(repo, contentItemId, options = {}) {
     .slice(0, evidenceLimit)
     .map((row) => normalizeEvidenceBlock(row));
 
-  const selectedAssets = repo.listContentAssetsByItem(contentItemId, { onlySelected: true });
-  const imageContext = repo.listApprovedImageContext(contentItemId);
-  const completeness = computeCompleteness(item, approvedBlocks, imageContext);
+  const selectedAssets = repo
+    .listContentAssetsByItem(contentItemId, { onlySelected: true })
+    .filter((row) => isCollectorControlledLocalAsset(row));
+  const selectedUrls = selectedAssets.map((row) => String(row.public_url || "").trim()).filter(Boolean);
+  const galleryUrls = selectedAssets
+    .filter((row) => String(row.role || "").trim().toLowerCase() === "gallery")
+    .map((row) => String(row.public_url || "").trim())
+    .filter(Boolean);
+  const inlineUrls = selectedAssets
+    .filter((row) => String(row.role || "").trim().toLowerCase() === "inline")
+    .map((row) => String(row.public_url || "").trim())
+    .filter(Boolean);
+  const coverAsset = selectedAssets.find((row) => Number(row.is_cover || 0) === 1 || String(row.role || "").trim().toLowerCase() === "cover") || null;
+  const coverUrl = String(coverAsset?.public_url || "").trim() || null;
+  const normalizedImageContext = {
+    cover_url: coverUrl,
+    selected_urls: selectedUrls,
+    gallery_urls: galleryUrls,
+    inline_urls: inlineUrls,
+  };
+  const completeness = computeCompleteness(item, approvedBlocks, normalizedImageContext);
 
   return {
     context_version: "v1",
@@ -147,12 +176,12 @@ export function buildCleanStructuredContext(repo, contentItemId, options = {}) {
     approved_context: approvedBlocks,
     evidence_blocks: evidenceBlocks,
     image_context: {
-      cover_url: imageContext?.cover_url || null,
-      selected_urls: Array.isArray(imageContext?.selected_urls) ? imageContext.selected_urls : [],
-      gallery_urls: Array.isArray(imageContext?.gallery_urls) ? imageContext.gallery_urls : [],
-      inline_urls: Array.isArray(imageContext?.inline_urls) ? imageContext.inline_urls : [],
-      selected_count: Array.isArray(imageContext?.selected_urls) ? imageContext.selected_urls.length : 0,
-      cover_count: imageContext?.cover_url ? 1 : 0,
+      cover_url: normalizedImageContext.cover_url,
+      selected_urls: normalizedImageContext.selected_urls,
+      gallery_urls: normalizedImageContext.gallery_urls,
+      inline_urls: normalizedImageContext.inline_urls,
+      selected_count: selectedUrls.length,
+      cover_count: coverUrl ? 1 : 0,
       assets: selectedAssets.map((row) => ({
         asset_id: Number(row.asset_id || 0) || null,
         role: row.role || "gallery",

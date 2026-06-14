@@ -14645,10 +14645,16 @@ app.post("/api/assets/register", requireRole("owner", "admin", "editor", "user")
 
   const assetId = Number(result.lastInsertRowid);
   if (contentItemId > 0) {
-    const selectedInClean = role === "unused" ? 0 : 1;
-    const isCover = role === "cover" ? 1 : 0;
-    const placementType = role === "inline" ? "inline" : role === "unused" ? "unused" : "gallery";
-    db.prepare("INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order) VALUES (?, ?, ?, ?, ?, ?, 0)").run(contentItemId, assetId, role, selectedInClean, isCover, placementType);
+    const eligibleLocalAsset = isCollectorControlledLocalAssetRow({
+      storage_disk: storageDisk,
+      storage_path: storagePath,
+      mime_type: mimeType,
+    });
+    const normalizedRole = eligibleLocalAsset ? role : "unused";
+    const selectedInClean = normalizedRole === "unused" ? 0 : 1;
+    const isCover = normalizedRole === "cover" ? 1 : 0;
+    const placementType = normalizedRole === "inline" ? "inline" : normalizedRole === "unused" ? "unused" : "gallery";
+    db.prepare("INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order) VALUES (?, ?, ?, ?, ?, ?, 0)").run(contentItemId, assetId, normalizedRole, selectedInClean, isCover, placementType);
   }
 
   repo.logAudit(actorEmail(req), "asset.register", "asset", String(assetId), { contentItemId: contentItemId || null });
