@@ -364,16 +364,16 @@ test("hover preview caches failed external images and falls back silently", () =
 });
 
 test("clean asset table uses AI reference wording and removes cover action", () => {
-  const decode = (value) => JSON.parse(`"${value}"`);
   const requiredSnippets = [
-    `selected ? "${decode("\\u0e44\\u0e21\\u0e48\\u0e2a\\u0e48\\u0e07\\u0e43\\u0e2b\\u0e49")} AI" : "${decode("\\u0e2a\\u0e48\\u0e07\\u0e43\\u0e2b\\u0e49")} AI ${decode("\\u0e14\\u0e39")}"`,
-    `"${decode("\\u0e2a\\u0e48\\u0e07\\u0e43\\u0e2b\\u0e49")} AI ${decode("\\u0e41\\u0e25\\u0e49\\u0e27")}"`,
-    `"${decode("\\u0e22\\u0e31\\u0e07\\u0e44\\u0e21\\u0e48\\u0e2a\\u0e48\\u0e07\\u0e43\\u0e2b\\u0e49")} AI"`,
-    '"reference-only"',
-    'asset-badge ${selected ? "state-on" : "state-off"}',
+    'workflow-badge workflow-badge-sent',
+    'ส่งให้ Agent',
+    'ยังไม่ถูกเลือกส่งให้ Agent',
+    'ภาพอ้างอิงเท่านั้น',
+    'อนุมัติให้ Agent',
+    'ถอนจาก Agent',
     'Number(row.selected_in_clean || 0) === 1',
-    `${decode("\\u0e2a\\u0e48\\u0e07")} asset \${id} ${decode("\\u0e43\\u0e2b\\u0e49")} AI/Field Pack ${decode("\\u0e14\\u0e39\\u0e41\\u0e25\\u0e49\\u0e27")}`,
-    `${decode("\\u0e40\\u0e2d\\u0e32")} asset \${id} ${decode("\\u0e2d\\u0e2d\\u0e01\\u0e08\\u0e32\\u0e01\\u0e0a\\u0e38\\u0e14\\u0e2d\\u0e49\\u0e32\\u0e07\\u0e2d\\u0e34\\u0e07")} AI ${decode("\\u0e41\\u0e25\\u0e49\\u0e27")}`,
+    'ส่ง asset ${id} ให้ Agent ใช้เป็นภาพอ้างอิงแล้ว',
+    'ถอน asset ${id} ออกจาก Agent แล้ว',
   ];
   for (const snippet of requiredSnippets) {
     assert.equal(itemEditorJs.includes(snippet), true, `expected clean asset workflow snippet in item-editor.js: ${snippet}`);
@@ -387,6 +387,15 @@ test("clean asset table uses AI reference wording and removes cover action", () 
   for (const snippet of forbiddenSnippets) {
     assert.equal(itemEditorJs.includes(snippet), false, `expected clean asset workflow to drop legacy cover snippet: ${snippet}`);
   }
+
+  const cleanModeBlock = itemEditorJs.match(/if \(cleanMode\) \{[\s\S]*?return badges\.join\(" "\);\s*\}/);
+  assert.ok(cleanModeBlock, "expected cleanMode renderAssetBadges block");
+  assert.equal(cleanModeBlock[0].includes('"reference-only"'), false, "clean render block should not use reference-only pill");
+  assert.equal(cleanModeBlock[0].includes('workflow-badge workflow-badge-sent'), true, "clean render block should keep workflow badge styling for selected assets");
+  assert.equal(cleanModeBlock[0].includes('ยังไม่ถูกเลือกส่งให้ Agent'), true, "clean render block should keep muted unselected copy");
+  assert.equal(cleanModeBlock[0].includes('ภาพอ้างอิงเท่านั้น'), true, "clean render block should always include reference-only copy");
+  assert.equal(cleanModeBlock[0].includes('roleDisplayLabel(role)'), false, "clean render block should not render publish role labels");
+  assert.equal(/if\s*\(\s*isReferenceOnly\s*\)\s*\{[\s\S]*ภาพอ้างอิงเท่านั้น/.test(cleanModeBlock[0]), false, "clean render block should not gate reference-only copy on isReferenceOnly");
 });
 
 test("clean mode guards use isCleanMode outside renderAssetBadges local scope", () => {
@@ -409,7 +418,7 @@ test("clean page copy explains AI reference-only image usage", () => {
   const requiredSnippets = [
     `${decode("\\u0e23\\u0e39\\u0e1b\\u0e2d\\u0e49\\u0e32\\u0e07\\u0e2d\\u0e34\\u0e07\\u0e2a\\u0e33\\u0e2b\\u0e23\\u0e31\\u0e1a")} AI / Field Pack`,
     `${decode("\\u0e40\\u0e25\\u0e37\\u0e2d\\u0e01\\u0e23\\u0e39\\u0e1b\\u0e40\\u0e1e\\u0e37\\u0e48\\u0e2d\\u0e43\\u0e2b\\u0e49")} AI/Field Pack ${decode("\\u0e43\\u0e0a\\u0e49\\u0e14\\u0e39\\u0e40\\u0e1b\\u0e47\\u0e19\\u0e20\\u0e32\\u0e1e\\u0e2d\\u0e49\\u0e32\\u0e07\\u0e2d\\u0e34\\u0e07\\u0e40\\u0e17\\u0e48\\u0e32\\u0e19\\u0e31\\u0e49\\u0e19")} ${decode("\\u0e44\\u0e21\\u0e48\\u0e43\\u0e0a\\u0e48\\u0e2a\\u0e37\\u0e48\\u0e2d\\u0e2a\\u0e33\\u0e2b\\u0e23\\u0e31\\u0e1a\\u0e40\\u0e1c\\u0e22\\u0e41\\u0e1e\\u0e23\\u0e48")}`,
-    `<th>${decode("\\u0e2a\\u0e16\\u0e32\\u0e19\\u0e30")} AI</th>`,
+    `<th>${decode("\\u0e2a\\u0e16\\u0e32\\u0e19\\u0e30")} Agent</th>`,
     '<input id="asset-role" type="hidden" value="gallery" />',
   ];
   for (const snippet of requiredSnippets) {
@@ -430,15 +439,19 @@ test("clean page copy explains AI reference-only image usage", () => {
 
 test("clean selected badge and status copy stay explicit without new css classes", () => {
   const requiredSnippets = [
-    'asset-badge ${selected ? "state-on" : "state-off"}',
-    'AI/Field Pack',
-    'state-on',
-    'state-off',
-    'reference-only',
+    'workflow-badge workflow-badge-sent',
+    'ส่งให้ Agent',
+    'ยังไม่ถูกเลือกส่งให้ Agent',
+    'ภาพอ้างอิงเท่านั้น',
   ];
   for (const snippet of requiredSnippets) {
     assert.equal(itemEditorJs.includes(snippet), true, `expected clean selected status snippet in item-editor.js: ${snippet}`);
   }
+});
+
+test("non-clean asset badges still use legacy publish role labels", () => {
+  const afterCleanReturn = itemEditorJs.split('return badges.join(" ");')[1] || "";
+  assert.equal(afterCleanReturn.includes('roleDisplayLabel(role)'), true, "non-clean asset badge flow should still render publish role labels");
 });
 
 test("clean asset workflow does not add new ai-specific css classes", () => {

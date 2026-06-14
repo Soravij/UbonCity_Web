@@ -4062,8 +4062,12 @@ function renderAssetBadges(row, { cleanMode = isCleanMode } = {}) {
   const isReferenceOnly = !isCollectorControlledLocalAssetForUi(row) || role === "reference" || role === "unused";
 
   if (cleanMode) {
-    badges.push(`<span class="asset-badge ${selected ? "state-on" : "state-off"}">${selected ? "ส่งให้ AI แล้ว" : "ยังไม่ส่งให้ AI"}</span>`);
-    badges.push(`<span class="asset-badge ${isReferenceOnly ? "role-reference" : `role-${role}`}">${isReferenceOnly ? "reference-only" : roleDisplayLabel(role)}</span>`);
+    if (selected) {
+      badges.push('<span class="workflow-badge workflow-badge-sent">ส่งให้ Agent</span>');
+    } else {
+      badges.push('<span class="muted">ยังไม่ถูกเลือกส่งให้ Agent</span>');
+    }
+    badges.push('<span class="muted">ภาพอ้างอิงเท่านั้น</span>');
     return badges.join(" ");
   }
 
@@ -4102,7 +4106,7 @@ function renderAssetsTable(rows) {
 
     const actions = [];
     if (isCleanMode) {
-      actions.push(`<button data-action="toggle-select" data-id="${assetId}"${disabledAttr}${disabledTitleAttr}>${selected ? "ไม่ส่งให้ AI" : "ส่งให้ AI ดู"}</button>`);
+      actions.push(`<button data-action="toggle-select" data-id="${assetId}"${disabledAttr}${disabledTitleAttr}>${selected ? "ถอนจาก Agent" : "อนุมัติให้ Agent"}</button>`);
     }
     if (isCleanMode && isOwnerUser()) {
       actions.push(`<button data-action="delete-asset" data-id="${assetId}" class="fail"${disabledAttr}${disabledTitleAttr}>ลบ</button>`);
@@ -4148,7 +4152,7 @@ function renderAssetsTable(rows) {
             body: JSON.stringify({ selected: nextSelected }),
           });
           await refreshAssets();
-          setAssetStatus(nextSelected ? `ส่ง asset ${id} ให้ AI/Field Pack ดูแล้ว` : `เอา asset ${id} ออกจากชุดอ้างอิง AI แล้ว`);
+          setAssetStatus(nextSelected ? `ส่ง asset ${id} ให้ Agent ใช้เป็นภาพอ้างอิงแล้ว` : `ถอน asset ${id} ออกจาก Agent แล้ว`);
           return;
         }
 
@@ -4746,8 +4750,6 @@ function wire() {
     setStatus(err.message, true);
   }
 })();
-
-
 
 
 
