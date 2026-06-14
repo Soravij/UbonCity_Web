@@ -239,7 +239,12 @@ function hasVisualContext(context) {
 
 function collectVisualImageUrls(item, limit = 5) {
   const max = Math.max(1, Math.min(5, Number(limit || 5)));
-  const list = Array.isArray(item?.visual_image_urls) ? item.visual_image_urls : [];
+  const list = [
+    ...(Array.isArray(item?.visual_image_urls) ? item.visual_image_urls : []),
+    ...(Array.isArray(item?.structured_context?.reference_media_context?.selected_urls)
+      ? item.structured_context.reference_media_context.selected_urls
+      : []),
+  ];
   const out = [];
   const seen = new Set();
   for (const raw of list) {
@@ -295,18 +300,26 @@ async function fetchImageUrlToDataUrl(url) {
 async function prepareVisualImageInputs(item, limit = 5) {
   const imageUrls = collectVisualImageUrls(item, limit);
   const inputs = [];
+  let skippedCount = 0;
 
   for (const url of imageUrls) {
     try {
       const imageUrl = await fetchImageUrlToDataUrl(url);
       inputs.push({ type: "image_url", image_url: { url: imageUrl, detail: "low" } });
     } catch (error) {
+      skippedCount += 1;
       traceAgentGeneration("visual_image.skip", {
         url: String(url || "").slice(0, 220),
         error: String(error?.message || error || "unknown error"),
       });
     }
   }
+
+  traceAgentGeneration("visual_image.prepare", {
+    requested_count: imageUrls.length,
+    prepared_count: inputs.length,
+    skipped_count: skippedCount,
+  });
 
   return inputs;
 }
@@ -317,6 +330,9 @@ function buildPromptInput(item) {
   const approvedContext = Array.isArray(context?.approved_context) ? context.approved_context : [];
   const evidenceBlocks = Array.isArray(context?.evidence_blocks) ? context.evidence_blocks : [];
   const imageContext = context?.image_context && typeof context.image_context === "object" ? context.image_context : {};
+  const referenceMediaContext = context?.reference_media_context && typeof context.reference_media_context === "object"
+    ? context.reference_media_context
+    : {};
   const completeness = context?.completeness && typeof context.completeness === "object" ? context.completeness : {};
   const evidencePolicy = context?.evidence_policy && typeof context.evidence_policy === "object" ? context.evidence_policy : {};
   const task = context?.task && typeof context.task === "object" ? context.task : {};
@@ -372,6 +388,11 @@ function buildPromptInput(item) {
       cover_count: Number(imageContext?.cover_count || 0) || 0,
       assets: Array.isArray(imageContext?.assets) ? imageContext.assets : [],
     },
+    reference_media_context: {
+      selected_urls: toArray(referenceMediaContext?.selected_urls),
+      selected_count: Number(referenceMediaContext?.selected_count || 0) || 0,
+      assets: Array.isArray(referenceMediaContext?.assets) ? referenceMediaContext.assets : [],
+    },
     completeness: {
       has_minimum_required: Boolean(completeness?.has_minimum_required),
       completeness_level: toText(completeness?.completeness_level),
@@ -414,6 +435,7 @@ function buildPromptInput(item) {
       approved_context: approvedContext.length,
       evidence_blocks: evidenceBlocks.length,
       selected_images: Array.isArray(imageContext?.selected_urls) ? imageContext.selected_urls.length : 0,
+      reference_media: Array.isArray(referenceMediaContext?.selected_urls) ? referenceMediaContext.selected_urls.length : 0,
     },
     visual_image_count: collectVisualImageUrls(item, 5).length,
   };
@@ -454,6 +476,9 @@ function buildFieldPackPrompt(item) {
     "Use approved_context as the PRIMARY source of truth.",
     "Use item for identity and factual anchoring.",
     "Use image_context and visual_context only for visible cues and shot planning.",
+    "Use reference_media_context only as reference-only visual planning context.",
+    "Do not treat it as publish media, cover, gallery, rights-verified media, or factual proof.",
+    "If reference media URLs cannot be fetched or viewed, do not invent visible details from them.",
     "Use evidence_blocks only as a clue layer to enrich specificity; never let evidence_blocks override approved_context.",
     "If evidence is thin, put unknowns into ai_unknowns or must_verify_fact. Do not invent facts.",
     "Write action-oriented instructions for a field/content team.",

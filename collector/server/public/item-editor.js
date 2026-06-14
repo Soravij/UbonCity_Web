@@ -458,16 +458,45 @@ async function api(path, options = {}) {
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
 
   const res = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  const rawText = await res.text();
+  let data = null;
+  if (rawText) {
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = null;
+    }
+  }
+  const normalizedRawText = String(rawText || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const compactRawText = normalizedRawText ? normalizedRawText.slice(0, 800) : "";
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "คำขอไม่สำเร็จ" }));
+    let detailMessage = "";
+    if (data && typeof data === "object") {
+      detailMessage = [
+        data?.error,
+        data?.message,
+        data?.detail,
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .filter((value, index, list) => list.indexOf(value) === index)
+        .join(" | ");
+    } else {
+      detailMessage = compactRawText;
+    }
+    if (!detailMessage) detailMessage = "คำขอไม่สำเร็จ";
     // Keep editor pages in-place on auth failures.
     // Auto-redirect here can bounce between return_to and home, which turns into
     // repeated document requests and eventually hits the rate limiter.
-    throw new Error(data.error || "เกิดข้อผิดพลาด");
+    throw new Error(`${res.status}: ${detailMessage}`);
   }
 
-  const contentType = res.headers.get("content-type") || "";
-  return contentType.includes("application/json") ? res.json() : null;
+  if (!rawText.trim()) return null;
+  if (data && typeof data === "object") return data;
+  return rawText;
 }
 
 function isAdminUser() {
@@ -4102,7 +4131,12 @@ function renderAssetsTable(rows) {
     const displayName = String(row.file_name || row.storage_path || "-");
     const assetId = Number(row.asset_id || 0) || 0;
     const previewUrl = sanitizeUrl(row.public_url || "");
-    const preview = previewUrl ? `<img class="asset-thumb" src="${escapeHtml(previewUrl)}" alt="asset" />` : "-";
+    const isLocalPreview = isCollectorControlledLocalAssetForUi(row) && previewUrl;
+    const preview = isLocalPreview
+      ? `<img class="asset-thumb" src="${escapeHtml(previewUrl)}" alt="asset" />`
+      : previewUrl
+        ? `<span class="muted">ภาพภายนอก</span> <a href="${escapeHtml(previewUrl)}" target="_blank" rel="noreferrer">เปิดต้นทาง</a>`
+        : '<span class="muted">ภาพภายนอก</span>';
 
     const actions = [];
     if (isCleanMode) {
@@ -4750,9 +4784,6 @@ function wire() {
     setStatus(err.message, true);
   }
 })();
-
-
-
 
 
 

@@ -398,6 +398,29 @@ test("clean asset table uses AI reference wording and removes cover action", () 
   assert.equal(/if\s*\(\s*isReferenceOnly\s*\)\s*\{[\s\S]*ภาพอ้างอิงเท่านั้น/.test(cleanModeBlock[0]), false, "clean render block should not gate reference-only copy on isReferenceOnly");
 });
 
+test("clean asset table does not render external images or hover preview them", () => {
+  const renderAssetsTableSource = extractFunctionSource(itemEditorJs, "renderAssetsTable");
+  assert.equal(renderAssetsTableSource.includes('const isLocalPreview = isCollectorControlledLocalAssetForUi(row) && previewUrl;'), true, "clean asset table should gate previews to local controlled images");
+  assert.equal(renderAssetsTableSource.includes('<span class="muted">ภาพภายนอก</span> <a href="${escapeHtml(previewUrl)}" target="_blank" rel="noreferrer">เปิดต้นทาง</a>'), true, "clean asset table should render external media as link text instead of img src");
+  assert.equal(renderAssetsTableSource.includes('showAssetHoverPreview(src, event)'), true, "local preview hover wiring should remain for real thumbnails");
+  assert.equal(renderAssetsTableSource.includes('tbody.querySelectorAll("img.asset-thumb")'), true, "hover preview should only bind to rendered thumbnails");
+});
+
+test("api helper surfaces readable backend error details", () => {
+  const apiSource = itemEditorJs.slice(
+    itemEditorJs.indexOf("async function api("),
+    itemEditorJs.indexOf("function isAdminUser()")
+  );
+  assert.match(apiSource, /const rawText = await res\.text\(\)/, "api helper should read response body with res.text() first");
+  assert.match(apiSource, /JSON\.parse\(rawText\)/, "api helper should parse JSON from rawText when possible");
+  assert.match(apiSource, /if \(data && typeof data === "object"\)/, "api helper should branch on parsed JSON objects");
+  assert.match(apiSource, /data\?\.error,\s*[\s\S]*data\?\.message,\s*[\s\S]*data\?\.detail/, "api helper should aggregate error, message, and detail fields");
+  assert.match(apiSource, /else \{\s*detailMessage = compactRawText;/, "api helper should use compactRawText only when JSON parsing fails");
+  assert.equal(/data\?\.detail,\s*compactRawText/.test(apiSource), false, "api helper should not append compactRawText to parsed JSON error details");
+  assert.match(apiSource, /throw new Error\(`\$\{res\.status\}:/, "api helper should include status code in thrown error");
+  assert.equal(apiSource.includes("await res.json()"), false, "api helper should not call res.json() after switching to res.text()");
+});
+
 test("clean mode guards use isCleanMode outside renderAssetBadges local scope", () => {
   const requiredSnippets = [
     "if (isCleanMode) {",

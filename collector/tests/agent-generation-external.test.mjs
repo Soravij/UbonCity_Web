@@ -5,7 +5,10 @@ import {
   buildExternalAgentPayload,
   buildFieldPackPrompt,
   buildFieldPackRevisionPrompt,
+  buildPromptInput,
+  collectVisualImageUrls,
   createAgentGenerationEngine,
+  prepareVisualImageInputs,
   normalizeFieldPack,
 } from "../services/agent-generation.mjs";
 
@@ -44,6 +47,17 @@ function createItem(overrides = {}) {
         gallery_urls: ["https://example.com/photo.jpg"],
         inline_urls: [],
         selected_count: 1,
+      },
+      reference_media_context: {
+        selected_urls: ["https://scontent.fubp1-1.fna.fbcdn.net/reference.jpg"],
+        selected_count: 1,
+        assets: [
+          {
+            asset_id: 91,
+            url: "https://scontent.fubp1-1.fna.fbcdn.net/reference.jpg",
+            kind: "reference",
+          },
+        ],
       },
       completeness: {
         has_minimum_required: true,
@@ -90,8 +104,70 @@ test("external agent payload carries structured context and not raw description"
   assert.equal(payload.model, "agent-v1");
   assert.deepEqual(payload.mcp.tools, ["validate_clean_minimum", "get_clean_context"]);
   assert.equal(payload.structured_context.item.description_clean, "clean text");
+  assert.equal(payload.prompt_input.reference_media_context.selected_count, 1);
+  assert.equal(payload.prompt_input.reference_media_context.selected_urls[0], "https://scontent.fubp1-1.fna.fbcdn.net/reference.jpg");
+  assert.equal(payload.prompt_input.context_counts.reference_media, 1);
   assert.equal(payload.prompt_input.agent_profile.profile_text, "custom tone profile");
   assert.equal(JSON.stringify(payload).includes("legacy raw text"), false);
+});
+
+test("buildPromptInput keeps reference_media_context separate from image_context", () => {
+  const promptInput = buildPromptInput(createItem());
+  assert.equal(promptInput.image_context.selected_urls.includes("https://scontent.fubp1-1.fna.fbcdn.net/reference.jpg"), false);
+  assert.equal(promptInput.reference_media_context.selected_urls.includes("https://scontent.fubp1-1.fna.fbcdn.net/reference.jpg"), true);
+  assert.equal(promptInput.context_counts.selected_images, 1);
+  assert.equal(promptInput.context_counts.reference_media, 1);
+});
+
+test("collectVisualImageUrls includes reference media urls with dedupe and limit", () => {
+  const item = createItem({
+    visual_image_urls: [
+      "https://example.com/photo.jpg",
+      "https://example.com/photo.jpg",
+    ],
+    structured_context: {
+      ...createItem().structured_context,
+      reference_media_context: {
+        selected_urls: [
+          "https://scontent.fubp1-1.fna.fbcdn.net/reference.jpg",
+          "https://scontent.fubp1-1.fna.fbcdn.net/reference.jpg",
+          "https://example.com/another.jpg",
+        ],
+        selected_count: 3,
+        assets: [],
+      },
+    },
+  });
+  assert.deepEqual(collectVisualImageUrls(item, 2), [
+    "https://example.com/photo.jpg",
+    "https://scontent.fubp1-1.fna.fbcdn.net/reference.jpg",
+  ]);
+});
+
+test("prepareVisualImageInputs skips unfetchable reference media without failing the run", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("reference.jpg")) {
+      return new Response("forbidden", { status: 403, headers: { "content-type": "text/plain" } });
+    }
+    return new Response("fake-image-bytes", {
+      status: 200,
+      headers: {
+        "content-type": "image/jpeg",
+      },
+    });
+  };
+
+  try {
+    const inputs = await prepareVisualImageInputs(createItem(), 5);
+    assert.equal(inputs.length, 1);
+    assert.equal(inputs[0].type, "image_url");
+    assert.equal(calls.some((url) => url.includes("reference.jpg")), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("field pack prompt blocks article output and requires handoff contract", () => {
@@ -102,6 +178,8 @@ test("field pack prompt blocks article output and requires handoff contract", ()
   assert.match(prompt, /capture_type/);
   assert.match(prompt, /Never output description_clean/);
   assert.match(prompt, /use a practical field producer tone/);
+  assert.match(prompt, /reference_media_context only as reference-only visual planning context/i);
+  assert.match(prompt, /Do not treat it as publish media, cover, gallery, rights-verified media, or factual proof/i);
 });
 
 test("field pack revision prompt includes previous pack and revision note", () => {
@@ -139,6 +217,14 @@ test("external agent engine normalizes visual context and field pack responses",
         status: 200,
         headers: {
           "content-type": "image/jpeg",
+        },
+      });
+    }
+    if (String(url) === "https://scontent.fubp1-1.fna.fbcdn.net/reference.jpg") {
+      return new Response("forbidden", {
+        status: 403,
+        headers: {
+          "content-type": "text/plain",
         },
       });
     }
@@ -192,6 +278,7 @@ test("external agent engine normalizes visual context and field pack responses",
     assert.equal(calls[1].body.task, "generate_field_pack");
     assert.equal(calls[1].body.agent_profile.profile_text, "custom tone profile");
     assert.equal(calls[1].body.prompt_input.agent_profile.profile_text, "custom tone profile");
+    assert.equal(calls[1].body.prompt_input.reference_media_context.selected_count, 1);
     assert.equal(calls[1].body.visual_context.visual_summary, "mock garden mood");
     assert.equal(calls[2].body.task, "revise_field_pack");
     assert.equal(calls[2].body.agent_profile.profile_text, "custom tone profile");
