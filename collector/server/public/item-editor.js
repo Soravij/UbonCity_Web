@@ -191,7 +191,7 @@ function applyEditorActionGuards() {
     saveAiContextBtn.disabled = saveBtn ? saveBtn.disabled : !editGuard.allowed;
     saveAiContextBtn.title = saveBtn ? String(saveBtn.title || "") : (editGuard.allowed ? "" : editGuard.reason);
   }
-  if (cleanMode) {
+  if (isCleanMode) {
     const nextAiBtn = qs("btn-next-ai");
     const runAiBtn = qs("btn-run-ai-context");
     const uploadBtn = qs("btn-upload-asset");
@@ -1928,7 +1928,7 @@ async function loadEvidenceContextAndPreview() {
     api(`/api/items/${state.itemId}/evidence-blocks`),
     api(`/api/items/${state.itemId}/approved-context`),
   ];
-  if (cleanMode) {
+  if (isCleanMode) {
     requests.push(api(`/api/items/${state.itemId}/draft-input-preview`));
   }
   const [evidence, context, previewRes] = await Promise.all(requests);
@@ -4746,7 +4746,6 @@ function wire() {
     setStatus(err.message, true);
   }
 })();
-
 
 
 

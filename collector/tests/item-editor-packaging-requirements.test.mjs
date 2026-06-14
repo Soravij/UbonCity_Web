@@ -384,6 +384,21 @@ test("clean asset table uses AI reference wording and removes cover action", () 
   }
 });
 
+test("clean mode guards use isCleanMode outside renderAssetBadges local scope", () => {
+  const requiredSnippets = [
+    "if (isCleanMode) {",
+    "async function loadEvidenceContextAndPreview() {",
+    "function applyEditorActionGuards() {",
+    "function renderAssetBadges(row, { cleanMode = isCleanMode } = {}) {",
+  ];
+  for (const snippet of requiredSnippets) {
+    assert.equal(itemEditorJs.includes(snippet), true, `expected item-editor.js clean mode guard snippet: ${snippet}`);
+  }
+
+  const cleanModeMatches = itemEditorJs.match(/if \(cleanMode\) \{/g) || [];
+  assert.equal(cleanModeMatches.length, 1, "expected only the renderAssetBadges local scope to use if (cleanMode)");
+});
+
 test("clean page copy explains AI reference-only image usage", () => {
   const requiredSnippet = "ขั้นนี้เลือกรูปเพื่อให้ AI/Field Pack ใช้เป็นภาพอ้างอิงเท่านั้น รูปปกสำหรับเผยแพร่ให้เลือกใหม่ใน Article Workspace หรือขั้น Publish จากไฟล์ local/backend-controlled media";
   assert.equal(cleanItemHtml.includes(requiredSnippet), true, "clean-item.html should explain reference-only media policy");
