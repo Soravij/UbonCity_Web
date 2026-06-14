@@ -9795,8 +9795,8 @@ function normalizeStateValue(value, stateGroup) {
         getItem,
         listApprovedContextBlocks,
         listEvidenceBlocks,
-        listContentAssetsByItem,
-        listApprovedImageContext,
+        listReferenceMediaByItem,
+        listApprovedLocalImageContext,
       },
       contentItemId
     );
