@@ -364,11 +364,16 @@ test("hover preview caches failed external images and falls back silently", () =
 });
 
 test("clean asset table uses AI reference wording and removes cover action", () => {
+  const decode = (value) => JSON.parse(`"${value}"`);
   const requiredSnippets = [
-    'selected ? "ไม่ส่งให้ AI" : "ส่งให้ AI ดู"',
-    '"ส่งให้ AI"',
+    `selected ? "${decode("\\u0e44\\u0e21\\u0e48\\u0e2a\\u0e48\\u0e07\\u0e43\\u0e2b\\u0e49")} AI" : "${decode("\\u0e2a\\u0e48\\u0e07\\u0e43\\u0e2b\\u0e49")} AI ${decode("\\u0e14\\u0e39")}"`,
+    `"${decode("\\u0e2a\\u0e48\\u0e07\\u0e43\\u0e2b\\u0e49")} AI ${decode("\\u0e41\\u0e25\\u0e49\\u0e27")}"`,
+    `"${decode("\\u0e22\\u0e31\\u0e07\\u0e44\\u0e21\\u0e48\\u0e2a\\u0e48\\u0e07\\u0e43\\u0e2b\\u0e49")} AI"`,
     '"reference-only"',
+    'asset-badge ${selected ? "state-on" : "state-off"}',
     'Number(row.selected_in_clean || 0) === 1',
+    `${decode("\\u0e2a\\u0e48\\u0e07")} asset \${id} ${decode("\\u0e43\\u0e2b\\u0e49")} AI/Field Pack ${decode("\\u0e14\\u0e39\\u0e41\\u0e25\\u0e49\\u0e27")}`,
+    `${decode("\\u0e40\\u0e2d\\u0e32")} asset \${id} ${decode("\\u0e2d\\u0e2d\\u0e01\\u0e08\\u0e32\\u0e01\\u0e0a\\u0e38\\u0e14\\u0e2d\\u0e49\\u0e32\\u0e07\\u0e2d\\u0e34\\u0e07")} AI ${decode("\\u0e41\\u0e25\\u0e49\\u0e27")}`,
   ];
   for (const snippet of requiredSnippets) {
     assert.equal(itemEditorJs.includes(snippet), true, `expected clean asset workflow snippet in item-editor.js: ${snippet}`);
@@ -400,6 +405,50 @@ test("clean mode guards use isCleanMode outside renderAssetBadges local scope", 
 });
 
 test("clean page copy explains AI reference-only image usage", () => {
-  const requiredSnippet = "ขั้นนี้เลือกรูปเพื่อให้ AI/Field Pack ใช้เป็นภาพอ้างอิงเท่านั้น รูปปกสำหรับเผยแพร่ให้เลือกใหม่ใน Article Workspace หรือขั้น Publish จากไฟล์ local/backend-controlled media";
-  assert.equal(cleanItemHtml.includes(requiredSnippet), true, "clean-item.html should explain reference-only media policy");
+  const decode = (value) => JSON.parse(`"${value}"`);
+  const requiredSnippets = [
+    `${decode("\\u0e23\\u0e39\\u0e1b\\u0e2d\\u0e49\\u0e32\\u0e07\\u0e2d\\u0e34\\u0e07\\u0e2a\\u0e33\\u0e2b\\u0e23\\u0e31\\u0e1a")} AI / Field Pack`,
+    `${decode("\\u0e40\\u0e25\\u0e37\\u0e2d\\u0e01\\u0e23\\u0e39\\u0e1b\\u0e40\\u0e1e\\u0e37\\u0e48\\u0e2d\\u0e43\\u0e2b\\u0e49")} AI/Field Pack ${decode("\\u0e43\\u0e0a\\u0e49\\u0e14\\u0e39\\u0e40\\u0e1b\\u0e47\\u0e19\\u0e20\\u0e32\\u0e1e\\u0e2d\\u0e49\\u0e32\\u0e07\\u0e2d\\u0e34\\u0e07\\u0e40\\u0e17\\u0e48\\u0e32\\u0e19\\u0e31\\u0e49\\u0e19")} ${decode("\\u0e44\\u0e21\\u0e48\\u0e43\\u0e0a\\u0e48\\u0e2a\\u0e37\\u0e48\\u0e2d\\u0e2a\\u0e33\\u0e2b\\u0e23\\u0e31\\u0e1a\\u0e40\\u0e1c\\u0e22\\u0e41\\u0e1e\\u0e23\\u0e48")}`,
+    `<th>${decode("\\u0e2a\\u0e16\\u0e32\\u0e19\\u0e30")} AI</th>`,
+    '<input id="asset-role" type="hidden" value="gallery" />',
+  ];
+  for (const snippet of requiredSnippets) {
+    assert.equal(cleanItemHtml.includes(snippet), true, `clean-item.html should include clean AI asset UI snippet: ${snippet}`);
+  }
+
+  const forbiddenSnippets = [
+    decode("\\u0e23\\u0e39\\u0e1b\\u0e1b\\u0e01"),
+    decode("\\u0e25\\u0e34\\u0e07\\u0e01\\u0e4c\\u0e23\\u0e39\\u0e1b\\u0e1b\\u0e01"),
+    decode("\\u0e40\\u0e1b\\u0e25\\u0e35\\u0e48\\u0e22\\u0e19\\u0e23\\u0e39\\u0e1b\\u0e1b\\u0e01"),
+    decode("\\u0e15\\u0e31\\u0e49\\u0e07\\u0e23\\u0e39\\u0e1b\\u0e1b\\u0e01"),
+    'option value="cover"',
+  ];
+  for (const snippet of forbiddenSnippets) {
+    assert.equal(cleanItemHtml.includes(snippet), false, `clean-item.html should not expose cover UI snippet: ${snippet}`);
+  }
+});
+
+test("clean selected badge and status copy stay explicit without new css classes", () => {
+  const requiredSnippets = [
+    'asset-badge ${selected ? "state-on" : "state-off"}',
+    'AI/Field Pack',
+    'state-on',
+    'state-off',
+    'reference-only',
+  ];
+  for (const snippet of requiredSnippets) {
+    assert.equal(itemEditorJs.includes(snippet), true, `expected clean selected status snippet in item-editor.js: ${snippet}`);
+  }
+});
+
+test("clean asset workflow does not add new ai-specific css classes", () => {
+  const forbiddenSnippets = [
+    "ai-selected",
+    "ai-reference-selected",
+    "clean-ai-selected",
+  ];
+  for (const snippet of forbiddenSnippets) {
+    assert.equal(itemEditorJs.includes(snippet), false, `item-editor.js should not add new css class snippet: ${snippet}`);
+    assert.equal(cleanItemHtml.includes(snippet), false, `clean-item.html should not add new css class snippet: ${snippet}`);
+  }
 });

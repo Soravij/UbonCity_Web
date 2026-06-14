@@ -51,7 +51,7 @@
     <button id="btn-item-takeover" type="button" class="fail">Take over</button>
   </div>
 </div>
-<p class="muted">ขั้นนี้เลือกรูปเพื่อให้ AI/Field Pack ใช้เป็นภาพอ้างอิงเท่านั้น รูปปกสำหรับเผยแพร่ให้เลือกใหม่ใน Article Workspace หรือขั้น Publish จากไฟล์ local/backend-controlled media</p>
+<p class="muted">ขั้นนี้เลือกรูปเพื่อให้ AI/Field Pack ใช้เป็นภาพอ้างอิงเท่านั้น สื่อสำหรับเผยแพร่ให้เลือกใหม่ใน Article Workspace หรือขั้น Publish จากไฟล์ local/backend-controlled media</p>
 <div id="clean-ai-guard" class="readiness-alert hidden"></div>
 
       <div class="card">
@@ -105,11 +105,7 @@
           <input id="e-lat" type="hidden" />
           <input id="e-lng" type="hidden" />
           <input id="e-image" type="hidden" />
-          <div style="grid-column: 1 / -1;">
-            <label>รูปปก</label>
-            <p class="muted">เลือกและเปลี่ยนรูปปกจากส่วนจัดการรูปด้านล่าง ไม่จำเป็นต้องแก้ URL ด้วยมือในขั้นนี้</p>
-            <img id="e-cover-preview" class="cover-preview hidden" alt="cover preview" />
-          </div>
+          <img id="e-cover-preview" class="cover-preview hidden" alt="cover preview" hidden />
           <div style="grid-column: 1 / -1;">
             <label>คำอธิบาย</label>
             <p class="muted">ในขั้นตอนนี้ยังไม่ควรแทรกรูปในเนื้อหา ให้เพิ่มในขั้นตรวจแก้เนื้อหา</p>
@@ -132,18 +128,15 @@
                 <label>ลองจิจูด</label>
                 <input id="e-lng-readonly" readonly />
               </div>
-              <div style="grid-column: 1 / -1;">
-                <label>ลิงก์รูปปก</label>
-                <input id="e-image-readonly" readonly />
-              </div>
+              <input id="e-image-readonly" type="hidden" />
             </div>
           </div>
         </details>
       </div>
 
       <div class="card">
-        <h2 class="section-title">รูปของรายการ</h2>
-        <p class="muted">ใช้ส่วนนี้เมื่อจำเป็นต้องเปลี่ยนรูปปกหรือจัดการไฟล์รูปเพิ่มเติมเท่านั้น</p>
+        <h2 class="section-title">รูปอ้างอิงสำหรับ AI / Field Pack</h2>
+        <p class="muted">เลือกรูปเพื่อให้ AI/Field Pack ใช้ดูเป็นภาพอ้างอิงเท่านั้น ไม่ใช่สื่อสำหรับเผยแพร่</p>
         <details class="raw-json-toggle">
           <summary>จัดการรูปเพิ่มเติม</summary>
           <div class="secondary-panel">
@@ -152,14 +145,7 @@
                 <label>Content Item ID</label>
                 <input id="asset-item-id" readonly />
               </div>
-              <div>
-                <label>บทบาทรูป</label>
-                <select id="asset-role">
-                  <option value="cover">cover</option>
-                  <option value="gallery" selected>gallery</option>
-                  <option value="inline">inline</option>
-                </select>
-              </div>
+              <input id="asset-role" type="hidden" value="gallery" />
             </div>
 
             <div class="grid">
@@ -189,7 +175,7 @@
                   <tr>
                     <th>Asset ID</th>
                     <th>Item ID</th>
-                    <th>บทบาท</th>
+                    <th>สถานะ AI</th>
                     <th>ไฟล์</th>
                     <th>ตัวอย่าง</th>
                     <th>การทำงาน</th>

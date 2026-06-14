@@ -4062,7 +4062,7 @@ function renderAssetBadges(row, { cleanMode = isCleanMode } = {}) {
   const isReferenceOnly = !isCollectorControlledLocalAssetForUi(row) || role === "reference" || role === "unused";
 
   if (cleanMode) {
-    badges.push(`<span class="asset-badge ${selected ? "state-on" : "state-off"}">${selected ? "ส่งให้ AI" : "ยังไม่ส่งให้ AI"}</span>`);
+    badges.push(`<span class="asset-badge ${selected ? "state-on" : "state-off"}">${selected ? "ส่งให้ AI แล้ว" : "ยังไม่ส่งให้ AI"}</span>`);
     badges.push(`<span class="asset-badge ${isReferenceOnly ? "role-reference" : `role-${role}`}">${isReferenceOnly ? "reference-only" : roleDisplayLabel(role)}</span>`);
     return badges.join(" ");
   }
@@ -4148,7 +4148,7 @@ function renderAssetsTable(rows) {
             body: JSON.stringify({ selected: nextSelected }),
           });
           await refreshAssets();
-          setAssetStatus(nextSelected ? `ส่ง asset ${id} ให้ AI ดูแล้ว` : `เอา asset ${id} ออกจากชุดอ้างอิง AI แล้ว`);
+          setAssetStatus(nextSelected ? `ส่ง asset ${id} ให้ AI/Field Pack ดูแล้ว` : `เอา asset ${id} ออกจากชุดอ้างอิง AI แล้ว`);
           return;
         }
 
@@ -4746,7 +4746,6 @@ function wire() {
     setStatus(err.message, true);
   }
 })();
-
 
 
 
