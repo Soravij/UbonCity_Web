@@ -285,6 +285,118 @@ test("buildCleanStructuredContext keeps thin items usable without blocking", () 
   assert.equal(context.image_context.selected_count, 0);
 });
 
+test("buildCleanStructuredContext excludes external reference assets from image context", () => {
+  const repo = createMockRepo({
+    item: createBaseItem({ map_url: "https://maps.google.com/?q=15.2246,104.8645" }),
+    approvedContext: [
+      createApprovedBlock(1, 210, {
+        selected_text: "verified opening hours from approved context",
+      }),
+    ],
+    selectedAssets: [
+      {
+        asset_id: 9901,
+        role: "cover",
+        selected_in_clean: 1,
+        is_cover: 1,
+        public_url: "https://fbcdn.net/blocked-reference.jpg",
+        storage_disk: "remote",
+        storage_path: "https://fbcdn.net/blocked-reference.jpg",
+        mime_type: "image/jpeg",
+      },
+      {
+        asset_id: 9902,
+        role: "cover",
+        selected_in_clean: 1,
+        is_cover: 1,
+        public_url: "/media/uploads/local-cover.jpg",
+        storage_disk: "local",
+        storage_path: "uploads/local-cover.jpg",
+        mime_type: "image/jpeg",
+      },
+    ],
+    imageContext: {
+      cover_url: "/media/uploads/local-cover.jpg",
+      selected_urls: [
+        "https://fbcdn.net/blocked-reference.jpg",
+        "/media/uploads/local-cover.jpg",
+      ],
+      gallery_urls: [
+        "https://fbcdn.net/blocked-reference.jpg",
+        "/media/uploads/local-cover.jpg",
+      ],
+      inline_urls: [],
+    },
+  });
+
+  const context = buildCleanStructuredContext(repo, 59);
+  const validation = validateCleanMinimum(repo, 59);
+
+  assert.equal(validation.ok, true);
+  assert.deepEqual(context.image_context.selected_urls, ["/media/uploads/local-cover.jpg"]);
+  assert.equal(context.image_context.cover_url, "/media/uploads/local-cover.jpg");
+  assert.deepEqual(context.image_context.gallery_urls, []);
+  assert.deepEqual(context.image_context.inline_urls, []);
+  assert.deepEqual(
+    context.image_context.assets.map((row) => Number(row.asset_id || 0)),
+    [9902]
+  );
+  assert.equal(
+    context.image_context.selected_urls.some((url) => String(url || "").includes("fbcdn.net")),
+    false
+  );
+  assert.equal(
+    context.image_context.gallery_urls.some((url) => String(url || "").includes("fbcdn.net")),
+    false
+  );
+  assert.equal(
+    context.image_context.inline_urls.some((url) => String(url || "").includes("fbcdn.net")),
+    false
+  );
+  assert.equal(
+    context.image_context.assets.some((row) => String(row?.public_url || "").includes("fbcdn.net")),
+    false
+  );
+});
+
+test("buildCleanStructuredContext ignores external imageContext fallback when no local usable asset exists", () => {
+  const repo = createMockRepo({
+    item: createBaseItem({ map_url: "https://maps.google.com/?q=15.2246,104.8645" }),
+    approvedContext: [
+      createApprovedBlock(1, 211, {
+        selected_text: "approved context is present",
+      }),
+    ],
+    selectedAssets: [
+      {
+        asset_id: 9911,
+        role: "cover",
+        selected_in_clean: 1,
+        is_cover: 1,
+        public_url: "https://scontent.fubp1-1.fna.fbcdn.net/xxx.jpg",
+        storage_disk: "remote",
+        storage_path: "https://scontent.fubp1-1.fna.fbcdn.net/xxx.jpg",
+        mime_type: "image/jpeg",
+      },
+    ],
+    imageContext: {
+      cover_url: "https://scontent.fubp1-1.fna.fbcdn.net/xxx.jpg",
+      selected_urls: ["https://scontent.fubp1-1.fna.fbcdn.net/xxx.jpg"],
+      gallery_urls: ["https://scontent.fubp1-1.fna.fbcdn.net/xxx.jpg"],
+      inline_urls: [],
+    },
+  });
+
+  const context = buildCleanStructuredContext(repo, 59);
+
+  assert.equal(context.completeness.has_minimum_required, true);
+  assert.equal(context.image_context.cover_url, null);
+  assert.equal(context.image_context.cover_count, 0);
+  assert.equal(context.image_context.selected_count, 0);
+  assert.deepEqual(context.image_context.selected_urls, []);
+  assert.ok(context.completeness.quality_gaps.includes("image_context"));
+});
+
 test("validateCleanMinimum blocks missing reference and missing approved context", () => {
   const repo = createMockRepo({
     item: createBaseItem({

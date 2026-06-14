@@ -100,12 +100,16 @@ test("repairImportedReferenceAssetsForItem promotes raw and source-record media 
     assert.equal(diagnostics.imported_asset_count_before, 0);
     assert.equal(diagnostics.added_count, 4);
     assert.equal(importedAssets.length, 4);
-    assert.ok(importedAssets.some((row) => row.role === "cover" && row.public_url.includes("cover-photo")));
+    assert.ok(importedAssets.some((row) => row.public_url.includes("cover-photo")));
     assert.ok(importedAssets.some((row) => row.public_url.includes("gallery-photo")));
     assert.ok(importedAssets.some((row) => row.public_url.includes("test-photo.jpg")));
     assert.ok(importedAssets.some((row) => row.public_url.includes("raw-photo.jpg")));
     assert.equal(
-      importedAssets.every((row) => Number(row.selected_in_clean || 0) === 1),
+      importedAssets.every((row) => Number(row.selected_in_clean || 0) === 0),
+      true
+    );
+    assert.equal(
+      importedAssets.every((row) => String(row.role || "") === "unused"),
       true
     );
   } finally {
