@@ -339,6 +339,10 @@ export function isOtherTransportItem(item = state.item) {
   return String(item?.type || "").trim().toLowerCase() === "other_transport";
 }
 
+export function isPlaceItem(item = state.item) {
+  return String(item?.type || "").trim().toLowerCase() === "place";
+}
+
 export function otherTransportSubtypeLabel(value) {
   const key = String(value || "").trim().toLowerCase();
   return OTHER_TRANSPORT_SUBTYPES[key] || OTHER_TRANSPORT_SUBTYPES.other;
@@ -473,6 +477,118 @@ export function fillField(id, value) {
   if (node) node.value = String(value ?? "");
 }
 
+export function defaultConfirmedCtaContact() {
+  return {
+    phone: null,
+    line_url: null,
+    facebook_url: null,
+    website_url: null,
+    primary_cta: null,
+  };
+}
+
+export function defaultConfirmedTaxonomy() {
+  return {
+    category: null,
+    subtype: null,
+    tags: [],
+  };
+}
+
+export function defaultFieldReturnEvidence() {
+  return {
+    version: 1,
+    items: [],
+  };
+}
+
+export function fieldReturnEvidence() {
+  const raw = state.articleProcess?.field_return_evidence;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return defaultFieldReturnEvidence();
+  const items = Array.isArray(raw.items) ? raw.items : [];
+  return {
+    version: 1,
+    items: items
+      .filter((row) => row && typeof row === "object" && !Array.isArray(row))
+      .map((row) => ({
+        key: String(row.key || "").trim().toLowerCase(),
+        group_key: String(row.group_key || "").trim().toLowerCase() || "other",
+        check_key: String(row.check_key || "").trim().toLowerCase() || String(row.key || "").trim().toLowerCase(),
+        label: String(row.label || "").trim() || String(row.check_key || row.key || "").trim(),
+        checked: row.checked === true,
+        found: row.found === true,
+        value: row.value ?? null,
+        condition_note: String(row.condition_note || "").trim() || null,
+        evidence: String(row.evidence || "").trim() || null,
+        note: String(row.note || "").trim() || null,
+        submitted_at: String(row.submitted_at || "").trim() || null,
+        submitted_by: String(row.submitted_by || "").trim() || null,
+        assignment_id: Number(row.assignment_id || 0) || null,
+      })),
+  };
+}
+
+export function canApplyFieldReturnEvidenceToConfirmedCta(item, currentItem = state.item) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+  if (!isPlaceItem(currentItem)) return false;
+  const key = String(item.key || "").trim().toLowerCase();
+  if (!["cta_contact.phone", "cta_contact.line_url", "cta_contact.facebook_url", "cta_contact.website_url", "cta_contact.primary_cta"].includes(key)) {
+    return false;
+  }
+  if (item.found !== true) return false;
+  if (key === "cta_contact.primary_cta") {
+    const primaryCta = String(item.value || "").trim().toLowerCase();
+    return ["map", "phone", "line"].includes(primaryCta);
+  }
+  return String(item.value || "").trim().length > 0;
+}
+
+export function applyFieldReturnEvidenceToConfirmedCta(currentValues = {}, item, currentItem = state.item) {
+  const nextValues = {
+    ...defaultConfirmedCtaContact(),
+    ...(currentValues && typeof currentValues === "object" && !Array.isArray(currentValues) ? currentValues : {}),
+  };
+  if (!canApplyFieldReturnEvidenceToConfirmedCta(item, currentItem)) return nextValues;
+  const key = String(item.key || "").trim().toLowerCase();
+  if (key === "cta_contact.phone") nextValues.phone = String(item.value || "").trim();
+  if (key === "cta_contact.line_url") nextValues.line_url = String(item.value || "").trim();
+  if (key === "cta_contact.facebook_url") nextValues.facebook_url = String(item.value || "").trim();
+  if (key === "cta_contact.website_url") nextValues.website_url = String(item.value || "").trim();
+  if (key === "cta_contact.primary_cta") nextValues.primary_cta = String(item.value || "").trim().toLowerCase();
+  return nextValues;
+}
+
+export function normalizeCommaSeparatedTags(rawValue) {
+  const seen = new Set();
+  return String(rawValue || "")
+    .split(",")
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .filter((part) => {
+      const key = part.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+export function applyArticleSuggestionFieldValues(currentValues = {}, suggestion = {}) {
+  return {
+    ...currentValues,
+    title: String(suggestion?.title || ""),
+    excerpt: String(suggestion?.excerpt || ""),
+    body: String(suggestion?.body || ""),
+  };
+}
+
+export function applySeoSuggestionFieldValues(currentValues = {}, suggestion = {}) {
+  return {
+    ...currentValues,
+    meta_title: String(suggestion?.meta_title || ""),
+    meta_description: String(suggestion?.meta_description || ""),
+  };
+}
+
 function readWorkspaceFieldValue(id, fallback = "") {
   const node = qs(id);
   if (node) return String(node.value ?? "").trim();
@@ -491,6 +607,27 @@ export function collectWorkspacePayload() {
   const metaTitle = readWorkspaceFieldValue("article-meta-title", draft?.meta_title ?? item.meta_title ?? "");
   const metaDescription = readWorkspaceFieldValue("article-meta-description", draft?.meta_description ?? item.meta_description ?? "");
   const body = readWorkspaceFieldValue("article-body", draft?.body ?? item.description_clean ?? item.description_raw ?? "");
+  const confirmedCtaContact = {
+    phone: readWorkspaceFieldValue("confirmed-phone", draft?.confirmed_cta_contact_json?.phone ?? ""),
+    line_url: readWorkspaceFieldValue("confirmed-line-url", draft?.confirmed_cta_contact_json?.line_url ?? ""),
+    facebook_url: readWorkspaceFieldValue("confirmed-facebook-url", draft?.confirmed_cta_contact_json?.facebook_url ?? ""),
+    website_url: readWorkspaceFieldValue("confirmed-website-url", draft?.confirmed_cta_contact_json?.website_url ?? ""),
+    primary_cta: readWorkspaceFieldValue("confirmed-primary-cta", draft?.confirmed_cta_contact_json?.primary_cta ?? ""),
+  };
+  const confirmedTaxonomy = {
+    category: readWorkspaceFieldValue("confirmed-category", draft?.confirmed_taxonomy_json?.category ?? ""),
+    subtype: readWorkspaceFieldValue("confirmed-subtype", draft?.confirmed_taxonomy_json?.subtype ?? ""),
+    tags: normalizeCommaSeparatedTags(
+      readWorkspaceFieldValue(
+        "confirmed-tags",
+        Array.isArray(draft?.confirmed_taxonomy_json?.tags)
+          ? draft.confirmed_taxonomy_json.tags.join(", ")
+          : ""
+      )
+    ),
+  };
+  const confirmedMetaStatus = readWorkspaceFieldValue("confirmed-meta-status", draft?.confirmed_meta_status ?? "not_started") || "not_started";
+  const confirmedNote = readWorkspaceFieldValue("confirmed-note", draft?.confirmed_note ?? "");
   const currentOtherTransport = currentOtherTransportMeta();
   const otherTransportMeta = isOtherTransportItem(item)
     ? {
@@ -519,6 +656,10 @@ export function collectWorkspacePayload() {
       body,
       meta_title: metaTitle,
       meta_description: metaDescription,
+      confirmed_cta_contact_json: confirmedCtaContact,
+      confirmed_taxonomy_json: confirmedTaxonomy,
+      confirmed_meta_status: confirmedMetaStatus,
+      confirmed_note: confirmedNote,
       status: "generated",
     },
   };
@@ -528,24 +669,179 @@ export function currentReviewNote() {
   return String(qs("review-note")?.value || "").trim();
 }
 
+function collectWorkspaceBlockingIssues({
+  payload = collectWorkspacePayload(),
+  item = state.item,
+  hasCover = null,
+} = {}) {
+  const normalizedItem = item && typeof item === "object" ? item : {};
+  const itemPayload = payload?.item && typeof payload.item === "object" ? payload.item : {};
+  const coverReady = hasCover === null
+    ? selectedWorkspaceAssets().some((row) => Number(row.is_cover || 0) === 1 || String(row.role || "") === "cover")
+    : hasCover === true;
+  const issues = [];
+
+  if (!itemPayload.title) issues.push({ missingKey: "title", blockerKey: "title", label: "ชื่อบทความ", message: "ยังไม่มีชื่อบทความ", target: "article-title" });
+  if (!itemPayload.summary) issues.push({ missingKey: "summary", blockerKey: "summary", label: "คำเกริ่น", message: "ยังไม่มีคำเกริ่น", target: "article-excerpt" });
+  if (!itemPayload.slug) issues.push({ missingKey: "slug", blockerKey: "slug", label: "ลิงก์บทความ", message: "ยังไม่มี slug", target: "article-slug" });
+  if (!itemPayload.meta_title) issues.push({ missingKey: "meta title", blockerKey: "meta_title", label: "ชื่อ SEO", message: "ยังไม่มีชื่อ SEO", target: "article-meta-title" });
+  if (!itemPayload.meta_description) issues.push({ missingKey: "meta description", blockerKey: "meta_description", label: "คำอธิบาย SEO", message: "ยังไม่มีคำอธิบาย SEO", target: "article-meta-description" });
+  if (!itemPayload.description_clean) issues.push({ missingKey: "body", blockerKey: "body", label: "เนื้อหา", message: "ยังไม่มีเนื้อหาบทความ", target: "article-body" });
+  if (!coverReady) issues.push({ missingKey: "cover image", blockerKey: "cover_image", label: "รูปปก", message: "ยังไม่ได้ตั้งรูปปก", target: "asset-library" });
+
+  if (isOtherTransportItem(normalizedItem)) {
+    const transportMeta = itemPayload.other_transport_meta || {};
+    if (!transportMeta.subtype) {
+      issues.push({ missingKey: "transport subtype", blockerKey: "transport_subtype", label: "ประเภทรถ", message: "ยังไม่ได้ระบุประเภทรถ", target: "other-transport-type" });
+    }
+    if (!transportMeta.contact_name) {
+      issues.push({ missingKey: "contact name", blockerKey: "transport_contact_name", label: "ชื่อผู้ติดต่อ", message: "ยังไม่มีชื่อผู้ติดต่อ", target: "other-transport-contact-name" });
+    }
+    if (!transportMeta.phone && !transportMeta.link_url && !transportMeta.contact_details) {
+      issues.push({ missingKey: "contact channel", blockerKey: "transport_contact_channel", label: "ช่องทางติดต่อ", message: "ยังไม่มีช่องทางติดต่อ", target: "other-transport-phone" });
+    }
+  }
+
+  return issues;
+}
+
 export function validateWorkspace() {
   const payload = collectWorkspacePayload();
-  const missing = [];
-  if (!payload.item.title) missing.push("title");
-  if (!payload.item.summary) missing.push("summary");
-  if (!payload.item.slug) missing.push("slug");
-  if (!payload.item.meta_title) missing.push("meta title");
-  if (!payload.item.meta_description) missing.push("meta description");
-  if (!payload.item.description_clean) missing.push("body");
-  const hasCover = selectedWorkspaceAssets().some((row) => Number(row.is_cover || 0) === 1 || String(row.role || "") === "cover");
-  if (!hasCover) missing.push("cover image");
-  if (isOtherTransportItem()) {
-    const meta = payload.item.other_transport_meta || {};
-    if (!meta.subtype) missing.push("transport subtype");
-    if (!meta.contact_name) missing.push("contact name");
-    if (!meta.phone && !meta.link_url && !meta.contact_details) missing.push("contact channel");
-  }
+  const missing = collectWorkspaceBlockingIssues({ payload }).map((issue) => issue.missingKey);
   return { ok: missing.length === 0, missing };
+}
+
+function hasNonEmptyValue(value) {
+  if (Array.isArray(value)) return value.some((entry) => String(entry || "").trim());
+  return Boolean(String(value ?? "").trim());
+}
+
+function normalizedStringValue(value) {
+  return String(value ?? "").trim();
+}
+
+function appendReadinessEntry(target, severity, key, label, message, focusTarget = null) {
+  target.push({
+    key,
+    label,
+    message,
+    severity,
+    target: focusTarget,
+  });
+}
+
+export function computeSubmitReadiness({
+  item = state.item,
+  payload = collectWorkspacePayload(),
+  evidence = fieldReturnEvidence(),
+  hasCover = null,
+} = {}) {
+  const blockers = [];
+  const warnings = [];
+  const info = [];
+  const normalizedItem = item && typeof item === "object" ? item : {};
+  const draft = payload?.draft && typeof payload.draft === "object" ? payload.draft : {};
+  const itemPayload = payload?.item && typeof payload.item === "object" ? payload.item : {};
+  const confirmedCta = {
+    phone: normalizedStringValue(draft?.confirmed_cta_contact_json?.phone),
+    line_url: normalizedStringValue(draft?.confirmed_cta_contact_json?.line_url),
+    facebook_url: normalizedStringValue(draft?.confirmed_cta_contact_json?.facebook_url),
+    website_url: normalizedStringValue(draft?.confirmed_cta_contact_json?.website_url),
+    primary_cta: normalizedStringValue(draft?.confirmed_cta_contact_json?.primary_cta).toLowerCase(),
+  };
+  const confirmedTaxonomy = {
+    category: normalizedStringValue(draft?.confirmed_taxonomy_json?.category),
+    subtype: normalizedStringValue(draft?.confirmed_taxonomy_json?.subtype),
+    tags: Array.isArray(draft?.confirmed_taxonomy_json?.tags)
+      ? draft.confirmed_taxonomy_json.tags.map((entry) => normalizedStringValue(entry)).filter(Boolean)
+      : [],
+  };
+  const evidenceItems = Array.isArray(evidence?.items) ? evidence.items : [];
+  for (const issue of collectWorkspaceBlockingIssues({ payload, item: normalizedItem, hasCover })) {
+    appendReadinessEntry(blockers, "blocker", issue.blockerKey, issue.label, issue.message, issue.target);
+  }
+
+  const taxonomyEvidence = evidenceItems.filter((entry) => String(entry?.group_key || "").trim().toLowerCase() === "taxonomy" && entry?.found === true);
+  const ctaEvidence = evidenceItems.filter((entry) => String(entry?.group_key || "").trim().toLowerCase() === "cta_contact" && entry?.found === true);
+
+  const confirmedMetaStatus = normalizedStringValue(draft?.confirmed_meta_status || "not_started").toLowerCase();
+  if (confirmedMetaStatus !== "confirmed") {
+    appendReadinessEntry(warnings, "warning", "confirmed_meta_status", "สถานะการยืนยัน", "ข้อมูลยืนยันยังไม่ได้ตั้งเป็นยืนยันแล้ว", "confirmed-meta-status");
+  }
+
+  if (isPlaceItem(normalizedItem)) {
+    const ctaFields = [
+      ["phone", "cta_contact.phone", "เบอร์โทร", "confirmed-phone"],
+      ["line_url", "cta_contact.line_url", "ลิงก์ LINE", "confirmed-line-url"],
+      ["facebook_url", "cta_contact.facebook_url", "ลิงก์ Facebook", "confirmed-facebook-url"],
+      ["website_url", "cta_contact.website_url", "ลิงก์เว็บไซต์", "confirmed-website-url"],
+      ["primary_cta", "cta_contact.primary_cta", "ปุ่มหลัก", "confirmed-primary-cta"],
+    ];
+    const hasAnyConfirmedCta = Object.values(confirmedCta).some((value) => hasNonEmptyValue(value));
+    if (hasAnyConfirmedCta) {
+      appendReadinessEntry(info, "info", "confirmed_cta_contact", "CTA / ช่องทางติดต่อ", "มีข้อมูล CTA / ช่องทางติดต่อที่ยืนยันแล้ว", "confirmed-meta-section");
+    }
+    for (const [fieldName, evidenceKey, label, target] of ctaFields) {
+      const evidenceEntry = ctaEvidence.find((entry) => String(entry?.key || "").trim().toLowerCase() === evidenceKey);
+      if (!evidenceEntry) continue;
+      const confirmedValue = normalizedStringValue(confirmedCta[fieldName]);
+      const evidenceValue = fieldName === "primary_cta"
+        ? normalizedStringValue(evidenceEntry.value).toLowerCase()
+        : normalizedStringValue(evidenceEntry.value);
+      if (!confirmedValue) {
+        appendReadinessEntry(warnings, "warning", evidenceKey, label, `${label}มีข้อมูลจากคนเช็กแล้ว แต่ยังไม่ได้ยืนยันในส่วนข้อมูลยืนยัน`, target);
+        continue;
+      }
+      if (confirmedValue !== evidenceValue) {
+        appendReadinessEntry(warnings, "warning", evidenceKey, label, `${label}ที่ยืนยันไว้ไม่ตรงกับข้อมูลที่คนเช็กส่งกลับ`, target);
+        continue;
+      }
+      appendReadinessEntry(info, "info", evidenceKey, label, `${label}ที่ยืนยันไว้ตรงกับข้อมูลที่คนเช็กส่งกลับ`, target);
+    }
+    if (ctaEvidence.length > 0 && !hasAnyConfirmedCta) {
+      appendReadinessEntry(warnings, "warning", "confirmed_cta_contact_missing", "CTA / ช่องทางติดต่อ", "มีข้อมูล CTA / ช่องทางติดต่อจากคนเช็ก แต่ยังไม่ได้ยืนยันค่าใช้งาน", "confirmed-meta-section");
+    }
+  } else {
+    appendReadinessEntry(info, "info", "cta_contact_na", "CTA / ช่องทางติดต่อ", "รายการนี้ไม่ใช้การตรวจ CTA / ช่องทางติดต่อแบบ place", null);
+  }
+
+  const hasConfirmedTaxonomy = Boolean(confirmedTaxonomy.category || confirmedTaxonomy.subtype || confirmedTaxonomy.tags.length > 0);
+  if (hasConfirmedTaxonomy) {
+    appendReadinessEntry(info, "info", "confirmed_taxonomy", "หมวดหมู่", "มีข้อมูลหมวดหมู่ที่ยืนยันแล้ว", "confirmed-meta-section");
+  }
+  if (!hasConfirmedTaxonomy) {
+    appendReadinessEntry(warnings, "warning", "confirmed_taxonomy_missing", "หมวดหมู่", "ยังไม่ได้ยืนยันหมวดหมู่หรือแท็ก", "confirmed-meta-section");
+  }
+  for (const entry of taxonomyEvidence) {
+    const key = String(entry?.key || "").trim().toLowerCase();
+    const value = entry?.value;
+    if (key === "taxonomy.category") {
+      if (!confirmedTaxonomy.category) appendReadinessEntry(warnings, "warning", key, "หมวดหลัก", "มีข้อมูลหมวดหลักจากคนเช็ก แต่ยังไม่ได้ยืนยัน", "confirmed-category");
+      else if (confirmedTaxonomy.category !== normalizedStringValue(value)) appendReadinessEntry(warnings, "warning", key, "หมวดหลัก", "หมวดหลักที่ยืนยันไว้ไม่ตรงกับข้อมูลที่คนเช็กส่งกลับ", "confirmed-category");
+      else appendReadinessEntry(info, "info", key, "หมวดหลัก", "หมวดหลักที่ยืนยันไว้ตรงกับข้อมูลที่คนเช็กส่งกลับ", "confirmed-category");
+      continue;
+    }
+    if (key === "taxonomy.subtype") {
+      if (!confirmedTaxonomy.subtype) appendReadinessEntry(warnings, "warning", key, "หมวดย่อย", "มีข้อมูลหมวดย่อยจากคนเช็ก แต่ยังไม่ได้ยืนยัน", "confirmed-subtype");
+      else if (confirmedTaxonomy.subtype !== normalizedStringValue(value)) appendReadinessEntry(warnings, "warning", key, "หมวดย่อย", "หมวดย่อยที่ยืนยันไว้ไม่ตรงกับข้อมูลที่คนเช็กส่งกลับ", "confirmed-subtype");
+      else appendReadinessEntry(info, "info", key, "หมวดย่อย", "หมวดย่อยที่ยืนยันไว้ตรงกับข้อมูลที่คนเช็กส่งกลับ", "confirmed-subtype");
+      continue;
+    }
+    if (key === "taxonomy.tags") {
+      const evidenceTags = Array.isArray(value) ? value.map((entryValue) => normalizedStringValue(entryValue)).filter(Boolean) : [];
+      const allMatch = evidenceTags.length > 0 && evidenceTags.every((entryValue) => confirmedTaxonomy.tags.includes(entryValue));
+      if (!confirmedTaxonomy.tags.length) appendReadinessEntry(warnings, "warning", key, "แท็ก", "มีข้อมูลแท็กจากคนเช็ก แต่ยังไม่ได้ยืนยัน", "confirmed-tags");
+      else if (!allMatch) appendReadinessEntry(warnings, "warning", key, "แท็ก", "แท็กที่ยืนยันไว้ยังไม่ครอบคลุมข้อมูลที่คนเช็กส่งกลับ", "confirmed-tags");
+      else appendReadinessEntry(info, "info", key, "แท็ก", "แท็กที่ยืนยันไว้ตรงกับข้อมูลที่คนเช็กส่งกลับ", "confirmed-tags");
+    }
+  }
+
+  const confirmedNote = normalizedStringValue(draft?.confirmed_note);
+  if (confirmedNote) {
+    appendReadinessEntry(info, "info", "confirmed_note", "บันทึกประกอบ", confirmedNote, "confirmed-note");
+  }
+
+  return { blockers, warnings, info };
 }
 
 export async function api(path, options = {}) {

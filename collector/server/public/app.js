@@ -219,6 +219,9 @@ const state = {
     serverSubmissionDraftPayloads: {},
     serverSubmissionDraftLoaded: {},
     serverSubmissionDraftSaveTimers: {},
+    handoffSourcePackages: {},
+    handoffSourceLoaded: {},
+    requestedCheckReturnDrafts: {},
     latestUploadedAssets: [],
     latestUploadedAssetsKey: "",
     syncedUploadAssetsByKey: {},
@@ -3130,6 +3133,40 @@ async function loadAssignmentContextFieldPackStatus(itemId) {
   renderAssignmentHandoffBrief();
   renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(state.assignments.selectedId)));
   return state.assignments.contextFieldPackStatus;
+}
+
+async function loadAssignmentRequestedCheckHandoffSource(assignment = null) {
+  if (isEditorUser()) return null;
+  const assignmentId = Number(assignment?.id || 0) || 0;
+  if (!assignmentId) return null;
+  const inlineHandoffPackage = assignment?.handoff_package_json && typeof assignment.handoff_package_json === "object"
+    ? assignment.handoff_package_json
+    : null;
+  if (inlineHandoffPackage) {
+    state.assignments.handoffSourcePackages[assignmentId] = inlineHandoffPackage;
+    state.assignments.handoffSourceLoaded[assignmentId] = true;
+    rerenderAssignmentRequestedCheckSurfaces(assignmentId);
+    return inlineHandoffPackage;
+  }
+  const loadState = state.assignments.handoffSourceLoaded?.[assignmentId];
+  if (loadState === true) {
+    return state.assignments.handoffSourcePackages?.[assignmentId] || null;
+  }
+  if (loadState === "loading") return null;
+  state.assignments.handoffSourceLoaded[assignmentId] = "loading";
+  try {
+    const result = await api(`/api/assignments/${assignmentId}/handoff-source`);
+    state.assignments.handoffSourcePackages[assignmentId] = result?.handoff?.handoff_package_json && typeof result.handoff.handoff_package_json === "object"
+      ? result.handoff.handoff_package_json
+      : null;
+    state.assignments.handoffSourceLoaded[assignmentId] = true;
+    rerenderAssignmentRequestedCheckSurfaces(assignmentId);
+    return state.assignments.handoffSourcePackages[assignmentId] || null;
+  } catch {
+    state.assignments.handoffSourcePackages[assignmentId] = null;
+    state.assignments.handoffSourceLoaded[assignmentId] = false;
+    return null;
+  }
 }
 
 function resetAssignmentPreviews() {
@@ -6579,6 +6616,9 @@ function renderAssignmentSubmissionForm(assignment = null) {
   const briefLabelNode = qs("assignment-submission-brief-label");
   const verifiedLabelNode = qs("assignment-submission-verified-label");
   const questionLabelNode = qs("assignment-submission-question-label");
+  const requestedChecksWrapNode = qs("assignment-submission-requested-checks-wrap");
+  const requestedChecksLabelNode = qs("assignment-submission-requested-checks-label");
+  const requestedChecksNode = qs("assignment-submission-requested-checks-fields");
   const captureLabelNode = qs("assignment-submission-capture-label");
   const additionalLabelNode = qs("assignment-submission-additional-label");
   const filesLabelNode = qs("assignment-submission-files-label");
@@ -6620,6 +6660,7 @@ function renderAssignmentSubmissionForm(assignment = null) {
   if (briefLabelNode) briefLabelNode.textContent = formConfig.briefLabel;
   if (verifiedLabelNode) verifiedLabelNode.textContent = formConfig.verifiedLabel;
   if (questionLabelNode) questionLabelNode.textContent = formConfig.questionLabel;
+  if (requestedChecksLabelNode) requestedChecksLabelNode.textContent = "คำตอบตามรายการที่ขอ";
   if (captureLabelNode) captureLabelNode.textContent = formConfig.captureLabel;
   if (additionalLabelNode) additionalLabelNode.textContent = formConfig.additionalLabel;
   if (filesLabelNode) filesLabelNode.textContent = formConfig.filesLabel;
@@ -6634,6 +6675,11 @@ function renderAssignmentSubmissionForm(assignment = null) {
     verifiedNode.innerHTML = formConfig.emptyVerified;
     questionNode.className = "assignment-brief-empty";
     questionNode.innerHTML = formConfig.emptyQuestion;
+    if (requestedChecksWrapNode) requestedChecksWrapNode.classList.add("hidden");
+    if (requestedChecksNode) {
+      requestedChecksNode.className = "assignment-brief-empty";
+      requestedChecksNode.innerHTML = "เลือกงานก่อนเพื่อดูรายการที่ขอจากชุดส่งงาน";
+    }
     captureNode.className = "assignment-brief-empty";
     captureNode.innerHTML = formConfig.emptyCapture;
     if (briefLink) {
@@ -6652,6 +6698,35 @@ function renderAssignmentSubmissionForm(assignment = null) {
   }
 
   const articlePayload = getAssignmentSubmissionPrefillPayload(assignment, fieldPack);
+  const assignmentId = Number(assignment?.id || state.assignments.selectedId || 0) || 0;
+  const cachedHandoffPackage = assignmentId > 0 ? state.assignments.handoffSourcePackages?.[assignmentId] || null : null;
+  const handoffPackageState = cachedHandoffPackage && typeof cachedHandoffPackage === "object"
+    ? cachedHandoffPackage
+    : null;
+  const requestedCheckGroups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackageState);
+  if (requestedChecksWrapNode) {
+    requestedChecksWrapNode.classList.toggle("hidden", !requestedCheckGroups.length);
+  }
+  if (requestedChecksNode) {
+    if (!requestedCheckGroups.length) {
+      const handoffLoadState = assignmentId > 0 ? state.assignments.handoffSourceLoaded?.[assignmentId] : null;
+      if (assignmentId > 0 && handoffLoadState !== true && !handoffLoadState && !isEditorUser()) {
+        requestedChecksNode.className = "assignment-brief-empty";
+        requestedChecksNode.innerHTML = "กำลังโหลดรายการที่ขอจากชุดส่งงาน...";
+        loadAssignmentRequestedCheckHandoffSource(assignment).catch(() => {});
+      } else {
+        requestedChecksNode.className = "assignment-brief-empty";
+        requestedChecksNode.innerHTML = "ไม่มีรายการที่ขอในชุดส่งงานนี้";
+      }
+    } else {
+      const existingDraft = state.assignments.requestedCheckReturnDrafts?.[assignmentId] || null;
+      const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackageState);
+      state.assignments.requestedCheckReturnDrafts[assignmentId] = normalizedDraft;
+      requestedChecksNode.className = "assignment-brief-grid";
+      requestedChecksNode.innerHTML = buildAssignmentRequestedCheckReturnSectionHtml(assignment, handoffPackageState, normalizedDraft);
+      requestedChecksNode.querySelectorAll("[data-requested-check-row]").forEach((rowNode) => updateAssignmentRequestedCheckReturnRowState(rowNode));
+    }
+  }
   verifiedNode.className = "assignment-brief-grid";
   verifiedNode.innerHTML = buildAssignmentSubmissionPromptInputs(
     formConfig.verifiedPrompts,
@@ -7078,6 +7153,326 @@ function getAssignmentSubmissionFormConfig(assignment = null, fieldPack = null) 
   };
 }
 
+function normalizeAssignmentRequestedCheckKeyPart(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function buildAssignmentRequestedCheckReturnKey(groupKey, checkKey) {
+  const group = normalizeAssignmentRequestedCheckKeyPart(groupKey);
+  const key = normalizeAssignmentRequestedCheckKeyPart(checkKey);
+  return group && key ? `${group}.${key}` : "";
+}
+
+function formatRequestedCheckSuggestedValue(value, answerType = "text") {
+  if (value == null) return "";
+  if (answerType === "multi_select" && Array.isArray(value)) return value.join("\n");
+  if ((answerType === "boolean" || answerType === "boolean_with_conditions") && typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  if (answerType === "number_with_unit" && value && typeof value === "object" && !Array.isArray(value)) {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value || "");
+}
+
+function getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage = null) {
+  const requestedChecks = handoffPackage && typeof handoffPackage === "object" && !Array.isArray(handoffPackage)
+    ? handoffPackage.requested_checks
+    : null;
+  const groups = Array.isArray(requestedChecks?.groups) ? requestedChecks.groups : [];
+  return groups
+    .map((group) => {
+      const groupKey = normalizeAssignmentRequestedCheckKeyPart(group?.group_key);
+      const groupLabel = String(group?.group_label || "").trim() || groupKey;
+      if (!groupKey) return null;
+      const checks = Array.isArray(group?.checks) ? group.checks : [];
+      const requestedChecksForGroup = checks
+        .map((check) => {
+          const checkKey = normalizeAssignmentRequestedCheckKeyPart(check?.key);
+          const returnKey = buildAssignmentRequestedCheckReturnKey(groupKey, checkKey);
+          if (!returnKey || check?.requested !== true) return null;
+          return {
+            group_key: groupKey,
+            group_label: groupLabel,
+            check_key: checkKey,
+            return_key: returnKey,
+            label: String(check?.label || "").trim(),
+            instruction: String(check?.instruction || "").trim(),
+            answer_type: String(check?.answer_type || "text").trim().toLowerCase() || "text",
+            suggested_value: Object.prototype.hasOwnProperty.call(check || {}, "suggested_value")
+              ? check.suggested_value
+              : null,
+            evidence_required: check?.evidence_required === true,
+            source: check?.source || null,
+          };
+        })
+        .filter(Boolean);
+      if (!requestedChecksForGroup.length) return null;
+      return {
+        group_key: groupKey,
+        group_label: groupLabel,
+        checks: requestedChecksForGroup,
+      };
+    })
+    .filter(Boolean);
+}
+
+function getAssignmentRequestedCheckDefaultValue(answerType = "text") {
+  const normalized = String(answerType || "").trim().toLowerCase();
+  if (normalized === "multi_select") return [];
+  if (normalized === "number_with_unit") return { number: "", unit: "" };
+  if (normalized === "boolean" || normalized === "boolean_with_conditions" || normalized === "note_only") return null;
+  return "";
+}
+
+function buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage = null) {
+  const groups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage);
+  const requestedCheckReturns = {};
+  groups.forEach((group) => {
+    (Array.isArray(group.checks) ? group.checks : []).forEach((check) => {
+      requestedCheckReturns[check.return_key] = {
+        group_key: group.group_key,
+        group_label: group.group_label,
+        check_key: check.check_key,
+        return_key: check.return_key,
+        answer_type: check.answer_type,
+        checked: false,
+        value: getAssignmentRequestedCheckDefaultValue(check.answer_type),
+        condition_note: "",
+        evidence: "",
+        note: "",
+        label: check.label,
+        instruction: check.instruction,
+        suggested_value: check.suggested_value,
+        evidence_required: check.evidence_required,
+        source: check.source,
+      };
+    });
+  });
+  return { requested_check_returns: requestedCheckReturns };
+}
+
+function normalizeAssignmentRequestedCheckReturnDraft(draft = null, handoffPackage = null) {
+  const base = buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage);
+  const incoming = draft && typeof draft === "object" && !Array.isArray(draft) ? draft : {};
+  const incomingReturns = incoming.requested_check_returns && typeof incoming.requested_check_returns === "object" && !Array.isArray(incoming.requested_check_returns)
+    ? incoming.requested_check_returns
+    : {};
+  const requestedCheckReturns = {};
+  const keys = new Set([...Object.keys(base.requested_check_returns || {}), ...Object.keys(incomingReturns || {})]);
+  keys.forEach((returnKey) => {
+    const baseRow = base.requested_check_returns?.[returnKey] || {};
+    const incomingRow = incomingReturns?.[returnKey] && typeof incomingReturns[returnKey] === "object" && !Array.isArray(incomingReturns[returnKey])
+      ? incomingReturns[returnKey]
+      : {};
+    requestedCheckReturns[returnKey] = {
+      ...baseRow,
+      ...incomingRow,
+      checked: incomingRow.checked === true,
+      condition_note: String(incomingRow.condition_note == null ? baseRow.condition_note || "" : incomingRow.condition_note || "").trim(),
+      evidence: String(incomingRow.evidence == null ? baseRow.evidence || "" : incomingRow.evidence || "").trim(),
+      note: String(incomingRow.note == null ? baseRow.note || "" : incomingRow.note || "").trim(),
+      value: Object.prototype.hasOwnProperty.call(incomingRow, "value")
+        ? incomingRow.value
+        : baseRow.value,
+      answer_type: String(incomingRow.answer_type || baseRow.answer_type || "text").trim().toLowerCase() || "text",
+    };
+  });
+  return { requested_check_returns: requestedCheckReturns };
+}
+
+function buildAssignmentRequestedCheckReturnPayloadFromDraft(draft = null) {
+  const normalized = normalizeAssignmentRequestedCheckReturnDraft(draft, null);
+  const requested_check_returns = {};
+  Object.entries(normalized.requested_check_returns || {}).forEach(([returnKey, row]) => {
+    requested_check_returns[returnKey] = {
+      checked: row.checked === true,
+      value: row.value == null ? null : row.value,
+      condition_note: String(row.condition_note || "").trim() || null,
+      evidence: String(row.evidence || "").trim() || null,
+      note: String(row.note || "").trim() || null,
+    };
+  });
+  return Object.keys(requested_check_returns).length ? { requested_check_returns } : null;
+}
+
+function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
+  const answerType = String(row?.answer_type || "text").trim().toLowerCase() || "text";
+  const checked = row?.checked === true;
+  const disabledAttr = checked ? "" : "disabled";
+  if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+    const currentValue = row?.value === true ? "true" : (row?.value === false ? "false" : "");
+    return `
+      <select data-requested-check-field="value" ${disabledAttr}>
+        <option value="" ${currentValue === "" ? "selected" : ""}>-- ยังไม่ระบุ --</option>
+        <option value="true" ${currentValue === "true" ? "selected" : ""}>ใช่</option>
+        <option value="false" ${currentValue === "false" ? "selected" : ""}>ไม่ใช่</option>
+      </select>
+    `;
+  }
+  if (answerType === "multi_select") {
+    const listValue = Array.isArray(row?.value) ? row.value : [];
+    return `<textarea data-requested-check-field="value" rows="3" placeholder="ใส่ทีละบรรทัด"${disabledAttr}>${escapeHtml(listValue.map((value) => String(value || "").trim()).filter(Boolean).join("\n"))}</textarea>`;
+  }
+  if (answerType === "number_with_unit") {
+    const numberValue = row?.value && typeof row.value === "object" && !Array.isArray(row.value)
+      ? String(row.value.number ?? "").trim()
+      : "";
+    const unitValue = row?.value && typeof row.value === "object" && !Array.isArray(row.value)
+      ? String(row.value.unit ?? "").trim()
+      : "";
+    return `
+      <div class="grid">
+        <div>
+          <label>จำนวน</label>
+          <input data-requested-check-field="value-number" type="number" value="${escapeHtml(numberValue)}" ${disabledAttr} />
+        </div>
+        <div>
+          <label>หน่วย</label>
+          <input data-requested-check-field="value-unit" type="text" value="${escapeHtml(unitValue)}" placeholder="เช่น คน, คัน, กิโลกรัม" ${disabledAttr} />
+        </div>
+      </div>
+    `;
+  }
+  const inputType = answerType === "url"
+    ? "url"
+    : answerType === "phone"
+      ? "tel"
+      : "text";
+  const value = row?.value == null ? "" : String(row.value || "");
+  return `<input data-requested-check-field="value" type="${escapeHtml(inputType)}" value="${escapeHtml(value)}" ${disabledAttr} />`;
+}
+
+function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, handoffPackage = null, draft = null) {
+  const groups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage);
+  if (!groups.length) return "";
+  const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(draft, handoffPackage);
+  return groups.map((group) => `
+    <div class="assignment-brief-card" data-requested-check-group="${escapeHtml(group.group_key)}">
+      <h5 class="assignment-subtitle" style="margin-top:0;">${escapeHtml(group.group_label)}</h5>
+      <div class="assignment-brief-grid">
+        ${(Array.isArray(group.checks) ? group.checks : []).map((check) => {
+          const row = normalizedDraft.requested_check_returns?.[check.return_key] || {};
+          const checked = row.checked === true;
+          return `
+            <div class="assignment-brief-section" data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
+              <div class="assignment-brief-text"><strong>${escapeHtml(check.label || check.check_key)}</strong></div>
+              ${check.instruction ? `<div class="assignment-brief-meta">${escapeHtml(check.instruction)}</div>` : ""}
+              ${check.suggested_value != null ? `<div class="assignment-brief-meta">ข้อมูลที่ระบบแนะนำให้ตรวจ: ${escapeHtml(formatRequestedCheckSuggestedValue(check.suggested_value, check.answer_type) || "-")}</div>` : ""}
+              ${check.evidence_required ? `<div class="assignment-brief-meta"><strong>ต้องมีหลักฐาน</strong></div>` : ""}
+              <label class="assignment-inline-check" style="margin-top:8px;">
+                <input data-requested-check-field="checked" type="checkbox" ${checked ? "checked" : ""} />
+                <span>ตรวจแล้ว</span>
+              </label>
+              <div class="grid" style="margin-top:8px;">
+                <div>
+                  <label>คำตอบ / ค่าที่พบ</label>
+                  ${buildAssignmentRequestedCheckReturnValueInputHtml(row)}
+                </div>
+                <div>
+                  <label>เงื่อนไข/ข้อจำกัด</label>
+                  <textarea data-requested-check-field="condition_note" rows="3" placeholder="เช่น จำกัดเฉพาะโซน outdoor">${escapeHtml(String(row.condition_note || ""))}</textarea>
+                </div>
+                <div>
+                  <label>หลักฐาน/แหล่งที่มา</label>
+                  <textarea data-requested-check-field="evidence" rows="3" placeholder="แนบลิงก์หรือคำบรรยายหลักฐาน">${escapeHtml(String(row.evidence || ""))}</textarea>
+                </div>
+                <div class="full-span">
+                  <label>หมายเหตุ</label>
+                  <textarea data-requested-check-field="note" rows="2" placeholder="หมายเหตุเพิ่มเติม">${escapeHtml(String(row.note || ""))}</textarea>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `).join("");
+}
+
+function updateAssignmentRequestedCheckReturnRowState(rowNode) {
+  if (!rowNode) return;
+  const checked = rowNode.querySelector("[data-requested-check-field='checked']")?.checked === true;
+  const answerType = String(rowNode.getAttribute("data-requested-check-answer-type") || "text").trim().toLowerCase() || "text";
+  const valueField = rowNode.querySelector("[data-requested-check-field='value']");
+  const valueNumberField = rowNode.querySelector("[data-requested-check-field='value-number']");
+  const valueUnitField = rowNode.querySelector("[data-requested-check-field='value-unit']");
+  if (valueField) valueField.disabled = !checked;
+  if (valueNumberField) valueNumberField.disabled = !checked;
+  if (valueUnitField) valueUnitField.disabled = !checked;
+  rowNode.classList.toggle("is-muted", !checked);
+  if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+    if (valueField) valueField.value = checked ? valueField.value : "";
+  }
+}
+
+function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
+  const id = Number(assignmentId || 0) || 0;
+  if (!id) return null;
+  const formNode = qs("assignment-submission-requested-checks-fields");
+  if (!formNode) return null;
+  const requested_check_returns = {};
+  formNode.querySelectorAll("[data-requested-check-row]").forEach((rowNode) => {
+    const returnKey = String(rowNode.getAttribute("data-requested-check-return-key") || "").trim().toLowerCase();
+    if (!returnKey) return;
+    const answerType = String(rowNode.getAttribute("data-requested-check-answer-type") || "text").trim().toLowerCase() || "text";
+    const checked = rowNode.querySelector("[data-requested-check-field='checked']")?.checked === true;
+    let value = null;
+    if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+      const rawValue = String(rowNode.querySelector("[data-requested-check-field='value']")?.value || "").trim().toLowerCase();
+      if (rawValue === "true") value = true;
+      else if (rawValue === "false") value = false;
+      else value = null;
+    } else if (answerType === "multi_select") {
+      value = String(rowNode.querySelector("[data-requested-check-field='value']")?.value || "").split("\n").map((part) => String(part || "").trim()).filter(Boolean);
+    } else if (answerType === "number_with_unit") {
+      const numberValue = String(rowNode.querySelector("[data-requested-check-field='value-number']")?.value || "").trim();
+      const unitValue = String(rowNode.querySelector("[data-requested-check-field='value-unit']")?.value || "").trim();
+      const numeric = Number(numberValue);
+      value = Number.isFinite(numeric) ? { number: numeric, unit: unitValue || null } : null;
+    } else if (answerType === "note_only") {
+      value = null;
+    } else {
+      value = String(rowNode.querySelector("[data-requested-check-field='value']")?.value || "").trim();
+    }
+    const condition_note = String(rowNode.querySelector("[data-requested-check-field='condition_note']")?.value || "").trim();
+    const evidence = String(rowNode.querySelector("[data-requested-check-field='evidence']")?.value || "").trim();
+    const note = String(rowNode.querySelector("[data-requested-check-field='note']")?.value || "").trim();
+    requested_check_returns[returnKey] = {
+      checked,
+      value,
+      condition_note,
+      evidence,
+      note,
+      answer_type: answerType,
+    };
+  });
+  return { requested_check_returns };
+}
+
+function syncAssignmentRequestedCheckReturnDraftFromForm(assignmentId = state.assignments.selectedId) {
+  const id = Number(assignmentId || 0) || 0;
+  if (!id) return null;
+  const currentDraft = readAssignmentRequestedCheckReturnDraftFromForm(id);
+  const handoffPackage = state.assignments.handoffSourcePackages?.[id] || null;
+  const normalized = normalizeAssignmentRequestedCheckReturnDraft(currentDraft, handoffPackage);
+  state.assignments.requestedCheckReturnDrafts[id] = normalized;
+  return normalized;
+}
+
+function rerenderAssignmentRequestedCheckSurfaces(assignmentId) {
+  if (Number(state.assignments.selectedId || 0) !== Number(assignmentId || 0)) return;
+  renderAssignmentHandoffBrief();
+  renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId), getAssignmentPageMode()));
+}
+
 function renderAssignmentHandoffBrief() {
   const node = qs("assignment-handoff-brief");
   if (!node) return;
@@ -7140,6 +7535,27 @@ function renderAssignmentHandoffBrief() {
       ${renderAssignmentBriefList(mustCapture, "ยังไม่ได้ระบุ")}
     </div>
   `;
+
+  const assignmentId = Number(state.assignments.selectedId || 0) || 0;
+  const requestedCheckGroups = assignmentId > 0
+    ? getAssignmentRequestedCheckGroupsFromHandoffPackage(state.assignments.handoffSourcePackages?.[assignmentId] || null)
+    : [];
+  if (requestedCheckGroups.length) {
+    node.insertAdjacentHTML(
+      "beforeend",
+      `
+        <div class="assignment-brief-section full-span">
+          <div class="assignment-brief-label"><span class="workflow-badge workflow-badge-sent">รายการที่ขอ</span></div>
+          ${renderAssignmentBriefList(
+            requestedCheckGroups.flatMap((group) =>
+              (Array.isArray(group.checks) ? group.checks : []).map((check) => `${group.group_label} · ${check.label || check.check_key}`)
+            ),
+            "ยังไม่มีรายการที่ขอ"
+          )}
+        </div>
+      `
+    );
+  }
 }
 
 function getAssignmentDeliverableLabel(type) {
@@ -7814,6 +8230,7 @@ function selectAssignment(assignmentId, { trackOnly = false, submittedView = fal
       });
   }
   if (!isEditorUser()) {
+    loadAssignmentRequestedCheckHandoffSource(assignment).catch(() => {});
     loadAssignmentDeliverablesBundle({ showStatus: false }).catch(() => {
       state.assignments.deliverablesBundle = null;
       renderAssignmentDeliverablesSummary(null, assignment);
@@ -8579,8 +8996,14 @@ async function createAssignmentSubmission() {
   const action = assignmentState === "revision_requested" ? "resubmit" : "submit";
   const body = { action };
   const articlePayload = buildAssignmentSubmissionArticlePayload();
+  const requestedCheckReturnPayload = buildAssignmentRequestedCheckReturnPayloadFromDraft(
+    syncAssignmentRequestedCheckReturnDraftFromForm(assignmentId)
+  );
   writeAssignmentSubmissionDraft(assignmentId, articlePayload, assignment);
   body.article_payload_json = articlePayload;
+  if (requestedCheckReturnPayload) {
+    body.field_return_payload_json = requestedCheckReturnPayload;
+  }
 
   assertAssignmentCaptureUploadsComplete(assignmentId, formConfig.captureItems);
   const uploadQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
@@ -9656,6 +10079,20 @@ function wireAssignments() {
     syncAssignmentSubmissionDraftFromForm();
     const assignment = getAssignmentById(state.assignments.selectedId);
     renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(state.assignments.selectedId, getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack)));
+  });
+  qs("assignment-submission-requested-checks-fields")?.addEventListener("input", (event) => {
+    const target = event.target?.closest?.("[data-requested-check-row]") || null;
+    if (target) {
+      updateAssignmentRequestedCheckReturnRowState(target);
+    }
+    syncAssignmentRequestedCheckReturnDraftFromForm();
+  });
+  qs("assignment-submission-requested-checks-fields")?.addEventListener("change", (event) => {
+    const target = event.target?.closest?.("[data-requested-check-row]") || null;
+    if (target) {
+      updateAssignmentRequestedCheckReturnRowState(target);
+    }
+    syncAssignmentRequestedCheckReturnDraftFromForm();
   });
   qs("assignment-submission-additional-text")?.addEventListener("input", () => {
     syncAssignmentSubmissionDraftFromForm();

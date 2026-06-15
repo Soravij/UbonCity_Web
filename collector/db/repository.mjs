@@ -786,6 +786,632 @@ function normalizeStringListInput(value, fieldName) {
   }
   return out;
 }
+
+const CTA_CONTACT_KEYS = Object.freeze(["phone", "line_url", "facebook_url", "website_url"]);
+const TAXONOMY_KEYS = Object.freeze(["category", "subtype"]);
+const CONFIDENCE_VALUES = new Set(["unknown", "low", "medium", "high", "verified"]);
+const CURATION_STATUS_VALUES = new Set(["not_started", "in_review", "curated"]);
+const CONFIRMED_META_STATUS_VALUES = new Set(["not_started", "in_review", "confirmed"]);
+const PRIMARY_CTA_VALUES = new Set(["map", "phone", "line"]);
+
+function defaultAiCtaContact() {
+  return {
+    phone: null,
+    line_url: null,
+    facebook_url: null,
+    website_url: null,
+    primary_cta: null,
+    source: [],
+    confidence: "unknown",
+    note: null,
+  };
+}
+
+function defaultAiTaxonomy() {
+  return {
+    category: null,
+    subtype: null,
+    tags: [],
+    source: [],
+    confidence: "unknown",
+    note: null,
+  };
+}
+
+function defaultCuratedCtaContact() {
+  return {
+    phone: { checked: false, found: false, value: null, source: [], note: null },
+    line_url: { checked: false, found: false, value: null, source: [], note: null },
+    facebook_url: { checked: false, found: false, value: null, source: [], note: null },
+    website_url: { checked: false, found: false, value: null, source: [], note: null },
+    primary_cta: { checked: false, found: false, value: null, note: null },
+  };
+}
+
+function defaultCuratedTaxonomy() {
+  return {
+    category: { checked: false, found: false, value: null, note: null },
+    subtype: { checked: false, found: false, value: null, note: null },
+    tags: { checked: false, found: false, value: [], note: null },
+  };
+}
+
+function defaultRequestedChecksJson() {
+  return {
+    version: 1,
+    groups: [],
+  };
+}
+
+function defaultFieldReturnPayload() {
+  return {
+    checklist_results: [],
+    cta_return: {},
+    taxonomy_return: {},
+    requested_check_returns: {},
+    note: null,
+  };
+}
+
+function defaultConfirmedCtaContact() {
+  return {
+    phone: null,
+    line_url: null,
+    facebook_url: null,
+    website_url: null,
+    primary_cta: null,
+  };
+}
+
+function defaultConfirmedTaxonomy() {
+  return {
+    category: null,
+    subtype: null,
+    tags: [],
+  };
+}
+
+function normalizeConfidenceValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CONFIDENCE_VALUES.has(normalized) ? normalized : "unknown";
+}
+
+function normalizePrimaryCtaValue(value, fieldName) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (!PRIMARY_CTA_VALUES.has(normalized)) {
+    throw new Error(`${fieldName} must be one of: map, phone, line`);
+  }
+  return normalized;
+}
+
+function normalizeJsonSourceList(value, fieldName) {
+  if (value == null || value === "") return [];
+  try {
+    return normalizeStringListInput(Array.isArray(value) ? value : JSON.stringify(value), fieldName);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeOptionalUrlValue(value, fieldName) {
+  if (value == null || value === "") return null;
+  return normalizeHttpUrl(value, fieldName);
+}
+
+function normalizeJsonSafeValue(value) {
+  if (value == null) return null;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRequestedCheckAnswerType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return [
+    "text",
+    "url",
+    "phone",
+    "select",
+    "multi_select",
+    "boolean",
+    "boolean_with_conditions",
+    "number_with_unit",
+    "hours",
+    "note_only",
+  ].includes(normalized)
+    ? normalized
+    : "text";
+}
+
+function normalizeRequestedCheckReturnKey(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  return raw
+    .split(".")
+    .map((part) => String(part || "")
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, ""))
+    .filter(Boolean)
+    .join(".");
+}
+
+function normalizeRequestedCheckSource(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const kind = String(value.kind || "").trim().toLowerCase() || null;
+  const confidence = value.confidence == null ? null : normalizeConfidenceValue(value.confidence);
+  const note = value.note == null ? null : String(value.note || "").trim() || null;
+  if (!kind && !confidence && !note) return null;
+  const next = {};
+  if (kind) next.kind = kind;
+  if (confidence) next.confidence = confidence;
+  if (note) next.note = note;
+  return next;
+}
+
+function normalizeRequestedCheckValueByAnswerType(value, answerType, fieldName) {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    if (answerType === "url") {
+      try {
+        return normalizeOptionalUrlValue(value, fieldName);
+      } catch {
+        return String(value || "").trim() || null;
+      }
+    }
+    return String(value || "").trim() || null;
+  }
+  return normalizeJsonSafeValue(value);
+}
+
+function normalizeRequestedChecksJson(value, fieldName = "requested_checks_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultRequestedChecksJson();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  const groupsRaw = Array.isArray(parsed.groups) ? parsed.groups : [];
+  return {
+    version: 1,
+    groups: groupsRaw
+      .map((group, groupIndex) => {
+        if (!group || typeof group !== "object" || Array.isArray(group)) return null;
+        const groupKey = String(group.group_key || "").trim().toLowerCase();
+        if (!["cta_contact", "taxonomy", "custom"].includes(groupKey)) return null;
+        const checksRaw = Array.isArray(group.checks) ? group.checks : [];
+        const checks = checksRaw
+          .map((check, checkIndex) => {
+            if (!check || typeof check !== "object" || Array.isArray(check)) return null;
+            const answerType = normalizeRequestedCheckAnswerType(check.answer_type);
+            return {
+              key: String(check.key || "").trim().toLowerCase() || `check_${groupIndex}_${checkIndex}`,
+              requested: Boolean(check.requested),
+              label: String(check.label || "").trim() || "",
+              instruction: String(check.instruction || "").trim() || "",
+              answer_type: answerType,
+              suggested_value: normalizeRequestedCheckValueByAnswerType(
+                check.suggested_value,
+                answerType,
+                `${fieldName}.groups[${groupIndex}].checks[${checkIndex}].suggested_value`
+              ),
+              condition_prompt: check.condition_prompt == null ? null : String(check.condition_prompt || "").trim() || null,
+              evidence_required: Boolean(check.evidence_required),
+              source: normalizeRequestedCheckSource(check.source),
+            };
+          })
+          .filter(Boolean);
+        return {
+          group_key: groupKey,
+          group_label: String(group.group_label || "").trim() || groupKey,
+          checks,
+        };
+      })
+      .filter(Boolean),
+  };
+}
+
+function hasMeaningfulValue(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  return String(value || "").trim().length > 0;
+}
+
+function normalizeAiCtaContactJson(value, fieldName = "ai_cta_contact_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultAiCtaContact();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    phone: parsed.phone == null ? null : String(parsed.phone || "").trim() || null,
+    line_url: normalizeOptionalUrlValue(parsed.line_url, `${fieldName}.line_url`),
+    facebook_url: normalizeOptionalUrlValue(parsed.facebook_url, `${fieldName}.facebook_url`),
+    website_url: normalizeOptionalUrlValue(parsed.website_url, `${fieldName}.website_url`),
+    primary_cta: normalizePrimaryCtaValue(parsed.primary_cta, `${fieldName}.primary_cta`),
+    source: normalizeJsonSourceList(parsed.source, `${fieldName}.source`),
+    confidence: normalizeConfidenceValue(parsed.confidence),
+    note: parsed.note == null ? null : String(parsed.note || "").trim() || null,
+  };
+}
+
+function normalizeAiTaxonomyJson(value, fieldName = "ai_taxonomy_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultAiTaxonomy();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    category: parsed.category == null ? null : String(parsed.category || "").trim() || null,
+    subtype: parsed.subtype == null ? null : String(parsed.subtype || "").trim() || null,
+    tags: normalizeJsonSourceList(parsed.tags, `${fieldName}.tags`),
+    source: normalizeJsonSourceList(parsed.source, `${fieldName}.source`),
+    confidence: normalizeConfidenceValue(parsed.confidence),
+    note: parsed.note == null ? null : String(parsed.note || "").trim() || null,
+  };
+}
+
+function normalizeCuratedCtaFieldValue(rawValue, fieldName, kind = "text") {
+  const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
+  const checked = Boolean(row.checked);
+  let value = null;
+  if (kind === "url") value = normalizeOptionalUrlValue(row.value, `${fieldName}.value`);
+  else if (kind === "primary_cta") value = normalizePrimaryCtaValue(row.value, `${fieldName}.value`);
+  else value = row.value == null ? null : String(row.value || "").trim() || null;
+  return {
+    checked,
+    found: checked && hasMeaningfulValue(value),
+    value,
+    source: kind === "primary_cta" ? undefined : normalizeJsonSourceList(row.source, `${fieldName}.source`),
+    note: row.note == null ? null : String(row.note || "").trim() || null,
+  };
+}
+
+function normalizeCuratedCtaContactJson(value, fieldName = "curated_cta_contact_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultCuratedCtaContact();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    phone: normalizeCuratedCtaFieldValue(parsed.phone, `${fieldName}.phone`, "text"),
+    line_url: normalizeCuratedCtaFieldValue(parsed.line_url, `${fieldName}.line_url`, "url"),
+    facebook_url: normalizeCuratedCtaFieldValue(parsed.facebook_url, `${fieldName}.facebook_url`, "url"),
+    website_url: normalizeCuratedCtaFieldValue(parsed.website_url, `${fieldName}.website_url`, "url"),
+    primary_cta: (() => {
+      const normalized = normalizeCuratedCtaFieldValue(parsed.primary_cta, `${fieldName}.primary_cta`, "primary_cta");
+      return {
+        checked: normalized.checked,
+        found: normalized.found,
+        value: normalized.value,
+        note: normalized.note,
+      };
+    })(),
+  };
+}
+
+function normalizeCuratedTaxonomyJson(value, fieldName = "curated_taxonomy_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultCuratedTaxonomy();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  const normalizeEntry = (rawValue, entryFieldName, isArray = false) => {
+    const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
+    const checked = Boolean(row.checked);
+    const valueNormalized = isArray
+      ? normalizeJsonSourceList(row.value, `${entryFieldName}.value`)
+      : row.value == null ? null : String(row.value || "").trim() || null;
+    return {
+      checked,
+      found: checked && hasMeaningfulValue(valueNormalized),
+      value: valueNormalized,
+      note: row.note == null ? null : String(row.note || "").trim() || null,
+    };
+  };
+  return {
+    category: normalizeEntry(parsed.category, `${fieldName}.category`),
+    subtype: normalizeEntry(parsed.subtype, `${fieldName}.subtype`),
+    tags: normalizeEntry(parsed.tags, `${fieldName}.tags`, true),
+  };
+}
+
+function normalizeFieldReturnEvidence(rawValue, fieldName) {
+  const evidenceDeliverableId = rawValue?.evidence_deliverable_id == null || rawValue.evidence_deliverable_id === ""
+    ? null
+    : Number(rawValue.evidence_deliverable_id || 0) || null;
+  let evidenceSourceUrl = null;
+  try {
+    evidenceSourceUrl = normalizeOptionalUrlValue(rawValue?.evidence_source_url, `${fieldName}.evidence_source_url`);
+  } catch {
+    evidenceSourceUrl = null;
+  }
+  return {
+    evidence_deliverable_id: evidenceDeliverableId,
+    evidence_source_url: evidenceSourceUrl,
+  };
+}
+
+function normalizeFieldReturnCtaEntry(rawValue, fieldName, kind = "text") {
+  const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
+  const checked = Boolean(row.checked);
+  const evidence = normalizeFieldReturnEvidence(row, fieldName);
+  let value = null;
+  if (checked) {
+    try {
+      if (kind === "url") value = normalizeOptionalUrlValue(row.value, `${fieldName}.value`);
+      else if (kind === "primary_cta") value = normalizePrimaryCtaValue(row.value, `${fieldName}.value`);
+      else value = row.value == null ? null : String(row.value || "").trim() || null;
+    } catch {
+      value = null;
+    }
+  }
+  return {
+    checked,
+    found: checked && (hasMeaningfulValue(value) || evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url)),
+    value: checked ? value : null,
+    note: row.note == null ? null : String(row.note || "").trim() || null,
+    evidence_deliverable_id: evidence.evidence_deliverable_id,
+    evidence_source_url: evidence.evidence_source_url,
+  };
+}
+
+function defaultFieldReturnCtaShape() {
+  return {
+    phone: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    line_url: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    facebook_url: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    website_url: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    primary_cta: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+  };
+}
+
+function normalizeFieldReturnCtaJson(value, fieldName = "field_return_payload_json.cta_return") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultFieldReturnCtaShape();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    phone: normalizeFieldReturnCtaEntry(parsed.phone, `${fieldName}.phone`, "text"),
+    line_url: normalizeFieldReturnCtaEntry(parsed.line_url, `${fieldName}.line_url`, "url"),
+    facebook_url: normalizeFieldReturnCtaEntry(parsed.facebook_url, `${fieldName}.facebook_url`, "url"),
+    website_url: normalizeFieldReturnCtaEntry(parsed.website_url, `${fieldName}.website_url`, "url"),
+    primary_cta: normalizeFieldReturnCtaEntry(parsed.primary_cta, `${fieldName}.primary_cta`, "primary_cta"),
+  };
+}
+
+function normalizeFieldReturnTaxonomyEntry(rawValue, fieldName, isTags = false) {
+  const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
+  const checked = Boolean(row.checked);
+  const evidence = normalizeFieldReturnEvidence(row, fieldName);
+  let value = isTags ? [] : null;
+  if (checked) {
+    try {
+      if (isTags) value = Array.isArray(row.value) ? normalizeStringListInput(row.value, `${fieldName}.value`) : [];
+      else value = row.value == null ? null : String(row.value || "").trim() || null;
+    } catch {
+      value = isTags ? [] : null;
+    }
+  }
+  return {
+    checked,
+    found: checked && (hasMeaningfulValue(value) || evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url)),
+    value: checked ? value : (isTags ? [] : null),
+    note: row.note == null ? null : String(row.note || "").trim() || null,
+    evidence_deliverable_id: evidence.evidence_deliverable_id,
+    evidence_source_url: evidence.evidence_source_url,
+  };
+}
+
+function defaultFieldReturnTaxonomyShape() {
+  return {
+    category: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    subtype: { checked: false, found: false, value: null, note: null, evidence_deliverable_id: null, evidence_source_url: null },
+    tags: { checked: false, found: false, value: [], note: null, evidence_deliverable_id: null, evidence_source_url: null },
+  };
+}
+
+function normalizeFieldReturnTaxonomyJson(value, fieldName = "field_return_payload_json.taxonomy_return") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultFieldReturnTaxonomyShape();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    category: normalizeFieldReturnTaxonomyEntry(parsed.category, `${fieldName}.category`, false),
+    subtype: normalizeFieldReturnTaxonomyEntry(parsed.subtype, `${fieldName}.subtype`, false),
+    tags: normalizeFieldReturnTaxonomyEntry(parsed.tags, `${fieldName}.tags`, true),
+  };
+}
+
+function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName) {
+  if (rawValue == null) {
+    return answerType === "multi_select" ? [] : null;
+  }
+  try {
+    if (answerType === "url") return normalizeOptionalUrlValue(rawValue, fieldName);
+    if (["text", "phone", "select", "hours"].includes(answerType)) {
+      return String(rawValue || "").trim() || null;
+    }
+    if (answerType === "multi_select") {
+      return Array.isArray(rawValue) ? normalizeStringListInput(rawValue, fieldName) : [];
+    }
+    if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+      return typeof rawValue === "boolean" ? rawValue : null;
+    }
+    if (answerType === "number_with_unit") {
+      if (typeof rawValue === "number" && Number.isFinite(rawValue)) return { number: rawValue, unit: null };
+      if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) return null;
+      const numeric = Number(rawValue.number);
+      return Number.isFinite(numeric)
+        ? { number: numeric, unit: rawValue.unit == null ? null : String(rawValue.unit || "").trim() || null }
+        : null;
+    }
+    if (answerType === "note_only") return null;
+  } catch {
+    return answerType === "multi_select" ? [] : null;
+  }
+  return normalizeJsonSafeValue(rawValue);
+}
+
+function inferRequestedCheckAnswerTypeFromReturnRow(row) {
+  const explicitAnswerType = String(row?.answer_type || "").trim().toLowerCase();
+  if (explicitAnswerType) return normalizeRequestedCheckAnswerType(explicitAnswerType);
+  const value = row?.value;
+  if (Array.isArray(value)) return "multi_select";
+  if (value && typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "number") || Object.prototype.hasOwnProperty.call(value, "unit")) {
+      return "number_with_unit";
+    }
+    return "text";
+  }
+  if (typeof value === "boolean") {
+    return (row?.condition_note || row?.note) ? "boolean_with_conditions" : "boolean";
+  }
+  if (!hasMeaningfulValue(value) && (row?.condition_note || row?.note)) {
+    return "note_only";
+  }
+  return "text";
+}
+
+function normalizeRequestedCheckReturnEntry(rawValue, fieldName) {
+  const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
+  const checked = Boolean(row.checked);
+  const answerType = inferRequestedCheckAnswerTypeFromReturnRow(row);
+  const evidence = normalizeFieldReturnEvidence(row, fieldName);
+  const evidenceText = row.evidence == null ? null : String(row.evidence || "").trim() || null;
+  const note = row.note == null ? null : String(row.note || "").trim() || null;
+  const conditionNote = row.condition_note == null ? null : String(row.condition_note || "").trim() || null;
+  const value = checked
+    ? normalizeRequestedCheckReturnValue(row.value, answerType, `${fieldName}.value`)
+    : (answerType === "multi_select" ? null : null);
+  const hasEvidence = evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url) || Boolean(evidenceText);
+  const hasCondition = Boolean(conditionNote);
+  const hasNote = Boolean(note);
+  const found = checked && (
+    hasMeaningfulValue(value)
+    || hasEvidence
+    || (answerType === "note_only" && (hasNote || hasCondition))
+    || (answerType === "boolean_with_conditions" && (value === true || hasCondition))
+  );
+  return {
+    checked,
+    found,
+    answer_type: answerType,
+    value: checked ? value : null,
+    condition_note: checked ? conditionNote : null,
+    evidence: checked ? evidenceText : null,
+    note,
+    evidence_deliverable_id: checked ? evidence.evidence_deliverable_id : null,
+    evidence_source_url: checked ? evidence.evidence_source_url : null,
+  };
+}
+
+function normalizeRequestedCheckReturns(value, fieldName = "field_return_payload_json.requested_check_returns") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  return Object.entries(parsed).reduce((acc, [key, row]) => {
+    const normalizedKey = normalizeRequestedCheckReturnKey(key);
+    if (!normalizedKey) return acc;
+    acc[normalizedKey] = normalizeRequestedCheckReturnEntry(row, `${fieldName}.${normalizedKey}`);
+    return acc;
+  }, {});
+}
+
+function normalizeFieldReturnPayloadJson(value, fieldName = "field_return_payload_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultFieldReturnPayload();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  const checklistResultsRaw = Array.isArray(parsed.checklist_results) ? parsed.checklist_results : [];
+  const checklistResults = checklistResultsRaw
+    .map((row, index) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+      const checked = Boolean(row.checked);
+      const evidence = normalizeFieldReturnEvidence(row, `${fieldName}.checklist_results[${index}]`);
+      const valueNormalized = row.value == null
+        ? null
+        : Array.isArray(row.value)
+          ? normalizeJsonSourceList(row.value, `${fieldName}.checklist_results[${index}].value`)
+          : String(row.value || "").trim() || null;
+      return {
+        checklist_id: row.checklist_id == null || row.checklist_id === "" ? null : Number(row.checklist_id || 0) || null,
+        checked,
+        found: checked && (hasMeaningfulValue(valueNormalized) || evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url)),
+        value: checked ? valueNormalized : null,
+        note: row.note == null ? null : String(row.note || "").trim() || null,
+        evidence_deliverable_id: evidence.evidence_deliverable_id,
+        evidence_source_url: evidence.evidence_source_url,
+      };
+    })
+    .filter(Boolean);
+  return {
+    checklist_results: checklistResults,
+    cta_return: normalizeFieldReturnCtaJson(parsed.cta_return, `${fieldName}.cta_return`),
+    taxonomy_return: normalizeFieldReturnTaxonomyJson(parsed.taxonomy_return, `${fieldName}.taxonomy_return`),
+    requested_check_returns: normalizeRequestedCheckReturns(parsed.requested_check_returns, `${fieldName}.requested_check_returns`),
+    note: parsed.note == null ? null : String(parsed.note || "").trim() || null,
+  };
+}
+
+function normalizeConfirmedCtaContactJson(value, fieldName = "confirmed_cta_contact_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultConfirmedCtaContact();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    phone: parsed.phone == null ? null : String(parsed.phone || "").trim() || null,
+    line_url: normalizeOptionalUrlValue(parsed.line_url, `${fieldName}.line_url`),
+    facebook_url: normalizeOptionalUrlValue(parsed.facebook_url, `${fieldName}.facebook_url`),
+    website_url: normalizeOptionalUrlValue(parsed.website_url, `${fieldName}.website_url`),
+    primary_cta: normalizePrimaryCtaValue(parsed.primary_cta, `${fieldName}.primary_cta`),
+  };
+}
+
+function normalizeConfirmedTaxonomyJson(value, fieldName = "confirmed_taxonomy_json") {
+  const parsed = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : parseJson(value, null);
+  const base = defaultConfirmedTaxonomy();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  return {
+    category: parsed.category == null ? null : String(parsed.category || "").trim() || null,
+    subtype: parsed.subtype == null ? null : String(parsed.subtype || "").trim() || null,
+    tags: normalizeJsonSourceList(parsed.tags, `${fieldName}.tags`),
+  };
+}
+
+function normalizeCurationStatusValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CURATION_STATUS_VALUES.has(normalized) ? normalized : "not_started";
+}
+
+function normalizeConfirmedMetaStatusValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CONFIRMED_META_STATUS_VALUES.has(normalized) ? normalized : "not_started";
+}
+
+function normalizeContentDraftRow(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    suggested_related: parseJson(row.suggested_related_json, []),
+    confirmed_cta_contact_json: normalizeConfirmedCtaContactJson(row.confirmed_cta_contact_json),
+    confirmed_taxonomy_json: normalizeConfirmedTaxonomyJson(row.confirmed_taxonomy_json),
+    confirmed_meta_status: normalizeConfirmedMetaStatusValue(row.confirmed_meta_status),
+    confirmed_by_user_id: Number(row.confirmed_by_user_id || 0) || null,
+    confirmed_at: row.confirmed_at || null,
+    confirmed_note: row.confirmed_note == null ? null : String(row.confirmed_note || "").trim() || null,
+  };
+}
 function normalizeSearchEnrichmentRow(row) {
   if (!row) return null;
   return {
@@ -923,7 +1549,30 @@ function normalizeAssignmentSubmissionRow(row) {
     ...row,
     article_payload_json: parseJson(row.article_payload_json, null),
     media_payload_json: parseJson(row.media_payload_json, null),
+    field_return_payload_json: normalizeFieldReturnPayloadJson(row.field_return_payload_json),
   };
+}
+
+function fieldReturnEvidenceLabelFromKey(groupKey, checkKey) {
+  const normalizedGroupKey = String(groupKey || "").trim().toLowerCase();
+  const normalizedCheckKey = String(checkKey || "").trim().toLowerCase();
+  if (normalizedGroupKey === "cta_contact") {
+    if (normalizedCheckKey === "phone") return "เบอร์โทร";
+    if (normalizedCheckKey === "line_url") return "ลิงก์ LINE";
+    if (normalizedCheckKey === "facebook_url") return "ลิงก์ Facebook";
+    if (normalizedCheckKey === "website_url") return "ลิงก์เว็บไซต์";
+    if (normalizedCheckKey === "primary_cta") return "ปุ่มหลัก";
+  }
+  if (normalizedGroupKey === "taxonomy") {
+    if (normalizedCheckKey === "category") return "หมวดหลัก";
+    if (normalizedCheckKey === "subtype") return "หมวดย่อย";
+    if (normalizedCheckKey === "tags") return "แท็ก";
+  }
+  return normalizedCheckKey
+    .split(/[_\-.]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function normalizeAssignmentSubmissionDraftRow(row) {
@@ -1468,6 +2117,15 @@ function normalizeFieldPackRow(row) {
     social_shot_emphasis_json: parseJson(row.social_shot_emphasis_json, []),
     social_on_camera_points_json: parseJson(row.social_on_camera_points_json, []),
     writer_key_points_json: parseJson(row.writer_key_points_json, []),
+    ai_cta_contact_json: normalizeAiCtaContactJson(row.ai_cta_contact_json),
+    ai_taxonomy_json: normalizeAiTaxonomyJson(row.ai_taxonomy_json),
+    requested_checks_json: normalizeRequestedChecksJson(row.requested_checks_json),
+    curated_cta_contact_json: normalizeCuratedCtaContactJson(row.curated_cta_contact_json),
+    curated_taxonomy_json: normalizeCuratedTaxonomyJson(row.curated_taxonomy_json),
+    curation_status: normalizeCurationStatusValue(row.curation_status),
+    curated_by_user_id: Number(row.curated_by_user_id || 0) || null,
+    curated_at: row.curated_at || null,
+    curation_note: row.curation_note == null ? null : String(row.curation_note || "").trim() || null,
   };
 }
 
@@ -1521,6 +2179,15 @@ function buildFieldPackEditableState(row) {
     social_shot_emphasis: Array.isArray(row.social_shot_emphasis_json) ? row.social_shot_emphasis_json : [],
     social_on_camera_points: Array.isArray(row.social_on_camera_points_json) ? row.social_on_camera_points_json : [],
     social_caption_angle: row.social_caption_angle,
+    ai_cta_contact_json: row.ai_cta_contact_json,
+    ai_taxonomy_json: row.ai_taxonomy_json,
+    requested_checks_json: row.requested_checks_json,
+    curated_cta_contact_json: row.curated_cta_contact_json,
+    curated_taxonomy_json: row.curated_taxonomy_json,
+    curation_status: row.curation_status,
+    curated_by_user_id: row.curated_by_user_id,
+    curated_at: row.curated_at,
+    curation_note: row.curation_note,
     writer_ready: row.writer_ready,
     writer_angle: row.writer_angle,
     writer_key_points: Array.isArray(row.writer_key_points_json) ? row.writer_key_points_json : [],
@@ -1575,6 +2242,15 @@ function normalizeFieldPackPayload(payload = {}, options = {}) {
     social_shot_emphasis_json: JSON.stringify(normalizeStringListInput(payload?.social_shot_emphasis_json ?? payload?.social_shot_emphasis ?? [], "social_shot_emphasis_json")),
     social_on_camera_points_json: JSON.stringify(normalizeStringListInput(payload?.social_on_camera_points_json ?? payload?.social_on_camera_points ?? [], "social_on_camera_points_json")),
     social_caption_angle: payload?.social_caption_angle == null ? null : String(payload.social_caption_angle || "").trim() || null,
+    ai_cta_contact_json: JSON.stringify(normalizeAiCtaContactJson(payload?.ai_cta_contact_json)),
+    ai_taxonomy_json: JSON.stringify(normalizeAiTaxonomyJson(payload?.ai_taxonomy_json)),
+    requested_checks_json: JSON.stringify(normalizeRequestedChecksJson(payload?.requested_checks_json)),
+    curated_cta_contact_json: JSON.stringify(normalizeCuratedCtaContactJson(payload?.curated_cta_contact_json)),
+    curated_taxonomy_json: JSON.stringify(normalizeCuratedTaxonomyJson(payload?.curated_taxonomy_json)),
+    curation_status: normalizeCurationStatusValue(payload?.curation_status),
+    curated_by_user_id: payload?.curated_by_user_id == null || payload.curated_by_user_id === "" ? null : Number(payload.curated_by_user_id || 0) || null,
+    curated_at: payload?.curated_at == null || payload.curated_at === "" ? null : toNullableDateIso(payload.curated_at, "curated_at"),
+    curation_note: payload?.curation_note == null ? null : String(payload.curation_note || "").trim() || null,
     writer_ready: toBooleanInt(payload?.writer_ready ?? 0, "writer_ready"),
     writer_angle: payload?.writer_angle == null ? null : String(payload.writer_angle || "").trim() || null,
     writer_key_points_json: JSON.stringify(normalizeStringListInput(payload?.writer_key_points_json ?? payload?.writer_key_points ?? [], "writer_key_points_json")),
@@ -2473,13 +3149,14 @@ function ensureFieldPackAssignmentForeignKeySupport(db) {
           contributor_note TEXT,
           reviewer_note TEXT,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           reviewed_at TEXT,
           FOREIGN KEY(assignment_id) REFERENCES content_assignments(id) ON DELETE CASCADE,
           FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
           FOREIGN KEY(submitted_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
         );
       `,
-      insertColumns: "id, assignment_id, content_item_id, submitted_by_user_id, submission_state, article_payload_json, media_payload_json, contributor_note, reviewer_note, created_at, reviewed_at",
+      insertColumns: "id, assignment_id, content_item_id, submitted_by_user_id, submission_state, article_payload_json, media_payload_json, contributor_note, reviewer_note, created_at, updated_at, reviewed_at",
       indexSql: [
         "CREATE INDEX IF NOT EXISTS idx_assignment_submissions_assignment ON content_assignment_submissions(assignment_id, created_at DESC);",
         "CREATE INDEX IF NOT EXISTS idx_assignment_submissions_item ON content_assignment_submissions(content_item_id, created_at DESC);",
@@ -2782,6 +3459,78 @@ function ensureItemClaimSupport(db) {
     db.exec("ALTER TABLE content_items ADD COLUMN location_text TEXT;");
   }
 }
+
+function ensureFieldPackMetadataSupport(db) {
+  const cols = db.prepare("PRAGMA table_info(field_packs)").all();
+  if (!Array.isArray(cols) || !cols.length) return;
+  const names = new Set(cols.map((c) => String(c?.name || "").trim()));
+  // Legacy SQLite upgrades stay additive here. schema.sql remains the canonical source
+  // for CHECK/FK parity on fresh databases, while repository normalizers enforce values.
+  if (!names.has("ai_cta_contact_json")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN ai_cta_contact_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("ai_taxonomy_json")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN ai_taxonomy_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("requested_checks_json")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN requested_checks_json TEXT NOT NULL DEFAULT '{\"version\":1,\"groups\":[]}';");
+  }
+  if (!names.has("curated_cta_contact_json")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curated_cta_contact_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("curated_taxonomy_json")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curated_taxonomy_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("curation_status")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curation_status TEXT NOT NULL DEFAULT 'not_started';");
+  }
+  if (!names.has("curated_by_user_id")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curated_by_user_id INTEGER;");
+  }
+  if (!names.has("curated_at")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curated_at TEXT;");
+  }
+  if (!names.has("curation_note")) {
+    db.exec("ALTER TABLE field_packs ADD COLUMN curation_note TEXT;");
+  }
+}
+
+function ensureAssignmentSubmissionFieldReturnSupport(db) {
+  const cols = db.prepare("PRAGMA table_info(content_assignment_submissions)").all();
+  if (!Array.isArray(cols) || !cols.length) return;
+  const names = new Set(cols.map((c) => String(c?.name || "").trim()));
+  if (!names.has("field_return_payload_json")) {
+    db.exec("ALTER TABLE content_assignment_submissions ADD COLUMN field_return_payload_json TEXT;");
+  }
+  if (!names.has("updated_at")) {
+    db.exec("ALTER TABLE content_assignment_submissions ADD COLUMN updated_at TEXT;");
+    db.exec("UPDATE content_assignment_submissions SET updated_at=COALESCE(updated_at, created_at, CURRENT_TIMESTAMP);");
+  }
+}
+
+function ensureContentDraftConfirmedMetaSupport(db) {
+  const cols = db.prepare("PRAGMA table_info(content_drafts)").all();
+  if (!Array.isArray(cols) || !cols.length) return;
+  const names = new Set(cols.map((c) => String(c?.name || "").trim()));
+  if (!names.has("confirmed_cta_contact_json")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_cta_contact_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("confirmed_taxonomy_json")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_taxonomy_json TEXT NOT NULL DEFAULT '{}';");
+  }
+  if (!names.has("confirmed_meta_status")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_meta_status TEXT NOT NULL DEFAULT 'not_started';");
+  }
+  if (!names.has("confirmed_by_user_id")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_by_user_id INTEGER;");
+  }
+  if (!names.has("confirmed_at")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_at TEXT;");
+  }
+  if (!names.has("confirmed_note")) {
+    db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_note TEXT;");
+  }
+}
 export function createRepository(db) {
   ensureLifecycleColumns(db);
   ensureTranslationTables(db);
@@ -2794,6 +3543,9 @@ export function createRepository(db) {
   ensureUsersProfileSupport(db);
   ensureItemClaimSupport(db);
   ensureAssignmentTableSupport(db);
+  ensureFieldPackMetadataSupport(db);
+  ensureAssignmentSubmissionFieldReturnSupport(db);
+  ensureContentDraftConfirmedMetaSupport(db);
   ensureAssignmentSubmissionDraftTableSupport(db);
   ensureFieldPackAssignmentForeignKeySupport(db);
   const insertItemStmt = db.prepare(`
@@ -3064,8 +3816,10 @@ export function createRepository(db) {
   const upsertDraftStmt = db.prepare(`
     INSERT INTO content_drafts (
       content_item_id, generation_run_uid, draft_title, excerpt, body,
-      meta_title, meta_description, suggested_related_json, ai_quality_score, status, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      meta_title, meta_description, suggested_related_json, ai_quality_score,
+      confirmed_cta_contact_json, confirmed_taxonomy_json, confirmed_meta_status,
+      confirmed_by_user_id, confirmed_at, confirmed_note, status, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(content_item_id, generation_run_uid) DO UPDATE SET
       draft_title=excluded.draft_title,
       excerpt=excluded.excerpt,
@@ -3074,6 +3828,12 @@ export function createRepository(db) {
       meta_description=excluded.meta_description,
       suggested_related_json=excluded.suggested_related_json,
       ai_quality_score=excluded.ai_quality_score,
+      confirmed_cta_contact_json=excluded.confirmed_cta_contact_json,
+      confirmed_taxonomy_json=excluded.confirmed_taxonomy_json,
+      confirmed_meta_status=excluded.confirmed_meta_status,
+      confirmed_by_user_id=excluded.confirmed_by_user_id,
+      confirmed_at=excluded.confirmed_at,
+      confirmed_note=excluded.confirmed_note,
       status=excluded.status,
       updated_at=CURRENT_TIMESTAMP
   `);
@@ -3130,8 +3890,10 @@ export function createRepository(db) {
       editor_summary, verified_facts_json, uncertain_facts_json,
       story_angle, field_notes, social_hook, social_shot_emphasis_json,
       social_on_camera_points_json, social_caption_angle,
+      ai_cta_contact_json, ai_taxonomy_json, requested_checks_json, curated_cta_contact_json, curated_taxonomy_json,
+      curation_status, curated_by_user_id, curated_at, curation_note,
       writer_ready, writer_angle, writer_key_points_json, writer_notes, updated_by, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
   `);
 
   const updateFieldPackStmt = db.prepare(`
@@ -3154,6 +3916,15 @@ export function createRepository(db) {
       social_shot_emphasis_json=?,
       social_on_camera_points_json=?,
       social_caption_angle=?,
+      ai_cta_contact_json=?,
+      ai_taxonomy_json=?,
+      requested_checks_json=?,
+      curated_cta_contact_json=?,
+      curated_taxonomy_json=?,
+      curation_status=?,
+      curated_by_user_id=?,
+      curated_at=?,
+      curation_note=?,
       writer_ready=?,
       writer_angle=?,
       writer_key_points_json=?,
@@ -3802,8 +4573,9 @@ export function createRepository(db) {
   const insertAssignmentSubmissionStmt = db.prepare(`
     INSERT INTO content_assignment_submissions (
       assignment_id, content_item_id, submitted_by_user_id, submission_state,
-      article_payload_json, media_payload_json, contributor_note, reviewer_note, reviewed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      article_payload_json, media_payload_json, field_return_payload_json,
+      contributor_note, reviewer_note, created_at, updated_at, reviewed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const updateAssignmentSubmissionStmt = db.prepare(`
     UPDATE content_assignment_submissions
@@ -3812,9 +4584,11 @@ export function createRepository(db) {
       submission_state=?,
       article_payload_json=?,
       media_payload_json=?,
+      field_return_payload_json=?,
       contributor_note=COALESCE(?, contributor_note),
       reviewer_note=COALESCE(?, reviewer_note),
-      reviewed_at=COALESCE(?, reviewed_at)
+      reviewed_at=COALESCE(?, reviewed_at),
+      updated_at=?
     WHERE id=?
   `);
 
@@ -5471,6 +6245,12 @@ function normalizeStateValue(value, stateGroup) {
     }
     const articlePayload = payload.article_payload_json == null ? null : parseJsonInputStrict(payload.article_payload_json, "article_payload_json", "object");
     const mediaPayload = payload.media_payload_json == null ? null : parseJsonInputStrict(payload.media_payload_json, "media_payload_json", "object");
+    const fieldReturnPayload = payload.field_return_payload_json == null
+      ? null
+      : normalizeFieldReturnPayloadJson(
+        parseJsonInputStrict(payload.field_return_payload_json, "field_return_payload_json", "object"),
+        "field_return_payload_json"
+      );
     const contributorNote = payload.contributor_note == null ? null : String(payload.contributor_note || "").trim() || null;
     const reviewerNote = payload.reviewer_note == null ? null : String(payload.reviewer_note || "").trim() || null;
     const reviewedAt = payload.reviewed_at == null || payload.reviewed_at === "" ? null : toNullableDateIso(payload.reviewed_at, "reviewed_at");
@@ -5481,20 +6261,26 @@ function normalizeStateValue(value, stateGroup) {
         ? normalizeAssignmentSubmissionRow(getAssignmentSubmissionByIdStmt.get(latestSubmissionId))
         : null;
       if (latestSubmission && Number(latestSubmission.assignment_id || 0) === assignmentId) {
+        const updatedAt = toBangkokSqlTimestamp();
         const nextArticlePayload = articlePayload == null
           ? latestSubmission.article_payload_json
           : mergeAssignmentSubmissionObjectPayload(latestSubmission.article_payload_json, articlePayload);
         const nextMediaPayload = mediaPayload == null
           ? latestSubmission.media_payload_json
           : mergeAssignmentSubmissionMediaPayload(latestSubmission.media_payload_json, mediaPayload);
+        const nextFieldReturnPayload = fieldReturnPayload == null
+          ? latestSubmission.field_return_payload_json
+          : fieldReturnPayload;
         updateAssignmentSubmissionStmt.run(
           submittedByUserId,
           submissionState,
           nextArticlePayload ? JSON.stringify(nextArticlePayload) : null,
           nextMediaPayload ? JSON.stringify(nextMediaPayload) : null,
+          nextFieldReturnPayload ? JSON.stringify(nextFieldReturnPayload) : null,
           contributorNote,
           reviewerNote,
           reviewedAt,
+          updatedAt,
           latestSubmissionId
         );
         setAssignmentLatestSubmission(assignmentId, latestSubmissionId);
@@ -5504,6 +6290,7 @@ function normalizeStateValue(value, stateGroup) {
       }
     }
 
+    const createdAt = toBangkokSqlTimestamp();
     const res = insertAssignmentSubmissionStmt.run(
       assignmentId,
       Number(assignment.content_item_id),
@@ -5511,8 +6298,11 @@ function normalizeStateValue(value, stateGroup) {
       submissionState,
       articlePayload ? JSON.stringify(articlePayload) : null,
       mediaPayload ? JSON.stringify(mediaPayload) : null,
+      fieldReturnPayload ? JSON.stringify(fieldReturnPayload) : null,
       contributorNote,
       reviewerNote,
+      createdAt,
+      createdAt,
       reviewedAt
     );
     const submissionId = Number(res.lastInsertRowid || 0);
@@ -7948,6 +8738,29 @@ function normalizeStateValue(value, stateGroup) {
     return next;
   }
 
+  function buildRequestedChecksHandoffPayload(requestedChecks, item) {
+    const normalized = normalizeRequestedChecksJson(requestedChecks);
+    const groups = normalized.groups
+      .filter((group) => {
+        const normalizedGroupKey = String(group?.group_key || "").trim().toLowerCase();
+        if (normalizedGroupKey === "cta_contact") {
+          return String(item?.type || "").trim().toLowerCase() === "place";
+        }
+        return true;
+      })
+      .map((group) => ({
+        group_key: group.group_key,
+        group_label: group.group_label,
+        checks: (Array.isArray(group.checks) ? group.checks : []).filter((check) => check?.requested === true),
+      }))
+      .filter((group) => group.checks.length > 0);
+    if (!groups.length) return null;
+    return {
+      version: 1,
+      groups,
+    };
+  }
+
   function buildFieldPackHandoffPackage(item, fieldPack, governance, readinessSnapshot = null) {
     const verifiedFacts = uniqueTextList(fieldPack?.verified_facts_json || [], 12);
     const uncertainFacts = uniqueTextList([
@@ -7967,6 +8780,7 @@ function normalizeStateValue(value, stateGroup) {
     const recommendedHook = String(fieldPack?.social_hook || "").trim() || null;
     const socialCaptionAngle = String(fieldPack?.social_caption_angle || "").trim() || null;
     const fieldNotes = String(fieldPack?.field_notes || "").trim() || null;
+    const requestedChecks = buildRequestedChecksHandoffPayload(fieldPack?.requested_checks_json, item);
 
     return finalizeAssignmentHandoffPackage({
       brief_summary: briefSummary,
@@ -7987,6 +8801,7 @@ function normalizeStateValue(value, stateGroup) {
       references: generalReferences,
       writer_references: writerReferences,
       media_hints: mediaHints,
+      ...(requestedChecks ? { requested_checks: requestedChecks } : {}),
       writer_ready: Boolean(fieldPack?.writer_ready),
       writer_notes: String(fieldPack?.writer_notes || "").trim() || null,
       source: {
@@ -8355,6 +9170,56 @@ function normalizeStateValue(value, stateGroup) {
     };
   }
 
+  function buildFieldReturnEvidenceByItem(contentItemId) {
+    const itemId = Number(contentItemId || 0) || 0;
+    const empty = { version: 1, items: [] };
+    if (!itemId) return empty;
+    const assignments = listAssignmentsByItem(itemId);
+    if (!assignments.length) return empty;
+    const items = assignments
+      .map((assignment) => {
+        const assignmentId = Number(assignment?.id || 0) || 0;
+        const latestSubmissionId = Number(assignment?.latest_submission_id || 0) || 0;
+        if (!assignmentId || !latestSubmissionId) return [];
+        const submission = getAssignmentSubmissionById(latestSubmissionId);
+        const returns = submission?.field_return_payload_json?.requested_check_returns;
+        if (!returns || typeof returns !== "object") return [];
+        const submittedAt = submission?.updated_at || submission?.created_at || null;
+        return Object.entries(returns).map(([key, entry]) => {
+          const normalizedKey = String(key || "").trim().toLowerCase();
+          const [groupKey = "", ...rest] = normalizedKey.split(".");
+          const checkKey = rest.join(".").trim().toLowerCase();
+          return {
+            key: normalizedKey,
+            group_key: groupKey || "other",
+            check_key: checkKey || normalizedKey,
+            label: fieldReturnEvidenceLabelFromKey(groupKey, checkKey || normalizedKey),
+            checked: entry?.checked === true,
+            found: entry?.found === true,
+            value: entry?.value ?? null,
+            condition_note: String(entry?.condition_note || "").trim() || null,
+            evidence: String(entry?.evidence || "").trim() || null,
+            note: String(entry?.note || "").trim() || null,
+            submitted_at: submittedAt,
+            submitted_by_user_id: Number(submission?.submitted_by_user_id || 0) || null,
+            assignment_id: assignmentId,
+            submission_id: latestSubmissionId,
+          };
+        });
+      })
+      .flat()
+      .sort((a, b) => {
+        const aTime = Date.parse(a?.submitted_at || "") || 0;
+        const bTime = Date.parse(b?.submitted_at || "") || 0;
+        if (bTime !== aTime) return bTime - aTime;
+        return (Number(b?.submission_id || 0) || 0) - (Number(a?.submission_id || 0) || 0);
+      });
+    return {
+      version: 1,
+      items,
+    };
+  }
+
   function createAssignmentFromReadiness(
     contentItemId,
     payload = {},
@@ -8587,6 +9452,8 @@ function normalizeStateValue(value, stateGroup) {
   }
 
   function saveDraft(contentItemId, generationRunUid, draft = {}) {
+    const confirmedCtaContact = normalizeConfirmedCtaContactJson(draft.confirmed_cta_contact_json);
+    const confirmedTaxonomy = normalizeConfirmedTaxonomyJson(draft.confirmed_taxonomy_json);
     upsertDraftStmt.run(
       contentItemId,
       generationRunUid,
@@ -8597,6 +9464,12 @@ function normalizeStateValue(value, stateGroup) {
       String(readDraftField(draft, "meta_description", "") ?? ""),
       JSON.stringify(draft.suggested_related || []),
       draft.ai_quality_score ?? null,
+      JSON.stringify(confirmedCtaContact),
+      JSON.stringify(confirmedTaxonomy),
+      normalizeConfirmedMetaStatusValue(draft.confirmed_meta_status),
+      draft.confirmed_by_user_id == null || draft.confirmed_by_user_id === "" ? null : Number(draft.confirmed_by_user_id || 0) || null,
+      draft.confirmed_at == null || draft.confirmed_at === "" ? null : toNullableDateIso(draft.confirmed_at, "confirmed_at"),
+      draft.confirmed_note == null ? null : String(draft.confirmed_note || "").trim() || null,
       String(readDraftField(draft, "status", "generated") || "generated")
     );
 
@@ -8604,12 +9477,7 @@ function normalizeStateValue(value, stateGroup) {
   }
 
   function latestDraftByItem(contentItemId) {
-    const row = latestDraftByItemStmt.get(contentItemId);
-    if (!row) return null;
-    return {
-      ...row,
-      suggested_related: parseJson(row.suggested_related_json, []),
-    };
+    return normalizeContentDraftRow(latestDraftByItemStmt.get(contentItemId));
   }
 
   function listDrafts(status = "") {
@@ -8618,10 +9486,9 @@ function normalizeStateValue(value, stateGroup) {
       : `SELECT d.*, c.title AS item_title, wm.production_state, wm.publication_state FROM content_drafts d JOIN content_items c ON c.id=d.content_item_id LEFT JOIN content_workflow_models wm ON wm.content_item_id=c.id ORDER BY d.id DESC`;
     const rows = status ? db.prepare(sql).all(status) : db.prepare(sql).all();
     return rows.map((row) => ({
-      ...row,
+      ...normalizeContentDraftRow(row),
       workflow_head_derived_status: deriveWorkflowStatusFromRowStates(row),
       workflow_head_status_source: "workflow_head",
-      suggested_related: parseJson(row.suggested_related_json, []),
     }));
   }
 
@@ -8914,6 +9781,15 @@ function normalizeStateValue(value, stateGroup) {
       normalized.social_shot_emphasis_json,
       normalized.social_on_camera_points_json,
       normalized.social_caption_angle,
+      normalized.ai_cta_contact_json,
+      normalized.ai_taxonomy_json,
+      normalized.requested_checks_json,
+      normalized.curated_cta_contact_json,
+      normalized.curated_taxonomy_json,
+      normalized.curation_status,
+      normalized.curated_by_user_id,
+      normalized.curated_at,
+      normalized.curation_note,
       normalized.writer_ready,
       normalized.writer_angle,
       normalized.writer_key_points_json,
@@ -9120,6 +9996,15 @@ function normalizeStateValue(value, stateGroup) {
       normalized.social_shot_emphasis_json,
       normalized.social_on_camera_points_json,
       normalized.social_caption_angle,
+      normalized.ai_cta_contact_json,
+      normalized.ai_taxonomy_json,
+      normalized.requested_checks_json,
+      normalized.curated_cta_contact_json,
+      normalized.curated_taxonomy_json,
+      normalized.curation_status,
+      normalized.curated_by_user_id,
+      normalized.curated_at,
+      normalized.curation_note,
       normalized.writer_ready,
       normalized.writer_angle,
       normalized.writer_key_points_json,
@@ -11519,6 +12404,7 @@ function normalizeStateValue(value, stateGroup) {
     listExternalAssignmentsByAssigner,
     buildAssignmentHandoffPreview,
     buildPublishableSourceByItem,
+    buildFieldReturnEvidenceByItem,
     buildGovernanceSummaryByItem,
     updateAssignmentState,
     updateAssignmentMediaResetPolicy,
