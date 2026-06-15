@@ -64,6 +64,18 @@ function buildApproveWarnings(content) {
   return warnings;
 }
 
+function applyPublishedMediaUrlRewrites(input, rewrites = []) {
+  let output = String(input || "");
+  if (!output) return output;
+  for (const rewrite of Array.isArray(rewrites) ? rewrites : []) {
+    const from = String(rewrite?.from || "").trim();
+    const to = String(rewrite?.to || "").trim();
+    if (!from || !to || from === to) continue;
+    output = output.split(from).join(to);
+  }
+  return output;
+}
+
 async function ensureUniquePlaceSlug(connection, initialSlug, excludePlaceId = null) {
   const base = slugify(initialSlug);
   let candidate = base;
@@ -179,13 +191,13 @@ async function upsertPublishedEvent(connection, content) {
       `UPDATE events
        SET title=?, description=?, event_period_text=?, location_text=?, map_url=?, is_approved=1, approved_at=CURRENT_TIMESTAMP
        WHERE id=?`,
-      [content.title, content.body, content.event_period_text, content.location_text, content.map_url, eventId]
+      [content.title, null, content.event_period_text, content.location_text, content.map_url, eventId]
     );
   } else {
     const [insertResult] = await connection.query(
       `INSERT INTO events (title, description, image, event_period_text, location_text, map_url, is_approved, approved_at)
        VALUES (?,?,?,?,?,?,1,CURRENT_TIMESTAMP)`,
-      [content.title, content.body, "", content.event_period_text, content.location_text, content.map_url]
+      [content.title, null, "", content.event_period_text, content.location_text, content.map_url]
     );
     eventId = Number(insertResult.insertId || 0) || null;
   }
@@ -216,9 +228,50 @@ async function updateEntityPublishedImages(connection, contentType, entityId, co
   }
 }
 
+async function rewritePublishedEntityContent(connection, content, entityId, mediaResult) {
+  const rewrittenBody = applyPublishedMediaUrlRewrites(content?.body, mediaResult?.url_rewrites);
+
+  if (content.content_type === "place") {
+    const [translations] = await connection.query(
+      "SELECT lang, description FROM place_translations WHERE place_id=?",
+      [Number(entityId)]
+    );
+    for (const row of Array.isArray(translations) ? translations : []) {
+      const nextDescription = applyPublishedMediaUrlRewrites(row?.description, mediaResult?.url_rewrites);
+      if (nextDescription === String(row?.description || "")) continue;
+      await connection.query(
+        `UPDATE place_translations
+         SET description=?
+         WHERE place_id=? AND lang=?`,
+        [nextDescription, Number(entityId), row.lang]
+      );
+    }
+    return;
+  }
+
+  if (content.content_type === "event") {
+    await connection.query("UPDATE events SET description=? WHERE id=?", [rewrittenBody, Number(entityId)]);
+    const [translations] = await connection.query(
+      "SELECT lang, description FROM event_translations WHERE event_id=?",
+      [Number(entityId)]
+    );
+    for (const row of Array.isArray(translations) ? translations : []) {
+      const nextDescription = applyPublishedMediaUrlRewrites(row?.description, mediaResult?.url_rewrites);
+      if (nextDescription === String(row?.description || "")) continue;
+      await connection.query(
+        `UPDATE event_translations
+         SET description=?
+         WHERE event_id=? AND lang=?`,
+        [nextDescription, Number(entityId), row.lang]
+      );
+    }
+  }
+}
+
 export async function approveReviewContent({ reviewContent, actorUserId, reviewNote = null }) {
   const connection = await pool.getConnection();
   let mediaCleanupFilePaths = [];
+  let promotedFilePaths = [];
   let result = null;
   try {
     await connection.beginTransaction();
@@ -264,7 +317,9 @@ export async function approveReviewContent({ reviewContent, actorUserId, reviewN
       actorUserId,
     });
     mediaCleanupFilePaths = Array.isArray(mediaResult?.cleanup_file_paths) ? mediaResult.cleanup_file_paths : [];
+    promotedFilePaths = Array.isArray(mediaResult?.promoted_file_paths) ? mediaResult.promoted_file_paths : [];
     await updateEntityPublishedImages(connection, contentType, publicEntityId, mediaResult.cover_url, mediaResult.thumbnail_url);
+    await rewritePublishedEntityContent(connection, content, publicEntityId, mediaResult);
 
     await connection.query(
       `UPDATE review_contents
@@ -314,6 +369,7 @@ export async function approveReviewContent({ reviewContent, actorUserId, reviewN
     try {
       await connection.rollback();
     } catch {}
+    await cleanupPublishedMediaFilesBestEffort(promotedFilePaths);
     throw err;
   } finally {
     connection.release();
