@@ -46,9 +46,8 @@ function rewriteReviewBodyMedia(html, entries = []) {
     const proxyUrl = String(entry?.url || "").trim();
     if (!proxyUrl) continue;
     const originalUrl = String(entry?.original_url || "").trim();
-    const sourceUrl = String(entry?.source_url || "").trim();
     const fileName = String(entry?.file_name || "").trim();
-    const candidates = [originalUrl, sourceUrl].filter(Boolean);
+    const candidates = [originalUrl].filter(Boolean);
     for (const candidate of candidates) {
       output = output.replace(new RegExp(escapeRegExp(candidate), "g"), proxyUrl);
     }

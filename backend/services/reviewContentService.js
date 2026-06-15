@@ -158,6 +158,69 @@ function parseJsonText(raw, fallback) {
   }
 }
 
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function rewritePublicReviewBodyMedia(html, entries = []) {
+  let output = String(html || "");
+  if (!output || !Array.isArray(entries) || !entries.length) return output;
+  for (const entry of entries) {
+    const backendUrl = String(entry?.url || "").trim();
+    const sourceUrl = String(entry?.source_url || "").trim();
+    const fileName = String(entry?.file_name || "").trim();
+    if (!backendUrl) continue;
+    if (sourceUrl) {
+      output = output.replace(new RegExp(escapeRegExp(sourceUrl), "g"), backendUrl);
+    }
+    if (fileName) {
+      output = output.replace(
+        new RegExp(`https?:\\/\\/[^"'\\s>]+\\/(?:media\\/)?uploads\\/${escapeRegExp(fileName)}`, "g"),
+        backendUrl
+      );
+    }
+  }
+  return output;
+}
+
+export function shapePublicReviewContent(item) {
+  if (!item || typeof item !== "object") return item;
+  const assets = item?.assets && typeof item.assets === "object" ? item.assets : { cover: null, gallery: [], inline: [] };
+  const assetEntries = [
+    assets?.cover,
+    ...(Array.isArray(assets?.gallery) ? assets.gallery : []),
+    ...(Array.isArray(assets?.inline) ? assets.inline : []),
+  ].filter(Boolean);
+  const rewrittenBody = rewritePublicReviewBodyMedia(item?.body, assetEntries);
+  const scrubEntry = (entry) => {
+    if (!entry || typeof entry !== "object") return null;
+    return {
+      url: String(entry.url || "").trim(),
+      storage_path: String(entry.storage_path || "").trim(),
+      file_name: String(entry.file_name || "").trim(),
+      mime_type: entry.mime_type || null,
+      size_bytes: entry.size_bytes == null ? null : Number(entry.size_bytes || 0) || null,
+    };
+  };
+  const publicAssets = {
+    cover: scrubEntry(assets?.cover),
+    gallery: (Array.isArray(assets?.gallery) ? assets.gallery : []).map(scrubEntry).filter(Boolean),
+    inline: (Array.isArray(assets?.inline) ? assets.inline : []).map(scrubEntry).filter(Boolean),
+  };
+  return {
+    ...item,
+    body: rewrittenBody,
+    description: rewrittenBody,
+    assets: publicAssets,
+    image: publicAssets.cover?.url || item?.image || null,
+    effective_cover_image: publicAssets.cover?.url || item?.effective_cover_image || null,
+    media_gallery_images: publicAssets.gallery.map((entry) => entry.url).filter(Boolean),
+    media_inline_images: publicAssets.inline.map((entry) => entry.url).filter(Boolean),
+    review_payload: undefined,
+    history: undefined,
+  };
+}
+
 export async function getReviewContentById(id) {
   const reviewId = Number(id);
   if (!Number.isFinite(reviewId) || reviewId <= 0) return null;
