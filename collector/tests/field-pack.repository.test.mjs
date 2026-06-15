@@ -1047,6 +1047,90 @@ test("buildAssignmentHandoffPreview includes only requested=true requested check
   }
 });
 
+test("buildAssignmentHandoffPreview excludes legacy cta_contact checks for non-place items", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.repo.createItemWithWorkflowHead({
+      type: "event",
+      category: "activities",
+      lang: "th",
+      title: "Event Requested Checks Handoff",
+      description_raw: "raw",
+      source_type: "manual",
+      source_name: "manual",
+      source_url: "https://example.com/event-requested-checks",
+    }).item;
+
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "พร้อมส่งงาน event",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            group_label: "CTA/ติดต่อ",
+            checks: [
+              {
+                key: "phone",
+                requested: true,
+                label: "เบอร์โทร",
+                instruction: "ยืนยันเบอร์",
+                answer_type: "phone",
+                suggested_value: "0812345678",
+                evidence_required: true,
+                source: { kind: "ai", confidence: "medium" },
+              },
+            ],
+          },
+          {
+            group_key: "taxonomy",
+            group_label: "หมวดหมู่",
+            checks: [
+              {
+                key: "category",
+                requested: true,
+                label: "หมวดหลัก",
+                instruction: "ยืนยันหมวด",
+                answer_type: "text",
+                suggested_value: "festival",
+                evidence_required: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const preview = ctx.repo.buildAssignmentHandoffPreview(item.id);
+    assert.deepEqual(preview.handoff_package?.requested_checks, {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "หมวดหมู่",
+          checks: [
+            {
+              key: "category",
+              requested: true,
+              label: "หมวดหลัก",
+              instruction: "ยืนยันหมวด",
+              answer_type: "text",
+              suggested_value: "festival",
+              condition_prompt: null,
+              evidence_required: false,
+              source: null,
+            },
+          ],
+        },
+      ],
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("buildAssignmentHandoffPreview falls back to readiness snapshot when current field pack is still draft", () => {
   const ctx = createTestContext();
   try {

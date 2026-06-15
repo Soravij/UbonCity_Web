@@ -8559,9 +8559,16 @@ function normalizeStateValue(value, stateGroup) {
     return next;
   }
 
-  function buildRequestedChecksHandoffPayload(requestedChecks) {
+  function buildRequestedChecksHandoffPayload(requestedChecks, item) {
     const normalized = normalizeRequestedChecksJson(requestedChecks);
     const groups = normalized.groups
+      .filter((group) => {
+        const normalizedGroupKey = String(group?.group_key || "").trim().toLowerCase();
+        if (normalizedGroupKey === "cta_contact") {
+          return String(item?.type || "").trim().toLowerCase() === "place";
+        }
+        return true;
+      })
       .map((group) => ({
         group_key: group.group_key,
         group_label: group.group_label,
@@ -8594,7 +8601,7 @@ function normalizeStateValue(value, stateGroup) {
     const recommendedHook = String(fieldPack?.social_hook || "").trim() || null;
     const socialCaptionAngle = String(fieldPack?.social_caption_angle || "").trim() || null;
     const fieldNotes = String(fieldPack?.field_notes || "").trim() || null;
-    const requestedChecks = buildRequestedChecksHandoffPayload(fieldPack?.requested_checks_json);
+    const requestedChecks = buildRequestedChecksHandoffPayload(fieldPack?.requested_checks_json, item);
 
     return finalizeAssignmentHandoffPackage({
       brief_summary: briefSummary,

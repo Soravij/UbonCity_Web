@@ -83,6 +83,26 @@ const REQUESTED_CHECK_GROUP_TEMPLATES = loadConstValue(itemEditorJs, "REQUESTED_
 const getRequestedCheckDefaultGroupLabel = loadNamedFunction(itemEditorJs, "getRequestedCheckDefaultGroupLabel", {
   REQUESTED_CHECK_GROUP_TEMPLATES,
 });
+const buildRequestedChecksEditorState = loadNamedFunction(itemEditorJs, "buildRequestedChecksEditorState", {
+  REQUESTED_CHECK_GROUP_TEMPLATES,
+  state: { item: { type: "place" } },
+});
+const isPlaceRequestedCheckItem = loadNamedFunction(itemEditorJs, "isPlaceRequestedCheckItem", {
+  state: { item: { type: "place" } },
+});
+const getRequestedCheckEditorGroups = loadNamedFunction(itemEditorJs, "getRequestedCheckEditorGroups", {
+  buildRequestedChecksEditorState,
+  isPlaceRequestedCheckItem,
+  state: { item: { type: "place" } },
+});
+const buildRequestedChecksPreviewHtml = loadNamedFunction(itemEditorJs, "buildRequestedChecksPreviewHtml", {
+  escapeHtml: (value) => String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;"),
+});
 const normalizeRequestedCheckKey = loadNamedFunction(itemEditorJs, "normalizeRequestedCheckKey");
 const mergeRequestedChecksForSave = loadNamedFunction(itemEditorJs, "mergeRequestedChecksForSave", {
   REQUESTED_CHECK_GROUP_TEMPLATES,
@@ -197,6 +217,225 @@ test("retained check preserves provenance while applying curator edits", () => {
   assert.equal(phoneCheck.evidence_required, false);
   assert.equal(phoneCheck.suggested_value, "0812345678");
   assert.deepEqual(phoneCheck.source, { kind: "ai", confidence: "high" });
+});
+
+test("requested-check editor shows CTA templates for place items", () => {
+  const groups = getRequestedCheckEditorGroups({
+    requested_checks_json: { version: 1, groups: [] },
+  }, {
+    type: "place",
+  });
+
+  const ctaGroup = groups.find((group) => group.group_key === "cta_contact");
+  const taxonomyGroup = groups.find((group) => group.group_key === "taxonomy");
+
+  assert.ok(ctaGroup);
+  assert.deepEqual(
+    ctaGroup.checks.map((check) => check.key),
+    ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]
+  );
+  assert.ok(taxonomyGroup);
+});
+
+test("requested-check editor hides CTA templates for non-place items", () => {
+  const groups = getRequestedCheckEditorGroups({
+    requested_checks_json: { version: 1, groups: [] },
+  }, {
+    type: "event",
+  });
+
+  assert.equal(groups.some((group) => group.group_key === "cta_contact"), false);
+  assert.equal(groups.some((group) => group.group_key === "taxonomy"), true);
+});
+
+test("ai suggested values do not auto-set requested=true in editor groups", () => {
+  const groups = getRequestedCheckEditorGroups({
+    ai_cta_contact_json: {
+      phone: "0812345678",
+      primary_cta: "line",
+      confidence: "medium",
+    },
+    ai_taxonomy_json: {
+      category: "attractions",
+      tags: ["family", "museum"],
+      confidence: "medium",
+    },
+    requested_checks_json: { version: 1, groups: [] },
+  }, {
+    type: "place",
+  });
+
+  const ctaPhone = groups.find((group) => group.group_key === "cta_contact")?.checks.find((check) => check.key === "phone");
+  const taxonomyCategory = groups.find((group) => group.group_key === "taxonomy")?.checks.find((check) => check.key === "category");
+
+  assert.equal(ctaPhone?.requested, false);
+  assert.equal(ctaPhone?.suggested_value, "0812345678");
+  assert.equal(taxonomyCategory?.requested, false);
+  assert.equal(taxonomyCategory?.suggested_value, "attractions");
+});
+
+test("requested-check preview shows only requested=true checks", () => {
+  const html = buildRequestedChecksPreviewHtml({
+    version: 1,
+    groups: [
+      {
+        group_key: "cta_contact",
+        group_label: "CTA/contact",
+        checks: [
+          { key: "phone", label: "เบอร์โทร", requested: true },
+          { key: "line_url", label: "LINE", requested: true },
+          { key: "facebook_url", label: "Facebook", requested: false },
+        ],
+      },
+      {
+        group_key: "taxonomy",
+        group_label: "Taxonomy",
+        checks: [
+          { key: "category", label: "หมวดหลัก", requested: true },
+          { key: "tags", label: "tags", requested: true },
+        ],
+      },
+      {
+        group_key: "custom",
+        group_label: "Custom",
+        checks: [
+          { key: "parking", label: "ที่จอดรถ", requested: true },
+        ],
+      },
+    ],
+  });
+
+  assert.match(html, /CTA\/contact/);
+  assert.match(html, /เบอร์โทร/);
+  assert.match(html, /LINE/);
+  assert.match(html, /Taxonomy/);
+  assert.match(html, /หมวดหลัก/);
+  assert.match(html, /tags/);
+  assert.match(html, /Custom/);
+  assert.match(html, /ที่จอดรถ/);
+  assert.doesNotMatch(html, /Facebook/);
+});
+
+test("requested-check preview shows clear empty state when nothing is selected", () => {
+  const html = buildRequestedChecksPreviewHtml({
+    version: 1,
+    groups: [
+      {
+        group_key: "cta_contact",
+        group_label: "CTA/contact",
+        checks: [
+          { key: "phone", label: "เบอร์โทร", requested: false },
+        ],
+      },
+    ],
+  });
+
+  assert.match(html, /ยังไม่ได้เลือกรายการที่จะส่งให้คนไปเช็ก/);
+});
+
+test("save merge preserves hidden legacy cta_contact checks for non-place items", () => {
+  const existingState = {
+    version: 1,
+    groups: [
+      {
+        group_key: "cta_contact",
+        group_label: "CTA/contact",
+        checks: [
+          {
+            key: "phone",
+            requested: true,
+            label: "เบอร์โทร",
+            instruction: "ยืนยันเบอร์",
+            answer_type: "phone",
+            suggested_value: "0812345678",
+            source: { kind: "ai", confidence: "high" },
+            condition_prompt: null,
+            evidence_required: true,
+          },
+        ],
+      },
+      {
+        group_key: "taxonomy",
+        group_label: "Taxonomy",
+        checks: [
+          {
+            key: "category",
+            requested: true,
+            label: "หมวดหลัก",
+            instruction: "ยืนยันหมวด",
+            answer_type: "text",
+            suggested_value: "festival",
+            source: null,
+            condition_prompt: null,
+            evidence_required: false,
+          },
+        ],
+      },
+    ],
+  };
+  const uiState = {
+    version: 1,
+    groups: [
+      {
+        group_key: "taxonomy",
+        group_label: "Taxonomy",
+        checks: [
+          {
+            key: "category",
+            requested: true,
+            label: "หมวดหลัก",
+            instruction: "ยืนยันหมวด",
+            answer_type: "text",
+            condition_prompt: null,
+            evidence_required: false,
+          },
+        ],
+      },
+      {
+        group_key: "custom",
+        group_label: "Custom",
+        checks: [],
+      },
+    ],
+  };
+
+  const result = mergeRequestedChecksForSave(uiState, existingState);
+  const ctaGroup = result.groups.find((group) => group.group_key === "cta_contact");
+
+  assert.ok(ctaGroup);
+  assert.equal(ctaGroup.checks[0].requested, true);
+  assert.equal(ctaGroup.checks[0].label, "เบอร์โทร");
+});
+
+test("non-place preview omits hidden legacy cta_contact checks", () => {
+  const groups = getRequestedCheckEditorGroups({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            { key: "phone", requested: true, label: "เบอร์โทร", instruction: "ยืนยันเบอร์", answer_type: "phone" },
+          ],
+        },
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            { key: "category", requested: true, label: "หมวดหลัก", instruction: "ยืนยันหมวด", answer_type: "text" },
+          ],
+        },
+      ],
+    },
+  }, {
+    type: "event",
+  });
+
+  const html = buildRequestedChecksPreviewHtml({ version: 1, groups });
+  assert.doesNotMatch(html, /CTA\/contact/);
+  assert.match(html, /หมวดหมู่/);
+  assert.match(html, /หมวดหลัก/);
 });
 
 test("duplicate custom keys are rejected before provenance can merge ambiguously", () => {

@@ -2622,6 +2622,22 @@ function parseRequestedCheckSuggestedValue(rawValue, answerType = "text") {
   return text;
 }
 
+function isPlaceRequestedCheckItem(item = state.item) {
+  return String(item?.type || "").trim().toLowerCase() === "place";
+}
+
+function shouldKeepRequestedCheckGroupForItem(groupKey, item = state.item) {
+  const normalizedGroupKey = String(groupKey || "").trim().toLowerCase();
+  if (normalizedGroupKey === "cta_contact") return isPlaceRequestedCheckItem(item);
+  return true;
+}
+
+function filterRequestedCheckGroupsForItem(groups = [], item = state.item) {
+  return (Array.isArray(groups) ? groups : []).filter((group) => {
+    return shouldKeepRequestedCheckGroupForItem(group?.group_key, item);
+  });
+}
+
 function mergeRequestedChecksForSave(uiState = {}, existingState = {}) {
   const existingGroups = new Map(
     (Array.isArray(existingState?.groups) ? existingState.groups : []).map((group) => [String(group.group_key || "").trim().toLowerCase(), group])
@@ -2629,16 +2645,27 @@ function mergeRequestedChecksForSave(uiState = {}, existingState = {}) {
   const uiGroups = new Map(
     (Array.isArray(uiState?.groups) ? uiState.groups : []).map((group) => [String(group.group_key || "").trim().toLowerCase(), group])
   );
+  const preservedHiddenGroupKeys = Array.from(existingGroups.keys()).filter((groupKey) => {
+    return groupKey === "cta_contact" && !uiGroups.has(groupKey);
+  });
   const orderedGroupKeys = Array.from(new Set([
     ...REQUESTED_CHECK_GROUP_TEMPLATES.map((group) => group.group_key),
+    ...preservedHiddenGroupKeys,
     ...uiGroups.keys(),
-  ])).filter((groupKey) => uiGroups.has(groupKey));
+  ])).filter((groupKey) => uiGroups.has(groupKey) || preservedHiddenGroupKeys.includes(groupKey));
 
   return {
     version: 1,
     groups: orderedGroupKeys.map((groupKey) => {
       const existingGroup = existingGroups.get(groupKey) || {};
       const uiGroup = uiGroups.get(groupKey) || {};
+      if (!uiGroups.has(groupKey)) {
+        return {
+          group_key: groupKey,
+          group_label: getRequestedCheckDefaultGroupLabel(groupKey),
+          checks: Array.isArray(existingGroup.checks) ? existingGroup.checks : [],
+        };
+      }
       const templateChecks = REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === groupKey)?.checks || [];
       const existingChecks = new Map(
         (Array.isArray(existingGroup.checks) ? existingGroup.checks : []).map((check) => [normalizeRequestedCheckKey(check.key), check])
@@ -2756,12 +2783,50 @@ function buildRequestedChecksEditorState(fieldPack = {}) {
   };
 }
 
+function getRequestedCheckEditorGroups(fieldPack = {}, item = state.item) {
+  const stateValue = buildRequestedChecksEditorState(fieldPack);
+  return (Array.isArray(stateValue.groups) ? stateValue.groups : []).filter((group) => {
+    const groupKey = String(group?.group_key || "").trim().toLowerCase();
+    if (groupKey === "cta_contact") return isPlaceRequestedCheckItem(item);
+    return true;
+  });
+}
+
+function buildRequestedChecksPreviewHtml(requestedChecks = { version: 1, groups: [] }) {
+  const groups = Array.isArray(requestedChecks?.groups) ? requestedChecks.groups : [];
+  const selectedLines = groups
+    .map((group) => {
+      const labels = (Array.isArray(group?.checks) ? group.checks : [])
+        .filter((check) => check?.requested === true)
+        .map((check) => String(check?.label || check?.key || "").trim())
+        .filter(Boolean);
+      if (!labels.length) return "";
+      const groupLabel = String(group?.group_label || group?.group_key || "").trim() || "-";
+      return `<div><strong>${escapeHtml(groupLabel)}:</strong> ${escapeHtml(labels.join(", "))}</div>`;
+    })
+    .filter(Boolean);
+  if (!selectedLines.length) return "ยังไม่ได้เลือกรายการที่จะส่งให้คนไปเช็ก";
+  return selectedLines.join("");
+}
+
+function renderRequestedChecksPreview(requestedChecks = readRequestedChecksEditorState()) {
+  const node = qs("fp-requested-checks-preview");
+  if (!node) return;
+  node.innerHTML = buildRequestedChecksPreviewHtml({
+    version: 1,
+    groups: filterRequestedCheckGroupsForItem(requestedChecks?.groups, state.item),
+  });
+}
+
 function renderRequestedChecksEditor(fieldPack = {}) {
   const root = qs("fp-requested-checks-editor");
   if (!root) return;
-  const stateValue = buildRequestedChecksEditorState(fieldPack);
+  const groups = getRequestedCheckEditorGroups(fieldPack, state.item);
+  const showCtaContactNote = !isPlaceRequestedCheckItem(state.item);
 
-  root.innerHTML = stateValue.groups.map((group) => `
+  root.innerHTML = `
+    ${showCtaContactNote ? '<div class="field-help">CTA/contact ใช้กับข้อมูลสถานที่เท่านั้น</div>' : ""}
+    ${groups.map((group) => `
     <details class="secondary-panel" open>
       <summary>${escapeHtml(group.group_label)}</summary>
       <div class="grid" data-requested-group="${escapeHtml(group.group_key)}">
@@ -2813,9 +2878,14 @@ function renderRequestedChecksEditor(fieldPack = {}) {
           : ""}
       </div>
     </details>
-  `).join("");
+  `).join("")}
+  `;
 
   root.querySelectorAll("textarea").forEach((node) => autosizeTextarea(node));
+  renderRequestedChecksPreview({
+    version: 1,
+    groups,
+  });
 }
 
 function readRequestedChecksEditorState() {
@@ -4873,10 +4943,12 @@ function wire() {
     if (target instanceof HTMLTextAreaElement) autosizeTextarea(target);
     applyEditorActionGuards();
     renderStepFourGuides();
+    renderRequestedChecksPreview();
   });
   qs("fp-requested-checks-editor")?.addEventListener("change", () => {
     applyEditorActionGuards();
     renderStepFourGuides();
+    renderRequestedChecksPreview();
   });
   qs("fp-requested-checks-editor")?.addEventListener("click", (event) => {
     const target = event.target;
@@ -4904,12 +4976,14 @@ function wire() {
       renderRequestedChecksEditor({ requested_checks_json: current });
       applyEditorActionGuards();
       renderStepFourGuides();
+      renderRequestedChecksPreview();
       return;
     }
     if (target.getAttribute("data-action") === "remove-requested-check") {
       target.closest("[data-requested-check-row]")?.remove();
       applyEditorActionGuards();
       renderStepFourGuides();
+      renderRequestedChecksPreview();
     }
   });
 
