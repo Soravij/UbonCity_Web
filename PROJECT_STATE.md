@@ -1,42 +1,21 @@
 # UbonCity Project State
 
-## Current Branch
+Last Updated: 2026-06-15
 
-- `fix/clean-media-blocker-placement`
+## Active Branch
 
-## Latest Completed Fix
+- `docs/nested-project-guidance`
 
-- Media blocker placement / Clean media workflow fix.
+## Current Documentation Work
 
-## Confirmed Working
+- Canonical nested docs are being normalized for root, backend, collector, admin, and frontend.
+- Existing docs should be overwritten or normalized instead of appended with duplicate sections.
 
-- Clean media select works.
-- Clean set cover works.
-- Clean AI Draft / Agent workflow works.
-- Publish/Admin Review readiness safety remains expected through local media readiness checks.
+## Global State
 
-## Key Commits
-
-- `8127f98` Relax clean media gate while preserving publish media checks
-- `7b9ec8b` Demote clean image readiness to AI draft warning
-- Restore clean media selection while keeping publish readiness
-
-## Current Media Decision
-
-- Clean stage media selection/cover is workflow context.
-- Publish readiness still requires local usable media.
-- Local-only media blocker belongs to late publish/admin-review gates, not early Clean selection.
-
-## Policy Reference
-
-- Main project policy: [PROJECT_POLICY.md](./PROJECT_POLICY.md)
-
-## Pending / Update Later
-
-- Full role matrix
-- Full publish workflow state machine
-- Taxonomy/revision assignment return flow
-- Translation policy
-- Production deployment policy
-- Backup/restore policy
-- Automated test coverage policy
+- Stacked Collector PRs are draft until runtime or E2E confirmation.
+- PR `#15` published media storage path fix is pending runtime verification.
+- Known blocker: review inline body images can still point to `collector-test` and need submit/ingest mirror plus `body_html` rewrite.
+- CTA/taxonomy requested-check workflow has a draft PR based on the collector submit-readiness stack.
+- Translation flow was handled separately; do not assume it is unresolved without checking branch or PR state.
+- `main` includes reference media policy v2 work.
