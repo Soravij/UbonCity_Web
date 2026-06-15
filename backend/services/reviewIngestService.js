@@ -404,13 +404,15 @@ function rewriteImgTagSrcByAssetIdentity(html, mirroredRows = []) {
   });
 }
 
-function rewriteBodyMediaToBackendUrls(html, mirroredRows = [], sourceBaseUrl) {
+export function rewriteBodyMediaToBackendUrls(html, mirroredRows = [], sourceBaseUrl) {
   let output = rewriteImgTagSrcByAssetIdentity(html, mirroredRows);
   if (!output || !mirroredRows.length) return output;
   for (const row of mirroredRows) {
     const backendUrl = String(row?.backend_url || "").trim();
     if (!backendUrl) continue;
-    for (const candidate of collectBodyMediaRewriteCandidates(row, sourceBaseUrl)) {
+    const sortedCandidates = collectBodyMediaRewriteCandidates(row, sourceBaseUrl)
+      .sort((left, right) => String(right || "").length - String(left || "").length);
+    for (const candidate of sortedCandidates) {
       output = output.replace(new RegExp(escapeRegExp(candidate), "g"), backendUrl);
     }
   }

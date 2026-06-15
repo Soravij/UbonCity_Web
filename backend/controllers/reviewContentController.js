@@ -5,7 +5,7 @@ import {
   markNeedsRevision,
   markRejected,
 } from "../services/reviewDecisionService.js";
-import { getReviewContentById } from "../services/reviewContentService.js";
+import { getReviewContentById, shapePublicReviewContent } from "../services/reviewContentService.js";
 import { ingestReviewContent } from "../services/reviewIngestService.js";
 import { issueReviewAccessToken } from "../middleware/authMiddleware.js";
 
@@ -138,7 +138,7 @@ export async function getReviewContentDetail(req, res) {
     }
     const item = await getReviewContentById(id);
     if (!item) return res.status(404).json({ error: "Review content not found" });
-    return res.json({ item });
+    return res.json({ item: shapePublicReviewContent(item) });
   } catch {
     return res.status(500).json({ error: "Internal server error" });
   }
