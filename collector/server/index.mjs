@@ -57,6 +57,12 @@ import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildArticleSuggestionPrompt, buildArticleSuggestionRequestContext, normalizeArticleSuggestion } from "../services/article-agent.mjs";
 import { planBulkItemDelete } from "../services/raw-delete.mjs";
 import { buildSeoSuggestionPrompt, buildSeoSuggestionRequestContext, normalizeSeoSuggestion } from "../services/seo-agent.mjs";
+import {
+  absolutizeCollectorMediaUrl,
+  buildAdminReviewMultipartUploadPlan,
+  mergeInlineMediaManifestFromBody,
+  rewriteCollectorHtmlMediaUrls,
+} from "./review-inline-media.mjs";
 
 const ARTICLE_AGENT_KEY = "article_agent";
 const DEFAULT_ARTICLE_AGENT_PROFILE = [
@@ -4552,29 +4558,6 @@ function hasExplicitCollectorPublicBaseUrl() {
   return Boolean(explicit && /^https?:\/\//i.test(explicit));
 }
 
-function absolutizeCollectorMediaUrl(value, baseUrl) {
-  const raw = String(value || "").trim();
-  const base = String(baseUrl || "").trim().replace(/\/+$/, "");
-  if (!raw) return "";
-  if (/^https?:\/\//i.test(raw)) {
-    try {
-      const parsed = new URL(raw);
-      if (base && /^\/(?:media\/)?uploads\//i.test(parsed.pathname)) {
-        return new URL(parsed.pathname, `${base}/`).toString();
-      }
-      return parsed.toString();
-    } catch {
-      return raw;
-    }
-  }
-  if (!base) return raw;
-  try {
-    return new URL(raw.startsWith("/") ? raw : `/${raw.replace(/^\/+/, "")}`, `${base}/`).toString();
-  } catch {
-    return raw;
-  }
-}
-
 function rewriteMediaManifestForBase(mediaManifest, baseUrl) {
   const rewriteEntry = (entry, fallbackRole = "gallery") => {
     if (!entry || typeof entry !== "object") return null;
@@ -4602,90 +4585,6 @@ function rewriteMediaManifestForBase(mediaManifest, baseUrl) {
     cover,
     gallery,
     inline,
-  };
-}
-
-function rewriteCollectorHtmlMediaUrls(html, baseUrl) {
-  const markup = String(html || "").trim();
-  const base = String(baseUrl || "").trim();
-  if (!markup || !base) return markup;
-  return markup.replace(
-    /\b(src|href)\s*=\s*(["'])([^"'<>]+)\2/gi,
-    (_match, attrName, quote, rawUrl) => {
-      const rewritten = absolutizeCollectorMediaUrl(rawUrl, base);
-      return `${attrName}=${quote}${rewritten}${quote}`;
-    }
-  );
-}
-
-function extractInlineImageUrlsFromHtml(html, baseUrl) {
-  const markup = String(html || "").trim();
-  if (!markup) return [];
-  const urls = [];
-  const seen = new Set();
-  const pattern = /<img\b[^>]*\bsrc\s*=\s*(["'])([^"'<>]+)\1/gi;
-  let match;
-  while ((match = pattern.exec(markup))) {
-    const resolved = absolutizeCollectorMediaUrl(match[2], baseUrl);
-    if (!resolved || seen.has(resolved)) continue;
-    seen.add(resolved);
-    urls.push(resolved);
-  }
-  return urls;
-}
-
-function mergeInlineMediaManifestFromBody(mediaManifest, bodyHtml, baseUrl) {
-  const manifest = mediaManifest && typeof mediaManifest === "object" ? mediaManifest : {};
-  const coverUrl = String(manifest?.cover?.source_url || manifest?.cover?.url || "").trim();
-  const existingInline = Array.isArray(manifest?.inline) ? manifest.inline : [];
-  const existingGallery = Array.isArray(manifest?.gallery) ? manifest.gallery : [];
-  const allowedSelectedUrls = new Set();
-  const seen = new Set();
-  const pushSeen = (value) => {
-    const normalized = String(value || "").trim();
-    if (!normalized) return;
-    seen.add(normalized);
-  };
-  const pushAllowed = (value) => {
-    const normalized = String(value || "").trim();
-    if (!normalized) return;
-    allowedSelectedUrls.add(normalized);
-  };
-  pushAllowed(coverUrl);
-  existingGallery.forEach((entry) => pushAllowed(entry?.source_url || entry?.url));
-  existingInline.forEach((entry) => pushAllowed(entry?.source_url || entry?.url));
-  pushSeen(coverUrl);
-  existingGallery.forEach((entry) => pushSeen(entry?.source_url || entry?.url));
-  existingInline.forEach((entry) => pushSeen(entry?.source_url || entry?.url));
-
-  const bodyUrls = extractInlineImageUrlsFromHtml(bodyHtml, baseUrl);
-  const mergedInline = [...existingInline];
-  const skippedBodyImageUrls = [];
-  for (const sourceUrl of bodyUrls) {
-    if (!sourceUrl || !allowedSelectedUrls.has(sourceUrl)) {
-      if (sourceUrl) skippedBodyImageUrls.push(sourceUrl);
-      continue;
-    }
-    if (!sourceUrl || seen.has(sourceUrl)) continue;
-    seen.add(sourceUrl);
-    mergedInline.push({
-      source_url: sourceUrl,
-      url: sourceUrl,
-      role: "inline",
-      selected: true,
-    });
-  }
-
-  return {
-    mediaManifest: {
-      ...manifest,
-      inline: mergedInline,
-    },
-    diagnostics: {
-      skipped_body_image_urls: skippedBodyImageUrls,
-      allowed_selected_urls: Array.from(allowedSelectedUrls),
-      body_image_urls: bodyUrls,
-    },
   };
 }
 
@@ -4945,6 +4844,7 @@ function buildReviewIngestPayload(options = {}) {
   const publishableSource = repo.buildPublishableSourceByItem(contentItemId);
   const latestDraft = buildArticleProcessDraftPreview(item, workflowModel, publishableSource) || {};
   const selectedAssets = repo.listContentAssetsByItem(contentItemId, { onlySelected: true });
+  const allAssets = repo.listContentAssetsByItem(contentItemId, { onlySelected: false });
   const sourceBaseUrl = String(options?.sourceBaseUrl || options?.source_base_url || resolveCollectorPublicBaseUrl()).trim();
   const contentType = String(item?.type || "").trim().toLowerCase() === "event" ? "event" : "place";
   const otherTransportMeta = isOtherTransportItem(item) ? getOtherTransportMetadata(item) : null;
@@ -4953,11 +4853,19 @@ function buildReviewIngestPayload(options = {}) {
   const excerpt = String(latestDraft?.excerpt || item?.summary || "").trim();
   const body = String(latestDraft?.body || item?.description_clean || item?.description_raw || "").trim();
   const rewrittenBody = rewriteCollectorHtmlMediaUrls(body, sourceBaseUrl);
-  const mergedMediaResult = mergeInlineMediaManifestFromBody(
-    rewriteMediaManifestForBase(toPublishedMediaManifest(contentItemId), sourceBaseUrl),
-    rewrittenBody,
-    sourceBaseUrl
-  );
+  const mergedMediaResult = mergeInlineMediaManifestFromBody({
+    mediaManifest: rewriteMediaManifestForBase(toPublishedMediaManifest(contentItemId), sourceBaseUrl),
+    bodyHtml: rewrittenBody,
+    baseUrl: sourceBaseUrl,
+    allAssets,
+    createInlineEntry: (asset, position) => buildSelectedAssetManifestEntry(contentItemId, asset, "inline", position),
+  });
+  const unresolvedCollectorUploadUrls = Array.isArray(mergedMediaResult?.diagnostics?.unresolved_collector_upload_urls)
+    ? mergedMediaResult.diagnostics.unresolved_collector_upload_urls.filter(Boolean)
+    : [];
+  if (unresolvedCollectorUploadUrls.length > 0) {
+    throw new Error(`body inline image must map to a local collector asset before admin review: ${unresolvedCollectorUploadUrls.join(", ")}`);
+  }
   const enrichedMediaManifest = attachSelectedMediaMetadata(mergedMediaResult?.mediaManifest || {}, selectedAssets, contentItemId);
   const adminReviewMediaResult = sanitizeAdminReviewMediaManifest(enrichedMediaManifest, contentItemId);
   const mediaManifest = adminReviewMediaResult.mediaManifest || {};
@@ -4979,14 +4887,11 @@ function buildReviewIngestPayload(options = {}) {
     .filter(Boolean);
 
   if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
-    const skippedBodyImageUrls = Array.isArray(mergedMediaResult?.diagnostics?.skipped_body_image_urls)
-      ? mergedMediaResult.diagnostics.skipped_body_image_urls
-      : [];
-    if (skippedBodyImageUrls.length > 0) {
+    if (unresolvedCollectorUploadUrls.length > 0) {
       try {
         console.error("[admin-review media eligibility skipped body images]", JSON.stringify({
           content_item_id: contentItemId,
-          skipped_body_image_urls: skippedBodyImageUrls,
+          unresolved_collector_upload_urls: unresolvedCollectorUploadUrls,
         }));
       } catch {
         console.error("[admin-review media eligibility skipped body images]");
@@ -5041,91 +4946,14 @@ function buildReviewIngestPayload(options = {}) {
 function buildAdminReviewMultipartFilePlan(payload, contentItemId) {
   const itemId = Number(contentItemId || 0) || 0;
   const selectedAssets = repo.listContentAssetsByItem(itemId, { onlySelected: true });
-  const byAssetId = new Map();
-  const byUrl = new Map();
-  selectedAssets.forEach((asset) => {
-    const assetId = Number(asset?.asset_id || asset?.id || 0) || 0;
-    const publicUrl = String(asset?.public_url || "").trim();
-    if (assetId > 0) byAssetId.set(assetId, asset);
-    if (publicUrl) byUrl.set(publicUrl, asset);
+  const allAssets = repo.listContentAssetsByItem(itemId, { onlySelected: false });
+  return buildAdminReviewMultipartUploadPlan({
+    payload,
+    selectedAssets,
+    allAssets,
+    resolveStoragePath,
+    fileExists: (absolutePath) => fsSync.existsSync(absolutePath),
   });
-  const mediaEntries = [];
-  if (payload?.media_manifest?.cover) mediaEntries.push({ usage_type: "cover", position: 0, entry: payload.media_manifest.cover });
-  (Array.isArray(payload?.media_manifest?.gallery) ? payload.media_manifest.gallery : []).forEach((entry, index) => {
-    mediaEntries.push({ usage_type: "gallery", position: index, entry });
-  });
-  (Array.isArray(payload?.media_manifest?.inline) ? payload.media_manifest.inline : []).forEach((entry, index) => {
-    mediaEntries.push({ usage_type: "inline", position: index, entry });
-  });
-
-  const uploadPlan = [];
-  const diagnostics = [];
-  for (const mediaRow of mediaEntries) {
-    const entry = mediaRow?.entry && typeof mediaRow.entry === "object" ? mediaRow.entry : null;
-    if (!entry) continue;
-    const sourceUrl = String(entry.source_url || entry.url || "").trim();
-    const assetId = Number(entry.source_asset_id || 0) || 0;
-    const role = String(entry.role || mediaRow.usage_type || "gallery").trim().toLowerCase() || "gallery";
-    const clientMediaUid = String(entry.client_media_uid || "").trim();
-    const asset = (assetId > 0 ? byAssetId.get(assetId) : null) || byUrl.get(sourceUrl) || null;
-    const diagnostic = {
-      asset_id: assetId || Number(asset?.asset_id || 0) || null,
-      client_media_uid: clientMediaUid || null,
-      role,
-      has_file: false,
-      reason: null,
-    };
-    if (!clientMediaUid) {
-      diagnostic.reason = "client_media_uid_missing";
-      diagnostics.push(diagnostic);
-      throw new Error("eligible collector media client_media_uid missing for admin review upload");
-    }
-    if (!asset) {
-      diagnostic.reason = "selected_asset_mapping_missing";
-      diagnostics.push(diagnostic);
-      throw new Error("eligible collector media file missing for admin review upload");
-    }
-    const storageDisk = String(asset?.storage_disk || "").trim().toLowerCase();
-    const storagePath = String(asset?.storage_path || "").trim();
-    const mimeType = String(entry.mime_type || asset?.mime_type || "").trim().toLowerCase();
-    if (!["local", "nas"].includes(storageDisk) || !storagePath || /^https?:\/\//i.test(storagePath)) {
-      diagnostic.reason = "asset_not_local_storage";
-      diagnostics.push(diagnostic);
-      throw new Error("eligible collector media file missing for admin review upload");
-    }
-    if (mimeType && !mimeType.startsWith("image/")) {
-      diagnostic.reason = "asset_not_image";
-      diagnostics.push(diagnostic);
-      throw new Error("eligible collector media file missing for admin review upload");
-    }
-    const absolutePath = resolveStoragePath(storagePath);
-    const hasFile = fsSync.existsSync(absolutePath);
-    diagnostic.has_file = hasFile;
-    if (!hasFile) {
-      diagnostic.reason = "local_file_missing";
-      diagnostics.push(diagnostic);
-      throw new Error("eligible collector media file missing for admin review upload");
-    }
-    diagnostics.push(diagnostic);
-    uploadPlan.push({
-      asset_id: Number(asset?.asset_id || 0) || null,
-      client_media_uid: clientMediaUid,
-      role,
-      position: Number(mediaRow.position || 0) || 0,
-      source_url: sourceUrl || null,
-      mime_type: mimeType || "application/octet-stream",
-      original_file_name: String(entry.original_file_name || asset?.file_name || "").trim() || `asset-${assetId || "media"}`,
-      absolute_path: absolutePath,
-    });
-  }
-  return {
-    uploadPlan,
-    diagnostics,
-    eligibleSelectedAssetCount: selectedAssets.filter((asset) => {
-      const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
-      return String(asset?.public_url || "").trim() && (!mimeType || mimeType.startsWith("image/"));
-    }).length,
-  };
 }
 
 function buildEventAdminQueuePayload(options = {}) {
