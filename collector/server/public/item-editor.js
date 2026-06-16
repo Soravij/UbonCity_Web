@@ -4091,12 +4091,16 @@ function buildFieldPackAssignmentPayload(pack, existing = state.fieldPack || {})
 function buildFieldPackApiPayload() {
   const pack = readFieldPackFormState();
   const existing = state.fieldPack || {};
+  const requestedChecksEditor = qs("fp-requested-checks-editor");
+  const requestedChecksJson = requestedChecksEditor
+    ? readRequestedChecksEditorState()
+    : existing.requested_checks_json && typeof existing.requested_checks_json === "object"
+      ? existing.requested_checks_json
+      : pack.requested_checks_json;
   return {
     ...buildFieldPackTopLevelPayload({
       ...pack,
-      requested_checks_json: existing.requested_checks_json && typeof existing.requested_checks_json === "object"
-        ? existing.requested_checks_json
-        : pack.requested_checks_json,
+      requested_checks_json: requestedChecksJson,
     }),
     field_pack_checklists: buildFieldPackChecklistPayload(pack, existing),
     field_pack_references: buildFieldPackReferencePayload(pack),

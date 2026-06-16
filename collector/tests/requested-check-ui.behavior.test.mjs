@@ -111,6 +111,11 @@ const REQUESTED_CHECK_ANSWER_TYPE_OPTIONS = loadConstValue(itemEditorJs, "REQUES
 const getRequestedCheckDefaultGroupLabel = loadNamedFunction(itemEditorJs, "getRequestedCheckDefaultGroupLabel", {
   REQUESTED_CHECK_GROUP_TEMPLATES,
 });
+let requestedChecksEditorRoot = null;
+const readRequestedChecksEditorState = loadNamedFunction(itemEditorJs, "readRequestedChecksEditorState", {
+  qs: (id) => (id === "fp-requested-checks-editor" ? requestedChecksEditorRoot : null),
+  getRequestedCheckDefaultGroupLabel,
+});
 const buildRequestedChecksEditorState = loadNamedFunction(itemEditorJs, "buildRequestedChecksEditorState", {
   REQUESTED_CHECK_GROUP_TEMPLATES,
   state: { item: { type: "place" } },
@@ -321,6 +326,7 @@ const buildFieldPackApiPayload = loadNamedFunction(itemEditorJs, "buildFieldPack
       },
     },
   },
+  qs: (id) => (id === "fp-requested-checks-editor" ? requestedChecksEditorRoot : null),
   readFieldPackFormState: () => ({
     id: 1,
     status: "draft",
@@ -355,9 +361,49 @@ const buildFieldPackApiPayload = loadNamedFunction(itemEditorJs, "buildFieldPack
   buildFieldPackReferencePayload: () => [],
   buildFieldPackMediaHintPayload: () => [],
   buildFieldPackAssignmentPayload: () => [],
+  readRequestedChecksEditorState,
   mergeRequestedChecksForSave,
   buildRequestedChecksEditorState,
 });
+
+function createRequestedChecksEditorRowNode(check) {
+  const fields = {
+    answer_type: { value: check.answer_type ?? "text" },
+    key: { value: check.key ?? "" },
+    requested: { checked: check.requested === true },
+    label: { value: check.label ?? "" },
+    instruction: { value: check.instruction ?? "" },
+    condition_prompt: { value: check.condition_prompt ?? "" },
+    evidence_required: { checked: check.evidence_required === true },
+  };
+  return {
+    querySelector(selector) {
+      const match = String(selector).match(/data-check-field='([^']+)'/);
+      return match ? fields[match[1]] || null : null;
+    },
+  };
+}
+
+function createRequestedChecksEditorGroupNode(groupKey, checks) {
+  const rowNodes = checks.map((check) => createRequestedChecksEditorRowNode(check));
+  return {
+    getAttribute(name) {
+      return name === "data-requested-group" ? groupKey : null;
+    },
+    querySelectorAll(selector) {
+      return selector === "[data-requested-check-row]" ? rowNodes : [];
+    },
+  };
+}
+
+function createRequestedChecksEditorRoot(groups) {
+  const groupNodes = groups.map((group) => createRequestedChecksEditorGroupNode(group.groupKey, group.checks));
+  return {
+    querySelectorAll(selector) {
+      return selector === "[data-requested-group]" ? groupNodes : [];
+    },
+  };
+}
 
 test("delete custom check removes it from saved payload instead of reviving existing state", () => {
   const existingState = {
@@ -1939,6 +1985,7 @@ test("buildRequestedChecksHandoffPayload omits requested_checks when nothing is 
 });
 
 test("buildFieldPackApiPayload preserves existing requested_checks_json when item editor has no requested-check DOM", () => {
+  requestedChecksEditorRoot = null;
   const result = buildFieldPackApiPayload();
 
   assert.deepEqual(result.requested_checks_json, {
@@ -1949,6 +1996,91 @@ test("buildFieldPackApiPayload preserves existing requested_checks_json when ite
         group_label: "Taxonomy",
         checks: [
           { key: "parking", label: "Parking", requested: true, instruction: "verify parking", answer_type: "text" },
+        ],
+      },
+    ],
+  });
+});
+
+test("buildFieldPackApiPayload reads live requested-check editor state when editor DOM exists", () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([
+    {
+      groupKey: "cta_contact",
+      checks: [
+        {
+          key: "phone",
+          label: "Phone",
+          requested: true,
+          instruction: "verify phone",
+          answer_type: "phone",
+        },
+        {
+          key: "website_url",
+          label: "Website URL",
+          requested: false,
+          instruction: "verify website",
+          answer_type: "url",
+        },
+      ],
+    },
+    {
+      groupKey: "taxonomy",
+      checks: [
+        {
+          key: "category",
+          label: "Category",
+          requested: true,
+          instruction: "verify category",
+          answer_type: "text",
+          condition_prompt: "only if needed",
+          evidence_required: true,
+        },
+      ],
+    },
+  ]);
+
+  const result = buildFieldPackApiPayload();
+
+  assert.deepEqual(result.requested_checks_json, {
+    version: 1,
+    groups: [
+      {
+        group_key: "cta_contact",
+        group_label: getRequestedCheckDefaultGroupLabel("cta_contact"),
+        checks: [
+          {
+            key: "phone",
+            requested: true,
+            label: "Phone",
+            instruction: "verify phone",
+            answer_type: "phone",
+            condition_prompt: null,
+            evidence_required: false,
+          },
+          {
+            key: "website_url",
+            requested: false,
+            label: "Website URL",
+            instruction: "verify website",
+            answer_type: "url",
+            condition_prompt: null,
+            evidence_required: false,
+          },
+        ],
+      },
+      {
+        group_key: "taxonomy",
+        group_label: getRequestedCheckDefaultGroupLabel("taxonomy"),
+        checks: [
+          {
+            key: "category",
+            requested: true,
+            label: "Category",
+            instruction: "verify category",
+            answer_type: "text",
+            condition_prompt: "only if needed",
+            evidence_required: true,
+          },
         ],
       },
     ],
