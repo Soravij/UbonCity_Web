@@ -128,12 +128,27 @@ const hasRequestedCheckMeaningfulValue = loadNamedFunction(itemEditorJs, "hasReq
 const normalizeRequestedCheckCandidate = loadNamedFunction(itemEditorJs, "normalizeRequestedCheckCandidate", {
   hasRequestedCheckMeaningfulValue,
 });
+const getGuidanceSourceObjects = loadNamedFunction(itemEditorJs, "getGuidanceSourceObjects", {
+  state: { item: { type: "place", category: "attractions" } },
+});
+const readGuidanceAliasValue = loadNamedFunction(itemEditorJs, "readGuidanceAliasValue");
+const normalizeGuidanceDisplayValue = loadNamedFunction(itemEditorJs, "normalizeGuidanceDisplayValue");
+const extractVerifiedFactValue = loadNamedFunction(itemEditorJs, "extractVerifiedFactValue");
 const buildRequestedCheckStatusRow = loadNamedFunction(itemEditorJs, "buildRequestedCheckStatusRow", {
   hasRequestedCheckMeaningfulValue,
   formatRequestedCheckSuggestedValue: (value) => {
     if (Array.isArray(value)) return value.join(", ");
     return value == null ? "" : String(value);
   },
+});
+const resolveGuidanceRowValue = loadNamedFunction(itemEditorJs, "resolveGuidanceRowValue", {
+  state: { item: { type: "place", category: "attractions" } },
+  taxonomyFieldLabel: (key) => String(key || ""),
+  normalizeRequestedCheckCandidate,
+  hasRequestedCheckMeaningfulValue,
+  normalizeGuidanceDisplayValue,
+  extractVerifiedFactValue,
+  buildRequestedCheckStatusRow,
 });
 const extractRequestedCheckArticleContextHints = loadNamedFunction(itemEditorJs, "extractRequestedCheckArticleContextHints");
 const parseFieldPackContractFromWriterNotes = loadNamedFunction(itemEditorJs, "parseFieldPackContractFromWriterNotes");
@@ -160,6 +175,10 @@ const buildRequestedChecksCompactSummaryData = loadNamedFunction(itemEditorJs, "
   isPlaceRequestedCheckItem,
   REQUESTED_CHECK_GROUP_TEMPLATES,
   normalizeRequestedCheckCandidate,
+  getGuidanceSourceObjects,
+  readGuidanceAliasValue,
+  normalizeGuidanceDisplayValue,
+  resolveGuidanceRowValue,
   getCompactGuidanceLabel: loadNamedFunction(itemEditorJs, "getCompactGuidanceLabel"),
   extractRequestedCheckArticleContextHints,
   buildTaxonomyGuidanceRows: loadNamedFunction(itemEditorJs, "buildTaxonomyGuidanceRows", {
@@ -172,6 +191,10 @@ const buildRequestedChecksCompactSummaryData = loadNamedFunction(itemEditorJs, "
     isTaxonomyConfigRelevantForScope,
     extractVerifiedFactSignals,
     hasRequestedCheckMeaningfulValue,
+    getGuidanceSourceObjects,
+    readGuidanceAliasValue,
+    normalizeGuidanceDisplayValue,
+    resolveGuidanceRowValue,
     buildRequestedCheckStatusRow,
   }),
   parseFieldPackContractFromWriterNotes,
@@ -983,6 +1006,104 @@ test("compact CTA summary keeps missing and suggested fields visible with explic
   assert.deepEqual(phoneRow?.statuses, ["missing"]);
   assert.deepEqual(facebookRow?.statuses, ["ai filled", "needs verification"]);
   assert.deepEqual(websiteRow?.statuses, ["confirmed"]);
+});
+
+test("CTA review resolves phone from clean source aliases before marking missing", () => {
+  const summary = buildRequestedChecksCompactSummaryData({
+    publishable_source: {
+      national_phone_number: "096-3435931",
+    },
+    requested_checks_json: { version: 1, groups: [] },
+  }, getRequestedCheckEditorGroups({
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "restaurants" }), { type: "place", category: "restaurants" });
+
+  const phoneRow = summary.ctaRows.find((row) => row.key === "phone");
+  assert.equal(phoneRow?.value, "096-3435931");
+  assert.doesNotMatch(phoneRow?.value || "", /No value/i);
+  assert.ok(!phoneRow?.statuses.includes("missing"));
+});
+
+test("curation review resolves category from clean source data", () => {
+  const summary = buildRequestedChecksCompactSummaryData({
+    publishable_source: {
+      category: "restaurants",
+    },
+    requested_checks_json: { version: 1, groups: [] },
+    content_type: "place",
+    category: "attractions",
+  }, getRequestedCheckEditorGroups({
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "attractions" }), { type: "place", category: "attractions" });
+
+  const categoryRow = summary.taxonomyRows.find((row) => row.key === "category");
+  assert.equal(categoryRow?.value, "restaurants");
+  assert.ok(!categoryRow?.statuses.includes("unknown"));
+});
+
+test("curation review formats opening hours from clean source fields into readable text", () => {
+  const html = buildRequestedChecksEditorHtml({
+    publishable_source: {
+      open_now: true,
+      opening_hours_weekday_text: ["Mon: 10:30-1:00", "Tue: 10:30-1:00"],
+    },
+    requested_checks_json: { version: 1, groups: [] },
+    content_type: "place",
+    category: "restaurants",
+  }, { type: "place", category: "restaurants" });
+  const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
+
+  assert.match(curationHtml, /Opening Hours Note/);
+  assert.match(curationHtml, /Open now: yes/);
+  assert.match(curationHtml, /Mon: 10:30-1:00/);
+  assert.doesNotMatch(curationHtml, /\[.*Mon: 10:30-1:00.*\]/);
+});
+
+test("curation review normalizes nearby arrays from clean source without raw brackets", () => {
+  const html = buildRequestedChecksEditorHtml({
+    publishable_source: {
+      nearby_landmarks: ["See photos and videos taken at this location"],
+    },
+    requested_checks_json: { version: 1, groups: [] },
+    content_type: "place",
+    category: "restaurants",
+  }, { type: "place", category: "restaurants" });
+  const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
+
+  assert.match(curationHtml, /See photos and videos taken at this location/);
+  assert.doesNotMatch(curationHtml, /\["See photos and videos taken at this location"\]/);
+});
+
+test("unknown clean-source confidence does not get ai filled badge", () => {
+  const html = buildRequestedChecksEditorHtml({
+    publishable_source: {
+      confidence: "unknown",
+    },
+    requested_checks_json: { version: 1, groups: [] },
+    content_type: "place",
+    category: "restaurants",
+  }, { type: "place", category: "restaurants" });
+  const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
+  const confidenceRow = extractCompactSummaryRow(curationHtml, "Confidence");
+
+  assert.match(confidenceRow, /No value|unknown/i);
+  assert.doesNotMatch(confidenceRow, /ai filled/i);
+});
+
+test("default guidance only shows No value when all accepted CTA sources are empty", () => {
+  const html = buildRequestedChecksEditorHtml({
+    publishable_source: {
+      phone: "096-3435931",
+      website_url: "https://example.com",
+    },
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "restaurants" });
+  const ctaHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "CTA Review");
+  const phoneRow = extractCompactSummaryRow(ctaHtml, "Phone");
+  const websiteRow = extractCompactSummaryRow(ctaHtml, "Website URL");
+
+  assert.doesNotMatch(phoneRow, /No value/i);
+  assert.doesNotMatch(websiteRow, /No value/i);
 });
 
 test("runtime preview renders ai_taxonomy_json-only taxonomy guidance and hides empty taxonomy message", () => {

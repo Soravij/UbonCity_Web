@@ -2896,11 +2896,14 @@ function extractRequestedCheckArticleContextHints(groups = []) {
 }
 
 function buildRequestedCheckStatusRow(key, label, value, statuses = []) {
+  const normalizedStatuses = Array.isArray(statuses)
+    ? Array.from(new Set(statuses.filter(Boolean)))
+    : [];
   return {
     key: String(key || "").trim().toLowerCase(),
     label: String(label || "").trim() || "-",
     value: hasRequestedCheckMeaningfulValue(value) ? formatRequestedCheckSuggestedValue(value) : "",
-    statuses: Array.isArray(statuses) ? statuses.filter(Boolean) : [],
+    statuses: normalizedStatuses,
   };
 }
 
@@ -2917,6 +2920,164 @@ function normalizeRequestedCheckCandidate(rawValue) {
     checked: false,
     found: false,
   };
+}
+
+function getGuidanceSourceObjects(fieldPack = {}, item = state.item) {
+  const publishableSource = fieldPack?.publishable_source && typeof fieldPack.publishable_source === "object" && !Array.isArray(fieldPack.publishable_source)
+    ? fieldPack.publishable_source
+    : {};
+  const sourceSnapshot = fieldPack?.source_snapshot_json && typeof fieldPack.source_snapshot_json === "object" && !Array.isArray(fieldPack.source_snapshot_json)
+    ? fieldPack.source_snapshot_json
+    : {};
+  const cleanContext = fieldPack?.clean_context && typeof fieldPack.clean_context === "object" && !Array.isArray(fieldPack.clean_context)
+    ? fieldPack.clean_context
+    : {};
+  const cleanContextItem = cleanContext?.item && typeof cleanContext.item === "object" && !Array.isArray(cleanContext.item)
+    ? cleanContext.item
+    : {};
+  const itemSource = item && typeof item === "object" && !Array.isArray(item) ? item : {};
+  return {
+    publishableSource,
+    sourceSnapshot,
+    cleanContext,
+    cleanContextItem,
+    itemSource,
+  };
+}
+
+function readGuidanceAliasValue(source, aliases = []) {
+  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+  for (const alias of Array.isArray(aliases) ? aliases : []) {
+    const path = String(alias || "").trim();
+    if (!path) continue;
+    const segments = path.split(".").filter(Boolean);
+    let cursor = source;
+    let resolved = true;
+    for (const segment of segments) {
+      if (!cursor || typeof cursor !== "object" || !Object.prototype.hasOwnProperty.call(cursor, segment)) {
+        resolved = false;
+        break;
+      }
+      cursor = cursor[segment];
+    }
+    if (resolved) return cursor;
+  }
+  return null;
+}
+
+function normalizeGuidanceDisplayValue(value, key = "") {
+  if (value == null) return "";
+  if (Array.isArray(value)) {
+    const items = value
+      .map((entry) => normalizeGuidanceDisplayValue(entry, key))
+      .filter((entry) => entry !== "");
+    return items.join("; ");
+  }
+  if (typeof value === "boolean") {
+    if (key === "open_now") return value ? "Open now: yes" : "Open now: no";
+    return value ? "true" : "false";
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "";
+  }
+  if (typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "value")) return normalizeGuidanceDisplayValue(value.value, key);
+    if (Object.prototype.hasOwnProperty.call(value, "text")) return normalizeGuidanceDisplayValue(value.text, key);
+    if (Object.prototype.hasOwnProperty.call(value, "label")) return normalizeGuidanceDisplayValue(value.label, key);
+    if (Object.prototype.hasOwnProperty.call(value, "name")) return normalizeGuidanceDisplayValue(value.name, key);
+    if (Object.prototype.hasOwnProperty.call(value, "url")) return normalizeGuidanceDisplayValue(value.url, key);
+    if (key === "opening_hours_note" || Object.prototype.hasOwnProperty.call(value, "open_now") || Object.prototype.hasOwnProperty.call(value, "weekday_text") || Object.prototype.hasOwnProperty.call(value, "opening_hours_weekday_text")) {
+      const parts = [];
+      const openNow = normalizeGuidanceDisplayValue(value.open_now, "open_now");
+      if (openNow) parts.push(openNow);
+      const weekdayText = normalizeGuidanceDisplayValue(value.weekday_text || value.opening_hours_weekday_text, "opening_hours_weekday_text");
+      if (weekdayText) parts.push(weekdayText);
+      const businessStatus = normalizeGuidanceDisplayValue(value.business_status, "business_status");
+      if (businessStatus) parts.push(`Status: ${businessStatus}`);
+      return parts.join("; ");
+    }
+    return "";
+  }
+  const text = String(value || "").trim();
+  return text;
+}
+
+function extractVerifiedFactValue(verifiedFacts = [], aliases = []) {
+  for (const fact of Array.isArray(verifiedFacts) ? verifiedFacts : []) {
+    const raw = String(fact || "").trim();
+    if (!raw) continue;
+    const separatorIndex = raw.indexOf(":");
+    if (separatorIndex <= 0) continue;
+    const factKey = raw.slice(0, separatorIndex).trim().toLowerCase();
+    const factValue = raw.slice(separatorIndex + 1).trim();
+    if (!factValue) continue;
+    if ((Array.isArray(aliases) ? aliases : []).some((alias) => {
+      const terminalKey = String(alias || "").trim().toLowerCase().split(".").pop();
+      return terminalKey && (factKey === terminalKey || factKey === terminalKey.replace(/_/g, " "));
+    })) {
+      return factValue;
+    }
+  }
+  return "";
+}
+
+function resolveGuidanceRowValue({
+  key = "",
+  label = "",
+  aliases = [],
+  fieldPack = {},
+  item = state.item,
+  confirmedValue = null,
+  fieldReturn = null,
+  cleanCandidates = [],
+  requestedCheck = null,
+  verifiedFacts = [],
+  fallbackStatus = "unknown",
+}) {
+  const normalizedKey = String(key || "").trim().toLowerCase();
+  const normalizedLabel = String(label || "").trim() || taxonomyFieldLabel(normalizedKey);
+  const confirmedCandidate = normalizeRequestedCheckCandidate(confirmedValue);
+  if (hasRequestedCheckMeaningfulValue(confirmedCandidate.value)) {
+    return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, normalizeGuidanceDisplayValue(confirmedCandidate.value, normalizedKey), ["confirmed"]);
+  }
+
+  if (fieldReturn?.found && hasRequestedCheckMeaningfulValue(fieldReturn.value)) {
+    return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, normalizeGuidanceDisplayValue(fieldReturn.value, normalizedKey), ["found"]);
+  }
+  if (fieldReturn?.checked) {
+    const displayValue = normalizeGuidanceDisplayValue(fieldReturn.value, normalizedKey);
+    return buildRequestedCheckStatusRow(
+      normalizedKey,
+      normalizedLabel,
+      displayValue,
+      displayValue ? ["found", "needs verification"] : ["needs verification"]
+    );
+  }
+
+  for (const candidate of Array.isArray(cleanCandidates) ? cleanCandidates : []) {
+    const candidateValue = candidate && typeof candidate === "object" && !Array.isArray(candidate) && Object.prototype.hasOwnProperty.call(candidate, "value")
+      ? candidate.value
+      : candidate;
+    const candidateStatus = candidate && typeof candidate === "object" && !Array.isArray(candidate) && Array.isArray(candidate.statuses)
+      ? candidate.statuses.filter(Boolean)
+      : ["ai filled"];
+    const displayValue = normalizeGuidanceDisplayValue(candidateValue, normalizedKey);
+    const normalizedValue = String(displayValue || "").trim().toLowerCase();
+    if (!displayValue) continue;
+    if (normalizedValue === "unknown" || normalizedValue === "null") continue;
+    return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, displayValue, candidateStatus);
+  }
+
+  const verifiedFactValue = extractVerifiedFactValue(verifiedFacts, aliases);
+  if (verifiedFactValue) {
+    return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, verifiedFactValue, ["found", "verified"]);
+  }
+
+  if (requestedCheck?.requested === true) {
+    return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, null, ["needs verification"]);
+  }
+
+  return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, null, [fallbackStatus]);
 }
 
 function getCompactGuidanceLabel(key, fallbackLabel = "") {
@@ -3033,7 +3194,25 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
     "opening_hours_note",
     "nearby",
     "accessibility",
+    "confidence",
   ]);
+  const sourceObjects = getGuidanceSourceObjects(fieldPack, item);
+  const taxonomyAliases = {
+    category: ["category", "type.category"],
+    subtype: ["subtype", "type.subtype"],
+    tags: ["tags", "publishableSource.tags"],
+    opening_hours_note: [
+      "opening_hours_note",
+      "opening_hours",
+      "business_status",
+      "open_now",
+      "current_opening_hours",
+      "weekday_text",
+      "opening_hours_weekday_text",
+    ],
+    nearby: ["nearby", "nearby_landmarks", "local_notes"],
+    confidence: ["confidence"],
+  };
 
   const knownKeys = new Set([
     ...Object.keys(aiTaxonomy || {}),
@@ -3044,6 +3223,19 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
   taxonomySectionConfigs.forEach(([sectionKey, fields]) => {
     const source = contract?.[sectionKey] && typeof contract[sectionKey] === "object" ? contract[sectionKey] : {};
     Object.keys(source).forEach((key) => knownKeys.add(key));
+  });
+  Object.entries(taxonomyAliases).forEach(([key, aliases]) => {
+    const found = aliases.some((alias) => {
+      const terminalAlias = String(alias || "").trim();
+      if (!terminalAlias) return false;
+      return [
+        sourceObjects.publishableSource,
+        sourceObjects.sourceSnapshot,
+        sourceObjects.cleanContext,
+        sourceObjects.cleanContextItem,
+      ].some((source) => readGuidanceAliasValue(source, [terminalAlias]) != null);
+    });
+    if (found) knownKeys.add(key);
   });
   if (scope?.isAttractionPlace || scope?.isRestaurant || scope?.isHotel || scope?.isEvent || scope?.isUnknownCategory) {
     scopedImportantKeys.forEach((key) => {
@@ -3064,68 +3256,75 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
         : null;
       const confirmedValue = confirmedTaxonomy[normalizedKey];
       const requestedCheck = requestedTaxonomyChecks.find((check) => String(check?.key || "").trim().toLowerCase() === normalizedKey) || null;
-
-      if (hasRequestedCheckMeaningfulValue(confirmedValue)) {
-        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), confirmedValue, ["confirmed"]);
-      }
-      if (fieldReturn?.found && hasRequestedCheckMeaningfulValue(fieldReturn.value)) {
-        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), fieldReturn.value, ["found"]);
-      }
-      if (fieldReturn?.checked) {
-        return buildRequestedCheckStatusRow(
-          normalizedKey,
-          taxonomyFieldLabel(normalizedKey),
-          fieldReturn.value,
-          hasRequestedCheckMeaningfulValue(fieldReturn.value) ? ["suggested", "needs verification"] : ["missing", "needs verification"]
-        );
-      }
-
-      let contractValue = null;
+      const aliases = [normalizedKey, ...(taxonomyAliases[normalizedKey] || [])];
+      const cleanCandidates = [];
       for (const [sectionKey] of taxonomySectionConfigs) {
         const source = contract?.[sectionKey] && typeof contract[sectionKey] === "object" ? contract[sectionKey] : {};
         if (Object.prototype.hasOwnProperty.call(source, normalizedKey)) {
-          contractValue = source[normalizedKey];
-          break;
+          cleanCandidates.push({
+            value: source[normalizedKey],
+            statuses: verifiedFactSignals.matchedKeys.has(normalizedKey)
+              ? ["found", "verified"]
+              : (needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey) ? ["suggested", "needs verification"] : ["suggested"]),
+          });
         }
       }
+      if (Object.prototype.hasOwnProperty.call(aiTaxonomy, normalizedKey)) {
+        cleanCandidates.push({
+          value: aiTaxonomy[normalizedKey],
+          statuses: hasRequestedCheckMeaningfulValue(aiTaxonomy[normalizedKey]) ? ["ai filled", "needs verification"] : ["unknown"],
+        });
+      }
+      if (normalizedKey === "opening_hours_note") {
+        const openingHoursComposite = {
+          open_now: readGuidanceAliasValue(sourceObjects.publishableSource, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.sourceSnapshot, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["open_now"]),
+          weekday_text: readGuidanceAliasValue(sourceObjects.publishableSource, ["weekday_text", "opening_hours_weekday_text"])
+            ?? readGuidanceAliasValue(sourceObjects.sourceSnapshot, ["weekday_text", "opening_hours_weekday_text"])
+            ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["weekday_text", "opening_hours_weekday_text"]),
+          business_status: readGuidanceAliasValue(sourceObjects.publishableSource, ["business_status"])
+            ?? readGuidanceAliasValue(sourceObjects.sourceSnapshot, ["business_status"])
+            ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["business_status"]),
+        };
+        if (openingHoursComposite.open_now != null || openingHoursComposite.weekday_text != null || openingHoursComposite.business_status != null) {
+          cleanCandidates.unshift({ value: openingHoursComposite, statuses: ["ai filled"] });
+        }
+      }
+      [
+        sourceObjects.publishableSource,
+        sourceObjects.sourceSnapshot,
+        sourceObjects.cleanContext,
+        sourceObjects.cleanContextItem,
+      ].forEach((source) => {
+        const aliasValue = readGuidanceAliasValue(source, aliases);
+        if (aliasValue != null) cleanCandidates.push({ value: aliasValue, statuses: ["ai filled"] });
+      });
 
-      const scalarUnknown = String(contractValue == null ? "" : contractValue).trim().toLowerCase() === "unknown";
-      if (hasRequestedCheckMeaningfulValue(contractValue) && !scalarUnknown) {
-        const isVerified = verifiedFactSignals.matchedKeys.has(normalizedKey);
-        const needsVerification = needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey);
-        return buildRequestedCheckStatusRow(
-          normalizedKey,
-          taxonomyFieldLabel(normalizedKey),
-          contractValue,
-          isVerified ? ["found", "verified"] : (needsVerification ? ["suggested", "needs verification"] : ["suggested"])
-        );
+      const resolvedRow = resolveGuidanceRowValue({
+        key: normalizedKey,
+        label: taxonomyFieldLabel(normalizedKey),
+        aliases,
+        fieldPack,
+        item,
+        confirmedValue,
+        fieldReturn,
+        cleanCandidates,
+        requestedCheck,
+        verifiedFacts,
+        fallbackStatus: "unknown",
+      });
+      if (!resolvedRow.value && (needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey))) {
+        const tone = resolvedRow.statuses.includes("unknown") ? ["unknown", "needs verification"] : ["needs verification"];
+        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, tone);
       }
-      if (scalarUnknown) {
-        return buildRequestedCheckStatusRow(
-          normalizedKey,
-          taxonomyFieldLabel(normalizedKey),
-          null,
-          needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey) ? ["unknown", "needs verification"] : ["unknown"]
-        );
+      if (resolvedRow.value && (needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey)) && !resolvedRow.statuses.includes("found") && !resolvedRow.statuses.includes("confirmed")) {
+        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), resolvedRow.value, [...resolvedRow.statuses, "needs verification"]);
       }
-      if (needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey)) {
-        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, ["needs verification"]);
-      }
-
-      const aiValue = aiTaxonomy[normalizedKey];
-      if (hasRequestedCheckMeaningfulValue(aiValue)) {
-        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), aiValue, ["ai filled", "needs verification"]);
-      }
-
-      if (requestedCheck) {
-        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, ["suggested", "needs verification"]);
-      }
-
-      return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, ["unknown"]);
+      return resolvedRow;
     })
     .filter((row) => {
       if (!row.statuses.length) return false;
       if (row.value) return true;
+      if (row.key === "confidence" && row.statuses.includes("unknown")) return true;
       if (row.statuses.includes("needs verification")) return true;
       if (row.statuses.includes("found") || row.statuses.includes("confirmed") || row.statuses.includes("verified")) return true;
       if (row.statuses.includes("suggested")) return true;
@@ -3144,6 +3343,14 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
   const fieldReturnCta = fieldPack?.field_return_payload_json?.cta_return && typeof fieldPack.field_return_payload_json.cta_return === "object"
     ? fieldPack.field_return_payload_json.cta_return
     : {};
+  const sourceObjects = getGuidanceSourceObjects(fieldPack, item);
+  const ctaAliases = {
+    phone: ["phone", "phone_number", "telephone", "tel", "contact.phone", "cta.phone", "national_phone_number", "international_phone_number"],
+    facebook_url: ["facebook_url", "facebook", "facebookUrl", "contact.facebook_url", "cta.facebook_url"],
+    line_url: ["line_url", "line", "lineUrl", "contact.line_url", "cta.line_url"],
+    website_url: ["website_url", "website", "websiteUrl", "contact.website_url", "cta.website_url", "source_url"],
+    primary_cta: ["primary_cta", "cta.primary_cta", "map_url", "location_url"],
+  };
 
   const ctaRows = isPlaceItem
     ? ctaTemplateChecks.map((check) => {
@@ -3153,22 +3360,51 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
       const curatedValue = normalizeRequestedCheckCandidate(fieldPack?.curated_cta_contact_json?.[key]);
       const aiValue = normalizeRequestedCheckCandidate(fieldPack?.ai_cta_contact_json?.[key]);
       const compactLabel = getCompactGuidanceLabel(key, check.label);
-      if (fieldReturn?.found && hasRequestedCheckMeaningfulValue(fieldReturn.value)) {
-        return buildRequestedCheckStatusRow(key, compactLabel, fieldReturn.value, ["found"]);
-      }
-      if (hasRequestedCheckMeaningfulValue(confirmedValue.value)) {
-        return buildRequestedCheckStatusRow(key, compactLabel, confirmedValue.value, ["confirmed"]);
-      }
+      const aliases = [key, ...(ctaAliases[key] || [])];
+      const cleanCandidates = [];
       if (hasRequestedCheckMeaningfulValue(curatedValue.value)) {
-        return buildRequestedCheckStatusRow(key, compactLabel, curatedValue.value, ["suggested"]);
+        cleanCandidates.push({ value: curatedValue.value, statuses: ["suggested"] });
       }
       if (hasRequestedCheckMeaningfulValue(aiValue.value)) {
-        return buildRequestedCheckStatusRow(key, compactLabel, aiValue.value, ["ai filled", "needs verification"]);
+        cleanCandidates.push({
+          value: aiValue.value,
+          statuses: aiValue.found ? ["found"] : ["ai filled", "needs verification"],
+        });
       }
-      if (fieldReturn?.checked || fieldReturn?.found || confirmedValue.checked || confirmedValue.found || curatedValue.checked || curatedValue.found || aiValue.checked || aiValue.found) {
-        return buildRequestedCheckStatusRow(key, compactLabel, null, ["found", "needs verification"]);
+      [
+        sourceObjects.publishableSource,
+        sourceObjects.sourceSnapshot,
+        sourceObjects.cleanContext,
+        sourceObjects.cleanContextItem,
+        sourceObjects.itemSource,
+      ].forEach((source) => {
+        const aliasValue = readGuidanceAliasValue(source, aliases);
+        if (aliasValue != null) cleanCandidates.push({ value: aliasValue, statuses: ["ai filled", "needs verification"] });
+      });
+      if (key === "primary_cta") {
+        const mapCandidate = cleanCandidates.find((candidate) => String(normalizeGuidanceDisplayValue(candidate?.value, key) || "").trim());
+        if (mapCandidate && !hasRequestedCheckMeaningfulValue(confirmedValue.value) && !fieldReturn?.found) {
+          cleanCandidates.unshift({ value: "map", statuses: ["suggested"] });
+        }
       }
-      return buildRequestedCheckStatusRow(key, compactLabel, null, ["missing"]);
+      const requestedCheck = selectedChecks.find((selected) => String(selected?.key || "").trim().toLowerCase() === key) || null;
+      const resolvedRow = resolveGuidanceRowValue({
+        key,
+        label: compactLabel,
+        aliases,
+        fieldPack,
+        item,
+        confirmedValue: confirmedValue.value,
+        fieldReturn,
+        cleanCandidates,
+        requestedCheck,
+        verifiedFacts: [],
+        fallbackStatus: "missing",
+      });
+      if (!resolvedRow.value && (fieldReturn?.checked || fieldReturn?.found || confirmedValue.checked || confirmedValue.found || curatedValue.checked || curatedValue.found || aiValue.checked || aiValue.found)) {
+        return buildRequestedCheckStatusRow(key, compactLabel, null, ["needs verification"]);
+      }
+      return resolvedRow;
     })
     : [];
   const taxonomyRows = buildTaxonomyGuidanceRows(
