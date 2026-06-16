@@ -128,12 +128,16 @@ const hasRequestedCheckMeaningfulValue = loadNamedFunction(itemEditorJs, "hasReq
 const normalizeRequestedCheckCandidate = loadNamedFunction(itemEditorJs, "normalizeRequestedCheckCandidate", {
   hasRequestedCheckMeaningfulValue,
 });
+const parseFieldPackContractFromWriterNotes = loadNamedFunction(itemEditorJs, "parseFieldPackContractFromWriterNotes");
 const getGuidanceSourceObjects = loadNamedFunction(itemEditorJs, "getGuidanceSourceObjects", {
   state: { item: { type: "place", category: "attractions" } },
+  parseFieldPackContractFromWriterNotes,
 });
 const readGuidanceAliasValue = loadNamedFunction(itemEditorJs, "readGuidanceAliasValue");
 const normalizeGuidanceDisplayValue = loadNamedFunction(itemEditorJs, "normalizeGuidanceDisplayValue");
 const extractVerifiedFactValue = loadNamedFunction(itemEditorJs, "extractVerifiedFactValue");
+const extractThaiPhoneCandidate = loadNamedFunction(itemEditorJs, "extractThaiPhoneCandidate");
+const collectGuidanceReferenceUrls = loadNamedFunction(itemEditorJs, "collectGuidanceReferenceUrls");
 const buildRequestedCheckStatusRow = loadNamedFunction(itemEditorJs, "buildRequestedCheckStatusRow", {
   hasRequestedCheckMeaningfulValue,
   formatRequestedCheckSuggestedValue: (value) => {
@@ -151,7 +155,6 @@ const resolveGuidanceRowValue = loadNamedFunction(itemEditorJs, "resolveGuidance
   buildRequestedCheckStatusRow,
 });
 const extractRequestedCheckArticleContextHints = loadNamedFunction(itemEditorJs, "extractRequestedCheckArticleContextHints");
-const parseFieldPackContractFromWriterNotes = loadNamedFunction(itemEditorJs, "parseFieldPackContractFromWriterNotes");
 const parseTaxonomyContract = loadNamedFunction(itemEditorJs, "parseTaxonomyContract");
 const toReviewList = loadNamedFunction(itemEditorJs, "toReviewList");
 const taxonomyFieldLabel = loadNamedFunction(itemEditorJs, "taxonomyFieldLabel");
@@ -178,6 +181,8 @@ const buildRequestedChecksCompactSummaryData = loadNamedFunction(itemEditorJs, "
   getGuidanceSourceObjects,
   readGuidanceAliasValue,
   normalizeGuidanceDisplayValue,
+  extractThaiPhoneCandidate,
+  collectGuidanceReferenceUrls,
   resolveGuidanceRowValue,
   getCompactGuidanceLabel: loadNamedFunction(itemEditorJs, "getCompactGuidanceLabel"),
   extractRequestedCheckArticleContextHints,
@@ -194,6 +199,7 @@ const buildRequestedChecksCompactSummaryData = loadNamedFunction(itemEditorJs, "
     getGuidanceSourceObjects,
     readGuidanceAliasValue,
     normalizeGuidanceDisplayValue,
+    collectGuidanceReferenceUrls,
     resolveGuidanceRowValue,
     buildRequestedCheckStatusRow,
   }),
@@ -1106,6 +1112,113 @@ test("default guidance only shows No value when all accepted CTA sources are emp
   assert.doesNotMatch(websiteRow, /No value/i);
 });
 
+test("category resolves from item.category and writer_notes core factual fields when ai taxonomy is null", () => {
+  const writerNotes = JSON.stringify({
+    contract_version: "1",
+    taxonomy_version: "page_curation_taxonomy_v1",
+    core_factual_fields: {
+      category: "restaurants",
+    },
+  });
+  const html = buildRequestedChecksEditorHtml({
+    ai_taxonomy_json: { category: null },
+    curated_taxonomy_json: {
+      category: { checked: false, found: false, value: null },
+    },
+    writer_notes: writerNotes,
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "restaurants" });
+  const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
+  const categoryRow = extractCompactSummaryRow(curationHtml, "Category");
+
+  assert.match(categoryRow, /restaurants/);
+  assert.doesNotMatch(categoryRow, /No value/i);
+});
+
+test("facebook reference URL maps into CTA review when ai and curated shells are empty", () => {
+  const html = buildRequestedChecksEditorHtml({
+    ai_cta_contact_json: {
+      phone: null,
+      facebook_url: null,
+      website_url: null,
+    },
+    curated_cta_contact_json: {
+      phone: { checked: false, found: false, value: null },
+      facebook_url: { checked: false, found: false, value: null },
+      website_url: { checked: false, found: false, value: null },
+    },
+    references: [
+      { label: "Facebook", url: "https://facebook.com/FuPanich", source_family: "facebook" },
+      { label: "Google Maps", url: "https://maps.google.com/?cid=123", source_family: "google_maps" },
+      { label: "Wongnai", url: "https://www.wongnai.com/restaurants/fupanich", source_family: "wongnai" },
+    ],
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "restaurants" });
+  const ctaHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "CTA Review");
+  const facebookRow = extractCompactSummaryRow(ctaHtml, "Facebook URL");
+  const primaryCtaRow = extractCompactSummaryRow(ctaHtml, "Primary CTA");
+
+  assert.match(facebookRow, /facebook\.com\/FuPanich/);
+  assert.doesNotMatch(facebookRow, /No value/i);
+  assert.match(primaryCtaRow, /map/i);
+});
+
+test("phone fallback only maps from verified facts when a thai phone pattern is present", () => {
+  const writerNotes = JSON.stringify({
+    contract_version: "1",
+    taxonomy_version: "page_curation_taxonomy_v1",
+    verification: {
+      verified_facts: ["phone: 096-3435931"],
+    },
+  });
+  const html = buildRequestedChecksEditorHtml({
+    ai_cta_contact_json: {
+      phone: null,
+    },
+    curated_cta_contact_json: {
+      phone: { checked: false, found: false, value: null },
+    },
+    writer_notes: writerNotes,
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "restaurants" });
+  const ctaHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "CTA Review");
+  const phoneRow = extractCompactSummaryRow(ctaHtml, "Phone");
+
+  assert.match(phoneRow, /096-3435931/);
+  assert.doesNotMatch(phoneRow, /No value/i);
+});
+
+test("opening hours note stays missing when writer_notes contract has no hours data", () => {
+  const writerNotes = JSON.stringify({
+    contract_version: "1",
+    taxonomy_version: "page_curation_taxonomy_v1",
+    core_factual_fields: {
+      category: "restaurants",
+    },
+  });
+  const html = buildRequestedChecksEditorHtml({
+    writer_notes: writerNotes,
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "restaurants" });
+  const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
+  const openingHoursRow = extractCompactSummaryRow(curationHtml, "Opening Hours Note");
+
+  assert.match(openingHoursRow, /No value/i);
+});
+
+test("default item editor surface renders CTA and Curation guidance only once", () => {
+  const html = buildRequestedChecksEditorHtml({
+    references: [
+      { label: "Facebook", url: "https://facebook.com/FuPanich", source_family: "facebook" },
+    ],
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "restaurants" });
+
+  assert.equal((html.match(/CTA Review/g) || []).length, 1);
+  assert.equal((html.match(/Curation Review/g) || []).length, 1);
+  assert.equal((html.match(/<strong>Phone<\/strong>/g) || []).length, 1);
+});
+
 test("runtime preview renders ai_taxonomy_json-only taxonomy guidance and hides empty taxonomy message", () => {
   const html = buildRequestedChecksPreviewHtml({
     version: 1,
@@ -1288,7 +1401,7 @@ test("compact taxonomy summary keeps unknown and needs-verification rows visible
   const photoRow = summary.taxonomyRows.find((row) => row.label === "Photo Spots");
 
   assert.deepEqual(parkingRow?.statuses, ["unknown", "needs verification"]);
-  assert.equal(familyRow, undefined);
+  assert.deepEqual(familyRow?.statuses, ["unknown"]);
   assert.deepEqual(photoRow?.statuses, ["suggested"]);
 });
 

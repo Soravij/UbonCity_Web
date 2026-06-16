@@ -2802,22 +2802,14 @@ function buildRequestedChecksPreviewHtml(requestedChecks = { version: 1, groups:
 function renderRequestedChecksPreview(requestedChecks = readRequestedChecksEditorState()) {
   const node = qs("fp-requested-checks-preview");
   if (!node) return;
-  node.innerHTML = buildRequestedChecksPreviewHtml({
-    version: 1,
-    groups: filterRequestedCheckGroupsForItem(requestedChecks?.groups, state.item),
-  }, state.fieldPack || null);
+  node.innerHTML = "";
 }
 
 function renderRequestedChecksEditor(fieldPack = {}) {
   const root = qs("fp-requested-checks-editor");
   if (!root) return;
-  const groups = getRequestedCheckEditorGroups(fieldPack, state.item);
   root.innerHTML = buildRequestedChecksEditorHtml(fieldPack, state.item);
   root.querySelectorAll("textarea").forEach((node) => autosizeTextarea(node));
-  renderRequestedChecksPreview({
-    version: 1,
-    groups,
-  });
 }
 
 function readRequestedChecksEditorState() {
@@ -2923,6 +2915,20 @@ function normalizeRequestedCheckCandidate(rawValue) {
 }
 
 function getGuidanceSourceObjects(fieldPack = {}, item = state.item) {
+  const writerNotesContract = parseFieldPackContractFromWriterNotes(fieldPack?.writer_notes);
+  const writerCoreFacts = writerNotesContract?.core_factual_fields && typeof writerNotesContract.core_factual_fields === "object" && !Array.isArray(writerNotesContract.core_factual_fields)
+    ? writerNotesContract.core_factual_fields
+    : {};
+  const writerCta = writerNotesContract?.cta_contact && typeof writerNotesContract.cta_contact === "object" && !Array.isArray(writerNotesContract.cta_contact)
+    ? writerNotesContract.cta_contact
+    : writerNotesContract?.cta && typeof writerNotesContract.cta === "object" && !Array.isArray(writerNotesContract.cta)
+      ? writerNotesContract.cta
+      : writerNotesContract?.contact && typeof writerNotesContract.contact === "object" && !Array.isArray(writerNotesContract.contact)
+        ? writerNotesContract.contact
+        : {};
+  const writerCuration = writerNotesContract?.curation_fields && typeof writerNotesContract.curation_fields === "object" && !Array.isArray(writerNotesContract.curation_fields)
+    ? writerNotesContract.curation_fields
+    : {};
   const publishableSource = fieldPack?.publishable_source && typeof fieldPack.publishable_source === "object" && !Array.isArray(fieldPack.publishable_source)
     ? fieldPack.publishable_source
     : {};
@@ -2937,6 +2943,10 @@ function getGuidanceSourceObjects(fieldPack = {}, item = state.item) {
     : {};
   const itemSource = item && typeof item === "object" && !Array.isArray(item) ? item : {};
   return {
+    writerNotesContract,
+    writerCoreFacts,
+    writerCta,
+    writerCuration,
     publishableSource,
     sourceSnapshot,
     cleanContext,
@@ -3019,6 +3029,30 @@ function extractVerifiedFactValue(verifiedFacts = [], aliases = []) {
     }
   }
   return "";
+}
+
+function extractThaiPhoneCandidate(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const match = text.match(/(?:\+66[-\s]?)?(?:0\d{1,2}[-\s]?\d{3}[-\s]?\d{4}|\d{9,10})/);
+  return match ? String(match[0]).trim() : "";
+}
+
+function collectGuidanceReferenceUrls(references = []) {
+  const out = {
+    facebook_url: "",
+    map_url: "",
+  };
+  for (const row of Array.isArray(references) ? references : []) {
+    const url = String(row?.url || row?.source_url || row?.evidence_source_url || "").trim();
+    if (!url) continue;
+    const normalizedUrl = url.toLowerCase();
+    if (!out.facebook_url && normalizedUrl.includes("facebook.com")) out.facebook_url = url;
+    if (!out.map_url && (normalizedUrl.includes("maps.google.") || normalizedUrl.includes("google.com/maps") || normalizedUrl.includes("goo.gl/maps"))) {
+      out.map_url = url;
+    }
+  }
+  return out;
 }
 
 function resolveGuidanceRowValue({
@@ -3197,6 +3231,7 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
     "confidence",
   ]);
   const sourceObjects = getGuidanceSourceObjects(fieldPack, item);
+  const referencesByUse = collectGuidanceReferenceUrls(fieldPack?.references);
   const taxonomyAliases = {
     category: ["category", "type.category"],
     subtype: ["subtype", "type.subtype"],
@@ -3224,6 +3259,8 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
     const source = contract?.[sectionKey] && typeof contract[sectionKey] === "object" ? contract[sectionKey] : {};
     Object.keys(source).forEach((key) => knownKeys.add(key));
   });
+  Object.keys(sourceObjects.writerCoreFacts).forEach((key) => knownKeys.add(String(key || "").trim().toLowerCase()));
+  Object.keys(sourceObjects.writerCuration).forEach((key) => knownKeys.add(String(key || "").trim().toLowerCase()));
   Object.entries(taxonomyAliases).forEach(([key, aliases]) => {
     const found = aliases.some((alias) => {
       const terminalAlias = String(alias || "").trim();
@@ -3233,10 +3270,15 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
         sourceObjects.sourceSnapshot,
         sourceObjects.cleanContext,
         sourceObjects.cleanContextItem,
+        sourceObjects.writerCoreFacts,
+        sourceObjects.writerCuration,
       ].some((source) => readGuidanceAliasValue(source, [terminalAlias]) != null);
     });
     if (found) knownKeys.add(key);
   });
+  if (contract && (scope?.isAttractionPlace || scope?.isRestaurant || scope?.isHotel || scope?.isEvent || scope?.isUnknownCategory)) {
+    ["category", "opening_hours_note", "nearby", "confidence"].forEach((key) => knownKeys.add(key));
+  }
   if (scope?.isAttractionPlace || scope?.isRestaurant || scope?.isHotel || scope?.isEvent || scope?.isUnknownCategory) {
     scopedImportantKeys.forEach((key) => {
       if (needsVerificationSet.has(key) || publishBlockerSet.has(key)) knownKeys.add(key);
@@ -3277,13 +3319,17 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
       }
       if (normalizedKey === "opening_hours_note") {
         const openingHoursComposite = {
-          open_now: readGuidanceAliasValue(sourceObjects.publishableSource, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.sourceSnapshot, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["open_now"]),
+          open_now: readGuidanceAliasValue(sourceObjects.publishableSource, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.sourceSnapshot, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.writerCoreFacts, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.writerCuration, ["open_now"]),
           weekday_text: readGuidanceAliasValue(sourceObjects.publishableSource, ["weekday_text", "opening_hours_weekday_text"])
             ?? readGuidanceAliasValue(sourceObjects.sourceSnapshot, ["weekday_text", "opening_hours_weekday_text"])
-            ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["weekday_text", "opening_hours_weekday_text"]),
+            ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["weekday_text", "opening_hours_weekday_text"])
+            ?? readGuidanceAliasValue(sourceObjects.writerCoreFacts, ["weekday_text", "opening_hours_weekday_text"])
+            ?? readGuidanceAliasValue(sourceObjects.writerCuration, ["weekday_text", "opening_hours_weekday_text"]),
           business_status: readGuidanceAliasValue(sourceObjects.publishableSource, ["business_status"])
             ?? readGuidanceAliasValue(sourceObjects.sourceSnapshot, ["business_status"])
-            ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["business_status"]),
+            ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["business_status"])
+            ?? readGuidanceAliasValue(sourceObjects.writerCoreFacts, ["business_status"])
+            ?? readGuidanceAliasValue(sourceObjects.writerCuration, ["business_status"]),
         };
         if (openingHoursComposite.open_now != null || openingHoursComposite.weekday_text != null || openingHoursComposite.business_status != null) {
           cleanCandidates.unshift({ value: openingHoursComposite, statuses: ["ai filled"] });
@@ -3294,6 +3340,8 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
         sourceObjects.sourceSnapshot,
         sourceObjects.cleanContext,
         sourceObjects.cleanContextItem,
+        sourceObjects.writerCoreFacts,
+        sourceObjects.writerCuration,
       ].forEach((source) => {
         const aliasValue = readGuidanceAliasValue(source, aliases);
         if (aliasValue != null) cleanCandidates.push({ value: aliasValue, statuses: ["ai filled"] });
@@ -3324,6 +3372,7 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
     .filter((row) => {
       if (!row.statuses.length) return false;
       if (row.value) return true;
+      if (row.statuses.includes("missing") || row.statuses.includes("unknown")) return true;
       if (row.key === "confidence" && row.statuses.includes("unknown")) return true;
       if (row.statuses.includes("needs verification")) return true;
       if (row.statuses.includes("found") || row.statuses.includes("confirmed") || row.statuses.includes("verified")) return true;
@@ -3344,6 +3393,7 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
     ? fieldPack.field_return_payload_json.cta_return
     : {};
   const sourceObjects = getGuidanceSourceObjects(fieldPack, item);
+  const referencesByUse = collectGuidanceReferenceUrls(fieldPack?.references);
   const ctaAliases = {
     phone: ["phone", "phone_number", "telephone", "tel", "contact.phone", "cta.phone", "national_phone_number", "international_phone_number"],
     facebook_url: ["facebook_url", "facebook", "facebookUrl", "contact.facebook_url", "cta.facebook_url"],
@@ -3377,10 +3427,27 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
         sourceObjects.cleanContext,
         sourceObjects.cleanContextItem,
         sourceObjects.itemSource,
+        sourceObjects.writerCoreFacts,
+        sourceObjects.writerCta,
       ].forEach((source) => {
         const aliasValue = readGuidanceAliasValue(source, aliases);
         if (aliasValue != null) cleanCandidates.push({ value: aliasValue, statuses: ["ai filled", "needs verification"] });
       });
+      if (key === "facebook_url" && referencesByUse.facebook_url) {
+        cleanCandidates.push({ value: referencesByUse.facebook_url, statuses: ["suggested"] });
+      }
+      if (key === "phone") {
+        const phoneFromFacts = extractThaiPhoneCandidate(
+          [
+            ...toReviewList(sourceObjects.writerNotesContract?.verification?.verified_facts),
+            String(fieldPack?.writer_notes || ""),
+          ].join(" | ")
+        );
+        if (phoneFromFacts) cleanCandidates.push({ value: phoneFromFacts, statuses: ["found", "verified"] });
+      }
+      if (key === "primary_cta" && referencesByUse.map_url) {
+        cleanCandidates.unshift({ value: "map", statuses: ["suggested"] });
+      }
       if (key === "primary_cta") {
         const mapCandidate = cleanCandidates.find((candidate) => String(normalizeGuidanceDisplayValue(candidate?.value, key) || "").trim());
         if (mapCandidate && !hasRequestedCheckMeaningfulValue(confirmedValue.value) && !fieldReturn?.found) {
