@@ -2904,6 +2904,18 @@ function buildRequestedCheckStatusRow(key, label, value, statuses = []) {
   };
 }
 
+function getCompactGuidanceLabel(key, fallbackLabel = "") {
+  const normalizedKey = String(key || "").trim().toLowerCase();
+  const englishCtaLabels = {
+    phone: "Phone",
+    line_url: "LINE URL",
+    facebook_url: "Facebook URL",
+    website_url: "Website URL",
+    primary_cta: "Primary CTA",
+  };
+  return englishCtaLabels[normalizedKey] || String(fallbackLabel || "").trim() || normalizedKey || "-";
+}
+
 function normalizeItemGuidanceToken(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -2971,6 +2983,9 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
   const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object"
     ? fieldPack.ai_taxonomy_json
     : {};
+  const confirmedTaxonomy = fieldPack?.confirmed_taxonomy_json && typeof fieldPack.confirmed_taxonomy_json === "object"
+    ? fieldPack.confirmed_taxonomy_json
+    : {};
   const contract = parseTaxonomyContract(parseFieldPackContractFromWriterNotes(fieldPack.writer_notes));
   const verification = contract?.verification && typeof contract.verification === "object" ? contract.verification : {};
   const verifiedFacts = toReviewList(verification.verified_facts);
@@ -3017,8 +3032,12 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
       const fieldReturn = fieldReturnTaxonomy[normalizedKey] && typeof fieldReturnTaxonomy[normalizedKey] === "object"
         ? fieldReturnTaxonomy[normalizedKey]
         : null;
+      const confirmedValue = confirmedTaxonomy[normalizedKey];
       const requestedCheck = requestedTaxonomyChecks.find((check) => String(check?.key || "").trim().toLowerCase() === normalizedKey) || null;
 
+      if (hasRequestedCheckMeaningfulValue(confirmedValue)) {
+        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), confirmedValue, ["confirmed"]);
+      }
       if (fieldReturn?.found && hasRequestedCheckMeaningfulValue(fieldReturn.value)) {
         return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), fieldReturn.value, ["found"]);
       }
@@ -3065,11 +3084,11 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
 
       const aiValue = aiTaxonomy[normalizedKey];
       if (hasRequestedCheckMeaningfulValue(aiValue)) {
-        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), aiValue, ["suggested"]);
+        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), aiValue, ["ai filled", "needs verification"]);
       }
 
       if (requestedCheck) {
-        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, ["suggested focus", "needs verification"]);
+        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, ["suggested", "needs verification"]);
       }
 
       return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, ["unknown"]);
@@ -3081,6 +3100,9 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
   const selectedChecks = groups.flatMap((group) => (Array.isArray(group?.checks) ? group.checks : []).filter((check) => check?.requested === true));
   const articleContextHints = extractRequestedCheckArticleContextHints(groups);
   const isPlaceItem = isPlaceRequestedCheckItem(item);
+  const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object"
+    ? fieldPack.ai_taxonomy_json
+    : {};
   const ctaTemplateChecks = REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === "cta_contact")?.checks || [];
   const fieldReturnCta = fieldPack?.field_return_payload_json?.cta_return && typeof fieldPack.field_return_payload_json.cta_return === "object"
     ? fieldPack.field_return_payload_json.cta_return
@@ -3093,22 +3115,23 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
       const confirmedValue = fieldPack?.confirmed_cta_contact_json?.[key];
       const curatedValue = fieldPack?.curated_cta_contact_json?.[key];
       const aiValue = fieldPack?.ai_cta_contact_json?.[key];
+      const compactLabel = getCompactGuidanceLabel(key, check.label);
       if (fieldReturn?.found && hasRequestedCheckMeaningfulValue(fieldReturn.value)) {
-        return buildRequestedCheckStatusRow(key, check.label, fieldReturn.value, ["found"]);
+        return buildRequestedCheckStatusRow(key, compactLabel, fieldReturn.value, ["found"]);
       }
       if (hasRequestedCheckMeaningfulValue(confirmedValue)) {
-        return buildRequestedCheckStatusRow(key, check.label, confirmedValue, ["found"]);
+        return buildRequestedCheckStatusRow(key, compactLabel, confirmedValue, ["confirmed"]);
       }
       if (hasRequestedCheckMeaningfulValue(curatedValue)) {
-        return buildRequestedCheckStatusRow(key, check.label, curatedValue, ["found"]);
+        return buildRequestedCheckStatusRow(key, compactLabel, curatedValue, ["suggested"]);
       }
       if (hasRequestedCheckMeaningfulValue(aiValue)) {
-        return buildRequestedCheckStatusRow(key, check.label, aiValue, ["suggested", "needs verification"]);
+        return buildRequestedCheckStatusRow(key, compactLabel, aiValue, ["ai filled", "needs verification"]);
       }
       if (fieldReturn?.checked) {
-        return buildRequestedCheckStatusRow(key, check.label, null, ["missing", "needs verification"]);
+        return buildRequestedCheckStatusRow(key, compactLabel, null, ["missing", "needs verification"]);
       }
-      return buildRequestedCheckStatusRow(key, check.label, null, ["missing"]);
+      return buildRequestedCheckStatusRow(key, compactLabel, null, ["missing"]);
     })
     : [];
   const taxonomyRows = buildTaxonomyGuidanceRows(
@@ -3117,7 +3140,12 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
     item
   );
   const taxonomyContract = parseTaxonomyContract(parseFieldPackContractFromWriterNotes(fieldPack.writer_notes));
+  const taxonomyVerification = taxonomyContract?.verification && typeof taxonomyContract.verification === "object"
+    ? taxonomyContract.verification
+    : {};
   const verifiedFacts = toReviewList(taxonomyContract?.verification?.verified_facts);
+  const needsVerificationFacts = toReviewList(taxonomyVerification.needs_verification);
+  const publishBlockers = toReviewList(taxonomyVerification.publish_blockers);
   const verifiedFactSignals = extractVerifiedFactSignals(
     verifiedFacts,
     taxonomyRows.map((row) => ({ key: row.key, label: row.label }))
@@ -3127,7 +3155,17 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
     ctaRows,
     ctaMutedNote: isPlaceItem ? "" : "CTA Review applies to place items only.",
     taxonomyRows,
-    taxonomyVerifiedFacts: verifiedFactSignals.unmatchedFacts,
+    taxonomyEvidence: {
+      verifiedFacts,
+      needsVerificationFacts,
+      publishBlockers,
+      unmatchedVerifiedFacts: verifiedFactSignals.unmatchedFacts,
+      aiTaxonomy,
+      fieldReturnTaxonomy: fieldPack?.field_return_payload_json?.taxonomy_return && typeof fieldPack.field_return_payload_json.taxonomy_return === "object"
+        ? fieldPack.field_return_payload_json.taxonomy_return
+        : {},
+      contract: taxonomyContract,
+    },
     selectedChecks,
     articleContextHints,
   };
@@ -3137,7 +3175,7 @@ function renderRequestedCheckCompactRows(rows = []) {
   return rows.map((row) => `
     <div class="summary-row">
       <strong>${escapeHtml(row.label)}</strong>
-      <span>${row.value ? `<span>${escapeHtml(row.value)}</span> ` : '<span class="muted">No value</span> '}${row.statuses.map((status) => getRequestedCheckStatusBadge(status, status === "found" ? "ok" : status === "missing" || status === "unknown" || status === "needs verification" ? "warning" : "neutral")).join(" ")}</span>
+      <span>${row.value ? `<span>${escapeHtml(row.value)}</span> ` : '<span class="muted">No value</span> '}${row.statuses.map((status) => getRequestedCheckStatusBadge(status, status === "found" || status === "confirmed" ? "ok" : status === "missing" || status === "unknown" || status === "needs verification" ? "warning" : "neutral")).join(" ")}</span>
     </div>
   `).join("");
 }
@@ -3152,11 +3190,26 @@ function buildRequestedChecksGuidanceModel(fieldPack = {}, requestedChecks = { v
 function renderRequestedChecksGuidanceHtml(model = {}, options = {}) {
   const showAdvanced = options.showAdvanced === true;
   const advancedHtml = String(options.advancedHtml || "");
+  const taxonomyEvidence = model.taxonomyEvidence && typeof model.taxonomyEvidence === "object" ? model.taxonomyEvidence : {};
+  const verifiedFacts = toReviewList(taxonomyEvidence.verifiedFacts);
+  const needsVerificationFacts = toReviewList(taxonomyEvidence.needsVerificationFacts);
+  const publishBlockers = toReviewList(taxonomyEvidence.publishBlockers);
+  const unmatchedVerifiedFacts = toReviewList(taxonomyEvidence.unmatchedVerifiedFacts);
+  const hasTaxonomyEvidence = verifiedFacts.length || needsVerificationFacts.length || publishBlockers.length || unmatchedVerifiedFacts.length
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.aiTaxonomy)
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.fieldReturnTaxonomy)
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.contract);
   return `
     <div class="article-brief-doc">
       <section class="article-brief-section">
         <h3>CTA Review</h3>
         ${model.ctaMutedNote ? `<div class="muted">${escapeHtml(model.ctaMutedNote)}</div>` : `<div class="readiness-summary">${renderRequestedCheckCompactRows(model.ctaRows || [])}</div>`}
+      </section>
+      <section class="article-brief-section">
+        <h3>Curation Review</h3>
+        <div class="readiness-summary">
+          ${(Array.isArray(model.taxonomyRows) && model.taxonomyRows.length) ? renderRequestedCheckCompactRows(model.taxonomyRows) : '<div class="summary-row"><strong>Status</strong><span class="muted">No taxonomy review signals available.</span></div>'}
+        </div>
       </section>
       <section class="article-brief-section">
         <h3>AI Guidance</h3>
@@ -3166,13 +3219,25 @@ function renderRequestedChecksGuidanceHtml(model = {}, options = {}) {
         </div>
       </section>
       <section class="article-brief-section">
-        <h3>Taxonomy Review</h3>
-        <div class="readiness-summary">
-          ${(Array.isArray(model.taxonomyRows) && model.taxonomyRows.length) ? renderRequestedCheckCompactRows(model.taxonomyRows) : '<div class="summary-row"><strong>Status</strong><span class="muted">No taxonomy review signals available.</span></div>'}
-          ${(Array.isArray(model.taxonomyVerifiedFacts) && model.taxonomyVerifiedFacts.length)
-            ? `<div class="summary-row"><strong>Verified facts</strong><span>${model.taxonomyVerifiedFacts.map((fact) => getRequestedCheckStatusBadge(fact, "ok")).join(" ")}</span></div>`
-            : ""}
-        </div>
+        <details class="secondary-panel">
+          <summary>Taxonomy evidence</summary>
+          ${hasTaxonomyEvidence
+            ? `<div class="readiness-summary">
+                ${verifiedFacts.length ? `<div class="summary-row"><strong>Verified facts</strong><span>${verifiedFacts.map((fact) => getRequestedCheckStatusBadge(fact, "ok")).join(" ")}</span></div>` : ""}
+                ${needsVerificationFacts.length ? `<div class="summary-row"><strong>Needs verification</strong><span>${needsVerificationFacts.map((fact) => getRequestedCheckStatusBadge(fact, "warning")).join(" ")}</span></div>` : ""}
+                ${publishBlockers.length ? `<div class="summary-row"><strong>Publish blockers</strong><span>${publishBlockers.map((fact) => getRequestedCheckStatusBadge(fact, "warning")).join(" ")}</span></div>` : ""}
+                ${unmatchedVerifiedFacts.length ? `<div class="summary-row"><strong>Unmatched verified facts</strong><span>${unmatchedVerifiedFacts.map((fact) => getRequestedCheckStatusBadge(fact, "ok")).join(" ")}</span></div>` : ""}
+              </div>
+              <details class="secondary-panel">
+                <summary>Debug JSON</summary>
+                <pre>${escapeHtml(JSON.stringify({
+                  ai_taxonomy_json: taxonomyEvidence.aiTaxonomy || {},
+                  field_return_taxonomy: taxonomyEvidence.fieldReturnTaxonomy || {},
+                  taxonomy_contract: taxonomyEvidence.contract || {},
+                }, null, 2))}</pre>
+              </details>`
+            : '<div class="muted">No taxonomy evidence available.</div>'}
+        </details>
       </section>
     </div>
     ${showAdvanced ? advancedHtml : ""}
@@ -3187,7 +3252,6 @@ function buildRequestedChecksCompactPreviewHtml(requestedChecks = { version: 1, 
 
 function buildRequestedChecksEditorHtml(fieldPack = {}, item = state.item) {
   const groups = getRequestedCheckEditorGroups(fieldPack, item);
-  const showCtaContactNote = !isPlaceRequestedCheckItem(item);
   const compactSummary = buildRequestedChecksGuidanceModel(fieldPack, { version: 1, groups }, item);
   const advancedHtml = `
     <details class="secondary-panel">
@@ -4615,56 +4679,57 @@ function renderTaxonomyReviewPanel() {
   const fieldPack = state.fieldPack && typeof state.fieldPack === "object" ? state.fieldPack : {};
   const contract = parseFieldPackContractFromWriterNotes(fieldPack.writer_notes);
   const taxonomyContract = parseTaxonomyContract(contract);
+  const requestedChecks = fieldPack?.requested_checks_json && typeof fieldPack.requested_checks_json === "object"
+    ? fieldPack.requested_checks_json
+    : { version: 1, groups: [] };
+  const guidanceModel = buildRequestedChecksGuidanceModel(fieldPack, requestedChecks, state.item);
+  const taxonomyEvidence = guidanceModel.taxonomyEvidence && typeof guidanceModel.taxonomyEvidence === "object" ? guidanceModel.taxonomyEvidence : {};
+  const verifiedFacts = toReviewList(taxonomyEvidence.verifiedFacts);
+  const needsVerificationFacts = toReviewList(taxonomyEvidence.needsVerificationFacts);
+  const publishBlockers = toReviewList(taxonomyEvidence.publishBlockers);
+  const unmatchedVerifiedFacts = toReviewList(taxonomyEvidence.unmatchedVerifiedFacts);
 
   if (!contract) {
     statusNode.className = "status";
     statusNode.textContent = "No JSON field pack contract found in writer notes.";
-    panel.innerHTML = '<p class="muted">Taxonomy Review appears when writer_notes contains field pack contract JSON.</p>';
+    panel.innerHTML = '<details class="secondary-panel"><summary>Taxonomy evidence</summary><div class="muted">Taxonomy evidence appears when writer_notes contains field pack contract JSON.</div></details>';
     return;
   }
 
   if (!taxonomyContract) {
     statusNode.className = "status";
     statusNode.textContent = "No page_curation_taxonomy_v1 contract found.";
-    panel.innerHTML = '<p class="muted">Taxonomy Review stays empty until writer_notes contains a contract with taxonomy_version set to page_curation_taxonomy_v1.</p>';
+    panel.innerHTML = '<details class="secondary-panel"><summary>Taxonomy evidence</summary><div class="muted">Taxonomy evidence stays empty until writer_notes contains a page_curation_taxonomy_v1 contract.</div></details>';
     return;
   }
 
-  const sections = buildTaxonomySections(taxonomyContract);
-  const publishBlockers = toReviewList(taxonomyContract?.verification?.publish_blockers);
-  const needsVerification = toReviewList(taxonomyContract?.verification?.needs_verification);
-
-  statusNode.className = `status ${publishBlockers.length > 0 || needsVerification.length > 0 ? "warn" : "ok"}`;
+  statusNode.className = `status ${publishBlockers.length > 0 || needsVerificationFacts.length > 0 ? "warn" : "ok"}`;
   statusNode.textContent = publishBlockers.length > 0
-    ? "Warning: taxonomy review found publish blockers."
-    : needsVerification.length > 0
-      ? "Taxonomy review found unresolved verification items."
-      : "Taxonomy review is available for curation.";
-
-  if (!sections.length) {
-    panel.innerHTML = '<p class="muted">No taxonomy groups with usable values were found in this contract.</p>';
-    return;
-  }
+    ? "Warning: taxonomy evidence found publish blockers."
+    : needsVerificationFacts.length > 0
+      ? "Taxonomy evidence found unresolved verification items."
+      : "Taxonomy evidence is available for review.";
 
   panel.innerHTML = `
-    <div class="readiness-summary">
-      <div class="summary-row"><strong>contract_version</strong><span>${escapeHtml(String(taxonomyContract.contract_version || "-"))}</span></div>
-      <div class="summary-row"><strong>taxonomy_version</strong><span>${escapeHtml(String(taxonomyContract.taxonomy_version || "-"))}</span></div>
-    </div>
-    <div class="article-brief-doc">
-      ${sections.map((section) => `
-        <section class="article-brief-section">
-          <h3>${escapeHtml(section.title)}</h3>
-          <ul>
-            ${section.rows.map((row) => `<li><strong>${escapeHtml(row.label)}:</strong> ${row.html}</li>`).join("")}
-          </ul>
-        </section>
-      `).join("")}
-      <details>
-        <summary>Debug: taxonomy contract JSON</summary>
-        <pre>${escapeHtml(JSON.stringify(taxonomyContract, null, 2))}</pre>
+    <details class="secondary-panel">
+      <summary>Taxonomy evidence</summary>
+      <div class="readiness-summary">
+        <div class="summary-row"><strong>contract_version</strong><span>${escapeHtml(String(taxonomyContract.contract_version || "-"))}</span></div>
+        <div class="summary-row"><strong>taxonomy_version</strong><span>${escapeHtml(String(taxonomyContract.taxonomy_version || "-"))}</span></div>
+        ${verifiedFacts.length ? `<div class="summary-row"><strong>Verified facts</strong><span>${verifiedFacts.map((fact) => getRequestedCheckStatusBadge(fact, "ok")).join(" ")}</span></div>` : ""}
+        ${needsVerificationFacts.length ? `<div class="summary-row"><strong>Needs verification</strong><span>${needsVerificationFacts.map((fact) => getRequestedCheckStatusBadge(fact, "warning")).join(" ")}</span></div>` : ""}
+        ${publishBlockers.length ? `<div class="summary-row"><strong>Publish blockers</strong><span>${publishBlockers.map((fact) => getRequestedCheckStatusBadge(fact, "warning")).join(" ")}</span></div>` : ""}
+        ${unmatchedVerifiedFacts.length ? `<div class="summary-row"><strong>Unmatched verified facts</strong><span>${unmatchedVerifiedFacts.map((fact) => getRequestedCheckStatusBadge(fact, "ok")).join(" ")}</span></div>` : ""}
+      </div>
+      <details class="secondary-panel">
+        <summary>Debug JSON</summary>
+        <pre>${escapeHtml(JSON.stringify({
+          taxonomy_contract: taxonomyContract,
+          ai_taxonomy_json: fieldPack.ai_taxonomy_json || {},
+          field_return_taxonomy: taxonomyEvidence.fieldReturnTaxonomy || {},
+        }, null, 2))}</pre>
       </details>
-    </div>
+    </details>
   `;
 }
 
@@ -4679,7 +4744,7 @@ function renderFieldPackContractPanel() {
   if (!contract) {
     statusNode.className = "status";
     statusNode.textContent = "No JSON field pack contract found in writer notes.";
-    panel.innerHTML = '<p class="muted">Keep using the normal field pack flow. Contract panel appears when writer_notes contains contract JSON.</p>';
+    panel.innerHTML = '<details class="secondary-panel"><summary>Evidence and debug</summary><div class="muted">Keep using the normal field pack flow. Contract details appear when writer_notes contains contract JSON.</div></details>';
     return;
   }
 
@@ -4701,7 +4766,7 @@ function renderFieldPackContractPanel() {
 
   statusNode.className = `status ${hasRiskWarning ? "warn" : "ok"}`;
   statusNode.textContent = hasRiskWarning
-    ? "Warning: ข้อมูลนี้ยังไม่ควรถือเป็น publish-ready"
+    ? "Warning: this data is not publish-ready yet."
     : "Contract is present. Review details before publish decision.";
 
   const listOrEmpty = (items, emptyText = "none") => items.length
@@ -4709,25 +4774,28 @@ function renderFieldPackContractPanel() {
     : `<p class="muted">${escapeHtml(emptyText)}</p>`;
 
   panel.innerHTML = `
-    <div class="readiness-summary">
-      <div class="summary-row"><strong>contract_version</strong><span>${escapeHtml(String(contract.contract_version || "-"))}</span></div>
-      <div class="summary-row"><strong>field_pack_id</strong><span>${escapeHtml(String(Number(fieldPack.id || 0) || "-"))}</span></div>
-      <div class="summary-row"><strong>source_draft_input_snapshot_id</strong><span>${escapeHtml(String(Number(fieldPack.source_draft_input_snapshot_id || 0) || "-"))}</span></div>
-      <div class="summary-row"><strong>priority_cta</strong><span>${escapeHtml(String(curationSignals.priority_cta || "-"))}</span></div>
-    </div>
-    <div class="article-brief-doc">
-      <section class="article-brief-section"><h3>Core Facts</h3>${coreFactRows.length ? `<ul>${coreFactRows.map((row) => `<li><strong>${escapeHtml(row.key)}:</strong> ${escapeHtml(row.value)}</li>`).join("")}</ul>` : '<p class="muted">No core facts in contract.</p>'}</section>
-      <section class="article-brief-section"><h3>Verified / Grounded Facts</h3>${listOrEmpty(verifiedFacts, "No verified facts yet.")}</section>
-      <section class="article-brief-section"><h3>Uncertain / Needs Review</h3>${listOrEmpty(uncertainFacts, "No uncertain facts listed.")}</section>
-      <section class="article-brief-section"><h3>Missing Data</h3>${listOrEmpty(missingFields, "No missing_fields.")}</section>
-      <section class="article-brief-section"><h3>Verify Required</h3>${listOrEmpty(verifyRequired, "No verify_required.")}</section>
-      <section class="article-brief-section"><h3>Suggested Page Blocks</h3>${listOrEmpty(suggestedBlocks, "No suggested blocks.")}</section>
-      <section class="article-brief-section"><h3>Content Risks</h3>${listOrEmpty(contentRisks, "No content risks.")}</section>
-      <details>
-        <summary>Debug: raw contract JSON</summary>
-        <pre>${escapeHtml(JSON.stringify(contract, null, 2))}</pre>
-      </details>
-    </div>
+    <details class="secondary-panel">
+      <summary>Evidence and debug</summary>
+      <div class="readiness-summary">
+        <div class="summary-row"><strong>contract_version</strong><span>${escapeHtml(String(contract.contract_version || "-"))}</span></div>
+        <div class="summary-row"><strong>field_pack_id</strong><span>${escapeHtml(String(Number(fieldPack.id || 0) || "-"))}</span></div>
+        <div class="summary-row"><strong>source_draft_input_snapshot_id</strong><span>${escapeHtml(String(Number(fieldPack.source_draft_input_snapshot_id || 0) || "-"))}</span></div>
+        <div class="summary-row"><strong>priority_cta</strong><span>${escapeHtml(String(curationSignals.priority_cta || "-"))}</span></div>
+      </div>
+      <div class="article-brief-doc">
+        <section class="article-brief-section"><h3>Core facts</h3>${coreFactRows.length ? `<ul>${coreFactRows.map((row) => `<li><strong>${escapeHtml(row.key)}:</strong> ${escapeHtml(row.value)}</li>`).join("")}</ul>` : '<p class="muted">No core facts in contract.</p>'}</section>
+        <section class="article-brief-section"><h3>Verified / grounded facts</h3>${listOrEmpty(verifiedFacts, "No verified facts yet.")}</section>
+        <section class="article-brief-section"><h3>Uncertain / needs review</h3>${listOrEmpty(uncertainFacts, "No uncertain facts listed.")}</section>
+        <section class="article-brief-section"><h3>Missing data</h3>${listOrEmpty(missingFields, "No missing_fields.")}</section>
+        <section class="article-brief-section"><h3>Verify required</h3>${listOrEmpty(verifyRequired, "No verify_required.")}</section>
+        <section class="article-brief-section"><h3>Suggested page blocks</h3>${listOrEmpty(suggestedBlocks, "No suggested blocks.")}</section>
+        <section class="article-brief-section"><h3>Content risks</h3>${listOrEmpty(contentRisks, "No content risks.")}</section>
+        <details class="secondary-panel">
+          <summary>Debug JSON</summary>
+          <pre>${escapeHtml(JSON.stringify(contract, null, 2))}</pre>
+        </details>
+      </div>
+    </details>
   `;
 }
 
@@ -5542,76 +5610,4 @@ function wire() {
     setStatus(err.message, true);
   }
 })();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

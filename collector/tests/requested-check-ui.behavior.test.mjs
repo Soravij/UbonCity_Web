@@ -5,6 +5,7 @@ import test from "node:test";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const itemEditorJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.js"), "utf8");
+const itemEditorHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.html"), "utf8");
 const repositoryJs = fs.readFileSync(path.join(collectorRoot, "db", "repository.mjs"), "utf8");
 
 function extractFunctionSource(source, functionName) {
@@ -79,6 +80,24 @@ function loadNamedFunction(sourceText, functionName, dependencies = {}) {
   return Function(...dependencyNames, `${source}; return ${functionName};`)(...dependencyValues);
 }
 
+function extractCompactSummaryRow(html, label) {
+  const escapedLabel = String(label).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`<div class="summary-row">\\s*<strong>${escapedLabel}<\\/strong>[\\s\\S]*?<\\/div>`);
+  const match = html.match(pattern);
+  return match ? match[0] : "";
+}
+
+function extractDefaultGuidanceHtml(html) {
+  return String(html).split('<details class="secondary-panel">\n      <summary>Advanced edit requested checks</summary>')[0];
+}
+
+function extractSectionHtml(html, heading) {
+  const escapedHeading = String(heading).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`<section class="article-brief-section">\\s*<h3>${escapedHeading}<\\/h3>[\\s\\S]*?<\\/section>`);
+  const match = String(html).match(pattern);
+  return match ? match[0] : "";
+}
+
 const REQUESTED_CHECK_GROUP_TEMPLATES = loadConstValue(itemEditorJs, "REQUESTED_CHECK_GROUP_TEMPLATES");
 const REQUESTED_CHECK_ANSWER_TYPE_OPTIONS = loadConstValue(itemEditorJs, "REQUESTED_CHECK_ANSWER_TYPE_OPTIONS");
 const getRequestedCheckDefaultGroupLabel = loadNamedFunction(itemEditorJs, "getRequestedCheckDefaultGroupLabel", {
@@ -137,6 +156,7 @@ const buildRequestedChecksCompactSummaryData = loadNamedFunction(itemEditorJs, "
   state: { item: { type: "place" } },
   isPlaceRequestedCheckItem,
   REQUESTED_CHECK_GROUP_TEMPLATES,
+  getCompactGuidanceLabel: loadNamedFunction(itemEditorJs, "getCompactGuidanceLabel"),
   extractRequestedCheckArticleContextHints,
   buildTaxonomyGuidanceRows: loadNamedFunction(itemEditorJs, "buildTaxonomyGuidanceRows", {
     state: { item: { type: "place", category: "attractions" } },
@@ -198,6 +218,8 @@ const buildRequestedChecksEditorHtml = loadNamedFunction(itemEditorJs, "buildReq
       .replace(/'/g, "&#39;"),
     renderRequestedCheckCompactRows,
     getRequestedCheckStatusBadge,
+    toReviewList,
+    hasRequestedCheckMeaningfulValue,
   }),
   buildRequestedChecksCompactSummaryData,
   renderRequestedCheckCompactRows,
@@ -233,6 +255,8 @@ const buildRequestedChecksPreviewHtml = loadNamedFunction(itemEditorJs, "buildRe
         .replace(/'/g, "&#39;"),
       renderRequestedCheckCompactRows,
       getRequestedCheckStatusBadge,
+      toReviewList,
+      hasRequestedCheckMeaningfulValue,
     }),
   }),
 });
@@ -898,8 +922,8 @@ test("compact CTA summary keeps missing and suggested fields visible with explic
   const websiteRow = summary.ctaRows.find((row) => row.key === "website_url");
 
   assert.deepEqual(phoneRow?.statuses, ["missing"]);
-  assert.deepEqual(facebookRow?.statuses, ["suggested", "needs verification"]);
-  assert.deepEqual(websiteRow?.statuses, ["found"]);
+  assert.deepEqual(facebookRow?.statuses, ["ai filled", "needs verification"]);
+  assert.deepEqual(websiteRow?.statuses, ["confirmed"]);
 });
 
 test("runtime preview renders ai_taxonomy_json-only taxonomy guidance and hides empty taxonomy message", () => {
@@ -914,10 +938,10 @@ test("runtime preview renders ai_taxonomy_json-only taxonomy guidance and hides 
     requested_checks_json: { version: 1, groups: [] },
   });
 
-  assert.match(html, /Taxonomy Review/);
+  assert.match(html, /Curation Review/);
   assert.match(html, /Parking/);
   assert.match(html, /street side/);
-  assert.match(html, /suggested/i);
+  assert.match(html, /ai filled/i);
   assert.doesNotMatch(html, /No taxonomy review signals available/);
 });
 
@@ -932,7 +956,7 @@ test("editor surface renders ai_taxonomy_json-only taxonomy guidance and hides e
 
   assert.match(html, /Parking/);
   assert.match(html, /street side/);
-  assert.match(html, /suggested/i);
+  assert.match(html, /ai filled/i);
   assert.doesNotMatch(html, /No taxonomy review signals available/);
 });
 
@@ -957,9 +981,29 @@ test("rendered compact guidance surface rejects mojibake", () => {
 
   assert.match(html, /CTA Review/);
   assert.match(html, /AI Guidance/);
+  assert.match(html, /Curation Review/);
   assert.match(html, /Suggested Focus/);
   assert.match(html, /Article context/);
   assert.doesNotMatch(html, /à¹€à¸˜|à¹€à¸™â‚¬|Ã Â¸|Ã Â¹|ï¿½/);
+});
+
+test("default item editor output avoids duplicate taxonomy review blocks", () => {
+  const html = buildRequestedChecksEditorHtml({
+    ai_taxonomy_json: {
+      parking: "street side",
+    },
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "attractions" });
+
+  assert.equal((html.match(/Curation Review/g) || []).length, 1);
+  assert.equal((html.match(/Taxonomy Review/g) || []).length, 0);
+  assert.equal((html.match(/Taxonomy evidence/g) || []).length, 1);
+});
+
+test("taxonomy evidence area is collapsed and does not duplicate the row table title", () => {
+  assert.match(itemEditorJs, /<summary>Taxonomy evidence<\/summary>/);
+  assert.match(itemEditorHtml, /Taxonomy Evidence/);
+  assert.doesNotMatch(itemEditorHtml, /<h2 class="section-title">Taxonomy Review<\/h2>/);
 });
 
 test("taxonomy guidance scopes configured rows for place items", () => {
@@ -1002,7 +1046,7 @@ test("explicit ai_taxonomy_json keys still render outside seeded config scope", 
 
   const hotelRow = summary.taxonomyRows.find((row) => row.key === "hotel_amenities");
   assert.equal(hotelRow?.value, "pool");
-  assert.deepEqual(hotelRow?.statuses, ["suggested"]);
+  assert.deepEqual(hotelRow?.statuses, ["ai filled", "needs verification"]);
 });
 
 test("compact taxonomy summary keeps unknown and needs-verification rows visible", () => {
@@ -1122,7 +1166,7 @@ test("unmatched verified facts do not mark unrelated taxonomy rows verified", ()
 
   const parkingRow = summary.taxonomyRows.find((row) => row.key === "parking");
   assert.deepEqual(parkingRow?.statuses, ["suggested"]);
-  assert.ok(summary.taxonomyVerifiedFacts.some((hint) => hint.includes("Abe Specialty Coffee")));
+  assert.ok(summary.taxonomyEvidence?.unmatchedVerifiedFacts.some((hint) => hint.includes("Abe Specialty Coffee")));
 });
 
 test("runtime preview keeps unmatched verified facts in taxonomy review", () => {
@@ -1148,8 +1192,8 @@ test("runtime preview keeps unmatched verified facts in taxonomy review", () => 
     category: "cafes",
   });
 
-  assert.match(html, /Taxonomy Review/);
-  assert.match(html, /Verified facts/);
+  assert.match(html, /Taxonomy evidence/);
+  assert.match(html, /Unmatched verified facts/);
   assert.match(html, /name: Abe Specialty Coffee/);
   assert.doesNotMatch(html, /found verified[^]*Parking/i);
 });
@@ -1208,13 +1252,15 @@ test("runtime preview merges ai taxonomy writer notes and field return by priori
     category: "attractions",
   });
 
-  assert.match(html, /Parking/);
-  assert.match(html, /garage/);
-  assert.doesNotMatch(html, /covered lot/);
-  assert.doesNotMatch(html, /street side/);
+  const parkingRowHtml = extractCompactSummaryRow(html, "Parking");
+  assert.match(parkingRowHtml, /Parking/);
+  assert.match(parkingRowHtml, /garage/);
+  assert.doesNotMatch(parkingRowHtml, /covered lot/);
+  assert.doesNotMatch(parkingRowHtml, /street side/);
+  assert.match(html, /covered lot/);
 });
 
-test("runtime reassigned buildRequestedChecksPreviewHtml still renders selected requested-check focus", () => {
+test("runtime preview still renders selected requested-check focus", () => {
   const html = buildRequestedChecksPreviewHtml({
     version: 1,
     groups: [
@@ -1278,7 +1324,39 @@ test("place item editor still renders CTA Review compact rows", () => {
 
   assert.match(html, /CTA Review/);
   assert.match(html, /https:\/\/example\.com/);
-  assert.match(html, /needs verification/);
+  assert.match(html, /ai filled/);
+});
+
+test("compact CTA review renders English fallback labels in default view", () => {
+  const html = buildRequestedChecksEditorHtml({
+    ai_cta_contact_json: {
+      phone: "0812345678",
+      line_url: "https://line.me/example",
+      facebook_url: "https://facebook.com/example",
+      website_url: "https://example.com",
+      primary_cta: "map",
+    },
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "attractions" });
+  const guidanceHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "CTA Review");
+
+  assert.match(guidanceHtml, /Phone/);
+  assert.match(guidanceHtml, /LINE URL/);
+  assert.match(guidanceHtml, /Facebook URL/);
+  assert.match(guidanceHtml, /Website URL/);
+  assert.match(guidanceHtml, /Primary CTA/);
+});
+
+test("compact CTA review default view does not render Thai CTA labels", () => {
+  const html = buildRequestedChecksEditorHtml({
+    ai_cta_contact_json: {
+      phone: "0812345678",
+    },
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "attractions" });
+  const guidanceHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "CTA Review");
+
+  assert.doesNotMatch(guidanceHtml, /เบอร์โทร|ลิงก์ LINE|ลิงก์ Facebook|ลิงก์เว็บไซต์|CTA หลัก/);
 });
 
 test("advanced requested-check editor is collapsed by default and contains editable controls", () => {
