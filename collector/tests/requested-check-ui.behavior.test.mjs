@@ -125,6 +125,9 @@ const buildRequestedChecksHandoffPayload = loadNamedFunction(repositoryJs, "buil
   normalizeRequestedChecksJson: (value) => value,
 });
 const hasRequestedCheckMeaningfulValue = loadNamedFunction(itemEditorJs, "hasRequestedCheckMeaningfulValue");
+const normalizeRequestedCheckCandidate = loadNamedFunction(itemEditorJs, "normalizeRequestedCheckCandidate", {
+  hasRequestedCheckMeaningfulValue,
+});
 const buildRequestedCheckStatusRow = loadNamedFunction(itemEditorJs, "buildRequestedCheckStatusRow", {
   hasRequestedCheckMeaningfulValue,
   formatRequestedCheckSuggestedValue: (value) => {
@@ -156,6 +159,7 @@ const buildRequestedChecksCompactSummaryData = loadNamedFunction(itemEditorJs, "
   state: { item: { type: "place" } },
   isPlaceRequestedCheckItem,
   REQUESTED_CHECK_GROUP_TEMPLATES,
+  normalizeRequestedCheckCandidate,
   getCompactGuidanceLabel: loadNamedFunction(itemEditorJs, "getCompactGuidanceLabel"),
   extractRequestedCheckArticleContextHints,
   buildTaxonomyGuidanceRows: loadNamedFunction(itemEditorJs, "buildTaxonomyGuidanceRows", {
@@ -259,6 +263,60 @@ const buildRequestedChecksPreviewHtml = loadNamedFunction(itemEditorJs, "buildRe
       hasRequestedCheckMeaningfulValue,
     }),
   }),
+});
+const buildFieldPackApiPayload = loadNamedFunction(itemEditorJs, "buildFieldPackApiPayload", {
+  state: {
+    fieldPack: {
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "taxonomy",
+            group_label: "Taxonomy",
+            checks: [
+              { key: "parking", label: "Parking", requested: true, instruction: "verify parking", answer_type: "text" },
+            ],
+          },
+        ],
+      },
+    },
+  },
+  readFieldPackFormState: () => ({
+    id: 1,
+    status: "draft",
+    writer_ready: false,
+    ai_summary: "",
+    ai_highlights: [],
+    ai_unknowns: [],
+    editor_summary: "",
+    verified_facts: [],
+    uncertain_facts: [],
+    story_angle: "",
+    field_notes: "",
+    must_verify_facts: [],
+    must_capture_items: [],
+    must_capture_shots: [],
+    must_ask_questions: [],
+    social_hook: "",
+    social_shot_emphasis: [],
+    social_on_camera_points: [],
+    social_caption_angle: "",
+    requested_checks_json: { version: 1, groups: [] },
+    references_text: "",
+    writer_references_text: "",
+    external_media_hints_text: "",
+    selected_media_hints: [],
+    rendered_content_asset_ids: [],
+    field_assignment: {},
+    writer_assignment: {},
+  }),
+  buildFieldPackTopLevelPayload: loadNamedFunction(itemEditorJs, "buildFieldPackTopLevelPayload"),
+  buildFieldPackChecklistPayload: () => [],
+  buildFieldPackReferencePayload: () => [],
+  buildFieldPackMediaHintPayload: () => [],
+  buildFieldPackAssignmentPayload: () => [],
+  mergeRequestedChecksForSave,
+  buildRequestedChecksEditorState,
 });
 
 test("delete custom check removes it from saved payload instead of reviving existing state", () => {
@@ -888,13 +946,14 @@ test("requested-check UI still does not expose editable provenance or suggested_
 
 test("requested-check UI exposes compact CTA review and collapsed advanced editor affordance", () => {
   assert.match(itemEditorJs, /CTA Review/);
-  assert.match(itemEditorJs, /Advanced edit requested checks/);
+  assert.match(itemEditorJs, /Field Pack Guidance/);
+  assert.match(itemEditorJs, /Source details/);
 });
 
 test("requested-check compact view is guidance-first and does not expose requested checkbox labels", () => {
   assert.match(itemEditorJs, /Suggested Focus/);
   assert.match(itemEditorJs, /Article context/);
-  assert.match(itemEditorJs, /Focus\/context signal/);
+  assert.doesNotMatch(itemEditorJs, /Focus\/context signal/);
 });
 
 test("compact CTA summary keeps missing and suggested fields visible with explicit statuses", () => {
@@ -980,7 +1039,7 @@ test("rendered compact guidance surface rejects mojibake", () => {
   }, { type: "place", category: "attractions" });
 
   assert.match(html, /CTA Review/);
-  assert.match(html, /AI Guidance/);
+  assert.match(html, /Field Pack Guidance/);
   assert.match(html, /Curation Review/);
   assert.match(html, /Suggested Focus/);
   assert.match(html, /Article context/);
@@ -997,13 +1056,41 @@ test("default item editor output avoids duplicate taxonomy review blocks", () =>
 
   assert.equal((html.match(/Curation Review/g) || []).length, 1);
   assert.equal((html.match(/Taxonomy Review/g) || []).length, 0);
-  assert.equal((html.match(/Taxonomy evidence/g) || []).length, 1);
+  assert.equal((html.match(/Taxonomy evidence/g) || []).length, 0);
 });
 
 test("taxonomy evidence area is collapsed and does not duplicate the row table title", () => {
-  assert.match(itemEditorJs, /<summary>Taxonomy evidence<\/summary>/);
-  assert.match(itemEditorHtml, /Taxonomy Evidence/);
+  assert.match(itemEditorJs, /<summary>Source details<\/summary>/);
+  assert.doesNotMatch(itemEditorHtml, /Taxonomy Evidence/);
   assert.doesNotMatch(itemEditorHtml, /<h2 class="section-title">Taxonomy Review<\/h2>/);
+});
+
+test("item editor removes stale standalone taxonomy and contract panel wiring", () => {
+  assert.doesNotMatch(itemEditorJs, /renderFieldPackContractPanel\(\)/);
+  assert.doesNotMatch(itemEditorJs, /renderTaxonomyReviewPanel\(\)/);
+  assert.doesNotMatch(itemEditorJs, /function renderFieldPackContractPanel/);
+  assert.doesNotMatch(itemEditorJs, /function renderTaxonomyReviewPanel/);
+});
+
+test("item editor default guidance does not render taxonomy evidence block", () => {
+  const html = buildRequestedChecksEditorHtml({
+    ai_taxonomy_json: { parking: "street side" },
+    writer_notes: JSON.stringify({
+      contract_version: "1",
+      taxonomy_version: "page_curation_taxonomy_v1",
+      verification: {
+        verified_facts: ["Parking: street side"],
+        needs_verification: ["parking"],
+        publish_blockers: [],
+      },
+    }),
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "attractions" });
+  const guidanceHtml = extractDefaultGuidanceHtml(html);
+
+  assert.doesNotMatch(guidanceHtml, /Taxonomy evidence/);
+  assert.doesNotMatch(guidanceHtml, /Verified facts/);
+  assert.doesNotMatch(guidanceHtml, /Unmatched verified facts/);
 });
 
 test("taxonomy guidance scopes configured rows for place items", () => {
@@ -1015,7 +1102,7 @@ test("taxonomy guidance scopes configured rows for place items", () => {
     requested_checks_json: { version: 1, groups: [] },
   }, { type: "place", category: "attractions" }), { type: "place", category: "attractions" });
 
-  assert.ok(summary.taxonomyRows.some((row) => row.key === "parking"));
+  assert.equal(summary.taxonomyRows.length, 0);
   assert.ok(summary.taxonomyRows.every((row) => row.key !== "hotel_amenities"));
   assert.ok(summary.taxonomyRows.every((row) => row.key !== "event_date_hints"));
 });
@@ -1029,7 +1116,7 @@ test("taxonomy guidance scopes configured rows for event items", () => {
     requested_checks_json: { version: 1, groups: [] },
   }, { type: "event", category: "events" }), { type: "event", category: "events" });
 
-  assert.ok(summary.taxonomyRows.some((row) => row.key === "event_date_hints"));
+  assert.equal(summary.taxonomyRows.length, 0);
 });
 
 test("explicit ai_taxonomy_json keys still render outside seeded config scope", () => {
@@ -1080,7 +1167,7 @@ test("compact taxonomy summary keeps unknown and needs-verification rows visible
   const photoRow = summary.taxonomyRows.find((row) => row.label === "Photo Spots");
 
   assert.deepEqual(parkingRow?.statuses, ["unknown", "needs verification"]);
-  assert.deepEqual(familyRow?.statuses, ["unknown"]);
+  assert.equal(familyRow, undefined);
   assert.deepEqual(photoRow?.statuses, ["suggested"]);
 });
 
@@ -1169,7 +1256,7 @@ test("unmatched verified facts do not mark unrelated taxonomy rows verified", ()
   assert.ok(summary.taxonomyEvidence?.unmatchedVerifiedFacts.some((hint) => hint.includes("Abe Specialty Coffee")));
 });
 
-test("runtime preview keeps unmatched verified facts in taxonomy review", () => {
+test("runtime preview keeps unmatched verified facts only in source details debug JSON", () => {
   const writerNotes = JSON.stringify({
     contract_version: "1",
     taxonomy_version: "page_curation_taxonomy_v1",
@@ -1192,8 +1279,8 @@ test("runtime preview keeps unmatched verified facts in taxonomy review", () => 
     category: "cafes",
   });
 
-  assert.match(html, /Taxonomy evidence/);
-  assert.match(html, /Unmatched verified facts/);
+  assert.match(html, /Source details/);
+  assert.match(html, /Debug JSON/);
   assert.match(html, /name: Abe Specialty Coffee/);
   assert.doesNotMatch(html, /found verified[^]*Parking/i);
 });
@@ -1277,17 +1364,15 @@ test("runtime preview still renders selected requested-check focus", () => {
   assert.match(html, /Parking/);
 });
 
-test("default requested-check view stays read-only until advanced edit section", () => {
+test("item editor guidance does not render advanced requested-check editor controls", () => {
   const html = buildRequestedChecksEditorHtml({
     requested_checks_json: { version: 1, groups: [] },
   }, { type: "place" });
 
-  const advancedIndex = html.indexOf("Advanced edit requested checks");
-  const firstEditableRequestedIndex = html.indexOf('data-check-field="requested"');
-
-  assert.notEqual(advancedIndex, -1);
-  assert.notEqual(firstEditableRequestedIndex, -1);
-  assert.ok(firstEditableRequestedIndex > advancedIndex);
+  assert.doesNotMatch(html, /Advanced edit requested checks/);
+  assert.doesNotMatch(html, /data-check-field="requested"/);
+  assert.doesNotMatch(html, /data-check-field="instruction"/);
+  assert.doesNotMatch(html, /Add custom check/);
 });
 
 test("non-place editor renders CTA place-only note exactly once", () => {
@@ -1304,14 +1389,11 @@ test("non-place default compact view does not render CTA/contact editable contro
     requested_checks_json: { version: 1, groups: [] },
   }, { type: "event" });
 
-  const advancedIndex = html.indexOf("Advanced edit requested checks");
   const ctaGroupIndex = html.indexOf('data-requested-group="cta_contact"');
   const firstEditableRequestedIndex = html.indexOf('data-check-field="requested"');
 
   assert.equal(ctaGroupIndex, -1);
-  assert.notEqual(advancedIndex, -1);
-  assert.notEqual(firstEditableRequestedIndex, -1);
-  assert.ok(firstEditableRequestedIndex > advancedIndex);
+  assert.equal(firstEditableRequestedIndex, -1);
 });
 
 test("place item editor still renders CTA Review compact rows", () => {
@@ -1325,6 +1407,52 @@ test("place item editor still renders CTA Review compact rows", () => {
   assert.match(html, /CTA Review/);
   assert.match(html, /https:\/\/example\.com/);
   assert.match(html, /ai filled/);
+});
+
+test("CTA review normalizes object-shaped values instead of dumping raw JSON", () => {
+  const html = buildRequestedChecksEditorHtml({
+    ai_cta_contact_json: {
+      phone: { checked: false, found: false, value: null },
+      website_url: { checked: true, found: true, value: "https://example.com" },
+      facebook_url: { checked: true, found: true, value: null },
+    },
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "attractions" });
+  const ctaHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "CTA Review");
+
+  assert.match(ctaHtml, /https:\/\/example\.com/);
+  assert.match(ctaHtml, /found/i);
+  assert.doesNotMatch(ctaHtml, /\{"checked":false,"found":false,"value":null\}/);
+  assert.doesNotMatch(ctaHtml, /\{"checked":true,"found":true,"value":"https:\/\/example\.com"\}/);
+});
+
+test("curation review renders ai-filled values directly without seeding a giant unknown table", () => {
+  const html = buildRequestedChecksEditorHtml({
+    ai_taxonomy_json: {
+      category: "restaurants",
+      opening_hours_note: "Open now: yes",
+      nearby: "See photos and videos taken at this location",
+    },
+    requested_checks_json: { version: 1, groups: [] },
+    content_type: "place",
+    category: "attractions",
+  }, { type: "place", category: "attractions" });
+  const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
+
+  assert.match(curationHtml, /restaurants/);
+  assert.match(curationHtml, /Open now: yes/);
+  assert.match(curationHtml, /See photos and videos taken at this location/);
+  assert.match(curationHtml, /ai filled/i);
+  assert.ok((curationHtml.match(/class="summary-row"/g) || []).length <= 8);
+});
+
+test("item editor guidance removes old handoff wording", () => {
+  const html = buildRequestedChecksEditorHtml({
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place" });
+  const guidanceHtml = extractDefaultGuidanceHtml(html);
+
+  assert.doesNotMatch(guidanceHtml, /Will ask worker|Handoff selected|Only selected checks will be sent/i);
 });
 
 test("compact CTA review renders English fallback labels in default view", () => {
@@ -1359,16 +1487,6 @@ test("compact CTA review default view does not render Thai CTA labels", () => {
   assert.doesNotMatch(guidanceHtml, /เบอร์โทร|ลิงก์ LINE|ลิงก์ Facebook|ลิงก์เว็บไซต์|CTA หลัก/);
 });
 
-test("advanced requested-check editor is collapsed by default and contains editable controls", () => {
-  const html = buildRequestedChecksEditorHtml({
-    requested_checks_json: { version: 1, groups: [] },
-  }, { type: "place" });
-
-  assert.match(html, /<details class="secondary-panel">\s*<summary>Advanced edit requested checks<\/summary>/);
-  assert.match(html, /data-check-field="requested"/);
-  assert.match(html, /data-check-field="instruction"/);
-});
-
 test("buildRequestedChecksHandoffPayload omits requested_checks when nothing is selected", () => {
   const result = buildRequestedChecksHandoffPayload({
     version: 1,
@@ -1384,4 +1502,21 @@ test("buildRequestedChecksHandoffPayload omits requested_checks when nothing is 
   });
 
   assert.equal(result, null);
+});
+
+test("buildFieldPackApiPayload preserves existing requested_checks_json when item editor has no requested-check DOM", () => {
+  const result = buildFieldPackApiPayload();
+
+  assert.deepEqual(result.requested_checks_json, {
+    version: 1,
+    groups: [
+      {
+        group_key: "taxonomy",
+        group_label: "Taxonomy",
+        checks: [
+          { key: "parking", label: "Parking", requested: true, instruction: "verify parking", answer_type: "text" },
+        ],
+      },
+    ],
+  });
 });

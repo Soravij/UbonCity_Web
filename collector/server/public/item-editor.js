@@ -2904,6 +2904,21 @@ function buildRequestedCheckStatusRow(key, label, value, statuses = []) {
   };
 }
 
+function normalizeRequestedCheckCandidate(rawValue) {
+  if (rawValue && typeof rawValue === "object" && !Array.isArray(rawValue)) {
+    return {
+      value: Object.prototype.hasOwnProperty.call(rawValue, "value") ? rawValue.value : null,
+      checked: rawValue.checked === true,
+      found: rawValue.found === true,
+    };
+  }
+  return {
+    value: rawValue,
+    checked: false,
+    found: false,
+  };
+}
+
 function getCompactGuidanceLabel(key, fallbackLabel = "") {
   const normalizedKey = String(key || "").trim().toLowerCase();
   const englishCtaLabels = {
@@ -3007,19 +3022,34 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
     ["hotel_profile", ["hotel_amenities", "room_type_hints", "checkin_checkout", "booking_channels", "nearby_landmarks", "stay_best_for"]],
     ["event_profile", ["event_date_hints", "schedule_hints", "ticket_hints", "venue_notes", "event_best_for"]],
   ];
+  const scopedImportantKeys = new Set([
+    "category",
+    "subtype",
+    "tags",
+    "parking",
+    "pet_friendly",
+    "family_friendly",
+    "price_range",
+    "opening_hours_note",
+    "nearby",
+    "accessibility",
+  ]);
 
   const knownKeys = new Set([
     ...Object.keys(aiTaxonomy || {}),
+    ...Object.keys(confirmedTaxonomy || {}),
     ...Object.keys(fieldReturnTaxonomy || {}),
     ...requestedTaxonomyChecks.map((check) => String(check.key || "").trim().toLowerCase()),
   ]);
   taxonomySectionConfigs.forEach(([sectionKey, fields]) => {
     const source = contract?.[sectionKey] && typeof contract[sectionKey] === "object" ? contract[sectionKey] : {};
     Object.keys(source).forEach((key) => knownKeys.add(key));
-    if (isTaxonomyConfigRelevantForScope(sectionKey, scope)) {
-      fields.forEach((field) => knownKeys.add(field));
-    }
   });
+  if (scope?.isAttractionPlace || scope?.isRestaurant || scope?.isHotel || scope?.isEvent || scope?.isUnknownCategory) {
+    scopedImportantKeys.forEach((key) => {
+      if (needsVerificationSet.has(key) || publishBlockerSet.has(key)) knownKeys.add(key);
+    });
+  }
   const verifiedFactSignals = extractVerifiedFactSignals(
     verifiedFacts,
     Array.from(knownKeys).map((key) => ({ key, label: taxonomyFieldLabel(key) }))
@@ -3093,7 +3123,14 @@ function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = 
 
       return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, ["unknown"]);
     })
-    .filter((row) => row.statuses.length > 0);
+    .filter((row) => {
+      if (!row.statuses.length) return false;
+      if (row.value) return true;
+      if (row.statuses.includes("needs verification")) return true;
+      if (row.statuses.includes("found") || row.statuses.includes("confirmed") || row.statuses.includes("verified")) return true;
+      if (row.statuses.includes("suggested")) return true;
+      return false;
+    });
 }
 
 function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], item = state.item) {
@@ -3112,24 +3149,24 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
     ? ctaTemplateChecks.map((check) => {
       const key = check.key;
       const fieldReturn = fieldReturnCta[key] && typeof fieldReturnCta[key] === "object" ? fieldReturnCta[key] : null;
-      const confirmedValue = fieldPack?.confirmed_cta_contact_json?.[key];
-      const curatedValue = fieldPack?.curated_cta_contact_json?.[key];
-      const aiValue = fieldPack?.ai_cta_contact_json?.[key];
+      const confirmedValue = normalizeRequestedCheckCandidate(fieldPack?.confirmed_cta_contact_json?.[key]);
+      const curatedValue = normalizeRequestedCheckCandidate(fieldPack?.curated_cta_contact_json?.[key]);
+      const aiValue = normalizeRequestedCheckCandidate(fieldPack?.ai_cta_contact_json?.[key]);
       const compactLabel = getCompactGuidanceLabel(key, check.label);
       if (fieldReturn?.found && hasRequestedCheckMeaningfulValue(fieldReturn.value)) {
         return buildRequestedCheckStatusRow(key, compactLabel, fieldReturn.value, ["found"]);
       }
-      if (hasRequestedCheckMeaningfulValue(confirmedValue)) {
-        return buildRequestedCheckStatusRow(key, compactLabel, confirmedValue, ["confirmed"]);
+      if (hasRequestedCheckMeaningfulValue(confirmedValue.value)) {
+        return buildRequestedCheckStatusRow(key, compactLabel, confirmedValue.value, ["confirmed"]);
       }
-      if (hasRequestedCheckMeaningfulValue(curatedValue)) {
-        return buildRequestedCheckStatusRow(key, compactLabel, curatedValue, ["suggested"]);
+      if (hasRequestedCheckMeaningfulValue(curatedValue.value)) {
+        return buildRequestedCheckStatusRow(key, compactLabel, curatedValue.value, ["suggested"]);
       }
-      if (hasRequestedCheckMeaningfulValue(aiValue)) {
-        return buildRequestedCheckStatusRow(key, compactLabel, aiValue, ["ai filled", "needs verification"]);
+      if (hasRequestedCheckMeaningfulValue(aiValue.value)) {
+        return buildRequestedCheckStatusRow(key, compactLabel, aiValue.value, ["ai filled", "needs verification"]);
       }
-      if (fieldReturn?.checked) {
-        return buildRequestedCheckStatusRow(key, compactLabel, null, ["missing", "needs verification"]);
+      if (fieldReturn?.checked || fieldReturn?.found || confirmedValue.checked || confirmedValue.found || curatedValue.checked || curatedValue.found || aiValue.checked || aiValue.found) {
+        return buildRequestedCheckStatusRow(key, compactLabel, null, ["found", "needs verification"]);
       }
       return buildRequestedCheckStatusRow(key, compactLabel, null, ["missing"]);
     })
@@ -3188,14 +3225,11 @@ function buildRequestedChecksGuidanceModel(fieldPack = {}, requestedChecks = { v
 }
 
 function renderRequestedChecksGuidanceHtml(model = {}, options = {}) {
-  const showAdvanced = options.showAdvanced === true;
-  const advancedHtml = String(options.advancedHtml || "");
   const taxonomyEvidence = model.taxonomyEvidence && typeof model.taxonomyEvidence === "object" ? model.taxonomyEvidence : {};
-  const verifiedFacts = toReviewList(taxonomyEvidence.verifiedFacts);
-  const needsVerificationFacts = toReviewList(taxonomyEvidence.needsVerificationFacts);
-  const publishBlockers = toReviewList(taxonomyEvidence.publishBlockers);
-  const unmatchedVerifiedFacts = toReviewList(taxonomyEvidence.unmatchedVerifiedFacts);
-  const hasTaxonomyEvidence = verifiedFacts.length || needsVerificationFacts.length || publishBlockers.length || unmatchedVerifiedFacts.length
+  const hasTaxonomyEvidence = hasRequestedCheckMeaningfulValue(taxonomyEvidence.verifiedFacts)
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.needsVerificationFacts)
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.publishBlockers)
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.unmatchedVerifiedFacts)
     || hasRequestedCheckMeaningfulValue(taxonomyEvidence.aiTaxonomy)
     || hasRequestedCheckMeaningfulValue(taxonomyEvidence.fieldReturnTaxonomy)
     || hasRequestedCheckMeaningfulValue(taxonomyEvidence.contract);
@@ -3212,35 +3246,32 @@ function renderRequestedChecksGuidanceHtml(model = {}, options = {}) {
         </div>
       </section>
       <section class="article-brief-section">
-        <h3>AI Guidance</h3>
+        <h3>Field Pack Guidance</h3>
         <div class="readiness-summary">
           <div class="summary-row"><strong>Suggested Focus</strong><span>${Array.isArray(model.selectedChecks) && model.selectedChecks.length ? model.selectedChecks.map((check) => getRequestedCheckStatusBadge(String(check.label || check.key || "").trim() || "-", "ok")).join(" ") : '<span class="muted">No suggested focus selected.</span>'}</span></div>
           <div class="summary-row"><strong>Article context</strong><span>${Array.isArray(model.articleContextHints) && model.articleContextHints.length ? escapeHtml(model.articleContextHints.slice(0, 6).join(" | ")) : '<span class="muted">No article context hints.</span>'}</span></div>
         </div>
       </section>
-      <section class="article-brief-section">
-        <details class="secondary-panel">
-          <summary>Taxonomy evidence</summary>
-          ${hasTaxonomyEvidence
-            ? `<div class="readiness-summary">
-                ${verifiedFacts.length ? `<div class="summary-row"><strong>Verified facts</strong><span>${verifiedFacts.map((fact) => getRequestedCheckStatusBadge(fact, "ok")).join(" ")}</span></div>` : ""}
-                ${needsVerificationFacts.length ? `<div class="summary-row"><strong>Needs verification</strong><span>${needsVerificationFacts.map((fact) => getRequestedCheckStatusBadge(fact, "warning")).join(" ")}</span></div>` : ""}
-                ${publishBlockers.length ? `<div class="summary-row"><strong>Publish blockers</strong><span>${publishBlockers.map((fact) => getRequestedCheckStatusBadge(fact, "warning")).join(" ")}</span></div>` : ""}
-                ${unmatchedVerifiedFacts.length ? `<div class="summary-row"><strong>Unmatched verified facts</strong><span>${unmatchedVerifiedFacts.map((fact) => getRequestedCheckStatusBadge(fact, "ok")).join(" ")}</span></div>` : ""}
-              </div>
+      ${hasTaxonomyEvidence
+        ? `<section class="article-brief-section">
+            <details class="secondary-panel">
+              <summary>Source details</summary>
               <details class="secondary-panel">
                 <summary>Debug JSON</summary>
                 <pre>${escapeHtml(JSON.stringify({
+                  verified_facts: taxonomyEvidence.verifiedFacts || [],
+                  needs_verification: taxonomyEvidence.needsVerificationFacts || [],
+                  publish_blockers: taxonomyEvidence.publishBlockers || [],
+                  unmatched_verified_facts: taxonomyEvidence.unmatchedVerifiedFacts || [],
                   ai_taxonomy_json: taxonomyEvidence.aiTaxonomy || {},
                   field_return_taxonomy: taxonomyEvidence.fieldReturnTaxonomy || {},
                   taxonomy_contract: taxonomyEvidence.contract || {},
                 }, null, 2))}</pre>
-              </details>`
-            : '<div class="muted">No taxonomy evidence available.</div>'}
-        </details>
-      </section>
+              </details>
+            </details>
+          </section>`
+        : ""}
     </div>
-    ${showAdvanced ? advancedHtml : ""}
   `;
 }
 
@@ -3253,68 +3284,7 @@ function buildRequestedChecksCompactPreviewHtml(requestedChecks = { version: 1, 
 function buildRequestedChecksEditorHtml(fieldPack = {}, item = state.item) {
   const groups = getRequestedCheckEditorGroups(fieldPack, item);
   const compactSummary = buildRequestedChecksGuidanceModel(fieldPack, { version: 1, groups }, item);
-  const advancedHtml = `
-    <details class="secondary-panel">
-      <summary>Advanced edit requested checks</summary>
-      <div class="field-help">Use this area only when you need to edit focus/context signals while preserving requested_checks_json round-trip.</div>
-      ${groups.map((group) => `
-      <details class="secondary-panel">
-        <summary>${escapeHtml(group.group_label)}</summary>
-        <div class="grid" data-requested-group="${escapeHtml(group.group_key)}">
-          ${(Array.isArray(group.checks) ? group.checks : []).map((check) => `
-            <div class="full-span secondary-panel" data-requested-check-row data-check-key="${escapeHtml(check.key)}">
-              <label><input type="checkbox" data-check-field="requested" ${check.requested ? "checked" : ""} /> Focus/context signal</label>
-              <div class="grid">
-                <div>
-                  <label>Check key</label>
-                  <input data-check-field="key" value="${escapeHtml(check.key)}" ${group.group_key === "custom" ? "" : "readonly"} />
-                </div>
-                <div>
-                  <label>Answer type</label>
-                  <select data-check-field="answer_type">${REQUESTED_CHECK_ANSWER_TYPE_OPTIONS
-                    .map(([value, label]) => `<option value="${escapeHtml(value)}" ${check.answer_type === value ? "selected" : ""}>${escapeHtml(label)}</option>`)
-                    .join("")}</select>
-                </div>
-                <div>
-                  <label><input type="checkbox" data-check-field="evidence_required" ${check.evidence_required ? "checked" : ""} /> Evidence required</label>
-                </div>
-                <div class="full-span">
-                  <label>Display label</label>
-                  <input data-check-field="label" value="${escapeHtml(check.label)}" placeholder="Display label" />
-                </div>
-                <div class="full-span">
-                  <label>Things to check</label>
-                  <textarea data-check-field="instruction" placeholder="Things to check">${escapeHtml(check.instruction)}</textarea>
-                </div>
-                <div class="full-span">
-                  <label>Suggested value</label>
-                  <div class="field-help">${escapeHtml(formatRequestedCheckSuggestedValue(check.suggested_value, check.answer_type) || "No suggested value")}</div>
-                </div>
-                <div class="full-span">
-                  <label>Article context condition</label>
-                  <textarea data-check-field="condition_prompt" placeholder="Article context condition">${escapeHtml(String(check.condition_prompt || ""))}</textarea>
-                </div>
-                <div class="full-span">
-                  <label>Source</label>
-                  <div class="field-help">${escapeHtml(check.source ? JSON.stringify(check.source) : "No provenance")}</div>
-                </div>
-                ${group.group_key === "custom"
-                  ? `<div><button type="button" class="utility-action" data-action="remove-requested-check">Remove check</button></div>`
-                  : ""}
-              </div>
-            </div>
-          `).join("")}
-          ${group.group_key === "custom"
-            ? `<div class="full-span"><button type="button" class="utility-action" data-action="add-requested-check">Add custom check</button></div>`
-            : ""}
-        </div>
-      </details>
-    `).join("")}
-    </details>`;
-  return `${renderRequestedChecksGuidanceHtml(compactSummary, {
-    showAdvanced: true,
-    advancedHtml,
-  })}`;
+  return renderRequestedChecksGuidanceHtml(compactSummary);
 }
 
 
@@ -3623,7 +3593,9 @@ function readFieldPackFormState() {
     social_shot_emphasis: parseLineList(qs("fp-social-shot-emphasis")?.value || ""),
     social_on_camera_points: parseLineList(qs("fp-social-on-camera-points")?.value || ""),
     social_caption_angle: String(qs("fp-social-caption-angle")?.value || "").trim(),
-    requested_checks_json: readRequestedChecksEditorState(),
+    requested_checks_json: state.fieldPack?.requested_checks_json && typeof state.fieldPack.requested_checks_json === "object"
+      ? state.fieldPack.requested_checks_json
+      : { version: 1, groups: [] },
     references_text: String(qs("fp-references")?.value || "").trim(),
     writer_references_text: String(qs("fp-writer-references")?.value || "").trim(),
     external_media_hints_text: String(qs("fp-external-media-hints")?.value || "").trim(),
@@ -3712,14 +3684,12 @@ function buildFieldPackAssignmentPayload(pack, existing = state.fieldPack || {})
 function buildFieldPackApiPayload() {
   const pack = readFieldPackFormState();
   const existing = state.fieldPack || {};
-  const requestedChecks = mergeRequestedChecksForSave(
-    pack.requested_checks_json,
-    buildRequestedChecksEditorState(existing)
-  );
   return {
     ...buildFieldPackTopLevelPayload({
       ...pack,
-      requested_checks_json: requestedChecks,
+      requested_checks_json: existing.requested_checks_json && typeof existing.requested_checks_json === "object"
+        ? existing.requested_checks_json
+        : pack.requested_checks_json,
     }),
     field_pack_checklists: buildFieldPackChecklistPayload(pack, existing),
     field_pack_references: buildFieldPackReferencePayload(pack),
@@ -4671,134 +4641,6 @@ function buildTaxonomySections(contract) {
   return sections;
 }
 
-function renderTaxonomyReviewPanel() {
-  const panel = qs("taxonomy-review-panel");
-  const statusNode = qs("taxonomy-review-status");
-  if (!panel || !statusNode) return;
-
-  const fieldPack = state.fieldPack && typeof state.fieldPack === "object" ? state.fieldPack : {};
-  const contract = parseFieldPackContractFromWriterNotes(fieldPack.writer_notes);
-  const taxonomyContract = parseTaxonomyContract(contract);
-  const requestedChecks = fieldPack?.requested_checks_json && typeof fieldPack.requested_checks_json === "object"
-    ? fieldPack.requested_checks_json
-    : { version: 1, groups: [] };
-  const guidanceModel = buildRequestedChecksGuidanceModel(fieldPack, requestedChecks, state.item);
-  const taxonomyEvidence = guidanceModel.taxonomyEvidence && typeof guidanceModel.taxonomyEvidence === "object" ? guidanceModel.taxonomyEvidence : {};
-  const verifiedFacts = toReviewList(taxonomyEvidence.verifiedFacts);
-  const needsVerificationFacts = toReviewList(taxonomyEvidence.needsVerificationFacts);
-  const publishBlockers = toReviewList(taxonomyEvidence.publishBlockers);
-  const unmatchedVerifiedFacts = toReviewList(taxonomyEvidence.unmatchedVerifiedFacts);
-
-  if (!contract) {
-    statusNode.className = "status";
-    statusNode.textContent = "No JSON field pack contract found in writer notes.";
-    panel.innerHTML = '<details class="secondary-panel"><summary>Taxonomy evidence</summary><div class="muted">Taxonomy evidence appears when writer_notes contains field pack contract JSON.</div></details>';
-    return;
-  }
-
-  if (!taxonomyContract) {
-    statusNode.className = "status";
-    statusNode.textContent = "No page_curation_taxonomy_v1 contract found.";
-    panel.innerHTML = '<details class="secondary-panel"><summary>Taxonomy evidence</summary><div class="muted">Taxonomy evidence stays empty until writer_notes contains a page_curation_taxonomy_v1 contract.</div></details>';
-    return;
-  }
-
-  statusNode.className = `status ${publishBlockers.length > 0 || needsVerificationFacts.length > 0 ? "warn" : "ok"}`;
-  statusNode.textContent = publishBlockers.length > 0
-    ? "Warning: taxonomy evidence found publish blockers."
-    : needsVerificationFacts.length > 0
-      ? "Taxonomy evidence found unresolved verification items."
-      : "Taxonomy evidence is available for review.";
-
-  panel.innerHTML = `
-    <details class="secondary-panel">
-      <summary>Taxonomy evidence</summary>
-      <div class="readiness-summary">
-        <div class="summary-row"><strong>contract_version</strong><span>${escapeHtml(String(taxonomyContract.contract_version || "-"))}</span></div>
-        <div class="summary-row"><strong>taxonomy_version</strong><span>${escapeHtml(String(taxonomyContract.taxonomy_version || "-"))}</span></div>
-        ${verifiedFacts.length ? `<div class="summary-row"><strong>Verified facts</strong><span>${verifiedFacts.map((fact) => getRequestedCheckStatusBadge(fact, "ok")).join(" ")}</span></div>` : ""}
-        ${needsVerificationFacts.length ? `<div class="summary-row"><strong>Needs verification</strong><span>${needsVerificationFacts.map((fact) => getRequestedCheckStatusBadge(fact, "warning")).join(" ")}</span></div>` : ""}
-        ${publishBlockers.length ? `<div class="summary-row"><strong>Publish blockers</strong><span>${publishBlockers.map((fact) => getRequestedCheckStatusBadge(fact, "warning")).join(" ")}</span></div>` : ""}
-        ${unmatchedVerifiedFacts.length ? `<div class="summary-row"><strong>Unmatched verified facts</strong><span>${unmatchedVerifiedFacts.map((fact) => getRequestedCheckStatusBadge(fact, "ok")).join(" ")}</span></div>` : ""}
-      </div>
-      <details class="secondary-panel">
-        <summary>Debug JSON</summary>
-        <pre>${escapeHtml(JSON.stringify({
-          taxonomy_contract: taxonomyContract,
-          ai_taxonomy_json: fieldPack.ai_taxonomy_json || {},
-          field_return_taxonomy: taxonomyEvidence.fieldReturnTaxonomy || {},
-        }, null, 2))}</pre>
-      </details>
-    </details>
-  `;
-}
-
-function renderFieldPackContractPanel() {
-  const panel = qs("field-pack-contract-panel");
-  const statusNode = qs("field-pack-contract-status");
-  if (!panel || !statusNode) return;
-
-  const fieldPack = state.fieldPack && typeof state.fieldPack === "object" ? state.fieldPack : {};
-  const contract = parseFieldPackContractFromWriterNotes(fieldPack.writer_notes);
-
-  if (!contract) {
-    statusNode.className = "status";
-    statusNode.textContent = "No JSON field pack contract found in writer notes.";
-    panel.innerHTML = '<details class="secondary-panel"><summary>Evidence and debug</summary><div class="muted">Keep using the normal field pack flow. Contract details appear when writer_notes contains contract JSON.</div></details>';
-    return;
-  }
-
-  const curationSignals = contract.curation_signals && typeof contract.curation_signals === "object"
-    ? contract.curation_signals
-    : {};
-  const checklists = contract.checklists && typeof contract.checklists === "object"
-    ? contract.checklists
-    : {};
-
-  const missingFields = toReviewList(curationSignals.missing_fields || checklists.missing_data);
-  const verifyRequired = toReviewList(curationSignals.verify_required || checklists.verify_required);
-  const contentRisks = toReviewList(curationSignals.content_risks || checklists.quality_gaps);
-  const suggestedBlocks = toReviewList(curationSignals.suggested_page_blocks);
-  const coreFactRows = buildContractFactRows(contract.core_factual_fields);
-  const verifiedFacts = toReviewList(fieldPack.verified_facts || fieldPack.verified_facts_json);
-  const uncertainFacts = toReviewList(fieldPack.uncertain_facts || fieldPack.uncertain_facts_json);
-  const hasRiskWarning = missingFields.length > 0 || verifyRequired.length > 0;
-
-  statusNode.className = `status ${hasRiskWarning ? "warn" : "ok"}`;
-  statusNode.textContent = hasRiskWarning
-    ? "Warning: this data is not publish-ready yet."
-    : "Contract is present. Review details before publish decision.";
-
-  const listOrEmpty = (items, emptyText = "none") => items.length
-    ? `<ul>${items.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>`
-    : `<p class="muted">${escapeHtml(emptyText)}</p>`;
-
-  panel.innerHTML = `
-    <details class="secondary-panel">
-      <summary>Evidence and debug</summary>
-      <div class="readiness-summary">
-        <div class="summary-row"><strong>contract_version</strong><span>${escapeHtml(String(contract.contract_version || "-"))}</span></div>
-        <div class="summary-row"><strong>field_pack_id</strong><span>${escapeHtml(String(Number(fieldPack.id || 0) || "-"))}</span></div>
-        <div class="summary-row"><strong>source_draft_input_snapshot_id</strong><span>${escapeHtml(String(Number(fieldPack.source_draft_input_snapshot_id || 0) || "-"))}</span></div>
-        <div class="summary-row"><strong>priority_cta</strong><span>${escapeHtml(String(curationSignals.priority_cta || "-"))}</span></div>
-      </div>
-      <div class="article-brief-doc">
-        <section class="article-brief-section"><h3>Core facts</h3>${coreFactRows.length ? `<ul>${coreFactRows.map((row) => `<li><strong>${escapeHtml(row.key)}:</strong> ${escapeHtml(row.value)}</li>`).join("")}</ul>` : '<p class="muted">No core facts in contract.</p>'}</section>
-        <section class="article-brief-section"><h3>Verified / grounded facts</h3>${listOrEmpty(verifiedFacts, "No verified facts yet.")}</section>
-        <section class="article-brief-section"><h3>Uncertain / needs review</h3>${listOrEmpty(uncertainFacts, "No uncertain facts listed.")}</section>
-        <section class="article-brief-section"><h3>Missing data</h3>${listOrEmpty(missingFields, "No missing_fields.")}</section>
-        <section class="article-brief-section"><h3>Verify required</h3>${listOrEmpty(verifyRequired, "No verify_required.")}</section>
-        <section class="article-brief-section"><h3>Suggested page blocks</h3>${listOrEmpty(suggestedBlocks, "No suggested blocks.")}</section>
-        <section class="article-brief-section"><h3>Content risks</h3>${listOrEmpty(contentRisks, "No content risks.")}</section>
-        <details class="secondary-panel">
-          <summary>Debug JSON</summary>
-          <pre>${escapeHtml(JSON.stringify(contract, null, 2))}</pre>
-        </details>
-      </div>
-    </details>
-  `;
-}
-
 function renderStepFourGuides() {
   if (isCleanMode) return;
   renderEditorReferenceSourceSummary();
@@ -4807,8 +4649,6 @@ function renderStepFourGuides() {
   renderGuideCards("ai-summary-preview", buildAiSummaryCards());
   renderGuideCards("fact-check-preview", buildFactCheckCards());
   renderGuideCards("field-brief-preview", buildFieldPackCards());
-  renderFieldPackContractPanel();
-  renderTaxonomyReviewPanel();
 }
 
 function roleLabel(row) {
