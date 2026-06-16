@@ -3797,6 +3797,8 @@ const STEP_FOUR_COPY_TOKENS = [
   "ยังไปงานมอบหมายไม่ได้: ต้องเปลี่ยนสถานะการเตรียมมอบหมายเป็น \"พร้อมส่งเข้า handoff\" ก่อน",
   "actionLabel = \"ไปงานมอบหมาย\";",
 ];
+const LEGACY_READY_FOR_HANDOFF_STATUS = "ready_for_handoff";
+
 function getFieldProgressSteps() {
   return [
     { value: "draft", label: "ร่าง brief", help: "ยังแก้ไขรายละเอียดใน brief ได้ตามปกติ" },
@@ -3807,7 +3809,7 @@ function getFieldProgressSteps() {
 function getFieldProgressStatusLabel(status) {
   const value = String(status || "").trim().toLowerCase();
   if (value === "draft") return "ร่าง brief";
-  if (value === "ready_for_field" || value === "ready_for_handoff") return "พร้อมส่ง handoff";
+  if (value === "ready_for_field" || value === LEGACY_READY_FOR_HANDOFF_STATUS) return "พร้อมส่ง handoff";
   if (value === "field_in_progress") return "กำลังทำภาคสนาม";
   if (value === "field_done") return "ภาคสนามเสร็จ";
   if (value === "on_hold") return "พักงาน";
@@ -3816,7 +3818,7 @@ function getFieldProgressStatusLabel(status) {
 
 function getFieldProgressActions(status) {
   const value = String(status || "").trim().toLowerCase();
-  if (value === "ready_for_field" || value === "ready_for_handoff") {
+  if (value === "ready_for_field" || value === LEGACY_READY_FOR_HANDOFF_STATUS) {
     return [{ nextStatus: "draft", label: "ย้ายกลับเป็นร่าง brief", tone: "secondary" }];
   }
   if (value === "on_hold") {
@@ -4164,7 +4166,7 @@ async function returnCurrentFieldPackToClean(comment) {
 
 function isFieldPackReadyForAssignment(status) {
   const value = String(status || "").trim().toLowerCase();
-  return value === "ready_for_field" || value === "ready_for_handoff";
+  return value === "ready_for_field" || value === LEGACY_READY_FOR_HANDOFF_STATUS;
 }
 
 function buildPackagingRequirements(data, fieldPack) {
@@ -4208,7 +4210,7 @@ function buildPackagingRequirements(data, fieldPack) {
     addRequirement(
       "fp-must-ask-questions",
       "คำถามหน้างาน",
-      "ควรเตรียมคำถามสำหรับเก็บข้อมูลเพิ่มระหว่างลงพื้นที่",
+      "ควรเตรียมคำถามสำหรับเก็บข้อมูลเพิ่ม",
       "soft"
     );
   }
@@ -4224,7 +4226,7 @@ function buildPackagingRequirements(data, fieldPack) {
     );
   }
   if (!String(fieldPack.field_notes || "").trim()) {
-    addRequirement("fp-field-notes", "บันทึกภาคสนาม", "ควรเพิ่มบันทึกที่ช่วยทีมหน้างานทำงานได้ตรงจุด", "soft");
+    addRequirement("fp-field-notes", "บันทึกภาคสนาม", "ควรเพิ่มบันทึกที่ช่วยให้ editor ติดตามประเด็นได้ตรงจุด", "soft");
   }
 
   return requirements;
@@ -4749,7 +4751,7 @@ function buildFieldPackCardsFromData(data) {
 
   return [
     {
-      title: "สิ่งที่ต้องยืนยันก่อนลงพื้นที่",
+      title: "สิ่งที่ต้องยืนยันเพิ่มเติม",
       rows: [
         { label: "เป้าหมาย", value: `ยืนยัน fact สำคัญของ ${data.fallbackTitle}` },
         { label: "มุมเรื่อง", value: data.angle },
@@ -4793,7 +4795,7 @@ function buildFieldPackCards() {
   const fallbackCards = buildFieldPackCardsFromData(data);
   return [
     {
-      title: "สิ่งที่ต้องยืนยันก่อนลงพื้นที่",
+      title: "สิ่งที่ต้องยืนยันเพิ่มเติม",
       rows: [
         { label: "เป้าหมาย", value: `ยืนยัน fact สำคัญของ ${data.fallbackTitle}` },
         { label: "มุมเรื่อง", value: fieldPack.story_angle || data.angle },

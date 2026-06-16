@@ -91,6 +91,14 @@ function extractDefaultGuidanceHtml(html) {
   return String(html).split('<details class="secondary-panel">\n      <summary>Advanced edit requested checks</summary>')[0];
 }
 
+function extractTemplateRequestedChecksCard(html) {
+  const source = String(html);
+  const marker = 'id="fp-requested-checks-editor"';
+  const index = source.indexOf(marker);
+  assert.notEqual(index, -1, "requested checks editor container should exist in template");
+  return source.slice(Math.max(0, index - 500), Math.min(source.length, index + 500));
+}
+
 function extractSectionHtml(html, heading) {
   const escapedHeading = String(heading).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(`<section class="article-brief-section">\\s*<h3>${escapedHeading}<\\/h3>[\\s\\S]*?<\\/section>`);
@@ -1368,6 +1376,23 @@ test("default guidance removes old handoff or worker style thai wording", () => 
 
   assert.doesNotMatch(guidanceHtml, /รายการให้เช็กพื้นที่ก่อนส่งงานหน้าร้าน|เลือกเฉพาะรายการที่ต้องการส่งให้คนลงพื้นที่|ส่งให้คนลงพื้นที่|รายการให้เช็ก|handoff|worker/i);
   assert.match(guidanceHtml, /AI guidance \/ curation review|ข้อเสนอจาก AI/i);
+});
+
+test("default item editor document removes stale handoff worker card wording", () => {
+  const cardHtml = extractTemplateRequestedChecksCard(itemEditorHtml);
+
+  assert.match(cardHtml, /id="fp-requested-checks-editor"/);
+  assert.doesNotMatch(
+    cardHtml,
+    /รายการให้เช็กพื้นที่ก่อนส่งงานหน้าร้าน|รายการให้เช็กเพิ่มก่อนส่งงานหน้างาน|ทีมหน้างาน|ส่งงานหน้าร้าน|ลงพื้นที่|รายการให้เช็ก|worker/i,
+  );
+  assert.match(cardHtml, /AI guidance|Advanced edit requested checks|requested-checks-editor/i);
+});
+
+test("real handoff workflow copy remains in item editor runtime", () => {
+  assert.match(itemEditorJs, /ready_for_handoff/);
+  assert.match(itemEditorJs, /handoff/);
+  assert.match(repositoryJs, /buildRequestedChecksHandoffPayload/);
 });
 
 test("article context drops CTA contact checklist prompts and falls back to empty state", () => {
