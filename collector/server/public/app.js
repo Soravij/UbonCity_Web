@@ -6704,19 +6704,19 @@ function renderAssignmentSubmissionForm(assignment = null) {
     ? cachedHandoffPackage
     : null;
   const requestedCheckGroups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackageState);
+  const handoffLoadState = assignmentId > 0 ? state.assignments.handoffSourceLoaded?.[assignmentId] : null;
   if (requestedChecksWrapNode) {
-    requestedChecksWrapNode.classList.toggle("hidden", !requestedCheckGroups.length);
+    requestedChecksWrapNode.classList.toggle("hidden", !requestedCheckGroups.length && handoffLoadState !== true);
   }
   if (requestedChecksNode) {
     if (!requestedCheckGroups.length) {
-      const handoffLoadState = assignmentId > 0 ? state.assignments.handoffSourceLoaded?.[assignmentId] : null;
       if (assignmentId > 0 && handoffLoadState !== true && !handoffLoadState && !isEditorUser()) {
         requestedChecksNode.className = "assignment-brief-empty";
         requestedChecksNode.innerHTML = "กำลังโหลดรายการที่ขอจากชุดส่งงาน...";
         loadAssignmentRequestedCheckHandoffSource(assignment).catch(() => {});
       } else {
-        requestedChecksNode.className = "assignment-brief-empty";
-        requestedChecksNode.innerHTML = "ไม่มีรายการที่ขอในชุดส่งงานนี้";
+        requestedChecksNode.className = "assignment-brief-grid";
+        requestedChecksNode.innerHTML = buildAssignmentRequestedCheckReturnSectionHtml(assignment, handoffPackageState, null);
       }
     } else {
       const existingDraft = state.assignments.requestedCheckReturnDrafts?.[assignmentId] || null;
@@ -7386,6 +7386,15 @@ function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
   return `<input data-requested-check-field="value" type="${escapeHtml(inputType)}" value="${escapeHtml(value)}" ${disabledAttr} />`;
 }
 
+function buildAssignmentRequestedCheckReturnEmptyGroupCardHtml(title, emptyText) {
+  return `
+    <div class="assignment-brief-card">
+      <h5 class="assignment-subtitle" style="margin-top:0;">${escapeHtml(title)}</h5>
+      <div class="assignment-brief-empty">${escapeHtml(emptyText)}</div>
+    </div>
+  `;
+}
+
 function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, handoffPackage = null, draft = null) {
   const groupOrder = new Map([
     ["cta_contact", 0],
@@ -7400,7 +7409,18 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
       if (leftRank !== rightRank) return leftRank - rightRank;
       return String(left?.group_label || "").localeCompare(String(right?.group_label || ""));
     });
-  if (!groups.length) return "";
+  if (!groups.length) {
+    return [
+      buildAssignmentRequestedCheckReturnEmptyGroupCardHtml(
+        "CTA / ข้อมูลติดต่อ",
+        "ยังไม่มีรายการ CTA ที่ถูกขอให้ตรวจในชุดส่งงานนี้"
+      ),
+      buildAssignmentRequestedCheckReturnEmptyGroupCardHtml(
+        "Taxonomy / ข้อมูลจัดหมวด",
+        "ยังไม่มีรายการ Taxonomy ที่ถูกขอให้ตรวจในชุดส่งงานนี้"
+      ),
+    ].join("");
+  }
   const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(draft, handoffPackage);
   return groups.map((group) => `
     <div class="assignment-brief-card" data-requested-check-group="${escapeHtml(group.group_key)}">

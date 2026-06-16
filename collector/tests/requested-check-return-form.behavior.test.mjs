@@ -65,6 +65,148 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function createMockDomNode(initial = {}) {
+  const classSet = new Set();
+  const attributes = new Map();
+  const node = {
+    innerHTML: "",
+    textContent: "",
+    value: "",
+    placeholder: "",
+    href: "",
+    disabled: false,
+    querySelectorAll: () => [],
+    setAttribute(name, value) {
+      attributes.set(String(name), String(value));
+    },
+    getAttribute(name) {
+      return attributes.has(String(name)) ? attributes.get(String(name)) : null;
+    },
+  };
+  Object.defineProperty(node, "className", {
+    get() {
+      return [...classSet].join(" ");
+    },
+    set(value) {
+      classSet.clear();
+      String(value || "")
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter(Boolean)
+        .forEach((token) => classSet.add(token));
+    },
+    enumerable: true,
+    configurable: true,
+  });
+  node.classList = {
+    add(...tokens) {
+      tokens.flat().map((token) => String(token || "").trim()).filter(Boolean).forEach((token) => classSet.add(token));
+      return undefined;
+    },
+    remove(...tokens) {
+      tokens.flat().map((token) => String(token || "").trim()).filter(Boolean).forEach((token) => classSet.delete(token));
+      return undefined;
+    },
+    toggle(token, force) {
+      const name = String(token || "").trim();
+      if (!name) return classSet.has(name);
+      const shouldAdd = force === undefined ? !classSet.has(name) : force === true;
+      if (shouldAdd) classSet.add(name);
+      else classSet.delete(name);
+      return classSet.has(name);
+    },
+    contains(token) {
+      return classSet.has(String(token || "").trim());
+    },
+  };
+  Object.assign(node, initial);
+  return node;
+}
+
+function createRequestedCheckRenderHarness(state) {
+  const nodes = new Map();
+  const ids = [
+    "assignment-submission-workspace-help",
+    "assignment-submission-brief-label",
+    "assignment-submission-verified-label",
+    "assignment-submission-question-label",
+    "assignment-submission-requested-checks-wrap",
+    "assignment-submission-requested-checks-label",
+    "assignment-submission-requested-checks-fields",
+    "assignment-submission-capture-label",
+    "assignment-submission-additional-label",
+    "assignment-submission-files-label",
+    "assignment-submission-verified-fields",
+    "assignment-submission-question-fields",
+    "assignment-submission-capture-guide",
+    "assignment-submission-reset-notice",
+    "assignment-submit-callout",
+    "assignment-submission-brief-link",
+    "assignment-submission-additional-text",
+    "btn-assignment-sync-upload",
+    "btn-assignment-submit",
+    "assignment-submission-context",
+    "assignment-submission-file-list",
+  ];
+  ids.forEach((id) => nodes.set(id, createMockDomNode()));
+  nodes.get("assignment-submission-requested-checks-wrap").className = "assignment-brief-section";
+  nodes.get("assignment-submission-requested-checks-fields").className = "assignment-brief-grid";
+  nodes.get("assignment-submission-verified-fields").className = "assignment-brief-grid";
+  nodes.get("assignment-submission-question-fields").className = "assignment-brief-grid";
+  nodes.get("assignment-submission-capture-guide").className = "assignment-brief-grid";
+  nodes.get("assignment-submission-file-list").className = "assignment-brief-grid";
+  return {
+    nodes,
+    qs: (id) => nodes.get(id) || null,
+    renderAssignmentSubmissionForm: loadNamedFunction(appJs, "renderAssignmentSubmissionForm", {
+      state,
+      qs: (id) => nodes.get(id) || null,
+      getAssignmentSubmissionFormConfig: () => ({
+        workspaceHelp: "workspace help",
+        briefLabel: "brief",
+        verifiedLabel: "verified",
+        questionLabel: "question",
+        captureLabel: "capture",
+        additionalLabel: "additional",
+        filesLabel: "files",
+        additionalPlaceholder: "เพิ่มเติม",
+        emptyVerified: "empty verified",
+        emptyQuestion: "empty question",
+        emptyCapture: "empty capture",
+        verifiedPrompts: [],
+        verifiedGroupName: "verified",
+        verifiedAnswers: "verified_answers",
+        questionPrompts: [],
+        questionGroupName: "question",
+        questionAnswers: "question_answers",
+        answerPlaceholder: "placeholder",
+        captureItems: [],
+      }),
+      renderAssignmentSubmissionContext: () => {},
+      getAssignmentLandingItemId: () => 0,
+      buildAssignmentBriefUrl: () => "/brief",
+      getAssignmentSubmissionPrefillPayload: () => ({
+        verified_answers: [],
+        question_answers: [],
+        capture_files: [],
+      }),
+      getAssignmentRequestedCheckGroupsFromHandoffPackage,
+      normalizeAssignmentRequestedCheckReturnDraft,
+      isEditorUser: () => false,
+      loadAssignmentRequestedCheckHandoffSource: async () => null,
+      setAssignmentDraftSaveStatus: () => {},
+      clearAssignmentCaptureUploads: () => {},
+      renderAssignmentSubmissionFileList: () => {},
+      renderAssignmentSubmissionGatePanel: () => {},
+      buildAssignmentRequestedCheckReturnSectionHtml,
+      updateAssignmentRequestedCheckReturnRowState: () => {},
+      buildAssignmentSubmissionPromptInputs: (items = [], groupName, answers = [], placeholderText = "") =>
+        `<div data-rendered-group="${escapeHtml(groupName || "")}" data-rendered-placeholder="${escapeHtml(placeholderText || "")}"></div>`,
+      escapeHtml,
+    }),
+  };
+}
+
 function parseJson(value) {
   if (value == null || value === "") return null;
   if (typeof value === "string") {
@@ -149,10 +291,14 @@ const buildAssignmentRequestedCheckReturnPayloadFromDraft = loadNamedFunction(ap
 const buildAssignmentRequestedCheckReturnValueInputHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnValueInputHtml", {
   escapeHtml,
 });
+const buildAssignmentRequestedCheckReturnEmptyGroupCardHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnEmptyGroupCardHtml", {
+  escapeHtml,
+});
 const buildAssignmentRequestedCheckReturnSectionHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnSectionHtml", {
   getAssignmentRequestedCheckGroupsFromHandoffPackage,
   normalizeAssignmentRequestedCheckReturnDraft,
   buildAssignmentRequestedCheckReturnValueInputHtml,
+  buildAssignmentRequestedCheckReturnEmptyGroupCardHtml,
   areAssignmentRequestedCheckValuesEqual,
   formatRequestedCheckSuggestedValue,
   escapeHtml,
@@ -332,6 +478,24 @@ test("requested-check section renders CTA before Taxonomy and keeps custom rows 
   assert.ok(taxonomyIndex < customIndex);
 });
 
+test("requested-check section renders empty CTA and Taxonomy blocks when nothing is requested", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [],
+    },
+  };
+
+  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
+
+  assert.match(sectionHtml, /CTA \/ ข้อมูลติดต่อ/);
+  assert.match(sectionHtml, /ยังไม่มีรายการ CTA ที่ถูกขอให้ตรวจในชุดส่งงานนี้/);
+  assert.match(sectionHtml, /Taxonomy \/ ข้อมูลจัดหมวด/);
+  assert.match(sectionHtml, /ยังไม่มีรายการ Taxonomy ที่ถูกขอให้ตรวจในชุดส่งงานนี้/);
+  assert.equal(sectionHtml.includes("data-requested-check-row"), false);
+  assert.equal(sectionHtml.includes('data-requested-check-field="checked"'), false);
+});
+
 test("requested-check section renders AI suggest badge when current value still equals suggested value", () => {
   const handoffPackage = {
     requested_checks: {
@@ -439,6 +603,63 @@ test("requested-check normalize keeps edited prefilled values through rerender m
   assert.equal(normalized.requested_check_returns["cta_contact.phone"].note, "edited");
 });
 
+test("requested-check empty loaded state renders empty CTA and Taxonomy cards through the submission form", async () => {
+  const state = {
+    assignments: {
+      selectedId: 12,
+      contextItemId: 27,
+      contextFieldPack: {},
+      requestedCheckReturnDrafts: {
+        12: {
+          requested_check_returns: {},
+        },
+      },
+      handoffSourcePackages: {},
+      handoffSourceLoaded: {},
+    },
+  };
+  const assignment = {
+    id: 12,
+    content_item_id: 27,
+    brief_json: { title: "Brief" },
+  };
+  const harness = createRequestedCheckRenderHarness(state);
+  const loadAssignmentRequestedCheckHandoffSource = await loadNamedAsyncFunction(appJs, "loadAssignmentRequestedCheckHandoffSource", {
+    state,
+    isEditorUser: () => false,
+    api: async () => ({
+      handoff: {
+        handoff_package_json: {
+          requested_checks: {
+            version: 1,
+            groups: [],
+          },
+        },
+      },
+    }),
+    rerenderAssignmentRequestedCheckSurfaces: loadNamedFunction(appJs, "rerenderAssignmentRequestedCheckSurfaces", {
+      state,
+      renderAssignmentHandoffBrief: () => {},
+      renderAssignmentSubmissionForm: harness.renderAssignmentSubmissionForm,
+      getAssignmentSubmissionFormAssignment: (value) => value,
+      getAssignmentById: () => assignment,
+      getAssignmentPageMode: () => "work",
+    }),
+  });
+
+  await loadAssignmentRequestedCheckHandoffSource(assignment);
+
+  const wrapNode = harness.nodes.get("assignment-submission-requested-checks-wrap");
+  const fieldsNode = harness.nodes.get("assignment-submission-requested-checks-fields");
+
+  assert.equal(wrapNode.classList.contains("hidden"), false);
+  assert.match(fieldsNode.innerHTML, /CTA \/ ข้อมูลติดต่อ/);
+  assert.match(fieldsNode.innerHTML, /Taxonomy \/ ข้อมูลจัดหมวด/);
+  assert.equal(fieldsNode.innerHTML.includes("data-requested-check-row"), false);
+  assert.equal(fieldsNode.innerHTML.includes('data-requested-check-field="checked"'), false);
+  assert.notEqual(fieldsNode.innerHTML.trim(), "ไม่มีรายการที่ขอในชุดส่งงานนี้");
+});
+
 test("requested-check section keeps a compact second line instead of three large textarea blocks", () => {
   const handoffPackage = {
     requested_checks: {
@@ -470,6 +691,9 @@ test("requested-check section keeps a compact second line instead of three large
 });
 
 test("requested-check payload builder keeps field_return_payload_json separate and strips internal metadata", () => {
+  assert.equal(buildAssignmentRequestedCheckReturnPayloadFromDraft({
+    requested_check_returns: {},
+  }), null);
   const payload = buildAssignmentRequestedCheckReturnPayloadFromDraft({
     requested_check_returns: {
       "cta_contact.phone": {
