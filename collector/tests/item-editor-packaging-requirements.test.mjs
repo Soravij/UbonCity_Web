@@ -161,7 +161,8 @@ test("step 4 prep state UI is reduced to prep-only states", () => {
   }
 
   const readinessRequiredSnippets = [
-    'return value === "ready_for_field" || value === "ready_for_handoff";',
+    'const LEGACY_READY_FOR_HANDOFF_STATUS = "ready_for_handoff";',
+    'return value === "ready_for_field" || value === LEGACY_READY_FOR_HANDOFF_STATUS;',
     'ยังไปงานมอบหมายไม่ได้: ต้องเปลี่ยนสถานะการเตรียมมอบหมายเป็น \\"พร้อมส่งเข้า handoff\\" ก่อน',
   ];
   for (const snippet of readinessRequiredSnippets) {

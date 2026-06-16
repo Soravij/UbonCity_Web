@@ -2,9 +2,17 @@
   api,
   canEditArticle,
   collectWorkspacePayload,
+  computeSubmitReadiness,
   currentOtherTransportMeta,
   currentAssignmentState,
   currentReviewNote,
+  canApplyFieldReturnEvidenceToConfirmedCta,
+  defaultConfirmedCtaContact,
+  defaultConfirmedTaxonomy,
+  fieldReturnEvidence,
+  applyArticleSuggestionFieldValues,
+  applyFieldReturnEvidenceToConfirmedCta,
+  applySeoSuggestionFieldValues,
   embedOrientation,
   ensureSelectedAssetId,
   escapeHtml,
@@ -15,6 +23,7 @@
   isImageAsset,
   latestDraft,
   loadWorkspace,
+  normalizeCommaSeparatedTags,
   normalizeEmbedUrl,
   otherTransportSubtypeLabel,
   primaryAssignment,
@@ -31,6 +40,7 @@
   setBanner,
   setInlineStatus,
   slugify,
+  isPlaceItem,
   isOtherTransportItem,
   state,
   validateWorkspace,
@@ -41,6 +51,7 @@ const workspaceState = {
   nextBlockId: 1,
   mediaCollapsed: true,
   systemInfoCollapsed: true,
+  confirmedMetaCollapsed: true,
   dirty: false,
   articleSuggestionBusy: false,
   seoSuggestionBusy: false,
@@ -1078,15 +1089,114 @@ function renderMediaLibraryVisibility() {
   if (workspaceState.mediaCollapsed) hideArticleAssetHoverPreview();
 }
 
+function renderConfirmedMetaVisibility() {
+  const content = qs("confirmed-meta-section");
+  const button = qs("btn-toggle-confirmed-meta");
+  if (!content || !button) return;
+  content.classList.toggle("hidden", workspaceState.confirmedMetaCollapsed);
+  button.setAttribute("aria-expanded", workspaceState.confirmedMetaCollapsed ? "false" : "true");
+  button.textContent = workspaceState.confirmedMetaCollapsed ? "แสดงข้อมูลยืนยัน" : "ซ่อนข้อมูลยืนยัน";
+}
+
+function fieldReturnEvidenceGroupLabel(groupKey) {
+  if (groupKey === "cta_contact") return "CTA / ช่องทางติดต่อ";
+  if (groupKey === "taxonomy") return "หมวดหมู่";
+  return "เช็กอื่น ๆ";
+}
+
+function renderFieldReturnEvidenceValue(value) {
+  if (Array.isArray(value)) {
+    const rows = value.map((entry) => String(entry || "").trim()).filter(Boolean);
+    return rows.length ? rows.map((entry) => escapeHtml(entry)).join(", ") : "-";
+  }
+  if (value && typeof value === "object") {
+    return escapeHtml(JSON.stringify(value));
+  }
+  const text = String(value ?? "").trim();
+  return text ? escapeHtml(text) : "-";
+}
+
+function renderFieldReturnEvidencePanel() {
+  const root = qs("field-return-evidence-panel");
+  if (!root) return;
+  const evidence = fieldReturnEvidence();
+  const items = (Array.isArray(evidence?.items) ? evidence.items : []).filter((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    if (String(item.group_key || "").trim().toLowerCase() === "cta_contact" && !isPlaceItem(state.item)) {
+      return false;
+    }
+    return true;
+  });
+  if (!items.length) {
+    root.innerHTML = '<p class="muted">ยังไม่มีข้อมูลที่คนเช็กส่งกลับ</p>';
+    setInlineStatus("field-return-evidence-status", "");
+    return;
+  }
+  const grouped = new Map([
+    ["cta_contact", []],
+    ["taxonomy", []],
+    ["other", []],
+  ]);
+  for (const item of items) {
+    const groupKey = item.group_key === "cta_contact" || item.group_key === "taxonomy" ? item.group_key : "other";
+    grouped.get(groupKey).push(item);
+  }
+  root.innerHTML = Array.from(grouped.entries())
+    .filter(([, rows]) => rows.length > 0)
+    .map(([groupKey, rows]) => `
+      <section class="article-brief-section">
+        <h3>${escapeHtml(fieldReturnEvidenceGroupLabel(groupKey))}</h3>
+        <ul>
+          ${rows.map((item) => {
+            const canApply = canApplyFieldReturnEvidenceToConfirmedCta(item, state.item);
+            const submittedMeta = [item.submitted_at ? formatDateTime(item.submitted_at) : "", item.submitted_by || ""].filter(Boolean).join(" · ");
+            return `
+              <li>
+                <strong>${escapeHtml(item.label || item.key)}</strong>
+                <div class="summary-row"><strong>คีย์</strong><span>${escapeHtml(item.key)}</span></div>
+                <div class="summary-row"><strong>ตรวจแล้ว</strong><span>${item.checked ? "ใช่" : "ไม่ใช่"}</span></div>
+                <div class="summary-row"><strong>${item.found ? "พบข้อมูล" : "ไม่พบข้อมูล"}</strong><span>${item.found ? "ใช่" : "ไม่ใช่"}</span></div>
+                <div class="summary-row"><strong>ค่าที่พบ</strong><span>${renderFieldReturnEvidenceValue(item.value)}</span></div>
+                <div class="summary-row"><strong>เงื่อนไข/ข้อจำกัด</strong><span>${escapeHtml(item.condition_note || "-")}</span></div>
+                <div class="summary-row"><strong>หลักฐาน/แหล่งที่มา</strong><span>${escapeHtml(item.evidence || "-")}</span></div>
+                <div class="summary-row"><strong>หมายเหตุ</strong><span>${escapeHtml(item.note || "-")}</span></div>
+                <div class="summary-row"><strong>ส่งกลับเมื่อ</strong><span>${escapeHtml(submittedMeta || "-")}</span></div>
+                ${canApply ? `<div class="toolbar compact-toolbar"><button type="button" class="utility-action" data-action="apply-field-return-evidence" data-field-return-key="${escapeHtml(item.key)}">ใช้ค่านี้</button></div>` : ""}
+              </li>
+            `;
+          }).join("")}
+        </ul>
+      </section>
+    `)
+    .join("");
+  setInlineStatus("field-return-evidence-status", "แสดงข้อมูลที่คนเช็กส่งกลับแบบอ่านอย่างเดียว");
+}
+
 function renderWorkspaceFields() {
   const item = state.item || {};
   const draft = latestDraft();
+  const confirmedCtaContact = draft?.confirmed_cta_contact_json && typeof draft.confirmed_cta_contact_json === "object"
+    ? draft.confirmed_cta_contact_json
+    : defaultConfirmedCtaContact();
+  const confirmedTaxonomy = draft?.confirmed_taxonomy_json && typeof draft.confirmed_taxonomy_json === "object"
+    ? draft.confirmed_taxonomy_json
+    : defaultConfirmedTaxonomy();
   const bodyValue = draft?.body || item.description_clean || item.description_raw || "";
   fillField("article-title", draft?.draft_title || item.title || "");
   fillField("article-excerpt", draft?.excerpt || item.summary || "");
   fillField("article-slug", item.slug || "");
   fillField("article-meta-title", draft?.meta_title || item.meta_title || "");
   fillField("article-meta-description", draft?.meta_description || item.meta_description || "");
+  fillField("confirmed-phone", confirmedCtaContact.phone || "");
+  fillField("confirmed-line-url", confirmedCtaContact.line_url || "");
+  fillField("confirmed-facebook-url", confirmedCtaContact.facebook_url || "");
+  fillField("confirmed-website-url", confirmedCtaContact.website_url || "");
+  fillField("confirmed-primary-cta", confirmedCtaContact.primary_cta || "");
+  fillField("confirmed-category", confirmedTaxonomy.category || "");
+  fillField("confirmed-subtype", confirmedTaxonomy.subtype || "");
+  fillField("confirmed-tags", Array.isArray(confirmedTaxonomy.tags) ? confirmedTaxonomy.tags.join(", ") : "");
+  fillField("confirmed-meta-status", draft?.confirmed_meta_status || "not_started");
+  fillField("confirmed-note", draft?.confirmed_note || "");
   fillField("article-body", bodyValue);
   if (isOtherTransportItem(item)) {
     const meta = currentOtherTransportMeta();
@@ -1207,6 +1317,7 @@ function refreshComposerFromBlocks() {
   renderBlocks();
   renderPreview();
   renderReviewChecklist();
+  renderSubmitReadiness();
   renderStatusChip();
   applyActionGuards();
 }
@@ -1215,6 +1326,7 @@ function refreshComposerDerivedState() {
   syncBodyFromBlocks();
   renderPreview();
   renderReviewChecklist();
+  renderSubmitReadiness();
   renderStatusChip();
   applyActionGuards();
 }
@@ -1257,14 +1369,20 @@ function applyGeneratedArticleDraft(suggestion) {
   if (!titleNode || !excerptNode || !bodyNode) {
     throw new Error("Article workspace fields are not ready");
   }
-  titleNode.value = suggestion.title;
-  excerptNode.value = suggestion.excerpt;
-  bodyNode.value = suggestion.body;
+  const nextValues = applyArticleSuggestionFieldValues({
+    title: titleNode.value,
+    excerpt: excerptNode.value,
+    body: bodyNode.value,
+  }, suggestion);
+  titleNode.value = nextValues.title;
+  excerptNode.value = nextValues.excerpt;
+  bodyNode.value = nextValues.body;
   workspaceState.bodyBlocks = buildBlocksFromBody(suggestion.body);
   renderBlocks();
   setWorkspaceDirty(true);
   renderPreview();
   renderReviewChecklist();
+  renderSubmitReadiness();
   renderStatusChip();
   applyActionGuards();
 }
@@ -1367,6 +1485,99 @@ function renderReviewChecklist() {
       <span>${escapeHtml(row.label)}</span>
     </label>
   `).join("");
+}
+
+function renderSubmitReadiness() {
+  const statusNode = qs("submit-readiness-status");
+  const root = qs("submit-readiness-panel");
+  if (!statusNode || !root) return;
+  const readiness = computeSubmitReadiness();
+  state.readiness = readiness;
+
+  if (readiness.blockers.length > 0) {
+    statusNode.className = "status error";
+    statusNode.textContent = "ต้องแก้รายการสำคัญก่อนส่งตรวจ";
+  } else if (readiness.warnings.length > 0) {
+    statusNode.className = "status warn";
+    statusNode.textContent = "ยังมีรายการที่ควรตรวจอีกครั้งก่อนส่งตรวจ";
+  } else {
+    statusNode.className = "status ok";
+    statusNode.textContent = "พร้อมส่งตรวจ";
+  }
+
+  const renderRows = (title, rows, emptyText) => `
+    <section class="article-brief-section">
+      <h3>${escapeHtml(title)}</h3>
+      ${rows.length > 0 ? `
+        <div class="readiness-summary">
+          ${rows.map((row) => `
+            <div class="summary-row">
+              <strong>${escapeHtml(row.label)}</strong>
+              <span>
+                ${escapeHtml(row.message)}
+                ${row.target ? ` <button type="button" class="utility-action" data-readiness-target="${escapeHtml(row.target)}">ไปแก้ไข</button>` : ""}
+              </span>
+            </div>
+          `).join("")}
+        </div>
+      ` : `<p class="muted">${escapeHtml(emptyText)}</p>`}
+    </section>
+  `;
+
+  root.innerHTML = [
+    renderRows("ต้องแก้ก่อนส่ง", readiness.blockers, "ไม่มีรายการที่บล็อกการส่ง"),
+    renderRows("ควรตรวจอีกครั้ง", readiness.warnings, "ไม่มีคำเตือนเพิ่มเติม"),
+    renderRows("พร้อมแล้ว / ข้อมูลที่ยืนยันแล้ว", readiness.info, "ยังไม่มีข้อมูลสรุปเพิ่มเติม"),
+  ].join("");
+}
+
+function focusReadinessTarget(target) {
+  const targetKey = String(target || "").trim();
+  if (!targetKey) return false;
+
+  const confirmedMetaTargets = new Set([
+    "confirmed-meta-section",
+    "confirmed-phone",
+    "confirmed-line-url",
+    "confirmed-facebook-url",
+    "confirmed-website-url",
+    "confirmed-primary-cta",
+    "confirmed-category",
+    "confirmed-subtype",
+    "confirmed-tags",
+    "confirmed-meta-status",
+    "confirmed-note",
+    "field-return-evidence-panel",
+    "field-return-evidence-status",
+  ]);
+
+  if (confirmedMetaTargets.has(targetKey) && workspaceState.confirmedMetaCollapsed) {
+    workspaceState.confirmedMetaCollapsed = false;
+    renderConfirmedMetaVisibility();
+  }
+
+  const node = qs(targetKey) || (confirmedMetaTargets.has(targetKey) ? qs("confirmed-meta-section") : null);
+  if (!node) return false;
+  if (typeof node.scrollIntoView === "function") {
+    node.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+  if (typeof node.focus === "function") {
+    try {
+      node.focus();
+    } catch {}
+  }
+  return true;
+}
+
+function handleSubmitReadinessTargetClick(event) {
+  const actionNode = event?.target?.closest?.("[data-readiness-target]");
+  if (!actionNode) return false;
+  if (typeof event?.preventDefault === "function") event.preventDefault();
+  return focusReadinessTarget(actionNode.dataset.readinessTarget || "");
+}
+
+function registerSubmitReadinessTargetDelegation(root = qs("submit-readiness-panel")) {
+  root?.addEventListener("click", handleSubmitReadinessTargetClick);
 }
 
 function renderMetaDescriptionGuidance() {
@@ -1480,6 +1691,16 @@ function applyEditorWorkspaceView() {
     ["article-slug", "Slug"],
     ["article-meta-title", "Meta Title"],
     ["article-meta-description", "Meta Description"],
+    ["confirmed-phone", "\u0e40\u0e1a\u0e2d\u0e23\u0e4c\u0e42\u0e17\u0e23"],
+    ["confirmed-line-url", "\u0e25\u0e34\u0e07\u0e01\u0e4c LINE"],
+    ["confirmed-facebook-url", "\u0e25\u0e34\u0e07\u0e01\u0e4c Facebook"],
+    ["confirmed-website-url", "\u0e25\u0e34\u0e07\u0e01\u0e4c\u0e40\u0e27\u0e47\u0e1a\u0e44\u0e0b\u0e15\u0e4c"],
+    ["confirmed-primary-cta", "\u0e1b\u0e38\u0e48\u0e21\u0e2b\u0e25\u0e31\u0e01"],
+    ["confirmed-category", "\u0e2b\u0e21\u0e27\u0e14\u0e2b\u0e25\u0e31\u0e01"],
+    ["confirmed-subtype", "\u0e2b\u0e21\u0e27\u0e14\u0e22\u0e48\u0e2d"],
+    ["confirmed-tags", "\u0e41\u0e17\u0e47\u0e01"],
+    ["confirmed-meta-status", "\u0e2a\u0e16\u0e32\u0e19\u0e30"],
+    ["confirmed-note", "\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e1b\u0e23\u0e30\u0e01\u0e2d\u0e1a"],
   ];
   labels.forEach(([id, text]) => {
     const label = qs(id)?.closest("div")?.querySelector("label");
@@ -1507,6 +1728,8 @@ function applyEditorWorkspaceView() {
   if (previewMobile) previewMobile.textContent = "\u0e21\u0e37\u0e2d\u0e16\u0e37\u0e2d";
   const mediaToggle = qs("btn-toggle-media-library");
   if (mediaToggle) mediaToggle.textContent = workspaceState.mediaCollapsed ? "\u0e41\u0e2a\u0e14\u0e07\u0e04\u0e25\u0e31\u0e07\u0e23\u0e39\u0e1b" : "\u0e0b\u0e48\u0e2d\u0e19\u0e04\u0e25\u0e31\u0e07\u0e23\u0e39\u0e1b";
+  const confirmedMetaToggle = qs("btn-toggle-confirmed-meta");
+  if (confirmedMetaToggle) confirmedMetaToggle.textContent = workspaceState.confirmedMetaCollapsed ? "\u0e41\u0e2a\u0e14\u0e07\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19" : "\u0e0b\u0e48\u0e2d\u0e19\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19";
   const systemToggle = qs("btn-toggle-writer-system-info");
   if (systemToggle) systemToggle.textContent = workspaceState.systemInfoCollapsed ? "\u0e41\u0e2a\u0e14\u0e07\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e23\u0e30\u0e1a\u0e1a" : "\u0e0b\u0e48\u0e2d\u0e19\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e23\u0e30\u0e1a\u0e1a";
   const selfCheckCard = qs("review-checklist")?.closest(".article-preview-review-card") || null;
@@ -1520,8 +1743,8 @@ function applyEditorWorkspaceView() {
   if (submitCard) {
     const title = submitCard.querySelector(".section-title");
     const help = submitCard.querySelector(".muted");
-    if (title) title.textContent = "\u0e2a\u0e48\u0e07\u0e40\u0e02\u0e49\u0e32\u0e04\u0e34\u0e27\u0e15\u0e23\u0e27\u0e08";
-    if (help) help.textContent = "\u0e40\u0e21\u0e37\u0e48\u0e2d\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e41\u0e25\u0e49\u0e27 \u0e04\u0e48\u0e2d\u0e22\u0e2a\u0e48\u0e07\u0e1a\u0e17\u0e04\u0e27\u0e32\u0e21\u0e40\u0e02\u0e49\u0e32\u0e04\u0e34\u0e27\u0e15\u0e23\u0e27\u0e08\u0e08\u0e32\u0e01\u0e2a\u0e48\u0e27\u0e19\u0e19\u0e35\u0e49";
+    if (title) title.textContent = "\u0e04\u0e27\u0e32\u0e21\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e15\u0e23\u0e27\u0e08";
+    if (help) help.textContent = "\u0e2a\u0e23\u0e38\u0e1b\u0e08\u0e38\u0e14\u0e17\u0e35\u0e48\u0e15\u0e49\u0e2d\u0e07\u0e41\u0e01\u0e49 \u0e08\u0e38\u0e14\u0e17\u0e35\u0e48\u0e04\u0e27\u0e23\u0e17\u0e27\u0e19 \u0e41\u0e25\u0e30\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19 \u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e40\u0e02\u0e49\u0e32\u0e04\u0e34\u0e27\u0e15\u0e23\u0e27\u0e08";
   }
   const submitBtn = qs("btn-submit-review");
   if (submitBtn) submitBtn.textContent = "\u0e2a\u0e48\u0e07\u0e40\u0e02\u0e49\u0e32\u0e04\u0e34\u0e27\u0e15\u0e23\u0e27\u0e08";
@@ -1538,13 +1761,16 @@ function renderAll(options = {}) {
   renderWriterBrief();
   renderFieldPackEvidencePanel();
   renderTaxonomyReviewPanel();
+  renderFieldReturnEvidencePanel();
   renderWriterSystemInfo();
   renderBlocks();
   renderHeroAndAssets();
   renderMediaLibraryVisibility();
+  renderConfirmedMetaVisibility();
   renderOtherTransportPanel();
   renderPreview();
   renderReviewChecklist();
+  renderSubmitReadiness();
   renderMetaDescriptionGuidance();
   applyEditorWorkspaceView();
   applyActionGuards();
@@ -1567,6 +1793,7 @@ async function refreshAssets() {
   renderOtherTransportPanel();
   renderPreview();
   renderReviewChecklist();
+  renderSubmitReadiness();
   applyEditorWorkspaceView();
   applyActionGuards();
   renderWorkspaceSaveState();
@@ -1625,13 +1852,23 @@ async function generateSeoMetadataSuggestion() {
       }
     }
 
+    const metaTitleNode = qs("article-meta-title");
+    const metaDescriptionNode = qs("article-meta-description");
+    const nextValues = applySeoSuggestionFieldValues({
+      meta_title: String(metaTitleNode?.value || ""),
+      meta_description: String(metaDescriptionNode?.value || ""),
+    }, {
+      meta_title: nextMetaTitle,
+      meta_description: nextMetaDescription,
+    });
+
     let applied = false;
-    if (nextMetaTitle && qs("article-meta-title")) {
-      qs("article-meta-title").value = nextMetaTitle;
+    if (nextMetaTitle && metaTitleNode) {
+      metaTitleNode.value = nextValues.meta_title;
       applied = true;
     }
-    if (nextMetaDescription && qs("article-meta-description")) {
-      qs("article-meta-description").value = nextMetaDescription;
+    if (nextMetaDescription && metaDescriptionNode) {
+      metaDescriptionNode.value = nextValues.meta_description;
       applied = true;
     }
     if (!applied) {
@@ -1641,6 +1878,7 @@ async function generateSeoMetadataSuggestion() {
     setWorkspaceDirty(true);
     renderPreview();
     renderReviewChecklist();
+    renderSubmitReadiness();
     renderMetaDescriptionGuidance();
     renderStatusChip();
     applyActionGuards();
@@ -1776,6 +2014,69 @@ function insertVideoEmbed() {
   input.value = "";
 }
 
+function applyFieldReturnEvidenceByKey(key) {
+  const evidence = fieldReturnEvidence();
+  const item = (Array.isArray(evidence?.items) ? evidence.items : []).find((row) => String(row?.key || "").trim().toLowerCase() === String(key || "").trim().toLowerCase()) || null;
+  if (!canApplyFieldReturnEvidenceToConfirmedCta(item, state.item)) return false;
+  const currentValues = {
+    phone: String(qs("confirmed-phone")?.value || ""),
+    line_url: String(qs("confirmed-line-url")?.value || ""),
+    facebook_url: String(qs("confirmed-facebook-url")?.value || ""),
+    website_url: String(qs("confirmed-website-url")?.value || ""),
+    primary_cta: String(qs("confirmed-primary-cta")?.value || ""),
+  };
+  const nextValues = applyFieldReturnEvidenceToConfirmedCta(currentValues, item, state.item);
+  const nextFieldName = String(item.key || "").trim().toLowerCase().split(".")[1] || "";
+  const currentValue = String(currentValues[nextFieldName] || "").trim();
+  const nextValue = String(nextValues[nextFieldName] || "").trim();
+  if (currentValue && currentValue !== nextValue) {
+    const confirmed = window.confirm("มีค่าที่ยืนยันไว้แล้ว ต้องการแทนที่ด้วยค่าที่คนเช็กส่งกลับหรือไม่?");
+    if (!confirmed) return false;
+  }
+  fillField("confirmed-phone", nextValues.phone || "");
+  fillField("confirmed-line-url", nextValues.line_url || "");
+  fillField("confirmed-facebook-url", nextValues.facebook_url || "");
+  fillField("confirmed-website-url", nextValues.website_url || "");
+  fillField("confirmed-primary-cta", nextValues.primary_cta || "");
+  setWorkspaceDirty(true);
+  renderSubmitReadiness();
+  renderStatusChip();
+  applyActionGuards();
+  setInlineStatus("field-return-evidence-status", "คัดลอกค่ามาไว้ในข้อมูลยืนยันแล้ว กรุณากดบันทึก");
+  return true;
+}
+
+function handleFieldReturnEvidencePanelClick(event) {
+  const actionNode = event?.target?.closest?.("[data-action='apply-field-return-evidence']");
+  if (!actionNode) return false;
+  try {
+    return applyFieldReturnEvidenceByKey(actionNode.dataset.fieldReturnKey || "");
+  } catch (err) {
+    setInlineStatus("field-return-evidence-status", err.message, "error");
+    return false;
+  }
+}
+
+async function handleSubmitReviewClick() {
+  try {
+    const validation = validateWorkspace();
+    if (!validation.ok) throw new Error(`Missing: ${validation.missing.join(", ")}`);
+    const readiness = computeSubmitReadiness();
+    state.readiness = readiness;
+    if (Array.isArray(readiness?.warnings) && readiness.warnings.length > 0) {
+      const confirmed = window.confirm("ยังมีรายการที่ควรตรวจอีกครั้ง ต้องการส่งตรวจต่อหรือไม่?");
+      if (!confirmed) return;
+    }
+    const note = currentReviewNote() || "submitted from article workspace";
+    await saveWorkspace();
+    await submitWorkspaceForReview(note);
+    window.location.href = reviewUrl();
+    setInlineStatus("review-status", "ส่งเข้าตรวจแล้ว");
+  } catch (err) {
+    setInlineStatus("review-status", err.message, "error");
+  }
+}
+
 function wire() {
   qs("btn-back-home")?.addEventListener("click", () => {
     window.location.href = "/";
@@ -1820,13 +2121,44 @@ function wire() {
     }
     renderPreview();
     renderReviewChecklist();
+    renderSubmitReadiness();
   });
   ["article-excerpt", "article-slug", "article-meta-title", "article-meta-description"].forEach((id) => {
     qs(id)?.addEventListener("input", () => {
       setWorkspaceDirty(true);
       renderPreview();
       renderReviewChecklist();
+      renderSubmitReadiness();
       renderMetaDescriptionGuidance();
+      renderStatusChip();
+      applyActionGuards();
+    });
+  });
+  ["confirmed-phone", "confirmed-line-url", "confirmed-facebook-url", "confirmed-website-url", "confirmed-category", "confirmed-subtype", "confirmed-note"].forEach((id) => {
+    qs(id)?.addEventListener("input", () => {
+      setWorkspaceDirty(true);
+      renderSubmitReadiness();
+      renderStatusChip();
+      applyActionGuards();
+    });
+  });
+  qs("confirmed-tags")?.addEventListener("change", () => {
+    fillField("confirmed-tags", normalizeCommaSeparatedTags(qs("confirmed-tags")?.value || "").join(", "));
+    setWorkspaceDirty(true);
+    renderSubmitReadiness();
+    renderStatusChip();
+    applyActionGuards();
+  });
+  qs("confirmed-tags")?.addEventListener("input", () => {
+    setWorkspaceDirty(true);
+    renderSubmitReadiness();
+    renderStatusChip();
+    applyActionGuards();
+  });
+  ["confirmed-primary-cta", "confirmed-meta-status"].forEach((id) => {
+    qs(id)?.addEventListener("change", () => {
+      setWorkspaceDirty(true);
+      renderSubmitReadiness();
       renderStatusChip();
       applyActionGuards();
     });
@@ -1838,6 +2170,7 @@ function wire() {
         renderOtherTransportPanel();
         renderPreview();
         renderReviewChecklist();
+        renderSubmitReadiness();
         renderStatusChip();
         applyActionGuards();
       });
@@ -1849,6 +2182,7 @@ function wire() {
     renderBlocks();
     renderPreview();
     renderReviewChecklist();
+    renderSubmitReadiness();
     renderStatusChip();
     applyActionGuards();
   });
@@ -1886,10 +2220,16 @@ function wire() {
     workspaceState.mediaCollapsed = !workspaceState.mediaCollapsed;
     renderMediaLibraryVisibility();
   });
+  qs("btn-toggle-confirmed-meta")?.addEventListener("click", () => {
+    workspaceState.confirmedMetaCollapsed = !workspaceState.confirmedMetaCollapsed;
+    renderConfirmedMetaVisibility();
+  });
   qs("btn-toggle-writer-system-info")?.addEventListener("click", () => {
     workspaceState.systemInfoCollapsed = !workspaceState.systemInfoCollapsed;
     renderWriterSystemInfo();
   });
+  qs("field-return-evidence-panel")?.addEventListener("click", handleFieldReturnEvidencePanelClick);
+  registerSubmitReadinessTargetDelegation();
   qs("asset-library")?.addEventListener("click", async (event) => {
     const actionNode = event.target.closest("[data-action]");
     if (!actionNode) return;
@@ -1971,17 +2311,7 @@ function wire() {
     event.returnValue = "";
   });
   qs("btn-submit-review")?.addEventListener("click", async () => {
-    try {
-      const validation = validateWorkspace();
-      if (!validation.ok) throw new Error(`Missing: ${validation.missing.join(", ")}`);
-      const note = currentReviewNote() || "submitted from article workspace";
-      await saveWorkspace();
-      await submitWorkspaceForReview(note);
-      window.location.href = reviewUrl();
-      setInlineStatus("review-status", "Submitted for review");
-    } catch (err) {
-      setInlineStatus("review-status", err.message, "error");
-    }
+    await handleSubmitReviewClick();
   });
 }
 

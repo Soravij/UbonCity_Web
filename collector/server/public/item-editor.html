@@ -7,6 +7,32 @@
     <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
     <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
     <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <style>
+      #fp-requested-checks-editor .requested-guidance-grid {
+        display: grid;
+        gap: 0.5rem 1rem;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      #fp-requested-checks-editor .requested-guidance-row {
+        align-items: start;
+      }
+      #fp-requested-checks-editor .requested-guidance-value {
+        min-width: 0;
+      }
+      #fp-requested-checks-editor .requested-guidance-value > span:first-child {
+        display: inline-block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
+      }
+      @media (max-width: 900px) {
+        #fp-requested-checks-editor .requested-guidance-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+    </style>
   </head>
   <body>
     <main class="container article-page-shell">
@@ -18,7 +44,7 @@
             <div class="auth-points">
               <div class="auth-point">
                 <strong>จัดชุดสั่งงาน</strong>
-                <span>ตรวจและแก้ field pack ให้พร้อมก่อนส่งต่อ Handoff เพื่อเปิดใบสั่งงาน</span>
+                <span>ตรวจและแก้ field pack พร้อม AI guidance ก่อนไปขั้นถัดไป</span>
               </div>
             </div>
           </div>
@@ -118,13 +144,13 @@
       </div>
 
       <div class="card">
-        <h2 class="section-title">รายละเอียดงานภาคสนาม</h2>
-        <p class="muted">สรุปข้อมูลที่ทีมต้องใช้หน้างานให้ชัดและพร้อมใช้งาน</p>
+        <h2 class="section-title">รายละเอียดภาคสนาม</h2>
+        <p class="muted">สรุปข้อมูลบริบทและหลักฐานให้ชัดสำหรับการตรวจแก้</p>
         <div class="grid">
           <input id="fp-id" type="hidden" />
           <div class="full-span">
-            <label>สรุปชุดสั่งงานจาก AI</label>
-            <textarea id="fp-ai-summary" placeholder="สรุปภาพรวมสำหรับทีมลงหน้างาน"></textarea>
+            <label>สรุปจาก AI</label>
+            <textarea id="fp-ai-summary" placeholder="สรุปภาพรวมสำหรับการตรวจแก้"></textarea>
           </div>
           <div class="full-span">
             <label>ประเด็นเด่น (1 บรรทัดต่อ 1 รายการ)</label>
@@ -151,20 +177,27 @@
             <textarea id="fp-story-angle" placeholder="มุมเล่าหลักของงานนี้"></textarea>
           </div>
           <div class="full-span">
-            <label>หมายเหตุหน้างาน</label>
-            <textarea id="fp-field-notes" placeholder="หมายเหตุเพิ่มเติมสำหรับทีมลงหน้างาน"></textarea>
+            <label>หมายเหตุเพิ่มเติม</label>
+            <textarea id="fp-field-notes" placeholder="หมายเหตุเพิ่มเติมสำหรับ editor"></textarea>
           </div>
           <div class="full-span">
-            <label>ข้อมูลที่ต้องยืนยันหน้างาน (1 บรรทัดต่อ 1 รายการ)</label>
-            <textarea id="fp-must-verify-facts" placeholder="สิ่งที่ต้องยืนยันหน้างาน"></textarea>
+            <label>ข้อมูลที่ต้องยืนยันเพิ่ม (1 บรรทัดต่อ 1 รายการ)</label>
+            <textarea id="fp-must-verify-facts" placeholder="สิ่งที่ต้องยืนยันเพิ่ม"></textarea>
           </div>
           <div class="full-span">
-            <label>คำถามที่ต้องถาม (1 บรรทัดต่อ 1 รายการ)</label>
-            <textarea id="fp-must-ask-questions" placeholder="คำถามที่ต้องถามหน้างาน"></textarea>
+            <label>คำถามที่ต้องถามเพิ่ม (1 บรรทัดต่อ 1 รายการ)</label>
+            <textarea id="fp-must-ask-questions" placeholder="คำถามที่ต้องถามเพิ่ม"></textarea>
+          </div>
+          <div class="full-span">
+            <div class="field-help">ส่วนด้านบนเป็น AI guidance แบบอ่านอย่างเดียว หากต้องการแก้ requested checks ให้ใช้ส่วน Advanced edit requested checks ด้านล่าง ค่าที่ AI แนะนำเป็นเพียงค่าเสนอแนะ ระบบจะไม่ยืนยันค่าให้อัตโนมัติ</div>
+            <div id="fp-requested-checks-editor" class="secondary-panel"></div>
+          </div>
+          <div class="full-span secondary-panel">
+            <div id="fp-requested-checks-preview" class="hidden" hidden></div>
           </div>
           <div class="full-span secondary-panel">
             <strong>ทิศทาง social / on-camera</strong>
-            <div class="field-help">ส่วนนี้ใช้กำหนดน้ำเสียง จุดขาย และช็อตที่อยากเน้นสำหรับคอนเทนต์ social หลังจากสรุปชุดลงหน้างานหลักแล้ว</div>
+            <div class="field-help">ส่วนนี้ใช้กำหนดน้ำเสียง จุดขาย และช็อตที่อยากเน้นสำหรับคอนเทนต์ social หลังจากสรุปหลักของงานแล้ว</div>
           </div>
           <div class="full-span">
             <label>Hook</label>
@@ -188,21 +221,23 @@
           </div>
           <div class="full-span secondary-panel">
             <strong>แหล่งอ้างอิงและภาพประกอบ</strong>
-            <div class="field-help">เก็บเฉพาะแหล่งอ้างอิงที่ตั้งใจส่งต่อจริง และภาพตัวอย่างที่ช่วยให้ทีมหน้างานหรือทีมเขียนตามตรวจได้</div>
+            <div class="field-help">เก็บเฉพาะแหล่งอ้างอิงที่ตั้งใจใช้จริง และภาพตัวอย่างที่ช่วยให้ editor หรือทีมเขียนตามตรวจได้</div>
           </div>
           <div class="full-span">
             <label>แหล่งอ้างอิง (1 บรรทัดต่อ 1 รายการ: label | url | source_family | note)</label>
-            <textarea id="fp-references" placeholder="แหล่งอ้างอิงทั่วไปของชุดลงหน้างาน"></textarea>
+            <textarea id="fp-references" placeholder="แหล่งอ้างอิงทั่วไปของงานนี้"></textarea>
           </div>
           <div class="full-span">
             <label>แหล่งอ้างอิงสำหรับทีมเขียน (ถ้ามี) (1 บรรทัดต่อ 1 รายการ: label | url | source_family | note)</label>
+            <label>การเตรียมส่งต่อทีมเขียน</label>
+            <div class="field-help">ส่วนนี้ไม่บังคับในขั้นนี้</div>
             <textarea id="fp-writer-references" placeholder="แหล่งอ้างอิงที่อยากส่งต่อให้ทีมเขียน"></textarea>
           </div>
           <div class="full-span">
             <details class="secondary-panel">
               <summary>ภาพอ้างอิงจาก assets ที่เลือกไว้</summary>
               <div id="fp-media-hints-editor" class="secondary-panel"></div>
-              <div class="field-help">ใช้เฉพาะรูปที่ถูกเลือกส่งเข้า Agent เป็นตัวอย่างหรือแนวทางสำหรับทีมหน้างาน</div>
+              <div class="field-help">ใช้เฉพาะรูปที่ถูกเลือกส่งเข้า Agent เป็นตัวอย่างหรือแนวทางสำหรับการตรวจบริบท</div>
             </details>
           </div>
           <div class="full-span">
@@ -290,20 +325,6 @@
       </div>
 
       <div class="card">
-        <h2 class="section-title">Field Pack Contract Review</h2>
-        <p class="muted">Review contract, evidence, and unresolved checks. This panel is for review/curation only.</p>
-        <div id="field-pack-contract-status" class="status"></div>
-        <div id="field-pack-contract-panel"></div>
-      </div>
-
-      <div class="card">
-        <h2 class="section-title">Taxonomy Review</h2>
-        <p class="muted">Review page_curation_taxonomy_v1 signals from the field pack contract. This panel is for curation only.</p>
-        <div id="taxonomy-review-status" class="status"></div>
-        <div id="taxonomy-review-panel"></div>
-      </div>
-
-      <div class="card">
         <h2 class="section-title">Final Decision</h2>
         <p class="muted">ค่อยตัดสินใจส่วนนี้หลังจากตรวจและจัดคำสั่งงานทั้งหมดด้านบนแล้ว</p>
         <div class="grid">
@@ -337,8 +358,8 @@
             </div>
           </div>
           <div class="full-span secondary-panel">
-            <strong>Handoff อยู่ขั้นถัดไป</strong>
-            <div class="field-help">หน้านี้ใช้ตรวจ field pack เท่านั้น การสร้าง assignment จริงทำในหน้า Handoff หลังจากกดไปกระบวนการส่งงานไปทำ</div>
+            <strong>Assignment อยู่ขั้นถัดไป</strong>
+            <div class="field-help">หน้านี้ใช้ตรวจ field pack เท่านั้น ส่วนการสร้าง assignment จริงอยู่ในหน้ามอบหมายงานเมื่อไปขั้นถัดไป</div>
           </div>
         </div>
       </div>

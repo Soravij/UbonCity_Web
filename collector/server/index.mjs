@@ -63,6 +63,12 @@ import {
   mergeInlineMediaManifestFromBody,
   rewriteCollectorHtmlMediaUrls,
 } from "./review-inline-media.mjs";
+import {
+  buildAssignmentSubmissionPayload,
+  buildFieldPackUpdatePayloadFromAgent,
+  mergeConfirmedDraftMetadata,
+} from "./endpoint-schema-mapping.mjs";
+import { buildReviewIngestContentPayload } from "./review-ingest-mapping.mjs";
 
 const ARTICLE_AGENT_KEY = "article_agent";
 const DEFAULT_ARTICLE_AGENT_PROFILE = [
@@ -4066,6 +4072,22 @@ function buildArticleProcessDraftPreview(item, workflowModel = null, publishable
     meta_description: String(resolved?.meta_description || item?.meta_description || item?.summary || "").trim() || null,
     suggested_related: [],
     ai_quality_score: null,
+    confirmed_cta_contact_json: {
+      phone: null,
+      line_url: null,
+      facebook_url: null,
+      website_url: null,
+      primary_cta: null,
+    },
+    confirmed_taxonomy_json: {
+      category: null,
+      subtype: null,
+      tags: [],
+    },
+    confirmed_meta_status: "not_started",
+    confirmed_by_user_id: null,
+    confirmed_at: null,
+    confirmed_note: null,
     status: publishableSource?.ready_for_publish_source ? "generated" : "draft",
     created_at: null,
     updated_at: null,
@@ -4166,20 +4188,58 @@ function getPrimaryEditorialAssignment(itemId) {
 
 function buildArticleProcessPayload(req, item) {
   const isDebugDiagnosticsEnabled = String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
+  const itemType = String(item?.type || "").trim().toLowerCase();
   const workflowModel = repo.ensureWorkflowModel(Number(item?.id || 0) || 0);
   const publishableSource = repo.buildPublishableSourceByItem(Number(item?.id || 0) || 0);
   const latestDraft = buildArticleProcessDraftPreview(item, workflowModel, publishableSource);
+  const rawFieldReturnEvidence = itemType === "place"
+    ? repo.buildFieldReturnEvidenceByItem(Number(item?.id || 0) || 0)
+    : { version: 1, items: [] };
   const workflowTransitions = repo.listWorkflowTransitionsByItem(Number(item?.id || 0) || 0, 12);
   const baseArticleStatus = deriveArticleProcessStatus(item, workflowModel, publishableSource);
   const articleStatus = deriveQueuedArticleProcessStatus(item, workflowModel, workflowTransitions, baseArticleStatus);
   const editorialAssignments = listEditorialAssignmentsByItem(item?.id);
   const activeEditorialAssignment = getPrimaryEditorialAssignment(item?.id);
   const role = actorPolicyRole(req);
+  const fieldReturnSubmitters = new Map(
+    listUsersByIds(
+      Array.isArray(rawFieldReturnEvidence?.items)
+        ? rawFieldReturnEvidence.items.map((row) => Number(row?.submitted_by_user_id || 0)).filter(Boolean)
+        : []
+    ).map((row) => [Number(row?.id || 0), row])
+  );
+  const fieldReturnEvidence = {
+    version: 1,
+    items: Array.isArray(rawFieldReturnEvidence?.items)
+      ? rawFieldReturnEvidence.items.map((row) => {
+        const submitter = fieldReturnSubmitters.get(Number(row?.submitted_by_user_id || 0)) || null;
+        const submittedBy = submitter
+          ? String(submitter.display_name || submitter.email || `user #${Number(submitter.id || 0)}`).trim()
+          : null;
+        return {
+          key: String(row?.key || "").trim(),
+          group_key: String(row?.group_key || "").trim() || "other",
+          check_key: String(row?.check_key || "").trim() || String(row?.key || "").trim(),
+          label: String(row?.label || "").trim() || String(row?.check_key || row?.key || "").trim(),
+          checked: row?.checked === true,
+          found: row?.found === true,
+          value: row?.value ?? null,
+          condition_note: row?.condition_note ?? null,
+          evidence: row?.evidence ?? null,
+          note: row?.note ?? null,
+          submitted_at: row?.submitted_at || null,
+          submitted_by: submittedBy,
+          assignment_id: Number(row?.assignment_id || 0) || null,
+        };
+      })
+      : [],
+  };
   return {
     item_id: Number(item?.id || 0) || 0,
     status: articleStatus,
     workflow_model: workflowModel,
     latest_draft: latestDraft,
+    field_return_evidence: fieldReturnEvidence,
     publishable_source: publishableSource?.source || null,
     publishable_source_ready: Boolean(publishableSource?.ready_for_publish_source),
     publishable_source_issues: Array.isArray(publishableSource?.issues) ? publishableSource.issues : [],
@@ -4912,27 +4972,23 @@ function buildReviewIngestPayload(options = {}) {
     source_content_item_id: contentItemId,
     source_base_url: sourceBaseUrl,
     content: {
-      content_type: contentType,
-      lang: sourceLang,
-      category: contentType === "event" ? "event" : (String(item?.category || "").trim().toLowerCase() || "attractions"),
-      slug: normalizeCollectorSlug(item?.slug || "", `item-${contentItemId}`),
-      title,
-      excerpt,
-      body: rewrittenBody,
-      meta_title: metaTitle,
-      meta_description: metaDescription,
-      event_period_text: contentType === "event" ? String(item?.event_period_text || "").trim() || null : null,
-      location_text: contentType === "event" ? String(item?.location_text || "").trim() || null : null,
-      latitude: Number.isFinite(Number(item?.latitude)) ? Number(item.latitude) : null,
-      longitude: Number.isFinite(Number(item?.longitude)) ? Number(item.longitude) : null,
-      map_url: String(item?.map_url || "").trim() || null,
-      google_place_id: String(item?.google_place_id || "").trim() || null,
-      transport_subtype: otherTransportMeta?.subtype || null,
-      transport_contact_name: otherTransportMeta?.contact_name || null,
-      transport_contact_phone: otherTransportMeta?.phone || null,
-      transport_contact_details: otherTransportMeta?.contact_details || null,
-      transport_link_url: otherTransportMeta?.link_url || null,
-      translation_langs: translationLangs,
+      ...buildReviewIngestContentPayload({
+        contentType,
+        sourceLang,
+        item: {
+          ...item,
+          // Confirmed CTA/contact remains place-first and draft-owned only.
+          slug: normalizeCollectorSlug(item?.slug || "", `item-${contentItemId}`),
+        },
+        latestDraft,
+        title,
+        excerpt,
+        rewrittenBody,
+        metaTitle,
+        metaDescription,
+        otherTransportMeta,
+        translationLangs,
+      }),
     },
     media_manifest: {
       ...mediaManifest,
@@ -8462,6 +8518,7 @@ app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "u
           ? draftPayload.suggested_related
           : (latestDraft?.suggested_related || []),
         ai_quality_score: draftPayload.ai_quality_score ?? latestDraft?.ai_quality_score ?? 0,
+        ...mergeConfirmedDraftMetadata(draftPayload, latestDraft),
         status: String(draftPayload.status || latestDraft?.status || "generated").trim() || "generated",
       });
       repo.logAudit(actorEmail(req), "draft.save_editor_work", "content_item", String(id), {
@@ -10603,16 +10660,17 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
     const assignmentAction = normalizedSubmissionState === "resubmitted" ? "resubmit" : "submit";
     const reasonCode = String(req.body?.reason_code || "").trim().toLowerCase()
       || ASSIGNMENT_REASON_CODE_DEFAULTS[assignmentAction];
-    const submission = repo.addAssignmentSubmission({
-      assignment_id: assignmentId,
-      submitted_by_user_id: req.authUser?.id,
-      submission_state: normalizedSubmissionState,
-      article_payload_json: normalizedArticlePayload,
-      media_payload_json: mediaPayload,
-      contributor_note: req.body?.contributor_note,
-      reviewer_note: req.body?.reviewer_note,
-      reviewed_at: req.body?.reviewed_at,
-    });
+    const submission = repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+      assignmentId,
+      submittedByUserId: req.authUser?.id,
+      submissionState: normalizedSubmissionState,
+      articlePayloadJson: normalizedArticlePayload,
+      mediaPayloadJson: mediaPayload,
+      fieldReturnPayloadJson: req.body?.field_return_payload_json,
+      contributorNote: req.body?.contributor_note,
+      reviewerNote: req.body?.reviewer_note,
+      reviewedAt: req.body?.reviewed_at,
+    }));
     const keepAssetIds = Array.isArray(req.body?.media_payload_json?.assets)
       ? req.body.media_payload_json.assets.map((row) => Number(row?.id || 0)).filter((id) => id > 0)
       : [];
@@ -12005,31 +12063,6 @@ app.put("/api/field-packs/:fieldPackId", requireRole("owner", "admin", "user"), 
     res.status(isNotFound ? 404 : isConflict ? 409 : 400).json({ error: msg });
   }
 });
-
-function buildFieldPackUpdatePayloadFromAgent(source = {}) {
-  const fieldPack = source && typeof source === "object" ? source : {};
-  return {
-    status: String(fieldPack.status || "ready_for_field").trim().toLowerCase() || "ready_for_field",
-    writer_ready: Boolean(fieldPack.writer_ready),
-    ai_summary: String(fieldPack.ai_summary || "").trim(),
-    ai_highlights: Array.isArray(fieldPack.ai_highlights) ? fieldPack.ai_highlights : [],
-    ai_unknowns: Array.isArray(fieldPack.ai_unknowns) ? fieldPack.ai_unknowns : [],
-    editor_summary: String(fieldPack.editor_summary || "").trim(),
-    verified_facts: Array.isArray(fieldPack.verified_facts) ? fieldPack.verified_facts : [],
-    uncertain_facts: Array.isArray(fieldPack.uncertain_facts) ? fieldPack.uncertain_facts : [],
-    story_angle: String(fieldPack.story_angle || "").trim(),
-    field_notes: String(fieldPack.field_notes || "").trim(),
-    social_hook: String(fieldPack.social_hook || "").trim(),
-    social_shot_emphasis: Array.isArray(fieldPack.social_shot_emphasis) ? fieldPack.social_shot_emphasis : [],
-    social_on_camera_points: Array.isArray(fieldPack.social_on_camera_points) ? fieldPack.social_on_camera_points : [],
-    social_caption_angle: String(fieldPack.social_caption_angle || "").trim(),
-    field_pack_checklists: Array.isArray(fieldPack.field_pack_checklists) ? fieldPack.field_pack_checklists : [],
-    // Current schema requires real URLs for references/media hints. Revision keeps
-    // these out until the separate internal-context reference schema exists.
-    field_pack_references: [],
-    field_pack_media_hints: [],
-  };
-}
 
 app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "user"), workflowRateLimit, async (req, res) => {
   const id = Number(req.params.id || 0);

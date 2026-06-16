@@ -2537,6 +2537,1162 @@ function buildFieldPackDefaults() {
   };
 }
 
+const REQUESTED_CHECK_GROUP_TEMPLATES = [
+  {
+    group_key: "cta_contact",
+    group_label: "CTA/ติดต่อ",
+    checks: [
+      { key: "phone", label: "เบอร์โทร", answer_type: "phone", instruction: "ขอเบอร์ที่ติดต่อได้จริง", condition_prompt: "", evidence_required: true },
+      { key: "line_url", label: "ลิงก์ LINE", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์ที่ใช้ได้จริง", condition_prompt: "", evidence_required: false },
+      { key: "facebook_url", label: "ลิงก์ Facebook", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์เพจที่ถูกต้อง", condition_prompt: "", evidence_required: false },
+      { key: "website_url", label: "ลิงก์เว็บไซต์", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์เว็บไซต์หลัก", condition_prompt: "", evidence_required: false },
+      { key: "primary_cta", label: "CTA หลัก", answer_type: "select", instruction: "ยืนยันว่าควรพาคนไปกดอะไรเป็นหลัก", condition_prompt: "", evidence_required: false },
+    ],
+  },
+  {
+    group_key: "taxonomy",
+    group_label: "หมวดหมู่",
+    checks: [
+      { key: "category", label: "หมวดหลัก", answer_type: "text", instruction: "ยืนยันหมวดหลักของสถานที่", condition_prompt: "", evidence_required: false },
+      { key: "subtype", label: "หมวดย่อย", answer_type: "text", instruction: "ยืนยันหมวดย่อยที่ตรงที่สุด", condition_prompt: "", evidence_required: false },
+      { key: "tags", label: "แท็ก", answer_type: "multi_select", instruction: "ดูว่ามีแท็กไหนควรเติม", condition_prompt: "", evidence_required: false },
+    ],
+  },
+];
+
+const REQUESTED_CHECK_ANSWER_TYPE_OPTIONS = [
+  ["text", "ข้อความ"],
+  ["url", "ลิงก์"],
+  ["phone", "เบอร์โทร"],
+  ["select", "เลือก 1 ค่า"],
+  ["multi_select", "เลือกหลายค่า"],
+  ["boolean", "ใช่/ไม่ใช่"],
+  ["boolean_with_conditions", "ใช่/ไม่ใช่ พร้อมเงื่อนไข"],
+  ["number_with_unit", "ตัวเลขพร้อมหน่วย"],
+  ["hours", "เวลาเปิดปิด"],
+  ["note_only", "บันทึกอย่างเดียว"],
+];
+
+function getRequestedCheckDefaultGroupLabel(groupKey) {
+  const normalized = String(groupKey || "").trim().toLowerCase();
+  const template = REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === normalized);
+  if (template?.group_label) return template.group_label;
+  if (normalized === "custom") return "เช็กเพิ่ม";
+  return normalized || "custom";
+}
+
+function normalizeRequestedCheckKey(rawKey) {
+  return String(rawKey || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function formatRequestedCheckSuggestedValue(value, answerType = "text") {
+  if (value == null) return "";
+  if (answerType === "multi_select" && Array.isArray(value)) return value.join("\n");
+  if ((answerType === "boolean" || answerType === "boolean_with_conditions") && typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  if (answerType === "number_with_unit" && value && typeof value === "object" && !Array.isArray(value)) {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value || "");
+}
+
+function parseRequestedCheckSuggestedValue(rawValue, answerType = "text") {
+  const text = String(rawValue || "").trim();
+  if (!text) return null;
+  if (answerType === "multi_select") return parseLineList(text);
+  if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+    if (text === "true") return true;
+    if (text === "false") return false;
+    return null;
+  }
+  if (answerType === "number_with_unit") {
+    try {
+      return JSON.parse(text);
+    } catch {
+      const numeric = Number(text);
+      return Number.isFinite(numeric) ? { number: numeric, unit: null } : null;
+    }
+  }
+  if (answerType === "select" && text.includes("\n")) return text.split("\n")[0].trim() || null;
+  return text;
+}
+
+function isPlaceRequestedCheckItem(item = state.item) {
+  return String(item?.type || "").trim().toLowerCase() === "place";
+}
+
+function shouldKeepRequestedCheckGroupForItem(groupKey, item = state.item) {
+  const normalizedGroupKey = String(groupKey || "").trim().toLowerCase();
+  if (normalizedGroupKey === "cta_contact") return isPlaceRequestedCheckItem(item);
+  return true;
+}
+
+function filterRequestedCheckGroupsForItem(groups = [], item = state.item) {
+  return (Array.isArray(groups) ? groups : []).filter((group) => {
+    return shouldKeepRequestedCheckGroupForItem(group?.group_key, item);
+  });
+}
+
+function mergeRequestedChecksForSave(uiState = {}, existingState = {}) {
+  const existingGroups = new Map(
+    (Array.isArray(existingState?.groups) ? existingState.groups : []).map((group) => [String(group.group_key || "").trim().toLowerCase(), group])
+  );
+  const uiGroups = new Map(
+    (Array.isArray(uiState?.groups) ? uiState.groups : []).map((group) => [String(group.group_key || "").trim().toLowerCase(), group])
+  );
+  const preservedHiddenGroupKeys = Array.from(existingGroups.keys()).filter((groupKey) => {
+    return groupKey === "cta_contact" && !uiGroups.has(groupKey);
+  });
+  const orderedGroupKeys = Array.from(new Set([
+    ...REQUESTED_CHECK_GROUP_TEMPLATES.map((group) => group.group_key),
+    ...preservedHiddenGroupKeys,
+    ...uiGroups.keys(),
+  ])).filter((groupKey) => uiGroups.has(groupKey) || preservedHiddenGroupKeys.includes(groupKey));
+
+  return {
+    version: 1,
+    groups: orderedGroupKeys.map((groupKey) => {
+      const existingGroup = existingGroups.get(groupKey) || {};
+      const uiGroup = uiGroups.get(groupKey) || {};
+      if (!uiGroups.has(groupKey)) {
+        return {
+          group_key: groupKey,
+          group_label: getRequestedCheckDefaultGroupLabel(groupKey),
+          checks: Array.isArray(existingGroup.checks) ? existingGroup.checks : [],
+        };
+      }
+      const templateChecks = REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === groupKey)?.checks || [];
+      const existingChecks = new Map(
+        (Array.isArray(existingGroup.checks) ? existingGroup.checks : []).map((check) => [normalizeRequestedCheckKey(check.key), check])
+      );
+      const uiChecks = Array.isArray(uiGroup.checks) ? uiGroup.checks : [];
+      const normalizedKeys = uiChecks.map((uiCheck, index) => {
+        if (groupKey !== "custom") return String(templateChecks[index]?.key || "").trim().toLowerCase();
+        return normalizeRequestedCheckKey(uiCheck?.key);
+      });
+      if (normalizedKeys.some((key) => !key)) {
+        throw new Error(`Requested check key is required for group "${groupKey}"`);
+      }
+      const seenKeys = new Set();
+      normalizedKeys.forEach((key) => {
+        if (seenKeys.has(key)) throw new Error(`Duplicate requested check key "${key}" in group "${groupKey}"`);
+        seenKeys.add(key);
+      });
+      return {
+        group_key: groupKey,
+        group_label: getRequestedCheckDefaultGroupLabel(groupKey),
+        // Save is driven by rows still present in the editor. Missing rows are deletions.
+        checks: uiChecks.map((uiCheck, index) => {
+          const checkKey = normalizedKeys[index];
+          const existingCheck = existingChecks.get(checkKey) || {};
+          return {
+            key: checkKey,
+            requested: uiCheck.requested === true,
+            label: String(uiCheck.label || existingCheck.label || "").trim(),
+            instruction: String(uiCheck.instruction || existingCheck.instruction || "").trim(),
+            answer_type: String(uiCheck.answer_type || existingCheck.answer_type || "text").trim() || "text",
+            suggested_value: Object.prototype.hasOwnProperty.call(existingCheck, "suggested_value")
+              ? existingCheck.suggested_value
+              : null,
+            condition_prompt: uiCheck.condition_prompt == null
+              ? (existingCheck.condition_prompt ?? null)
+              : String(uiCheck.condition_prompt || "").trim() || null,
+            evidence_required: uiCheck.evidence_required === true,
+            source: Object.prototype.hasOwnProperty.call(existingCheck, "source")
+              ? existingCheck.source
+              : null,
+          };
+        }).filter((check) => check.key || check.label || check.instruction || check.requested || check.suggested_value != null || check.source != null),
+      };
+    }).filter((group) => Array.isArray(group.checks) && group.checks.length > 0),
+  };
+}
+
+function buildRequestedChecksEditorState(fieldPack = {}) {
+  const saved = fieldPack?.requested_checks_json && typeof fieldPack.requested_checks_json === "object"
+    ? fieldPack.requested_checks_json
+    : { version: 1, groups: [] };
+  const savedGroups = new Map(
+    (Array.isArray(saved.groups) ? saved.groups : []).map((group) => [String(group.group_key || "").trim().toLowerCase(), group])
+  );
+  const aiCta = fieldPack?.ai_cta_contact_json && typeof fieldPack.ai_cta_contact_json === "object" ? fieldPack.ai_cta_contact_json : {};
+  const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object" ? fieldPack.ai_taxonomy_json : {};
+  const sourceMeta = {
+    kind: "ai",
+    confidence: aiCta.confidence || aiTaxonomy.confidence || "unknown",
+    note: null,
+  };
+
+  const groups = REQUESTED_CHECK_GROUP_TEMPLATES.map((template) => {
+    const savedGroup = savedGroups.get(template.group_key) || {};
+    const savedChecks = new Map(
+      (Array.isArray(savedGroup.checks) ? savedGroup.checks : []).map((check) => [String(check.key || "").trim().toLowerCase(), check])
+    );
+    return {
+      group_key: template.group_key,
+      group_label: template.group_label,
+      checks: template.checks.map((check) => {
+        const savedCheck = savedChecks.get(check.key) || {};
+        const aiSuggestedValue = template.group_key === "cta_contact"
+          ? aiCta[check.key]
+          : aiTaxonomy[check.key];
+        return {
+          key: check.key,
+          requested: savedCheck.requested === true,
+          label: String(savedCheck.label || check.label || "").trim(),
+          instruction: String(savedCheck.instruction || check.instruction || "").trim(),
+          answer_type: String(savedCheck.answer_type || check.answer_type || "text").trim() || "text",
+          suggested_value: Object.prototype.hasOwnProperty.call(savedCheck, "suggested_value")
+            ? savedCheck.suggested_value
+            : (aiSuggestedValue ?? null),
+          condition_prompt: savedCheck.condition_prompt == null
+            ? (String(check.condition_prompt || "").trim() || null)
+            : String(savedCheck.condition_prompt || "").trim() || null,
+          evidence_required: savedCheck.evidence_required === true || check.evidence_required === true,
+          source: savedCheck.source || (aiSuggestedValue != null ? sourceMeta : null),
+        };
+      }),
+    };
+  });
+
+  const customGroup = savedGroups.get("custom");
+  groups.push({
+    group_key: "custom",
+    group_label: String(customGroup?.group_label || "เช็กเพิ่ม").trim() || "เช็กเพิ่ม",
+    checks: (Array.isArray(customGroup?.checks) ? customGroup.checks : []).map((check, index) => ({
+      key: String(check.key || `custom_${index + 1}`).trim().toLowerCase() || `custom_${index + 1}`,
+      requested: check.requested === true,
+      label: String(check.label || "").trim(),
+      instruction: String(check.instruction || "").trim(),
+      answer_type: String(check.answer_type || "text").trim() || "text",
+      suggested_value: Object.prototype.hasOwnProperty.call(check, "suggested_value") ? check.suggested_value : null,
+      condition_prompt: check.condition_prompt == null ? null : String(check.condition_prompt || "").trim() || null,
+      evidence_required: check.evidence_required === true,
+      source: check.source || null,
+    })),
+  });
+
+  return {
+    version: 1,
+    groups,
+  };
+}
+
+function getRequestedCheckEditorGroups(fieldPack = {}, item = state.item) {
+  const stateValue = buildRequestedChecksEditorState(fieldPack);
+  return (Array.isArray(stateValue.groups) ? stateValue.groups : []).filter((group) => {
+    const groupKey = String(group?.group_key || "").trim().toLowerCase();
+    if (groupKey === "cta_contact") return isPlaceRequestedCheckItem(item);
+    return true;
+  });
+}
+
+function buildRequestedChecksPreviewHtml(requestedChecks = { version: 1, groups: [] }, fieldPack = state.fieldPack || null) {
+  return buildRequestedChecksCompactPreviewHtml(requestedChecks, fieldPack, state.item);
+}
+
+function renderRequestedChecksPreview(requestedChecks = readRequestedChecksEditorState()) {
+  const node = qs("fp-requested-checks-preview");
+  if (!node) return;
+  node.innerHTML = "";
+}
+
+function renderRequestedChecksEditor(fieldPack = {}) {
+  const root = qs("fp-requested-checks-editor");
+  if (!root) return;
+  root.innerHTML = buildRequestedChecksEditorHtml(fieldPack, state.item);
+  root.querySelectorAll("textarea").forEach((node) => autosizeTextarea(node));
+}
+
+function readRequestedChecksEditorState() {
+  const root = qs("fp-requested-checks-editor");
+  if (!root) return { version: 1, groups: [] };
+  const groups = Array.from(root.querySelectorAll("[data-requested-group]")).map((groupNode) => {
+    const groupKey = String(groupNode.getAttribute("data-requested-group") || "").trim().toLowerCase();
+    const groupLabel = getRequestedCheckDefaultGroupLabel(groupKey);
+    const checks = Array.from(groupNode.querySelectorAll("[data-requested-check-row]")).map((rowNode) => {
+      const answerType = String(rowNode.querySelector("[data-check-field='answer_type']")?.value || "text").trim() || "text";
+      return {
+        key: String(rowNode.querySelector("[data-check-field='key']")?.value || "").trim().toLowerCase(),
+        requested: rowNode.querySelector("[data-check-field='requested']")?.checked === true,
+        label: String(rowNode.querySelector("[data-check-field='label']")?.value || "").trim(),
+        instruction: String(rowNode.querySelector("[data-check-field='instruction']")?.value || "").trim(),
+        answer_type: answerType,
+        condition_prompt: String(rowNode.querySelector("[data-check-field='condition_prompt']")?.value || "").trim() || null,
+        evidence_required: rowNode.querySelector("[data-check-field='evidence_required']")?.checked === true,
+      };
+    }).filter((check) => check.key || check.label || check.instruction || check.requested);
+    return {
+      group_key: groupKey,
+      group_label: groupLabel,
+      checks,
+    };
+  });
+  return {
+    version: 1,
+    groups,
+  };
+}
+
+function getRequestedCheckStatusBadge(label, tone = "neutral") {
+  const className = tone === "warning"
+    ? "workflow-badge workflow-badge-generated"
+    : tone === "ok"
+      ? "workflow-badge workflow-badge-sent"
+      : "workflow-badge";
+  return `<span class="${className}">${escapeHtml(label)}</span>`;
+}
+
+function hasRequestedCheckMeaningfulValue(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (value && typeof value === "object") return Object.keys(value).length > 0;
+  return value != null && String(value).trim() !== "";
+}
+
+function buildRequestedCheckCompactGroups(requestedChecks = { version: 1, groups: [] }) {
+  const compactMap = new Map([
+    ["cta_contact", { key: "cta_contact", label: "CTA Review", checks: [] }],
+    ["taxonomy", { key: "taxonomy", label: "Suggested Focus", checks: [] }],
+    ["custom", { key: "custom", label: "Article context", checks: [] }],
+  ]);
+  const groups = Array.isArray(requestedChecks?.groups) ? requestedChecks.groups : [];
+  groups.forEach((group) => {
+    const groupKey = String(group?.group_key || "").trim().toLowerCase();
+    const target = compactMap.get(compactMap.has(groupKey) ? groupKey : "custom");
+    (Array.isArray(group?.checks) ? group.checks : []).forEach((check) => target.checks.push(check));
+  });
+  return Array.from(compactMap.values()).filter((group) => group.checks.length > 0);
+}
+
+function extractRequestedCheckArticleContextHints(groups = []) {
+  return groups.flatMap((group) => {
+    return (Array.isArray(group?.checks) ? group.checks : []).filter((check) => check?.requested === true).flatMap((check) => {
+      const hints = [];
+      const instruction = String(check?.instruction || "").trim();
+      if (instruction) hints.push(instruction);
+      const condition = String(check?.condition_prompt || "").trim();
+      if (condition) hints.push(condition);
+      return hints;
+    });
+  }).filter(Boolean);
+}
+
+function buildRequestedCheckStatusRow(key, label, value, statuses = []) {
+  const normalizedStatuses = Array.isArray(statuses)
+    ? Array.from(new Set(statuses.filter(Boolean)))
+    : [];
+  return {
+    key: String(key || "").trim().toLowerCase(),
+    label: String(label || "").trim() || "-",
+    value: hasRequestedCheckMeaningfulValue(value) ? formatRequestedCheckSuggestedValue(value) : "",
+    statuses: normalizedStatuses,
+  };
+}
+
+function normalizeRequestedCheckCandidate(rawValue) {
+  if (rawValue && typeof rawValue === "object" && !Array.isArray(rawValue)) {
+    return {
+      value: Object.prototype.hasOwnProperty.call(rawValue, "value") ? rawValue.value : null,
+      checked: rawValue.checked === true,
+      found: rawValue.found === true,
+    };
+  }
+  return {
+    value: rawValue,
+    checked: false,
+    found: false,
+  };
+}
+
+function getGuidanceSourceObjects(fieldPack = {}, item = state.item) {
+  const writerNotesContract = parseFieldPackContractFromWriterNotes(fieldPack?.writer_notes);
+  const writerCoreFacts = writerNotesContract?.core_factual_fields && typeof writerNotesContract.core_factual_fields === "object" && !Array.isArray(writerNotesContract.core_factual_fields)
+    ? writerNotesContract.core_factual_fields
+    : {};
+  const writerCta = writerNotesContract?.cta_contact && typeof writerNotesContract.cta_contact === "object" && !Array.isArray(writerNotesContract.cta_contact)
+    ? writerNotesContract.cta_contact
+    : writerNotesContract?.cta && typeof writerNotesContract.cta === "object" && !Array.isArray(writerNotesContract.cta)
+      ? writerNotesContract.cta
+      : writerNotesContract?.contact && typeof writerNotesContract.contact === "object" && !Array.isArray(writerNotesContract.contact)
+        ? writerNotesContract.contact
+        : {};
+  const writerCuration = writerNotesContract?.curation_fields && typeof writerNotesContract.curation_fields === "object" && !Array.isArray(writerNotesContract.curation_fields)
+    ? writerNotesContract.curation_fields
+    : {};
+  const publishableSource = fieldPack?.publishable_source && typeof fieldPack.publishable_source === "object" && !Array.isArray(fieldPack.publishable_source)
+    ? fieldPack.publishable_source
+    : {};
+  const sourceSnapshot = fieldPack?.source_snapshot_json && typeof fieldPack.source_snapshot_json === "object" && !Array.isArray(fieldPack.source_snapshot_json)
+    ? fieldPack.source_snapshot_json
+    : {};
+  const cleanContext = fieldPack?.clean_context && typeof fieldPack.clean_context === "object" && !Array.isArray(fieldPack.clean_context)
+    ? fieldPack.clean_context
+    : {};
+  const cleanContextItem = cleanContext?.item && typeof cleanContext.item === "object" && !Array.isArray(cleanContext.item)
+    ? cleanContext.item
+    : {};
+  const itemSource = item && typeof item === "object" && !Array.isArray(item) ? item : {};
+  return {
+    writerNotesContract,
+    writerCoreFacts,
+    writerCta,
+    writerCuration,
+    publishableSource,
+    sourceSnapshot,
+    cleanContext,
+    cleanContextItem,
+    itemSource,
+  };
+}
+
+function readGuidanceAliasValue(source, aliases = []) {
+  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+  for (const alias of Array.isArray(aliases) ? aliases : []) {
+    const path = String(alias || "").trim();
+    if (!path) continue;
+    const segments = path.split(".").filter(Boolean);
+    let cursor = source;
+    let resolved = true;
+    for (const segment of segments) {
+      if (!cursor || typeof cursor !== "object" || !Object.prototype.hasOwnProperty.call(cursor, segment)) {
+        resolved = false;
+        break;
+      }
+      cursor = cursor[segment];
+    }
+    if (resolved) return cursor;
+  }
+  return null;
+}
+
+function normalizeGuidanceDisplayValue(value, key = "") {
+  if (value == null) return "";
+  if (Array.isArray(value)) {
+    const items = value
+      .map((entry) => normalizeGuidanceDisplayValue(entry, key))
+      .filter((entry) => entry !== "");
+    return items.join("; ");
+  }
+  if (typeof value === "boolean") {
+    if (key === "open_now") return value ? "Open now: yes" : "Open now: no";
+    return value ? "true" : "false";
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "";
+  }
+  if (typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "value")) return normalizeGuidanceDisplayValue(value.value, key);
+    if (Object.prototype.hasOwnProperty.call(value, "text")) return normalizeGuidanceDisplayValue(value.text, key);
+    if (Object.prototype.hasOwnProperty.call(value, "label")) return normalizeGuidanceDisplayValue(value.label, key);
+    if (Object.prototype.hasOwnProperty.call(value, "name")) return normalizeGuidanceDisplayValue(value.name, key);
+    if (Object.prototype.hasOwnProperty.call(value, "url")) return normalizeGuidanceDisplayValue(value.url, key);
+    if (key === "opening_hours_note" || Object.prototype.hasOwnProperty.call(value, "open_now") || Object.prototype.hasOwnProperty.call(value, "weekday_text") || Object.prototype.hasOwnProperty.call(value, "opening_hours_weekday_text")) {
+      const parts = [];
+      const openNow = normalizeGuidanceDisplayValue(value.open_now, "open_now");
+      if (openNow) parts.push(openNow);
+      const weekdayText = normalizeGuidanceDisplayValue(value.weekday_text || value.opening_hours_weekday_text, "opening_hours_weekday_text");
+      if (weekdayText) parts.push(weekdayText);
+      const businessStatus = normalizeGuidanceDisplayValue(value.business_status, "business_status");
+      if (businessStatus) parts.push(`Status: ${businessStatus}`);
+      return parts.join("; ");
+    }
+    return "";
+  }
+  const text = String(value || "").trim();
+  return text;
+}
+
+function extractVerifiedFactValue(verifiedFacts = [], aliases = []) {
+  for (const fact of Array.isArray(verifiedFacts) ? verifiedFacts : []) {
+    const raw = String(fact || "").trim();
+    if (!raw) continue;
+    const separatorIndex = raw.indexOf(":");
+    if (separatorIndex <= 0) continue;
+    const factKey = raw.slice(0, separatorIndex).trim().toLowerCase();
+    const factValue = raw.slice(separatorIndex + 1).trim();
+    if (!factValue) continue;
+    if ((Array.isArray(aliases) ? aliases : []).some((alias) => {
+      const terminalKey = String(alias || "").trim().toLowerCase().split(".").pop();
+      return terminalKey && (factKey === terminalKey || factKey === terminalKey.replace(/_/g, " "));
+    })) {
+      return factValue;
+    }
+  }
+  return "";
+}
+
+function extractThaiPhoneCandidate(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const match = text.match(/(?:\+66[-\s]?)?(?:0\d{1,2}[-\s]?\d{3}[-\s]?\d{4}|\d{9,10})/);
+  return match ? String(match[0]).trim() : "";
+}
+
+function collectGuidanceReferenceUrls(references = []) {
+  const out = {
+    facebook_url: "",
+    map_url: "",
+  };
+  for (const row of Array.isArray(references) ? references : []) {
+    const url = String(row?.url || row?.source_url || row?.evidence_source_url || "").trim();
+    if (!url) continue;
+    const normalizedUrl = url.toLowerCase();
+    if (!out.facebook_url && normalizedUrl.includes("facebook.com")) out.facebook_url = url;
+    if (!out.map_url && (normalizedUrl.includes("maps.google.") || normalizedUrl.includes("google.com/maps") || normalizedUrl.includes("goo.gl/maps"))) {
+      out.map_url = url;
+    }
+  }
+  return out;
+}
+
+function resolveGuidanceRowValue({
+  key = "",
+  label = "",
+  aliases = [],
+  fieldPack = {},
+  item = state.item,
+  confirmedValue = null,
+  fieldReturn = null,
+  cleanCandidates = [],
+  requestedCheck = null,
+  verifiedFacts = [],
+  fallbackStatus = "unknown",
+}) {
+  const normalizedKey = String(key || "").trim().toLowerCase();
+  const normalizedLabel = String(label || "").trim() || taxonomyFieldLabel(normalizedKey);
+  const confirmedCandidate = normalizeRequestedCheckCandidate(confirmedValue);
+  if (hasRequestedCheckMeaningfulValue(confirmedCandidate.value)) {
+    return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, normalizeGuidanceDisplayValue(confirmedCandidate.value, normalizedKey), ["confirmed"]);
+  }
+
+  if (fieldReturn?.found && hasRequestedCheckMeaningfulValue(fieldReturn.value)) {
+    return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, normalizeGuidanceDisplayValue(fieldReturn.value, normalizedKey), ["found"]);
+  }
+  if (fieldReturn?.checked) {
+    const displayValue = normalizeGuidanceDisplayValue(fieldReturn.value, normalizedKey);
+    return buildRequestedCheckStatusRow(
+      normalizedKey,
+      normalizedLabel,
+      displayValue,
+      displayValue ? ["found", "needs verification"] : ["needs verification"]
+    );
+  }
+
+  for (const candidate of Array.isArray(cleanCandidates) ? cleanCandidates : []) {
+    const candidateValue = candidate && typeof candidate === "object" && !Array.isArray(candidate) && Object.prototype.hasOwnProperty.call(candidate, "value")
+      ? candidate.value
+      : candidate;
+    const candidateStatus = candidate && typeof candidate === "object" && !Array.isArray(candidate) && Array.isArray(candidate.statuses)
+      ? candidate.statuses.filter(Boolean)
+      : ["ai filled"];
+    const displayValue = normalizeGuidanceDisplayValue(candidateValue, normalizedKey);
+    const normalizedValue = String(displayValue || "").trim().toLowerCase();
+    if (!displayValue) continue;
+    if (normalizedValue === "unknown" || normalizedValue === "null") continue;
+    return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, displayValue, candidateStatus);
+  }
+
+  const verifiedFactValue = extractVerifiedFactValue(verifiedFacts, aliases);
+  if (verifiedFactValue) {
+    return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, verifiedFactValue, ["found", "verified"]);
+  }
+
+  if (requestedCheck?.requested === true) {
+    return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, null, ["needs verification"]);
+  }
+
+  return buildRequestedCheckStatusRow(normalizedKey, normalizedLabel, null, [fallbackStatus]);
+}
+
+function getCompactGuidanceLabel(key, fallbackLabel = "") {
+  const normalizedKey = String(key || "").trim().toLowerCase();
+  const englishCtaLabels = {
+    phone: "Phone",
+    line_url: "LINE URL",
+    facebook_url: "Facebook URL",
+    website_url: "Website URL",
+    primary_cta: "Primary CTA",
+  };
+  return englishCtaLabels[normalizedKey] || String(fallbackLabel || "").trim() || normalizedKey || "-";
+}
+
+function normalizeItemGuidanceToken(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function resolveItemGuidanceScope(fieldPack = {}, item = state.item) {
+  const itemType = normalizeItemGuidanceToken(fieldPack?.content_type || item?.type);
+  const category = normalizeItemGuidanceToken(fieldPack?.category || fieldPack?.item_category || item?.category);
+  const hotelCategories = new Set(["hotels", "hotel", "stay", "stays", "lodging", "accommodation", "resort"]);
+  const restaurantCategories = new Set(["cafes", "cafe", "restaurants", "restaurant", "food", "dining"]);
+  const attractionCategories = new Set(["attractions", "attraction", "activities", "activity", "landmark", "landmarks", "temple", "museum", "market", "transport"]);
+  return {
+    itemType,
+    category,
+    isEvent: itemType === "event" || category === "event" || category === "events",
+    isHotel: hotelCategories.has(category),
+    isRestaurant: restaurantCategories.has(category),
+    isAttractionPlace: itemType === "place" && attractionCategories.has(category),
+    isUnknownCategory: !category,
+  };
+}
+
+function isTaxonomyConfigRelevantForScope(sectionKey, scope = {}) {
+  const normalizedSectionKey = String(sectionKey || "").trim().toLowerCase();
+  if (normalizedSectionKey === "universal_curation_profile" || normalizedSectionKey === "practical_profile") return true;
+  if (scope?.isUnknownCategory) return false;
+  if (normalizedSectionKey === "event_profile") return scope?.isEvent === true;
+  if (normalizedSectionKey === "hotel_profile") return scope?.isHotel === true;
+  if (normalizedSectionKey === "restaurant_profile") return scope?.isRestaurant === true;
+  if (normalizedSectionKey === "place_profile") return scope?.isAttractionPlace === true;
+  return false;
+}
+
+function extractVerifiedFactSignals(verifiedFacts = [], rowConfigs = []) {
+  const normalizedRows = (Array.isArray(rowConfigs) ? rowConfigs : []).map((row) => {
+    const key = String(row?.key || "").trim().toLowerCase();
+    const label = String(row?.label || "").trim().toLowerCase();
+    const aliases = Array.isArray(row?.aliases) ? row.aliases.map((alias) => String(alias || "").trim().toLowerCase()).filter(Boolean) : [];
+    return { key, label, aliases };
+  }).filter((row) => row.key);
+  const matchedKeys = new Set();
+  const unmatchedFacts = [];
+
+  for (const fact of Array.isArray(verifiedFacts) ? verifiedFacts : []) {
+    const raw = String(fact || "").trim();
+    if (!raw) continue;
+    const normalizedFact = raw.toLowerCase();
+    const matchedRow = normalizedRows.find((row) => {
+      const candidates = [row.key, row.label, ...row.aliases].filter(Boolean);
+      return candidates.some((candidate) => normalizedFact.startsWith(`${candidate}:`));
+    });
+    if (matchedRow) {
+      matchedKeys.add(matchedRow.key);
+      continue;
+    }
+    unmatchedFacts.push(raw);
+  }
+
+  return {
+    matchedKeys,
+    unmatchedFacts,
+  };
+}
+
+function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = state.item) {
+  const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object"
+    ? fieldPack.ai_taxonomy_json
+    : {};
+  const confirmedTaxonomy = fieldPack?.confirmed_taxonomy_json && typeof fieldPack.confirmed_taxonomy_json === "object"
+    ? fieldPack.confirmed_taxonomy_json
+    : {};
+  const contract = parseTaxonomyContract(parseFieldPackContractFromWriterNotes(fieldPack.writer_notes));
+  const verification = contract?.verification && typeof contract.verification === "object" ? contract.verification : {};
+  const verifiedFacts = toReviewList(verification.verified_facts);
+  const needsVerificationSet = new Set(toReviewList(verification.needs_verification));
+  const publishBlockerSet = new Set(toReviewList(verification.publish_blockers));
+  const scope = resolveItemGuidanceScope(fieldPack, item);
+  const fieldReturnTaxonomy = fieldPack?.field_return_payload_json?.taxonomy_return && typeof fieldPack.field_return_payload_json.taxonomy_return === "object"
+    ? fieldPack.field_return_payload_json.taxonomy_return
+    : {};
+  const requestedTaxonomyChecks = (Array.isArray(requestedChecks) ? requestedChecks : []).filter((check) => {
+    const key = String(check?.key || "").trim().toLowerCase();
+    return check?.requested === true && (key === "category" || key === "subtype" || key === "tags");
+  });
+  const taxonomySectionConfigs = [
+    ["universal_curation_profile", ["highlights", "good_to_know", "why_visit", "recommended_for", "best_for", "nearby", "local_notes"]],
+    ["practical_profile", ["price_range", "parking", "pet_friendly", "family_friendly", "accessibility", "opening_hours_note", "reservation_needed"]],
+    ["place_profile", ["view_type", "atmosphere", "photo_spots", "visit_duration", "best_time_to_visit"]],
+    ["restaurant_profile", ["restaurant_features", "signature_menu", "cuisine_type", "price_signals", "service_style", "seating_vibe"]],
+    ["hotel_profile", ["hotel_amenities", "room_type_hints", "checkin_checkout", "booking_channels", "nearby_landmarks", "stay_best_for"]],
+    ["event_profile", ["event_date_hints", "schedule_hints", "ticket_hints", "venue_notes", "event_best_for"]],
+  ];
+  const scopedImportantKeys = new Set([
+    "category",
+    "subtype",
+    "tags",
+    "parking",
+    "pet_friendly",
+    "family_friendly",
+    "price_range",
+    "opening_hours_note",
+    "nearby",
+    "accessibility",
+    "confidence",
+  ]);
+  const sourceObjects = getGuidanceSourceObjects(fieldPack, item);
+  const referencesByUse = collectGuidanceReferenceUrls(fieldPack?.references);
+  const taxonomyAliases = {
+    category: ["category", "type.category"],
+    subtype: ["subtype", "type.subtype"],
+    tags: ["tags", "publishableSource.tags"],
+    opening_hours_note: [
+      "opening_hours_note",
+      "opening_hours",
+      "business_status",
+      "open_now",
+      "current_opening_hours",
+      "weekday_text",
+      "opening_hours_weekday_text",
+    ],
+    nearby: ["nearby", "nearby_landmarks", "local_notes"],
+    confidence: ["confidence"],
+  };
+
+  const knownKeys = new Set([
+    ...Object.keys(aiTaxonomy || {}),
+    ...Object.keys(confirmedTaxonomy || {}),
+    ...Object.keys(fieldReturnTaxonomy || {}),
+    ...requestedTaxonomyChecks.map((check) => String(check.key || "").trim().toLowerCase()),
+  ]);
+  taxonomySectionConfigs.forEach(([sectionKey, fields]) => {
+    const source = contract?.[sectionKey] && typeof contract[sectionKey] === "object" ? contract[sectionKey] : {};
+    Object.keys(source).forEach((key) => knownKeys.add(key));
+  });
+  Object.keys(sourceObjects.writerCoreFacts).forEach((key) => knownKeys.add(String(key || "").trim().toLowerCase()));
+  Object.keys(sourceObjects.writerCuration).forEach((key) => knownKeys.add(String(key || "").trim().toLowerCase()));
+  Object.entries(taxonomyAliases).forEach(([key, aliases]) => {
+    const found = aliases.some((alias) => {
+      const terminalAlias = String(alias || "").trim();
+      if (!terminalAlias) return false;
+      return [
+        sourceObjects.publishableSource,
+        sourceObjects.sourceSnapshot,
+        sourceObjects.cleanContext,
+        sourceObjects.cleanContextItem,
+        sourceObjects.writerCoreFacts,
+        sourceObjects.writerCuration,
+      ].some((source) => readGuidanceAliasValue(source, [terminalAlias]) != null);
+    });
+    if (found) knownKeys.add(key);
+  });
+  if (contract && (scope?.isAttractionPlace || scope?.isRestaurant || scope?.isHotel || scope?.isEvent || scope?.isUnknownCategory)) {
+    ["category", "opening_hours_note", "nearby", "confidence"].forEach((key) => knownKeys.add(key));
+  }
+  if (scope?.isAttractionPlace || scope?.isRestaurant || scope?.isHotel || scope?.isEvent || scope?.isUnknownCategory) {
+    scopedImportantKeys.forEach((key) => {
+      if (needsVerificationSet.has(key) || publishBlockerSet.has(key)) knownKeys.add(key);
+    });
+  }
+  const verifiedFactSignals = extractVerifiedFactSignals(
+    verifiedFacts,
+    Array.from(knownKeys).map((key) => ({ key, label: taxonomyFieldLabel(key) }))
+  );
+
+  return Array.from(knownKeys)
+    .filter(Boolean)
+    .map((key) => {
+      const normalizedKey = String(key || "").trim().toLowerCase();
+      const fieldReturn = fieldReturnTaxonomy[normalizedKey] && typeof fieldReturnTaxonomy[normalizedKey] === "object"
+        ? fieldReturnTaxonomy[normalizedKey]
+        : null;
+      const confirmedValue = confirmedTaxonomy[normalizedKey];
+      const requestedCheck = requestedTaxonomyChecks.find((check) => String(check?.key || "").trim().toLowerCase() === normalizedKey) || null;
+      const aliases = [normalizedKey, ...(taxonomyAliases[normalizedKey] || [])];
+      const cleanCandidates = [];
+      for (const [sectionKey] of taxonomySectionConfigs) {
+        const source = contract?.[sectionKey] && typeof contract[sectionKey] === "object" ? contract[sectionKey] : {};
+        if (Object.prototype.hasOwnProperty.call(source, normalizedKey)) {
+          cleanCandidates.push({
+            value: source[normalizedKey],
+            statuses: verifiedFactSignals.matchedKeys.has(normalizedKey)
+              ? ["found", "verified"]
+              : (needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey) ? ["suggested", "needs verification"] : ["suggested"]),
+          });
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(aiTaxonomy, normalizedKey)) {
+        cleanCandidates.push({
+          value: aiTaxonomy[normalizedKey],
+          statuses: hasRequestedCheckMeaningfulValue(aiTaxonomy[normalizedKey]) ? ["ai filled", "needs verification"] : ["unknown"],
+        });
+      }
+      if (normalizedKey === "opening_hours_note") {
+        const openingHoursComposite = {
+          open_now: readGuidanceAliasValue(sourceObjects.publishableSource, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.sourceSnapshot, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.writerCoreFacts, ["open_now"]) ?? readGuidanceAliasValue(sourceObjects.writerCuration, ["open_now"]),
+          weekday_text: readGuidanceAliasValue(sourceObjects.publishableSource, ["weekday_text", "opening_hours_weekday_text"])
+            ?? readGuidanceAliasValue(sourceObjects.sourceSnapshot, ["weekday_text", "opening_hours_weekday_text"])
+            ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["weekday_text", "opening_hours_weekday_text"])
+            ?? readGuidanceAliasValue(sourceObjects.writerCoreFacts, ["weekday_text", "opening_hours_weekday_text"])
+            ?? readGuidanceAliasValue(sourceObjects.writerCuration, ["weekday_text", "opening_hours_weekday_text"]),
+          business_status: readGuidanceAliasValue(sourceObjects.publishableSource, ["business_status"])
+            ?? readGuidanceAliasValue(sourceObjects.sourceSnapshot, ["business_status"])
+            ?? readGuidanceAliasValue(sourceObjects.cleanContextItem, ["business_status"])
+            ?? readGuidanceAliasValue(sourceObjects.writerCoreFacts, ["business_status"])
+            ?? readGuidanceAliasValue(sourceObjects.writerCuration, ["business_status"]),
+        };
+        if (openingHoursComposite.open_now != null || openingHoursComposite.weekday_text != null || openingHoursComposite.business_status != null) {
+          cleanCandidates.unshift({ value: openingHoursComposite, statuses: ["ai filled"] });
+        }
+      }
+      [
+        sourceObjects.publishableSource,
+        sourceObjects.sourceSnapshot,
+        sourceObjects.cleanContext,
+        sourceObjects.cleanContextItem,
+        sourceObjects.writerCoreFacts,
+        sourceObjects.writerCuration,
+      ].forEach((source) => {
+        const aliasValue = readGuidanceAliasValue(source, aliases);
+        if (aliasValue != null) cleanCandidates.push({ value: aliasValue, statuses: ["ai filled"] });
+      });
+
+      const resolvedRow = resolveGuidanceRowValue({
+        key: normalizedKey,
+        label: taxonomyFieldLabel(normalizedKey),
+        aliases,
+        fieldPack,
+        item,
+        confirmedValue,
+        fieldReturn,
+        cleanCandidates,
+        requestedCheck,
+        verifiedFacts,
+        fallbackStatus: "unknown",
+      });
+      if (!resolvedRow.value && (needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey))) {
+        const tone = resolvedRow.statuses.includes("unknown") ? ["unknown", "needs verification"] : ["needs verification"];
+        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, tone);
+      }
+      if (resolvedRow.value && (needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey)) && !resolvedRow.statuses.includes("found") && !resolvedRow.statuses.includes("confirmed")) {
+        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), resolvedRow.value, [...resolvedRow.statuses, "needs verification"]);
+      }
+      return resolvedRow;
+    })
+    .filter((row) => {
+      if (!row.statuses.length) return false;
+      if (row.value) return true;
+      if (row.statuses.includes("missing") || row.statuses.includes("unknown")) return true;
+      if (row.key === "confidence" && row.statuses.includes("unknown")) return true;
+      if (row.statuses.includes("needs verification")) return true;
+      if (row.statuses.includes("found") || row.statuses.includes("confirmed") || row.statuses.includes("verified")) return true;
+      if (row.statuses.includes("suggested")) return true;
+      return false;
+    });
+}
+
+function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], item = state.item) {
+  const selectedChecks = groups.flatMap((group) => (Array.isArray(group?.checks) ? group.checks : []).filter((check) => check?.requested === true));
+  const articleContextHints = extractRequestedCheckArticleContextHints(groups);
+  const isPlaceItem = isPlaceRequestedCheckItem(item);
+  const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object"
+    ? fieldPack.ai_taxonomy_json
+    : {};
+  const ctaTemplateChecks = REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === "cta_contact")?.checks || [];
+  const fieldReturnCta = fieldPack?.field_return_payload_json?.cta_return && typeof fieldPack.field_return_payload_json.cta_return === "object"
+    ? fieldPack.field_return_payload_json.cta_return
+    : {};
+  const sourceObjects = getGuidanceSourceObjects(fieldPack, item);
+  const referencesByUse = collectGuidanceReferenceUrls(fieldPack?.references);
+  const ctaAliases = {
+    phone: ["phone", "phone_number", "telephone", "tel", "contact.phone", "cta.phone", "national_phone_number", "international_phone_number"],
+    facebook_url: ["facebook_url", "facebook", "facebookUrl", "contact.facebook_url", "cta.facebook_url"],
+    line_url: ["line_url", "line", "lineUrl", "contact.line_url", "cta.line_url"],
+    website_url: ["website_url", "website", "websiteUrl", "contact.website_url", "cta.website_url", "source_url"],
+    primary_cta: ["primary_cta", "cta.primary_cta", "map_url", "location_url"],
+  };
+
+  const ctaRows = isPlaceItem
+    ? ctaTemplateChecks.map((check) => {
+      const key = check.key;
+      const fieldReturn = fieldReturnCta[key] && typeof fieldReturnCta[key] === "object" ? fieldReturnCta[key] : null;
+      const confirmedValue = normalizeRequestedCheckCandidate(fieldPack?.confirmed_cta_contact_json?.[key]);
+      const curatedValue = normalizeRequestedCheckCandidate(fieldPack?.curated_cta_contact_json?.[key]);
+      const aiValue = normalizeRequestedCheckCandidate(fieldPack?.ai_cta_contact_json?.[key]);
+      const compactLabel = getCompactGuidanceLabel(key, check.label);
+      const aliases = [key, ...(ctaAliases[key] || [])];
+      const cleanCandidates = [];
+      if (hasRequestedCheckMeaningfulValue(curatedValue.value)) {
+        cleanCandidates.push({ value: curatedValue.value, statuses: ["suggested"] });
+      }
+      if (hasRequestedCheckMeaningfulValue(aiValue.value)) {
+        cleanCandidates.push({
+          value: aiValue.value,
+          statuses: aiValue.found ? ["found"] : ["ai filled", "needs verification"],
+        });
+      }
+      [
+        sourceObjects.publishableSource,
+        sourceObjects.sourceSnapshot,
+        sourceObjects.cleanContext,
+        sourceObjects.cleanContextItem,
+        sourceObjects.itemSource,
+        sourceObjects.writerCoreFacts,
+        sourceObjects.writerCta,
+      ].forEach((source) => {
+        const aliasValue = readGuidanceAliasValue(source, aliases);
+        if (aliasValue != null) cleanCandidates.push({ value: aliasValue, statuses: ["ai filled", "needs verification"] });
+      });
+      if (key === "facebook_url" && referencesByUse.facebook_url) {
+        cleanCandidates.push({ value: referencesByUse.facebook_url, statuses: ["suggested"] });
+      }
+      if (key === "phone") {
+        const phoneFromFacts = extractThaiPhoneCandidate(
+          [
+            ...toReviewList(sourceObjects.writerNotesContract?.verification?.verified_facts),
+            String(fieldPack?.writer_notes || ""),
+          ].join(" | ")
+        );
+        if (phoneFromFacts) cleanCandidates.push({ value: phoneFromFacts, statuses: ["found", "verified"] });
+      }
+      if (key === "primary_cta" && referencesByUse.map_url) {
+        cleanCandidates.unshift({ value: "map", statuses: ["suggested"] });
+      }
+      if (key === "primary_cta") {
+        const mapCandidate = cleanCandidates.find((candidate) => String(normalizeGuidanceDisplayValue(candidate?.value, key) || "").trim());
+        if (mapCandidate && !hasRequestedCheckMeaningfulValue(confirmedValue.value) && !fieldReturn?.found) {
+          cleanCandidates.unshift({ value: "map", statuses: ["suggested"] });
+        }
+      }
+      const requestedCheck = selectedChecks.find((selected) => String(selected?.key || "").trim().toLowerCase() === key) || null;
+      const resolvedRow = resolveGuidanceRowValue({
+        key,
+        label: compactLabel,
+        aliases,
+        fieldPack,
+        item,
+        confirmedValue: confirmedValue.value,
+        fieldReturn,
+        cleanCandidates,
+        requestedCheck,
+        verifiedFacts: [],
+        fallbackStatus: "missing",
+      });
+      if (!resolvedRow.value && (fieldReturn?.checked || fieldReturn?.found || confirmedValue.checked || confirmedValue.found || curatedValue.checked || curatedValue.found || aiValue.checked || aiValue.found)) {
+        return buildRequestedCheckStatusRow(key, compactLabel, null, ["needs verification"]);
+      }
+      return resolvedRow;
+    })
+    : [];
+  const scope = resolveItemGuidanceScope(fieldPack, item);
+  const rawTaxonomyRows = buildTaxonomyGuidanceRows(
+    fieldPack,
+    groups.flatMap((group) => Array.isArray(group?.checks) ? group.checks : []),
+    item
+  );
+  const hiddenMetadataKeys = new Set(["title", "type", "slug", "map_url", "google_place_id", "source_url", "latitude", "longitude"]);
+  const unresolvedRestaurantWhitelist = new Set([
+    "price_range",
+    "parking",
+    "pet_friendly",
+    "family_friendly",
+    "accessibility",
+    "signature_menu",
+    "price_signals",
+    "service_style",
+  ]);
+  const alwaysVisibleMeaningfulKeys = new Set([
+    "category",
+    "opening_hours_note",
+    "nearby",
+    "nearby_landmarks",
+    "price_range",
+    "parking",
+    "pet_friendly",
+    "family_friendly",
+    "accessibility",
+    "signature_menu",
+    "price_signals",
+    "service_style",
+  ]);
+  const hiddenLowValueKeys = new Set([
+    "subtype",
+    "tags",
+    "source",
+    "confidence",
+    "note",
+    "highlights",
+    "good_to_know",
+    "why_visit",
+    "recommended_for",
+    "best_for",
+    "local_notes",
+    "reservation_needed",
+    "view_type",
+    "atmosphere",
+    "photo_spots",
+    "visit_duration",
+    "best_time_to_visit",
+    "restaurant_features",
+    "cuisine_type",
+    "seating_vibe",
+    "stay_best_for",
+    "event_date_hints",
+    "schedule_hints",
+    "ticket_hints",
+    "venue_notes",
+    "event_best_for",
+    "hotel_amenities",
+    "room_type_hints",
+    "checkin_checkout",
+    "booking_channels",
+  ]);
+  const taxonomyRows = rawTaxonomyRows
+    .map((row) => {
+      const normalizedStatuses = row.statuses.includes("needs verification")
+        ? row.statuses.filter((status) => status !== "unknown")
+        : row.statuses;
+      return {
+        ...row,
+        statuses: normalizedStatuses.length ? normalizedStatuses : row.statuses,
+      };
+    })
+    .filter((row) => {
+      const key = String(row.key || "").trim().toLowerCase();
+      const hasValue = hasRequestedCheckMeaningfulValue(row.value);
+      const needsVerification = row.statuses.includes("needs verification");
+      if (hiddenMetadataKeys.has(key)) return false;
+      if (scope?.isRestaurant || scope?.isAttractionPlace) {
+        if (hiddenLowValueKeys.has(key)) return false;
+        if (hasValue && !alwaysVisibleMeaningfulKeys.has(key)) return false;
+        if (!hasValue && unresolvedRestaurantWhitelist.has(key)) return true;
+        if (!hasValue && needsVerification && (key === "nearby" || key === "nearby_landmarks")) return true;
+        if (!hasValue && (key === "category" || key === "opening_hours_note")) return true;
+        if (!hasValue) return false;
+        if ((key.startsWith("hotel_") || key.startsWith("event_") || key === "room_type_hints" || key === "checkin_checkout" || key === "booking_channels") && !hasValue) return false;
+      }
+      return hasValue || needsVerification || key === "category" || key === "opening_hours_note" || key === "nearby" || key === "nearby_landmarks";
+    });
+  const taxonomyContract = parseTaxonomyContract(parseFieldPackContractFromWriterNotes(fieldPack.writer_notes));
+  const taxonomyVerification = taxonomyContract?.verification && typeof taxonomyContract.verification === "object"
+    ? taxonomyContract.verification
+    : {};
+  const verifiedFacts = toReviewList(taxonomyContract?.verification?.verified_facts);
+  const needsVerificationFacts = toReviewList(taxonomyVerification.needs_verification);
+  const publishBlockers = toReviewList(taxonomyVerification.publish_blockers);
+  const verifiedFactSignals = extractVerifiedFactSignals(
+    verifiedFacts,
+    taxonomyRows.map((row) => ({ key: row.key, label: row.label }))
+  );
+
+  return {
+    ctaRows,
+    ctaMutedNote: isPlaceItem ? "" : "CTA Review applies to place items only.",
+    taxonomyRows,
+    taxonomyEvidence: {
+      verifiedFacts,
+      needsVerificationFacts,
+      publishBlockers,
+      unmatchedVerifiedFacts: verifiedFactSignals.unmatchedFacts,
+      aiTaxonomy,
+      fieldReturnTaxonomy: fieldPack?.field_return_payload_json?.taxonomy_return && typeof fieldPack.field_return_payload_json.taxonomy_return === "object"
+        ? fieldPack.field_return_payload_json.taxonomy_return
+        : {},
+      contract: taxonomyContract,
+    },
+    selectedChecks,
+    articleContextHints: articleContextHints
+      .filter((hint) => {
+        const normalized = String(hint || "").trim().toLowerCase();
+        return normalized && !/(confirm phone|confirm facebook|confirm website|confirm line|confirm primary cta|need phone|need facebook|need website|need line|need cta|ขอเบอร์ที่ติดต่อได้จริง|ถ้ามีให้ขอลิงก์ที่ใช้ได้จริง|ถ้ามีให้ขอลิงก์เพจที่ถูกต้อง|ถ้ามีให้ขอลิงก์เว็บไซต์หลัก|ยืนยันว่าควรพาคนไปกดอะไรเป็นหลัก)/i.test(normalized);
+      })
+      .filter((hint, index, list) => list.findIndex((entry) => String(entry || "").trim().toLowerCase() === String(hint || "").trim().toLowerCase()) === index)
+      .slice(0, 5),
+  };
+}
+
+function truncateRequestedGuidanceValue(value, maxLen = 72) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen - 3).trimEnd() + "...";
+}
+
+function renderRequestedCheckCompactRows(rows = [], options = {}) {
+  const useGrid = options.useGrid === true;
+  return rows.map((row) => `
+    <div class="${useGrid ? "summary-row requested-guidance-row" : "summary-row"}">
+      <strong>${escapeHtml(row.label)}</strong>
+      <span class="${useGrid ? "requested-guidance-value" : ""}">${row.value ? `<span title="${escapeHtml(row.value)}">${escapeHtml(truncateRequestedGuidanceValue(row.value))}</span> ` : '<span class="muted">No value</span> '}${row.statuses.map((status) => getRequestedCheckStatusBadge(status, status === "found" || status === "confirmed" ? "ok" : status === "missing" || status === "unknown" || status === "needs verification" ? "warning" : "neutral")).join(" ")}</span>
+    </div>
+  `).join("");
+}
+
+function buildRequestedChecksGuidanceModel(fieldPack = {}, requestedChecks = { version: 1, groups: [] }, item = state.item) {
+  const groups = Array.isArray(requestedChecks?.groups)
+    ? filterRequestedCheckGroupsForItem(requestedChecks.groups, item)
+    : getRequestedCheckEditorGroups(fieldPack, item);
+  return buildRequestedChecksCompactSummaryData(fieldPack, groups, item);
+}
+
+function renderRequestedChecksGuidanceHtml(model = {}, options = {}) {
+  const taxonomyEvidence = model.taxonomyEvidence && typeof model.taxonomyEvidence === "object" ? model.taxonomyEvidence : {};
+  const hasTaxonomyEvidence = hasRequestedCheckMeaningfulValue(taxonomyEvidence.verifiedFacts)
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.needsVerificationFacts)
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.publishBlockers)
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.unmatchedVerifiedFacts)
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.aiTaxonomy)
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.fieldReturnTaxonomy)
+    || hasRequestedCheckMeaningfulValue(taxonomyEvidence.contract);
+  return `
+    <div class="article-brief-doc">
+      <section class="article-brief-section">
+        <h3>AI guidance / curation review</h3>
+        <div class="muted">ข้อมูลด้านล่างเป็นข้อเสนอจาก AI และหลักฐานที่ช่วยให้ editor ตรวจบริบทก่อนเขียนหรือส่งต่อ งานนี้ยังไม่ใช่การยืนยันเผยแพร่</div>
+      </section>
+      <section class="article-brief-section">
+        <h3>CTA Review</h3>
+        ${model.ctaMutedNote ? `<div class="muted">${escapeHtml(model.ctaMutedNote)}</div>` : `<div class="readiness-summary">${renderRequestedCheckCompactRows(model.ctaRows || [])}</div>`}
+      </section>
+      <section class="article-brief-section">
+        <h3>Curation Review</h3>
+        <div class="readiness-summary requested-guidance-grid">
+          ${(Array.isArray(model.taxonomyRows) && model.taxonomyRows.length) ? renderRequestedCheckCompactRows(model.taxonomyRows, { useGrid: true }) : '<div class="summary-row"><strong>Status</strong><span class="muted">No taxonomy review signals available.</span></div>'}
+        </div>
+      </section>
+      <section class="article-brief-section">
+        <h3>Field Pack Guidance</h3>
+        <div class="readiness-summary">
+          <div class="summary-row"><strong>Suggested Focus</strong><span>${Array.isArray(model.selectedChecks) && model.selectedChecks.length ? model.selectedChecks.map((check) => getRequestedCheckStatusBadge(String(check.label || check.key || "").trim() || "-", "ok")).join(" ") : '<span class="muted">No suggested focus selected.</span>'}</span></div>
+          <div class="summary-row"><strong>Article context</strong><span>${Array.isArray(model.articleContextHints) && model.articleContextHints.length ? escapeHtml(model.articleContextHints.slice(0, 5).join(" | ")) : '<span class="muted">No article context hints.</span>'}</span></div>
+        </div>
+      </section>
+      ${hasTaxonomyEvidence
+        ? `<section class="article-brief-section">
+            <details class="secondary-panel">
+              <summary>Source details</summary>
+              <details class="secondary-panel">
+                <summary>Debug JSON</summary>
+                <pre>${escapeHtml(JSON.stringify({
+                  verified_facts: taxonomyEvidence.verifiedFacts || [],
+                  needs_verification: taxonomyEvidence.needsVerificationFacts || [],
+                  publish_blockers: taxonomyEvidence.publishBlockers || [],
+                  unmatched_verified_facts: taxonomyEvidence.unmatchedVerifiedFacts || [],
+                  ai_taxonomy_json: taxonomyEvidence.aiTaxonomy || {},
+                  field_return_taxonomy: taxonomyEvidence.fieldReturnTaxonomy || {},
+                  taxonomy_contract: taxonomyEvidence.contract || {},
+                }, null, 2))}</pre>
+              </details>
+            </details>
+          </section>`
+        : ""}
+    </div>
+  `;
+}
+
+function buildRequestedChecksCompactPreviewHtml(requestedChecks = { version: 1, groups: [] }, fieldPack = state.fieldPack || null, item = state.item) {
+  const guidanceModel = buildRequestedChecksGuidanceModel(fieldPack || {}, requestedChecks, item);
+  return renderRequestedChecksGuidanceHtml(guidanceModel);
+}
+
+
+function buildRequestedChecksEditorHtml(fieldPack = {}, item = state.item) {
+  const groups = getRequestedCheckEditorGroups(fieldPack, item);
+  const compactSummary = buildRequestedChecksGuidanceModel(fieldPack, { version: 1, groups }, item);
+  return renderRequestedChecksGuidanceHtml(compactSummary);
+}
+
+
 function getDraftSelectedImageAssets() {
   return (Array.isArray(state.assets) ? state.assets : []).filter((row) => {
     const selected = Number(row?.selected_in_clean || 0) === 1 && String(row?.role || "") !== "unused";
@@ -2611,6 +3767,38 @@ function renderFieldPackMediaHintEditor(fieldPack = null) {
   });
 }
 
+// Step 4 copy contract:
+// label: "พร้อมส่งเข้า handoff"
+// help: "ใช้เมื่อ brief พร้อมแล้วและจบงานใน place step 4 พร้อมส่งต่อไป handoff"
+// label: "ตั้งเป็นพร้อมส่งเข้า handoff"
+// label: "กลับไปยังจัด brief"
+// ยังไม่พร้อมส่งเข้า handoff
+// พร้อมส่งเข้า handoff ได้ แต่ยังมีข้อแนะนำ
+// ข้อแนะนำเพิ่มเติม
+// ต้องเติมก่อนส่งเข้า handoff
+// ต้องเปลี่ยนสถานะการเตรียมมอบหมายเป็น "พร้อมส่งเข้า handoff" ก่อน
+// ต้องเปลี่ยนสถานะการเตรียมมอบหมายเป็น "พร้อมส่งเข้า handoff"
+// ยังไปงานมอบหมายไม่ได้: ต้องเปลี่ยนสถานะการเตรียมมอบหมายเป็น "พร้อมส่งเข้า handoff" ก่อน
+// ชุดงานนี้พร้อมส่งเข้า handoff แล้ว แต่ยังไม่ได้สร้างงานมอบหมาย
+// สร้างงานมอบหมายแล้ว และติดตามงานต่อได้ในขั้นงานมอบหมาย
+// งานนี้ยังอยู่ระหว่างจัด brief และยังไม่พร้อมส่งเข้า handoff
+// มีงานมอบหมายอยู่ในรายการนี้แล้ว แต่ยังไม่ผูกกับชุดงานนี้
+// โหลดข้อมูลงานมอบหมายไม่สำเร็จ
+// โหลดข้อมูลงานมอบหมายไม่สำเร็จ จึงยังยืนยันสถานะงานต่อจากขั้นนี้ไม่ได้
+// พร้อมส่งเข้า handoff จากชุดลงหน้านี้
+// actionLabel = "ไปงานมอบหมาย";
+// actionLabel = "ดูงานมอบหมาย";
+// setStatus("กำลังบันทึกงานตรวจแก้และเข้าสู่กระบวนการส่งงานไปทำ...");
+// setStatus(`ยังเข้าสู่กระบวนการส่งงานไปทำไม่ได้: ${err.message}`, true);
+const STEP_FOUR_COPY_TOKENS = [
+  "ต้องเปลี่ยนสถานะการเตรียมมอบหมายเป็น \"พร้อมส่งเข้า handoff\"",
+  "พร้อมส่งเข้า handoff จากชุดลงหน้างานนี้",
+  "มีงานมอบหมายอยู่ในรายการนี้แล้ว แต่ยังไม่ได้ผูกกับชุดงานนี้",
+  "ยังไปงานมอบหมายไม่ได้: ต้องเปลี่ยนสถานะการเตรียมมอบหมายเป็น \"พร้อมส่งเข้า handoff\" ก่อน",
+  "actionLabel = \"ไปงานมอบหมาย\";",
+];
+const LEGACY_READY_FOR_HANDOFF_STATUS = "ready_for_handoff";
+
 function getFieldProgressSteps() {
   return [
     { value: "draft", label: "ร่าง brief", help: "ยังแก้ไขรายละเอียดใน brief ได้ตามปกติ" },
@@ -2621,7 +3809,7 @@ function getFieldProgressSteps() {
 function getFieldProgressStatusLabel(status) {
   const value = String(status || "").trim().toLowerCase();
   if (value === "draft") return "ร่าง brief";
-  if (value === "ready_for_field" || value === "ready_for_handoff") return "พร้อมส่ง handoff";
+  if (value === "ready_for_field" || value === LEGACY_READY_FOR_HANDOFF_STATUS) return "พร้อมส่ง handoff";
   if (value === "field_in_progress") return "กำลังทำภาคสนาม";
   if (value === "field_done") return "ภาคสนามเสร็จ";
   if (value === "on_hold") return "พักงาน";
@@ -2630,7 +3818,7 @@ function getFieldProgressStatusLabel(status) {
 
 function getFieldProgressActions(status) {
   const value = String(status || "").trim().toLowerCase();
-  if (value === "ready_for_field" || value === "ready_for_handoff") {
+  if (value === "ready_for_field" || value === LEGACY_READY_FOR_HANDOFF_STATUS) {
     return [{ nextStatus: "draft", label: "ย้ายกลับเป็นร่าง brief", tone: "secondary" }];
   }
   if (value === "on_hold") {
@@ -2761,6 +3949,7 @@ function fillFieldPackForm(fieldPack = null) {
   if (qs("fp-writer-assigned-role")) qs("fp-writer-assigned-role").value = writerAssignment.assigned_role;
   if (qs("fp-writer-due-at")) qs("fp-writer-due-at").value = writerAssignment.due_at;
   if (qs("fp-writer-assignment-note")) qs("fp-writer-assignment-note").value = writerAssignment.note;
+  renderRequestedChecksEditor(pack);
   renderFieldPackMediaHintEditor(pack);
   autosizeFieldPackTextareas();
   renderFieldProgressControl();
@@ -2811,6 +4000,9 @@ function readFieldPackFormState() {
     social_shot_emphasis: parseLineList(qs("fp-social-shot-emphasis")?.value || ""),
     social_on_camera_points: parseLineList(qs("fp-social-on-camera-points")?.value || ""),
     social_caption_angle: String(qs("fp-social-caption-angle")?.value || "").trim(),
+    requested_checks_json: state.fieldPack?.requested_checks_json && typeof state.fieldPack.requested_checks_json === "object"
+      ? state.fieldPack.requested_checks_json
+      : { version: 1, groups: [] },
     references_text: String(qs("fp-references")?.value || "").trim(),
     writer_references_text: String(qs("fp-writer-references")?.value || "").trim(),
     external_media_hints_text: String(qs("fp-external-media-hints")?.value || "").trim(),
@@ -2850,6 +4042,7 @@ function buildFieldPackTopLevelPayload(pack) {
     social_shot_emphasis: pack.social_shot_emphasis,
     social_on_camera_points: pack.social_on_camera_points,
     social_caption_angle: pack.social_caption_angle,
+    requested_checks_json: pack.requested_checks_json,
   };
 }
 
@@ -2899,7 +4092,12 @@ function buildFieldPackApiPayload() {
   const pack = readFieldPackFormState();
   const existing = state.fieldPack || {};
   return {
-    ...buildFieldPackTopLevelPayload(pack),
+    ...buildFieldPackTopLevelPayload({
+      ...pack,
+      requested_checks_json: existing.requested_checks_json && typeof existing.requested_checks_json === "object"
+        ? existing.requested_checks_json
+        : pack.requested_checks_json,
+    }),
     field_pack_checklists: buildFieldPackChecklistPayload(pack, existing),
     field_pack_references: buildFieldPackReferencePayload(pack),
     field_pack_media_hints: buildFieldPackMediaHintPayload(pack, existing),
@@ -2968,7 +4166,7 @@ async function returnCurrentFieldPackToClean(comment) {
 
 function isFieldPackReadyForAssignment(status) {
   const value = String(status || "").trim().toLowerCase();
-  return value === "ready_for_field" || value === "ready_for_handoff";
+  return value === "ready_for_field" || value === LEGACY_READY_FOR_HANDOFF_STATUS;
 }
 
 function buildPackagingRequirements(data, fieldPack) {
@@ -3012,7 +4210,7 @@ function buildPackagingRequirements(data, fieldPack) {
     addRequirement(
       "fp-must-ask-questions",
       "คำถามหน้างาน",
-      "ควรเตรียมคำถามสำหรับเก็บข้อมูลเพิ่มระหว่างลงพื้นที่",
+      "ควรเตรียมคำถามสำหรับเก็บข้อมูลเพิ่ม",
       "soft"
     );
   }
@@ -3028,7 +4226,7 @@ function buildPackagingRequirements(data, fieldPack) {
     );
   }
   if (!String(fieldPack.field_notes || "").trim()) {
-    addRequirement("fp-field-notes", "บันทึกภาคสนาม", "ควรเพิ่มบันทึกที่ช่วยทีมหน้างานทำงานได้ตรงจุด", "soft");
+    addRequirement("fp-field-notes", "บันทึกภาคสนาม", "ควรเพิ่มบันทึกที่ช่วยให้ editor ติดตามประเด็นได้ตรงจุด", "soft");
   }
 
   return requirements;
@@ -3553,7 +4751,7 @@ function buildFieldPackCardsFromData(data) {
 
   return [
     {
-      title: "สิ่งที่ต้องยืนยันก่อนลงพื้นที่",
+      title: "สิ่งที่ต้องยืนยันเพิ่มเติม",
       rows: [
         { label: "เป้าหมาย", value: `ยืนยัน fact สำคัญของ ${data.fallbackTitle}` },
         { label: "มุมเรื่อง", value: data.angle },
@@ -3597,7 +4795,7 @@ function buildFieldPackCards() {
   const fallbackCards = buildFieldPackCardsFromData(data);
   return [
     {
-      title: "สิ่งที่ต้องยืนยันก่อนลงพื้นที่",
+      title: "สิ่งที่ต้องยืนยันเพิ่มเติม",
       rows: [
         { label: "เป้าหมาย", value: `ยืนยัน fact สำคัญของ ${data.fallbackTitle}` },
         { label: "มุมเรื่อง", value: fieldPack.story_angle || data.angle },
@@ -3850,130 +5048,6 @@ function buildTaxonomySections(contract) {
   return sections;
 }
 
-function renderTaxonomyReviewPanel() {
-  const panel = qs("taxonomy-review-panel");
-  const statusNode = qs("taxonomy-review-status");
-  if (!panel || !statusNode) return;
-
-  const fieldPack = state.fieldPack && typeof state.fieldPack === "object" ? state.fieldPack : {};
-  const contract = parseFieldPackContractFromWriterNotes(fieldPack.writer_notes);
-  const taxonomyContract = parseTaxonomyContract(contract);
-
-  if (!contract) {
-    statusNode.className = "status";
-    statusNode.textContent = "No JSON field pack contract found in writer notes.";
-    panel.innerHTML = '<p class="muted">Taxonomy Review appears when writer_notes contains field pack contract JSON.</p>';
-    return;
-  }
-
-  if (!taxonomyContract) {
-    statusNode.className = "status";
-    statusNode.textContent = "No page_curation_taxonomy_v1 contract found.";
-    panel.innerHTML = '<p class="muted">Taxonomy Review stays empty until writer_notes contains a contract with taxonomy_version set to page_curation_taxonomy_v1.</p>';
-    return;
-  }
-
-  const sections = buildTaxonomySections(taxonomyContract);
-  const publishBlockers = toReviewList(taxonomyContract?.verification?.publish_blockers);
-  const needsVerification = toReviewList(taxonomyContract?.verification?.needs_verification);
-
-  statusNode.className = `status ${publishBlockers.length > 0 || needsVerification.length > 0 ? "warn" : "ok"}`;
-  statusNode.textContent = publishBlockers.length > 0
-    ? "Warning: taxonomy review found publish blockers."
-    : needsVerification.length > 0
-      ? "Taxonomy review found unresolved verification items."
-      : "Taxonomy review is available for curation.";
-
-  if (!sections.length) {
-    panel.innerHTML = '<p class="muted">No taxonomy groups with usable values were found in this contract.</p>';
-    return;
-  }
-
-  panel.innerHTML = `
-    <div class="readiness-summary">
-      <div class="summary-row"><strong>contract_version</strong><span>${escapeHtml(String(taxonomyContract.contract_version || "-"))}</span></div>
-      <div class="summary-row"><strong>taxonomy_version</strong><span>${escapeHtml(String(taxonomyContract.taxonomy_version || "-"))}</span></div>
-    </div>
-    <div class="article-brief-doc">
-      ${sections.map((section) => `
-        <section class="article-brief-section">
-          <h3>${escapeHtml(section.title)}</h3>
-          <ul>
-            ${section.rows.map((row) => `<li><strong>${escapeHtml(row.label)}:</strong> ${row.html}</li>`).join("")}
-          </ul>
-        </section>
-      `).join("")}
-      <details>
-        <summary>Debug: taxonomy contract JSON</summary>
-        <pre>${escapeHtml(JSON.stringify(taxonomyContract, null, 2))}</pre>
-      </details>
-    </div>
-  `;
-}
-
-function renderFieldPackContractPanel() {
-  const panel = qs("field-pack-contract-panel");
-  const statusNode = qs("field-pack-contract-status");
-  if (!panel || !statusNode) return;
-
-  const fieldPack = state.fieldPack && typeof state.fieldPack === "object" ? state.fieldPack : {};
-  const contract = parseFieldPackContractFromWriterNotes(fieldPack.writer_notes);
-
-  if (!contract) {
-    statusNode.className = "status";
-    statusNode.textContent = "No JSON field pack contract found in writer notes.";
-    panel.innerHTML = '<p class="muted">Keep using the normal field pack flow. Contract panel appears when writer_notes contains contract JSON.</p>';
-    return;
-  }
-
-  const curationSignals = contract.curation_signals && typeof contract.curation_signals === "object"
-    ? contract.curation_signals
-    : {};
-  const checklists = contract.checklists && typeof contract.checklists === "object"
-    ? contract.checklists
-    : {};
-
-  const missingFields = toReviewList(curationSignals.missing_fields || checklists.missing_data);
-  const verifyRequired = toReviewList(curationSignals.verify_required || checklists.verify_required);
-  const contentRisks = toReviewList(curationSignals.content_risks || checklists.quality_gaps);
-  const suggestedBlocks = toReviewList(curationSignals.suggested_page_blocks);
-  const coreFactRows = buildContractFactRows(contract.core_factual_fields);
-  const verifiedFacts = toReviewList(fieldPack.verified_facts || fieldPack.verified_facts_json);
-  const uncertainFacts = toReviewList(fieldPack.uncertain_facts || fieldPack.uncertain_facts_json);
-  const hasRiskWarning = missingFields.length > 0 || verifyRequired.length > 0;
-
-  statusNode.className = `status ${hasRiskWarning ? "warn" : "ok"}`;
-  statusNode.textContent = hasRiskWarning
-    ? "Warning: ข้อมูลนี้ยังไม่ควรถือเป็น publish-ready"
-    : "Contract is present. Review details before publish decision.";
-
-  const listOrEmpty = (items, emptyText = "none") => items.length
-    ? `<ul>${items.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>`
-    : `<p class="muted">${escapeHtml(emptyText)}</p>`;
-
-  panel.innerHTML = `
-    <div class="readiness-summary">
-      <div class="summary-row"><strong>contract_version</strong><span>${escapeHtml(String(contract.contract_version || "-"))}</span></div>
-      <div class="summary-row"><strong>field_pack_id</strong><span>${escapeHtml(String(Number(fieldPack.id || 0) || "-"))}</span></div>
-      <div class="summary-row"><strong>source_draft_input_snapshot_id</strong><span>${escapeHtml(String(Number(fieldPack.source_draft_input_snapshot_id || 0) || "-"))}</span></div>
-      <div class="summary-row"><strong>priority_cta</strong><span>${escapeHtml(String(curationSignals.priority_cta || "-"))}</span></div>
-    </div>
-    <div class="article-brief-doc">
-      <section class="article-brief-section"><h3>Core Facts</h3>${coreFactRows.length ? `<ul>${coreFactRows.map((row) => `<li><strong>${escapeHtml(row.key)}:</strong> ${escapeHtml(row.value)}</li>`).join("")}</ul>` : '<p class="muted">No core facts in contract.</p>'}</section>
-      <section class="article-brief-section"><h3>Verified / Grounded Facts</h3>${listOrEmpty(verifiedFacts, "No verified facts yet.")}</section>
-      <section class="article-brief-section"><h3>Uncertain / Needs Review</h3>${listOrEmpty(uncertainFacts, "No uncertain facts listed.")}</section>
-      <section class="article-brief-section"><h3>Missing Data</h3>${listOrEmpty(missingFields, "No missing_fields.")}</section>
-      <section class="article-brief-section"><h3>Verify Required</h3>${listOrEmpty(verifyRequired, "No verify_required.")}</section>
-      <section class="article-brief-section"><h3>Suggested Page Blocks</h3>${listOrEmpty(suggestedBlocks, "No suggested blocks.")}</section>
-      <section class="article-brief-section"><h3>Content Risks</h3>${listOrEmpty(contentRisks, "No content risks.")}</section>
-      <details>
-        <summary>Debug: raw contract JSON</summary>
-        <pre>${escapeHtml(JSON.stringify(contract, null, 2))}</pre>
-      </details>
-    </div>
-  `;
-}
-
 function renderStepFourGuides() {
   if (isCleanMode) return;
   renderEditorReferenceSourceSummary();
@@ -3982,8 +5056,6 @@ function renderStepFourGuides() {
   renderGuideCards("ai-summary-preview", buildAiSummaryCards());
   renderGuideCards("fact-check-preview", buildFactCheckCards());
   renderGuideCards("field-brief-preview", buildFieldPackCards());
-  renderFieldPackContractPanel();
-  renderTaxonomyReviewPanel();
 }
 
 function roleLabel(row) {
@@ -4508,6 +5580,7 @@ function wire() {
     "fp-social-shot-emphasis",
     "fp-social-on-camera-points",
     "fp-social-caption-angle",
+    "fp-requested-checks-editor",
     "fp-references",
     "fp-writer-references",
     "fp-external-media-hints",
@@ -4567,6 +5640,54 @@ function wire() {
   });
   qs("fp-media-hints-editor")?.addEventListener("input", renderStepFourGuides);
   qs("fp-media-hints-editor")?.addEventListener("change", renderStepFourGuides);
+  qs("fp-requested-checks-editor")?.addEventListener("input", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLTextAreaElement) autosizeTextarea(target);
+    applyEditorActionGuards();
+    renderStepFourGuides();
+    renderRequestedChecksPreview();
+  });
+  qs("fp-requested-checks-editor")?.addEventListener("change", () => {
+    applyEditorActionGuards();
+    renderStepFourGuides();
+    renderRequestedChecksPreview();
+  });
+  qs("fp-requested-checks-editor")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const groupNode = target.closest("[data-requested-group]");
+    if (!groupNode) return;
+    if (target.getAttribute("data-action") === "add-requested-check") {
+      const current = readRequestedChecksEditorState();
+      const customGroup = current.groups.find((group) => group.group_key === "custom");
+      const nextIndex = Array.isArray(customGroup?.checks) ? customGroup.checks.length + 1 : 1;
+      if (!customGroup) {
+        current.groups.push({ group_key: "custom", group_label: "เช็กเพิ่ม", checks: [] });
+      }
+      current.groups.find((group) => group.group_key === "custom").checks.push({
+        key: `custom_${nextIndex}`,
+        requested: false,
+        label: "",
+        instruction: "",
+        answer_type: "text",
+        suggested_value: null,
+        condition_prompt: null,
+        evidence_required: false,
+        source: null,
+      });
+      renderRequestedChecksEditor({ requested_checks_json: current });
+      applyEditorActionGuards();
+      renderStepFourGuides();
+      renderRequestedChecksPreview();
+      return;
+    }
+    if (target.getAttribute("data-action") === "remove-requested-check") {
+      target.closest("[data-requested-check-row]")?.remove();
+      applyEditorActionGuards();
+      renderStepFourGuides();
+      renderRequestedChecksPreview();
+    }
+  });
 
 
 
@@ -4736,76 +5857,4 @@ function wire() {
     setStatus(err.message, true);
   }
 })();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
