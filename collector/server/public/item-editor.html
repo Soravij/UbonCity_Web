@@ -7,6 +7,32 @@
     <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
     <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
     <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <style>
+      #fp-requested-checks-editor .requested-guidance-grid {
+        display: grid;
+        gap: 0.5rem 1rem;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      #fp-requested-checks-editor .requested-guidance-row {
+        align-items: start;
+      }
+      #fp-requested-checks-editor .requested-guidance-value {
+        min-width: 0;
+      }
+      #fp-requested-checks-editor .requested-guidance-value > span:first-child {
+        display: inline-block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
+      }
+      @media (max-width: 900px) {
+        #fp-requested-checks-editor .requested-guidance-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+    </style>
   </head>
   <body>
     <main class="container article-page-shell">

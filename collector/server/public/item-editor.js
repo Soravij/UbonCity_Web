@@ -3474,11 +3474,95 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
       return resolvedRow;
     })
     : [];
-  const taxonomyRows = buildTaxonomyGuidanceRows(
+  const scope = resolveItemGuidanceScope(fieldPack, item);
+  const rawTaxonomyRows = buildTaxonomyGuidanceRows(
     fieldPack,
     groups.flatMap((group) => Array.isArray(group?.checks) ? group.checks : []),
     item
   );
+  const hiddenMetadataKeys = new Set(["title", "type", "slug", "map_url", "google_place_id", "source_url", "latitude", "longitude"]);
+  const unresolvedRestaurantWhitelist = new Set([
+    "price_range",
+    "parking",
+    "pet_friendly",
+    "family_friendly",
+    "accessibility",
+    "signature_menu",
+    "price_signals",
+    "service_style",
+  ]);
+  const alwaysVisibleMeaningfulKeys = new Set([
+    "category",
+    "opening_hours_note",
+    "nearby",
+    "nearby_landmarks",
+    "price_range",
+    "parking",
+    "pet_friendly",
+    "family_friendly",
+    "accessibility",
+    "signature_menu",
+    "price_signals",
+    "service_style",
+  ]);
+  const hiddenLowValueKeys = new Set([
+    "subtype",
+    "tags",
+    "source",
+    "confidence",
+    "note",
+    "highlights",
+    "good_to_know",
+    "why_visit",
+    "recommended_for",
+    "best_for",
+    "local_notes",
+    "reservation_needed",
+    "view_type",
+    "atmosphere",
+    "photo_spots",
+    "visit_duration",
+    "best_time_to_visit",
+    "restaurant_features",
+    "cuisine_type",
+    "seating_vibe",
+    "stay_best_for",
+    "event_date_hints",
+    "schedule_hints",
+    "ticket_hints",
+    "venue_notes",
+    "event_best_for",
+    "hotel_amenities",
+    "room_type_hints",
+    "checkin_checkout",
+    "booking_channels",
+  ]);
+  const taxonomyRows = rawTaxonomyRows
+    .map((row) => {
+      const normalizedStatuses = row.statuses.includes("needs verification")
+        ? row.statuses.filter((status) => status !== "unknown")
+        : row.statuses;
+      return {
+        ...row,
+        statuses: normalizedStatuses.length ? normalizedStatuses : row.statuses,
+      };
+    })
+    .filter((row) => {
+      const key = String(row.key || "").trim().toLowerCase();
+      const hasValue = hasRequestedCheckMeaningfulValue(row.value);
+      const needsVerification = row.statuses.includes("needs verification");
+      if (hiddenMetadataKeys.has(key)) return false;
+      if (scope?.isRestaurant || scope?.isAttractionPlace) {
+        if (hiddenLowValueKeys.has(key)) return false;
+        if (hasValue && !alwaysVisibleMeaningfulKeys.has(key)) return false;
+        if (!hasValue && unresolvedRestaurantWhitelist.has(key)) return true;
+        if (!hasValue && needsVerification && (key === "nearby" || key === "nearby_landmarks")) return true;
+        if (!hasValue && (key === "category" || key === "opening_hours_note")) return true;
+        if (!hasValue) return false;
+        if ((key.startsWith("hotel_") || key.startsWith("event_") || key === "room_type_hints" || key === "checkin_checkout" || key === "booking_channels") && !hasValue) return false;
+      }
+      return hasValue || needsVerification || key === "category" || key === "opening_hours_note" || key === "nearby" || key === "nearby_landmarks";
+    });
   const taxonomyContract = parseTaxonomyContract(parseFieldPackContractFromWriterNotes(fieldPack.writer_notes));
   const taxonomyVerification = taxonomyContract?.verification && typeof taxonomyContract.verification === "object"
     ? taxonomyContract.verification
@@ -3507,15 +3591,29 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
       contract: taxonomyContract,
     },
     selectedChecks,
-    articleContextHints,
+    articleContextHints: articleContextHints
+      .filter((hint) => {
+        const normalized = String(hint || "").trim().toLowerCase();
+        return normalized && !/(confirm phone|confirm facebook|confirm website|confirm line|confirm primary cta|need phone|need facebook|need website|need line|need cta)/i.test(normalized);
+      })
+      .filter((hint, index, list) => list.findIndex((entry) => String(entry || "").trim().toLowerCase() === String(hint || "").trim().toLowerCase()) === index)
+      .slice(0, 5),
   };
 }
 
-function renderRequestedCheckCompactRows(rows = []) {
+function truncateRequestedGuidanceValue(value, maxLen = 72) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen - 3).trimEnd() + "...";
+}
+
+function renderRequestedCheckCompactRows(rows = [], options = {}) {
+  const useGrid = options.useGrid === true;
   return rows.map((row) => `
-    <div class="summary-row">
+    <div class="${useGrid ? "summary-row requested-guidance-row" : "summary-row"}">
       <strong>${escapeHtml(row.label)}</strong>
-      <span>${row.value ? `<span>${escapeHtml(row.value)}</span> ` : '<span class="muted">No value</span> '}${row.statuses.map((status) => getRequestedCheckStatusBadge(status, status === "found" || status === "confirmed" ? "ok" : status === "missing" || status === "unknown" || status === "needs verification" ? "warning" : "neutral")).join(" ")}</span>
+      <span class="${useGrid ? "requested-guidance-value" : ""}">${row.value ? `<span title="${escapeHtml(row.value)}">${escapeHtml(truncateRequestedGuidanceValue(row.value))}</span> ` : '<span class="muted">No value</span> '}${row.statuses.map((status) => getRequestedCheckStatusBadge(status, status === "found" || status === "confirmed" ? "ok" : status === "missing" || status === "unknown" || status === "needs verification" ? "warning" : "neutral")).join(" ")}</span>
     </div>
   `).join("");
 }
@@ -3544,15 +3642,15 @@ function renderRequestedChecksGuidanceHtml(model = {}, options = {}) {
       </section>
       <section class="article-brief-section">
         <h3>Curation Review</h3>
-        <div class="readiness-summary">
-          ${(Array.isArray(model.taxonomyRows) && model.taxonomyRows.length) ? renderRequestedCheckCompactRows(model.taxonomyRows) : '<div class="summary-row"><strong>Status</strong><span class="muted">No taxonomy review signals available.</span></div>'}
+        <div class="readiness-summary requested-guidance-grid">
+          ${(Array.isArray(model.taxonomyRows) && model.taxonomyRows.length) ? renderRequestedCheckCompactRows(model.taxonomyRows, { useGrid: true }) : '<div class="summary-row"><strong>Status</strong><span class="muted">No taxonomy review signals available.</span></div>'}
         </div>
       </section>
       <section class="article-brief-section">
         <h3>Field Pack Guidance</h3>
         <div class="readiness-summary">
           <div class="summary-row"><strong>Suggested Focus</strong><span>${Array.isArray(model.selectedChecks) && model.selectedChecks.length ? model.selectedChecks.map((check) => getRequestedCheckStatusBadge(String(check.label || check.key || "").trim() || "-", "ok")).join(" ") : '<span class="muted">No suggested focus selected.</span>'}</span></div>
-          <div class="summary-row"><strong>Article context</strong><span>${Array.isArray(model.articleContextHints) && model.articleContextHints.length ? escapeHtml(model.articleContextHints.slice(0, 6).join(" | ")) : '<span class="muted">No article context hints.</span>'}</span></div>
+          <div class="summary-row"><strong>Article context</strong><span>${Array.isArray(model.articleContextHints) && model.articleContextHints.length ? escapeHtml(model.articleContextHints.slice(0, 5).join(" | ")) : '<span class="muted">No article context hints.</span>'}</span></div>
         </div>
       </section>
       ${hasTaxonomyEvidence

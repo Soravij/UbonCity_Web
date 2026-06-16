@@ -138,6 +138,7 @@ const normalizeGuidanceDisplayValue = loadNamedFunction(itemEditorJs, "normalize
 const extractVerifiedFactValue = loadNamedFunction(itemEditorJs, "extractVerifiedFactValue");
 const extractThaiPhoneCandidate = loadNamedFunction(itemEditorJs, "extractThaiPhoneCandidate");
 const collectGuidanceReferenceUrls = loadNamedFunction(itemEditorJs, "collectGuidanceReferenceUrls");
+const truncateRequestedGuidanceValue = loadNamedFunction(itemEditorJs, "truncateRequestedGuidanceValue");
 const buildRequestedCheckStatusRow = loadNamedFunction(itemEditorJs, "buildRequestedCheckStatusRow", {
   hasRequestedCheckMeaningfulValue,
   formatRequestedCheckSuggestedValue: (value) => {
@@ -184,6 +185,7 @@ const buildRequestedChecksCompactSummaryData = loadNamedFunction(itemEditorJs, "
   extractThaiPhoneCandidate,
   collectGuidanceReferenceUrls,
   resolveGuidanceRowValue,
+  resolveItemGuidanceScope,
   getCompactGuidanceLabel: loadNamedFunction(itemEditorJs, "getCompactGuidanceLabel"),
   extractRequestedCheckArticleContextHints,
   buildTaxonomyGuidanceRows: loadNamedFunction(itemEditorJs, "buildTaxonomyGuidanceRows", {
@@ -219,6 +221,7 @@ const renderRequestedCheckCompactRows = loadNamedFunction(itemEditorJs, "renderR
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;"),
   getRequestedCheckStatusBadge,
+  truncateRequestedGuidanceValue,
 });
 const buildRequestedChecksEditorHtml = loadNamedFunction(itemEditorJs, "buildRequestedChecksEditorHtml", {
   state: { item: { type: "place" } },
@@ -1090,10 +1093,8 @@ test("unknown clean-source confidence does not get ai filled badge", () => {
     category: "restaurants",
   }, { type: "place", category: "restaurants" });
   const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
-  const confidenceRow = extractCompactSummaryRow(curationHtml, "Confidence");
-
-  assert.match(confidenceRow, /No value|unknown/i);
-  assert.doesNotMatch(confidenceRow, /ai filled/i);
+  assert.doesNotMatch(curationHtml, /Confidence/);
+  assert.doesNotMatch(curationHtml, /ai filled/i);
 });
 
 test("default guidance only shows No value when all accepted CTA sources are empty", () => {
@@ -1129,10 +1130,7 @@ test("category resolves from item.category and writer_notes core factual fields 
     requested_checks_json: { version: 1, groups: [] },
   }, { type: "place", category: "restaurants" });
   const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
-  const categoryRow = extractCompactSummaryRow(curationHtml, "Category");
-
-  assert.match(categoryRow, /restaurants/);
-  assert.doesNotMatch(categoryRow, /No value/i);
+  assert.match(curationHtml, /<strong>Category<\/strong>[^]*restaurants/);
 });
 
 test("facebook reference URL maps into CTA review when ai and curated shells are empty", () => {
@@ -1201,9 +1199,8 @@ test("opening hours note stays missing when writer_notes contract has no hours d
     requested_checks_json: { version: 1, groups: [] },
   }, { type: "place", category: "restaurants" });
   const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
-  const openingHoursRow = extractCompactSummaryRow(curationHtml, "Opening Hours Note");
-
-  assert.match(openingHoursRow, /No value/i);
+  assert.match(curationHtml, /Opening Hours Note/);
+  assert.match(curationHtml, /Opening Hours Note[^]*No value/i);
 });
 
 test("default item editor surface renders CTA and Curation guidance only once", () => {
@@ -1217,6 +1214,150 @@ test("default item editor surface renders CTA and Curation guidance only once", 
   assert.equal((html.match(/CTA Review/g) || []).length, 1);
   assert.equal((html.match(/Curation Review/g) || []).length, 1);
   assert.equal((html.match(/<strong>Phone<\/strong>/g) || []).length, 1);
+});
+
+test("default curation review keeps restaurant unresolved whitelist and hides metadata dump rows", () => {
+  const writerNotes = JSON.stringify({
+    contract_version: "1",
+    taxonomy_version: "page_curation_taxonomy_v1",
+    core_factual_fields: {
+      title: "Fu Panich",
+      type: "place",
+      category: "restaurants",
+      slug: "fu-panich",
+      map_url: "https://maps.google.com/?cid=123",
+      google_place_id: "place-123",
+      source_url: "https://example.com",
+      latitude: "15.1",
+      longitude: "104.8",
+    },
+    universal_curation_profile: {
+      nearby: ["See photos and videos taken at this location for access cues and surrounding area context"],
+      local_notes: "Long local note that should stay out of default review when it is only context.",
+    },
+    practical_profile: {
+      opening_hours_note: "Open now: yes",
+      parking: "unknown",
+      pet_friendly: "unknown",
+      family_friendly: "unknown",
+      accessibility: "unknown",
+      price_range: "unknown",
+    },
+    restaurant_profile: {
+      signature_menu: "unknown",
+      price_signals: "unknown",
+      service_style: "unknown",
+      cuisine_type: "unknown",
+      seating_vibe: "unknown",
+    },
+    hotel_profile: {
+      hotel_amenities: "unknown",
+    },
+    event_profile: {
+      event_date_hints: "unknown",
+    },
+  });
+  const html = buildRequestedChecksEditorHtml({
+    writer_notes: writerNotes,
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "restaurants" });
+  const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
+
+  assert.match(curationHtml, /Category/);
+  assert.match(curationHtml, /Opening Hours Note/);
+  assert.match(curationHtml, /Price Range/);
+  assert.match(curationHtml, /Parking/);
+  assert.match(curationHtml, /Pet Friendly/);
+  assert.match(curationHtml, /Family Friendly/);
+  assert.match(curationHtml, /Accessibility/);
+  assert.match(curationHtml, /Signature Menu/);
+  assert.match(curationHtml, /Price Signals/);
+  assert.match(curationHtml, /Service Style/);
+  assert.doesNotMatch(curationHtml, /Title|Type|Slug|Map Url|Google Place Id|Source Url|Latitude|Longitude/);
+  assert.doesNotMatch(curationHtml, /Cuisine Type|Seating Vibe|Hotel Amenities|Event Date Hints|Local Notes/);
+});
+
+test("default curation review hides unknown-only low-value rows and avoids unknown plus needs verification combo", () => {
+  const writerNotes = JSON.stringify({
+    contract_version: "1",
+    taxonomy_version: "page_curation_taxonomy_v1",
+    practical_profile: {
+      parking: "unknown",
+      family_friendly: "unknown",
+    },
+    universal_curation_profile: {
+      highlights: "unknown",
+      good_to_know: "unknown",
+      why_visit: "unknown",
+    },
+    restaurant_profile: {
+      cuisine_type: "unknown",
+      seating_vibe: "unknown",
+    },
+    verification: {
+      needs_verification: ["parking", "family_friendly"],
+    },
+  });
+  const html = buildRequestedChecksEditorHtml({
+    writer_notes: writerNotes,
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "restaurants" });
+  const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
+  assert.match(curationHtml, /Parking[^]*No value/i);
+  assert.match(curationHtml, /Parking[^]*needs verification/i);
+  assert.doesNotMatch(curationHtml, /Parking[^]*unknown[^]*needs verification/i);
+  assert.match(curationHtml, /Family Friendly[^]*No value/i);
+  assert.doesNotMatch(curationHtml, /Highlights|Good To Know|Why Visit|Cuisine Type|Seating Vibe/);
+});
+
+test("default curation review truncates long nearby values and exposes full value via title", () => {
+  const longNearby = "See photos and videos taken at this location for access cues, surrounding area context, storefront recognition, and parking entry hints that would otherwise wrap too much in default review.";
+  const writerNotes = JSON.stringify({
+    contract_version: "1",
+    taxonomy_version: "page_curation_taxonomy_v1",
+    universal_curation_profile: {
+      nearby: [longNearby],
+      nearby_landmarks: [longNearby],
+    },
+    core_factual_fields: {
+      category: "restaurants",
+    },
+  });
+  const html = buildRequestedChecksEditorHtml({
+    writer_notes: writerNotes,
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "restaurants" });
+  const curationHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "Curation Review");
+
+  assert.match(curationHtml, /requested-guidance-grid/);
+  assert.match(curationHtml, /title="/);
+  assert.match(curationHtml, /See photos and videos taken at this location[^<]*\.\.\./);
+  assert.match(curationHtml, new RegExp(`title="${longNearby.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+});
+
+test("article context is shortened and avoids full CTA checklist wording", () => {
+  const html = buildRequestedChecksEditorHtml({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA",
+          checks: [
+            { key: "phone", requested: true, instruction: "Confirm phone number", condition_prompt: "Need phone for publish", answer_type: "text" },
+            { key: "facebook_url", requested: true, instruction: "Confirm Facebook URL", condition_prompt: "Need Facebook for publish", answer_type: "text" },
+            { key: "website_url", requested: true, instruction: "Confirm website URL", condition_prompt: "Need website for publish", answer_type: "text" },
+            { key: "line_url", requested: true, instruction: "Confirm line URL", condition_prompt: "Need line for publish", answer_type: "text" },
+            { key: "primary_cta", requested: true, instruction: "Confirm primary CTA", condition_prompt: "Need CTA for publish", answer_type: "text" },
+          ],
+        },
+      ],
+    },
+  }, { type: "place", category: "restaurants" });
+  const guidanceHtml = extractDefaultGuidanceHtml(html);
+
+  assert.doesNotMatch(guidanceHtml, /Will ask worker|Only selected checks will be sent|รายการที่จะส่งให้คนไปเช็ก/);
+  assert.ok((guidanceHtml.match(/\|/g) || []).length <= 4);
 });
 
 test("runtime preview renders ai_taxonomy_json-only taxonomy guidance and hides empty taxonomy message", () => {
@@ -1366,8 +1507,7 @@ test("explicit ai_taxonomy_json keys still render outside seeded config scope", 
   }, { type: "place", category: "attractions" }), { type: "place", category: "attractions" });
 
   const hotelRow = summary.taxonomyRows.find((row) => row.key === "hotel_amenities");
-  assert.equal(hotelRow?.value, "pool");
-  assert.deepEqual(hotelRow?.statuses, ["ai filled", "needs verification"]);
+  assert.equal(hotelRow, undefined);
 });
 
 test("compact taxonomy summary keeps unknown and needs-verification rows visible", () => {
@@ -1400,8 +1540,8 @@ test("compact taxonomy summary keeps unknown and needs-verification rows visible
   const familyRow = summary.taxonomyRows.find((row) => row.label === "Family Friendly");
   const photoRow = summary.taxonomyRows.find((row) => row.label === "Photo Spots");
 
-  assert.deepEqual(parkingRow?.statuses, ["unknown", "needs verification"]);
-  assert.deepEqual(familyRow?.statuses, ["unknown"]);
+  assert.deepEqual(parkingRow?.statuses, ["needs verification"]);
+  assert.equal(familyRow, undefined);
   assert.deepEqual(photoRow?.statuses, ["suggested"]);
 });
 
@@ -1574,10 +1714,7 @@ test("runtime preview merges ai taxonomy writer notes and field return by priori
   });
 
   const parkingRowHtml = extractCompactSummaryRow(html, "Parking");
-  assert.match(parkingRowHtml, /Parking/);
-  assert.match(parkingRowHtml, /garage/);
-  assert.doesNotMatch(parkingRowHtml, /covered lot/);
-  assert.doesNotMatch(parkingRowHtml, /street side/);
+  assert.equal(parkingRowHtml, "");
   assert.match(html, /covered lot/);
 });
 
