@@ -7232,19 +7232,55 @@ function getAssignmentRequestedCheckDefaultValue(answerType = "text") {
   return "";
 }
 
+function cloneAssignmentRequestedCheckValue(value, answerType = "text") {
+  const normalized = String(answerType || "").trim().toLowerCase();
+  if (normalized === "multi_select") {
+    return Array.isArray(value) ? value.map((entry) => String(entry || "").trim()).filter(Boolean) : [];
+  }
+  if (normalized === "number_with_unit") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return { number: "", unit: "" };
+    return {
+      number: value.number == null ? "" : value.number,
+      unit: String(value.unit ?? "").trim(),
+    };
+  }
+  if (normalized === "boolean" || normalized === "boolean_with_conditions") {
+    return typeof value === "boolean" ? value : null;
+  }
+  if (normalized === "note_only") return null;
+  return value == null ? "" : String(value || "");
+}
+
+function areAssignmentRequestedCheckValuesEqual(leftValue, rightValue, answerType = "text") {
+  const normalized = String(answerType || "text").trim().toLowerCase() || "text";
+  const left = cloneAssignmentRequestedCheckValue(leftValue, normalized);
+  const right = cloneAssignmentRequestedCheckValue(rightValue, normalized);
+  if (normalized === "multi_select") {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+  if (normalized === "number_with_unit") {
+    return String(left?.number ?? "") === String(right?.number ?? "")
+      && String(left?.unit ?? "") === String(right?.unit ?? "");
+  }
+  return left === right;
+}
+
 function buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage = null) {
   const groups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage);
   const requestedCheckReturns = {};
   groups.forEach((group) => {
     (Array.isArray(group.checks) ? group.checks : []).forEach((check) => {
+      const hasSuggestedValue = check.suggested_value != null;
       requestedCheckReturns[check.return_key] = {
         group_key: group.group_key,
         group_label: group.group_label,
         check_key: check.check_key,
         return_key: check.return_key,
         answer_type: check.answer_type,
-        checked: false,
-        value: getAssignmentRequestedCheckDefaultValue(check.answer_type),
+        checked: hasSuggestedValue,
+        value: hasSuggestedValue
+          ? cloneAssignmentRequestedCheckValue(check.suggested_value, check.answer_type)
+          : getAssignmentRequestedCheckDefaultValue(check.answer_type),
         condition_note: "",
         evidence: "",
         note: "",
@@ -7351,42 +7387,59 @@ function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
 }
 
 function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, handoffPackage = null, draft = null) {
-  const groups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage);
+  const groupOrder = new Map([
+    ["cta_contact", 0],
+    ["taxonomy", 1],
+    ["custom", 2],
+  ]);
+  const groups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage)
+    .slice()
+    .sort((left, right) => {
+      const leftRank = groupOrder.has(left?.group_key) ? groupOrder.get(left.group_key) : 99;
+      const rightRank = groupOrder.has(right?.group_key) ? groupOrder.get(right.group_key) : 99;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      return String(left?.group_label || "").localeCompare(String(right?.group_label || ""));
+    });
   if (!groups.length) return "";
   const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(draft, handoffPackage);
   return groups.map((group) => `
     <div class="assignment-brief-card" data-requested-check-group="${escapeHtml(group.group_key)}">
       <h5 class="assignment-subtitle" style="margin-top:0;">${escapeHtml(group.group_label)}</h5>
-      <div class="assignment-brief-grid">
+      <div class="assignment-brief-grid requested-check-group-grid">
         ${(Array.isArray(group.checks) ? group.checks : []).map((check) => {
           const row = normalizedDraft.requested_check_returns?.[check.return_key] || {};
           const checked = row.checked === true;
+          const usesSuggestedValue = check.suggested_value != null
+            && areAssignmentRequestedCheckValuesEqual(row.value, check.suggested_value, check.answer_type);
+          const badgeClass = usesSuggestedValue ? "workflow-badge-generated" : "workflow-badge-raw";
+          const badgeLabel = usesSuggestedValue ? "AI suggest" : "Manual";
           return `
             <div class="assignment-brief-section" data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
-              <div class="assignment-brief-text"><strong>${escapeHtml(check.label || check.check_key)}</strong></div>
-              ${check.instruction ? `<div class="assignment-brief-meta">${escapeHtml(check.instruction)}</div>` : ""}
-              ${check.suggested_value != null ? `<div class="assignment-brief-meta">ข้อมูลที่ระบบแนะนำให้ตรวจ: ${escapeHtml(formatRequestedCheckSuggestedValue(check.suggested_value, check.answer_type) || "-")}</div>` : ""}
-              ${check.evidence_required ? `<div class="assignment-brief-meta"><strong>ต้องมีหลักฐาน</strong></div>` : ""}
-              <label class="assignment-inline-check" style="margin-top:8px;">
-                <input data-requested-check-field="checked" type="checkbox" ${checked ? "checked" : ""} />
-                <span>ตรวจแล้ว</span>
-              </label>
-              <div class="grid" style="margin-top:8px;">
-                <div>
-                  <label>คำตอบ / ค่าที่พบ</label>
+              <div class="requested-check-row-main">
+                <label class="assignment-inline-check">
+                  <input data-requested-check-field="checked" type="checkbox" ${checked ? "checked" : ""} />
+                </label>
+                <div class="assignment-brief-text requested-check-row-label">
+                  <strong>${escapeHtml(check.label || check.check_key)}</strong>
+                  ${check.instruction ? `<div class="assignment-brief-meta">${escapeHtml(check.instruction)}</div>` : ""}
+                </div>
+                <div class="requested-check-row-value">
                   ${buildAssignmentRequestedCheckReturnValueInputHtml(row)}
                 </div>
+                <div class="requested-check-row-status">
+                  <span class="workflow-badge ${badgeClass}">${badgeLabel}</span>
+                  ${check.evidence_required ? `<span class="assignment-brief-meta">ต้องมีหลักฐาน</span>` : ""}
+                </div>
+              </div>
+              <div class="grid requested-check-row-secondary">
                 <div>
-                  <label>เงื่อนไข/ข้อจำกัด</label>
-                  <textarea data-requested-check-field="condition_note" rows="3" placeholder="เช่น จำกัดเฉพาะโซน outdoor">${escapeHtml(String(row.condition_note || ""))}</textarea>
+                  <input data-requested-check-field="condition_note" type="text" value="${escapeHtml(String(row.condition_note || ""))}" placeholder="เงื่อนไข/ข้อจำกัด" />
                 </div>
                 <div>
-                  <label>หลักฐาน/แหล่งที่มา</label>
-                  <textarea data-requested-check-field="evidence" rows="3" placeholder="แนบลิงก์หรือคำบรรยายหลักฐาน">${escapeHtml(String(row.evidence || ""))}</textarea>
+                  <input data-requested-check-field="evidence" type="text" value="${escapeHtml(String(row.evidence || ""))}" placeholder="หลักฐาน/แหล่งที่มา" />
                 </div>
-                <div class="full-span">
-                  <label>หมายเหตุ</label>
-                  <textarea data-requested-check-field="note" rows="2" placeholder="หมายเหตุเพิ่มเติม">${escapeHtml(String(row.note || ""))}</textarea>
+                <div class="full-span requested-check-row-note">
+                  <input data-requested-check-field="note" type="text" value="${escapeHtml(String(row.note || ""))}" placeholder="หมายเหตุเพิ่มเติม" />
                 </div>
               </div>
             </div>

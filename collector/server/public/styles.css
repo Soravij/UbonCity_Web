@@ -1688,6 +1688,60 @@ button.fail {
   margin: 0;
 }
 
+#assignment-submission-requested-checks-fields .requested-check-group-grid {
+  grid-template-columns: 1fr;
+}
+
+#assignment-submission-requested-checks-fields .requested-check-row-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1.1fr) minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+#assignment-submission-requested-checks-fields .requested-check-row-label {
+  min-width: 0;
+}
+
+#assignment-submission-requested-checks-fields .requested-check-row-value input,
+#assignment-submission-requested-checks-fields .requested-check-row-value select,
+#assignment-submission-requested-checks-fields .requested-check-row-value textarea {
+  margin: 0;
+}
+
+#assignment-submission-requested-checks-fields .requested-check-row-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#assignment-submission-requested-checks-fields .requested-check-row-secondary {
+  margin-top: 8px;
+}
+
+#assignment-submission-requested-checks-fields .requested-check-row-secondary input,
+#assignment-submission-requested-checks-fields .requested-check-row-secondary select,
+#assignment-submission-requested-checks-fields .requested-check-row-secondary textarea {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  #assignment-submission-requested-checks-fields .requested-check-row-main {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  #assignment-submission-requested-checks-fields .requested-check-row-value,
+  #assignment-submission-requested-checks-fields .requested-check-row-status {
+    grid-column: 2;
+  }
+
+  #assignment-submission-requested-checks-fields .requested-check-row-status {
+    justify-content: flex-start;
+  }
+}
+
 .release-queue-summary {
   margin: 12px 0;
   color: var(--fg);

@@ -126,6 +126,10 @@ const buildAssignmentRequestedCheckReturnKey = loadNamedFunction(appJs, "buildAs
   normalizeAssignmentRequestedCheckKeyPart,
 });
 const formatRequestedCheckSuggestedValue = loadNamedFunction(appJs, "formatRequestedCheckSuggestedValue");
+const cloneAssignmentRequestedCheckValue = loadNamedFunction(appJs, "cloneAssignmentRequestedCheckValue");
+const areAssignmentRequestedCheckValuesEqual = loadNamedFunction(appJs, "areAssignmentRequestedCheckValuesEqual", {
+  cloneAssignmentRequestedCheckValue,
+});
 const getAssignmentRequestedCheckGroupsFromHandoffPackage = loadNamedFunction(appJs, "getAssignmentRequestedCheckGroupsFromHandoffPackage", {
   normalizeAssignmentRequestedCheckKeyPart,
   buildAssignmentRequestedCheckReturnKey,
@@ -134,6 +138,7 @@ const getAssignmentRequestedCheckDefaultValue = loadNamedFunction(appJs, "getAss
 const buildAssignmentRequestedCheckReturnDraftFromHandoffPackage = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnDraftFromHandoffPackage", {
   getAssignmentRequestedCheckGroupsFromHandoffPackage,
   getAssignmentRequestedCheckDefaultValue,
+  cloneAssignmentRequestedCheckValue,
 });
 const normalizeAssignmentRequestedCheckReturnDraft = loadNamedFunction(appJs, "normalizeAssignmentRequestedCheckReturnDraft", {
   buildAssignmentRequestedCheckReturnDraftFromHandoffPackage,
@@ -148,16 +153,9 @@ const buildAssignmentRequestedCheckReturnSectionHtml = loadNamedFunction(appJs, 
   getAssignmentRequestedCheckGroupsFromHandoffPackage,
   normalizeAssignmentRequestedCheckReturnDraft,
   buildAssignmentRequestedCheckReturnValueInputHtml,
+  areAssignmentRequestedCheckValuesEqual,
   formatRequestedCheckSuggestedValue,
   escapeHtml,
-});
-const rerenderAssignmentRequestedCheckSurfaces = loadNamedFunction(appJs, "rerenderAssignmentRequestedCheckSurfaces", {
-  state: { assignments: { selectedId: 0 } },
-  renderAssignmentHandoffBrief: () => {},
-  renderAssignmentSubmissionForm: () => {},
-  getAssignmentSubmissionFormAssignment: () => null,
-  getAssignmentById: () => null,
-  getAssignmentPageMode: () => "work",
 });
 
 const normalizeRequestedCheckAnswerType = loadNamedFunction(repositoryJs, "normalizeRequestedCheckAnswerType");
@@ -190,13 +188,13 @@ test("requested-check section uses namespaced keys and keeps requested groups on
       groups: [
         {
           group_key: "cta_contact",
-          group_label: "CTA/ติดต่อ",
+          group_label: "CTA/contact",
           checks: [
             {
               key: "phone",
               requested: true,
-              label: "เบอร์โทร",
-              instruction: "ให้ใส่เบอร์ที่ติดต่อได้จริง",
+              label: "Phone",
+              instruction: "Use the phone number that is actually reachable",
               answer_type: "phone",
               suggested_value: "0812345678",
               evidence_required: true,
@@ -205,20 +203,20 @@ test("requested-check section uses namespaced keys and keeps requested groups on
               key: "line_url",
               requested: false,
               label: "LINE",
-              instruction: "ไม่ควรถูกเรนเดอร์",
+              instruction: "Should not render",
               answer_type: "url",
             },
           ],
         },
         {
           group_key: "taxonomy",
-          group_label: "หมวดหมู่",
+          group_label: "Taxonomy",
           checks: [
             {
               key: "phone",
               requested: true,
-              label: "เบอร์สำรอง",
-              instruction: "ต้องไม่ชนกับอีกกลุ่ม",
+              label: "Backup phone label",
+              instruction: "Must not collide with CTA namespace",
               answer_type: "text",
             },
           ],
@@ -228,7 +226,6 @@ test("requested-check section uses namespaced keys and keeps requested groups on
   };
 
   const groups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage);
-
   assert.equal(groups.length, 2);
   assert.equal(groups[0].checks[0].return_key, "cta_contact.phone");
   assert.equal(groups[1].checks[0].return_key, "taxonomy.phone");
@@ -238,7 +235,8 @@ test("requested-check section uses namespaced keys and keeps requested groups on
   );
 
   const draft = buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage);
-  assert.deepEqual(draft.requested_check_returns["cta_contact.phone"].value, "");
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, true);
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0812345678");
   assert.deepEqual(draft.requested_check_returns["taxonomy.phone"].value, "");
   assert.equal(getAssignmentRequestedCheckDefaultValue("boolean"), null);
   assert.deepEqual(getAssignmentRequestedCheckDefaultValue("multi_select"), []);
@@ -247,8 +245,228 @@ test("requested-check section uses namespaced keys and keeps requested groups on
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, draft);
   assert.ok(sectionHtml.includes('data-requested-check-return-key="cta_contact.phone"'));
   assert.ok(sectionHtml.includes('data-requested-check-return-key="taxonomy.phone"'));
-  assert.ok(sectionHtml.includes("ข้อมูลที่ระบบแนะนำให้ตรวจ"));
+  assert.ok(sectionHtml.includes("AI suggest"));
   assert.equal(sectionHtml.includes("line_url"), false);
+});
+
+test("requested-check draft auto-checks and prefills suggested values without changing namespaced keys", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: true,
+              label: "Phone",
+              answer_type: "phone",
+              suggested_value: "0812345678",
+            },
+          ],
+        },
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            {
+              key: "tags",
+              requested: true,
+              label: "Tags",
+              answer_type: "multi_select",
+              suggested_value: ["family", "cafe"],
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const draft = buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage);
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, true);
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0812345678");
+  assert.equal(draft.requested_check_returns["taxonomy.tags"].checked, true);
+  assert.deepEqual(draft.requested_check_returns["taxonomy.tags"].value, ["family", "cafe"]);
+});
+
+test("requested-check section renders CTA before Taxonomy and keeps custom rows at the end", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            { key: "category", requested: true, label: "Category", answer_type: "text" },
+          ],
+        },
+        {
+          group_key: "custom",
+          group_label: "Custom",
+          checks: [
+            { key: "parking", requested: true, label: "Parking", answer_type: "text" },
+          ],
+        },
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            { key: "phone", requested: true, label: "Phone", answer_type: "phone", suggested_value: "0812345678" },
+          ],
+        },
+      ],
+    },
+  };
+
+  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
+  const ctaIndex = sectionHtml.indexOf('data-requested-check-group="cta_contact"');
+  const taxonomyIndex = sectionHtml.indexOf('data-requested-check-group="taxonomy"');
+  const customIndex = sectionHtml.indexOf('data-requested-check-group="custom"');
+  assert.ok(ctaIndex >= 0);
+  assert.ok(taxonomyIndex >= 0);
+  assert.ok(customIndex >= 0);
+  assert.ok(ctaIndex < taxonomyIndex);
+  assert.ok(taxonomyIndex < customIndex);
+});
+
+test("requested-check section renders AI suggest badge when current value still equals suggested value", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: true,
+              label: "Phone",
+              answer_type: "phone",
+              suggested_value: "0812345678",
+            },
+            {
+              key: "facebook_url",
+              requested: true,
+              label: "Facebook",
+              answer_type: "url",
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
+  assert.match(sectionHtml, /AI suggest/);
+  assert.match(sectionHtml, /Manual/);
+  assert.match(sectionHtml, /value="0812345678"/);
+  assert.equal(sectionHtml.includes("ข้อมูลที่ระบบแนะนำให้ตรวจ"), false);
+});
+
+test("requested-check badge changes to manual when current value diverges from suggested value", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: true,
+              label: "Phone",
+              answer_type: "phone",
+              suggested_value: "0812345678",
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, {
+    requested_check_returns: {
+      "cta_contact.phone": {
+        checked: true,
+        value: "0999999999",
+      },
+    },
+  });
+
+  assert.doesNotMatch(sectionHtml, /AI suggest/);
+  assert.match(sectionHtml, /Manual/);
+});
+
+test("requested-check normalize keeps edited prefilled values through rerender merges", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: true,
+              label: "Phone",
+              answer_type: "phone",
+              suggested_value: "0812345678",
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const normalized = normalizeAssignmentRequestedCheckReturnDraft({
+    requested_check_returns: {
+      "cta_contact.phone": {
+        checked: true,
+        value: "0999999999",
+        note: "edited",
+      },
+    },
+  }, handoffPackage);
+
+  assert.equal(normalized.requested_check_returns["cta_contact.phone"].value, "0999999999");
+  assert.equal(normalized.requested_check_returns["cta_contact.phone"].checked, true);
+  assert.equal(normalized.requested_check_returns["cta_contact.phone"].note, "edited");
+});
+
+test("requested-check section keeps a compact second line instead of three large textarea blocks", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: true,
+              label: "Phone",
+              answer_type: "phone",
+              suggested_value: "0812345678",
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
+  const textareaCount = (sectionHtml.match(/<textarea /g) || []).length;
+  assert.equal(textareaCount, 0);
+  assert.match(sectionHtml, /data-requested-check-field="condition_note"/);
+  assert.match(sectionHtml, /data-requested-check-field="evidence"/);
+  assert.match(sectionHtml, /data-requested-check-field="note"/);
 });
 
 test("requested-check payload builder keeps field_return_payload_json separate and strips internal metadata", () => {
@@ -257,11 +475,11 @@ test("requested-check payload builder keeps field_return_payload_json separate a
       "cta_contact.phone": {
         checked: true,
         value: "0812345678",
-        condition_note: "โทรได้เฉพาะช่วงเย็น",
+        condition_note: "Reachable only at night",
         evidence: "https://example.com/evidence",
-        note: "ตรวจด้วยตา",
+        note: "Checked by eye",
         answer_type: "phone",
-        label: "เบอร์โทร",
+        label: "Phone",
         group_key: "cta_contact",
       },
       "taxonomy.tags": {
@@ -277,9 +495,9 @@ test("requested-check payload builder keeps field_return_payload_json separate a
       "cta_contact.phone": {
         checked: true,
         value: "0812345678",
-        condition_note: "โทรได้เฉพาะช่วงเย็น",
+        condition_note: "Reachable only at night",
         evidence: "https://example.com/evidence",
-        note: "ตรวจด้วยตา",
+        note: "Checked by eye",
       },
       "taxonomy.tags": {
         checked: false,
@@ -378,8 +596,8 @@ test("handoff source load rerenders brief and submission surfaces after async fe
             groups: [
               {
                 group_key: "cta_contact",
-                group_label: "CTA/ติดต่อ",
-                checks: [{ key: "phone", requested: true, label: "เบอร์โทร", answer_type: "phone" }],
+                group_label: "CTA/contact",
+                checks: [{ key: "phone", requested: true, label: "Phone", answer_type: "phone" }],
               },
             ],
           },
@@ -397,8 +615,74 @@ test("handoff source load rerenders brief and submission surfaces after async fe
   });
 
   const result = await loadAssignmentRequestedCheckHandoffSource({ id: 12 });
-
   assert.ok(result?.requested_checks);
   assert.deepEqual(calls, ["brief", "submission:12:work"]);
   assert.equal(state.assignments.handoffSourceLoaded[12], true);
+});
+
+test("edited requested-check draft survives async handoff load and rerender path", async () => {
+  const calls = [];
+  const state = {
+    assignments: {
+      selectedId: 12,
+      requestedCheckReturnDrafts: {
+        12: {
+          requested_check_returns: {
+            "cta_contact.phone": {
+              checked: true,
+              value: "0999999999",
+              note: "edited",
+            },
+          },
+        },
+      },
+      handoffSourcePackages: {},
+      handoffSourceLoaded: {},
+    },
+  };
+  const renderAssignmentHandoffBriefSpy = () => {
+    calls.push("brief");
+  };
+  const renderAssignmentSubmissionFormSpy = () => {
+    const handoffPackage = state.assignments.handoffSourcePackages[12] || null;
+    const currentDraft = state.assignments.requestedCheckReturnDrafts[12] || null;
+    const html = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, currentDraft);
+    calls.push(html);
+  };
+  const loadAssignmentRequestedCheckHandoffSource = await loadNamedAsyncFunction(appJs, "loadAssignmentRequestedCheckHandoffSource", {
+    state,
+    isEditorUser: () => false,
+    api: async () => ({
+      handoff: {
+        handoff_package_json: {
+          requested_checks: {
+            version: 1,
+            groups: [
+              {
+                group_key: "cta_contact",
+                group_label: "CTA/contact",
+                checks: [{ key: "phone", requested: true, label: "Phone", answer_type: "phone", suggested_value: "0812345678" }],
+              },
+            ],
+          },
+        },
+      },
+    }),
+    rerenderAssignmentRequestedCheckSurfaces: loadNamedFunction(appJs, "rerenderAssignmentRequestedCheckSurfaces", {
+      state,
+      renderAssignmentHandoffBrief: renderAssignmentHandoffBriefSpy,
+      renderAssignmentSubmissionForm: renderAssignmentSubmissionFormSpy,
+      getAssignmentSubmissionFormAssignment: (assignment, mode) => `${assignment?.id || 0}:${mode}`,
+      getAssignmentById: (id) => ({ id }),
+      getAssignmentPageMode: () => "work",
+    }),
+  });
+
+  await loadAssignmentRequestedCheckHandoffSource({ id: 12 });
+  assert.equal(calls[0], "brief");
+  assert.match(calls[1], /value="0999999999"/);
+  assert.match(calls[1], /Manual/);
+  assert.equal(calls[1].includes('value="0812345678"'), false);
+  assert.equal(state.assignments.requestedCheckReturnDrafts[12].requested_check_returns["cta_contact.phone"].value, "0999999999");
+  assert.equal(state.assignments.requestedCheckReturnDrafts[12].requested_check_returns["cta_contact.phone"].note, "edited");
 });
