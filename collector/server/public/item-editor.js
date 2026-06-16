@@ -2795,21 +2795,8 @@ function getRequestedCheckEditorGroups(fieldPack = {}, item = state.item) {
   });
 }
 
-function buildRequestedChecksPreviewHtml(requestedChecks = { version: 1, groups: [] }) {
-  const groups = Array.isArray(requestedChecks?.groups) ? requestedChecks.groups : [];
-  const selectedLines = groups
-    .map((group) => {
-      const labels = (Array.isArray(group?.checks) ? group.checks : [])
-        .filter((check) => check?.requested === true)
-        .map((check) => String(check?.label || check?.key || "").trim())
-        .filter(Boolean);
-      if (!labels.length) return "";
-      const groupLabel = String(group?.group_label || group?.group_key || "").trim() || "-";
-      return `<div><strong>${escapeHtml(groupLabel)}:</strong> ${escapeHtml(labels.join(", "))}</div>`;
-    })
-    .filter(Boolean);
-  if (!selectedLines.length) return "ยังไม่ได้เลือกรายการที่จะส่งให้คนไปเช็ก";
-  return selectedLines.join("");
+function buildRequestedChecksPreviewHtml(requestedChecks = { version: 1, groups: [] }, fieldPack = state.fieldPack || null) {
+  return buildRequestedChecksCompactPreviewHtml(requestedChecks, fieldPack, state.item);
 }
 
 function renderRequestedChecksPreview(requestedChecks = readRequestedChecksEditorState()) {
@@ -2818,72 +2805,14 @@ function renderRequestedChecksPreview(requestedChecks = readRequestedChecksEdito
   node.innerHTML = buildRequestedChecksPreviewHtml({
     version: 1,
     groups: filterRequestedCheckGroupsForItem(requestedChecks?.groups, state.item),
-  });
+  }, state.fieldPack || null);
 }
 
 function renderRequestedChecksEditor(fieldPack = {}) {
   const root = qs("fp-requested-checks-editor");
   if (!root) return;
   const groups = getRequestedCheckEditorGroups(fieldPack, state.item);
-  const showCtaContactNote = !isPlaceRequestedCheckItem(state.item);
-
-  root.innerHTML = `
-    ${showCtaContactNote ? '<div class="field-help">CTA/contact ใช้กับข้อมูลสถานที่เท่านั้น</div>' : ""}
-    ${groups.map((group) => `
-    <details class="secondary-panel" open>
-      <summary>${escapeHtml(group.group_label)}</summary>
-      <div class="grid" data-requested-group="${escapeHtml(group.group_key)}">
-        ${(Array.isArray(group.checks) ? group.checks : []).map((check, index) => `
-          <div class="full-span secondary-panel" data-requested-check-row data-check-key="${escapeHtml(check.key)}">
-            <label><input type="checkbox" data-check-field="requested" ${check.requested ? "checked" : ""} /> เลือกให้ทีมหน้างานเช็ก</label>
-            <div class="grid">
-              <div>
-                <label>รหัสรายการ</label>
-                <input data-check-field="key" value="${escapeHtml(check.key)}" ${group.group_key === "custom" ? "" : "readonly"} />
-              </div>
-              <div>
-                <label>ประเภทคำตอบ</label>
-                <select data-check-field="answer_type">${REQUESTED_CHECK_ANSWER_TYPE_OPTIONS
-                  .map(([value, label]) => `<option value="${escapeHtml(value)}" ${check.answer_type === value ? "selected" : ""}>${escapeHtml(label)}</option>`)
-                  .join("")}</select>
-              </div>
-              <div>
-                <label><input type="checkbox" data-check-field="evidence_required" ${check.evidence_required ? "checked" : ""} /> ต้องมีหลักฐาน</label>
-              </div>
-              <div class="full-span">
-                <label>ชื่อที่จะแสดง</label>
-                <input data-check-field="label" value="${escapeHtml(check.label)}" placeholder="ชื่อรายการ" />
-              </div>
-              <div class="full-span">
-                <label>คำสั่งให้ทีมหน้างาน</label>
-                <textarea data-check-field="instruction" placeholder="สิ่งที่อยากให้ช่วยเช็ก">${escapeHtml(check.instruction)}</textarea>
-              </div>
-              <div class="full-span">
-                <label>ค่าที่ AI แนะนำไว้</label>
-                <div class="field-help">${escapeHtml(formatRequestedCheckSuggestedValue(check.suggested_value, check.answer_type) || "ยังไม่มีค่าที่ AI แนะนำไว้")}</div>
-              </div>
-              <div class="full-span">
-                <label>เงื่อนไขเพิ่มเติม</label>
-                <textarea data-check-field="condition_prompt" placeholder="เช่น ถ้ามีข้อจำกัดให้ระบุ">${escapeHtml(String(check.condition_prompt || ""))}</textarea>
-              </div>
-              <div class="full-span">
-                <label>ที่มาคำแนะนำ</label>
-                <div class="field-help">${escapeHtml(check.source ? JSON.stringify(check.source) : "ไม่มี provenance")}</div>
-              </div>
-              ${group.group_key === "custom"
-                ? `<div><button type="button" class="utility-action" data-action="remove-requested-check">ลบรายการนี้</button></div>`
-                : ""}
-            </div>
-          </div>
-        `).join("")}
-        ${group.group_key === "custom"
-          ? `<div class="full-span"><button type="button" class="utility-action" data-action="add-requested-check">เพิ่มรายการเช็กเอง</button></div>`
-          : ""}
-      </div>
-    </details>
-  `).join("")}
-  `;
-
+  root.innerHTML = buildRequestedChecksEditorHtml(fieldPack, state.item);
   root.querySelectorAll("textarea").forEach((node) => autosizeTextarea(node));
   renderRequestedChecksPreview({
     version: 1,
@@ -2920,6 +2849,410 @@ function readRequestedChecksEditorState() {
     groups,
   };
 }
+
+function getRequestedCheckStatusBadge(label, tone = "neutral") {
+  const className = tone === "warning"
+    ? "workflow-badge workflow-badge-generated"
+    : tone === "ok"
+      ? "workflow-badge workflow-badge-sent"
+      : "workflow-badge";
+  return `<span class="${className}">${escapeHtml(label)}</span>`;
+}
+
+function hasRequestedCheckMeaningfulValue(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (value && typeof value === "object") return Object.keys(value).length > 0;
+  return value != null && String(value).trim() !== "";
+}
+
+function buildRequestedCheckCompactGroups(requestedChecks = { version: 1, groups: [] }) {
+  const compactMap = new Map([
+    ["cta_contact", { key: "cta_contact", label: "CTA Review", checks: [] }],
+    ["taxonomy", { key: "taxonomy", label: "Suggested Focus", checks: [] }],
+    ["custom", { key: "custom", label: "Article context", checks: [] }],
+  ]);
+  const groups = Array.isArray(requestedChecks?.groups) ? requestedChecks.groups : [];
+  groups.forEach((group) => {
+    const groupKey = String(group?.group_key || "").trim().toLowerCase();
+    const target = compactMap.get(compactMap.has(groupKey) ? groupKey : "custom");
+    (Array.isArray(group?.checks) ? group.checks : []).forEach((check) => target.checks.push(check));
+  });
+  return Array.from(compactMap.values()).filter((group) => group.checks.length > 0);
+}
+
+function extractRequestedCheckArticleContextHints(groups = []) {
+  return groups.flatMap((group) => {
+    return (Array.isArray(group?.checks) ? group.checks : []).flatMap((check) => {
+      const hints = [];
+      const instruction = String(check?.instruction || "").trim();
+      if (instruction) hints.push(instruction);
+      const condition = String(check?.condition_prompt || "").trim();
+      if (condition) hints.push(condition);
+      return hints;
+    });
+  }).filter(Boolean);
+}
+
+function buildRequestedCheckStatusRow(key, label, value, statuses = []) {
+  return {
+    key: String(key || "").trim().toLowerCase(),
+    label: String(label || "").trim() || "-",
+    value: hasRequestedCheckMeaningfulValue(value) ? formatRequestedCheckSuggestedValue(value) : "",
+    statuses: Array.isArray(statuses) ? statuses.filter(Boolean) : [],
+  };
+}
+
+function normalizeItemGuidanceToken(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function resolveItemGuidanceScope(fieldPack = {}, item = state.item) {
+  const itemType = normalizeItemGuidanceToken(fieldPack?.content_type || item?.type);
+  const category = normalizeItemGuidanceToken(fieldPack?.category || fieldPack?.item_category || item?.category);
+  const hotelCategories = new Set(["hotels", "hotel", "stay", "stays", "lodging", "accommodation", "resort"]);
+  const restaurantCategories = new Set(["cafes", "cafe", "restaurants", "restaurant", "food", "dining"]);
+  const attractionCategories = new Set(["attractions", "attraction", "activities", "activity", "landmark", "landmarks", "temple", "museum", "market", "transport"]);
+  return {
+    itemType,
+    category,
+    isEvent: itemType === "event" || category === "event" || category === "events",
+    isHotel: hotelCategories.has(category),
+    isRestaurant: restaurantCategories.has(category),
+    isAttractionPlace: itemType === "place" && attractionCategories.has(category),
+    isUnknownCategory: !category,
+  };
+}
+
+function isTaxonomyConfigRelevantForScope(sectionKey, scope = {}) {
+  const normalizedSectionKey = String(sectionKey || "").trim().toLowerCase();
+  if (normalizedSectionKey === "universal_curation_profile" || normalizedSectionKey === "practical_profile") return true;
+  if (scope?.isUnknownCategory) return false;
+  if (normalizedSectionKey === "event_profile") return scope?.isEvent === true;
+  if (normalizedSectionKey === "hotel_profile") return scope?.isHotel === true;
+  if (normalizedSectionKey === "restaurant_profile") return scope?.isRestaurant === true;
+  if (normalizedSectionKey === "place_profile") return scope?.isAttractionPlace === true;
+  return false;
+}
+
+function extractVerifiedFactSignals(verifiedFacts = [], rowConfigs = []) {
+  const normalizedRows = (Array.isArray(rowConfigs) ? rowConfigs : []).map((row) => {
+    const key = String(row?.key || "").trim().toLowerCase();
+    const label = String(row?.label || "").trim().toLowerCase();
+    const aliases = Array.isArray(row?.aliases) ? row.aliases.map((alias) => String(alias || "").trim().toLowerCase()).filter(Boolean) : [];
+    return { key, label, aliases };
+  }).filter((row) => row.key);
+  const matchedKeys = new Set();
+  const unmatchedFacts = [];
+
+  for (const fact of Array.isArray(verifiedFacts) ? verifiedFacts : []) {
+    const raw = String(fact || "").trim();
+    if (!raw) continue;
+    const normalizedFact = raw.toLowerCase();
+    const matchedRow = normalizedRows.find((row) => {
+      const candidates = [row.key, row.label, ...row.aliases].filter(Boolean);
+      return candidates.some((candidate) => normalizedFact.startsWith(`${candidate}:`));
+    });
+    if (matchedRow) {
+      matchedKeys.add(matchedRow.key);
+      continue;
+    }
+    unmatchedFacts.push(raw);
+  }
+
+  return {
+    matchedKeys,
+    unmatchedFacts,
+  };
+}
+
+function buildTaxonomyGuidanceRows(fieldPack = {}, requestedChecks = [], item = state.item) {
+  const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object"
+    ? fieldPack.ai_taxonomy_json
+    : {};
+  const contract = parseTaxonomyContract(parseFieldPackContractFromWriterNotes(fieldPack.writer_notes));
+  const verification = contract?.verification && typeof contract.verification === "object" ? contract.verification : {};
+  const verifiedFacts = toReviewList(verification.verified_facts);
+  const needsVerificationSet = new Set(toReviewList(verification.needs_verification));
+  const publishBlockerSet = new Set(toReviewList(verification.publish_blockers));
+  const scope = resolveItemGuidanceScope(fieldPack, item);
+  const fieldReturnTaxonomy = fieldPack?.field_return_payload_json?.taxonomy_return && typeof fieldPack.field_return_payload_json.taxonomy_return === "object"
+    ? fieldPack.field_return_payload_json.taxonomy_return
+    : {};
+  const requestedTaxonomyChecks = (Array.isArray(requestedChecks) ? requestedChecks : []).filter((check) => {
+    const key = String(check?.key || "").trim().toLowerCase();
+    return check?.requested === true && (key === "category" || key === "subtype" || key === "tags");
+  });
+  const taxonomySectionConfigs = [
+    ["universal_curation_profile", ["highlights", "good_to_know", "why_visit", "recommended_for", "best_for", "nearby", "local_notes"]],
+    ["practical_profile", ["price_range", "parking", "pet_friendly", "family_friendly", "accessibility", "opening_hours_note", "reservation_needed"]],
+    ["place_profile", ["view_type", "atmosphere", "photo_spots", "visit_duration", "best_time_to_visit"]],
+    ["restaurant_profile", ["restaurant_features", "signature_menu", "cuisine_type", "price_signals", "service_style", "seating_vibe"]],
+    ["hotel_profile", ["hotel_amenities", "room_type_hints", "checkin_checkout", "booking_channels", "nearby_landmarks", "stay_best_for"]],
+    ["event_profile", ["event_date_hints", "schedule_hints", "ticket_hints", "venue_notes", "event_best_for"]],
+  ];
+
+  const knownKeys = new Set([
+    ...Object.keys(aiTaxonomy || {}),
+    ...Object.keys(fieldReturnTaxonomy || {}),
+    ...requestedTaxonomyChecks.map((check) => String(check.key || "").trim().toLowerCase()),
+  ]);
+  taxonomySectionConfigs.forEach(([sectionKey, fields]) => {
+    const source = contract?.[sectionKey] && typeof contract[sectionKey] === "object" ? contract[sectionKey] : {};
+    Object.keys(source).forEach((key) => knownKeys.add(key));
+    if (isTaxonomyConfigRelevantForScope(sectionKey, scope)) {
+      fields.forEach((field) => knownKeys.add(field));
+    }
+  });
+  const verifiedFactSignals = extractVerifiedFactSignals(
+    verifiedFacts,
+    Array.from(knownKeys).map((key) => ({ key, label: taxonomyFieldLabel(key) }))
+  );
+
+  return Array.from(knownKeys)
+    .filter(Boolean)
+    .map((key) => {
+      const normalizedKey = String(key || "").trim().toLowerCase();
+      const fieldReturn = fieldReturnTaxonomy[normalizedKey] && typeof fieldReturnTaxonomy[normalizedKey] === "object"
+        ? fieldReturnTaxonomy[normalizedKey]
+        : null;
+      const requestedCheck = requestedTaxonomyChecks.find((check) => String(check?.key || "").trim().toLowerCase() === normalizedKey) || null;
+
+      if (fieldReturn?.found && hasRequestedCheckMeaningfulValue(fieldReturn.value)) {
+        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), fieldReturn.value, ["found"]);
+      }
+      if (fieldReturn?.checked) {
+        return buildRequestedCheckStatusRow(
+          normalizedKey,
+          taxonomyFieldLabel(normalizedKey),
+          fieldReturn.value,
+          hasRequestedCheckMeaningfulValue(fieldReturn.value) ? ["suggested", "needs verification"] : ["missing", "needs verification"]
+        );
+      }
+
+      let contractValue = null;
+      for (const [sectionKey] of taxonomySectionConfigs) {
+        const source = contract?.[sectionKey] && typeof contract[sectionKey] === "object" ? contract[sectionKey] : {};
+        if (Object.prototype.hasOwnProperty.call(source, normalizedKey)) {
+          contractValue = source[normalizedKey];
+          break;
+        }
+      }
+
+      const scalarUnknown = String(contractValue == null ? "" : contractValue).trim().toLowerCase() === "unknown";
+      if (hasRequestedCheckMeaningfulValue(contractValue) && !scalarUnknown) {
+        const isVerified = verifiedFactSignals.matchedKeys.has(normalizedKey);
+        const needsVerification = needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey);
+        return buildRequestedCheckStatusRow(
+          normalizedKey,
+          taxonomyFieldLabel(normalizedKey),
+          contractValue,
+          isVerified ? ["found", "verified"] : (needsVerification ? ["suggested", "needs verification"] : ["suggested"])
+        );
+      }
+      if (scalarUnknown) {
+        return buildRequestedCheckStatusRow(
+          normalizedKey,
+          taxonomyFieldLabel(normalizedKey),
+          null,
+          needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey) ? ["unknown", "needs verification"] : ["unknown"]
+        );
+      }
+      if (needsVerificationSet.has(normalizedKey) || publishBlockerSet.has(normalizedKey)) {
+        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, ["needs verification"]);
+      }
+
+      const aiValue = aiTaxonomy[normalizedKey];
+      if (hasRequestedCheckMeaningfulValue(aiValue)) {
+        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), aiValue, ["suggested"]);
+      }
+
+      if (requestedCheck) {
+        return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, ["suggested focus", "needs verification"]);
+      }
+
+      return buildRequestedCheckStatusRow(normalizedKey, taxonomyFieldLabel(normalizedKey), null, ["unknown"]);
+    })
+    .filter((row) => row.statuses.length > 0);
+}
+
+function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], item = state.item) {
+  const selectedChecks = groups.flatMap((group) => (Array.isArray(group?.checks) ? group.checks : []).filter((check) => check?.requested === true));
+  const articleContextHints = extractRequestedCheckArticleContextHints(groups);
+  const isPlaceItem = isPlaceRequestedCheckItem(item);
+  const ctaTemplateChecks = REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === "cta_contact")?.checks || [];
+  const fieldReturnCta = fieldPack?.field_return_payload_json?.cta_return && typeof fieldPack.field_return_payload_json.cta_return === "object"
+    ? fieldPack.field_return_payload_json.cta_return
+    : {};
+
+  const ctaRows = isPlaceItem
+    ? ctaTemplateChecks.map((check) => {
+      const key = check.key;
+      const fieldReturn = fieldReturnCta[key] && typeof fieldReturnCta[key] === "object" ? fieldReturnCta[key] : null;
+      const confirmedValue = fieldPack?.confirmed_cta_contact_json?.[key];
+      const curatedValue = fieldPack?.curated_cta_contact_json?.[key];
+      const aiValue = fieldPack?.ai_cta_contact_json?.[key];
+      if (fieldReturn?.found && hasRequestedCheckMeaningfulValue(fieldReturn.value)) {
+        return buildRequestedCheckStatusRow(key, check.label, fieldReturn.value, ["found"]);
+      }
+      if (hasRequestedCheckMeaningfulValue(confirmedValue)) {
+        return buildRequestedCheckStatusRow(key, check.label, confirmedValue, ["found"]);
+      }
+      if (hasRequestedCheckMeaningfulValue(curatedValue)) {
+        return buildRequestedCheckStatusRow(key, check.label, curatedValue, ["found"]);
+      }
+      if (hasRequestedCheckMeaningfulValue(aiValue)) {
+        return buildRequestedCheckStatusRow(key, check.label, aiValue, ["suggested", "needs verification"]);
+      }
+      if (fieldReturn?.checked) {
+        return buildRequestedCheckStatusRow(key, check.label, null, ["missing", "needs verification"]);
+      }
+      return buildRequestedCheckStatusRow(key, check.label, null, ["missing"]);
+    })
+    : [];
+  const taxonomyRows = buildTaxonomyGuidanceRows(
+    fieldPack,
+    groups.flatMap((group) => Array.isArray(group?.checks) ? group.checks : []),
+    item
+  );
+  const taxonomyContract = parseTaxonomyContract(parseFieldPackContractFromWriterNotes(fieldPack.writer_notes));
+  const verifiedFacts = toReviewList(taxonomyContract?.verification?.verified_facts);
+  const verifiedFactSignals = extractVerifiedFactSignals(
+    verifiedFacts,
+    taxonomyRows.map((row) => ({ key: row.key, label: row.label }))
+  );
+
+  return {
+    ctaRows,
+    ctaMutedNote: isPlaceItem ? "" : "CTA Review applies to place items only.",
+    taxonomyRows,
+    taxonomyVerifiedFacts: verifiedFactSignals.unmatchedFacts,
+    selectedChecks,
+    articleContextHints,
+  };
+}
+
+function renderRequestedCheckCompactRows(rows = []) {
+  return rows.map((row) => `
+    <div class="summary-row">
+      <strong>${escapeHtml(row.label)}</strong>
+      <span>${row.value ? `<span>${escapeHtml(row.value)}</span> ` : '<span class="muted">No value</span> '}${row.statuses.map((status) => getRequestedCheckStatusBadge(status, status === "found" ? "ok" : status === "missing" || status === "unknown" || status === "needs verification" ? "warning" : "neutral")).join(" ")}</span>
+    </div>
+  `).join("");
+}
+
+function buildRequestedChecksGuidanceModel(fieldPack = {}, requestedChecks = { version: 1, groups: [] }, item = state.item) {
+  const groups = Array.isArray(requestedChecks?.groups)
+    ? filterRequestedCheckGroupsForItem(requestedChecks.groups, item)
+    : getRequestedCheckEditorGroups(fieldPack, item);
+  return buildRequestedChecksCompactSummaryData(fieldPack, groups, item);
+}
+
+function renderRequestedChecksGuidanceHtml(model = {}, options = {}) {
+  const showAdvanced = options.showAdvanced === true;
+  const advancedHtml = String(options.advancedHtml || "");
+  return `
+    <div class="article-brief-doc">
+      <section class="article-brief-section">
+        <h3>CTA Review</h3>
+        ${model.ctaMutedNote ? `<div class="muted">${escapeHtml(model.ctaMutedNote)}</div>` : `<div class="readiness-summary">${renderRequestedCheckCompactRows(model.ctaRows || [])}</div>`}
+      </section>
+      <section class="article-brief-section">
+        <h3>AI Guidance</h3>
+        <div class="readiness-summary">
+          <div class="summary-row"><strong>Suggested Focus</strong><span>${Array.isArray(model.selectedChecks) && model.selectedChecks.length ? model.selectedChecks.map((check) => getRequestedCheckStatusBadge(String(check.label || check.key || "").trim() || "-", "ok")).join(" ") : '<span class="muted">No suggested focus selected.</span>'}</span></div>
+          <div class="summary-row"><strong>Article context</strong><span>${Array.isArray(model.articleContextHints) && model.articleContextHints.length ? escapeHtml(model.articleContextHints.slice(0, 6).join(" | ")) : '<span class="muted">No article context hints.</span>'}</span></div>
+        </div>
+      </section>
+      <section class="article-brief-section">
+        <h3>Taxonomy Review</h3>
+        <div class="readiness-summary">
+          ${(Array.isArray(model.taxonomyRows) && model.taxonomyRows.length) ? renderRequestedCheckCompactRows(model.taxonomyRows) : '<div class="summary-row"><strong>Status</strong><span class="muted">No taxonomy review signals available.</span></div>'}
+          ${(Array.isArray(model.taxonomyVerifiedFacts) && model.taxonomyVerifiedFacts.length)
+            ? `<div class="summary-row"><strong>Verified facts</strong><span>${model.taxonomyVerifiedFacts.map((fact) => getRequestedCheckStatusBadge(fact, "ok")).join(" ")}</span></div>`
+            : ""}
+        </div>
+      </section>
+    </div>
+    ${showAdvanced ? advancedHtml : ""}
+  `;
+}
+
+function buildRequestedChecksCompactPreviewHtml(requestedChecks = { version: 1, groups: [] }, fieldPack = state.fieldPack || null, item = state.item) {
+  const guidanceModel = buildRequestedChecksGuidanceModel(fieldPack || {}, requestedChecks, item);
+  return renderRequestedChecksGuidanceHtml(guidanceModel);
+}
+
+
+function buildRequestedChecksEditorHtml(fieldPack = {}, item = state.item) {
+  const groups = getRequestedCheckEditorGroups(fieldPack, item);
+  const showCtaContactNote = !isPlaceRequestedCheckItem(item);
+  const compactSummary = buildRequestedChecksGuidanceModel(fieldPack, { version: 1, groups }, item);
+  const advancedHtml = `
+    <details class="secondary-panel">
+      <summary>Advanced edit requested checks</summary>
+      <div class="field-help">Use this area only when you need to edit focus/context signals while preserving requested_checks_json round-trip.</div>
+      ${groups.map((group) => `
+      <details class="secondary-panel">
+        <summary>${escapeHtml(group.group_label)}</summary>
+        <div class="grid" data-requested-group="${escapeHtml(group.group_key)}">
+          ${(Array.isArray(group.checks) ? group.checks : []).map((check) => `
+            <div class="full-span secondary-panel" data-requested-check-row data-check-key="${escapeHtml(check.key)}">
+              <label><input type="checkbox" data-check-field="requested" ${check.requested ? "checked" : ""} /> Focus/context signal</label>
+              <div class="grid">
+                <div>
+                  <label>Check key</label>
+                  <input data-check-field="key" value="${escapeHtml(check.key)}" ${group.group_key === "custom" ? "" : "readonly"} />
+                </div>
+                <div>
+                  <label>Answer type</label>
+                  <select data-check-field="answer_type">${REQUESTED_CHECK_ANSWER_TYPE_OPTIONS
+                    .map(([value, label]) => `<option value="${escapeHtml(value)}" ${check.answer_type === value ? "selected" : ""}>${escapeHtml(label)}</option>`)
+                    .join("")}</select>
+                </div>
+                <div>
+                  <label><input type="checkbox" data-check-field="evidence_required" ${check.evidence_required ? "checked" : ""} /> Evidence required</label>
+                </div>
+                <div class="full-span">
+                  <label>Display label</label>
+                  <input data-check-field="label" value="${escapeHtml(check.label)}" placeholder="Display label" />
+                </div>
+                <div class="full-span">
+                  <label>Things to check</label>
+                  <textarea data-check-field="instruction" placeholder="Things to check">${escapeHtml(check.instruction)}</textarea>
+                </div>
+                <div class="full-span">
+                  <label>Suggested value</label>
+                  <div class="field-help">${escapeHtml(formatRequestedCheckSuggestedValue(check.suggested_value, check.answer_type) || "No suggested value")}</div>
+                </div>
+                <div class="full-span">
+                  <label>Article context condition</label>
+                  <textarea data-check-field="condition_prompt" placeholder="Article context condition">${escapeHtml(String(check.condition_prompt || ""))}</textarea>
+                </div>
+                <div class="full-span">
+                  <label>Source</label>
+                  <div class="field-help">${escapeHtml(check.source ? JSON.stringify(check.source) : "No provenance")}</div>
+                </div>
+                ${group.group_key === "custom"
+                  ? `<div><button type="button" class="utility-action" data-action="remove-requested-check">Remove check</button></div>`
+                  : ""}
+              </div>
+            </div>
+          `).join("")}
+          ${group.group_key === "custom"
+            ? `<div class="full-span"><button type="button" class="utility-action" data-action="add-requested-check">Add custom check</button></div>`
+            : ""}
+        </div>
+      </details>
+    `).join("")}
+    </details>`;
+  return `${renderRequestedChecksGuidanceHtml(compactSummary, {
+    showAdvanced: true,
+    advancedHtml,
+  })}`;
+}
+
 
 function getDraftSelectedImageAssets() {
   return (Array.isArray(state.assets) ? state.assets : []).filter((row) => {
