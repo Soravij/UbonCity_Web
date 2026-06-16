@@ -1360,6 +1360,44 @@ test("article context is shortened and avoids full CTA checklist wording", () =>
   assert.ok((guidanceHtml.match(/\|/g) || []).length <= 4);
 });
 
+test("default guidance removes old handoff or worker style thai wording", () => {
+  const html = buildRequestedChecksEditorHtml({
+    requested_checks_json: { version: 1, groups: [] },
+  }, { type: "place", category: "restaurants" });
+  const guidanceHtml = extractDefaultGuidanceHtml(html);
+
+  assert.doesNotMatch(guidanceHtml, /รายการให้เช็กพื้นที่ก่อนส่งงานหน้าร้าน|เลือกเฉพาะรายการที่ต้องการส่งให้คนลงพื้นที่|ส่งให้คนลงพื้นที่|รายการให้เช็ก|handoff|worker/i);
+  assert.match(guidanceHtml, /AI guidance \/ curation review|ข้อเสนอจาก AI/i);
+});
+
+test("article context drops CTA contact checklist prompts and falls back to empty state", () => {
+  const html = buildRequestedChecksEditorHtml({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA",
+          checks: [
+            { key: "phone", requested: true, instruction: "ขอเบอร์ที่ติดต่อได้จริง", condition_prompt: "", answer_type: "text" },
+            { key: "line_url", requested: true, instruction: "ถ้ามีให้ขอลิงก์ที่ใช้ได้จริง", condition_prompt: "", answer_type: "text" },
+            { key: "facebook_url", requested: true, instruction: "ถ้ามีให้ขอลิงก์เพจที่ถูกต้อง", condition_prompt: "", answer_type: "text" },
+            { key: "website_url", requested: true, instruction: "ถ้ามีให้ขอลิงก์เว็บไซต์หลัก", condition_prompt: "", answer_type: "text" },
+            { key: "primary_cta", requested: true, instruction: "ยืนยันว่าควรพาคนไปกดอะไรเป็นหลัก", condition_prompt: "", answer_type: "text" },
+          ],
+        },
+      ],
+    },
+  }, { type: "place", category: "restaurants" });
+  const guidanceHtml = extractDefaultGuidanceHtml(html);
+
+  assert.doesNotMatch(guidanceHtml, /ขอเบอร์ที่ติดต่อได้จริง|ถ้ามีให้ขอลิงก์ที่ใช้ได้จริง|ถ้ามีให้ขอลิงก์เพจที่ถูกต้อง|ถ้ามีให้ขอลิงก์เว็บไซต์หลัก|ยืนยันว่าควรพาคนไปกดอะไรเป็นหลัก/);
+  assert.match(guidanceHtml, /No article context hints\./);
+  assert.match(guidanceHtml, /CTA Review/);
+  assert.match(guidanceHtml, /Curation Review/);
+  assert.match(guidanceHtml, /requested-guidance-grid/);
+});
+
 test("runtime preview renders ai_taxonomy_json-only taxonomy guidance and hides empty taxonomy message", () => {
   const html = buildRequestedChecksPreviewHtml({
     version: 1,

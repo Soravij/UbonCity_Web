@@ -2876,7 +2876,7 @@ function buildRequestedCheckCompactGroups(requestedChecks = { version: 1, groups
 
 function extractRequestedCheckArticleContextHints(groups = []) {
   return groups.flatMap((group) => {
-    return (Array.isArray(group?.checks) ? group.checks : []).flatMap((check) => {
+    return (Array.isArray(group?.checks) ? group.checks : []).filter((check) => check?.requested === true).flatMap((check) => {
       const hints = [];
       const instruction = String(check?.instruction || "").trim();
       if (instruction) hints.push(instruction);
@@ -3594,7 +3594,7 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
     articleContextHints: articleContextHints
       .filter((hint) => {
         const normalized = String(hint || "").trim().toLowerCase();
-        return normalized && !/(confirm phone|confirm facebook|confirm website|confirm line|confirm primary cta|need phone|need facebook|need website|need line|need cta)/i.test(normalized);
+        return normalized && !/(confirm phone|confirm facebook|confirm website|confirm line|confirm primary cta|need phone|need facebook|need website|need line|need cta|ขอเบอร์ที่ติดต่อได้จริง|ถ้ามีให้ขอลิงก์ที่ใช้ได้จริง|ถ้ามีให้ขอลิงก์เพจที่ถูกต้อง|ถ้ามีให้ขอลิงก์เว็บไซต์หลัก|ยืนยันว่าควรพาคนไปกดอะไรเป็นหลัก)/i.test(normalized);
       })
       .filter((hint, index, list) => list.findIndex((entry) => String(entry || "").trim().toLowerCase() === String(hint || "").trim().toLowerCase()) === index)
       .slice(0, 5),
@@ -3636,6 +3636,10 @@ function renderRequestedChecksGuidanceHtml(model = {}, options = {}) {
     || hasRequestedCheckMeaningfulValue(taxonomyEvidence.contract);
   return `
     <div class="article-brief-doc">
+      <section class="article-brief-section">
+        <h3>AI guidance / curation review</h3>
+        <div class="muted">ข้อมูลด้านล่างเป็นข้อเสนอจาก AI และหลักฐานที่ช่วยให้ editor ตรวจบริบทก่อนเขียนหรือส่งต่อ งานนี้ยังไม่ใช่การยืนยันเผยแพร่</div>
+      </section>
       <section class="article-brief-section">
         <h3>CTA Review</h3>
         ${model.ctaMutedNote ? `<div class="muted">${escapeHtml(model.ctaMutedNote)}</div>` : `<div class="readiness-summary">${renderRequestedCheckCompactRows(model.ctaRows || [])}</div>`}
