@@ -116,8 +116,10 @@ const readRequestedChecksEditorState = loadNamedFunction(itemEditorJs, "readRequ
   qs: (id) => (id === "fp-requested-checks-editor" ? requestedChecksEditorRoot : null),
   getRequestedCheckDefaultGroupLabel,
 });
+const hasRequestedCheckMeaningfulValue = loadNamedFunction(itemEditorJs, "hasRequestedCheckMeaningfulValue");
 const buildRequestedChecksEditorState = loadNamedFunction(itemEditorJs, "buildRequestedChecksEditorState", {
   REQUESTED_CHECK_GROUP_TEMPLATES,
+  hasRequestedCheckMeaningfulValue,
   state: { item: { type: "place" } },
 });
 const isPlaceRequestedCheckItem = loadNamedFunction(itemEditorJs, "isPlaceRequestedCheckItem", {
@@ -141,7 +143,6 @@ const mergeRequestedChecksForSave = loadNamedFunction(itemEditorJs, "mergeReques
 const buildRequestedChecksHandoffPayload = loadNamedFunction(repositoryJs, "buildRequestedChecksHandoffPayload", {
   normalizeRequestedChecksJson: (value) => value,
 });
-const hasRequestedCheckMeaningfulValue = loadNamedFunction(itemEditorJs, "hasRequestedCheckMeaningfulValue");
 const normalizeRequestedCheckCandidate = loadNamedFunction(itemEditorJs, "normalizeRequestedCheckCandidate", {
   hasRequestedCheckMeaningfulValue,
 });
@@ -616,6 +617,44 @@ test("ai suggested values do not auto-set requested=true in editor groups", () =
   assert.equal(ctaPhone?.suggested_value, "0812345678");
   assert.equal(taxonomyCategory?.requested, false);
   assert.equal(taxonomyCategory?.suggested_value, "attractions");
+});
+
+test("buildRequestedChecksEditorState prefers current AI suggestions over stale saved values", () => {
+  const result = buildRequestedChecksEditorState({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: false,
+              label: "Stale phone",
+              instruction: "stale",
+              answer_type: "phone",
+              suggested_value: "0999999999",
+              condition_prompt: null,
+              evidence_required: false,
+            },
+          ],
+        },
+      ],
+    },
+    ai_cta_contact_json: {
+      phone: "0812345678",
+      confidence: "high",
+    },
+    ai_taxonomy_json: {},
+  });
+
+  const phoneCheck = result.groups
+    .find((group) => group.group_key === "cta_contact")
+    ?.checks.find((check) => check.key === "phone");
+
+  assert.equal(phoneCheck?.suggested_value, "0812345678");
+  assert.deepEqual(phoneCheck?.source, { kind: "ai", confidence: "high", note: null });
 });
 
 test("requested-check preview shows only requested=true checks", () => {
@@ -2036,7 +2075,7 @@ test("buildRequestedChecksHandoffPayload omits requested_checks when nothing is 
   assert.equal(result, null);
 });
 
-test("buildFieldPackApiPayload preserves existing requested_checks_json when item editor has no requested-check DOM", () => {
+test("buildFieldPackApiPayload merges full standard catalogs with saved custom groups when item editor has no requested-check DOM", () => {
   requestedChecksEditorRoot = null;
   setBuildFieldPackApiPayloadState({
     requested_checks_json: {
@@ -2049,6 +2088,23 @@ test("buildFieldPackApiPayload preserves existing requested_checks_json when ite
             { key: "parking", label: "Parking", requested: true, instruction: "verify parking", answer_type: "text" },
           ],
         },
+        {
+          group_key: "custom",
+          group_label: "Custom checks",
+          checks: [
+            {
+              key: "wifi_password",
+              requested: true,
+              label: "Wi-Fi password",
+              instruction: "Ask for Wi-Fi password",
+              answer_type: "text",
+              suggested_value: "front desk only",
+              condition_prompt: null,
+              evidence_required: false,
+              source: { kind: "manual", confidence: "high" },
+            },
+          ],
+        },
       ],
     },
     ai_cta_contact_json: {},
@@ -2057,18 +2113,10 @@ test("buildFieldPackApiPayload preserves existing requested_checks_json when ite
   });
   const result = buildFieldPackApiPayload();
 
-  assert.deepEqual(result.requested_checks_json, {
-    version: 1,
-    groups: [
-      {
-        group_key: "taxonomy",
-        group_label: "Taxonomy",
-        checks: [
-          { key: "parking", label: "Parking", requested: true, instruction: "verify parking", answer_type: "text" },
-        ],
-      },
-    ],
-  });
+  assert.deepEqual(result.requested_checks_json.groups.map((group) => group.group_key), ["cta_contact", "taxonomy", "custom"]);
+  assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact")?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
+  assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy")?.checks.map((check) => check.key), ["category", "subtype", "tags"]);
+  assert.equal(result.requested_checks_json.groups.find((group) => group.group_key === "custom")?.checks[0].suggested_value, "front desk only");
 });
 
 test("buildFieldPackApiPayload prefers current auto CTA recommendations over stale saved rows", () => {
@@ -2117,11 +2165,19 @@ test("buildFieldPackApiPayload prefers current auto CTA recommendations over sta
   const result = buildFieldPackApiPayload();
   const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
   const phoneCheck = ctaGroup?.checks.find((check) => check.key === "phone");
+  const lineUrlCheck = ctaGroup?.checks.find((check) => check.key === "line_url");
+  const facebookCheck = ctaGroup?.checks.find((check) => check.key === "facebook_url");
+  const websiteCheck = ctaGroup?.checks.find((check) => check.key === "website_url");
+  const primaryCtaCheck = ctaGroup?.checks.find((check) => check.key === "primary_cta");
 
   assert.ok(ctaGroup);
-  assert.equal(ctaGroup.checks.length, 1);
+  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
   assert.equal(phoneCheck?.requested, true);
   assert.equal(phoneCheck?.suggested_value, "0812345678");
+  assert.equal(lineUrlCheck?.suggested_value, null);
+  assert.equal(facebookCheck?.suggested_value, null);
+  assert.equal(websiteCheck?.suggested_value, null);
+  assert.equal(primaryCtaCheck?.suggested_value, null);
   assert.equal(phoneCheck?.label, REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === "cta_contact")?.checks.find((check) => check.key === "phone")?.label);
 });
 
@@ -2204,9 +2260,11 @@ test("buildFieldPackApiPayload overlays explicitly edited live CTA checks while 
   const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
   const phoneCheck = ctaGroup?.checks.find((check) => check.key === "phone");
   const lineUrlCheck = ctaGroup?.checks.find((check) => check.key === "line_url");
+  const facebookCheck = ctaGroup?.checks.find((check) => check.key === "facebook_url");
 
   assert.ok(ctaGroup);
-  assert.equal(phoneCheck?.requested, false);
+  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
+  assert.equal(phoneCheck?.requested, true);
   assert.equal(phoneCheck?.label, "Edited phone");
   assert.equal(phoneCheck?.instruction, "updated instruction");
   assert.equal(phoneCheck?.condition_prompt, "edited condition");
@@ -2214,6 +2272,7 @@ test("buildFieldPackApiPayload overlays explicitly edited live CTA checks while 
   assert.equal(phoneCheck?.suggested_value, "0812345678");
   assert.equal(lineUrlCheck?.requested, true);
   assert.equal(lineUrlCheck?.suggested_value, "https://line.me/example");
+  assert.equal(facebookCheck?.requested, true);
 });
 
 test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks while preserving untouched auto checks", () => {
@@ -2295,15 +2354,19 @@ test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks w
   const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
   const categoryCheck = taxonomyGroup?.checks.find((check) => check.key === "category");
   const subtypeCheck = taxonomyGroup?.checks.find((check) => check.key === "subtype");
+  const tagsCheck = taxonomyGroup?.checks.find((check) => check.key === "tags");
 
   assert.ok(taxonomyGroup);
-  assert.equal(categoryCheck?.requested, false);
+  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["category", "subtype", "tags"]);
+  assert.equal(categoryCheck?.requested, true);
   assert.equal(categoryCheck?.label, "Edited category");
   assert.equal(categoryCheck?.instruction, "updated taxonomy instruction");
   assert.equal(categoryCheck?.condition_prompt, "edited taxonomy condition");
   assert.equal(categoryCheck?.suggested_value, "attractions");
   assert.equal(subtypeCheck?.requested, true);
   assert.equal(subtypeCheck?.suggested_value, "museum");
+  assert.equal(tagsCheck?.requested, true);
+  assert.equal(tagsCheck?.suggested_value, null);
 });
 
 test("buildFieldPackApiPayload preserves current custom groups from the live editor without letting stale auto rows override them", () => {
@@ -2436,11 +2499,12 @@ test("buildFieldPackApiPayload preserves current custom groups from the live edi
   assert.ok(customGroup);
   assert.equal(customGroup.checks[0].key, "wifi_password");
   assert.ok(ctaGroup);
+  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
   assert.equal(ctaGroup.checks[0].requested, true);
   assert.equal(ctaGroup.checks[0].suggested_value, "0812345678");
 });
 
-test("buildRequestedChecksAutoSaveState ignores unsupported keys outside the requested-check policy", () => {
+test("buildRequestedChecksAutoSaveState emits full standard catalogs and ignores unsupported AI suggestions", () => {
   const result = buildRequestedChecksAutoSaveState({
     ai_cta_contact_json: {
       phone: "0812345678",
@@ -2467,13 +2531,17 @@ test("buildRequestedChecksAutoSaveState ignores unsupported keys outside the req
   const ctaGroup = result.groups.find((group) => group.group_key === "cta_contact");
   const taxonomyGroup = result.groups.find((group) => group.group_key === "taxonomy");
 
-  assert.deepEqual(ctaGroup?.checks.map((check) => check.key), ["phone"]);
-  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), ["category"]);
-  assert.equal(ctaGroup?.checks[0].requested, true);
-  assert.equal(taxonomyGroup?.checks[0].requested, true);
+  assert.deepEqual(ctaGroup?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
+  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), ["category", "subtype", "tags"]);
+  assert.equal(ctaGroup?.checks.every((check) => check.requested === true), true);
+  assert.equal(taxonomyGroup?.checks.every((check) => check.requested === true), true);
+  assert.equal(ctaGroup?.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
+  assert.equal(ctaGroup?.checks.find((check) => check.key === "line_url")?.suggested_value, null);
+  assert.equal(taxonomyGroup?.checks.find((check) => check.key === "category")?.suggested_value, "attractions");
+  assert.equal(taxonomyGroup?.checks.find((check) => check.key === "subtype")?.suggested_value, null);
 });
 
-test("buildFieldPackApiPayload auto-builds taxonomy requested checks from verification hints", () => {
+test("buildFieldPackApiPayload emits full taxonomy catalog when AI data is empty", () => {
   requestedChecksEditorRoot = createRequestedChecksEditorRoot([]);
   setRequestedChecksEditorBaselineState(null);
   setBuildFieldPackApiPayloadState({
@@ -2494,15 +2562,22 @@ test("buildFieldPackApiPayload auto-builds taxonomy requested checks from verifi
   });
 
   const result = buildFieldPackApiPayload();
+  const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
   const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
   const categoryCheck = taxonomyGroup?.checks.find((check) => check.key === "category");
+  const subtypeCheck = taxonomyGroup?.checks.find((check) => check.key === "subtype");
+  const tagsCheck = taxonomyGroup?.checks.find((check) => check.key === "tags");
 
+  assert.ok(ctaGroup);
   assert.ok(taxonomyGroup);
+  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["category", "subtype", "tags"]);
   assert.equal(categoryCheck?.requested, true);
   assert.equal(categoryCheck?.suggested_value, null);
+  assert.equal(subtypeCheck?.requested, true);
+  assert.equal(tagsCheck?.requested, true);
 });
 
-test("buildFieldPackApiPayload does not require manual ticks when the requested-check editor root exists but is empty", () => {
+test("buildFieldPackApiPayload emits full standard catalogs when the requested-check editor root exists but is empty", () => {
   requestedChecksEditorRoot = createRequestedChecksEditorRoot([]);
   setRequestedChecksEditorBaselineState(null);
   setBuildFieldPackApiPayloadState({
@@ -2518,7 +2593,13 @@ test("buildFieldPackApiPayload does not require manual ticks when the requested-
   });
 
   const result = buildFieldPackApiPayload();
+  const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
+  const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
 
-  assert.ok(result.requested_checks_json.groups.some((group) => group.group_key === "cta_contact"));
-  assert.ok(result.requested_checks_json.groups.some((group) => group.group_key === "taxonomy"));
+  assert.ok(ctaGroup);
+  assert.ok(taxonomyGroup);
+  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
+  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["category", "subtype", "tags"]);
+  assert.equal(ctaGroup.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
+  assert.equal(taxonomyGroup.checks.find((check) => check.key === "category")?.suggested_value, "attractions");
 });

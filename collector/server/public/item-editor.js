@@ -2744,20 +2744,26 @@ function buildRequestedChecksEditorState(fieldPack = {}) {
         const aiSuggestedValue = template.group_key === "cta_contact"
           ? aiCta[check.key]
           : aiTaxonomy[check.key];
+        const savedSuggestedValue = Object.prototype.hasOwnProperty.call(savedCheck, "suggested_value")
+          ? savedCheck.suggested_value
+          : null;
+        const suggestedValue = hasRequestedCheckMeaningfulValue(aiSuggestedValue)
+          ? aiSuggestedValue
+          : (hasRequestedCheckMeaningfulValue(savedSuggestedValue) ? savedSuggestedValue : null);
         return {
           key: check.key,
           requested: savedCheck.requested === true,
           label: String(savedCheck.label || check.label || "").trim(),
           instruction: String(savedCheck.instruction || check.instruction || "").trim(),
           answer_type: String(savedCheck.answer_type || check.answer_type || "text").trim() || "text",
-          suggested_value: Object.prototype.hasOwnProperty.call(savedCheck, "suggested_value")
-            ? savedCheck.suggested_value
-            : (aiSuggestedValue ?? null),
+          suggested_value: suggestedValue,
           condition_prompt: savedCheck.condition_prompt == null
             ? (String(check.condition_prompt || "").trim() || null)
             : String(savedCheck.condition_prompt || "").trim() || null,
           evidence_required: savedCheck.evidence_required === true || check.evidence_required === true,
-          source: savedCheck.source || (aiSuggestedValue != null ? sourceMeta : null),
+          source: hasRequestedCheckMeaningfulValue(aiSuggestedValue)
+            ? sourceMeta
+            : (savedCheck.source || null),
         };
       }),
     };
@@ -2878,16 +2884,16 @@ function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}
       const checkKey = String(autoCheck?.key || "").trim().toLowerCase();
       const manualCheck = manualChecksByKey.get(checkKey);
       if (!manualCheck) return autoCheck;
-      const baselineCheck = baselineChecksByKey.get(checkKey) || {};
-      if (areEditableSnapshotsEqual(manualCheck, baselineCheck)) return autoCheck;
-      return {
-        ...autoCheck,
-        requested: manualCheck.requested === true,
-        label: String(manualCheck.label || autoCheck.label || "").trim(),
-        instruction: String(manualCheck.instruction || autoCheck.instruction || "").trim(),
-        answer_type: String(manualCheck.answer_type || autoCheck.answer_type || "text").trim() || "text",
-        condition_prompt: manualCheck.condition_prompt == null
-          ? (autoCheck.condition_prompt ?? null)
+    const baselineCheck = baselineChecksByKey.get(checkKey) || {};
+    if (areEditableSnapshotsEqual(manualCheck, baselineCheck)) return autoCheck;
+    return {
+      ...autoCheck,
+      requested: autoCheck.requested === true,
+      label: String(manualCheck.label || autoCheck.label || "").trim(),
+      instruction: String(manualCheck.instruction || autoCheck.instruction || "").trim(),
+      answer_type: String(manualCheck.answer_type || autoCheck.answer_type || "text").trim() || "text",
+      condition_prompt: manualCheck.condition_prompt == null
+        ? (autoCheck.condition_prompt ?? null)
           : String(manualCheck.condition_prompt || "").trim() || null,
         evidence_required: manualCheck.evidence_required === true,
       };
@@ -2916,13 +2922,6 @@ function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}
 }
 
 function buildRequestedChecksAutoSaveState(fieldPack = {}, item = state.item) {
-  const contract = parseFieldPackContractFromWriterNotes(fieldPack?.writer_notes);
-  const verification = contract?.verification && typeof contract.verification === "object" ? contract.verification : {};
-  const checklists = contract?.checklists && typeof contract.checklists === "object" ? contract.checklists : {};
-  const autoRequestKeys = new Set([
-    ...toReviewList(verification.needs_verification),
-    ...toReviewList(checklists.missing_data),
-  ].map((key) => normalizeRequestedCheckKey(key)));
   const aiCta = fieldPack?.ai_cta_contact_json && typeof fieldPack.ai_cta_contact_json === "object" ? fieldPack.ai_cta_contact_json : {};
   const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object" ? fieldPack.ai_taxonomy_json : {};
   const sourceMeta = {
@@ -2939,32 +2938,28 @@ function buildRequestedChecksAutoSaveState(fieldPack = {}, item = state.item) {
         const groupSource = template.group_key === "cta_contact" ? aiCta : aiTaxonomy;
         const checks = (Array.isArray(template?.checks) ? template.checks : [])
           .map((check) => {
-            const normalizedKey = normalizeRequestedCheckKey(check?.key);
             const suggestedValue = Object.prototype.hasOwnProperty.call(groupSource, check.key)
               ? groupSource[check.key]
               : null;
-            const shouldRequest = autoRequestKeys.has(normalizedKey) || hasRequestedCheckMeaningfulValue(suggestedValue);
-            if (!shouldRequest) return null;
             return {
               key: check.key,
               requested: true,
               label: String(check.label || "").trim(),
               instruction: String(check.instruction || "").trim(),
               answer_type: String(check.answer_type || "text").trim() || "text",
-              suggested_value: suggestedValue ?? null,
+              suggested_value: hasRequestedCheckMeaningfulValue(suggestedValue) ? suggestedValue : null,
               condition_prompt: String(check.condition_prompt || "").trim() || null,
               evidence_required: check.evidence_required === true,
-              source: suggestedValue != null ? sourceMeta : null,
+              source: hasRequestedCheckMeaningfulValue(suggestedValue) ? sourceMeta : null,
             };
           })
-          .filter(Boolean);
-        return checks.length ? {
+        return {
           group_key: template.group_key,
           group_label: template.group_label,
           checks,
-        } : null;
+        };
       })
-      .filter(Boolean),
+      .filter((group) => Array.isArray(group.checks) && group.checks.length > 0),
   };
 }
 
@@ -4275,7 +4270,6 @@ function buildFieldPackApiPayload() {
       ? pack.requested_checks_json
       : null);
   const autoRequestedChecksJson = buildRequestedChecksAutoSaveState(fieldPackSource, state.item);
-  const hasSavedRequestedChecks = Array.isArray(savedRequestedChecksJson?.groups) && savedRequestedChecksJson.groups.length > 0;
   let requestedChecksJson = autoRequestedChecksJson;
   if (requestedChecksEditor) {
     const editorRequestedChecksJson = readRequestedChecksEditorState();
@@ -4289,10 +4283,13 @@ function buildFieldPackApiPayload() {
     if (Array.isArray(mergedRequestedChecksJson?.groups) && mergedRequestedChecksJson.groups.length > 0) {
       requestedChecksJson = mergedRequestedChecksJson;
     }
-  } else if (Array.isArray(autoRequestedChecksJson?.groups) && autoRequestedChecksJson.groups.length > 0) {
-    requestedChecksJson = autoRequestedChecksJson;
-  } else if (hasSavedRequestedChecks) {
-    requestedChecksJson = savedRequestedChecksJson;
+  } else if (Array.isArray(savedRequestedChecksJson?.groups) && savedRequestedChecksJson.groups.length > 0) {
+    requestedChecksJson = mergeRequestedChecksAutoAndManualState(
+      autoRequestedChecksJson,
+      savedRequestedChecksJson,
+      savedRequestedChecksJson,
+      state.item
+    );
   }
   return {
     ...buildFieldPackTopLevelPayload({
