@@ -2795,6 +2795,179 @@ function getRequestedCheckEditorGroups(fieldPack = {}, item = state.item) {
   });
 }
 
+let requestedChecksEditorBaselineState = null;
+
+function setRequestedChecksEditorBaselineState(nextState = null) {
+  requestedChecksEditorBaselineState = nextState && typeof nextState === "object" ? nextState : null;
+}
+
+function getRequestedChecksEditorBaselineState(fieldPack = {}) {
+  return requestedChecksEditorBaselineState
+    || buildRequestedChecksEditorState(fieldPack);
+}
+
+function getRequestedCheckEditableSnapshot(check = {}) {
+  return {
+    key: String(check?.key || "").trim().toLowerCase(),
+    requested: check?.requested === true,
+    label: String(check?.label || "").trim(),
+    instruction: String(check?.instruction || "").trim(),
+    answer_type: String(check?.answer_type || "text").trim() || "text",
+    condition_prompt: check?.condition_prompt == null ? null : String(check.condition_prompt || "").trim() || null,
+    evidence_required: check?.evidence_required === true,
+  };
+}
+
+function areRequestedCheckEditableSnapshotsEqual(left = {}, right = {}) {
+  const leftSnapshot = getRequestedCheckEditableSnapshot(left);
+  const rightSnapshot = getRequestedCheckEditableSnapshot(right);
+  return Object.keys(leftSnapshot).every((key) => leftSnapshot[key] === rightSnapshot[key]);
+}
+
+function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}, baselineState = {}, item = state.item) {
+  const autoGroups = Array.isArray(autoState?.groups) ? autoState.groups : [];
+  const toEditableSnapshot = (check = {}) => ({
+    key: String(check?.key || "").trim().toLowerCase(),
+    requested: check?.requested === true,
+    label: String(check?.label || "").trim(),
+    instruction: String(check?.instruction || "").trim(),
+    answer_type: String(check?.answer_type || "text").trim() || "text",
+    condition_prompt: check?.condition_prompt == null ? null : String(check.condition_prompt || "").trim() || null,
+    evidence_required: check?.evidence_required === true,
+  });
+  const areEditableSnapshotsEqual = (left = {}, right = {}) => {
+    const leftSnapshot = toEditableSnapshot(left);
+    const rightSnapshot = toEditableSnapshot(right);
+    return Object.keys(leftSnapshot).every((key) => leftSnapshot[key] === rightSnapshot[key]);
+  };
+  const manualGroups = new Map(
+    (Array.isArray(manualState?.groups) ? manualState.groups : [])
+      .map((group) => {
+        const normalizedGroup = {
+          ...group,
+          group_key: String(group?.group_key || "").trim().toLowerCase(),
+          checks: Array.isArray(group?.checks) ? group.checks : [],
+        };
+        return [normalizedGroup.group_key, normalizedGroup];
+      })
+      .filter(([groupKey, group]) => Boolean(groupKey) && Array.isArray(group.checks) && group.checks.length > 0)
+  );
+  const baselineGroups = new Map(
+    (Array.isArray(baselineState?.groups) ? baselineState.groups : [])
+      .map((group) => {
+        const normalizedGroup = {
+          ...group,
+          group_key: String(group?.group_key || "").trim().toLowerCase(),
+          checks: Array.isArray(group?.checks) ? group.checks : [],
+        };
+        return [normalizedGroup.group_key, normalizedGroup];
+      })
+  );
+  const mergedGroups = autoGroups.map((autoGroup) => {
+    const groupKey = String(autoGroup?.group_key || "").trim().toLowerCase();
+    const manualGroup = manualGroups.get(groupKey);
+    const baselineGroup = baselineGroups.get(groupKey);
+    if (!manualGroup) return autoGroup;
+    const manualChecksByKey = new Map(
+      manualGroup.checks.map((check) => [String(check?.key || "").trim().toLowerCase(), check])
+    );
+    const baselineChecksByKey = new Map(
+      (Array.isArray(baselineGroup?.checks) ? baselineGroup.checks : []).map((check) => [String(check?.key || "").trim().toLowerCase(), check])
+    );
+    const checks = (Array.isArray(autoGroup?.checks) ? autoGroup.checks : []).map((autoCheck) => {
+      const checkKey = String(autoCheck?.key || "").trim().toLowerCase();
+      const manualCheck = manualChecksByKey.get(checkKey);
+      if (!manualCheck) return autoCheck;
+      const baselineCheck = baselineChecksByKey.get(checkKey) || {};
+      if (areEditableSnapshotsEqual(manualCheck, baselineCheck)) return autoCheck;
+      return {
+        ...autoCheck,
+        requested: manualCheck.requested === true,
+        label: String(manualCheck.label || autoCheck.label || "").trim(),
+        instruction: String(manualCheck.instruction || autoCheck.instruction || "").trim(),
+        answer_type: String(manualCheck.answer_type || autoCheck.answer_type || "text").trim() || "text",
+        condition_prompt: manualCheck.condition_prompt == null
+          ? (autoCheck.condition_prompt ?? null)
+          : String(manualCheck.condition_prompt || "").trim() || null,
+        evidence_required: manualCheck.evidence_required === true,
+      };
+    });
+    return {
+      ...autoGroup,
+      checks,
+    };
+  });
+  const autoGroupKeys = new Set(autoGroups.map((group) => String(group?.group_key || "").trim().toLowerCase()).filter(Boolean));
+  const preservedManualGroups = (Array.isArray(manualState?.groups) ? manualState.groups : [])
+    .map((group) => ({
+      ...group,
+      group_key: String(group?.group_key || "").trim().toLowerCase(),
+      checks: Array.isArray(group?.checks) ? group.checks : [],
+    }))
+    .filter((group) => {
+      if (!group.group_key || autoGroupKeys.has(group.group_key)) return false;
+      return Array.isArray(group.checks) && group.checks.length > 0;
+    });
+
+  return {
+    version: 1,
+    groups: [...mergedGroups, ...preservedManualGroups],
+  };
+}
+
+function buildRequestedChecksAutoSaveState(fieldPack = {}, item = state.item) {
+  const contract = parseFieldPackContractFromWriterNotes(fieldPack?.writer_notes);
+  const verification = contract?.verification && typeof contract.verification === "object" ? contract.verification : {};
+  const checklists = contract?.checklists && typeof contract.checklists === "object" ? contract.checklists : {};
+  const autoRequestKeys = new Set([
+    ...toReviewList(verification.needs_verification),
+    ...toReviewList(checklists.missing_data),
+  ].map((key) => normalizeRequestedCheckKey(key)));
+  const aiCta = fieldPack?.ai_cta_contact_json && typeof fieldPack.ai_cta_contact_json === "object" ? fieldPack.ai_cta_contact_json : {};
+  const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object" ? fieldPack.ai_taxonomy_json : {};
+  const sourceMeta = {
+    kind: "ai",
+    confidence: aiCta.confidence || aiTaxonomy.confidence || "unknown",
+    note: null,
+  };
+
+  return {
+    version: 1,
+    groups: REQUESTED_CHECK_GROUP_TEMPLATES
+      .filter((template) => shouldKeepRequestedCheckGroupForItem(template?.group_key, item))
+      .map((template) => {
+        const groupSource = template.group_key === "cta_contact" ? aiCta : aiTaxonomy;
+        const checks = (Array.isArray(template?.checks) ? template.checks : [])
+          .map((check) => {
+            const normalizedKey = normalizeRequestedCheckKey(check?.key);
+            const suggestedValue = Object.prototype.hasOwnProperty.call(groupSource, check.key)
+              ? groupSource[check.key]
+              : null;
+            const shouldRequest = autoRequestKeys.has(normalizedKey) || hasRequestedCheckMeaningfulValue(suggestedValue);
+            if (!shouldRequest) return null;
+            return {
+              key: check.key,
+              requested: true,
+              label: String(check.label || "").trim(),
+              instruction: String(check.instruction || "").trim(),
+              answer_type: String(check.answer_type || "text").trim() || "text",
+              suggested_value: suggestedValue ?? null,
+              condition_prompt: String(check.condition_prompt || "").trim() || null,
+              evidence_required: check.evidence_required === true,
+              source: suggestedValue != null ? sourceMeta : null,
+            };
+          })
+          .filter(Boolean);
+        return checks.length ? {
+          group_key: template.group_key,
+          group_label: template.group_label,
+          checks,
+        } : null;
+      })
+      .filter(Boolean),
+  };
+}
+
 function buildRequestedChecksPreviewHtml(requestedChecks = { version: 1, groups: [] }, fieldPack = state.fieldPack || null) {
   return buildRequestedChecksCompactPreviewHtml(requestedChecks, fieldPack, state.item);
 }
@@ -2805,9 +2978,12 @@ function renderRequestedChecksPreview(requestedChecks = readRequestedChecksEdito
   node.innerHTML = "";
 }
 
-function renderRequestedChecksEditor(fieldPack = {}) {
+function renderRequestedChecksEditor(fieldPack = {}, options = {}) {
   const root = qs("fp-requested-checks-editor");
   if (!root) return;
+  if (options.resetBaseline !== false) {
+    setRequestedChecksEditorBaselineState(buildRequestedChecksEditorState(fieldPack));
+  }
   root.innerHTML = buildRequestedChecksEditorHtml(fieldPack, state.item);
   root.querySelectorAll("textarea").forEach((node) => autosizeTextarea(node));
 }
@@ -4092,11 +4268,32 @@ function buildFieldPackApiPayload() {
   const pack = readFieldPackFormState();
   const existing = state.fieldPack || {};
   const requestedChecksEditor = qs("fp-requested-checks-editor");
-  const requestedChecksJson = requestedChecksEditor
-    ? readRequestedChecksEditorState()
-    : existing.requested_checks_json && typeof existing.requested_checks_json === "object"
-      ? existing.requested_checks_json
-      : pack.requested_checks_json;
+  const fieldPackSource = { ...existing, ...pack };
+  const savedRequestedChecksJson = existing.requested_checks_json && typeof existing.requested_checks_json === "object"
+    ? existing.requested_checks_json
+    : (pack.requested_checks_json && typeof pack.requested_checks_json === "object"
+      ? pack.requested_checks_json
+      : null);
+  const autoRequestedChecksJson = buildRequestedChecksAutoSaveState(fieldPackSource, state.item);
+  const hasSavedRequestedChecks = Array.isArray(savedRequestedChecksJson?.groups) && savedRequestedChecksJson.groups.length > 0;
+  let requestedChecksJson = autoRequestedChecksJson;
+  if (requestedChecksEditor) {
+    const editorRequestedChecksJson = readRequestedChecksEditorState();
+    const baselineRequestedChecksJson = getRequestedChecksEditorBaselineState(fieldPackSource);
+    const mergedRequestedChecksJson = mergeRequestedChecksAutoAndManualState(
+      autoRequestedChecksJson,
+      editorRequestedChecksJson,
+      baselineRequestedChecksJson,
+      state.item
+    );
+    if (Array.isArray(mergedRequestedChecksJson?.groups) && mergedRequestedChecksJson.groups.length > 0) {
+      requestedChecksJson = mergedRequestedChecksJson;
+    }
+  } else if (Array.isArray(autoRequestedChecksJson?.groups) && autoRequestedChecksJson.groups.length > 0) {
+    requestedChecksJson = autoRequestedChecksJson;
+  } else if (hasSavedRequestedChecks) {
+    requestedChecksJson = savedRequestedChecksJson;
+  }
   return {
     ...buildFieldPackTopLevelPayload({
       ...pack,
@@ -5679,7 +5876,7 @@ function wire() {
         evidence_required: false,
         source: null,
       });
-      renderRequestedChecksEditor({ requested_checks_json: current });
+      renderRequestedChecksEditor({ requested_checks_json: current }, { resetBaseline: false });
       applyEditorActionGuards();
       renderStepFourGuides();
       renderRequestedChecksPreview();

@@ -123,6 +123,10 @@ const buildRequestedChecksEditorState = loadNamedFunction(itemEditorJs, "buildRe
 const isPlaceRequestedCheckItem = loadNamedFunction(itemEditorJs, "isPlaceRequestedCheckItem", {
   state: { item: { type: "place" } },
 });
+const shouldKeepRequestedCheckGroupForItem = loadNamedFunction(itemEditorJs, "shouldKeepRequestedCheckGroupForItem", {
+  isPlaceRequestedCheckItem,
+  state: { item: { type: "place" } },
+});
 const getRequestedCheckEditorGroups = loadNamedFunction(itemEditorJs, "getRequestedCheckEditorGroups", {
   buildRequestedChecksEditorState,
   isPlaceRequestedCheckItem,
@@ -171,6 +175,26 @@ const resolveGuidanceRowValue = loadNamedFunction(itemEditorJs, "resolveGuidance
 const extractRequestedCheckArticleContextHints = loadNamedFunction(itemEditorJs, "extractRequestedCheckArticleContextHints");
 const parseTaxonomyContract = loadNamedFunction(itemEditorJs, "parseTaxonomyContract");
 const toReviewList = loadNamedFunction(itemEditorJs, "toReviewList");
+const buildRequestedChecksAutoSaveState = loadNamedFunction(itemEditorJs, "buildRequestedChecksAutoSaveState", {
+  REQUESTED_CHECK_GROUP_TEMPLATES,
+  parseFieldPackContractFromWriterNotes,
+  toReviewList,
+  normalizeRequestedCheckKey,
+  shouldKeepRequestedCheckGroupForItem,
+  hasRequestedCheckMeaningfulValue,
+  state: { item: { type: "place" } },
+});
+const mergeRequestedChecksAutoAndManualState = loadNamedFunction(itemEditorJs, "mergeRequestedChecksAutoAndManualState", {
+  REQUESTED_CHECK_GROUP_TEMPLATES,
+  state: { item: { type: "place" } },
+});
+const requestedChecksEditorBaselineState = { value: null };
+const getRequestedChecksEditorBaselineState = (fieldPack = {}) => {
+  return requestedChecksEditorBaselineState.value || buildRequestedChecksEditorState(fieldPack);
+};
+const setRequestedChecksEditorBaselineState = (nextState = null) => {
+  requestedChecksEditorBaselineState.value = nextState && typeof nextState === "object" ? nextState : null;
+};
 const taxonomyFieldLabel = loadNamedFunction(itemEditorJs, "taxonomyFieldLabel");
 const normalizeItemGuidanceToken = loadNamedFunction(itemEditorJs, "normalizeItemGuidanceToken");
 const resolveItemGuidanceScope = loadNamedFunction(itemEditorJs, "resolveItemGuidanceScope", {
@@ -309,23 +333,43 @@ const buildRequestedChecksPreviewHtml = loadNamedFunction(itemEditorJs, "buildRe
     }),
   }),
 });
-const buildFieldPackApiPayload = loadNamedFunction(itemEditorJs, "buildFieldPackApiPayload", {
-  state: {
-    fieldPack: {
-      requested_checks_json: {
-        version: 1,
-        groups: [
-          {
-            group_key: "taxonomy",
-            group_label: "Taxonomy",
-            checks: [
-              { key: "parking", label: "Parking", requested: true, instruction: "verify parking", answer_type: "text" },
-            ],
-          },
-        ],
-      },
+const buildFieldPackApiPayloadState = {
+  fieldPack: {
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            { key: "parking", label: "Parking", requested: true, instruction: "verify parking", answer_type: "text" },
+          ],
+        },
+      ],
     },
+    ai_cta_contact_json: {
+      phone: "0812345678",
+      confidence: "high",
+    },
+    ai_taxonomy_json: {
+      category: "attractions",
+      confidence: "medium",
+    },
+    writer_notes: JSON.stringify({
+      contract_version: "1",
+      taxonomy_version: "page_curation_taxonomy_v1",
+      verification: {
+        needs_verification: ["parking"],
+        publish_blockers: [],
+      },
+      checklists: {
+        missing_data: ["phone"],
+      },
+    }),
   },
+};
+const buildFieldPackApiPayload = loadNamedFunction(itemEditorJs, "buildFieldPackApiPayload", {
+  state: buildFieldPackApiPayloadState,
   qs: (id) => (id === "fp-requested-checks-editor" ? requestedChecksEditorRoot : null),
   readFieldPackFormState: () => ({
     id: 1,
@@ -361,8 +405,12 @@ const buildFieldPackApiPayload = loadNamedFunction(itemEditorJs, "buildFieldPack
   buildFieldPackReferencePayload: () => [],
   buildFieldPackMediaHintPayload: () => [],
   buildFieldPackAssignmentPayload: () => [],
+  buildRequestedChecksAutoSaveState,
   readRequestedChecksEditorState,
   mergeRequestedChecksForSave,
+  mergeRequestedChecksAutoAndManualState,
+  getRequestedChecksEditorBaselineState,
+  setRequestedChecksEditorBaselineState,
   buildRequestedChecksEditorState,
 });
 
@@ -403,6 +451,10 @@ function createRequestedChecksEditorRoot(groups) {
       return selector === "[data-requested-group]" ? groupNodes : [];
     },
   };
+}
+
+function setBuildFieldPackApiPayloadState(fieldPack) {
+  buildFieldPackApiPayloadState.fieldPack = fieldPack;
 }
 
 test("delete custom check removes it from saved payload instead of reviving existing state", () => {
@@ -1986,6 +2038,23 @@ test("buildRequestedChecksHandoffPayload omits requested_checks when nothing is 
 
 test("buildFieldPackApiPayload preserves existing requested_checks_json when item editor has no requested-check DOM", () => {
   requestedChecksEditorRoot = null;
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            { key: "parking", label: "Parking", requested: true, instruction: "verify parking", answer_type: "text" },
+          ],
+        },
+      ],
+    },
+    ai_cta_contact_json: {},
+    ai_taxonomy_json: {},
+    writer_notes: "",
+  });
   const result = buildFieldPackApiPayload();
 
   assert.deepEqual(result.requested_checks_json, {
@@ -2002,87 +2071,454 @@ test("buildFieldPackApiPayload preserves existing requested_checks_json when ite
   });
 });
 
-test("buildFieldPackApiPayload reads live requested-check editor state when editor DOM exists", () => {
+test("buildFieldPackApiPayload prefers current auto CTA recommendations over stale saved rows", () => {
+  requestedChecksEditorRoot = null;
+  setRequestedChecksEditorBaselineState(null);
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: false,
+              label: "Stale phone",
+              instruction: "stale",
+              answer_type: "phone",
+              suggested_value: "0999999999",
+              condition_prompt: null,
+              evidence_required: false,
+            },
+          ],
+        },
+      ],
+    },
+    ai_cta_contact_json: {
+      phone: "0812345678",
+      confidence: "high",
+    },
+    ai_taxonomy_json: {},
+    writer_notes: JSON.stringify({
+      contract_version: "1",
+      taxonomy_version: "page_curation_taxonomy_v1",
+      verification: {
+        needs_verification: ["phone"],
+        publish_blockers: [],
+      },
+      checklists: {
+        missing_data: [],
+      },
+    }),
+  });
+
+  const result = buildFieldPackApiPayload();
+  const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
+  const phoneCheck = ctaGroup?.checks.find((check) => check.key === "phone");
+
+  assert.ok(ctaGroup);
+  assert.equal(ctaGroup.checks.length, 1);
+  assert.equal(phoneCheck?.requested, true);
+  assert.equal(phoneCheck?.suggested_value, "0812345678");
+  assert.equal(phoneCheck?.label, REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === "cta_contact")?.checks.find((check) => check.key === "phone")?.label);
+});
+
+test("buildFieldPackApiPayload overlays explicitly edited live CTA checks while preserving untouched auto checks", () => {
   requestedChecksEditorRoot = createRequestedChecksEditorRoot([
     {
       groupKey: "cta_contact",
       checks: [
         {
           key: "phone",
-          label: "Phone",
-          requested: true,
-          instruction: "verify phone",
-          answer_type: "phone",
-        },
-        {
-          key: "website_url",
-          label: "Website URL",
           requested: false,
-          instruction: "verify website",
-          answer_type: "url",
-        },
-      ],
-    },
-    {
-      groupKey: "taxonomy",
-      checks: [
-        {
-          key: "category",
-          label: "Category",
-          requested: true,
-          instruction: "verify category",
-          answer_type: "text",
-          condition_prompt: "only if needed",
+          label: "Edited phone",
+          instruction: "updated instruction",
+          answer_type: "phone",
+          condition_prompt: "edited condition",
           evidence_required: true,
+        },
+        {
+          key: "line_url",
+          requested: false,
+          label: "LINE URL",
+          instruction: "confirm line",
+          answer_type: "url",
+          condition_prompt: null,
+          evidence_required: false,
         },
       ],
     },
   ]);
-
-  const result = buildFieldPackApiPayload();
-
-  assert.deepEqual(result.requested_checks_json, {
+  setRequestedChecksEditorBaselineState({
     version: 1,
     groups: [
       {
         group_key: "cta_contact",
-        group_label: getRequestedCheckDefaultGroupLabel("cta_contact"),
+        group_label: "CTA/contact",
         checks: [
           {
             key: "phone",
-            requested: true,
+            requested: false,
             label: "Phone",
-            instruction: "verify phone",
+            instruction: "confirm phone",
             answer_type: "phone",
             condition_prompt: null,
             evidence_required: false,
           },
           {
-            key: "website_url",
+            key: "line_url",
             requested: false,
-            label: "Website URL",
-            instruction: "verify website",
+            label: "LINE URL",
+            instruction: "confirm line",
             answer_type: "url",
             condition_prompt: null,
             evidence_required: false,
           },
         ],
       },
+    ],
+  });
+  setBuildFieldPackApiPayloadState({
+    ai_cta_contact_json: {
+      phone: "0812345678",
+      line_url: "https://line.me/example",
+      confidence: "high",
+    },
+    ai_taxonomy_json: {},
+    writer_notes: JSON.stringify({
+      contract_version: "1",
+      taxonomy_version: "page_curation_taxonomy_v1",
+      verification: {
+        needs_verification: ["phone", "line_url"],
+        publish_blockers: [],
+      },
+      checklists: {
+        missing_data: [],
+      },
+    }),
+  });
+
+  const result = buildFieldPackApiPayload();
+  const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
+  const phoneCheck = ctaGroup?.checks.find((check) => check.key === "phone");
+  const lineUrlCheck = ctaGroup?.checks.find((check) => check.key === "line_url");
+
+  assert.ok(ctaGroup);
+  assert.equal(phoneCheck?.requested, false);
+  assert.equal(phoneCheck?.label, "Edited phone");
+  assert.equal(phoneCheck?.instruction, "updated instruction");
+  assert.equal(phoneCheck?.condition_prompt, "edited condition");
+  assert.equal(phoneCheck?.evidence_required, true);
+  assert.equal(phoneCheck?.suggested_value, "0812345678");
+  assert.equal(lineUrlCheck?.requested, true);
+  assert.equal(lineUrlCheck?.suggested_value, "https://line.me/example");
+});
+
+test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks while preserving untouched auto checks", () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([
+    {
+      groupKey: "taxonomy",
+      checks: [
+        {
+          key: "category",
+          requested: false,
+          label: "Edited category",
+          instruction: "updated taxonomy instruction",
+          answer_type: "text",
+          condition_prompt: "edited taxonomy condition",
+          evidence_required: false,
+        },
+        {
+          key: "subtype",
+          requested: false,
+          label: "Subtype",
+          instruction: "confirm subtype",
+          answer_type: "text",
+          condition_prompt: null,
+          evidence_required: false,
+        },
+      ],
+    },
+  ]);
+  setRequestedChecksEditorBaselineState({
+    version: 1,
+    groups: [
       {
         group_key: "taxonomy",
-        group_label: getRequestedCheckDefaultGroupLabel("taxonomy"),
+        group_label: "Taxonomy",
         checks: [
           {
             key: "category",
-            requested: true,
+            requested: false,
             label: "Category",
-            instruction: "verify category",
+            instruction: "confirm category",
             answer_type: "text",
-            condition_prompt: "only if needed",
-            evidence_required: true,
+            condition_prompt: null,
+            evidence_required: false,
+          },
+          {
+            key: "subtype",
+            requested: false,
+            label: "Subtype",
+            instruction: "confirm subtype",
+            answer_type: "text",
+            condition_prompt: null,
+            evidence_required: false,
           },
         ],
       },
     ],
   });
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: { version: 1, groups: [] },
+    ai_cta_contact_json: {},
+    ai_taxonomy_json: {
+      category: "attractions",
+      subtype: "museum",
+    },
+    writer_notes: JSON.stringify({
+      contract_version: "1",
+      taxonomy_version: "page_curation_taxonomy_v1",
+      verification: {
+        needs_verification: ["category", "subtype"],
+        publish_blockers: [],
+      },
+      checklists: {
+        missing_data: [],
+      },
+    }),
+  });
+
+  const result = buildFieldPackApiPayload();
+  const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+  const categoryCheck = taxonomyGroup?.checks.find((check) => check.key === "category");
+  const subtypeCheck = taxonomyGroup?.checks.find((check) => check.key === "subtype");
+
+  assert.ok(taxonomyGroup);
+  assert.equal(categoryCheck?.requested, false);
+  assert.equal(categoryCheck?.label, "Edited category");
+  assert.equal(categoryCheck?.instruction, "updated taxonomy instruction");
+  assert.equal(categoryCheck?.condition_prompt, "edited taxonomy condition");
+  assert.equal(categoryCheck?.suggested_value, "attractions");
+  assert.equal(subtypeCheck?.requested, true);
+  assert.equal(subtypeCheck?.suggested_value, "museum");
+});
+
+test("buildFieldPackApiPayload preserves current custom groups from the live editor without letting stale auto rows override them", () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([
+    {
+      groupKey: "cta_contact",
+      checks: [
+        {
+          key: "phone",
+          requested: false,
+          label: "Phone",
+          instruction: "confirm phone",
+          answer_type: "phone",
+          condition_prompt: null,
+          evidence_required: false,
+        },
+      ],
+    },
+    {
+      groupKey: "custom",
+      checks: [
+        {
+          key: "wifi_password",
+          requested: true,
+          label: "Wi-Fi password",
+          instruction: "Ask for Wi-Fi password",
+          answer_type: "text",
+          condition_prompt: null,
+          evidence_required: false,
+        },
+      ],
+    },
+  ]);
+  setRequestedChecksEditorBaselineState({
+    version: 1,
+    groups: [
+      {
+        group_key: "cta_contact",
+        group_label: "CTA/contact",
+        checks: [
+          {
+            key: "phone",
+            requested: false,
+            label: "Phone",
+            instruction: "confirm phone",
+            answer_type: "phone",
+            condition_prompt: null,
+            evidence_required: false,
+          },
+        ],
+      },
+      {
+        group_key: "custom",
+        group_label: "Custom checks",
+        checks: [
+          {
+            key: "wifi_password",
+            requested: true,
+            label: "Wi-Fi password",
+            instruction: "Ask for Wi-Fi password",
+            answer_type: "text",
+            condition_prompt: null,
+            evidence_required: false,
+          },
+        ],
+      },
+    ],
+  });
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: false,
+              label: "Stale phone",
+              instruction: "stale",
+              answer_type: "phone",
+              suggested_value: "0999999999",
+              condition_prompt: null,
+              evidence_required: false,
+            },
+          ],
+        },
+        {
+          group_key: "custom",
+          group_label: "Custom checks",
+          checks: [
+            {
+              key: "wifi_password",
+              requested: true,
+              label: "Wi-Fi password",
+              instruction: "Ask for Wi-Fi password",
+              answer_type: "text",
+              suggested_value: null,
+              condition_prompt: null,
+              evidence_required: false,
+              source: null,
+            },
+          ],
+        },
+      ],
+    },
+    ai_cta_contact_json: {
+      phone: "0812345678",
+      confidence: "high",
+    },
+    ai_taxonomy_json: {},
+    writer_notes: JSON.stringify({
+      contract_version: "1",
+      taxonomy_version: "page_curation_taxonomy_v1",
+      verification: {
+        needs_verification: ["phone"],
+        publish_blockers: [],
+      },
+      checklists: {
+        missing_data: [],
+      },
+    }),
+  });
+
+  const result = buildFieldPackApiPayload();
+  const customGroup = result.requested_checks_json.groups.find((group) => group.group_key === "custom");
+  const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
+
+  assert.ok(customGroup);
+  assert.equal(customGroup.checks[0].key, "wifi_password");
+  assert.ok(ctaGroup);
+  assert.equal(ctaGroup.checks[0].requested, true);
+  assert.equal(ctaGroup.checks[0].suggested_value, "0812345678");
+});
+
+test("buildRequestedChecksAutoSaveState ignores unsupported keys outside the requested-check policy", () => {
+  const result = buildRequestedChecksAutoSaveState({
+    ai_cta_contact_json: {
+      phone: "0812345678",
+      fax: "999-9999",
+      confidence: "high",
+    },
+    ai_taxonomy_json: {
+      category: "attractions",
+      parking: "lot",
+    },
+    writer_notes: JSON.stringify({
+      contract_version: "1",
+      taxonomy_version: "page_curation_taxonomy_v1",
+      verification: {
+        needs_verification: ["fax", "parking"],
+        publish_blockers: [],
+      },
+      checklists: {
+        missing_data: ["fax", "parking"],
+      },
+    }),
+  });
+
+  const ctaGroup = result.groups.find((group) => group.group_key === "cta_contact");
+  const taxonomyGroup = result.groups.find((group) => group.group_key === "taxonomy");
+
+  assert.deepEqual(ctaGroup?.checks.map((check) => check.key), ["phone"]);
+  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), ["category"]);
+  assert.equal(ctaGroup?.checks[0].requested, true);
+  assert.equal(taxonomyGroup?.checks[0].requested, true);
+});
+
+test("buildFieldPackApiPayload auto-builds taxonomy requested checks from verification hints", () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([]);
+  setRequestedChecksEditorBaselineState(null);
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: { version: 1, groups: [] },
+    ai_cta_contact_json: {},
+    ai_taxonomy_json: {},
+    writer_notes: JSON.stringify({
+      contract_version: "1",
+      taxonomy_version: "page_curation_taxonomy_v1",
+      verification: {
+        needs_verification: ["category"],
+        publish_blockers: [],
+      },
+      checklists: {
+        missing_data: [],
+      },
+    }),
+  });
+
+  const result = buildFieldPackApiPayload();
+  const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+  const categoryCheck = taxonomyGroup?.checks.find((check) => check.key === "category");
+
+  assert.ok(taxonomyGroup);
+  assert.equal(categoryCheck?.requested, true);
+  assert.equal(categoryCheck?.suggested_value, null);
+});
+
+test("buildFieldPackApiPayload does not require manual ticks when the requested-check editor root exists but is empty", () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([]);
+  setRequestedChecksEditorBaselineState(null);
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: { version: 1, groups: [] },
+    ai_cta_contact_json: {
+      phone: "0812345678",
+      confidence: "high",
+    },
+    ai_taxonomy_json: {
+      category: "attractions",
+    },
+    writer_notes: "",
+  });
+
+  const result = buildFieldPackApiPayload();
+
+  assert.ok(result.requested_checks_json.groups.some((group) => group.group_key === "cta_contact"));
+  assert.ok(result.requested_checks_json.groups.some((group) => group.group_key === "taxonomy"));
 });
