@@ -6705,25 +6705,35 @@ function renderAssignmentSubmissionForm(assignment = null) {
     : null;
   const requestedCheckGroups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackageState);
   const handoffLoadState = assignmentId > 0 ? state.assignments.handoffSourceLoaded?.[assignmentId] : null;
+  const existingDraft = assignmentId > 0 ? state.assignments.requestedCheckReturnDrafts?.[assignmentId] || null : null;
+  const normalizedDraft = requestedCheckGroups.length
+    ? normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackageState)
+    : null;
+  const requestedCheckSectionHtml = requestedCheckGroups.length
+    ? buildAssignmentRequestedCheckReturnSectionHtml(assignment, handoffPackageState, normalizedDraft)
+    : "";
   if (requestedChecksWrapNode) {
-    requestedChecksWrapNode.classList.toggle("hidden", !requestedCheckGroups.length && handoffLoadState !== true);
+    const shouldShowRequestedChecksLoading = !requestedCheckSectionHtml
+      && assignmentId > 0
+      && handoffLoadState !== true
+      && !handoffLoadState
+      && !isEditorUser();
+    requestedChecksWrapNode.classList.toggle("hidden", !requestedCheckSectionHtml && !shouldShowRequestedChecksLoading);
   }
   if (requestedChecksNode) {
-    if (!requestedCheckGroups.length) {
+    if (!requestedCheckSectionHtml) {
       if (assignmentId > 0 && handoffLoadState !== true && !handoffLoadState && !isEditorUser()) {
         requestedChecksNode.className = "assignment-brief-empty";
         requestedChecksNode.innerHTML = "กำลังโหลดรายการที่ขอจากชุดส่งงาน...";
         loadAssignmentRequestedCheckHandoffSource(assignment).catch(() => {});
       } else {
         requestedChecksNode.className = "assignment-brief-grid";
-        requestedChecksNode.innerHTML = buildAssignmentRequestedCheckReturnSectionHtml(assignment, handoffPackageState, null);
+        requestedChecksNode.innerHTML = "";
       }
     } else {
-      const existingDraft = state.assignments.requestedCheckReturnDrafts?.[assignmentId] || null;
-      const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackageState);
       state.assignments.requestedCheckReturnDrafts[assignmentId] = normalizedDraft;
       requestedChecksNode.className = "assignment-brief-grid";
-      requestedChecksNode.innerHTML = buildAssignmentRequestedCheckReturnSectionHtml(assignment, handoffPackageState, normalizedDraft);
+      requestedChecksNode.innerHTML = requestedCheckSectionHtml;
       requestedChecksNode.querySelectorAll("[data-requested-check-row]").forEach((rowNode) => updateAssignmentRequestedCheckReturnRowState(rowNode));
     }
   }
@@ -7182,6 +7192,19 @@ function formatRequestedCheckSuggestedValue(value, answerType = "text") {
   return String(value || "");
 }
 
+function hasAssignmentRequestedCheckMeaningfulSuggestedValue(value, answerType = "text") {
+  const normalized = String(answerType || "text").trim().toLowerCase() || "text";
+  if (value == null) return false;
+  if (normalized === "multi_select") return Array.isArray(value) && value.some((entry) => String(entry || "").trim());
+  if (normalized === "number_with_unit") {
+    return Boolean(String(value?.number ?? "").trim() || String(value?.unit ?? "").trim());
+  }
+  if (normalized === "boolean" || normalized === "boolean_with_conditions") {
+    return typeof value === "boolean";
+  }
+  return String(formatRequestedCheckSuggestedValue(value, normalized) || "").trim().length > 0;
+}
+
 function getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage = null) {
   const requestedChecks = handoffPackage && typeof handoffPackage === "object" && !Array.isArray(handoffPackage)
     ? handoffPackage.requested_checks
@@ -7193,16 +7216,17 @@ function getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage = nu
       const groupLabel = String(group?.group_label || "").trim() || groupKey;
       if (!groupKey) return null;
       const checks = Array.isArray(group?.checks) ? group.checks : [];
-      const requestedChecksForGroup = checks
+      const normalizedChecksForGroup = checks
         .map((check) => {
           const checkKey = normalizeAssignmentRequestedCheckKeyPart(check?.key);
           const returnKey = buildAssignmentRequestedCheckReturnKey(groupKey, checkKey);
-          if (!returnKey || check?.requested !== true) return null;
+          if (!returnKey) return null;
           return {
             group_key: groupKey,
             group_label: groupLabel,
             check_key: checkKey,
             return_key: returnKey,
+            requested: check?.requested === true,
             label: String(check?.label || "").trim(),
             instruction: String(check?.instruction || "").trim(),
             answer_type: String(check?.answer_type || "text").trim().toLowerCase() || "text",
@@ -7214,11 +7238,11 @@ function getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage = nu
           };
         })
         .filter(Boolean);
-      if (!requestedChecksForGroup.length) return null;
+      if (!normalizedChecksForGroup.length) return null;
       return {
         group_key: groupKey,
         group_label: groupLabel,
-        checks: requestedChecksForGroup,
+        checks: normalizedChecksForGroup,
       };
     })
     .filter(Boolean);
@@ -7355,7 +7379,7 @@ function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
   }
   if (answerType === "multi_select") {
     const listValue = Array.isArray(row?.value) ? row.value : [];
-    return `<textarea data-requested-check-field="value" rows="3" placeholder="ใส่ทีละบรรทัด"${disabledAttr}>${escapeHtml(listValue.map((value) => String(value || "").trim()).filter(Boolean).join("\n"))}</textarea>`;
+    return `<textarea data-requested-check-field="value" rows="1" placeholder="ใส่ทีละบรรทัด"${disabledAttr}>${escapeHtml(listValue.map((value) => String(value || "").trim()).filter(Boolean).join("\n"))}</textarea>`;
   }
   if (answerType === "number_with_unit") {
     const numberValue = row?.value && typeof row.value === "object" && !Array.isArray(row.value)
@@ -7365,13 +7389,11 @@ function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
       ? String(row.value.unit ?? "").trim()
       : "";
     return `
-      <div class="grid">
+      <div class="grid requested-check-row-number-with-unit">
         <div>
-          <label>จำนวน</label>
           <input data-requested-check-field="value-number" type="number" value="${escapeHtml(numberValue)}" ${disabledAttr} />
         </div>
         <div>
-          <label>หน่วย</label>
           <input data-requested-check-field="value-unit" type="text" value="${escapeHtml(unitValue)}" placeholder="เช่น คน, คัน, กิโลกรัม" ${disabledAttr} />
         </div>
       </div>
@@ -7395,6 +7417,53 @@ function buildAssignmentRequestedCheckReturnEmptyGroupCardHtml(title, emptyText)
   `;
 }
 
+function shouldShowAssignmentRequestedCheckVisibleRow(check) {
+  return check?.requested === true || hasAssignmentRequestedCheckMeaningfulSuggestedValue(check?.suggested_value, check?.answer_type);
+}
+
+function buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row) {
+  return `
+    <div class="grid requested-check-row-secondary">
+      <div>
+        <input data-requested-check-field="condition_note" type="text" value="${escapeHtml(String(row.condition_note || ""))}" placeholder="เงื่อนไข" />
+      </div>
+      <div>
+        <input data-requested-check-field="evidence" type="text" value="${escapeHtml(String(row.evidence || ""))}" placeholder="หลักฐาน" />
+      </div>
+      <div>
+        <input data-requested-check-field="note" type="text" value="${escapeHtml(String(row.note || ""))}" placeholder="หมายเหตุ" />
+      </div>
+    </div>
+  `;
+}
+
+function buildAssignmentRequestedCheckReturnRowHtml(check, row) {
+  const checked = row.checked === true;
+  const usesSuggestedValue = hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
+    && areAssignmentRequestedCheckValuesEqual(row.value, check.suggested_value, check.answer_type);
+  const hasSecondaryContent = Boolean(String(row.condition_note || "").trim() || String(row.evidence || "").trim() || String(row.note || "").trim());
+  const shouldExpandSecondary = check.evidence_required === true || hasSecondaryContent;
+  return `
+    <div data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
+      <div class="requested-check-row-main">
+        <label class="assignment-inline-check">
+          <input data-requested-check-field="checked" type="checkbox" ${checked ? "checked" : ""} />
+        </label>
+        <div class="assignment-brief-text requested-check-row-label">
+          <strong>${escapeHtml(check.label || check.check_key)}</strong>
+        </div>
+        ${usesSuggestedValue ? `<div class="requested-check-row-status"><span class="workflow-badge workflow-badge-generated">AI แนะนำ</span></div>` : `<div class="requested-check-row-status"></div>`}
+        <div class="requested-check-row-value">
+          ${buildAssignmentRequestedCheckReturnValueInputHtml(row)}
+        </div>
+      </div>
+      ${shouldExpandSecondary
+        ? buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row)
+        : `<details class="requested-check-row-details"><summary class="muted">รายละเอียด</summary>${buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row)}</details>`}
+    </div>
+  `;
+}
+
 function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, handoffPackage = null, draft = null) {
   const groupOrder = new Map([
     ["cta_contact", 0],
@@ -7409,65 +7478,32 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
       if (leftRank !== rightRank) return leftRank - rightRank;
       return String(left?.group_label || "").localeCompare(String(right?.group_label || ""));
     });
-  if (!groups.length) {
-    return [
-      buildAssignmentRequestedCheckReturnEmptyGroupCardHtml(
-        "CTA / ข้อมูลติดต่อ",
-        "ยังไม่มีรายการ CTA ที่ถูกขอให้ตรวจในชุดส่งงานนี้"
-      ),
-      buildAssignmentRequestedCheckReturnEmptyGroupCardHtml(
-        "Taxonomy / ข้อมูลจัดหมวด",
-        "ยังไม่มีรายการ Taxonomy ที่ถูกขอให้ตรวจในชุดส่งงานนี้"
-      ),
-    ].join("");
-  }
+  if (!groups.length) return "";
   const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(draft, handoffPackage);
-  return groups.map((group) => `
-    <div class="assignment-brief-card" data-requested-check-group="${escapeHtml(group.group_key)}">
-      <h5 class="assignment-subtitle" style="margin-top:0;">${escapeHtml(group.group_label)}</h5>
-      <div class="assignment-brief-grid requested-check-group-grid">
-        ${(Array.isArray(group.checks) ? group.checks : []).map((check) => {
-          const row = normalizedDraft.requested_check_returns?.[check.return_key] || {};
-          const checked = row.checked === true;
-          const usesSuggestedValue = check.suggested_value != null
-            && areAssignmentRequestedCheckValuesEqual(row.value, check.suggested_value, check.answer_type);
-          const badgeClass = usesSuggestedValue ? "workflow-badge-generated" : "workflow-badge-raw";
-          const badgeLabel = usesSuggestedValue ? "AI suggest" : "Manual";
-          return `
-            <div class="assignment-brief-section" data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
-              <div class="requested-check-row-main">
-                <label class="assignment-inline-check">
-                  <input data-requested-check-field="checked" type="checkbox" ${checked ? "checked" : ""} />
-                </label>
-                <div class="assignment-brief-text requested-check-row-label">
-                  <strong>${escapeHtml(check.label || check.check_key)}</strong>
-                  ${check.instruction ? `<div class="assignment-brief-meta">${escapeHtml(check.instruction)}</div>` : ""}
-                </div>
-                <div class="requested-check-row-value">
-                  ${buildAssignmentRequestedCheckReturnValueInputHtml(row)}
-                </div>
-                <div class="requested-check-row-status">
-                  <span class="workflow-badge ${badgeClass}">${badgeLabel}</span>
-                  ${check.evidence_required ? `<span class="assignment-brief-meta">ต้องมีหลักฐาน</span>` : ""}
-                </div>
+  return groups.map((group) => {
+    const checks = Array.isArray(group.checks) ? group.checks : [];
+    const visibleChecks = checks.filter((check) => shouldShowAssignmentRequestedCheckVisibleRow(check));
+    const additionalChecks = checks.filter((check) => !shouldShowAssignmentRequestedCheckVisibleRow(check));
+    if (!visibleChecks.length && !additionalChecks.length) return "";
+    return `
+      <div class="assignment-brief-card" data-requested-check-group="${escapeHtml(group.group_key)}">
+        <h5 class="assignment-subtitle" style="margin-top:0;">${escapeHtml(group.group_label)}</h5>
+        <div class="assignment-brief-grid requested-check-group-grid">
+          ${visibleChecks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {})).join("")}
+        </div>
+        ${additionalChecks.length
+          ? `
+            <details class="assignment-brief-section requested-check-additional" data-requested-check-additional-group="${escapeHtml(group.group_key)}">
+              <summary>ข้อมูลเพิ่มเติม</summary>
+              <div class="assignment-brief-grid requested-check-group-grid">
+                ${additionalChecks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {})).join("")}
               </div>
-              <div class="grid requested-check-row-secondary">
-                <div>
-                  <input data-requested-check-field="condition_note" type="text" value="${escapeHtml(String(row.condition_note || ""))}" placeholder="เงื่อนไข/ข้อจำกัด" />
-                </div>
-                <div>
-                  <input data-requested-check-field="evidence" type="text" value="${escapeHtml(String(row.evidence || ""))}" placeholder="หลักฐาน/แหล่งที่มา" />
-                </div>
-                <div class="full-span requested-check-row-note">
-                  <input data-requested-check-field="note" type="text" value="${escapeHtml(String(row.note || ""))}" placeholder="หมายเหตุเพิ่มเติม" />
-                </div>
-              </div>
-            </div>
-          `;
-        }).join("")}
+            </details>
+          `
+          : ""}
       </div>
-    </div>
-  `).join("");
+    `;
+  }).join("");
 }
 
 function updateAssignmentRequestedCheckReturnRowState(rowNode) {
