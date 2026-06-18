@@ -305,6 +305,8 @@ const buildAssignmentRequestedCheckReturnSecondaryFieldsHtml = loadNamedFunction
   escapeHtml,
 });
 const buildAssignmentRequestedCheckReturnRowHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnRowHtml", {
+  hasAssignmentRequestedCheckMeaningfulSuggestedValue,
+  areAssignmentRequestedCheckValuesEqual,
   buildAssignmentRequestedCheckReturnValueInputHtml,
   buildAssignmentRequestedCheckReturnSecondaryFieldsHtml,
   escapeHtml,
@@ -315,6 +317,7 @@ const buildAssignmentRequestedCheckReturnSectionHtml = loadNamedFunction(appJs, 
   buildAssignmentRequestedCheckReturnRowHtml,
   escapeHtml,
 });
+const readAssignmentRequestedCheckReturnDraftFromForm = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm");
 
 const normalizeRequestedCheckAnswerType = loadNamedFunction(repositoryJs, "normalizeRequestedCheckAnswerType");
 const normalizeRequestedCheckReturnKey = loadNamedFunction(repositoryJs, "normalizeRequestedCheckReturnKey");
@@ -339,7 +342,7 @@ const normalizeRequestedCheckReturns = loadNamedFunction(repositoryJs, "normaliz
   parseJson,
 });
 
-test("requested-check section uses namespaced keys and renders all handoff rows once", () => {
+test("requested-check section uses namespaced keys and renders CTA rows once while hiding taxonomy", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -402,11 +405,13 @@ test("requested-check section uses namespaced keys and renders all handoff rows 
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, draft);
   assert.ok(sectionHtml.includes('data-requested-check-return-key="cta_contact.phone"'));
-  assert.ok(sectionHtml.includes('data-requested-check-return-key="taxonomy.phone"'));
   assert.ok(sectionHtml.includes('data-requested-check-return-key="cta_contact.line_url"'));
   assert.equal((sectionHtml.match(/data-requested-check-return-key="cta_contact\.phone"/g) || []).length, 1);
   assert.equal((sectionHtml.match(/data-requested-check-return-key="cta_contact\.line_url"/g) || []).length, 1);
-  assert.doesNotMatch(sectionHtml, /AI แนะนำ|Manual|ข้อมูลเพิ่มเติม|รายละเอียด/);
+  assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.phone"'), false);
+  assert.equal(sectionHtml.includes('data-requested-check-group="taxonomy"'), false);
+  assert.match(sectionHtml, /AI แนะนำ/);
+  assert.doesNotMatch(sectionHtml, /Manual|ข้อมูลเพิ่มเติม|รายละเอียด/);
 });
 
 test("requested-check draft auto-checks and prefills suggested values without changing namespaced keys", () => {
@@ -451,7 +456,7 @@ test("requested-check draft auto-checks and prefills suggested values without ch
   assert.deepEqual(draft.requested_check_returns["taxonomy.tags"].value, ["family", "cafe"]);
 });
 
-test("requested-check section renders CTA before Taxonomy and keeps custom rows at the end", () => {
+test("requested-check section renders only the CTA group in Work Return", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -483,13 +488,9 @@ test("requested-check section renders CTA before Taxonomy and keeps custom rows 
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
   const ctaIndex = sectionHtml.indexOf('data-requested-check-group="cta_contact"');
-  const taxonomyIndex = sectionHtml.indexOf('data-requested-check-group="taxonomy"');
-  const customIndex = sectionHtml.indexOf('data-requested-check-group="custom"');
   assert.ok(ctaIndex >= 0);
-  assert.ok(taxonomyIndex >= 0);
-  assert.ok(customIndex >= 0);
-  assert.ok(ctaIndex < taxonomyIndex);
-  assert.ok(taxonomyIndex < customIndex);
+  assert.equal(sectionHtml.includes('data-requested-check-group="taxonomy"'), false);
+  assert.equal(sectionHtml.includes('data-requested-check-group="custom"'), false);
 });
 
 test("requested-check section omits empty groups instead of rendering empty cards", () => {
@@ -533,10 +534,11 @@ test("requested-check section renders all five standard CTA checks with editable
   }
   assert.match(sectionHtml, /value="0812345678"/);
   assert.match(sectionHtml, /data-requested-check-field="value" type="url" value=""/);
-  assert.doesNotMatch(sectionHtml, /AI แนะนำ|Manual/);
+  assert.match(sectionHtml, /AI แนะนำ/);
+  assert.doesNotMatch(sectionHtml, /Manual/);
 });
 
-test("requested-check section keeps edited prefilled values without showing AI or Manual badges", () => {
+test("requested-check section keeps edited prefilled values and hides AI chip when value diverges", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -572,7 +574,7 @@ test("requested-check section keeps edited prefilled values without showing AI o
   assert.doesNotMatch(sectionHtml, /AI แนะนำ|Manual/);
 });
 
-test("requested-check section renders compact primary rows without a status column or details disclosure", () => {
+test("requested-check section renders compact CTA rows with optional AI chip and no details disclosure", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -593,7 +595,65 @@ test("requested-check section renders compact primary rows without a status colu
   assert.match(sectionHtml, /<div class="requested-check-row-main">\s*<label class="assignment-inline-check">/);
   assert.match(sectionHtml, /<div class="assignment-brief-text requested-check-row-label">/);
   assert.match(sectionHtml, /<div class="requested-check-row-value">/);
-  assert.doesNotMatch(sectionHtml, /requested-check-row-status|<details|<summary|รายละเอียด|AI แนะนำ|Manual/);
+  assert.doesNotMatch(sectionHtml, /<details|<summary|รายละเอียด|Manual/);
+});
+
+test("requested-check section shows no AI chip for null or empty suggestions", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            { key: "phone", requested: true, label: "Phone", answer_type: "phone", suggested_value: "" },
+            { key: "line_url", requested: true, label: "LINE", answer_type: "url", suggested_value: null },
+          ],
+        },
+      ],
+    },
+  };
+
+  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
+  assert.doesNotMatch(sectionHtml, /AI แนะนำ|Manual/);
+});
+
+test("requested-check normalize keeps edited prefilled values through rerender merges", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: true,
+              label: "Phone",
+              answer_type: "phone",
+              suggested_value: "0812345678",
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const normalized = normalizeAssignmentRequestedCheckReturnDraft({
+    requested_check_returns: {
+      "cta_contact.phone": {
+        checked: true,
+        value: "0999999999",
+        note: "edited",
+      },
+    },
+  }, handoffPackage);
+
+  assert.equal(normalized.requested_check_returns["cta_contact.phone"].value, "0999999999");
+  assert.equal(normalized.requested_check_returns["cta_contact.phone"].checked, true);
+  assert.equal(normalized.requested_check_returns["cta_contact.phone"].note, "edited");
 });
 
 test("requested-check empty loaded state hides the requested-check surface through the submission form", async () => {
@@ -649,6 +709,72 @@ test("requested-check empty loaded state hides the requested-check surface throu
   assert.equal(fieldsNode.innerHTML.trim(), "");
   assert.equal(fieldsNode.innerHTML.includes("data-requested-check-row"), false);
   assert.equal(fieldsNode.innerHTML.includes('data-requested-check-field="checked"'), false);
+});
+
+test("requested-check form reader merges visible CTA values into the existing draft without clearing hidden taxonomy values", () => {
+  const rowNode = {
+    getAttribute(name) {
+      if (name === "data-requested-check-return-key") return "cta_contact.phone";
+      if (name === "data-requested-check-answer-type") return "phone";
+      return null;
+    },
+    querySelector(selector) {
+      if (selector === "[data-requested-check-field='checked']") return { checked: true };
+      if (selector === "[data-requested-check-field='value']") return { value: "0999999999" };
+      return null;
+    },
+  };
+  const formNode = {
+    querySelectorAll(selector) {
+      return selector === "[data-requested-check-row]" ? [rowNode] : [];
+    },
+  };
+  const state = {
+    assignments: {
+      requestedCheckReturnDrafts: {
+        12: {
+          requested_check_returns: {
+            "cta_contact.phone": {
+              checked: true,
+              value: "0812345678",
+              condition_note: "old condition",
+              evidence: "old evidence",
+              note: "old note",
+            },
+            "taxonomy.category": {
+              checked: true,
+              value: "cafe",
+              condition_note: "keep category",
+              evidence: "keep evidence",
+              note: "keep note",
+            },
+          },
+        },
+      },
+    },
+  };
+  const readDraft = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm", {
+    qs: () => formNode,
+    state,
+  });
+
+  const draft = readDraft(12);
+
+  assert.deepEqual(draft.requested_check_returns["cta_contact.phone"], {
+    checked: true,
+    value: "0999999999",
+    condition_note: "old condition",
+    evidence: "old evidence",
+    note: "old note",
+    answer_type: "phone",
+  });
+  assert.deepEqual(draft.requested_check_returns["taxonomy.category"], {
+    checked: true,
+    value: "cafe",
+    condition_note: "keep category",
+    evidence: "keep evidence",
+    note: "keep note",
+  });
 });
 
 test("requested-check submission form render path outputs compact CTA before taxonomy", () => {
@@ -713,14 +839,15 @@ test("requested-check submission form render path outputs compact CTA before tax
   const wrapNode = harness.nodes.get("assignment-submission-requested-checks-wrap");
   const fieldsNode = harness.nodes.get("assignment-submission-requested-checks-fields");
   assert.equal(wrapNode.classList.contains("hidden"), false);
-  assert.ok(fieldsNode.innerHTML.indexOf('data-requested-check-group="cta_contact"') < fieldsNode.innerHTML.indexOf('data-requested-check-group="taxonomy"'));
+  assert.match(fieldsNode.innerHTML, /data-requested-check-group="cta_contact"/);
+  assert.equal(fieldsNode.innerHTML.includes('data-requested-check-group="taxonomy"'), false);
   assert.match(fieldsNode.innerHTML, /value="0999999999"/);
   assert.equal(fieldsNode.innerHTML.includes('value="0812345678"'), false);
   assert.match(fieldsNode.innerHTML, /data-requested-check-return-key="cta_contact.line_url"/);
-  assert.doesNotMatch(fieldsNode.innerHTML, /AI แนะนำ|Manual|requested-check-row-status|<details|ข้อมูลเพิ่มเติม/);
+  assert.doesNotMatch(fieldsNode.innerHTML, /Manual|<details|ข้อมูลเพิ่มเติม|data-requested-check-return-key="taxonomy\./);
 });
 
-test("requested-check section renders optional secondary fields only for required evidence or saved metadata", () => {
+test("requested-check section does not render condition, evidence, or note controls for CTA rows", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -735,7 +862,6 @@ test("requested-check section renders optional secondary fields only for require
               label: "Phone",
               answer_type: "phone",
               suggested_value: "0812345678",
-              evidence_required: true,
             },
             {
               key: "line_url",
@@ -755,27 +881,17 @@ test("requested-check section renders optional secondary fields only for require
     },
   };
 
-  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, {
-    requested_check_returns: {
-      "cta_contact.line_url": {
-        checked: false,
-        value: "",
-        note: "manual note",
-      },
-    },
-  });
-
+  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
   const textareaCount = (sectionHtml.match(/<textarea /g) || []).length;
   assert.equal(textareaCount, 0);
-  assert.equal((sectionHtml.match(/requested-check-row-secondary/g) || []).length, 2);
-  assert.match(sectionHtml, /data-requested-check-field="condition_note"/);
-  assert.match(sectionHtml, /data-requested-check-field="evidence"/);
-  assert.match(sectionHtml, /data-requested-check-field="note"/);
-  assert.equal(sectionHtml.includes('data-requested-check-return-key="cta_contact.facebook_url"'), true);
-  assert.doesNotMatch(sectionHtml, /<details|<summary|รายละเอียด/);
+  assert.equal(sectionHtml.includes('data-requested-check-field="condition_note"'), false);
+  assert.equal(sectionHtml.includes('data-requested-check-field="evidence"'), false);
+  assert.equal(sectionHtml.includes('data-requested-check-field="note"'), false);
+  assert.equal(sectionHtml.includes('requested-check-row-secondary'), false);
+  assert.doesNotMatch(sectionHtml, /<details|<summary|รายละเอียด|เงื่อนไข|หลักฐาน|หมายเหตุ/);
 });
 
-test("requested-check section does not wrap each field in a large per-field card and keeps custom rows editable", () => {
+test("requested-check section uses one outer panel and does not render custom groups in CTA-only mode", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -799,14 +915,14 @@ test("requested-check section does not wrap each field in a large per-field card
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
-  assert.equal((sectionHtml.match(/class="assignment-brief-card"/g) || []).length, 2);
-  assert.equal((sectionHtml.match(/data-requested-check-row/g) || []).length, 2);
-  assert.match(sectionHtml, /data-requested-check-group="custom"/);
-  assert.match(sectionHtml, /data-requested-check-return-key="custom.parking"/);
+  assert.equal((sectionHtml.match(/class="assignment-brief-card"/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/data-requested-check-row/g) || []).length, 1);
+  assert.equal(sectionHtml.includes('data-requested-check-group="custom"'), false);
+  assert.equal(sectionHtml.includes('data-requested-check-return-key="custom.parking"'), false);
   assert.match(sectionHtml, /data-requested-check-field="value"/);
 });
 
-test("requested-check taxonomy rows render with the same compact row component and no partitioning", () => {
+test("requested-check taxonomy rows are not rendered in CTA-only Work Return", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -824,18 +940,16 @@ test("requested-check taxonomy rows render with the same compact row component a
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
-  assert.equal((sectionHtml.match(/data-requested-check-row/g) || []).length, 2);
-  assert.match(sectionHtml, /data-requested-check-return-key="taxonomy.category"/);
-  assert.match(sectionHtml, /data-requested-check-return-key="taxonomy.tags"/);
-  assert.doesNotMatch(sectionHtml, /ข้อมูลเพิ่มเติม|requested-check-additional|AI แนะนำ|Manual/);
+  assert.equal(sectionHtml.trim(), "");
+  assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.category"'), false);
+  assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.tags"'), false);
 });
 
-test("requested-check mobile CSS stacks compact rows and wraps secondary fields", () => {
+test("requested-check mobile CSS keeps one-column CTA rows without secondary controls", () => {
   assert.match(stylesCss, /@media \(max-width: 900px\)/);
   assert.match(stylesCss, /requested-check-row-main/);
-  assert.match(stylesCss, /requested-check-row-secondary \{\s*grid-template-columns: 1fr;/);
-  assert.match(stylesCss, /requested-check-row-number-with-unit \{\s*grid-template-columns: 1fr 1fr;/);
-  assert.doesNotMatch(stylesCss, /requested-check-row-status|requested-check-row-details|requested-check-additional/);
+  assert.match(stylesCss, /requested-check-row-value \{\s*grid-column: 2 \/ -1;/);
+  assert.doesNotMatch(stylesCss, /requested-check-row-secondary|requested-check-row-details|requested-check-additional/);
 });
 
 test("requested-check payload builder keeps field_return_payload_json separate and strips internal metadata", () => {

@@ -1703,9 +1703,13 @@ button.fail {
 
 #assignment-submission-requested-checks-fields .requested-check-row-main {
   display: grid;
-  grid-template-columns: auto minmax(96px, auto) minmax(180px, 1fr);
+  grid-template-columns: auto minmax(120px, auto) minmax(220px, 1fr);
   align-items: center;
   gap: 8px;
+}
+
+#assignment-submission-requested-checks-fields .requested-check-row-main:has(.requested-check-row-status) {
+  grid-template-columns: auto minmax(120px, auto) auto minmax(220px, 1fr);
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-label {
@@ -1724,16 +1728,10 @@ button.fail {
   overflow: auto;
 }
 
-#assignment-submission-requested-checks-fields .requested-check-row-secondary {
-  margin-top: 6px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-#assignment-submission-requested-checks-fields .requested-check-row-secondary input,
-#assignment-submission-requested-checks-fields .requested-check-row-secondary select,
-#assignment-submission-requested-checks-fields .requested-check-row-secondary textarea {
-  margin: 0;
-  min-height: 36px;
+#assignment-submission-requested-checks-fields .requested-check-row-status {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-number-with-unit {
@@ -1746,12 +1744,20 @@ button.fail {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  #assignment-submission-requested-checks-fields .requested-check-row-value {
+  #assignment-submission-requested-checks-fields .requested-check-row-main:has(.requested-check-row-status) {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  #assignment-submission-requested-checks-fields .requested-check-row-label {
     grid-column: 2;
   }
 
-  #assignment-submission-requested-checks-fields .requested-check-row-secondary {
-    grid-template-columns: 1fr;
+  #assignment-submission-requested-checks-fields .requested-check-row-status {
+    grid-column: 3;
+  }
+
+  #assignment-submission-requested-checks-fields .requested-check-row-value {
+    grid-column: 2 / -1;
   }
 
   #assignment-submission-requested-checks-fields .requested-check-row-number-with-unit {

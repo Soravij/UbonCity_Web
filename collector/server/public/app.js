@@ -7426,8 +7426,8 @@ function buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row) {
 
 function buildAssignmentRequestedCheckReturnRowHtml(check, row) {
   const checked = row.checked === true;
-  const hasSecondaryContent = Boolean(String(row.condition_note || "").trim() || String(row.evidence || "").trim() || String(row.note || "").trim());
-  const shouldRenderSecondary = check.evidence_required === true || hasSecondaryContent;
+  const usesSuggestedValue = hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
+    && areAssignmentRequestedCheckValuesEqual(row.value, check.suggested_value, check.answer_type);
   return `
     <div data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
       <div class="requested-check-row-main">
@@ -7437,29 +7437,18 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row) {
         <div class="assignment-brief-text requested-check-row-label">
           <strong>${escapeHtml(check.label || check.check_key)}</strong>
         </div>
+        ${usesSuggestedValue ? `<div class="requested-check-row-status"><span class="workflow-badge workflow-badge-generated">AI แนะนำ</span></div>` : ""}
         <div class="requested-check-row-value">
           ${buildAssignmentRequestedCheckReturnValueInputHtml(row)}
         </div>
       </div>
-      ${shouldRenderSecondary ? buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row) : ""}
     </div>
   `;
 }
 
 function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, handoffPackage = null, draft = null) {
-  const groupOrder = new Map([
-    ["cta_contact", 0],
-    ["taxonomy", 1],
-    ["custom", 2],
-  ]);
   const groups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage)
-    .slice()
-    .sort((left, right) => {
-      const leftRank = groupOrder.has(left?.group_key) ? groupOrder.get(left.group_key) : 99;
-      const rightRank = groupOrder.has(right?.group_key) ? groupOrder.get(right.group_key) : 99;
-      if (leftRank !== rightRank) return leftRank - rightRank;
-      return String(left?.group_label || "").localeCompare(String(right?.group_label || ""));
-    });
+    .filter((group) => String(group?.group_key || "").trim().toLowerCase() === "cta_contact");
   if (!groups.length) return "";
   const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(draft, handoffPackage);
   return groups.map((group) => {
@@ -7497,10 +7486,16 @@ function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
   if (!id) return null;
   const formNode = qs("assignment-submission-requested-checks-fields");
   if (!formNode) return null;
-  const requested_check_returns = {};
+  const existingRows = state.assignments.requestedCheckReturnDrafts?.[id]?.requested_check_returns;
+  const requested_check_returns = existingRows && typeof existingRows === "object"
+    ? JSON.parse(JSON.stringify(existingRows))
+    : {};
   formNode.querySelectorAll("[data-requested-check-row]").forEach((rowNode) => {
     const returnKey = String(rowNode.getAttribute("data-requested-check-return-key") || "").trim().toLowerCase();
     if (!returnKey) return;
+    const existingRow = requested_check_returns[returnKey] && typeof requested_check_returns[returnKey] === "object"
+      ? requested_check_returns[returnKey]
+      : {};
     const answerType = String(rowNode.getAttribute("data-requested-check-answer-type") || "text").trim().toLowerCase() || "text";
     const checked = rowNode.querySelector("[data-requested-check-field='checked']")?.checked === true;
     let value = null;
@@ -7521,9 +7516,18 @@ function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
     } else {
       value = String(rowNode.querySelector("[data-requested-check-field='value']")?.value || "").trim();
     }
-    const condition_note = String(rowNode.querySelector("[data-requested-check-field='condition_note']")?.value || "").trim();
-    const evidence = String(rowNode.querySelector("[data-requested-check-field='evidence']")?.value || "").trim();
-    const note = String(rowNode.querySelector("[data-requested-check-field='note']")?.value || "").trim();
+    const conditionNoteField = rowNode.querySelector("[data-requested-check-field='condition_note']");
+    const evidenceField = rowNode.querySelector("[data-requested-check-field='evidence']");
+    const noteField = rowNode.querySelector("[data-requested-check-field='note']");
+    const condition_note = conditionNoteField
+      ? String(conditionNoteField.value || "").trim()
+      : String(existingRow.condition_note || "").trim();
+    const evidence = evidenceField
+      ? String(evidenceField.value || "").trim()
+      : String(existingRow.evidence || "").trim();
+    const note = noteField
+      ? String(noteField.value || "").trim()
+      : String(existingRow.note || "").trim();
     requested_check_returns[returnKey] = {
       checked,
       value,
