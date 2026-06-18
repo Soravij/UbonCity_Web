@@ -1688,13 +1688,24 @@ button.fail {
   margin: 0;
 }
 
+#assignment-submission-requested-checks-fields {
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+#assignment-submission-requested-checks-fields [data-requested-check-group="cta_contact"] {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin: 0;
+}
+
 #assignment-submission-requested-checks-fields .requested-check-group-grid {
   grid-template-columns: 1fr;
   gap: 0;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-row] {
-  padding: 8px 0;
+  padding: 6px 0;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-row] + [data-requested-check-row] {
@@ -1716,11 +1727,17 @@ button.fail {
   min-width: 0;
 }
 
+#assignment-submission-requested-checks-fields .requested-check-row-value {
+  min-width: 0;
+}
+
 #assignment-submission-requested-checks-fields .requested-check-row-value input,
 #assignment-submission-requested-checks-fields .requested-check-row-value select,
 #assignment-submission-requested-checks-fields .requested-check-row-value textarea {
   margin: 0;
-  min-height: 38px;
+  min-height: 36px;
+  width: 100%;
+  min-width: 0;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-value textarea {
