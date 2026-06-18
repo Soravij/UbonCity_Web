@@ -80,6 +80,9 @@ function createMockDomNode(initial = {}) {
     setAttribute(name, value) {
       attributes.set(String(name), String(value));
     },
+    removeAttribute(name) {
+      attributes.delete(String(name));
+    },
     getAttribute(name) {
       return attributes.has(String(name)) ? attributes.get(String(name)) : null;
     },
@@ -198,9 +201,12 @@ function createRequestedCheckRenderHarness(state) {
       setAssignmentDraftSaveStatus: () => {},
       clearAssignmentCaptureUploads: () => {},
       renderAssignmentSubmissionFileList: () => {},
+      buildAssignmentSubmissionGateState: () => ({}),
       renderAssignmentSubmissionGatePanel: () => {},
+      applyAssignmentModernClasses: () => {},
       buildAssignmentRequestedCheckReturnSectionHtml,
       updateAssignmentRequestedCheckReturnRowState: () => {},
+      buildAssignmentCaptureUploadCards: () => "",
       buildAssignmentSubmissionPromptInputs: (items = [], groupName, answers = [], placeholderText = "") =>
         `<div data-rendered-group="${escapeHtml(groupName || "")}" data-rendered-placeholder="${escapeHtml(placeholderText || "")}"></div>`,
       escapeHtml,
@@ -295,15 +301,10 @@ const buildAssignmentRequestedCheckReturnPayloadFromDraft = loadNamedFunction(ap
 const buildAssignmentRequestedCheckReturnValueInputHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnValueInputHtml", {
   escapeHtml,
 });
-const shouldShowAssignmentRequestedCheckVisibleRow = loadNamedFunction(appJs, "shouldShowAssignmentRequestedCheckVisibleRow", {
-  hasAssignmentRequestedCheckMeaningfulSuggestedValue,
-});
 const buildAssignmentRequestedCheckReturnSecondaryFieldsHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnSecondaryFieldsHtml", {
   escapeHtml,
 });
 const buildAssignmentRequestedCheckReturnRowHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnRowHtml", {
-  hasAssignmentRequestedCheckMeaningfulSuggestedValue,
-  areAssignmentRequestedCheckValuesEqual,
   buildAssignmentRequestedCheckReturnValueInputHtml,
   buildAssignmentRequestedCheckReturnSecondaryFieldsHtml,
   escapeHtml,
@@ -311,7 +312,6 @@ const buildAssignmentRequestedCheckReturnRowHtml = loadNamedFunction(appJs, "bui
 const buildAssignmentRequestedCheckReturnSectionHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnSectionHtml", {
   getAssignmentRequestedCheckGroupsFromHandoffPackage,
   normalizeAssignmentRequestedCheckReturnDraft,
-  shouldShowAssignmentRequestedCheckVisibleRow,
   buildAssignmentRequestedCheckReturnRowHtml,
   escapeHtml,
 });
@@ -339,7 +339,7 @@ const normalizeRequestedCheckReturns = loadNamedFunction(repositoryJs, "normaliz
   parseJson,
 });
 
-test("requested-check section uses namespaced keys and keeps visible and additional rows separated", () => {
+test("requested-check section uses namespaced keys and renders all handoff rows once", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -361,7 +361,7 @@ test("requested-check section uses namespaced keys and keeps visible and additio
               key: "line_url",
               requested: false,
               label: "LINE",
-              instruction: "Should not render",
+              instruction: "Still render from handoff",
               answer_type: "url",
             },
           ],
@@ -403,10 +403,10 @@ test("requested-check section uses namespaced keys and keeps visible and additio
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, draft);
   assert.ok(sectionHtml.includes('data-requested-check-return-key="cta_contact.phone"'));
   assert.ok(sectionHtml.includes('data-requested-check-return-key="taxonomy.phone"'));
-  assert.ok(sectionHtml.includes("AI แนะนำ"));
-  assert.ok(sectionHtml.includes("ข้อมูลเพิ่มเติม"));
   assert.ok(sectionHtml.includes('data-requested-check-return-key="cta_contact.line_url"'));
   assert.equal((sectionHtml.match(/data-requested-check-return-key="cta_contact\.phone"/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/data-requested-check-return-key="cta_contact\.line_url"/g) || []).length, 1);
+  assert.doesNotMatch(sectionHtml, /AI แนะนำ|Manual|ข้อมูลเพิ่มเติม|รายละเอียด/);
 });
 
 test("requested-check draft auto-checks and prefills suggested values without changing namespaced keys", () => {
@@ -507,7 +507,7 @@ test("requested-check section omits empty groups instead of rendering empty card
   assert.equal(sectionHtml.includes('data-requested-check-field="checked"'), false);
 });
 
-test("requested-check section renders AI suggestion chip when current value still equals suggested value", () => {
+test("requested-check section renders all five standard CTA checks with editable values", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -516,19 +516,11 @@ test("requested-check section renders AI suggestion chip when current value stil
           group_key: "cta_contact",
           group_label: "CTA/contact",
           checks: [
-            {
-              key: "phone",
-              requested: true,
-              label: "Phone",
-              answer_type: "phone",
-              suggested_value: "0812345678",
-            },
-            {
-              key: "facebook_url",
-              requested: true,
-              label: "Facebook",
-              answer_type: "url",
-            },
+            { key: "phone", requested: true, label: "Phone", answer_type: "phone", suggested_value: "0812345678" },
+            { key: "line_url", requested: true, label: "LINE", answer_type: "url" },
+            { key: "facebook_url", requested: true, label: "Facebook", answer_type: "url" },
+            { key: "website_url", requested: true, label: "Website", answer_type: "url" },
+            { key: "primary_cta", requested: true, label: "Primary CTA", answer_type: "text" },
           ],
         },
       ],
@@ -536,13 +528,15 @@ test("requested-check section renders AI suggestion chip when current value stil
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
-  assert.match(sectionHtml, /AI แนะนำ/);
-  assert.doesNotMatch(sectionHtml, /Manual/);
+  for (const key of ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]) {
+    assert.match(sectionHtml, new RegExp(`data-requested-check-return-key="cta_contact\\.${key}"`));
+  }
   assert.match(sectionHtml, /value="0812345678"/);
-  assert.equal(sectionHtml.includes("ข้อมูลที่ระบบแนะนำให้ตรวจ"), false);
+  assert.match(sectionHtml, /data-requested-check-field="value" type="url" value=""/);
+  assert.doesNotMatch(sectionHtml, /AI แนะนำ|Manual/);
 });
 
-test("requested-check section hides suggestion chip when current value diverges from suggested value", () => {
+test("requested-check section keeps edited prefilled values without showing AI or Manual badges", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -573,11 +567,12 @@ test("requested-check section hides suggestion chip when current value diverges 
     },
   });
 
-  assert.doesNotMatch(sectionHtml, /AI แนะนำ/);
-  assert.doesNotMatch(sectionHtml, /Manual/);
+  assert.match(sectionHtml, /value="0999999999"/);
+  assert.equal(sectionHtml.includes('value="0812345678"'), false);
+  assert.doesNotMatch(sectionHtml, /AI แนะนำ|Manual/);
 });
 
-test("requested-check section shows no suggestion chip for null or empty suggestions", () => {
+test("requested-check section renders compact primary rows without a status column or details disclosure", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -595,45 +590,10 @@ test("requested-check section shows no suggestion chip for null or empty suggest
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
-  assert.doesNotMatch(sectionHtml, /AI แนะนำ/);
-  assert.doesNotMatch(sectionHtml, /Manual/);
-});
-
-test("requested-check normalize keeps edited prefilled values through rerender merges", () => {
-  const handoffPackage = {
-    requested_checks: {
-      version: 1,
-      groups: [
-        {
-          group_key: "cta_contact",
-          group_label: "CTA/contact",
-          checks: [
-            {
-              key: "phone",
-              requested: true,
-              label: "Phone",
-              answer_type: "phone",
-              suggested_value: "0812345678",
-            },
-          ],
-        },
-      ],
-    },
-  };
-
-  const normalized = normalizeAssignmentRequestedCheckReturnDraft({
-    requested_check_returns: {
-      "cta_contact.phone": {
-        checked: true,
-        value: "0999999999",
-        note: "edited",
-      },
-    },
-  }, handoffPackage);
-
-  assert.equal(normalized.requested_check_returns["cta_contact.phone"].value, "0999999999");
-  assert.equal(normalized.requested_check_returns["cta_contact.phone"].checked, true);
-  assert.equal(normalized.requested_check_returns["cta_contact.phone"].note, "edited");
+  assert.match(sectionHtml, /<div class="requested-check-row-main">\s*<label class="assignment-inline-check">/);
+  assert.match(sectionHtml, /<div class="assignment-brief-text requested-check-row-label">/);
+  assert.match(sectionHtml, /<div class="requested-check-row-value">/);
+  assert.doesNotMatch(sectionHtml, /requested-check-row-status|<details|<summary|รายละเอียด|AI แนะนำ|Manual/);
 });
 
 test("requested-check empty loaded state hides the requested-check surface through the submission form", async () => {
@@ -691,7 +651,76 @@ test("requested-check empty loaded state hides the requested-check surface throu
   assert.equal(fieldsNode.innerHTML.includes('data-requested-check-field="checked"'), false);
 });
 
-test("requested-check section keeps a compact second line instead of three large textarea blocks", () => {
+test("requested-check submission form render path outputs compact CTA before taxonomy", () => {
+  const state = {
+    assignments: {
+      selectedId: 12,
+      contextItemId: 27,
+      contextFieldPack: {},
+      requestedCheckReturnDrafts: {
+        12: {
+          requested_check_returns: {
+            "cta_contact.phone": {
+              checked: true,
+              value: "0999999999",
+              note: "edited",
+            },
+            "taxonomy.category": {
+              checked: false,
+              value: "",
+            },
+          },
+        },
+      },
+      handoffSourcePackages: {
+        12: {
+          requested_checks: {
+            version: 1,
+            groups: [
+              {
+                group_key: "taxonomy",
+                group_label: "Taxonomy",
+                checks: [
+                  { key: "category", requested: true, label: "Category", answer_type: "text" },
+                ],
+              },
+              {
+                group_key: "cta_contact",
+                group_label: "CTA/contact",
+                checks: [
+                  { key: "phone", requested: true, label: "Phone", answer_type: "phone", suggested_value: "0812345678" },
+                  { key: "line_url", requested: false, label: "LINE", answer_type: "url" },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      handoffSourceLoaded: {
+        12: true,
+      },
+    },
+  };
+  const assignment = {
+    id: 12,
+    content_item_id: 27,
+    brief_json: { title: "Brief" },
+  };
+  const harness = createRequestedCheckRenderHarness(state);
+
+  harness.renderAssignmentSubmissionForm(assignment, "work");
+
+  const wrapNode = harness.nodes.get("assignment-submission-requested-checks-wrap");
+  const fieldsNode = harness.nodes.get("assignment-submission-requested-checks-fields");
+  assert.equal(wrapNode.classList.contains("hidden"), false);
+  assert.ok(fieldsNode.innerHTML.indexOf('data-requested-check-group="cta_contact"') < fieldsNode.innerHTML.indexOf('data-requested-check-group="taxonomy"'));
+  assert.match(fieldsNode.innerHTML, /value="0999999999"/);
+  assert.equal(fieldsNode.innerHTML.includes('value="0812345678"'), false);
+  assert.match(fieldsNode.innerHTML, /data-requested-check-return-key="cta_contact.line_url"/);
+  assert.doesNotMatch(fieldsNode.innerHTML, /AI แนะนำ|Manual|requested-check-row-status|<details|ข้อมูลเพิ่มเติม/);
+});
+
+test("requested-check section renders optional secondary fields only for required evidence or saved metadata", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -706,6 +735,19 @@ test("requested-check section keeps a compact second line instead of three large
               label: "Phone",
               answer_type: "phone",
               suggested_value: "0812345678",
+              evidence_required: true,
+            },
+            {
+              key: "line_url",
+              requested: true,
+              label: "LINE",
+              answer_type: "url",
+            },
+            {
+              key: "facebook_url",
+              requested: true,
+              label: "Facebook",
+              answer_type: "url",
             },
           ],
         },
@@ -713,13 +755,24 @@ test("requested-check section keeps a compact second line instead of three large
     },
   };
 
-  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
+  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, {
+    requested_check_returns: {
+      "cta_contact.line_url": {
+        checked: false,
+        value: "",
+        note: "manual note",
+      },
+    },
+  });
+
   const textareaCount = (sectionHtml.match(/<textarea /g) || []).length;
   assert.equal(textareaCount, 0);
-  assert.match(sectionHtml, /<details class="requested-check-row-details">/);
+  assert.equal((sectionHtml.match(/requested-check-row-secondary/g) || []).length, 2);
   assert.match(sectionHtml, /data-requested-check-field="condition_note"/);
   assert.match(sectionHtml, /data-requested-check-field="evidence"/);
   assert.match(sectionHtml, /data-requested-check-field="note"/);
+  assert.equal(sectionHtml.includes('data-requested-check-return-key="cta_contact.facebook_url"'), true);
+  assert.doesNotMatch(sectionHtml, /<details|<summary|รายละเอียด/);
 });
 
 test("requested-check section does not wrap each field in a large per-field card and keeps custom rows editable", () => {
@@ -753,11 +806,36 @@ test("requested-check section does not wrap each field in a large per-field card
   assert.match(sectionHtml, /data-requested-check-field="value"/);
 });
 
+test("requested-check taxonomy rows render with the same compact row component and no partitioning", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            { key: "category", requested: true, label: "Category", answer_type: "text" },
+            { key: "tags", requested: false, label: "Tags", answer_type: "multi_select" },
+          ],
+        },
+      ],
+    },
+  };
+
+  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
+  assert.equal((sectionHtml.match(/data-requested-check-row/g) || []).length, 2);
+  assert.match(sectionHtml, /data-requested-check-return-key="taxonomy.category"/);
+  assert.match(sectionHtml, /data-requested-check-return-key="taxonomy.tags"/);
+  assert.doesNotMatch(sectionHtml, /ข้อมูลเพิ่มเติม|requested-check-additional|AI แนะนำ|Manual/);
+});
+
 test("requested-check mobile CSS stacks compact rows and wraps secondary fields", () => {
   assert.match(stylesCss, /@media \(max-width: 900px\)/);
   assert.match(stylesCss, /requested-check-row-main/);
   assert.match(stylesCss, /requested-check-row-secondary \{\s*grid-template-columns: 1fr;/);
   assert.match(stylesCss, /requested-check-row-number-with-unit \{\s*grid-template-columns: 1fr 1fr;/);
+  assert.doesNotMatch(stylesCss, /requested-check-row-status|requested-check-row-details|requested-check-additional/);
 });
 
 test("requested-check payload builder keeps field_return_payload_json separate and strips internal metadata", () => {
@@ -977,6 +1055,7 @@ test("edited requested-check draft survives async handoff load and rerender path
   assert.match(calls[1], /value="0999999999"/);
   assert.doesNotMatch(calls[1], /Manual/);
   assert.doesNotMatch(calls[1], /AI แนะนำ/);
+  assert.doesNotMatch(calls[1], /requested-check-row-status|<details|ข้อมูลเพิ่มเติม/);
   assert.equal(calls[1].includes('value="0812345678"'), false);
   assert.equal(state.assignments.requestedCheckReturnDrafts[12].requested_check_returns["cta_contact.phone"].value, "0999999999");
   assert.equal(state.assignments.requestedCheckReturnDrafts[12].requested_check_returns["cta_contact.phone"].note, "edited");

@@ -1703,7 +1703,7 @@ button.fail {
 
 #assignment-submission-requested-checks-fields .requested-check-row-main {
   display: grid;
-  grid-template-columns: auto minmax(96px, auto) auto minmax(180px, 1fr);
+  grid-template-columns: auto minmax(96px, auto) minmax(180px, 1fr);
   align-items: center;
   gap: 8px;
 }
@@ -1724,13 +1724,6 @@ button.fail {
   overflow: auto;
 }
 
-#assignment-submission-requested-checks-fields .requested-check-row-status {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  min-width: 0;
-}
-
 #assignment-submission-requested-checks-fields .requested-check-row-secondary {
   margin-top: 6px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1748,33 +1741,11 @@ button.fail {
   gap: 8px;
 }
 
-#assignment-submission-requested-checks-fields .requested-check-row-details {
-  margin-top: 6px;
-}
-
-#assignment-submission-requested-checks-fields .requested-check-row-details > summary,
-#assignment-submission-requested-checks-fields .requested-check-additional > summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-#assignment-submission-requested-checks-fields .requested-check-additional {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-
-#assignment-submission-requested-checks-fields .requested-check-additional[open] > .requested-check-group-grid {
-  margin-top: 8px;
-}
-
 @media (max-width: 900px) {
   #assignment-submission-requested-checks-fields .requested-check-row-main {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  #assignment-submission-requested-checks-fields .requested-check-row-status,
   #assignment-submission-requested-checks-fields .requested-check-row-value {
     grid-column: 2;
   }

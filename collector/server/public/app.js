@@ -7408,19 +7408,6 @@ function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
   return `<input data-requested-check-field="value" type="${escapeHtml(inputType)}" value="${escapeHtml(value)}" ${disabledAttr} />`;
 }
 
-function buildAssignmentRequestedCheckReturnEmptyGroupCardHtml(title, emptyText) {
-  return `
-    <div class="assignment-brief-card">
-      <h5 class="assignment-subtitle" style="margin-top:0;">${escapeHtml(title)}</h5>
-      <div class="assignment-brief-empty">${escapeHtml(emptyText)}</div>
-    </div>
-  `;
-}
-
-function shouldShowAssignmentRequestedCheckVisibleRow(check) {
-  return check?.requested === true || hasAssignmentRequestedCheckMeaningfulSuggestedValue(check?.suggested_value, check?.answer_type);
-}
-
 function buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row) {
   return `
     <div class="grid requested-check-row-secondary">
@@ -7439,10 +7426,8 @@ function buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row) {
 
 function buildAssignmentRequestedCheckReturnRowHtml(check, row) {
   const checked = row.checked === true;
-  const usesSuggestedValue = hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
-    && areAssignmentRequestedCheckValuesEqual(row.value, check.suggested_value, check.answer_type);
   const hasSecondaryContent = Boolean(String(row.condition_note || "").trim() || String(row.evidence || "").trim() || String(row.note || "").trim());
-  const shouldExpandSecondary = check.evidence_required === true || hasSecondaryContent;
+  const shouldRenderSecondary = check.evidence_required === true || hasSecondaryContent;
   return `
     <div data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
       <div class="requested-check-row-main">
@@ -7452,14 +7437,11 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row) {
         <div class="assignment-brief-text requested-check-row-label">
           <strong>${escapeHtml(check.label || check.check_key)}</strong>
         </div>
-        ${usesSuggestedValue ? `<div class="requested-check-row-status"><span class="workflow-badge workflow-badge-generated">AI แนะนำ</span></div>` : `<div class="requested-check-row-status"></div>`}
         <div class="requested-check-row-value">
           ${buildAssignmentRequestedCheckReturnValueInputHtml(row)}
         </div>
       </div>
-      ${shouldExpandSecondary
-        ? buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row)
-        : `<details class="requested-check-row-details"><summary class="muted">รายละเอียด</summary>${buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row)}</details>`}
+      ${shouldRenderSecondary ? buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row) : ""}
     </div>
   `;
 }
@@ -7482,25 +7464,13 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
   const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(draft, handoffPackage);
   return groups.map((group) => {
     const checks = Array.isArray(group.checks) ? group.checks : [];
-    const visibleChecks = checks.filter((check) => shouldShowAssignmentRequestedCheckVisibleRow(check));
-    const additionalChecks = checks.filter((check) => !shouldShowAssignmentRequestedCheckVisibleRow(check));
-    if (!visibleChecks.length && !additionalChecks.length) return "";
+    if (!checks.length) return "";
     return `
       <div class="assignment-brief-card" data-requested-check-group="${escapeHtml(group.group_key)}">
         <h5 class="assignment-subtitle" style="margin-top:0;">${escapeHtml(group.group_label)}</h5>
         <div class="assignment-brief-grid requested-check-group-grid">
-          ${visibleChecks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {})).join("")}
+          ${checks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {})).join("")}
         </div>
-        ${additionalChecks.length
-          ? `
-            <details class="assignment-brief-section requested-check-additional" data-requested-check-additional-group="${escapeHtml(group.group_key)}">
-              <summary>ข้อมูลเพิ่มเติม</summary>
-              <div class="assignment-brief-grid requested-check-group-grid">
-                ${additionalChecks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {})).join("")}
-              </div>
-            </details>
-          `
-          : ""}
       </div>
     `;
   }).join("");
