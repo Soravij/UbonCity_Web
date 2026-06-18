@@ -87,6 +87,16 @@ return normalizeAssignmentSubmissionEditorialPayload;`
   })
 );
 
+const normalizeAssignmentKindForTest = new Function(
+  "ASSIGNMENT_KINDS",
+  `${extractNamedFunctionSource(indexServer, "normalizeAssignmentKind")}; return normalizeAssignmentKind;`
+)(new Set(["field", "editorial"]));
+
+const validateAssignmentCreateFieldPackPrerequisitesForTest = new Function(
+  "normalizeAssignmentKind",
+  `${extractNamedFunctionSource(indexServer, "validateAssignmentCreateFieldPackPrerequisites")}; return validateAssignmentCreateFieldPackPrerequisites;`
+)(normalizeAssignmentKindForTest);
+
 const normalizeAssignmentRowForTest = new Function(
   "parseJson",
   `${extractNamedFunctionSource(repositoryJs, "normalizeAssignmentRow")}; return normalizeAssignmentRow;`
@@ -395,6 +405,35 @@ test("manual assignment create flow is gated by step 4 prep-ready status in fron
   for (const snippet of requiredBackendSnippets) {
     assert.equal(indexServer.includes(snippet), true, `manual assignment create should gate prep-ready status in backend: ${snippet}`);
   }
+});
+
+test("assignment create field-pack prerequisites only gate field assignments", () => {
+  assert.deepEqual(
+    validateAssignmentCreateFieldPackPrerequisitesForTest("editorial", null),
+    { ok: true, error: null }
+  );
+  assert.deepEqual(
+    validateAssignmentCreateFieldPackPrerequisitesForTest("editorial", { id: 11, status: "draft" }),
+    { ok: true, error: null }
+  );
+  assert.deepEqual(
+    validateAssignmentCreateFieldPackPrerequisitesForTest("field", null),
+    {
+      ok: false,
+      error: 'item is not ready_for_assignment; brief is missing (complete step "จัด brief" first)',
+    }
+  );
+  assert.deepEqual(
+    validateAssignmentCreateFieldPackPrerequisitesForTest("field", { id: 11, status: "draft" }),
+    {
+      ok: false,
+      error: 'item is not ready_for_assignment; complete step "พร้อมส่งเข้า handoff" (stored field pack status must be "ready_for_field")',
+    }
+  );
+  assert.deepEqual(
+    validateAssignmentCreateFieldPackPrerequisitesForTest("field", { id: 11, status: "ready_for_field" }),
+    { ok: true, error: null }
+  );
 });
 
 test("assignment state patch permission keeps editor out of assignment workflow", () => {
@@ -1888,6 +1927,78 @@ test("assignment routes use management-line scope helpers instead of global admi
     "item assignments create route must validate assignee management-line scope"
   );
   assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+      'if (requestedAssignmentKind === "field") {'
+    ),
+    true,
+    "item assignments create route must branch field assignments explicitly"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+      'const fieldResult = repo.createAssignmentFromReadiness('
+    ),
+    true,
+    "item assignments create route must create field assignments through the readiness handoff helper"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+      'assignment = repo.createAssignment('
+    ),
+    true,
+    "item assignments create route must create editorial or non-field assignments directly"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+      'handoff = null;'
+    ),
+    true,
+    "item assignments create route must avoid creating a handoff snapshot for direct assignments"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+      'mode: "direct_assignment"'
+    ),
+    true,
+    "item assignments create route must mark non-field provenance as direct_assignment"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+      'source_of_truth: "request_payload"'
+    ),
+    true,
+    "item assignments create route must mark non-field provenance as request_payload"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+      'handoff,'
+    ),
+    true,
+    "item assignments create route must return the handoff payload when present"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+      'manual_legacy'
+    ),
+    false,
+    "item assignments create route must stop labelling the path as manual_legacy"
+  );
+  assert.equal(
+    routeContainsAfter(
+      'app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) => {',
+      'mode: "field_pack_handoff"'
+    ),
+    true,
+    "item assignments create route must record field-pack provenance in audit metadata"
+  );
+  assert.equal(
     routeGuardBefore(
       'app.post("/api/items/:id/unpublish", requireRole("admin", "owner"), (req, res) => {',
       'if (!ensureItemMutationAccess(req, res, item)) {',
@@ -1919,6 +2030,29 @@ test("assignment routes use management-line scope helpers instead of global admi
       < indexServer.indexOf('const translation = await repairTranslationFromRecheckIssues(repo, id, lang, aiConfig, actorEmail(req));'),
     true,
     "translation repair must guard subtree mutation access before repair"
+  );
+});
+
+test("shared assignment create route branches field handoff from non-field direct creation", () => {
+  assert.equal(indexServer.includes('if (requestedAssignmentKind === "field") {'), true);
+  assert.equal(indexServer.includes("const fieldPackPrerequisites = validateAssignmentCreateFieldPackPrerequisites("), true);
+  assert.equal(indexServer.includes("const fieldResult = repo.createAssignmentFromReadiness("), true);
+  assert.equal(indexServer.includes("requireReadyForHandoff: false"), true);
+  assert.equal(indexServer.includes("assignment = repo.createAssignment("), true);
+  assert.equal(indexServer.includes('handoff = null;'), true);
+  assert.equal(indexServer.includes('mode: "direct_assignment"'), true);
+  assert.equal(indexServer.includes('source_of_truth: "request_payload"'), true);
+});
+
+test("legacy from-readiness route preserves strict ready_for_handoff helper behavior", () => {
+  assert.equal(indexServer.includes('app.post("/api/items/:id/assignments/from-readiness", requireRole("owner")'), true);
+  assert.equal(indexServer.includes("legacy from-readiness route requires force_override=true and force_reason"), true);
+  assert.equal(indexServer.includes("const result = repo.createAssignmentFromReadiness(id, req.body || {}, req.authUser?.id || null, actorEmail(req), role);"), true);
+  assert.equal(indexServer.includes("requireReadyForHandoff: false"), true, "active route should opt out explicitly");
+  assert.equal(
+    indexServer.includes('repo.createAssignmentFromReadiness(id, req.body || {}, req.authUser?.id || null, actorEmail(req), role, { requireReadyForHandoff: false })'),
+    false,
+    "legacy route must not disable strict ready_for_handoff guard"
   );
 });
 

@@ -104,6 +104,71 @@ function createTestContext() {
     return Number(result.lastInsertRowid || 0);
   }
 
+  const tableColumnCache = new Map();
+
+  function getTableColumns(table) {
+    if (tableColumnCache.has(table)) return tableColumnCache.get(table);
+    const columns = new Set(
+      db.prepare(`PRAGMA table_info(${table})`).all().map((column) => String(column?.name || "").trim())
+    );
+    tableColumnCache.set(table, columns);
+    return columns;
+  }
+
+  function setRowTimestamps(table, id, createdAt, updatedAt = createdAt) {
+    const columns = getTableColumns(table);
+    if (columns.has("updated_at")) {
+      db.prepare(`UPDATE ${table} SET created_at=?, updated_at=? WHERE id=?`).run(createdAt, updatedAt, id);
+      return;
+    }
+    db.prepare(`UPDATE ${table} SET created_at=? WHERE id=?`).run(createdAt, id);
+  }
+
+  function createExecutionControls(itemId, readinessBriefId, suffix = "A") {
+    const result = db.prepare(`
+      INSERT INTO content_execution_controls (
+        content_item_id,
+        source_readiness_brief_id,
+        source_intelligence_model_id,
+        must_include_points_json,
+        must_avoid_points_json,
+        blockers_json,
+        missing_requirements_json,
+        reasons_json,
+        payload_json,
+        computed_by
+      ) VALUES (?, ?, NULL, '[]', '[]', '[]', '[]', '{}', ?, 'tester@local')
+    `).run(
+      itemId,
+      readinessBriefId == null ? null : Number(readinessBriefId || 0) || null,
+      JSON.stringify({ label: `controls-${suffix}` })
+    );
+    return Number(result.lastInsertRowid || 0) || 0;
+  }
+
+  function createExecutionChannel(itemId, readinessBriefId, channel, suffix = "A") {
+    const result = db.prepare(`
+      INSERT INTO content_execution_channels (
+        content_item_id,
+        source_readiness_brief_id,
+        channel,
+        lang,
+        derived_controls_json,
+        recommended_version_json,
+        alternatives_json,
+        validation_json,
+        status,
+        generated_by
+      ) VALUES (?, ?, ?, 'th', '{}', ?, '[]', '{}', 'generated', 'tester@local')
+    `).run(
+      itemId,
+      readinessBriefId == null ? null : Number(readinessBriefId || 0) || null,
+      String(channel || "").trim().toLowerCase(),
+      JSON.stringify({ label: `${channel}-${suffix}` })
+    );
+    return Number(result.lastInsertRowid || 0) || 0;
+  }
+
   function createContentAsset(itemId, suffix = "A", options = {}) {
     const mimeType = String(options.mime_type || "image/jpeg");
     const extension = String(options.extension || (mimeType.startsWith("video/") ? "mp4" : "jpg"));
@@ -239,6 +304,9 @@ function createTestContext() {
     createReview,
     createSnapshot,
     createReadinessBrief,
+    createExecutionControls,
+    createExecutionChannel,
+    setRowTimestamps,
     createContentAsset,
     createRawOnlyAutoDependencies,
     createRawReview,
@@ -1200,31 +1268,210 @@ test("createAssignmentFromReadiness uses field pack handoff without readiness sn
   }
 });
 
-test("createAssignmentFromReadiness snapshots requested checks through existing handoff package", () => {
+test("createAssignmentFromReadiness remains strict by default when readiness fallback is not ready_for_handoff", () => {
   const ctx = createTestContext();
   try {
-    const item = ctx.createItem("Requested Checks Snapshot");
-    const assignee = ctx.createUser("requested-checks-snapshot");
-    ctx.repo.createFieldPack({
+    const item = ctx.createItem("Strict Readiness Guard");
+    const assignee = ctx.createUser("strict-guard");
+    ctx.createReadinessBrief(item.id, "strict");
+
+    assert.throws(
+      () => ctx.repo.createAssignmentFromReadiness(
+        item.id,
+        { assignee_user_id: assignee.id },
+        assignee.id,
+        "tester@local",
+        "admin"
+      ),
+      /item is not ready_for_handoff; use force_override with force_reason/
+    );
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("createAssignmentFromReadiness can bypass ready_for_handoff when explicitly allowed", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Relaxed Readiness Guard");
+    const assignee = ctx.createUser("relaxed-guard");
+    const readiness = ctx.createReadinessBrief(item.id, "relaxed");
+
+    const result = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id },
+      assignee.id,
+      "tester@local",
+      "admin",
+      { requireReadyForHandoff: false }
+    );
+
+    assert.equal(Number(result?.assignment?.id || 0) > 0, true);
+    assert.equal(Number(result?.handoff?.id || 0) > 0, true);
+    assert.equal(result?.preview?.source_of_truth, "readiness_snapshot");
+    assert.equal(result?.preview?.ready_for_handoff, false);
+    assert.equal(result?.guard?.force_override, false);
+    assert.equal(result?.guard?.force_reason, null);
+    assert.equal(result?.handoff?.readiness_brief_id, readiness);
+    const snapshotCount = ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots WHERE assignment_id=?").get(result.assignment.id)?.c || 0;
+    assert.equal(snapshotCount, 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("repairAssignmentHandoffSnapshotForAssignment backfills a missing handoff snapshot idempotently", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Repair Snapshot Target");
+    const assignee = ctx.createUser("repair-target");
+    const fieldPack = ctx.repo.createFieldPack({
       content_item_id: item.id,
       status: "ready_for_field",
-      editor_summary: "พร้อมส่งทีมหน้างาน",
+      editor_summary: "พร้อมส่งงาน",
       requested_checks_json: {
         version: 1,
         groups: [
           {
+            group_key: "cta_contact",
+            group_label: "CTA / ข้อมูลติดต่อ",
+            checks: [
+              {
+                key: "phone",
+                requested: true,
+                label: "โทรศัพท์",
+                instruction: "ตรวจเบอร์",
+                answer_type: "phone",
+                suggested_value: "080-111-2222",
+                condition_prompt: null,
+                evidence_required: false,
+                source: "ai",
+              },
+            ],
+          },
+          {
             group_key: "taxonomy",
-            group_label: "หมวดหมู่",
+            group_label: "Taxonomy / ข้อมูลจัดหมวด",
             checks: [
               {
                 key: "tags",
                 requested: true,
                 label: "แท็ก",
-                instruction: "ดูว่ามีแท็กไหนควรเติม",
+                instruction: "ตรวจแท็ก",
                 answer_type: "multi_select",
-                suggested_value: ["family", "late-night"],
+                suggested_value: ["family"],
+                condition_prompt: null,
                 evidence_required: false,
+                source: "ai",
               },
+            ],
+          },
+        ],
+      },
+    });
+
+    const createdAssignment = ctx.repo.createAssignment(
+      {
+        content_item_id: item.id,
+        assignee_user_id: assignee.id,
+        assignment_kind: "field",
+      },
+      assignee.id,
+      {
+        actor_email: "tester@local",
+        actor_role: "admin",
+        reason_code: "assignment_created_sync_manual",
+        note: "manual assignment without handoff snapshot",
+      }
+    );
+
+    assert.equal(ctx.repo.getLatestAssignmentHandoffByAssignment(createdAssignment.id), null);
+
+    const dryRun = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPack.id, {
+      apply: false,
+      actorEmail: "tester@local",
+    });
+    assert.equal(dryRun.ok, true);
+    assert.equal(dryRun.apply_requested, false);
+    assert.equal(dryRun.created, false);
+    assert.equal(dryRun.reason, "dry_run");
+    assert.equal(dryRun.would_apply, true);
+    assert.equal(dryRun.applied, false);
+    assert.equal(dryRun.historical_cutoff_at, createdAssignment.created_at);
+    assert.equal(dryRun.historical_readiness_brief_id, null);
+    assert.equal(dryRun.historical_execution_controls_id, null);
+    assert.deepEqual(dryRun.historical_execution_channels, { facebook: null, tiktok: null });
+    assert.equal(dryRun.warnings.includes("historical_readiness_snapshot_missing"), true);
+    assert.equal(dryRun.warnings.includes("historical_execution_controls_missing"), true);
+    assert.equal(dryRun.warnings.includes("historical_execution_channel_missing:facebook"), true);
+    assert.equal(dryRun.warnings.includes("historical_execution_channel_missing:tiktok"), true);
+    assert.equal(dryRun.handoff, null);
+
+    const repaired = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPack.id, {
+      apply: true,
+      actorEmail: "tester@local",
+    });
+    assert.equal(repaired.ok, true);
+    assert.equal(repaired.apply_requested, true);
+    assert.equal(repaired.created, true);
+    assert.equal(repaired.repaired, true);
+    assert.equal(repaired.would_apply, true);
+    assert.equal(repaired.applied, true);
+    assert.equal(repaired.source_generated_at, createdAssignment.created_at);
+    assert.equal(repaired.handoff?.assignment_id, createdAssignment.id);
+    assert.deepEqual(
+      repaired.handoff?.handoff_package_json?.requested_checks?.groups?.map((group) => group.group_key),
+      ["cta_contact", "taxonomy"]
+    );
+    assert.equal(repaired.handoff?.handoff_package_json?.requested_checks?.groups?.[0]?.checks?.[0]?.requested, true);
+
+    const secondRepair = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPack.id, {
+      apply: true,
+      actorEmail: "tester@local",
+    });
+    assert.equal(secondRepair.ok, true);
+    assert.equal(secondRepair.apply_requested, true);
+    assert.equal(secondRepair.created, false);
+    assert.equal(secondRepair.reason, "already_exists");
+    assert.equal(secondRepair.would_apply, false);
+    assert.equal(secondRepair.applied, false);
+    assert.equal(ctx.repo.getLatestAssignmentHandoffByAssignment(createdAssignment.id)?.id, repaired.handoff?.id);
+    const snapshotCount = ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots WHERE assignment_id=?").get(createdAssignment.id)?.c || 0;
+    assert.equal(snapshotCount, 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
+test("createAssignmentFromReadiness snapshots CTA and taxonomy requested checks through existing handoff package", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Checks Snapshot Expanded");
+    const assignee = ctx.createUser("requested-checks-expanded");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready for field handoff",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            group_label: "CTA / Contact",
+            checks: [
+              { key: "phone", requested: true, label: "Phone", instruction: "Confirm phone", answer_type: "phone", suggested_value: "080-111-2222", evidence_required: false },
+              { key: "line_url", requested: true, label: "LINE", instruction: "Confirm LINE", answer_type: "url", suggested_value: "https://line.me/example", evidence_required: false },
+              { key: "facebook_url", requested: true, label: "Facebook", instruction: "Confirm Facebook", answer_type: "url", suggested_value: "https://facebook.com/example", evidence_required: false },
+              { key: "website_url", requested: true, label: "Website", instruction: "Confirm website", answer_type: "url", suggested_value: "https://example.com", evidence_required: false },
+              { key: "primary_cta", requested: true, label: "Primary CTA", instruction: "Confirm CTA", answer_type: "text", suggested_value: "Call now", evidence_required: false },
+            ],
+          },
+          {
+            group_key: "taxonomy",
+            group_label: "Taxonomy",
+            checks: [
+              { key: "tags", requested: true, label: "Tags", instruction: "Confirm tags", answer_type: "multi_select", suggested_value: ["family", "late-night"], evidence_required: false },
+              { key: "business_type", requested: true, label: "Business type", instruction: "Confirm business type", answer_type: "text", suggested_value: "restaurant", evidence_required: false },
+              { key: "price_level", requested: true, label: "Price level", instruction: "Confirm price level", answer_type: "text", suggested_value: null, evidence_required: false },
             ],
           },
         ],
@@ -1239,28 +1486,546 @@ test("createAssignmentFromReadiness snapshots requested checks through existing 
       "admin"
     );
 
-    assert.deepEqual(result.handoff.handoff_package_json?.requested_checks, {
-      version: 1,
-      groups: [
-        {
-          group_key: "taxonomy",
-          group_label: "หมวดหมู่",
-          checks: [
-            {
-              key: "tags",
-              requested: true,
-              label: "แท็ก",
-              instruction: "ดูว่ามีแท็กไหนควรเติม",
-              answer_type: "multi_select",
-              suggested_value: ["family", "late-night"],
-              condition_prompt: null,
-              evidence_required: false,
-              source: null,
-            },
-          ],
-        },
-      ],
+    const requestedChecks = result.handoff.handoff_package_json?.requested_checks;
+    assert.deepEqual(requestedChecks?.groups?.map((group) => group.group_key), ["cta_contact", "taxonomy"]);
+    assert.equal(
+      requestedChecks?.groups?.reduce((sum, group) => sum + (Array.isArray(group?.checks) ? group.checks.length : 0), 0),
+      8
+    );
+    assert.equal(requestedChecks?.groups?.[0]?.checks?.[0]?.suggested_value, "080-111-2222");
+    assert.equal(requestedChecks?.groups?.[1]?.checks?.[0]?.condition_prompt, null);
+    assert.equal(requestedChecks?.groups?.[1]?.checks?.[0]?.source, null);
+    assert.equal(requestedChecks?.groups?.[1]?.checks?.[2]?.key, "price_level");
+    assert.equal(requestedChecks?.groups?.[1]?.checks?.[2]?.suggested_value, null);
+    assert.equal(requestedChecks?.groups?.[1]?.checks?.[2]?.requested, true);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("createAssignmentFromReadiness rolls back assignment workflow and snapshot when snapshot insert fails", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Atomic Snapshot Failure");
+    const assignee = ctx.createUser("atomic-snapshot");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready for atomic test",
+      requested_checks_json: { version: 1, groups: [] },
     });
+
+    const assignmentCountBefore = ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assignments").get()?.c || 0;
+    const snapshotCountBefore = ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots").get()?.c || 0;
+    const workflowBefore = ctx.repo.ensureWorkflowModel(item.id);
+
+    ctx.db.exec(`
+      CREATE TRIGGER fail_assignment_handoff_snapshot_insert
+      BEFORE INSERT ON content_assignment_handoff_snapshots
+      BEGIN
+        SELECT RAISE(ABORT, 'forced snapshot insert failure');
+      END;
+    `);
+
+    assert.throws(() => {
+      ctx.repo.createAssignmentFromReadiness(
+        item.id,
+        { assignee_user_id: assignee.id },
+        assignee.id,
+        "tester@local",
+        "admin"
+      );
+    }, /forced snapshot insert failure/);
+
+    const assignmentCountAfter = ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assignments").get()?.c || 0;
+    const snapshotCountAfter = ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots").get()?.c || 0;
+    const workflowAfter = ctx.repo.ensureWorkflowModel(item.id);
+    assert.equal(assignmentCountAfter, assignmentCountBefore);
+    assert.equal(snapshotCountAfter, snapshotCountBefore);
+    assert.equal(workflowAfter.assignment_state, workflowBefore.assignment_state);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("repairAssignmentHandoffSnapshotForAssignment uses assignment-time readiness controls and channels instead of newer records", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Historical Repair Source Resolution");
+    const assignee = ctx.createUser("historical-source");
+    const fieldPackA = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "field pack A",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    ctx.setRowTimestamps("field_packs", fieldPackA.id, "2026-01-02 09:00:00");
+
+    const readinessA = ctx.createReadinessBrief(item.id, "A");
+    ctx.setRowTimestamps("content_readiness_briefs", readinessA, "2026-01-02 09:10:00");
+    const controlsA = ctx.createExecutionControls(item.id, readinessA, "A");
+    ctx.setRowTimestamps("content_execution_controls", controlsA, "2026-01-02 09:20:00");
+    const facebookA = ctx.createExecutionChannel(item.id, readinessA, "facebook", "A");
+    ctx.setRowTimestamps("content_execution_channels", facebookA, "2026-01-02 09:30:00");
+    const tiktokA = ctx.createExecutionChannel(item.id, readinessA, "tiktok", "A");
+    ctx.setRowTimestamps("content_execution_channels", tiktokA, "2026-01-02 09:31:00");
+
+    const createdAssignment = ctx.repo.createAssignment(
+      {
+        content_item_id: item.id,
+        assignee_user_id: assignee.id,
+        assignment_kind: "field",
+      },
+      assignee.id,
+      {
+        actor_email: "tester@local",
+        actor_role: "admin",
+        reason_code: "assignment_created_sync_manual",
+        note: "manual assignment without handoff snapshot",
+      }
+    );
+    ctx.setRowTimestamps("content_assignments", createdAssignment.id, "2026-01-02 09:40:00");
+
+    const readinessB = ctx.createReadinessBrief(item.id, "B");
+    ctx.setRowTimestamps("content_readiness_briefs", readinessB, "2026-01-02 10:10:00");
+    const controlsB = ctx.createExecutionControls(item.id, readinessB, "B");
+    ctx.setRowTimestamps("content_execution_controls", controlsB, "2026-01-02 10:20:00");
+    const facebookB = ctx.createExecutionChannel(item.id, readinessB, "facebook", "B");
+    ctx.setRowTimestamps("content_execution_channels", facebookB, "2026-01-02 10:30:00");
+    const tiktokB = ctx.createExecutionChannel(item.id, readinessB, "tiktok", "B");
+    ctx.setRowTimestamps("content_execution_channels", tiktokB, "2026-01-02 10:31:00");
+
+    const dryRun = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPackA.id, {
+      apply: false,
+      actorEmail: "tester@local",
+    });
+    assert.equal(dryRun.historical_cutoff_at, "2026-01-02 09:40:00");
+    assert.equal(dryRun.historical_readiness_brief_id, readinessA);
+    assert.equal(dryRun.historical_execution_controls_id, controlsA);
+    assert.deepEqual(dryRun.historical_execution_channels, { facebook: facebookA, tiktok: tiktokA });
+    assert.equal(dryRun.warnings.length, 0);
+    assert.equal(dryRun.would_apply, true);
+
+    const repaired = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPackA.id, {
+      apply: true,
+      actorEmail: "tester@local",
+    });
+    const source = repaired.handoff?.handoff_package_json?.source || null;
+    assert.equal(repaired.handoff?.readiness_brief_id, readinessA);
+    assert.equal(source?.field_pack_id, fieldPackA.id);
+    assert.equal(source?.readiness_brief_id, readinessA);
+    assert.equal(source?.execution_controls_id, controlsA);
+    assert.deepEqual(source?.execution_channels, { facebook: facebookA, tiktok: tiktokA });
+    assert.equal(source?.generated_at, "2026-01-02 09:40:00");
+    assert.notEqual(repaired.handoff?.readiness_brief_id, readinessB);
+    assert.notEqual(source?.readiness_brief_id, readinessB);
+    assert.notEqual(source?.execution_controls_id, controlsB);
+    assert.notEqual(source?.execution_channels?.facebook, facebookB);
+    assert.notEqual(source?.execution_channels?.tiktok, tiktokB);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("repairAssignmentHandoffSnapshotForAssignment keeps historical governance null when only newer records exist", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Historical Repair Missing Context");
+    const assignee = ctx.createUser("historical-missing");
+    const fieldPack = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "field pack",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const createdAssignment = ctx.repo.createAssignment(
+      {
+        content_item_id: item.id,
+        assignee_user_id: assignee.id,
+        assignment_kind: "field",
+      },
+      assignee.id,
+      {
+        actor_email: "tester@local",
+        actor_role: "admin",
+        reason_code: "assignment_created_sync_manual",
+        note: "manual assignment without handoff snapshot",
+      }
+    );
+    ctx.setRowTimestamps("content_assignments", createdAssignment.id, "2026-02-03 09:00:00");
+
+    const readinessNew = ctx.createReadinessBrief(item.id, "new");
+    ctx.setRowTimestamps("content_readiness_briefs", readinessNew, "2026-02-03 10:00:00");
+    const controlsNew = ctx.createExecutionControls(item.id, readinessNew, "new");
+    ctx.setRowTimestamps("content_execution_controls", controlsNew, "2026-02-03 10:05:00");
+    const facebookNew = ctx.createExecutionChannel(item.id, readinessNew, "facebook", "new");
+    ctx.setRowTimestamps("content_execution_channels", facebookNew, "2026-02-03 10:10:00");
+    const tiktokNew = ctx.createExecutionChannel(item.id, readinessNew, "tiktok", "new");
+    ctx.setRowTimestamps("content_execution_channels", tiktokNew, "2026-02-03 10:11:00");
+
+    const dryRun = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPack.id, {
+      apply: false,
+      actorEmail: "tester@local",
+    });
+    assert.equal(dryRun.ok, true);
+    assert.equal(dryRun.would_apply, true);
+    assert.equal(dryRun.applied, false);
+    assert.equal(dryRun.historical_readiness_brief_id, null);
+    assert.equal(dryRun.historical_execution_controls_id, null);
+    assert.deepEqual(dryRun.historical_execution_channels, { facebook: null, tiktok: null });
+    assert.equal(dryRun.warnings.includes("historical_readiness_snapshot_missing"), true);
+    assert.equal(dryRun.warnings.includes("historical_execution_controls_missing"), true);
+    assert.equal(dryRun.warnings.includes("historical_execution_channel_missing:facebook"), true);
+    assert.equal(dryRun.warnings.includes("historical_execution_channel_missing:tiktok"), true);
+    assert.equal(ctx.repo.getLatestAssignmentHandoffByAssignment(createdAssignment.id), null);
+
+    const repaired = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPack.id, {
+      apply: true,
+      actorEmail: "tester@local",
+    });
+    assert.equal(repaired.applied, true);
+    assert.equal(repaired.handoff?.readiness_brief_id, null);
+    assert.equal(repaired.handoff?.handoff_package_json?.source?.readiness_brief_id, null);
+    assert.equal(repaired.handoff?.handoff_package_json?.source?.execution_controls_id, null);
+    assert.deepEqual(repaired.handoff?.handoff_package_json?.source?.execution_channels, { facebook: null, tiktok: null });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("repairAssignmentHandoffSnapshotForAssignment matches the normal handoff source shape and provenance fields", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Historical Repair Source Parity");
+    const assignee = ctx.createUser("historical-parity");
+    const fieldPack = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "field pack",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const readinessId = ctx.createReadinessBrief(item.id, "parity");
+    const controlsId = ctx.createExecutionControls(item.id, readinessId, "parity");
+    const facebookId = ctx.createExecutionChannel(item.id, readinessId, "facebook", "parity");
+    const tiktokId = ctx.createExecutionChannel(item.id, readinessId, "tiktok", "parity");
+
+    const normal = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const normalSource = normal.handoff?.handoff_package_json?.source || null;
+
+    const missingSnapshotAssignment = ctx.repo.createAssignment(
+      {
+        content_item_id: item.id,
+        assignee_user_id: assignee.id,
+        assignment_kind: "field",
+      },
+      assignee.id,
+      {
+        actor_email: "tester@local",
+        actor_role: "admin",
+        reason_code: "assignment_created_sync_manual",
+        note: "manual assignment without handoff snapshot",
+      }
+    );
+    ctx.setRowTimestamps("content_assignments", missingSnapshotAssignment.id, normalSource.generated_at, normalSource.generated_at);
+
+    const repaired = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(missingSnapshotAssignment.id, fieldPack.id, {
+      apply: true,
+      actorEmail: "tester@local",
+    });
+    const repairedSource = repaired.handoff?.handoff_package_json?.source || null;
+
+    assert.deepEqual(Object.keys(repairedSource || {}).sort(), Object.keys(normalSource || {}).sort());
+    assert.equal(repairedSource?.field_pack_id, fieldPack.id);
+    assert.equal(repairedSource?.field_pack_status, normalSource?.field_pack_status);
+    assert.equal(repairedSource?.readiness_brief_id, readinessId);
+    assert.equal(repairedSource?.execution_controls_id, controlsId);
+    assert.deepEqual(repairedSource?.execution_channels, { facebook: facebookId, tiktok: tiktokId });
+    assert.equal(repairedSource?.content_item_id, item.id);
+    assert.equal(repairedSource?.generated_at, normalSource?.generated_at);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("repairAssignmentHandoffSnapshotForAssignment uses the explicit historical field pack and is idempotent", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Repair Snapshot Historical Source");
+    const assignee = ctx.createUser("repair-historical");
+    const fieldPackA = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "field pack A",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            group_label: "CTA / Contact",
+            checks: [
+              { key: "phone", requested: true, label: "Phone", instruction: "Check phone A", answer_type: "phone", suggested_value: "080-111-2222", evidence_required: false },
+            ],
+          },
+        ],
+      },
+    });
+
+    const createdAssignment = ctx.repo.createAssignment(
+      {
+        content_item_id: item.id,
+        assignee_user_id: assignee.id,
+        assignment_kind: "field",
+      },
+      assignee.id,
+      {
+        actor_email: "tester@local",
+        actor_role: "admin",
+        reason_code: "assignment_created_sync_manual",
+        note: "manual assignment without handoff snapshot",
+      }
+    );
+
+    const fieldPackB = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "field_done",
+      editor_summary: "field pack B",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "taxonomy",
+            group_label: "Taxonomy",
+            checks: [
+              { key: "tags", requested: true, label: "Tags", instruction: "Check tags B", answer_type: "multi_select", suggested_value: ["family"], evidence_required: false },
+            ],
+          },
+        ],
+      },
+    });
+
+    const dryRun = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPackA.id, {
+      apply: false,
+      actorEmail: "tester@local",
+    });
+    assert.equal(dryRun.ok, true);
+    assert.equal(dryRun.apply_requested, false);
+    assert.equal(dryRun.created, false);
+    assert.equal(dryRun.reason, "dry_run");
+    assert.equal(dryRun.field_pack_id, fieldPackA.id);
+    assert.equal(dryRun.requested_check_group_count, 1);
+    assert.equal(dryRun.requested_check_count, 1);
+    assert.equal(dryRun.would_apply, true);
+    assert.equal(dryRun.applied, false);
+
+    const repaired = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPackA.id, {
+      apply: true,
+      actorEmail: "tester@local",
+    });
+    assert.equal(repaired.ok, true);
+    assert.equal(repaired.apply_requested, true);
+    assert.equal(repaired.created, true);
+    assert.equal(repaired.repaired, true);
+    assert.equal(repaired.would_apply, true);
+    assert.equal(repaired.applied, true);
+    assert.equal(repaired.mode, "repair_from_explicit_field_pack");
+    assert.deepEqual(
+      repaired.handoff?.handoff_package_json?.requested_checks?.groups?.map((group) => group.group_key),
+      ["cta_contact"]
+    );
+    assert.equal(
+      repaired.handoff?.handoff_package_json?.requested_checks?.groups?.[0]?.checks?.[0]?.instruction,
+      "Check phone A"
+    );
+
+    const secondRepair = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPackB.id, {
+      apply: true,
+      actorEmail: "tester@local",
+    });
+    assert.equal(secondRepair.ok, true);
+    assert.equal(secondRepair.apply_requested, true);
+    assert.equal(secondRepair.created, false);
+    assert.equal(secondRepair.reason, "already_exists");
+    assert.equal(secondRepair.would_apply, false);
+    assert.equal(secondRepair.applied, false);
+    const snapshotCount = ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots WHERE assignment_id=?").get(createdAssignment.id)?.c || 0;
+    assert.equal(snapshotCount, 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("repairAssignmentHandoffSnapshotForAssignment rejects wrong-item and missing field pack ids", () => {
+  const ctx = createTestContext();
+  try {
+    const itemA = ctx.createItem("Repair Snapshot Item A");
+    const itemB = ctx.createItem("Repair Snapshot Item B");
+    const assignee = ctx.createUser("repair-validation");
+    const fieldPackA = ctx.repo.createFieldPack({
+      content_item_id: itemA.id,
+      status: "ready_for_field",
+      editor_summary: "field pack A",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            group_label: "CTA / Contact",
+            checks: [
+              { key: "phone", requested: true, label: "Phone", instruction: "Check phone", answer_type: "phone", suggested_value: "080-111-2222", evidence_required: false },
+            ],
+          },
+        ],
+      },
+    });
+    const fieldPackB = ctx.repo.createFieldPack({
+      content_item_id: itemB.id,
+      status: "ready_for_field",
+      editor_summary: "field pack B",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "taxonomy",
+            group_label: "Taxonomy",
+            checks: [
+              { key: "tags", requested: true, label: "Tags", instruction: "Check tags", answer_type: "multi_select", suggested_value: ["late-night"], evidence_required: false },
+            ],
+          },
+        ],
+      },
+    });
+
+    const createdAssignment = ctx.repo.createAssignment(
+      {
+        content_item_id: itemA.id,
+        assignee_user_id: assignee.id,
+        assignment_kind: "field",
+      },
+      assignee.id,
+      {
+        actor_email: "tester@local",
+        actor_role: "admin",
+        reason_code: "assignment_created_sync_manual",
+        note: "manual assignment without handoff snapshot",
+      }
+    );
+
+    const missingFieldPack = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, null, {
+      apply: false,
+      actorEmail: "tester@local",
+    });
+    assert.equal(missingFieldPack.ok, false);
+    assert.equal(missingFieldPack.apply_requested, false);
+    assert.equal(missingFieldPack.reason, "rejected");
+    assert.equal(missingFieldPack.would_apply, false);
+    assert.equal(missingFieldPack.applied, false);
+    assert.equal(missingFieldPack.errors.includes("field_pack_id is required"), true);
+
+    const wrongItemRepair = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPackB.id, {
+      apply: true,
+      actorEmail: "tester@local",
+    });
+    assert.equal(wrongItemRepair.ok, false);
+    assert.equal(wrongItemRepair.apply_requested, true);
+    assert.equal(wrongItemRepair.would_apply, false);
+    assert.equal(wrongItemRepair.applied, false);
+    assert.equal(wrongItemRepair.errors.includes("field pack belongs to another content item"), true);
+    assert.equal(ctx.repo.getLatestAssignmentHandoffByAssignment(createdAssignment.id), null);
+
+    const validDryRun = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPackA.id, {
+      apply: false,
+      actorEmail: "tester@local",
+    });
+    assert.equal(validDryRun.ok, true);
+    assert.equal(validDryRun.reason, "dry_run");
+    assert.equal(validDryRun.apply_requested, false);
+    assert.equal(validDryRun.would_apply, true);
+    assert.equal(validDryRun.applied, false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("repairAssignmentHandoffSnapshotForAssignment is a no-op for existing snapshot and rejects non-field assignments", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Repair Snapshot Existing Snapshot");
+    const assignee = ctx.createUser("repair-existing");
+    const fieldPack = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            group_label: "CTA / Contact",
+            checks: [
+              { key: "phone", requested: true, label: "Phone", instruction: "Check phone", answer_type: "phone", suggested_value: "080-111-2222", evidence_required: false },
+            ],
+          },
+        ],
+      },
+    });
+
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+
+    const existingSnapshotRepair = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(
+      assignmentResult.assignment.id,
+      fieldPack.id,
+      {
+        apply: true,
+        actorEmail: "tester@local",
+      }
+    );
+    assert.equal(existingSnapshotRepair.ok, true);
+    assert.equal(existingSnapshotRepair.apply_requested, true);
+    assert.equal(existingSnapshotRepair.created, false);
+    assert.equal(existingSnapshotRepair.reason, "already_exists");
+    assert.equal(existingSnapshotRepair.would_apply, false);
+    assert.equal(existingSnapshotRepair.applied, false);
+
+    const editorialAssignment = ctx.repo.createAssignment(
+      {
+        content_item_id: item.id,
+        assignee_user_id: assignee.id,
+        assignment_kind: "editorial",
+        brief_json: { brief_summary: "Editorial brief" },
+        requirements_json: { priority: "normal" },
+      },
+      assignee.id,
+      {
+        actor_email: "tester@local",
+        actor_role: "admin",
+        reason_code: "assignment_created_sync_manual",
+        note: "editorial assignment",
+      }
+    );
+
+    const editorialRepair = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(editorialAssignment.id, fieldPack.id, {
+      apply: true,
+      actorEmail: "tester@local",
+    });
+    assert.equal(editorialRepair.ok, false);
+    assert.equal(editorialRepair.apply_requested, true);
+    assert.equal(editorialRepair.would_apply, false);
+    assert.equal(editorialRepair.applied, false);
+    assert.equal(editorialRepair.errors.includes("repair is supported only for field assignments"), true);
+    const editorialSnapshotCount = ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots WHERE assignment_id=?").get(editorialAssignment.id)?.c || 0;
+    assert.equal(editorialSnapshotCount, 0);
   } finally {
     ctx.cleanup();
   }
