@@ -1690,42 +1690,63 @@ button.fail {
 
 #assignment-submission-requested-checks-fields {
   grid-template-columns: 1fr;
-  gap: 8px;
+  gap: 4px;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-group="cta_contact"] {
   grid-column: 1 / -1;
   width: 100%;
   margin: 0;
+  padding: 8px 10px;
+}
+
+#assignment-submission-requested-checks-fields [data-requested-check-group="cta_contact"] .assignment-subtitle {
+  margin: 0 0 8px;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-group-grid {
   grid-template-columns: 1fr;
-  gap: 10px;
+  gap: 2px;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-row] {
-  padding: 7px 0;
+  padding: 2px 0;
+  margin: 0;
   border: 0;
+  min-height: 0;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-row] + [data-requested-check-row] {
   border-top: 0;
+  margin: 0;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-main {
   display: grid;
   grid-template-columns: auto minmax(120px, auto) minmax(220px, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  min-height: 36px;
+  margin: 0;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-main:has(.requested-check-row-status) {
   grid-template-columns: auto minmax(120px, auto) auto minmax(220px, 1fr);
 }
 
+#assignment-submission-requested-checks-fields .assignment-inline-check {
+  min-height: 32px;
+  height: 32px;
+  margin: 0;
+}
+
 #assignment-submission-requested-checks-fields .requested-check-row-label {
   min-width: 0;
+  margin: 0;
+}
+
+#assignment-submission-requested-checks-fields .requested-check-row-label strong {
+  margin: 0;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-value {
@@ -1733,10 +1754,16 @@ button.fail {
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-value input,
-#assignment-submission-requested-checks-fields .requested-check-row-value select,
+#assignment-submission-requested-checks-fields .requested-check-row-value select {
+  margin: 0;
+  min-height: 32px;
+  height: 32px;
+  width: 100%;
+  min-width: 0;
+}
+
 #assignment-submission-requested-checks-fields .requested-check-row-value textarea {
   margin: 0;
-  min-height: 36px;
   width: 100%;
   min-width: 0;
 }
@@ -1750,6 +1777,7 @@ button.fail {
   display: inline-flex;
   align-items: center;
   min-width: 0;
+  margin: 0;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-number-with-unit {
