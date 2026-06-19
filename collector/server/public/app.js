@@ -7429,8 +7429,8 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row) {
   const usesSuggestedValue = hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
     && areAssignmentRequestedCheckValuesEqual(row.value, check.suggested_value, check.answer_type);
   return `
-    <div data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
-      <div class="requested-check-row-main">
+    <div class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row" data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
+      <div class="assignment-capture-row requested-check-row-main">
         <label class="assignment-inline-check">
           <input data-requested-check-field="checked" type="checkbox" ${checked ? "checked" : ""} />
         </label>
@@ -7455,11 +7455,9 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
     const checks = Array.isArray(group.checks) ? group.checks : [];
     if (!checks.length) return "";
     return `
-      <div class="requested-check-cta-card" data-requested-check-group="${escapeHtml(group.group_key)}">
-        <h5 class="assignment-subtitle requested-check-cta-title">${escapeHtml(group.group_label)}</h5>
-        <div class="requested-check-cta-list">
-          ${checks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {})).join("")}
-        </div>
+      <div class="assignment-brief-section full-span requested-check-cta-section" data-requested-check-group="${escapeHtml(group.group_key)}">
+        <div class="assignment-brief-label">CTA/ติดต่อ</div>
+        ${checks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {})).join("")}
       </div>
     `;
   }).join("");

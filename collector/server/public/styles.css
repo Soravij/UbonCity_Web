@@ -1693,78 +1693,44 @@ button.fail {
   gap: 4px;
 }
 
-#assignment-submission-requested-checks-fields .requested-check-cta-card {
-  border: 0;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--card) 42%, transparent);
-  padding: 8px 10px;
-  box-shadow: none;
-}
-
-#assignment-submission-requested-checks-fields [data-requested-check-group="cta_contact"] {
-  grid-column: 1 / -1;
+#assignment-submission-requested-checks-fields .requested-check-cta-section {
   width: 100%;
   margin: 0;
-  align-self: start;
   height: auto;
   min-height: 0;
 }
 
-#assignment-submission-requested-checks-fields .requested-check-cta-title {
-  margin: 0 0 4px;
-}
-
-#assignment-submission-requested-checks-fields .requested-check-cta-list {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 4px;
-  align-content: start;
-  grid-auto-rows: max-content;
-  height: auto;
-  min-height: 0;
-}
-
-#assignment-submission-requested-checks-fields [data-requested-check-row] {
+#assignment-submission-requested-checks-fields .requested-check-cta-row {
   padding: 8px 10px;
   margin: 0;
-  border: 0;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--card) 42%, transparent);
   min-height: 0;
-  align-self: start;
-  height: auto;
 }
 
-#assignment-submission-requested-checks-fields [data-requested-check-row] + [data-requested-check-row] {
-  border-top: 0;
-  margin: 0;
-  padding: 0;
+#assignment-submission-requested-checks-fields .requested-check-cta-row + .requested-check-cta-row {
+  margin-top: 4px;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-main {
   display: grid;
   grid-template-columns: 20px 150px 76px minmax(0, 1fr);
   align-items: center;
-  column-gap: 8px;
-  min-height: 40px;
+  gap: 8px;
+  min-height: 0;
   margin: 0;
 }
 
 #assignment-submission-requested-checks-fields .assignment-inline-check {
   width: 20px;
-  min-height: 40px;
-  height: 40px;
+  min-height: 32px;
+  height: 32px;
   margin: 0;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-label {
   min-width: 0;
-  margin: 0;
   white-space: nowrap;
-  word-break: normal;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.2;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-label strong {
@@ -1797,17 +1763,6 @@ button.fail {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-#assignment-submission-requested-checks-fields .requested-check-row-value textarea {
-  margin: 0;
-  width: 100%;
-  min-width: 0;
-}
-
-#assignment-submission-requested-checks-fields .requested-check-row-value textarea {
-  resize: vertical;
-  overflow: auto;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-status {
