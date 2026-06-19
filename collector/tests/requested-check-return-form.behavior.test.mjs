@@ -408,11 +408,13 @@ test("requested-check section uses namespaced keys and renders CTA rows once whi
   assert.ok(sectionHtml.includes('data-requested-check-return-key="cta_contact.line_url"'));
   assert.equal((sectionHtml.match(/data-requested-check-return-key="cta_contact\.phone"/g) || []).length, 1);
   assert.equal((sectionHtml.match(/data-requested-check-return-key="cta_contact\.line_url"/g) || []).length, 1);
-  assert.equal((sectionHtml.match(/class="requested-check-row-status"/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/requested-check-row-status/g) || []).length, 2);
   assert.equal((sectionHtml.match(/AI แนะนำ/g) || []).length, 1);
   assert.equal((sectionHtml.match(/class="assignment-brief-section full-span requested-check-cta-section"/g) || []).length, 1);
   assert.equal((sectionHtml.match(/class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row"/g) || []).length, 2);
   assert.equal((sectionHtml.match(/class="assignment-capture-row requested-check-row-main"/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/class="assignment-capture-title requested-check-row-label"/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/class="assignment-capture-actions requested-check-row-status"/g) || []).length, 2);
   assert.equal((sectionHtml.match(/class="requested-check-cta-list"/g) || []).length, 0);
   assert.equal((sectionHtml.match(/class="requested-check-cta-card"/g) || []).length, 0);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.phone"'), false);
@@ -539,7 +541,7 @@ test("requested-check section renders all five standard CTA checks with editable
   for (const key of ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]) {
     assert.match(sectionHtml, new RegExp(`data-requested-check-return-key="cta_contact\\.${key}"`));
   }
-  assert.equal((sectionHtml.match(/class="requested-check-row-status"/g) || []).length, 5);
+  assert.equal((sectionHtml.match(/requested-check-row-status/g) || []).length, 5);
   assert.match(sectionHtml, /value="0812345678"/);
   assert.match(sectionHtml, /data-requested-check-field="value" type="url" value=""/);
   assert.match(sectionHtml, /AI แนะนำ/);
@@ -601,12 +603,13 @@ test("requested-check section renders compact CTA rows with optional AI chip and
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
   assert.match(sectionHtml, /<div class="assignment-capture-row requested-check-row-main">\s*<label class="assignment-inline-check">/);
-  assert.match(sectionHtml, /<div class="assignment-brief-text requested-check-row-label">/);
+  assert.match(sectionHtml, /<div class="assignment-capture-title requested-check-row-label">/);
+  assert.match(sectionHtml, /<div class="assignment-capture-actions requested-check-row-status">/);
   assert.match(sectionHtml, /<div class="requested-check-row-value">/);
   assert.match(sectionHtml, /<div class="assignment-brief-section full-span requested-check-cta-section" data-requested-check-group="cta_contact">/);
-  assert.equal((sectionHtml.match(/class="requested-check-row-status"/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/requested-check-row-status/g) || []).length, 2);
   assert.equal((sectionHtml.match(/AI แนะนำ/g) || []).length, 0);
-  assert.ok(sectionHtml.includes('<div class="requested-check-row-status"></div>'));
+  assert.ok(sectionHtml.includes('<div class="assignment-capture-actions requested-check-row-status"></div>'));
   assert.equal((sectionHtml.match(/class="requested-check-cta-list"/g) || []).length, 0);
   assert.doesNotMatch(sectionHtml, /<details|<summary|รายละเอียด|Manual/);
 });
@@ -629,8 +632,8 @@ test("requested-check section shows no AI chip for null or empty suggestions", (
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
-  assert.equal((sectionHtml.match(/class="requested-check-row-status"/g) || []).length, 2);
-  assert.ok(sectionHtml.includes('<div class="requested-check-row-status"></div>'));
+  assert.equal((sectionHtml.match(/requested-check-row-status/g) || []).length, 2);
+  assert.ok(sectionHtml.includes('<div class="assignment-capture-actions requested-check-row-status"></div>'));
   assert.doesNotMatch(sectionHtml, /AI แนะนำ|Manual/);
 });
 
@@ -933,6 +936,8 @@ test("requested-check section uses one outer panel and does not render custom gr
   assert.equal((sectionHtml.match(/class="assignment-brief-section full-span requested-check-cta-section"/g) || []).length, 1);
   assert.equal((sectionHtml.match(/class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row"/g) || []).length, 1);
   assert.equal((sectionHtml.match(/class="assignment-capture-row requested-check-row-main"/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/class="assignment-capture-title requested-check-row-label"/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/class="assignment-capture-actions requested-check-row-status"/g) || []).length, 1);
   assert.equal((sectionHtml.match(/class="requested-check-cta-list"/g) || []).length, 0);
   assert.equal((sectionHtml.match(/class="requested-check-cta-card"/g) || []).length, 0);
   assert.equal((sectionHtml.match(/class="assignment-brief-card"/g) || []).length, 0);
@@ -973,15 +978,27 @@ test("requested-check mobile CSS keeps one-column CTA rows without secondary con
   assert.match(stylesCss, /requested-check-cta-row/);
   assert.match(
     stylesCss,
-    /#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-row-main\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-columns:\s*20px 150px 76px minmax\(0,\s*1fr\);/
+    /#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-row-main\s*\{[\s\S]*?grid-template-columns:\s*20px 150px 76px minmax\(0,\s*1fr\);/
   );
   assert.match(
     stylesCss,
-    /#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-cta-row\s*\{[\s\S]*?padding:\s*8px 10px;/
+    /#assignment-submission-capture-guide\s+\.assignment-capture-card,\s*#assignment-submission-requested-checks-fields\s+\.assignment-capture-card\s*\{[\s\S]*?padding:\s*8px 10px;/
   );
   assert.match(
     stylesCss,
     /#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-cta-section\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-direction:\s*column;[\s\S]*?align-self:\s*start;[\s\S]*?gap:\s*4px;/
+  );
+  assert.match(
+    stylesCss,
+    /#assignment-submission-capture-guide\s+\.assignment-capture-row,\s*#assignment-submission-requested-checks-fields\s+\.assignment-capture-row\s*\{[\s\S]*?display:\s*grid;[\s\S]*?align-items:\s*center;[\s\S]*?gap:\s*10px;/
+  );
+  assert.match(
+    stylesCss,
+    /#assignment-submission-capture-guide\s+\.assignment-capture-title,\s*#assignment-submission-requested-checks-fields\s+\.assignment-capture-title\s*\{[\s\S]*?font-size:\s*0\.9rem;[\s\S]*?line-height:\s*1\.3;/
+  );
+  assert.match(
+    stylesCss,
+    /#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-row-value input,\s*#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-row-value select\s*\{[\s\S]*?font-size:\s*0\.9rem;[\s\S]*?line-height:\s*1\.3;/
   );
   assert.doesNotMatch(
     stylesCss,
@@ -1208,8 +1225,8 @@ test("edited requested-check draft survives async handoff load and rerender path
   assert.match(calls[1], /value="0999999999"/);
   assert.doesNotMatch(calls[1], /Manual/);
   assert.doesNotMatch(calls[1], /AI แนะนำ/);
-  assert.equal((calls[1].match(/class="requested-check-row-status"/g) || []).length, 1);
-  assert.ok(calls[1].includes('<div class="requested-check-row-status"></div>'));
+  assert.equal((calls[1].match(/requested-check-row-status/g) || []).length, 1);
+  assert.ok(calls[1].includes('<div class="assignment-capture-actions requested-check-row-status"></div>'));
   assert.doesNotMatch(calls[1], /<details|ข้อมูลเพิ่มเติม/);
   assert.equal(calls[1].includes('value="0812345678"'), false);
   assert.equal(state.assignments.requestedCheckReturnDrafts[12].requested_check_returns["cta_contact.phone"].value, "0999999999");

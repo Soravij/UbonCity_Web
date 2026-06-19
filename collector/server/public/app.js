@@ -7434,10 +7434,10 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row) {
         <label class="assignment-inline-check">
           <input data-requested-check-field="checked" type="checkbox" ${checked ? "checked" : ""} />
         </label>
-        <div class="assignment-brief-text requested-check-row-label">
+        <div class="assignment-capture-title requested-check-row-label">
           <strong>${escapeHtml(check.label || check.check_key)}</strong>
         </div>
-        <div class="requested-check-row-status">${usesSuggestedValue ? `<span class="workflow-badge workflow-badge-generated">AI แนะนำ</span>` : ""}</div>
+        <div class="assignment-capture-actions requested-check-row-status">${usesSuggestedValue ? `<span class="workflow-badge workflow-badge-generated">AI แนะนำ</span>` : ""}</div>
         <div class="requested-check-row-value">
           ${buildAssignmentRequestedCheckReturnValueInputHtml(row)}
         </div>
