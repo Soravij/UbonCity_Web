@@ -979,6 +979,14 @@ test("requested-check mobile CSS keeps one-column CTA rows without secondary con
     stylesCss,
     /#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-cta-row\s*\{[\s\S]*?padding:\s*8px 10px;/
   );
+  assert.match(
+    stylesCss,
+    /#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-cta-section\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-direction:\s*column;[\s\S]*?align-self:\s*start;[\s\S]*?gap:\s*4px;/
+  );
+  assert.doesNotMatch(
+    stylesCss,
+    /#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-cta-row\s*\+\s*\.requested-check-cta-row\s*\{[\s\S]*?margin-top:\s*4px;/
+  );
   assert.match(stylesCss, /requested-check-row-value \{\s*grid-column: 2 \/ -1;/);
   assert.doesNotMatch(stylesCss, /requested-check-row-secondary|requested-check-row-details|requested-check-additional/);
 });

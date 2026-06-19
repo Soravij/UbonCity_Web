@@ -1694,6 +1694,11 @@ button.fail {
 }
 
 #assignment-submission-requested-checks-fields .requested-check-cta-section {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  align-self: start;
+  gap: 4px;
   width: 100%;
   margin: 0;
   height: auto;
@@ -1701,13 +1706,11 @@ button.fail {
 }
 
 #assignment-submission-requested-checks-fields .requested-check-cta-row {
+  flex: 0 0 auto;
+  height: auto;
   padding: 8px 10px;
   margin: 0;
   min-height: 0;
-}
-
-#assignment-submission-requested-checks-fields .requested-check-cta-row + .requested-check-cta-row {
-  margin-top: 4px;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-main {
