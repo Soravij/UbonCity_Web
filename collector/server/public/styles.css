@@ -1690,27 +1690,27 @@ button.fail {
 
 #assignment-submission-requested-checks-fields {
   grid-template-columns: 1fr;
-  gap: 4px;
+  gap: 2px;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-group="cta_contact"] {
   grid-column: 1 / -1;
   width: 100%;
   margin: 0;
-  padding: 8px 10px;
+  padding: 4px 8px;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-group="cta_contact"] .assignment-subtitle {
-  margin: 0 0 8px;
+  margin: 0 0 4px;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-group-grid {
   grid-template-columns: 1fr;
-  gap: 2px;
+  gap: 0;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-row] {
-  padding: 2px 0;
+  padding: 0;
   margin: 0;
   border: 0;
   min-height: 0;
@@ -1719,14 +1719,15 @@ button.fail {
 #assignment-submission-requested-checks-fields [data-requested-check-row] + [data-requested-check-row] {
   border-top: 0;
   margin: 0;
+  padding: 0;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-main {
   display: grid;
   grid-template-columns: auto minmax(120px, auto) minmax(220px, 1fr);
   align-items: center;
-  gap: 8px;
-  min-height: 36px;
+  gap: 6px;
+  min-height: 28px;
   margin: 0;
 }
 
@@ -1735,14 +1736,15 @@ button.fail {
 }
 
 #assignment-submission-requested-checks-fields .assignment-inline-check {
-  min-height: 32px;
-  height: 32px;
+  min-height: 28px;
+  height: 28px;
   margin: 0;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-label {
   min-width: 0;
   margin: 0;
+  line-height: 1.15;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-label strong {
@@ -1756,8 +1758,9 @@ button.fail {
 #assignment-submission-requested-checks-fields .requested-check-row-value input,
 #assignment-submission-requested-checks-fields .requested-check-row-value select {
   margin: 0;
-  min-height: 32px;
-  height: 32px;
+  min-height: 28px;
+  height: 28px;
+  padding-block: 2px;
   width: 100%;
   min-width: 0;
 }
@@ -1778,6 +1781,7 @@ button.fail {
   align-items: center;
   min-width: 0;
   margin: 0;
+  align-self: center;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-number-with-unit {
