@@ -138,6 +138,35 @@ Placeholders:
 - Publish must require body/meta/readiness requirements.
 - External/reference media must not pass publish readiness.
 
+## 7A. Taxonomy and Curation Policy
+
+- Clean owns the canonical main category.
+- Current canonical category path is `item.category -> buildFieldPackHandoffPackage(...) -> handoffPackage.niche`.
+- Work Return recipients must not change category in the assignment return UI.
+- Taxonomy catalog entries must use stable real check keys, not generic placeholder rows.
+- `taxonomy.category`, `taxonomy.subtype`, and `taxonomy.tags` are reserved metadata keys, not editable Curation questions.
+- Category defaults are the baseline for Curation.
+- Mapping may add category-relevant checks.
+- AI may add checks and suggested values.
+- AI must not silently remove required category defaults.
+- Resolver must deduplicate by stable `taxonomy_key`.
+- Resolver writes an immutable resolved checklist into the assignment handoff snapshot.
+- Work Return renders only the resolved snapshot.
+- Work Return must not query the live taxonomy catalog, infer category defaults, or call AI.
+- One taxonomy check maps to one Work Return row.
+- Each visible Curation row supports a main value plus optional `condition_note`.
+- Hidden legacy rows remain preserved through draft merge and payload handling for backward compatibility.
+- Issued assignments must stay stable when the live taxonomy catalog changes.
+- Any change to an issued handoff requires explicit repair or reissue behavior.
+- If a handoff snapshot contains no actual resolved taxonomy checks, the Work Return Curation section stays hidden.
+
+Responsibility split:
+- `default`: category taxonomy defaults owned by the future taxonomy resolver/catalog
+- `mapping`: category/subtype mapping-selected checks owned by the future resolver
+- `AI`: additive checks and suggestions only
+- `resolved handoff snapshot`: immutable checklist copied into assignment handoff
+- `Work Return response`: field-worker answers stored in `requested_check_returns`
+
 Placeholders:
 
 - Exact approval workflow state machine: TBD / update later.

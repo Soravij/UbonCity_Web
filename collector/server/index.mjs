@@ -2701,6 +2701,27 @@ function normalizeAssignmentKind(value, fallback = "field") {
   return ASSIGNMENT_KINDS.has(normalized) ? normalized : fallback;
 }
 
+function validateAssignmentCreateFieldPackPrerequisites(assignmentKind, currentFieldPack) {
+  const normalizedKind = normalizeAssignmentKind(assignmentKind, "field");
+  if (normalizedKind !== "field") {
+    return { ok: true, error: null };
+  }
+  if (!currentFieldPack || !Number(currentFieldPack?.id || 0)) {
+    return {
+      ok: false,
+      error: 'item is not ready_for_assignment; brief is missing (complete step "จัด brief" first)',
+    };
+  }
+  const fieldPackStatus = String(currentFieldPack?.status || "").trim().toLowerCase();
+  if (fieldPackStatus !== "ready_for_field") {
+    return {
+      ok: false,
+      error: 'item is not ready_for_assignment; complete step "พร้อมส่งเข้า handoff" (stored field pack status must be "ready_for_field")',
+    };
+  }
+  return { ok: true, error: null };
+}
+
 function getAllowedAssigneeRolesForAssignmentKind(kind) {
   const normalized = normalizeAssignmentKind(kind, "");
   if (normalized === "field") return ["freelance", "user", "admin", "owner"];
@@ -10044,16 +10065,6 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
   if (!ensureItemMutationAccess(req, res, item)) {
     return;
   }
-  const currentFieldPack = repo.getCurrentFieldPackByItem(id);
-  if (!currentFieldPack || !Number(currentFieldPack?.id || 0)) {
-    res.status(409).json({ error: 'item is not ready_for_assignment; brief is missing (complete step "จัด brief" first)' });
-    return;
-  }
-  const fieldPackStatus = String(currentFieldPack?.status || "").trim().toLowerCase();
-  if (fieldPackStatus !== "ready_for_field") {
-    res.status(409).json({ error: 'item is not ready_for_assignment; complete step "พร้อมส่งเข้า handoff" (stored field pack status must be "ready_for_field")' });
-    return;
-  }
   try {
     const role = actorPolicyRole(req);
     const assigneeId = Number(req.body?.assignee_user_id || 0);
@@ -10090,34 +10101,77 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
       res.status(400).json({ error: "external assignee requires name and at least one contact field (phone/email/line_id)" });
       return;
     }
-    const assignment = repo.createAssignment(
-      {
-        ...req.body,
-        assignee_name: assigneeId ? null : externalAssigneeProfile?.name || externalAssigneeName || null,
-        assignee_contact: assigneeId
-          ? null
-          : (
-            externalAssigneeContact
-            || externalAssigneeProfile?.phone
-            || externalAssigneeProfile?.email
-            || externalAssigneeProfile?.line_id
-            || null
-          ),
-        external_assignee_profile_json: assigneeId ? null : externalAssigneeProfile,
-        assignment_kind: requestedAssignmentKind,
-        content_item_id: id,
-      },
-      req.authUser?.id || null,
-      {
-        actor_email: actorEmail(req),
-        actor_role: role,
-        reason_code: WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC_MANUAL,
-        note: "assignment created via manual legacy route",
+    const normalizedPayload = {
+      ...req.body,
+      assignee_name: assigneeId ? null : externalAssigneeProfile?.name || externalAssigneeName || null,
+      assignee_contact: assigneeId
+        ? null
+        : (
+          externalAssigneeContact
+          || externalAssigneeProfile?.phone
+          || externalAssigneeProfile?.email
+          || externalAssigneeProfile?.line_id
+          || null
+        ),
+      external_assignee_profile_json: assigneeId ? null : externalAssigneeProfile,
+      assignment_kind: requestedAssignmentKind,
+      content_item_id: id,
+    };
+    let assignment = null;
+    let handoff = null;
+    let guard = null;
+    let fieldPackAuditId = null;
+    if (requestedAssignmentKind === "field") {
+      const currentFieldPack = repo.getCurrentFieldPackByItem(id);
+      const fieldPackPrerequisites = validateAssignmentCreateFieldPackPrerequisites(requestedAssignmentKind, currentFieldPack);
+      if (!fieldPackPrerequisites.ok) {
+        res.status(409).json({ error: fieldPackPrerequisites.error });
+        return;
       }
-    );
+      const fieldResult = repo.createAssignmentFromReadiness(
+        id,
+        normalizedPayload,
+        req.authUser?.id || null,
+        actorEmail(req),
+        role,
+        { requireReadyForHandoff: false }
+      );
+      assignment = fieldResult?.assignment || null;
+      handoff = fieldResult?.handoff || null;
+      fieldPackAuditId = Number(fieldResult?.preview?.field_pack?.id || 0) || null;
+      guard = {
+        ...(fieldResult?.guard || {}),
+        mode: "field_pack_handoff",
+        source_of_truth: "field_pack",
+      };
+    } else {
+      assignment = repo.createAssignment(
+        normalizedPayload,
+        req.authUser?.id || null,
+        {
+          actor_email: actorEmail(req),
+          actor_role: role,
+          reason_code: WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC_MANUAL,
+          note: "assignment created via direct request payload",
+        }
+      );
+      handoff = null;
+      guard = {
+        mode: "direct_assignment",
+        source_of_truth: "request_payload",
+        brief_source: normalizedPayload.brief_json != null ? "request_payload" : "none",
+        brief_override_applied: normalizedPayload.brief_json != null,
+      };
+    }
+    const mode = String(guard?.mode || (requestedAssignmentKind === "field" ? "field_pack_handoff" : "direct_assignment"));
+    const sourceOfTruth = String(guard?.source_of_truth || (requestedAssignmentKind === "field" ? "field_pack" : "request_payload"));
     repo.logAudit(actorEmail(req), "assignment.create", "content_item", String(id), {
       assignment_id: assignment?.id || null,
-      mode: "manual_legacy",
+      mode,
+      source_of_truth: sourceOfTruth,
+      field_pack_id: requestedAssignmentKind === "field" ? fieldPackAuditId : null,
+      handoff_snapshot_id: handoff?.id || null,
+      brief_source: guard?.brief_source || (requestedAssignmentKind === "field" ? "field_pack" : "none"),
     }, {
       assignment_id: assignment?.id || null,
     });
@@ -10129,14 +10183,18 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
       assignee_contact: assignment?.assignee_contact || null,
       external_assignee_profile_json: assignment?.external_assignee_profile_json || null,
       state: assignment?.state || null,
-      mode: "manual_legacy",
+      mode,
+      source_of_truth: sourceOfTruth,
+      field_pack_id: requestedAssignmentKind === "field" ? fieldPackAuditId : null,
+      handoff_snapshot_id: handoff?.id || null,
+      brief_source: guard?.brief_source || (requestedAssignmentKind === "field" ? "field_pack" : "none"),
     }, {
       assignment_id: assignment?.id || null,
     });
     if (assignment?.workflow_sync?.applied) {
       repo.logAudit(actorEmail(req), "assignment.workflow_sync.initialized", "content_item", String(id), {
         assignment_id: assignment?.id || null,
-        mode: "manual_legacy",
+        mode,
         from_state: assignment.workflow_sync.from_state || null,
         to_state: assignment.workflow_sync.to_state || null,
         reason_code: assignment.workflow_sync.reason_code || WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC,
@@ -10145,7 +10203,7 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
       });
       repo.logAudit(actorEmail(req), "assignment.workflow_sync.initialized", "assignment", String(assignment?.id || ""), {
         content_item_id: id,
-        mode: "manual_legacy",
+        mode,
         from_state: assignment.workflow_sync.from_state || null,
         to_state: assignment.workflow_sync.to_state || null,
         reason_code: assignment.workflow_sync.reason_code || WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC,
@@ -10158,14 +10216,14 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
       aiInputCleanup = cleanupAiInputAssetsAfterAssignmentCreated(id);
       repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.post_create", "content_item", String(id), {
         assignment_id: assignment?.id || null,
-        mode: "manual_legacy",
+        mode,
         ...aiInputCleanup,
       }, {
         assignment_id: assignment?.id || null,
       });
       repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.post_create", "assignment", String(assignment?.id || ""), {
         content_item_id: id,
-        mode: "manual_legacy",
+        mode,
         ...aiInputCleanup,
       }, {
         assignment_id: assignment?.id || null,
@@ -10174,14 +10232,14 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
       const cleanupMessage = String(cleanupErr?.message || "post-create ai input cleanup failed");
       repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.error", "content_item", String(id), {
         assignment_id: assignment?.id || null,
-        mode: "manual_legacy",
+        mode,
         error: cleanupMessage,
       }, {
         assignment_id: assignment?.id || null,
       });
       repo.logAudit(actorEmail(req), "assignment.ai_input_cleanup.error", "assignment", String(assignment?.id || ""), {
         content_item_id: id,
-        mode: "manual_legacy",
+        mode,
         error: cleanupMessage,
       }, {
         assignment_id: assignment?.id || null,
@@ -10195,6 +10253,8 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
       ok: true,
       item_id: id,
       assignment,
+      handoff,
+      guard,
       ai_input_cleanup: aiInputCleanup,
       warning: aiInputCleanup?.ok === false ? "Assignment created but AI input cleanup failed" : null,
     });

@@ -4735,6 +4735,13 @@ export function createRepository(db) {
     ORDER BY id DESC
     LIMIT 1
   `);
+  const latestReadinessBriefByItemBeforeStmt = db.prepare(`
+    SELECT *
+    FROM content_readiness_briefs
+    WHERE content_item_id=? AND created_at<=?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `);
 
   const getReadinessBriefByIdStmt = db.prepare(`
     SELECT *
@@ -4763,6 +4770,20 @@ export function createRepository(db) {
     FROM content_execution_controls
     WHERE content_item_id=?
     ORDER BY id DESC
+    LIMIT 1
+  `);
+  const latestExecutionControlsByItemBeforeStmt = db.prepare(`
+    SELECT *
+    FROM content_execution_controls
+    WHERE content_item_id=? AND created_at<=?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `);
+  const latestExecutionControlsByItemAndReadinessBeforeStmt = db.prepare(`
+    SELECT *
+    FROM content_execution_controls
+    WHERE content_item_id=? AND source_readiness_brief_id=? AND created_at<=?
+    ORDER BY created_at DESC, id DESC
     LIMIT 1
   `);
 
@@ -4824,6 +4845,20 @@ export function createRepository(db) {
     SELECT *
     FROM content_execution_channels
     WHERE content_item_id=? AND channel=?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `);
+  const latestExecutionChannelByItemAndChannelBeforeStmt = db.prepare(`
+    SELECT *
+    FROM content_execution_channels
+    WHERE content_item_id=? AND channel=? AND created_at<=?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `);
+  const latestExecutionChannelByItemAndChannelAndReadinessBeforeStmt = db.prepare(`
+    SELECT *
+    FROM content_execution_channels
+    WHERE content_item_id=? AND channel=? AND source_readiness_brief_id=? AND created_at<=?
     ORDER BY created_at DESC, id DESC
     LIMIT 1
   `);
@@ -8761,7 +8796,7 @@ function normalizeStateValue(value, stateGroup) {
     };
   }
 
-  function buildFieldPackHandoffPackage(item, fieldPack, governance, readinessSnapshot = null) {
+  function buildFieldPackHandoffPackage(item, fieldPack, governance, readinessSnapshot = null, options = {}) {
     const verifiedFacts = uniqueTextList(fieldPack?.verified_facts_json || [], 12);
     const uncertainFacts = uniqueTextList([
       ...(Array.isArray(fieldPack?.uncertain_facts_json) ? fieldPack.uncertain_facts_json : []),
@@ -8811,9 +8846,23 @@ function normalizeStateValue(value, stateGroup) {
         execution_controls_id: governance?.source_controls_id || null,
         execution_channels: governance?.source_execution_channels || null,
         content_item_id: Number(item?.id || 0) || null,
-        generated_at: new Date().toISOString(),
+        generated_at: String(options?.generatedAt || "").trim() || new Date().toISOString(),
       },
     });
+  }
+
+  function buildAssignmentHandoffPackageFromFieldPack(fieldPack, item, options = {}) {
+    const normalizedItem = item && typeof item === "object" ? item : null;
+    const normalizedFieldPack = fieldPack && typeof fieldPack === "object" ? fieldPack : null;
+    if (!normalizedItem?.id) throw new Error("item not found");
+    if (!normalizedFieldPack?.id) throw new Error("field pack not found");
+    return buildFieldPackHandoffPackage(
+      normalizedItem,
+      normalizedFieldPack,
+      options?.governance || null,
+      options?.readinessSnapshot || null,
+      { generatedAt: options?.generatedAt || null }
+    );
   }
 
   function buildAssignmentHandoffPreview(contentItemId) {
@@ -8901,6 +8950,56 @@ function normalizeStateValue(value, stateGroup) {
       readiness_missing_requirements: Array.isArray(readiness?.missing_requirements) ? readiness.missing_requirements : [],
       handoff_package: handoffPackage,
       governance_summary: governance,
+    };
+  }
+
+  function resolveFieldPackHandoffSourceContextAt(contentItemId, cutoffAt) {
+    const itemId = Number(contentItemId || 0) || 0;
+    const historicalCutoffAt = String(cutoffAt || "").trim();
+    if (!itemId) throw new Error("content_item_id is required");
+    if (!historicalCutoffAt) throw new Error("cutoffAt is required");
+
+    const readinessSnapshot = normalizeReadinessBriefRow(
+      latestReadinessBriefByItemBeforeStmt.get(itemId, historicalCutoffAt)
+    );
+    const readinessId = Number(readinessSnapshot?.id || 0) || null;
+    const controlsSnapshot = readinessId
+      ? normalizeExecutionControlsRow(
+        latestExecutionControlsByItemAndReadinessBeforeStmt.get(itemId, readinessId, historicalCutoffAt)
+      )
+      : normalizeExecutionControlsRow(
+        latestExecutionControlsByItemBeforeStmt.get(itemId, historicalCutoffAt)
+      );
+
+    const historicalExecutionChannels = {};
+    const warnings = [];
+    if (!readinessSnapshot?.id) warnings.push("historical_readiness_snapshot_missing");
+    if (!controlsSnapshot?.id) warnings.push("historical_execution_controls_missing");
+
+    for (const channel of EXECUTION_CHANNELS) {
+      const channelSnapshot = readinessId
+        ? normalizeExecutionChannelRow(
+          latestExecutionChannelByItemAndChannelAndReadinessBeforeStmt.get(itemId, channel, readinessId, historicalCutoffAt)
+        )
+        : normalizeExecutionChannelRow(
+          latestExecutionChannelByItemAndChannelBeforeStmt.get(itemId, channel, historicalCutoffAt)
+        );
+      historicalExecutionChannels[channel] = Number(channelSnapshot?.id || 0) || null;
+      if (!channelSnapshot?.id) {
+        warnings.push(`historical_execution_channel_missing:${channel}`);
+      }
+    }
+
+    return {
+      cutoff_at: historicalCutoffAt,
+      readiness_snapshot: readinessSnapshot || null,
+      execution_controls_snapshot: controlsSnapshot || null,
+      governance: {
+        source_readiness_brief_id: readinessId,
+        source_controls_id: Number(controlsSnapshot?.id || 0) || null,
+        source_execution_channels: historicalExecutionChannels,
+      },
+      warnings,
     };
   }
 
@@ -9225,7 +9324,8 @@ function normalizeStateValue(value, stateGroup) {
     payload = {},
     actorUserId = null,
     actorEmail = "system@local",
-    actorRole = "system"
+    actorRole = "system",
+    options = {}
   ) {
     const itemId = Number(contentItemId || 0);
     if (!itemId) throw new Error("content_item_id is required");
@@ -9237,7 +9337,8 @@ function normalizeStateValue(value, stateGroup) {
 
     const forceOverride = toBooleanFlag(payload.force_override ?? payload.force);
     const forceReason = payload.force_reason == null ? null : String(payload.force_reason || "").trim() || null;
-    if (!preview.ready_for_handoff) {
+    const requireReadyForHandoff = options?.requireReadyForHandoff !== false;
+    if (requireReadyForHandoff && !preview.ready_for_handoff) {
       if (!forceOverride) {
         throw new Error("item is not ready_for_handoff; use force_override with force_reason");
       }
@@ -9249,39 +9350,42 @@ function normalizeStateValue(value, stateGroup) {
     const briefOverrideApplied = payload.brief_json != null;
     const assignmentBrief = briefOverrideApplied ? payload.brief_json : preview.handoff_package;
 
-    const assignment = createAssignment(
-      {
-        ...payload,
-        content_item_id: itemId,
-        brief_json: assignmentBrief,
-      },
-      actorUserId,
-      {
-        actor_email: actorEmail,
-        actor_role: actorRole,
-        reason_code: preview.source_of_truth === "field_pack"
-          ? WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC_FROM_FIELD_PACK
-          : WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC_FROM_READINESS,
-        note: preview.ready_for_handoff
-          ? `assignment created from ${preview.source_of_truth === "field_pack" ? "field pack handoff" : "readiness handoff"}`
-          : `assignment created from forced ${preview.source_of_truth === "field_pack" ? "field pack handoff" : "readiness handoff"}`,
-      }
-    );
+    const transactionResult = runInTransaction(db, () => {
+      const assignment = createAssignment(
+        {
+          ...payload,
+          content_item_id: itemId,
+          brief_json: assignmentBrief,
+        },
+        actorUserId,
+        {
+          actor_email: actorEmail,
+          actor_role: actorRole,
+          reason_code: preview.source_of_truth === "field_pack"
+            ? WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC_FROM_FIELD_PACK
+            : WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC_FROM_READINESS,
+          note: preview.ready_for_handoff
+            ? `assignment created from ${preview.source_of_truth === "field_pack" ? "field pack handoff" : "readiness handoff"}`
+            : `assignment created from forced ${preview.source_of_truth === "field_pack" ? "field pack handoff" : "readiness handoff"}`,
+        }
+      );
 
-    insertAssignmentHandoffSnapshotStmt.run(
-      Number(assignment.id || 0),
-      itemId,
-      Number(preview.readiness_snapshot?.id || 0) || null,
-      JSON.stringify(preview.handoff_package),
-      preview.ready_for_handoff ? "ready" : "forced",
-      forceReason,
-      String(actorEmail || "").trim() || null
-    );
+      insertAssignmentHandoffSnapshotStmt.run(
+        Number(assignment.id || 0),
+        itemId,
+        Number(preview.readiness_snapshot?.id || 0) || null,
+        JSON.stringify(preview.handoff_package),
+        preview.ready_for_handoff ? "ready" : "forced",
+        forceReason,
+        String(actorEmail || "").trim() || null
+      );
 
-    const handoff = normalizeAssignmentHandoffRow(latestAssignmentHandoffByAssignmentStmt.get(Number(assignment.id || 0)));
+      const handoff = normalizeAssignmentHandoffRow(latestAssignmentHandoffByAssignmentStmt.get(Number(assignment.id || 0)));
+      return { assignment, handoff };
+    });
     return {
-      assignment,
-      handoff,
+      assignment: transactionResult.assignment,
+      handoff: transactionResult.handoff,
       preview,
       guard: {
         mode: preview.ready_for_handoff
@@ -9293,6 +9397,132 @@ function normalizeStateValue(value, stateGroup) {
         brief_source: briefOverrideApplied ? "override" : (preview.brief_source || "none"),
         brief_override_applied: briefOverrideApplied,
       },
+    };
+  }
+
+  function repairAssignmentHandoffSnapshotForAssignment(assignmentId, fieldPackId, options = {}) {
+    const resolvedAssignmentId = Number(assignmentId || 0) || 0;
+    const resolvedFieldPackId = Number(fieldPackId || 0) || 0;
+    const applyRequested = options?.apply === true;
+    const actorEmail = String(options?.actorEmail || "system@local").trim() || "system@local";
+    const repairExecutedAt = new Date().toISOString();
+    const existingHandoff = resolvedAssignmentId ? getLatestAssignmentHandoffByAssignment(resolvedAssignmentId) : null;
+    const assignment = resolvedAssignmentId ? getAssignmentById(resolvedAssignmentId) : null;
+    const item = assignment?.content_item_id ? getItem(Number(assignment.content_item_id || 0)) : null;
+    const fieldPack = resolvedFieldPackId ? getFieldPackBundleById(resolvedFieldPackId) : null;
+    const fieldPackStatus = String(fieldPack?.status || "").trim().toLowerCase() || null;
+    const supportedRepairStatuses = new Set(["ready_for_field", "field_in_progress", "field_done"]);
+    const validationErrors = [];
+    const validationWarnings = [];
+    const historicalCutoffAt = String(assignment?.created_at || "").trim() || null;
+    let historicalContext = null;
+
+    if (!resolvedAssignmentId) validationErrors.push("assignment_id is required");
+    if (!assignment) validationErrors.push("assignment not found");
+    if (!resolvedFieldPackId) validationErrors.push("field_pack_id is required");
+    if (assignment && String(assignment.assignment_kind || "").trim().toLowerCase() !== "field") {
+      validationErrors.push("repair is supported only for field assignments");
+    }
+    if (existingHandoff?.id) validationWarnings.push("already_exists");
+    if (resolvedFieldPackId && !fieldPack) validationErrors.push("field pack not found");
+    if (assignment && fieldPack && Number(fieldPack.content_item_id || 0) !== Number(assignment.content_item_id || 0)) {
+      validationErrors.push("field pack belongs to another content item");
+    }
+    if (fieldPack && !supportedRepairStatuses.has(fieldPackStatus || "")) {
+      validationErrors.push("field pack status must be ready_for_field, field_in_progress, or field_done");
+    }
+
+    let handoffPackage = null;
+    let historicalReadinessBriefId = null;
+    if (!validationErrors.length && !existingHandoff?.id) {
+      try {
+        historicalContext = resolveFieldPackHandoffSourceContextAt(
+          Number(assignment?.content_item_id || 0) || 0,
+          historicalCutoffAt
+        );
+        historicalReadinessBriefId = Number(historicalContext?.readiness_snapshot?.id || 0) || null;
+        handoffPackage = buildAssignmentHandoffPackageFromFieldPack(fieldPack, item, {
+          governance: historicalContext?.governance || null,
+          readinessSnapshot: historicalContext?.readiness_snapshot || null,
+          generatedAt: historicalCutoffAt,
+        });
+        validationWarnings.push(...(Array.isArray(historicalContext?.warnings) ? historicalContext.warnings : []));
+      } catch (error) {
+        validationErrors.push(String(error?.message || "cannot build handoff package"));
+      }
+      if (!handoffPackage) {
+        validationErrors.push("field pack does not contain a buildable handoff package");
+      }
+    }
+
+    const requestedCheckGroups = Array.isArray(handoffPackage?.requested_checks?.groups)
+      ? handoffPackage.requested_checks.groups
+      : [];
+    const requestedCheckCount = requestedCheckGroups.reduce((sum, group) => {
+      return sum + (Array.isArray(group?.checks) ? group.checks.length : 0);
+    }, 0);
+    const wouldApply = validationErrors.length === 0 && !existingHandoff?.id;
+    const baseDiagnostics = {
+      ok: validationErrors.length === 0,
+      created: false,
+      repaired: false,
+      reason: existingHandoff?.id ? "already_exists" : (validationErrors.length ? "rejected" : "dry_run"),
+      assignment_id: resolvedAssignmentId || null,
+      content_item_id: Number(assignment?.content_item_id || 0) || null,
+      assignment_kind: String(assignment?.assignment_kind || "").trim().toLowerCase() || null,
+      assignment_created_at: assignment?.created_at || null,
+      field_pack_id: resolvedFieldPackId || null,
+      field_pack_status: fieldPackStatus,
+      field_pack_created_at: fieldPack?.created_at || null,
+      field_pack_updated_at: fieldPack?.updated_at || null,
+      historical_cutoff_at: historicalCutoffAt,
+      historical_readiness_brief_id: historicalReadinessBriefId,
+      historical_execution_controls_id: Number(historicalContext?.execution_controls_snapshot?.id || 0) || null,
+      historical_execution_channels: historicalContext?.governance?.source_execution_channels || {
+        facebook: null,
+        tiktok: null,
+      },
+      repair_executed_at: repairExecutedAt,
+      source_generated_at: String(handoffPackage?.source?.generated_at || historicalCutoffAt || "").trim() || null,
+      existing_snapshot_id: Number(existingHandoff?.id || 0) || null,
+      requested_check_group_count: requestedCheckGroups.length,
+      requested_check_count: requestedCheckCount,
+      apply_requested: applyRequested,
+      would_apply: wouldApply,
+      applied: false,
+      errors: validationErrors,
+      warnings: validationWarnings,
+      mode: "repair_from_explicit_field_pack",
+      audit_actor: actorEmail,
+      handoff: existingHandoff || null,
+    };
+
+    if (existingHandoff?.id || validationErrors.length || !applyRequested) {
+      return baseDiagnostics;
+    }
+
+    insertAssignmentHandoffSnapshotStmt.run(
+      resolvedAssignmentId,
+      Number(assignment?.content_item_id || 0) || null,
+      historicalReadinessBriefId,
+      JSON.stringify(handoffPackage),
+      "repair_from_explicit_field_pack",
+      null,
+      actorEmail
+    );
+
+    const handoff = normalizeAssignmentHandoffRow(latestAssignmentHandoffByAssignmentStmt.get(resolvedAssignmentId));
+    return {
+      ...baseDiagnostics,
+      ok: true,
+      created: true,
+      repaired: true,
+      reason: "created",
+      existing_snapshot_id: Number(handoff?.id || 0) || null,
+      created_snapshot_id: Number(handoff?.id || 0) || null,
+      would_apply: true,
+      applied: true,
+      handoff,
     };
   }
 
@@ -12395,6 +12625,7 @@ function normalizeStateValue(value, stateGroup) {
     listAuditByTarget,
     createAssignment,
     createAssignmentFromReadiness,
+    repairAssignmentHandoffSnapshotForAssignment,
     getAssignmentById,
     getLatestAssignmentHandoffByAssignment,
     listAssignmentsByItem,

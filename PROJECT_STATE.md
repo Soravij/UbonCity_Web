@@ -2,11 +2,30 @@
 
 ## Current Branch
 
-- `fix/clean-media-blocker-placement`
+- `feature/assignment-return-cta-taxonomy-ui`
 
 ## Latest Completed Fix
 
-- Media blocker placement / Clean media workflow fix.
+- Assignment Work Return CTA compact list and locked Curation snapshot render behavior.
+
+## 2026-06-19 CTA / Curation Lock
+
+Completed:
+- CTA Work Return compact UI completed.
+- CTA rows share the approved upload-row visual rules.
+- Curation rows support the current shared row pattern with `condition_note`.
+- Reserved placeholder keys `taxonomy.category`, `taxonomy.subtype`, and `taxonomy.tags` are hidden from Work Return.
+- Curation stays hidden when the handoff snapshot contains no actual resolved taxonomy checks.
+- Clean category source is `item.category -> handoffPackage.niche`.
+- Tests cover hidden-row draft and payload preservation for legacy keys and `custom.*`.
+
+Pending:
+- Taxonomy catalog / defaults resolver is not implemented yet.
+- Category mapping is not implemented yet.
+- Taxonomy Agent additive check generation is not implemented yet.
+- Future resolver must combine defaults + mapping + AI into a resolved handoff snapshot.
+- Existing assignment snapshots must remain stable; changes require explicit repair/reissue behavior.
+- Next task is taxonomy catalog + resolver/mapping design, not another Work Return UI redesign.
 
 ## Confirmed Working
 
@@ -35,7 +54,7 @@
 
 - Full role matrix
 - Full publish workflow state machine
-- Taxonomy/revision assignment return flow
+- Taxonomy catalog/resolver and mapping implementation
 - Translation policy
 - Production deployment policy
 - Backup/restore policy
