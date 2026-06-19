@@ -7213,10 +7213,18 @@ function hasAssignmentRequestedCheckMeaningfulValue(value, answerType = "text") 
 function resolveAssignmentCurationCheckPlacement(check, row, options = {}) {
   const checkKey = String(check?.check_key || check?.key || "").trim().toLowerCase();
   const applicableKeys = options?.applicableKeys instanceof Set ? options.applicableKeys : null;
-  if (["category", "subtype", "tags"].includes(checkKey)) return "primary";
+  if (checkKey === "category") return "hidden";
   if (hasAssignmentRequestedCheckMeaningfulValue(check?.suggested_value, check?.answer_type)) return "primary";
   if (applicableKeys?.has(checkKey)) return "primary";
   return "additional";
+}
+
+function resolveAssignmentCleanCategoryContext(assignment = null, handoffPackage = null) {
+  const rawValue = String(handoffPackage?.niche || "").trim();
+  return {
+    value: rawValue ? toCategoryLabel(rawValue) : "ยังไม่ระบุจาก Clean",
+    sourceLabel: "จาก Clean",
+  };
 }
 
 function getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage = null) {
@@ -7438,12 +7446,16 @@ function buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row) {
   `;
 }
 
-function buildAssignmentRequestedCheckReturnRowHtml(check, row) {
+function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
   const checked = row.checked === true;
   const usesSuggestedValue = hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
     && areAssignmentRequestedCheckValuesEqual(row.value, check.suggested_value, check.answer_type);
+  const showConditionNote = options?.showConditionNote === true;
+  const rowModifierClass = String(options?.rowModifierClass || "").trim();
+  const extraClass = rowModifierClass ? ` ${rowModifierClass}` : "";
+  const conditionValue = String(row?.condition_note || "");
   return `
-    <div class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row" data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
+    <div class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row${extraClass}" data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
       <div class="assignment-capture-row requested-check-row-main">
         <label class="assignment-inline-check">
           <input data-requested-check-field="checked" type="checkbox" ${checked ? "checked" : ""} />
@@ -7455,6 +7467,11 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row) {
         <div class="requested-check-row-value">
           ${buildAssignmentRequestedCheckReturnValueInputHtml(row)}
         </div>
+        ${showConditionNote ? `
+          <div class="requested-check-row-condition">
+            <input type="text" data-requested-check-field="condition_note" value="${escapeHtml(conditionValue)}" placeholder="เงื่อนไข/รายละเอียดเพิ่มเติม" ${checked ? "" : "disabled"} />
+          </div>
+        ` : ""}
       </div>
     </div>
   `;
@@ -7473,22 +7490,34 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
     const checks = Array.isArray(group.checks) ? group.checks : [];
     if (!checks.length) return "";
     if (groupKey === "taxonomy") {
+      const categoryContext = resolveAssignmentCleanCategoryContext(assignment, handoffPackage);
       const primaryRows = [];
       const additionalRows = [];
       checks.forEach((check) => {
         const row = normalizedDraft.requested_check_returns?.[check.return_key] || {};
-        const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(check, row);
-        if (resolveAssignmentCurationCheckPlacement(check, row) === "primary") {
+        const placement = resolveAssignmentCurationCheckPlacement(check, row);
+        if (placement === "hidden") return;
+        const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(check, row, {
+          showConditionNote: true,
+          rowModifierClass: "requested-check-curation-row",
+        });
+        if (placement === "primary") {
           primaryRows.push(rowHtml);
         } else {
           additionalRows.push({ row, html: rowHtml });
         }
       });
       const shouldOpenAdditional = additionalRows.some(({ row }) => row?.checked === true
-        || hasAssignmentRequestedCheckMeaningfulValue(row?.value, row?.answer_type));
+        || hasAssignmentRequestedCheckMeaningfulValue(row?.value, row?.answer_type)
+        || String(row?.condition_note || "").trim().length > 0);
       return `
         <div class="assignment-brief-section full-span requested-check-cta-section requested-check-curation-section" data-requested-check-group="${escapeHtml(group.group_key)}">
           <div class="assignment-brief-label">Curation</div>
+          <div class="requested-check-curation-category-context">
+            <span class="requested-check-curation-category-label">หมวดหลัก</span>
+            <strong class="requested-check-curation-category-value">${escapeHtml(categoryContext.value)}</strong>
+            <span class="workflow-badge workflow-badge-cleaned">${escapeHtml(categoryContext.sourceLabel)}</span>
+          </div>
           ${primaryRows.join("")}
           ${additionalRows.length ? `
             <details class="requested-check-curation-more"${shouldOpenAdditional ? " open" : ""}>
@@ -7504,7 +7533,9 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
     return `
       <div class="assignment-brief-section full-span requested-check-cta-section" data-requested-check-group="${escapeHtml(group.group_key)}">
         <div class="assignment-brief-label">CTA/ติดต่อ</div>
-        ${checks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {})).join("")}
+        ${checks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {}, {
+          showConditionNote: false,
+        })).join("")}
       </div>
     `;
   }).join("");
@@ -7517,9 +7548,11 @@ function updateAssignmentRequestedCheckReturnRowState(rowNode) {
   const valueField = rowNode.querySelector("[data-requested-check-field='value']");
   const valueNumberField = rowNode.querySelector("[data-requested-check-field='value-number']");
   const valueUnitField = rowNode.querySelector("[data-requested-check-field='value-unit']");
+  const conditionField = rowNode.querySelector("[data-requested-check-field='condition_note']");
   if (valueField) valueField.disabled = !checked;
   if (valueNumberField) valueNumberField.disabled = !checked;
   if (valueUnitField) valueUnitField.disabled = !checked;
+  if (conditionField) conditionField.disabled = !checked;
   rowNode.classList.toggle("is-muted", !checked);
   if (answerType === "boolean" || answerType === "boolean_with_conditions") {
     if (valueField) valueField.value = checked ? valueField.value : "";
