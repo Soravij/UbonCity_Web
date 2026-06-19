@@ -1,10 +1,33 @@
 # PROJECT_STATE
 
-Last Updated: 2026-06-14
+Last Updated: 2026-06-19
 
 ## Active Branch
 
-`fix/reference-media-policy-v2`
+`feature/assignment-return-cta-taxonomy-ui`
+
+## 2026-06-19 Work Return CTA / Curation Lock
+
+Status:
+- in progress on current branch
+
+Completed on this branch:
+- CTA Work Return stays on the approved compact list layout.
+- Curation rows use the existing requested-check return payload path and keep `condition_note`.
+- `handoffPackage.niche` remains the upstream Clean category context for collector-owned handoff construction.
+- Work Return no longer renders reserved metadata rows `taxonomy.category`, `taxonomy.subtype`, or `taxonomy.tags`.
+- Hidden legacy draft rows and `custom.*` rows remain preserved through draft merge and payload serialization.
+- No auto-save, auto-submit, or auto-publish behavior was introduced by this patch.
+
+Pending:
+- taxonomy catalog/default resolver
+- category/subtype mapping-selected checks
+- AI-added taxonomy checks in the resolver
+- handoff builder changes that emit resolved taxonomy checks instead of placeholders
+
+Relevant tests:
+- `collector/tests/requested-check-return-form.behavior.test.mjs`
+- `collector/tests/requested-check-ui.behavior.test.mjs`
 
 Current baseline:
 - `1136009` Add reference media policy v2

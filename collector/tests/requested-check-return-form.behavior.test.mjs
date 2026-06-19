@@ -291,11 +291,10 @@ const cloneAssignmentRequestedCheckValue = loadNamedFunction(appJs, "cloneAssign
 const areAssignmentRequestedCheckValuesEqual = loadNamedFunction(appJs, "areAssignmentRequestedCheckValuesEqual", {
   cloneAssignmentRequestedCheckValue,
 });
+const isAssignmentCurationRenderableCheck = loadNamedFunction(appJs, "isAssignmentCurationRenderableCheck");
 const resolveAssignmentCurationCheckPlacement = loadNamedFunction(appJs, "resolveAssignmentCurationCheckPlacement", {
+  isAssignmentCurationRenderableCheck,
   hasAssignmentRequestedCheckMeaningfulValue,
-});
-const resolveAssignmentCleanCategoryContext = loadNamedFunction(appJs, "resolveAssignmentCleanCategoryContext", {
-  toCategoryLabel,
 });
 const getAssignmentRequestedCheckGroupsFromHandoffPackage = loadNamedFunction(appJs, "getAssignmentRequestedCheckGroupsFromHandoffPackage", {
   normalizeAssignmentRequestedCheckKeyPart,
@@ -330,8 +329,8 @@ const buildAssignmentRequestedCheckReturnSectionHtml = loadNamedFunction(appJs, 
   getAssignmentRequestedCheckGroupsFromHandoffPackage,
   normalizeAssignmentRequestedCheckReturnDraft,
   buildAssignmentRequestedCheckReturnRowHtml,
+  isAssignmentCurationRenderableCheck,
   resolveAssignmentCurationCheckPlacement,
-  resolveAssignmentCleanCategoryContext,
   hasAssignmentRequestedCheckMeaningfulValue,
   escapeHtml,
 });
@@ -361,7 +360,7 @@ const normalizeRequestedCheckReturns = loadNamedFunction(repositoryJs, "normaliz
   parseJson,
 });
 
-test("requested-check section uses namespaced keys and renders read-only Clean category context instead of taxonomy.category row", () => {
+test("requested-check section uses namespaced keys and hides reserved taxonomy metadata rows", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -431,7 +430,7 @@ test("requested-check section uses namespaced keys and renders read-only Clean c
   assert.equal((sectionHtml.match(/data-requested-check-return-key="cta_contact\.line_url"/g) || []).length, 1);
   assert.equal((sectionHtml.match(/requested-check-row-status/g) || []).length, 2);
   assert.equal((sectionHtml.match(/AI แนะนำ/g) || []).length, 1);
-  assert.equal((sectionHtml.match(/data-requested-check-group="/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/data-requested-check-group="/g) || []).length, 1);
   assert.equal((sectionHtml.match(/class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row"/g) || []).length, 2);
   assert.equal((sectionHtml.match(/class="assignment-capture-row requested-check-row-main"/g) || []).length, 2);
   assert.equal((sectionHtml.match(/class="assignment-capture-title requested-check-row-label"/g) || []).length, 2);
@@ -439,9 +438,8 @@ test("requested-check section uses namespaced keys and renders read-only Clean c
   assert.equal((sectionHtml.match(/class="requested-check-cta-list"/g) || []).length, 0);
   assert.equal((sectionHtml.match(/class="requested-check-cta-card"/g) || []).length, 0);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.category"'), false);
-  assert.ok(sectionHtml.includes('data-requested-check-group="taxonomy"'));
-  assert.match(sectionHtml, /requested-check-curation-category-context/);
-  assert.match(sectionHtml, /workflow-badge workflow-badge-cleaned/);
+  assert.equal(sectionHtml.includes('data-requested-check-group="taxonomy"'), false);
+  assert.doesNotMatch(sectionHtml, /หมวดหลัก|หมวดย่อย|แท็ก|จาก Clean|requested-check-curation-category-context/);
   assert.match(sectionHtml, /AI แนะนำ/);
   assert.doesNotMatch(sectionHtml, /Manual|ข้อมูลเพิ่มเติม/);
 });
@@ -516,18 +514,16 @@ test("requested-check section renders CTA before Curation and hides custom group
         },
       ],
     },
-    niche: "restaurants",
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
   const ctaIndex = sectionHtml.indexOf('data-requested-check-group="cta_contact"');
   const taxonomyIndex = sectionHtml.indexOf('data-requested-check-group="taxonomy"');
   assert.ok(ctaIndex >= 0);
-  assert.ok(taxonomyIndex > ctaIndex);
+  assert.equal(taxonomyIndex, -1);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.category"'), false);
   assert.match(sectionHtml, /<div class="assignment-brief-label">CTA\/ติดต่อ<\/div>/);
-  assert.match(sectionHtml, /<div class="assignment-brief-label">Curation<\/div>/);
-  assert.match(sectionHtml, /requested-check-curation-category-context/);
+  assert.doesNotMatch(sectionHtml, /<div class="assignment-brief-label">Curation<\/div>/);
   assert.equal(sectionHtml.includes('data-requested-check-group="custom"'), false);
 });
 
@@ -577,7 +573,7 @@ test("requested-check section renders all five standard CTA checks with editable
   assert.doesNotMatch(sectionHtml, /Manual/);
 });
 
-test("requested-check section places only suggested non-category taxonomy rows into Curation primary area", () => {
+test("requested-check section places only real suggested taxonomy rows into Curation primary area", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -601,7 +597,6 @@ test("requested-check section places only suggested non-category taxonomy rows i
         },
       ],
     },
-    niche: "restaurants",
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
@@ -611,40 +606,10 @@ test("requested-check section places only suggested non-category taxonomy rows i
   assert.ok(detailsStart > curationStart);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.category"'), false);
   assert.ok(sectionHtml.indexOf('data-requested-check-return-key="taxonomy.distance"') < detailsStart);
-  assert.ok(sectionHtml.indexOf('data-requested-check-return-key="taxonomy.subtype"') > detailsStart);
-  assert.ok(sectionHtml.indexOf('data-requested-check-return-key="taxonomy.tags"') > detailsStart);
+  assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.subtype"'), false);
+  assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.tags"'), false);
   assert.ok(sectionHtml.indexOf('data-requested-check-return-key="taxonomy.price_range"') > detailsStart);
-  assert.match(sectionHtml, /ตัวเลือกเพิ่มเติม \(3\)/);
-});
-
-test("requested-check clean category context resolves from handoff niche and never from draft row value", () => {
-  assert.deepEqual(
-    resolveAssignmentCleanCategoryContext(null, {
-      niche: "restaurants",
-      requested_checks: { version: 1, groups: [] },
-    }),
-    {
-      value: "ร้านอาหารและคาเฟ่",
-      sourceLabel: "จาก Clean",
-    }
-  );
-
-  assert.deepEqual(
-    resolveAssignmentCleanCategoryContext({
-      requested_check_returns: {
-        "taxonomy.category": {
-          value: "should-not-win",
-        },
-      },
-    }, {
-      niche: "",
-      requested_checks: { version: 1, groups: [] },
-    }),
-    {
-      value: "ยังไม่ระบุจาก Clean",
-      sourceLabel: "จาก Clean",
-    }
-  );
+  assert.match(sectionHtml, /ตัวเลือกเพิ่มเติม \(1\)/);
 });
 
 test("requested-check section keeps additional taxonomy rows collapsed by default and opens them for checked or meaningful saved values", () => {
@@ -657,17 +622,18 @@ test("requested-check section keeps additional taxonomy rows collapsed by defaul
           group_label: "Taxonomy",
           checks: [
             { key: "category", requested: true, label: "Category", answer_type: "text" },
+            { key: "subtype", requested: true, label: "Subtype", answer_type: "text" },
             { key: "parking", requested: true, label: "Parking", answer_type: "text" },
           ],
         },
       ],
     },
-    niche: "restaurants",
   };
 
   const collapsedHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
   assert.match(collapsedHtml, /<details class="requested-check-curation-more">/);
   assert.doesNotMatch(collapsedHtml, /<details class="requested-check-curation-more" open>/);
+  assert.match(collapsedHtml, /ตัวเลือกเพิ่มเติม \(1\)/);
 
   const checkedHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, {
     requested_check_returns: {
@@ -701,9 +667,8 @@ test("requested-check section keeps additional taxonomy rows collapsed by defaul
   assert.match(conditionedHtml, /<details class="requested-check-curation-more" open>/);
 });
 
-test("requested-check section renders read-only Clean category context without editable controls", () => {
+test("requested-check section omits Curation entirely when only reserved taxonomy keys exist", () => {
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, {
-    niche: "restaurants",
     requested_checks: {
       version: 1,
       groups: [
@@ -712,27 +677,16 @@ test("requested-check section renders read-only Clean category context without e
           group_label: "Taxonomy",
           checks: [
             { key: "category", requested: true, label: "Category", answer_type: "text" },
-            { key: "parking", requested: true, label: "Parking", answer_type: "text" },
+            { key: "subtype", requested: true, label: "Subtype", answer_type: "text" },
+            { key: "tags", requested: true, label: "Tags", answer_type: "multi_select" },
           ],
         },
       ],
     },
   }, null);
 
-  assert.match(sectionHtml, /requested-check-curation-category-context/);
-  assert.match(sectionHtml, /หมวดหลัก/);
-  assert.match(sectionHtml, /ร้านอาหารและคาเฟ่/);
-  assert.match(sectionHtml, /จาก Clean/);
-  assert.equal(sectionHtml.includes('data-requested-check-row'), true);
-  const contextStart = sectionHtml.indexOf('requested-check-curation-category-context');
-  const firstRowStart = sectionHtml.indexOf('data-requested-check-row');
-  assert.ok(contextStart >= 0 && contextStart < firstRowStart);
-  const contextSlice = sectionHtml.slice(contextStart, firstRowStart);
-  assert.equal(contextSlice.includes('data-requested-check-row'), false);
-  assert.equal(contextSlice.includes('type="checkbox"'), false);
-  assert.equal(contextSlice.includes('<input'), false);
-  assert.equal(contextSlice.includes('<select'), false);
-  assert.equal(contextSlice.includes('<textarea'), false);
+  assert.equal(sectionHtml.includes('data-requested-check-group="taxonomy"'), false);
+  assert.doesNotMatch(sectionHtml, /Curation|ตัวเลือกเพิ่มเติม|requested-check-curation-more|requested-check-curation-category-context/);
 });
 
 test("requested-check section keeps edited additional taxonomy values in the additional panel without promoting them", () => {
@@ -750,7 +704,6 @@ test("requested-check section keeps edited additional taxonomy values in the add
         },
       ],
     },
-    niche: "restaurants",
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, {
@@ -765,6 +718,39 @@ test("requested-check section keeps edited additional taxonomy values in the add
   assert.ok(detailsStart >= 0);
   assert.ok(sectionHtml.indexOf('data-requested-check-return-key="taxonomy.parking"') > detailsStart);
   assert.match(sectionHtml, /value="จอดได้ 10 คัน"/);
+});
+
+test("requested-check curation helper treats only non-reserved taxonomy keys as renderable", () => {
+  assert.equal(isAssignmentCurationRenderableCheck({ group_key: "cta_contact", check_key: "phone" }), false);
+  assert.equal(isAssignmentCurationRenderableCheck({ group_key: "taxonomy", check_key: "" }), false);
+  assert.equal(isAssignmentCurationRenderableCheck({ group_key: "taxonomy", check_key: "category" }), false);
+  assert.equal(isAssignmentCurationRenderableCheck({ group_key: "taxonomy", check_key: "subtype" }), false);
+  assert.equal(isAssignmentCurationRenderableCheck({ group_key: "taxonomy", check_key: "tags" }), false);
+  assert.equal(isAssignmentCurationRenderableCheck({ group_key: "taxonomy", check_key: "air_conditioning" }), true);
+});
+
+test("requested-check curation placement uses only meaningful suggested values for primary fallback", () => {
+  assert.equal(
+    resolveAssignmentCurationCheckPlacement(
+      { group_key: "taxonomy", check_key: "air_conditioning", answer_type: "boolean", suggested_value: true },
+      { value: false, condition_note: "ริมร้าน" }
+    ),
+    "primary"
+  );
+  assert.equal(
+    resolveAssignmentCurationCheckPlacement(
+      { group_key: "taxonomy", check_key: "parking", answer_type: "text", suggested_value: "" },
+      { value: "มีที่จอด", condition_note: "หน้าร้าน" }
+    ),
+    "additional"
+  );
+  assert.equal(
+    resolveAssignmentCurationCheckPlacement(
+      { group_key: "taxonomy", check_key: "tags", answer_type: "multi_select", suggested_value: ["family"] },
+      { value: ["family"] }
+    ),
+    "hidden"
+  );
 });
 
 test("requested-check section keeps edited prefilled values and hides AI chip when value diverges", () => {
@@ -1264,8 +1250,7 @@ test("requested-check submission form render path outputs CTA before Curation an
   assert.equal(fieldsNode.innerHTML.includes('value="0812345678"'), false);
   assert.match(fieldsNode.innerHTML, /data-requested-check-return-key="cta_contact.line_url"/);
   assert.equal(fieldsNode.innerHTML.includes('data-requested-check-return-key="taxonomy.category"'), false);
-  assert.match(fieldsNode.innerHTML, /requested-check-curation-category-context/);
-  assert.match(fieldsNode.innerHTML, /ร้านอาหารและคาเฟ่/);
+  assert.doesNotMatch(fieldsNode.innerHTML, /requested-check-curation-category-context|หมวดหลัก|จาก Clean/);
   assert.match(fieldsNode.innerHTML, /<details class="requested-check-curation-more" open>/);
   assert.match(fieldsNode.innerHTML, /data-requested-check-return-key="taxonomy.parking"/);
   assert.ok(fieldsNode.innerHTML.includes('value="ริมถนน"'));
@@ -1355,7 +1340,7 @@ test("requested-check return form preserves hidden rows in CTA and Curation mode
   assert.match(sectionHtml, /data-requested-check-field="value"/);
 });
 
-test("requested-check taxonomy rows without suggestions render under Curation additional panel while category stays hidden", () => {
+test("requested-check taxonomy section is omitted when only reserved placeholder rows exist", () => {
   const handoffPackage = {
     niche: "restaurants",
     requested_checks: {
@@ -1374,11 +1359,8 @@ test("requested-check taxonomy rows without suggestions render under Curation ad
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
-  assert.match(sectionHtml, /data-requested-check-group="taxonomy"/);
-  assert.match(sectionHtml, /<div class="assignment-brief-label">Curation<\/div>/);
-  assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.category"'), false);
-  assert.match(sectionHtml, /data-requested-check-return-key="taxonomy.tags"/);
-  assert.match(sectionHtml, /<details class="requested-check-curation-more">/);
+  assert.equal(sectionHtml.trim(), "");
+  assert.doesNotMatch(sectionHtml, /data-requested-check-group="taxonomy"|Curation|ตัวเลือกเพิ่มเติม|taxonomy\.category|taxonomy\.tags/);
 });
 
 test("requested-check mobile CSS keeps one-column CTA rows without secondary controls", () => {

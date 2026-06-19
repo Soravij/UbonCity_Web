@@ -7210,21 +7210,22 @@ function hasAssignmentRequestedCheckMeaningfulValue(value, answerType = "text") 
   return String(formatRequestedCheckSuggestedValue(value, normalized) || "").trim().length > 0;
 }
 
+function isAssignmentCurationRenderableCheck(check) {
+  const groupKey = String(check?.group_key || "").trim().toLowerCase();
+  const checkKey = String(check?.check_key || check?.key || "").trim().toLowerCase();
+  if (groupKey !== "taxonomy") return false;
+  if (!checkKey) return false;
+  if (checkKey === "category" || checkKey === "subtype" || checkKey === "tags") return false;
+  return true;
+}
+
 function resolveAssignmentCurationCheckPlacement(check, row, options = {}) {
+  if (!isAssignmentCurationRenderableCheck(check)) return "hidden";
   const checkKey = String(check?.check_key || check?.key || "").trim().toLowerCase();
   const applicableKeys = options?.applicableKeys instanceof Set ? options.applicableKeys : null;
-  if (checkKey === "category") return "hidden";
   if (hasAssignmentRequestedCheckMeaningfulValue(check?.suggested_value, check?.answer_type)) return "primary";
   if (applicableKeys?.has(checkKey)) return "primary";
   return "additional";
-}
-
-function resolveAssignmentCleanCategoryContext(assignment = null, handoffPackage = null) {
-  const rawValue = String(handoffPackage?.niche || "").trim();
-  return {
-    value: rawValue ? toCategoryLabel(rawValue) : "ยังไม่ระบุจาก Clean",
-    sourceLabel: "จาก Clean",
-  };
 }
 
 function getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage = null) {
@@ -7490,7 +7491,6 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
     const checks = Array.isArray(group.checks) ? group.checks : [];
     if (!checks.length) return "";
     if (groupKey === "taxonomy") {
-      const categoryContext = resolveAssignmentCleanCategoryContext(assignment, handoffPackage);
       const primaryRows = [];
       const additionalRows = [];
       checks.forEach((check) => {
@@ -7510,14 +7510,10 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
       const shouldOpenAdditional = additionalRows.some(({ row }) => row?.checked === true
         || hasAssignmentRequestedCheckMeaningfulValue(row?.value, row?.answer_type)
         || String(row?.condition_note || "").trim().length > 0);
+      if (!primaryRows.length && !additionalRows.length) return "";
       return `
         <div class="assignment-brief-section full-span requested-check-cta-section requested-check-curation-section" data-requested-check-group="${escapeHtml(group.group_key)}">
           <div class="assignment-brief-label">Curation</div>
-          <div class="requested-check-curation-category-context">
-            <span class="requested-check-curation-category-label">หมวดหลัก</span>
-            <strong class="requested-check-curation-category-value">${escapeHtml(categoryContext.value)}</strong>
-            <span class="workflow-badge workflow-badge-cleaned">${escapeHtml(categoryContext.sourceLabel)}</span>
-          </div>
           ${primaryRows.join("")}
           ${additionalRows.length ? `
             <details class="requested-check-curation-more"${shouldOpenAdditional ? " open" : ""}>
