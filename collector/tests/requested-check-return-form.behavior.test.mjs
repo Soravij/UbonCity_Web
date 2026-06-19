@@ -410,6 +410,8 @@ test("requested-check section uses namespaced keys and renders CTA rows once whi
   assert.equal((sectionHtml.match(/data-requested-check-return-key="cta_contact\.line_url"/g) || []).length, 1);
   assert.equal((sectionHtml.match(/class="requested-check-row-status"/g) || []).length, 2);
   assert.equal((sectionHtml.match(/AI แนะนำ/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/class="requested-check-cta-card"/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/class="requested-check-cta-list"/g) || []).length, 1);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.phone"'), false);
   assert.equal(sectionHtml.includes('data-requested-check-group="taxonomy"'), false);
   assert.match(sectionHtml, /AI แนะนำ/);
@@ -598,6 +600,8 @@ test("requested-check section renders compact CTA rows with optional AI chip and
   assert.match(sectionHtml, /<div class="requested-check-row-main">\s*<label class="assignment-inline-check">/);
   assert.match(sectionHtml, /<div class="assignment-brief-text requested-check-row-label">/);
   assert.match(sectionHtml, /<div class="requested-check-row-value">/);
+  assert.match(sectionHtml, /<div class="requested-check-cta-card" data-requested-check-group="cta_contact">/);
+  assert.match(sectionHtml, /<div class="requested-check-cta-list">/);
   assert.equal((sectionHtml.match(/class="requested-check-row-status"/g) || []).length, 2);
   assert.equal((sectionHtml.match(/AI แนะนำ/g) || []).length, 0);
   assert.ok(sectionHtml.includes('<div class="requested-check-row-status"></div>'));
@@ -923,7 +927,10 @@ test("requested-check section uses one outer panel and does not render custom gr
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
-  assert.equal((sectionHtml.match(/class="assignment-brief-card"/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/class="requested-check-cta-card"/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/class="requested-check-cta-list"/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/class="assignment-brief-card"/g) || []).length, 0);
+  assert.equal((sectionHtml.match(/class="assignment-brief-grid requested-check-group-grid"/g) || []).length, 0);
   assert.equal((sectionHtml.match(/data-requested-check-row/g) || []).length, 1);
   assert.equal(sectionHtml.includes('data-requested-check-group="custom"'), false);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="custom.parking"'), false);
@@ -956,6 +963,8 @@ test("requested-check taxonomy rows are not rendered in CTA-only Work Return", (
 test("requested-check mobile CSS keeps one-column CTA rows without secondary controls", () => {
   assert.match(stylesCss, /@media \(max-width: 900px\)/);
   assert.match(stylesCss, /requested-check-row-main/);
+  assert.match(stylesCss, /requested-check-cta-card/);
+  assert.match(stylesCss, /requested-check-cta-list/);
   assert.match(stylesCss, /requested-check-row-value \{\s*grid-column: 2 \/ -1;/);
   assert.doesNotMatch(stylesCss, /requested-check-row-secondary|requested-check-row-details|requested-check-additional/);
 });

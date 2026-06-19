@@ -7455,9 +7455,9 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
     const checks = Array.isArray(group.checks) ? group.checks : [];
     if (!checks.length) return "";
     return `
-      <div class="assignment-brief-card" data-requested-check-group="${escapeHtml(group.group_key)}">
-        <h5 class="assignment-subtitle" style="margin-top:0;">${escapeHtml(group.group_label)}</h5>
-        <div class="assignment-brief-grid requested-check-group-grid">
+      <div class="requested-check-cta-card" data-requested-check-group="${escapeHtml(group.group_key)}">
+        <h5 class="assignment-subtitle requested-check-cta-title">${escapeHtml(group.group_label)}</h5>
+        <div class="requested-check-cta-list">
           ${checks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {})).join("")}
         </div>
       </div>
