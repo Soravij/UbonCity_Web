@@ -7193,6 +7193,10 @@ function formatRequestedCheckSuggestedValue(value, answerType = "text") {
 }
 
 function hasAssignmentRequestedCheckMeaningfulSuggestedValue(value, answerType = "text") {
+  return hasAssignmentRequestedCheckMeaningfulValue(value, answerType);
+}
+
+function hasAssignmentRequestedCheckMeaningfulValue(value, answerType = "text") {
   const normalized = String(answerType || "text").trim().toLowerCase() || "text";
   if (value == null) return false;
   if (normalized === "multi_select") return Array.isArray(value) && value.some((entry) => String(entry || "").trim());
@@ -7202,7 +7206,17 @@ function hasAssignmentRequestedCheckMeaningfulSuggestedValue(value, answerType =
   if (normalized === "boolean" || normalized === "boolean_with_conditions") {
     return typeof value === "boolean";
   }
+  if (normalized === "note_only") return false;
   return String(formatRequestedCheckSuggestedValue(value, normalized) || "").trim().length > 0;
+}
+
+function resolveAssignmentCurationCheckPlacement(check, row, options = {}) {
+  const checkKey = String(check?.check_key || check?.key || "").trim().toLowerCase();
+  const applicableKeys = options?.applicableKeys instanceof Set ? options.applicableKeys : null;
+  if (["category", "subtype", "tags"].includes(checkKey)) return "primary";
+  if (hasAssignmentRequestedCheckMeaningfulValue(check?.suggested_value, check?.answer_type)) return "primary";
+  if (applicableKeys?.has(checkKey)) return "primary";
+  return "additional";
 }
 
 function getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage = null) {
@@ -7447,13 +7461,46 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row) {
 }
 
 function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, handoffPackage = null, draft = null) {
+  const visibleGroupOrder = ["cta_contact", "taxonomy"];
   const groups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage)
-    .filter((group) => String(group?.group_key || "").trim().toLowerCase() === "cta_contact");
+    .filter((group) => visibleGroupOrder.includes(String(group?.group_key || "").trim().toLowerCase()))
+    .sort((left, right) => visibleGroupOrder.indexOf(String(left?.group_key || "").trim().toLowerCase())
+      - visibleGroupOrder.indexOf(String(right?.group_key || "").trim().toLowerCase()));
   if (!groups.length) return "";
   const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(draft, handoffPackage);
   return groups.map((group) => {
+    const groupKey = String(group?.group_key || "").trim().toLowerCase();
     const checks = Array.isArray(group.checks) ? group.checks : [];
     if (!checks.length) return "";
+    if (groupKey === "taxonomy") {
+      const primaryRows = [];
+      const additionalRows = [];
+      checks.forEach((check) => {
+        const row = normalizedDraft.requested_check_returns?.[check.return_key] || {};
+        const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(check, row);
+        if (resolveAssignmentCurationCheckPlacement(check, row) === "primary") {
+          primaryRows.push(rowHtml);
+        } else {
+          additionalRows.push({ row, html: rowHtml });
+        }
+      });
+      const shouldOpenAdditional = additionalRows.some(({ row }) => row?.checked === true
+        || hasAssignmentRequestedCheckMeaningfulValue(row?.value, row?.answer_type));
+      return `
+        <div class="assignment-brief-section full-span requested-check-cta-section requested-check-curation-section" data-requested-check-group="${escapeHtml(group.group_key)}">
+          <div class="assignment-brief-label">Curation</div>
+          ${primaryRows.join("")}
+          ${additionalRows.length ? `
+            <details class="requested-check-curation-more"${shouldOpenAdditional ? " open" : ""}>
+              <summary class="requested-check-curation-more-summary">ตัวเลือกเพิ่มเติม (${additionalRows.length})</summary>
+              <div class="requested-check-curation-more-list">
+                ${additionalRows.map((entry) => entry.html).join("")}
+              </div>
+            </details>
+          ` : ""}
+        </div>
+      `;
+    }
     return `
       <div class="assignment-brief-section full-span requested-check-cta-section" data-requested-check-group="${escapeHtml(group.group_key)}">
         <div class="assignment-brief-label">CTA/ติดต่อ</div>
