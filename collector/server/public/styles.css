@@ -1690,7 +1690,7 @@ button.fail {
 
 #assignment-submission-requested-checks-fields {
   grid-template-columns: 1fr;
-  gap: 2px;
+  gap: 4px;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-group="cta_contact"] {
@@ -1706,7 +1706,7 @@ button.fail {
 
 #assignment-submission-requested-checks-fields .requested-check-group-grid {
   grid-template-columns: 1fr;
-  gap: 0;
+  gap: 4px;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-row] {
@@ -1724,27 +1724,24 @@ button.fail {
 
 #assignment-submission-requested-checks-fields .requested-check-row-main {
   display: grid;
-  grid-template-columns: auto minmax(120px, auto) minmax(220px, 1fr);
+  grid-template-columns: 20px minmax(110px, 140px) 76px minmax(0, 1fr);
   align-items: center;
-  gap: 6px;
-  min-height: 28px;
+  column-gap: 8px;
+  min-height: 32px;
   margin: 0;
 }
 
-#assignment-submission-requested-checks-fields .requested-check-row-main:has(.requested-check-row-status) {
-  grid-template-columns: auto minmax(120px, auto) auto minmax(220px, 1fr);
-}
-
 #assignment-submission-requested-checks-fields .assignment-inline-check {
-  min-height: 28px;
-  height: 28px;
+  width: 20px;
+  min-height: 32px;
+  height: 32px;
   margin: 0;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-label {
   min-width: 0;
   margin: 0;
-  line-height: 1.15;
+  line-height: 1.2;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-label strong {
@@ -1758,9 +1755,8 @@ button.fail {
 #assignment-submission-requested-checks-fields .requested-check-row-value input,
 #assignment-submission-requested-checks-fields .requested-check-row-value select {
   margin: 0;
-  min-height: 28px;
-  height: 28px;
-  padding-block: 2px;
+  min-height: 32px;
+  height: 32px;
   width: 100%;
   min-width: 0;
 }
@@ -1777,11 +1773,12 @@ button.fail {
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-status {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  min-width: 0;
+  justify-content: flex-start;
+  width: 76px;
+  min-width: 76px;
   margin: 0;
-  align-self: center;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-number-with-unit {
@@ -1791,19 +1788,7 @@ button.fail {
 
 @media (max-width: 900px) {
   #assignment-submission-requested-checks-fields .requested-check-row-main {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  #assignment-submission-requested-checks-fields .requested-check-row-main:has(.requested-check-row-status) {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
-  #assignment-submission-requested-checks-fields .requested-check-row-label {
-    grid-column: 2;
-  }
-
-  #assignment-submission-requested-checks-fields .requested-check-row-status {
-    grid-column: 3;
+    grid-template-columns: 20px minmax(0, 1fr) 76px;
   }
 
   #assignment-submission-requested-checks-fields .requested-check-row-value {

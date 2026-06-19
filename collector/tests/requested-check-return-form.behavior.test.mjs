@@ -408,6 +408,8 @@ test("requested-check section uses namespaced keys and renders CTA rows once whi
   assert.ok(sectionHtml.includes('data-requested-check-return-key="cta_contact.line_url"'));
   assert.equal((sectionHtml.match(/data-requested-check-return-key="cta_contact\.phone"/g) || []).length, 1);
   assert.equal((sectionHtml.match(/data-requested-check-return-key="cta_contact\.line_url"/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/class="requested-check-row-status"/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/AI แนะนำ/g) || []).length, 1);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.phone"'), false);
   assert.equal(sectionHtml.includes('data-requested-check-group="taxonomy"'), false);
   assert.match(sectionHtml, /AI แนะนำ/);
@@ -532,6 +534,7 @@ test("requested-check section renders all five standard CTA checks with editable
   for (const key of ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]) {
     assert.match(sectionHtml, new RegExp(`data-requested-check-return-key="cta_contact\\.${key}"`));
   }
+  assert.equal((sectionHtml.match(/class="requested-check-row-status"/g) || []).length, 5);
   assert.match(sectionHtml, /value="0812345678"/);
   assert.match(sectionHtml, /data-requested-check-field="value" type="url" value=""/);
   assert.match(sectionHtml, /AI แนะนำ/);
@@ -595,6 +598,9 @@ test("requested-check section renders compact CTA rows with optional AI chip and
   assert.match(sectionHtml, /<div class="requested-check-row-main">\s*<label class="assignment-inline-check">/);
   assert.match(sectionHtml, /<div class="assignment-brief-text requested-check-row-label">/);
   assert.match(sectionHtml, /<div class="requested-check-row-value">/);
+  assert.equal((sectionHtml.match(/class="requested-check-row-status"/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/AI แนะนำ/g) || []).length, 0);
+  assert.ok(sectionHtml.includes('<div class="requested-check-row-status"></div>'));
   assert.doesNotMatch(sectionHtml, /<details|<summary|รายละเอียด|Manual/);
 });
 
@@ -616,6 +622,8 @@ test("requested-check section shows no AI chip for null or empty suggestions", (
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
+  assert.equal((sectionHtml.match(/class="requested-check-row-status"/g) || []).length, 2);
+  assert.ok(sectionHtml.includes('<div class="requested-check-row-status"></div>'));
   assert.doesNotMatch(sectionHtml, /AI แนะนำ|Manual/);
 });
 
@@ -1169,7 +1177,9 @@ test("edited requested-check draft survives async handoff load and rerender path
   assert.match(calls[1], /value="0999999999"/);
   assert.doesNotMatch(calls[1], /Manual/);
   assert.doesNotMatch(calls[1], /AI แนะนำ/);
-  assert.doesNotMatch(calls[1], /requested-check-row-status|<details|ข้อมูลเพิ่มเติม/);
+  assert.equal((calls[1].match(/class="requested-check-row-status"/g) || []).length, 1);
+  assert.ok(calls[1].includes('<div class="requested-check-row-status"></div>'));
+  assert.doesNotMatch(calls[1], /<details|ข้อมูลเพิ่มเติม/);
   assert.equal(calls[1].includes('value="0812345678"'), false);
   assert.equal(state.assignments.requestedCheckReturnDrafts[12].requested_check_returns["cta_contact.phone"].value, "0999999999");
   assert.equal(state.assignments.requestedCheckReturnDrafts[12].requested_check_returns["cta_contact.phone"].note, "edited");

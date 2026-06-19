@@ -7437,7 +7437,7 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row) {
         <div class="assignment-brief-text requested-check-row-label">
           <strong>${escapeHtml(check.label || check.check_key)}</strong>
         </div>
-        ${usesSuggestedValue ? `<div class="requested-check-row-status"><span class="workflow-badge workflow-badge-generated">AI แนะนำ</span></div>` : ""}
+        <div class="requested-check-row-status">${usesSuggestedValue ? `<span class="workflow-badge workflow-badge-generated">AI แนะนำ</span>` : ""}</div>
         <div class="requested-check-row-value">
           ${buildAssignmentRequestedCheckReturnValueInputHtml(row)}
         </div>
