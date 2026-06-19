@@ -1698,6 +1698,9 @@ button.fail {
   width: 100%;
   margin: 0;
   padding: 4px 8px;
+  align-self: start;
+  height: auto;
+  min-height: 0;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-group="cta_contact"] .assignment-subtitle {
@@ -1707,6 +1710,10 @@ button.fail {
 #assignment-submission-requested-checks-fields .requested-check-group-grid {
   grid-template-columns: 1fr;
   gap: 4px;
+  align-content: start;
+  grid-auto-rows: max-content;
+  height: auto;
+  min-height: 0;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-row] {
@@ -1714,6 +1721,8 @@ button.fail {
   margin: 0;
   border: 0;
   min-height: 0;
+  align-self: start;
+  height: auto;
 }
 
 #assignment-submission-requested-checks-fields [data-requested-check-row] + [data-requested-check-row] {
@@ -1741,11 +1750,21 @@ button.fail {
 #assignment-submission-requested-checks-fields .requested-check-row-label {
   min-width: 0;
   margin: 0;
+  white-space: nowrap;
+  word-break: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
   line-height: 1.2;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-label strong {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-value {
@@ -1759,6 +1778,15 @@ button.fail {
   height: 32px;
   width: 100%;
   min-width: 0;
+  font-size: 13px;
+  line-height: 1.2;
+  padding-inline: 8px;
+}
+
+#assignment-submission-requested-checks-fields .requested-check-row-value input {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-value textarea {
