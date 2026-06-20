@@ -47,6 +47,8 @@ Excluded from taxonomy:
 - `required` means the field worker must answer the check.
 - `required` does not mean the value must be true.
 - `agent-triggered` means the key is approved in the catalog, but the Field Pack Agent adds it only when the context makes it relevant.
+- AI may activate approved Agent-triggered catalog keys and may provide suggested values.
+- AI must not create canonical unknown keys, override catalog schema, or remove required defaults.
 
 ## Taxonomy v1 Approved Category Matrix
 
@@ -177,11 +179,12 @@ Agent-triggered:
 - No new `custom.*` keys.
 - No new UI creation for custom requested checks.
 - Field Pack Agent must not output or route unknown taxonomy ideas into `custom.*`.
-- No inclusion of new `custom.*` rows in newly created handoff snapshots.
+- Do not include any `custom` group or `custom.*` row in newly created handoff snapshots, including legacy stored rows.
 - No canonical taxonomy projection from `custom.*`.
 - No Homepage Signals filtering from `custom.*`.
 - Preserve legacy custom data at rest.
-- Existing issued snapshots that already contain custom checks remain readable and returnable for compatibility only.
+- Already-issued immutable snapshots containing custom checks remain readable and returnable for compatibility.
+- Do not delete legacy stored data.
 
 ## Unknown Observation Flow
 

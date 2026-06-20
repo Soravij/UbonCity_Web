@@ -156,7 +156,8 @@ Placeholders:
 - Coordinates, map identity/link, Google Maps opening hours, and CTA/contact are excluded from taxonomy.
 - Category defaults are the baseline for Curation.
 - Mapping may add category-relevant checks.
-- AI may add checks and suggested values.
+- AI may activate approved Agent-triggered catalog keys and may provide suggested values.
+- AI must not create canonical unknown keys, override catalog schema, or remove required defaults.
 - AI must not silently remove required category defaults.
 - Resolver must deduplicate by stable `taxonomy_key`.
 - Resolver writes an immutable resolved checklist into the assignment handoff snapshot.
@@ -173,9 +174,11 @@ Placeholders:
 - Unknown/non-catalog observations must go to handoff guidance, `must_ask_question`, or Work Return additional notes for writer consideration.
 - Unknown observations do not become catalog keys automatically.
 - Do not create new `custom` groups or new `custom.*` keys in the active taxonomy/requested-check flow.
-- Do not include new `custom.*` rows in newly created handoff snapshots.
+- Do not include any `custom` group or `custom.*` row in newly created handoff snapshots, including legacy stored rows.
 - Do not project `custom.*` into canonical taxonomy facts or Homepage Signals filtering.
-- Preserve legacy `custom.*` data at rest and preserve immutable old snapshots for compatibility.
+- Preserve legacy custom data at rest.
+- Already-issued immutable snapshots containing custom checks remain readable and returnable for compatibility.
+- Do not delete legacy stored data.
 
 Responsibility split:
 - `default`: category taxonomy defaults owned by the future taxonomy resolver/catalog
