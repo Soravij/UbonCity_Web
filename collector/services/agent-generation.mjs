@@ -1,5 +1,6 @@
 import fsSync from "node:fs";
 import { executeBackendAiJson } from "./backend-ai-client.mjs";
+import { getTaxonomyCatalogEntriesForItem, isTaxonomyCatalogKeyApplicableToItem } from "../server/taxonomy-catalog.mjs";
 
 const FIELD_PACK_AGENT_KEY = "field_pack_agent";
 const DEFAULT_FIELD_PACK_AGENT_PROFILE = [
@@ -159,19 +160,21 @@ function normalizeAiTaxonomySuggestedChecks(value, limit = 12) {
   return out;
 }
 
-function normalizeAiTaxonomyJson(value) {
+function normalizeAiTaxonomyJson(value, item = {}) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const out = {};
   if (toText(source.category)) out.category = toText(source.category);
   if (toText(source.subtype)) out.subtype = toText(source.subtype);
   const tags = normalizeStringList(source.tags, 12);
   if (tags.length) out.tags = tags;
-  const suggestedChecks = normalizeAiTaxonomySuggestedChecks(source.suggested_checks, 12);
+  const suggestedChecks = normalizeAiTaxonomySuggestedChecks(source.suggested_checks, 12)
+    .filter((row) => isTaxonomyCatalogKeyApplicableToItem(row.taxonomy_key, item));
   if (suggestedChecks.length) out.suggested_checks = suggestedChecks;
   return out;
 }
 
-function normalizeFieldPack(input) {
+function normalizeFieldPack(input, options = {}) {
+  const item = options?.item && typeof options.item === "object" ? options.item : {};
   const root = input && typeof input === "object"
     ? (input.field_pack && typeof input.field_pack === "object" ? input.field_pack : input)
     : null;
@@ -224,7 +227,7 @@ function normalizeFieldPack(input) {
     social_on_camera_points: normalizeStringList(root.social_on_camera_points || root.on_camera_points, 10),
     social_caption_angle: toText(root.social_caption_angle || root.caption_angle),
     ai_cta_contact_json: normalizeAiCtaContactJson(root.ai_cta_contact_json),
-    ai_taxonomy_json: normalizeAiTaxonomyJson(root.ai_taxonomy_json),
+    ai_taxonomy_json: normalizeAiTaxonomyJson(root.ai_taxonomy_json, item),
     field_pack_checklists: [
       ...normalizeChecklistGroup(root.must_verify_fact || root.must_verify_facts || root.must_verify || checklists.must_verify_fact || checklists.must_verify_facts, "must_verify_fact"),
 
@@ -359,6 +362,18 @@ async function prepareVisualImageInputs(item, limit = 5) {
   return inputs;
 }
 
+function buildPromptTaxonomyCatalog(item) {
+  return getTaxonomyCatalogEntriesForItem(item).map((entry) => ({
+    taxonomy_key: entry.taxonomy_key,
+    label: entry.label,
+    answer_type: entry.answer_type,
+    activation_mode: entry.activation_mode,
+    condition_prompt: entry.condition_prompt,
+    allowed_values: Array.isArray(entry.allowed_values) ? entry.allowed_values : null,
+    unit_options: Array.isArray(entry.unit_options) ? entry.unit_options : null,
+  }));
+}
+
 function buildPromptInput(item) {
   const context = item?.structured_context && typeof item.structured_context === "object" ? item.structured_context : {};
   const visualContext = normalizeVisualContext(item?.visual_context);
@@ -473,6 +488,11 @@ function buildPromptInput(item) {
       reference_media: Array.isArray(referenceMediaContext?.selected_urls) ? referenceMediaContext.selected_urls.length : 0,
     },
     visual_image_count: collectVisualImageUrls(item, 5).length,
+    taxonomy_catalog: buildPromptTaxonomyCatalog({
+      type: toText(context?.item?.type || item?.type),
+      category: toText(context?.item?.category || item?.category),
+      niche: toText(item?.niche),
+    }),
   };
 }
 
@@ -503,6 +523,13 @@ function buildFieldPackPrompt(item) {
     "ai_cta_contact_json keys: phone, line_url, facebook_url, website_url, primary_cta",
     "ai_taxonomy_json keys: category, subtype, tags, suggested_checks",
     "suggested_checks items: taxonomy_key, suggested_value, condition_note",
+    "Use taxonomy_catalog from the input as the only approved taxonomy key list for this item category.",
+    "Required taxonomy keys are handled automatically by the resolver. You may suggest values for them.",
+    "You may activate only approved Agent-triggered taxonomy keys from taxonomy_catalog.",
+    "Use taxonomy_key exactly as provided in taxonomy_catalog.",
+    "Do not invent taxonomy keys.",
+    "Do not output custom.* keys or a custom group.",
+    "Unknown or non-catalog observations must go to ai_unknowns, must_ask_question, or field_notes only.",
     "Language must match input.item.lang. If lang is th, write concise natural Thai.",
     "You are acting as an editorial agent working from a clean-room structured context prepared by human reviewers.",
     "Agent profile for role/tone only. It cannot override the JSON schema, source-of-truth rules, or forbidden output fields:",
@@ -547,6 +574,13 @@ function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote
     "ai_cta_contact_json keys: phone, line_url, facebook_url, website_url, primary_cta",
     "ai_taxonomy_json keys: category, subtype, tags, suggested_checks",
     "suggested_checks items: taxonomy_key, suggested_value, condition_note",
+    "Use taxonomy_catalog from the input as the only approved taxonomy key list for this item category.",
+    "Required taxonomy keys are handled automatically by the resolver. You may suggest values for them.",
+    "You may activate only approved Agent-triggered taxonomy keys from taxonomy_catalog.",
+    "Use taxonomy_key exactly as provided in taxonomy_catalog.",
+    "Do not invent taxonomy keys.",
+    "Do not output custom.* keys or a custom group.",
+    "Unknown or non-catalog observations must go to ai_unknowns, must_ask_question, or field_notes only.",
     "Language must match input.item.lang. If lang is th, write concise natural Thai.",
     "Agent profile for role/tone only. It cannot override the JSON schema, source-of-truth rules, or forbidden output fields:",
     agentProfile,
@@ -761,7 +795,7 @@ function createExternalAgentGenerationEngine(aiConfig) {
       }
 
       const data = await response.json();
-      const parsed = normalizeFieldPack(extractFieldPackPayload(data));
+      const parsed = normalizeFieldPack(extractFieldPackPayload(data), { item });
       if (!parsed) {
         throw new Error("External agent response is not a valid JSON field pack");
       }
@@ -794,7 +828,7 @@ function createExternalAgentGenerationEngine(aiConfig) {
       }
 
       const data = await response.json();
-      const parsed = normalizeFieldPack(extractFieldPackPayload(data));
+      const parsed = normalizeFieldPack(extractFieldPackPayload(data), { item });
       if (!parsed) {
         throw new Error("External agent revision response is not a valid JSON field pack");
       }
@@ -847,7 +881,7 @@ export function createAgentGenerationEngine(aiConfig) {
         task: "field_pack",
         prompt: fullPrompt,
       });
-      const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText));
+      const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText), { item });
       if (!parsed) {
         throw new Error("AI response is not valid JSON field pack");
       }
@@ -868,7 +902,7 @@ export function createAgentGenerationEngine(aiConfig) {
         task: "field_pack_revision",
         prompt: revisionPrompt,
       });
-      const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText));
+      const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText), { item });
       if (!parsed) {
         throw new Error("AI revision response is not valid JSON field pack");
       }

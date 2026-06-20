@@ -4,12 +4,15 @@ Last Updated: 2026-06-20
 
 ## Scope
 
-This document closes the CTA/contact milestone on `feature/taxonomy-catalog-resolver` and records the approved planning baseline for Taxonomy v1.
+This document closes the CTA/contact milestone on `feature/taxonomy-catalog-resolver` and records the approved Taxonomy v1 baseline implemented on `feature/taxonomy-v1-catalog`.
 
-Implementation note:
-- The taxonomy code present at commit `372bb50` is implementation scaffolding.
-- Its current defaults are not the approved final Taxonomy v1 catalog.
-- Final catalog implementation belongs to `feature/taxonomy-v1-catalog`.
+Implementation status:
+- implementation baseline started from commit `372bb50`
+- the approved Taxonomy v1 catalog is now implemented on `feature/taxonomy-v1-catalog`
+- resolver activation semantics are now implemented
+- Field Pack Agent category-aware catalog input is now implemented
+- backend curated taxonomy storage/filtering remains a later phase
+- internal Homepage Signals / Content Pool filtering remains a later phase
 
 ## CTA Milestone Final Contract
 
@@ -203,16 +206,8 @@ Agent-triggered:
 - `condition_note` remains unchanged.
 - Do not create a second Work Return payload.
 
-## Next Implementation Phases
+## Remaining Later Phases
 
-1. Build the final Taxonomy v1 catalog on `feature/taxonomy-v1-catalog`.
-2. Add final catalog metadata per key:
-   - Thai label
-   - answer type
-   - category applicability
-   - condition prompt
-   - evidence requirement
-   - downstream filtering use
-3. Complete backend curated taxonomy storage/filtering.
-4. Bridge confirmed taxonomy facts into internal Homepage Signals / Content Pool filtering.
-5. Keep public homepage behavior unchanged and keep human selection manual.
+1. Complete backend curated taxonomy storage/filtering.
+2. Bridge confirmed taxonomy facts into internal Homepage Signals / Content Pool filtering.
+3. Keep public homepage behavior unchanged and keep human selection manual.

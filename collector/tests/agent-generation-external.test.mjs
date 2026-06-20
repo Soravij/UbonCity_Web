@@ -126,6 +126,10 @@ test("field pack prompt blocks article output and requires handoff contract", ()
   assert.match(prompt, /ai_cta_contact_json/);
   assert.match(prompt, /ai_taxonomy_json/);
   assert.match(prompt, /suggested_checks/);
+  assert.match(prompt, /taxonomy_catalog/);
+  assert.match(prompt, /only approved taxonomy key list/);
+  assert.match(prompt, /Do not invent taxonomy keys/);
+  assert.match(prompt, /Do not output custom\.\*/);
   assert.match(prompt, /NOT an article-writing task/);
   assert.match(prompt, /reference-only/);
   assert.match(prompt, /not rights-verified/);
@@ -146,6 +150,8 @@ test("field pack revision prompt includes previous pack and revision note", () =
   assert.match(prompt, /previous_field_pack/);
   assert.match(prompt, /revision_note/);
   assert.match(prompt, /ai_taxonomy_json/);
+  assert.match(prompt, /taxonomy_catalog/);
+  assert.match(prompt, /Do not invent taxonomy keys/);
   assert.match(prompt, /make it more practical/);
   assert.match(prompt, /Never output description_clean/);
 });
@@ -167,7 +173,7 @@ test("field pack normalizer preserves structured AI CTA and additive taxonomy su
     field_pack: {
       ...fieldPackResponse().field_pack,
     },
-  });
+  }, { item: createItem() });
 
   assert.deepEqual(normalized.ai_cta_contact_json, {
     phone: "0811111111",
@@ -180,6 +186,31 @@ test("field pack normalizer preserves structured AI CTA and additive taxonomy su
         taxonomy_key: "waterfront",
         suggested_value: true,
       },
+    ],
+  });
+});
+
+test("field pack normalizer removes unknown and wrong-category taxonomy suggestions while preserving false and structured values", () => {
+  const normalized = normalizeFieldPack({
+    field_pack: {
+      ...fieldPackResponse().field_pack,
+      ai_taxonomy_json: {
+        category: "cafes",
+        suggested_checks: [
+          { taxonomy_key: "waterfront", suggested_value: false },
+          { taxonomy_key: "parking", suggested_value: { number: 500, unit: "THB/person" } },
+          { taxonomy_key: "private_room_available", suggested_value: true },
+          { taxonomy_key: "unknown_key", suggested_value: true },
+        ],
+      },
+    },
+  }, { item: createItem({ category: "cafes" }) });
+
+  assert.deepEqual(normalized.ai_taxonomy_json, {
+    category: "cafes",
+    suggested_checks: [
+      { taxonomy_key: "waterfront", suggested_value: false },
+      { taxonomy_key: "parking", suggested_value: { number: 500, unit: "THB/person" } },
     ],
   });
 });

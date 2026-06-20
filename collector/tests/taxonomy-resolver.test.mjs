@@ -2,12 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  SUPPORTED_TAXONOMY_CATEGORIES,
   TAXONOMY_CATALOG_VERSION,
+  TAXONOMY_CATEGORY_MATRIX,
+  getTaxonomyBaseDefinition,
+  getTaxonomyCatalogEntriesForCategory,
   getTaxonomyCatalogEntriesForItem,
 } from "../server/taxonomy-catalog.mjs";
 import {
-  resolveRequestedChecksWithCatalog,
+  filterRequestedChecksForNewHandoff,
   getAiTaxonomySuggestedValue,
+  resolveRequestedChecksWithCatalog,
 } from "../server/taxonomy-resolver.mjs";
 
 function createPlaceItem(overrides = {}) {
@@ -26,47 +31,97 @@ function findCheck(group, key) {
   return (group?.checks || []).find((check) => check.key === key) || null;
 }
 
-test("taxonomy catalog exports stable actionable keys only", () => {
-  const keys = getTaxonomyCatalogEntriesForItem(createPlaceItem()).map((entry) => entry.taxonomy_key);
+function getCategoryCounts(category) {
+  const config = TAXONOMY_CATEGORY_MATRIX[category];
+  return {
+    required: config.required.length,
+    agent_triggered: config.agent_triggered.length,
+  };
+}
+
+test("taxonomy catalog supports exactly six categories and 48 unique keys", () => {
+  const uniqueKeys = new Set();
+  for (const category of SUPPORTED_TAXONOMY_CATEGORIES) {
+    const entries = getTaxonomyCatalogEntriesForCategory(category, "place");
+    for (const entry of entries) uniqueKeys.add(entry.taxonomy_key);
+  }
+
   assert.equal(TAXONOMY_CATALOG_VERSION, "taxonomy_catalog_v1");
-  assert.deepEqual(keys, [
-    "waterfront",
-    "price_level",
-    "average_price_per_person",
-    "air_conditioning",
-    "parking",
-    "outdoor_seating",
-    "pet_friendly",
-    "work_power_outlets",
+  assert.deepEqual(SUPPORTED_TAXONOMY_CATEGORIES, [
+    "attractions",
+    "activities",
+    "hotels",
+    "cafes",
+    "restaurants",
+    "transport",
   ]);
-  assert.equal(keys.includes("category"), false);
-  assert.equal(keys.includes("subtype"), false);
-  assert.equal(keys.includes("tags"), false);
+  assert.equal(uniqueKeys.size, 48);
 });
 
-test("resolver emits required and mapped taxonomy checks without AI", () => {
+test("every category returns the exact required and agent-triggered matrix", () => {
+  const expectedCounts = {
+    attractions: { required: 6, agent_triggered: 5 },
+    activities: { required: 8, agent_triggered: 5 },
+    hotels: { required: 8, agent_triggered: 6 },
+    cafes: { required: 8, agent_triggered: 5 },
+    restaurants: { required: 8, agent_triggered: 4 },
+    transport: { required: 6, agent_triggered: 5 },
+  };
+
+  for (const category of SUPPORTED_TAXONOMY_CATEGORIES) {
+    const entries = getTaxonomyCatalogEntriesForCategory(category, "place");
+    const requiredKeys = entries.filter((entry) => entry.activation_mode === "required").map((entry) => entry.taxonomy_key);
+    const agentKeys = entries.filter((entry) => entry.activation_mode === "agent_triggered").map((entry) => entry.taxonomy_key);
+    assert.deepEqual(requiredKeys, TAXONOMY_CATEGORY_MATRIX[category].required);
+    assert.deepEqual(agentKeys, TAXONOMY_CATEGORY_MATRIX[category].agent_triggered);
+    assert.deepEqual(getCategoryCounts(category), expectedCounts[category]);
+  }
+});
+
+test("every catalog key exposes Thai metadata, explicit categories, and answer contract", () => {
+  for (const category of SUPPORTED_TAXONOMY_CATEGORIES) {
+    for (const entry of getTaxonomyCatalogEntriesForCategory(category, "place")) {
+      assert.match(entry.label, /[ก-๙]/);
+      assert.match(entry.instruction, /[ก-๙]/);
+      assert.equal(typeof entry.answer_type, "string");
+      assert.equal(typeof entry.condition_prompt, "string");
+      assert.equal(typeof entry.evidence_required, "boolean");
+      assert.ok(Array.isArray(entry.categories));
+      assert.ok(entry.categories.length > 0);
+      assert.ok(entry.categories.every((value) => SUPPORTED_TAXONOMY_CATEGORIES.includes(value)));
+      assert.deepEqual(entry.item_types, ["place"]);
+    }
+  }
+
+  assert.deepEqual(getTaxonomyBaseDefinition("setting_type")?.allowed_values, ["indoor", "outdoor", "mixed"]);
+  assert.deepEqual(getTaxonomyBaseDefinition("price_level")?.allowed_values, ["budget", "standard", "premium"]);
+  assert.deepEqual(getTaxonomyBaseDefinition("physical_difficulty")?.allowed_values, ["easy", "moderate", "hard"]);
+  assert.deepEqual(getTaxonomyBaseDefinition("pricing_model")?.allowed_values, ["meter", "fixed_trip", "distance_based", "per_person", "hourly", "daily"]);
+  assert.deepEqual(getTaxonomyBaseDefinition("average_price_per_person")?.unit_options, ["THB/person"]);
+  assert.deepEqual(getTaxonomyBaseDefinition("typical_duration")?.unit_options, ["minutes", "hours"]);
+});
+
+test("events return no place taxonomy", () => {
+  assert.deepEqual(getTaxonomyCatalogEntriesForItem({ type: "event", category: "restaurants" }), []);
+});
+
+test("resolver required keys are always requested and agent-triggered keys default to false", () => {
   const result = resolveRequestedChecksWithCatalog({
     requestedChecks: { version: 1, groups: [] },
-    item: createPlaceItem(),
+    item: createPlaceItem({ category: "cafes" }),
   });
 
   const taxonomyGroup = findGroup(result, "taxonomy");
   assert.ok(taxonomyGroup);
-  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), [
-    "waterfront",
-    "price_level",
-    "average_price_per_person",
-    "air_conditioning",
-    "parking",
-    "outdoor_seating",
-    "pet_friendly",
-    "work_power_outlets",
-  ]);
-  assert.equal(findCheck(taxonomyGroup, "waterfront")?.requested, true);
-  assert.equal(findCheck(taxonomyGroup, "parking")?.requested, true);
+  for (const key of TAXONOMY_CATEGORY_MATRIX.cafes.required) {
+    assert.equal(findCheck(taxonomyGroup, key)?.requested, true);
+  }
+  for (const key of TAXONOMY_CATEGORY_MATRIX.cafes.agent_triggered) {
+    assert.equal(findCheck(taxonomyGroup, key)?.requested, false);
+  }
 });
 
-test("resolver preserves required taxonomy checks even when saved rows try to remove them", () => {
+test("resolver preserves explicit editor selection and rejection for agent-triggered keys", () => {
   const result = resolveRequestedChecksWithCatalog({
     requestedChecks: {
       version: 1,
@@ -75,51 +130,61 @@ test("resolver preserves required taxonomy checks even when saved rows try to re
           group_key: "taxonomy",
           group_label: "Taxonomy",
           checks: [
-            {
-              key: "waterfront",
-              requested: false,
-              label: "Edited waterfront",
-              instruction: "edited",
-              answer_type: "text",
-            },
+            { key: "waterfront", requested: false },
+            { key: "specialty_coffee", requested: true },
           ],
         },
       ],
     },
-    item: createPlaceItem(),
-  });
-
-  const waterfront = findCheck(findGroup(result, "taxonomy"), "waterfront");
-  assert.equal(waterfront?.requested, true);
-  assert.equal(waterfront?.label, "Waterfront");
-  assert.equal(waterfront?.answer_type, "boolean_with_conditions");
-});
-
-test("resolver accepts AI additive suggestions but cannot override catalog schema", () => {
-  const result = resolveRequestedChecksWithCatalog({
-    requestedChecks: { version: 1, groups: [] },
-    item: createPlaceItem(),
+    item: createPlaceItem({ category: "cafes" }),
     aiTaxonomy: {
       suggested_checks: [
-        {
-          taxonomy_key: "waterfront",
-          suggested_value: true,
-          answer_type: "text",
-          label: "Wrong AI label",
-          instruction: "Wrong AI instruction",
-        },
+        { taxonomy_key: "waterfront", suggested_value: true },
+        { taxonomy_key: "specialty_coffee", suggested_value: true },
       ],
     },
   });
 
-  const waterfront = findCheck(findGroup(result, "taxonomy"), "waterfront");
-  assert.equal(waterfront?.answer_type, "boolean_with_conditions");
-  assert.equal(waterfront?.label, "Waterfront");
-  assert.equal(waterfront?.instruction, "Confirm whether the place has a real waterfront setting visible to visitors.");
-  assert.equal(waterfront?.suggested_value, true);
+  const taxonomyGroup = findGroup(result, "taxonomy");
+  assert.equal(findCheck(taxonomyGroup, "waterfront")?.requested, false);
+  assert.equal(findCheck(taxonomyGroup, "specialty_coffee")?.requested, true);
 });
 
-test("resolver dedupes by stable key and preserves boolean false suggestions", () => {
+test("resolver activates only applicable agent-triggered AI suggestions", () => {
+  const cafeResult = resolveRequestedChecksWithCatalog({
+    requestedChecks: { version: 1, groups: [] },
+    item: createPlaceItem({ category: "cafes" }),
+    aiTaxonomy: {
+      suggested_checks: [
+        { taxonomy_key: "waterfront", suggested_value: true },
+        { taxonomy_key: "private_room_available", suggested_value: true },
+      ],
+    },
+  });
+
+  const taxonomyGroup = findGroup(cafeResult, "taxonomy");
+  assert.equal(findCheck(taxonomyGroup, "waterfront")?.requested, true);
+  assert.equal(findCheck(taxonomyGroup, "private_room_available"), null);
+});
+
+test("resolver ignores unknown AI keys and preserves false suggested values", () => {
+  const result = resolveRequestedChecksWithCatalog({
+    requestedChecks: { version: 1, groups: [] },
+    item: createPlaceItem({ category: "attractions" }),
+    aiTaxonomy: {
+      suggested_checks: [
+        { taxonomy_key: "parking", suggested_value: false },
+        { taxonomy_key: "unknown_key", suggested_value: true },
+      ],
+    },
+  });
+
+  const taxonomyGroup = findGroup(result, "taxonomy");
+  assert.equal(findCheck(taxonomyGroup, "parking")?.suggested_value, false);
+  assert.equal(findCheck(taxonomyGroup, "unknown_key"), null);
+});
+
+test("resolver forces catalog schema and required keys cannot be removed", () => {
   const result = resolveRequestedChecksWithCatalog({
     requestedChecks: {
       version: 1,
@@ -130,102 +195,38 @@ test("resolver dedupes by stable key and preserves boolean false suggestions", (
           checks: [
             {
               key: "parking",
-              requested: true,
-              label: "Parking legacy",
-              instruction: "legacy",
+              requested: false,
+              label: "Wrong label",
+              instruction: "wrong",
               answer_type: "text",
+              condition_prompt: "wrong",
+              evidence_required: false,
             },
           ],
         },
       ],
     },
-    item: createPlaceItem(),
+    item: createPlaceItem({ category: "cafes" }),
     aiTaxonomy: {
       suggested_checks: [
-        { taxonomy_key: "parking", suggested_value: false },
-        { taxonomy_key: "parking", suggested_value: true },
+        {
+          taxonomy_key: "parking",
+          suggested_value: true,
+          label: "Wrong AI label",
+          answer_type: "text",
+        },
       ],
     },
   });
 
-  const parkingRows = findGroup(result, "taxonomy").checks.filter((check) => check.key === "parking");
-  assert.equal(parkingRows.length, 1);
-  assert.equal(parkingRows[0].suggested_value, false);
-  assert.equal(parkingRows[0].answer_type, "boolean_with_conditions");
+  const parking = findCheck(findGroup(result, "taxonomy"), "parking");
+  assert.equal(parking?.requested, true);
+  assert.match(parking?.label || "", /มีที่จอดรถ/);
+  assert.equal(parking?.answer_type, "boolean_with_conditions");
 });
 
-test("resolver preserves custom rows and hidden legacy taxonomy placeholders", () => {
-  const result = resolveRequestedChecksWithCatalog({
-    requestedChecks: {
-      version: 1,
-      groups: [
-        {
-          group_key: "taxonomy",
-          group_label: "Taxonomy",
-          checks: [
-            { key: "category", requested: true, label: "Category", instruction: "legacy", answer_type: "text" },
-            { key: "tags", requested: true, label: "Tags", instruction: "legacy", answer_type: "multi_select" },
-          ],
-        },
-        {
-          group_key: "custom",
-          group_label: "Custom",
-          checks: [
-            { key: "wifi_password", requested: true, label: "Wi-Fi password", instruction: "ask", answer_type: "text" },
-          ],
-        },
-      ],
-    },
-    item: createPlaceItem(),
-  });
-
-  const taxonomyGroup = findGroup(result, "taxonomy");
-  assert.ok(findCheck(taxonomyGroup, "category"));
-  assert.ok(findCheck(taxonomyGroup, "tags"));
-  assert.ok(findCheck(findGroup(result, "custom"), "wifi_password"));
-});
-
-test("resolver drops stale known catalog keys when category applicability changes but preserves legacy placeholders", () => {
-  const result = resolveRequestedChecksWithCatalog({
-    requestedChecks: {
-      version: 1,
-      groups: [
-        {
-          group_key: "taxonomy",
-          group_label: "Taxonomy",
-          checks: [
-            { key: "price_level", requested: true, label: "Old price", instruction: "legacy", answer_type: "text" },
-            { key: "work_power_outlets", requested: true, label: "Old outlets", instruction: "legacy", answer_type: "text" },
-            { key: "category", requested: true, label: "Category", instruction: "legacy", answer_type: "text" },
-          ],
-        },
-      ],
-    },
-    item: createPlaceItem({ category: "attractions" }),
-  });
-
-  const taxonomyGroup = findGroup(result, "taxonomy");
-  assert.equal(findCheck(taxonomyGroup, "price_level"), null);
-  assert.equal(findCheck(taxonomyGroup, "work_power_outlets"), null);
-  assert.ok(findCheck(taxonomyGroup, "category"));
-});
-
-test("resolver preserves CTA as place-only", () => {
+test("resolver preserves CTA as place-only and AI CTA stays suggestion-only", () => {
   const placeResult = resolveRequestedChecksWithCatalog({
-    requestedChecks: { version: 1, groups: [{ group_key: "cta_contact", group_label: "CTA", checks: [{ key: "phone", requested: true }] }] },
-    item: createPlaceItem(),
-  });
-  const eventResult = resolveRequestedChecksWithCatalog({
-    requestedChecks: { version: 1, groups: [{ group_key: "cta_contact", group_label: "CTA", checks: [{ key: "phone", requested: true }] }] },
-    item: { type: "event", category: "activities" },
-  });
-
-  assert.ok(findGroup(placeResult, "cta_contact"));
-  assert.equal(findGroup(eventResult, "cta_contact"), null);
-});
-
-test("resolver keeps AI CTA suggestions suggestion-only for every CTA key", () => {
-  const result = resolveRequestedChecksWithCatalog({
     requestedChecks: { version: 1, groups: [] },
     item: createPlaceItem(),
     aiCtaContact: {
@@ -237,25 +238,23 @@ test("resolver keeps AI CTA suggestions suggestion-only for every CTA key", () =
       confidence: "high",
     },
   });
+  const eventResult = resolveRequestedChecksWithCatalog({
+    requestedChecks: { version: 1, groups: [] },
+    item: { type: "event", category: "activities" },
+  });
 
-  const ctaGroup = findGroup(result, "cta_contact");
+  const ctaGroup = findGroup(placeResult, "cta_contact");
   assert.ok(ctaGroup);
-  assert.deepEqual(ctaGroup.checks.map((check) => check.key), [
-    "phone",
-    "line_url",
-    "facebook_url",
-    "website_url",
-    "primary_cta",
-  ]);
   for (const key of ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]) {
     const row = findCheck(ctaGroup, key);
     assert.equal(row?.requested, false);
     assert.equal(row?.source?.kind, "ai");
   }
+  assert.equal(findGroup(eventResult, "cta_contact"), null);
 });
 
-test("resolver forces known catalog schema even when saved row tries to override it", () => {
-  const result = resolveRequestedChecksWithCatalog({
+test("new handoff output excludes custom groups, reserved placeholders, and unknown taxonomy keys", () => {
+  const resolved = resolveRequestedChecksWithCatalog({
     requestedChecks: {
       version: 1,
       groups: [
@@ -263,90 +262,30 @@ test("resolver forces known catalog schema even when saved row tries to override
           group_key: "taxonomy",
           group_label: "Taxonomy",
           checks: [
-            {
-              key: "parking",
-              requested: true,
-              label: "Wrong saved label",
-              instruction: "Wrong saved instruction",
-              answer_type: "text",
-              condition_prompt: "Wrong saved prompt",
-              evidence_required: false,
-              suggested_value: false,
-              source: { kind: "manual" },
-            },
+            { key: "category", requested: true, label: "Category", answer_type: "text" },
+            { key: "legacy_unknown", requested: true, label: "Legacy", answer_type: "text" },
           ],
         },
-      ],
-    },
-    item: createPlaceItem(),
-    aiTaxonomy: {
-      suggested_checks: [
         {
-          taxonomy_key: "parking",
-          suggested_value: true,
-          label: "Wrong AI label",
-          instruction: "Wrong AI instruction",
-          answer_type: "number_with_unit",
+          group_key: "custom",
+          group_label: "Custom",
+          checks: [{ key: "custom_wifi", requested: true, answer_type: "text" }],
         },
       ],
     },
+    item: createPlaceItem({ category: "cafes" }),
+    aiTaxonomy: {
+      suggested_checks: [{ taxonomy_key: "waterfront", suggested_value: true }],
+    },
   });
 
-  const parking = findCheck(findGroup(result, "taxonomy"), "parking");
-  assert.equal(parking?.label, "Parking");
-  assert.equal(parking?.instruction, "Confirm whether visitor parking is available on-site or nearby.");
-  assert.equal(parking?.answer_type, "boolean_with_conditions");
-  assert.equal(parking?.condition_prompt, "If parking is limited, paid, shared, or street-only, note the condition.");
-  assert.equal(parking?.evidence_required, false);
-  assert.equal(parking?.requested, true);
-  assert.equal(parking?.suggested_value, true);
-});
-
-test("resolver applies restaurant facets for restaurant category", () => {
-  const result = resolveRequestedChecksWithCatalog({
-    requestedChecks: { version: 1, groups: [] },
-    item: createPlaceItem({ category: "restaurants" }),
-  });
-  const keys = findGroup(result, "taxonomy").checks.map((check) => check.key);
-  assert.ok(keys.includes("price_level"));
-  assert.ok(keys.includes("average_price_per_person"));
-  assert.ok(keys.includes("outdoor_seating"));
-  assert.ok(keys.includes("pet_friendly"));
-  assert.equal(keys.includes("work_power_outlets"), false);
-});
-
-test("resolver applies cafe facets for cafe category aliases", () => {
-  const result = resolveRequestedChecksWithCatalog({
-    requestedChecks: { version: 1, groups: [] },
-    item: createPlaceItem({ category: "cafe" }),
-  });
-  const keys = findGroup(result, "taxonomy").checks.map((check) => check.key);
-  assert.ok(keys.includes("price_level"));
-  assert.ok(keys.includes("average_price_per_person"));
-  assert.ok(keys.includes("outdoor_seating"));
-  assert.ok(keys.includes("work_power_outlets"));
-});
-
-test("resolver excludes restaurant cafe facets for unrelated place categories", () => {
-  const result = resolveRequestedChecksWithCatalog({
-    requestedChecks: { version: 1, groups: [] },
-    item: createPlaceItem({ category: "attractions" }),
-  });
-  const keys = findGroup(result, "taxonomy").checks.map((check) => check.key);
-  assert.ok(keys.includes("waterfront"));
-  assert.ok(keys.includes("parking"));
-  assert.equal(keys.includes("price_level"), false);
-  assert.equal(keys.includes("average_price_per_person"), false);
-  assert.equal(keys.includes("outdoor_seating"), false);
-  assert.equal(keys.includes("work_power_outlets"), false);
-});
-
-test("resolver excludes taxonomy catalog for non-place items even with category aliases", () => {
-  const result = resolveRequestedChecksWithCatalog({
-    requestedChecks: { version: 1, groups: [] },
-    item: { type: "event", category: "restaurants" },
-  });
-  assert.equal(findGroup(result, "taxonomy"), null);
+  const handoff = filterRequestedChecksForNewHandoff(resolved, createPlaceItem({ category: "cafes" }));
+  const taxonomyGroup = findGroup(handoff, "taxonomy");
+  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), [
+    ...TAXONOMY_CATEGORY_MATRIX.cafes.required,
+    "waterfront",
+  ]);
+  assert.equal(findGroup(handoff, "custom"), null);
 });
 
 test("AI taxonomy helper supports new suggested_checks and legacy top-level keys", () => {

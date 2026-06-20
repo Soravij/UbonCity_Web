@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "crypto";
 import path from "path";
 
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
-import { resolveRequestedChecksWithCatalog } from "../server/taxonomy-resolver.mjs";
+import { filterRequestedChecksForNewHandoff, resolveRequestedChecksWithCatalog } from "../server/taxonomy-resolver.mjs";
 
 function parseTags(raw) {
   if (!raw) return [];
@@ -8802,25 +8802,7 @@ function normalizeStateValue(value, stateGroup) {
       aiCtaContact: normalizeAiCtaContactJson(options.aiCtaContact ?? null),
       aiTaxonomy: normalizeAiTaxonomyJson(options.aiTaxonomy ?? null),
     });
-    const groups = resolved.groups
-      .filter((group) => {
-        const normalizedGroupKey = String(group?.group_key || "").trim().toLowerCase();
-        if (normalizedGroupKey === "cta_contact") {
-          return String(item?.type || "").trim().toLowerCase() === "place";
-        }
-        return true;
-      })
-      .map((group) => ({
-        group_key: group.group_key,
-        group_label: group.group_label,
-        checks: (Array.isArray(group.checks) ? group.checks : []).filter((check) => check?.requested === true),
-      }))
-      .filter((group) => group.checks.length > 0);
-    if (!groups.length) return null;
-    return {
-      version: 1,
-      groups,
-    };
+    return filterRequestedChecksForNewHandoff(resolved, item);
   }
 
   function buildFieldPackHandoffPackage(item, fieldPack, governance, readinessSnapshot = null, options = {}) {

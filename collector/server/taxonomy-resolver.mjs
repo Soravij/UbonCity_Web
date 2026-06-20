@@ -1,4 +1,9 @@
-import { getTaxonomyCatalogEntriesForItem, getTaxonomyCatalogEntryMapForItem, isKnownTaxonomyCatalogKey } from "./taxonomy-catalog.mjs";
+import {
+  getTaxonomyCatalogEntriesForItem,
+  getTaxonomyCatalogEntryMapForItem,
+  isKnownTaxonomyCatalogKey,
+  isTaxonomyCatalogKeyApplicableToItem,
+} from "./taxonomy-catalog.mjs";
 
 function cloneValue(value) {
   if (value == null) return value;
@@ -8,6 +13,7 @@ function cloneValue(value) {
 function hasMeaningfulValue(value) {
   if (value === false) return true;
   if (value == null) return false;
+  if (typeof value === "number") return Number.isFinite(value);
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === "object") return Object.keys(value).length > 0;
   return String(value).trim().length > 0;
@@ -36,55 +42,67 @@ function defaultCtaTemplateChecks() {
   ];
 }
 
-export function getAiTaxonomySuggestedValue(aiTaxonomy = {}, taxonomyKey = "") {
+function findAiTaxonomySuggestionRow(aiTaxonomy = {}, taxonomyKey = "") {
   const key = normalizeKey(taxonomyKey);
   const suggestedChecks = Array.isArray(aiTaxonomy?.suggested_checks) ? aiTaxonomy.suggested_checks : [];
   for (const row of suggestedChecks) {
     if (normalizeKey(row?.taxonomy_key) !== key) continue;
-    if (Object.prototype.hasOwnProperty.call(row || {}, "suggested_value")) {
-      return row.suggested_value;
-    }
+    return row;
   }
-  if (Object.prototype.hasOwnProperty.call(aiTaxonomy || {}, key)) return aiTaxonomy[key];
+  if (Object.prototype.hasOwnProperty.call(aiTaxonomy || {}, key)) {
+    return { taxonomy_key: key, suggested_value: aiTaxonomy[key] };
+  }
   return null;
 }
 
-function buildCatalogCheck(entry, aiTaxonomy = {}) {
-  const suggestedValue = getAiTaxonomySuggestedValue(aiTaxonomy, entry.taxonomy_key);
+export function getAiTaxonomySuggestedValue(aiTaxonomy = {}, taxonomyKey = "") {
+  const row = findAiTaxonomySuggestionRow(aiTaxonomy, taxonomyKey);
+  if (!row) return null;
+  if (Object.prototype.hasOwnProperty.call(row, "suggested_value")) {
+    return row.suggested_value;
+  }
+  return null;
+}
+
+function hasExplicitRequestedDecision(savedCheck = {}) {
+  return Object.prototype.hasOwnProperty.call(savedCheck || {}, "requested");
+}
+
+function resolveRequestedFlag(entry, savedCheck = {}, aiSuggestionRow = null) {
+  if (entry.activation_mode === "required") return true;
+  if (hasExplicitRequestedDecision(savedCheck)) return savedCheck.requested === true;
+  if (aiSuggestionRow && Object.prototype.hasOwnProperty.call(aiSuggestionRow, "suggested_value")) return true;
+  return false;
+}
+
+function buildCatalogCheck(entry, savedCheck = {}, aiTaxonomy = {}) {
+  const aiSuggestionRow = findAiTaxonomySuggestionRow(aiTaxonomy, entry.taxonomy_key);
+  const hasAiSuggestedValue = aiSuggestionRow && Object.prototype.hasOwnProperty.call(aiSuggestionRow, "suggested_value");
+  const savedHasSuggestedValue = Object.prototype.hasOwnProperty.call(savedCheck || {}, "suggested_value");
+  const suggestedValue = hasAiSuggestedValue
+    ? cloneValue(aiSuggestionRow.suggested_value)
+    : (savedHasSuggestedValue ? cloneValue(savedCheck.suggested_value) : null);
+  const aiConfidence = normalizeKey(aiTaxonomy?.confidence) || "unknown";
   return {
     key: entry.taxonomy_key,
-    requested: entry.required === true,
+    requested: resolveRequestedFlag(entry, savedCheck, aiSuggestionRow),
     label: entry.label,
     instruction: entry.instruction,
     answer_type: entry.answer_type,
-    suggested_value: hasMeaningfulValue(suggestedValue) ? cloneValue(suggestedValue) : (suggestedValue === false ? false : null),
+    activation_mode: entry.activation_mode,
+    required: entry.required === true,
+    categories: cloneValue(entry.categories),
+    item_types: cloneValue(entry.item_types),
     condition_prompt: entry.condition_prompt || null,
     evidence_required: entry.evidence_required === true,
-    source: hasMeaningfulValue(suggestedValue) || suggestedValue === false
-      ? { kind: "ai", confidence: normalizeKey(aiTaxonomy?.confidence) || "unknown" }
-      : null,
+    allowed_values: Array.isArray(entry.allowed_values) ? cloneValue(entry.allowed_values) : null,
+    unit_options: Array.isArray(entry.unit_options) ? cloneValue(entry.unit_options) : null,
+    downstream_consumers: cloneValue(entry.downstream_consumers),
+    suggested_value: suggestedValue,
+    source: hasAiSuggestedValue
+      ? { kind: "ai", confidence: aiConfidence }
+      : (savedCheck.source != null ? cloneValue(savedCheck.source) : null),
   };
-}
-
-function mergeCatalogCheck(autoCheck, savedCheck = {}) {
-  const next = {
-    ...autoCheck,
-    key: autoCheck.key,
-    label: autoCheck.label,
-    instruction: autoCheck.instruction,
-    answer_type: autoCheck.answer_type,
-    condition_prompt: autoCheck.condition_prompt,
-    evidence_required: autoCheck.evidence_required === true,
-    requested: true,
-  };
-  if (savedCheck.requested === true) next.requested = true;
-  if (Object.prototype.hasOwnProperty.call(savedCheck || {}, "suggested_value")) {
-    next.suggested_value = autoCheck.suggested_value == null ? cloneValue(savedCheck.suggested_value) : autoCheck.suggested_value;
-  }
-  if (savedCheck.source != null && autoCheck.source == null) {
-    next.source = cloneValue(savedCheck.source);
-  }
-  return next;
 }
 
 function preserveUnknownTaxonomyChecks(existingChecks = [], catalogMap) {
@@ -107,10 +125,7 @@ function buildResolvedTaxonomyGroup(existingGroup = null, item = {}, aiTaxonomy 
       .map((check) => [normalizeKey(check?.key), check])
       .filter(([key]) => key)
   );
-  const checks = catalogEntries.map((entry) => {
-    const autoCheck = buildCatalogCheck(entry, aiTaxonomy);
-    return mergeCatalogCheck(autoCheck, savedChecks.get(entry.taxonomy_key) || {});
-  });
+  const checks = catalogEntries.map((entry) => buildCatalogCheck(entry, savedChecks.get(entry.taxonomy_key) || {}, aiTaxonomy));
   const preservedLegacy = preserveUnknownTaxonomyChecks(existingGroup?.checks, catalogMap);
   return {
     group_key: "taxonomy",
@@ -120,7 +135,6 @@ function buildResolvedTaxonomyGroup(existingGroup = null, item = {}, aiTaxonomy 
 }
 
 function buildResolvedCtaGroup(existingGroup = null, item = {}, aiCtaContact = {}) {
-  if (!isPlaceItem(item) && !Array.isArray(existingGroup?.checks)) return null;
   if (!isPlaceItem(item)) return null;
   const savedChecks = new Map(
     (Array.isArray(existingGroup?.checks) ? existingGroup.checks : [])
@@ -132,21 +146,22 @@ function buildResolvedCtaGroup(existingGroup = null, item = {}, aiCtaContact = {
     group_label: String(existingGroup?.group_label || "CTA/contact").trim() || "CTA/contact",
     checks: defaultCtaTemplateChecks().map((check) => {
       const saved = savedChecks.get(check.key) || {};
-      const suggestedValue = Object.prototype.hasOwnProperty.call(aiCtaContact || {}, check.key)
-        ? aiCtaContact[check.key]
-        : null;
+      const hasAiSuggestedValue = Object.prototype.hasOwnProperty.call(aiCtaContact || {}, check.key);
+      const suggestedValue = hasAiSuggestedValue
+        ? cloneValue(aiCtaContact[check.key])
+        : (Object.prototype.hasOwnProperty.call(saved, "suggested_value") ? cloneValue(saved.suggested_value) : null);
       return {
         key: check.key,
         requested: saved.requested === true,
-        label: String(saved.label || check.label || "").trim() || check.label,
-        instruction: String(saved.instruction || check.instruction || "").trim() || check.instruction,
-        answer_type: String(saved.answer_type || check.answer_type || "").trim() || check.answer_type,
-        suggested_value: hasMeaningfulValue(suggestedValue) ? cloneValue(suggestedValue) : null,
-        condition_prompt: saved.condition_prompt == null ? check.condition_prompt : String(saved.condition_prompt || "").trim() || null,
-        evidence_required: check.evidence_required === true || saved.evidence_required === true,
-        source: hasMeaningfulValue(suggestedValue)
+        label: check.label,
+        instruction: check.instruction,
+        answer_type: check.answer_type,
+        condition_prompt: check.condition_prompt,
+        evidence_required: check.evidence_required === true,
+        suggested_value: suggestedValue,
+        source: hasAiSuggestedValue
           ? { kind: "ai", confidence: normalizeKey(aiCtaContact?.confidence) || "unknown" }
-          : (saved.source ?? null),
+          : (saved.source != null ? cloneValue(saved.source) : null),
       };
     }),
   };
@@ -181,5 +196,32 @@ export function resolveRequestedChecksWithCatalog({
   return {
     version: 1,
     groups: resultGroups,
+  };
+}
+
+export function filterRequestedChecksForNewHandoff(resolvedRequestedChecks = { version: 1, groups: [] }, item = {}) {
+  const groups = Array.isArray(resolvedRequestedChecks?.groups) ? resolvedRequestedChecks.groups : [];
+  const filteredGroups = groups
+    .flatMap((group) => {
+      const groupKey = normalizeKey(group?.group_key);
+      if (groupKey === "cta_contact") {
+        if (!isPlaceItem(item)) return [];
+        const checks = (Array.isArray(group?.checks) ? group.checks : []).filter((check) => check?.requested === true);
+        return checks.length ? [{ group_key: "cta_contact", group_label: group.group_label, checks }] : [];
+      }
+      if (groupKey !== "taxonomy") return [];
+      const checks = (Array.isArray(group?.checks) ? group.checks : []).filter((check) => {
+        const key = normalizeKey(check?.key);
+        return check?.requested === true
+          && isKnownTaxonomyCatalogKey(key)
+          && !isReservedLegacyTaxonomyKey(key)
+          && isTaxonomyCatalogKeyApplicableToItem(key, item);
+      });
+      return checks.length ? [{ group_key: "taxonomy", group_label: group.group_label, checks }] : [];
+    });
+  if (!filteredGroups.length) return null;
+  return {
+    version: 1,
+    groups: filteredGroups,
   };
 }

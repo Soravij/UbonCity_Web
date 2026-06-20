@@ -2673,26 +2673,30 @@ function buildResolvedTaxonomyRequestedChecks(fieldPack = {}) {
   return (Array.isArray(savedGroup.checks) ? savedGroup.checks : []).map((check) => {
     const savedCheck = savedChecks.get(normalizeRequestedCheckKey(check.key)) || {};
     const aiSuggestedValue = getAiTaxonomySuggestedValue(aiTaxonomy, check.key);
+    const hasAiSuggestedValue = Object.prototype.hasOwnProperty.call(aiTaxonomy, normalizeRequestedCheckKey(check.key))
+      || (Array.isArray(aiTaxonomy.suggested_checks) && aiTaxonomy.suggested_checks.some((entry) => normalizeRequestedCheckKey(entry?.taxonomy_key) === normalizeRequestedCheckKey(check.key) && Object.prototype.hasOwnProperty.call(entry, "suggested_value")));
     const savedSuggestedValue = Object.prototype.hasOwnProperty.call(savedCheck, "suggested_value")
       ? savedCheck.suggested_value
       : null;
-    const suggestedValue = hasRequestedCheckMeaningfulValue(aiSuggestedValue)
+    const suggestedValue = hasAiSuggestedValue
       ? aiSuggestedValue
-      : (hasRequestedCheckMeaningfulValue(savedSuggestedValue) ? savedSuggestedValue : null);
+      : (Object.prototype.hasOwnProperty.call(savedCheck, "suggested_value") ? savedSuggestedValue : null);
     return {
       key: check.key,
-      requested: savedCheck.requested === true || check.requested === true,
-      label: String(savedCheck.label || check.label || "").trim(),
-      instruction: String(savedCheck.instruction || check.instruction || "").trim(),
-      answer_type: String(savedCheck.answer_type || check.answer_type || "text").trim() || "text",
+      requested: check.requested === true,
+      label: String(check.label || savedCheck.label || "").trim(),
+      instruction: String(check.instruction || savedCheck.instruction || "").trim(),
+      answer_type: String(check.answer_type || savedCheck.answer_type || "text").trim() || "text",
+      activation_mode: String(check.activation_mode || savedCheck.activation_mode || "").trim() || null,
+      required: check.required === true || savedCheck.required === true,
       suggested_value: suggestedValue,
-      condition_prompt: savedCheck.condition_prompt == null
-        ? (check.condition_prompt ?? null)
-        : String(savedCheck.condition_prompt || "").trim() || null,
-      evidence_required: savedCheck.evidence_required === true || check.evidence_required === true,
-      source: hasRequestedCheckMeaningfulValue(aiSuggestedValue)
+      condition_prompt: check.condition_prompt == null
+        ? (savedCheck.condition_prompt ?? null)
+        : String(check.condition_prompt || "").trim() || null,
+      evidence_required: check.evidence_required === true || savedCheck.evidence_required === true,
+      source: hasAiSuggestedValue
         ? sourceMeta
-        : (savedCheck.source || null),
+        : (check.source || savedCheck.source || null),
     };
   });
 }
@@ -2904,6 +2908,10 @@ function areRequestedCheckEditableSnapshotsEqual(left = {}, right = {}) {
 
 function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}, baselineState = {}, item = state.item) {
   const autoGroups = Array.isArray(autoState?.groups) ? autoState.groups : [];
+  const isAutoLockedRequestedCheck = (groupKey = "", autoCheck = {}) => {
+    if (autoCheck?.required === true || autoCheck?.activation_mode === "required") return true;
+    return groupKey === "cta_contact" && autoCheck?.requested === true;
+  };
   const toEditableSnapshot = (check = {}) => ({
     key: String(check?.key || "").trim().toLowerCase(),
     requested: check?.requested === true,
@@ -2955,12 +2963,14 @@ function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}
     const checks = (Array.isArray(autoGroup?.checks) ? autoGroup.checks : []).map((autoCheck) => {
       const checkKey = String(autoCheck?.key || "").trim().toLowerCase();
       const manualCheck = manualChecksByKey.get(checkKey);
-      if (!manualCheck) return autoCheck;
+    if (!manualCheck) return autoCheck;
     const baselineCheck = baselineChecksByKey.get(checkKey) || {};
     if (areEditableSnapshotsEqual(manualCheck, baselineCheck)) return autoCheck;
     return {
       ...autoCheck,
-      requested: autoCheck.requested === true,
+      requested: isAutoLockedRequestedCheck(groupKey, autoCheck)
+        ? true
+        : manualCheck.requested === true,
       label: String(manualCheck.label || autoCheck.label || "").trim(),
       instruction: String(manualCheck.instruction || autoCheck.instruction || "").trim(),
       answer_type: String(manualCheck.answer_type || autoCheck.answer_type || "text").trim() || "text",
@@ -3010,10 +3020,7 @@ function buildRequestedChecksAutoSaveState(fieldPack = {}, item = state.item) {
           return {
             group_key: template.group_key,
             group_label: template.group_label,
-            checks: buildResolvedTaxonomyRequestedChecks(fieldPack).map((check) => ({
-              ...check,
-              requested: check.requested === true,
-            })),
+            checks: buildResolvedTaxonomyRequestedChecks(fieldPack),
           };
         }
         const groupSource = aiCta;
@@ -3159,6 +3166,8 @@ function buildRequestedCheckCompactGroups(requestedChecks = { version: 1, groups
 
 function extractRequestedCheckArticleContextHints(groups = []) {
   return groups.flatMap((group) => {
+    const groupKey = String(group?.group_key || "").trim().toLowerCase();
+    if (groupKey === "cta_contact") return [];
     return (Array.isArray(group?.checks) ? group.checks : []).filter((check) => check?.requested === true).flatMap((check) => {
       const hints = [];
       const instruction = String(check?.instruction || "").trim();

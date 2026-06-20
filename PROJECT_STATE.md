@@ -30,9 +30,9 @@ Locked CTA rules:
 
 - CTA milestone branch `feature/taxonomy-catalog-resolver` is complete.
 - Current branch inherits the CTA documentation baseline.
-- Taxonomy code currently present on `feature/taxonomy-v1-catalog` is implementation scaffolding.
-- The current scaffold is not the approved final Taxonomy v1 catalog or defaults.
-- Current task is Taxonomy v1 catalog implementation on `feature/taxonomy-v1-catalog`.
+- Taxonomy v1 catalog is now implemented on `feature/taxonomy-v1-catalog`.
+- Resolver activation semantics are implemented on `feature/taxonomy-v1-catalog`.
+- Field Pack Agent catalog-awareness is implemented on `feature/taxonomy-v1-catalog`.
 - Backend curated taxonomy storage remains pending.
 - Homepage Signals / Content Pool taxonomy integration remains pending.
 
@@ -40,7 +40,7 @@ Locked CTA rules:
 
 - CTA/contact milestone is already closed on `feature/taxonomy-catalog-resolver`.
 - Taxonomy v1 now continues on the active branch before downstream backend/Homepage integration.
-- Real taxonomy categories for the next branch are:
+- Real taxonomy categories for the current Taxonomy v1 branch are:
   - `attractions`
   - `activities`
   - `hotels`
@@ -54,7 +54,6 @@ Locked CTA rules:
 
 ## Pending / Update Later
 
-- Taxonomy v1 catalog implementation on `feature/taxonomy-v1-catalog`
 - Backend curated taxonomy storage/filtering
 - Homepage Signals / Content Pool taxonomy integration
 - Full role matrix

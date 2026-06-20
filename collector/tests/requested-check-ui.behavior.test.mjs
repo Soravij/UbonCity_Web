@@ -2,7 +2,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { resolveRequestedChecksWithCatalog } from "../server/taxonomy-resolver.mjs";
+import { filterRequestedChecksForNewHandoff, resolveRequestedChecksWithCatalog } from "../server/taxonomy-resolver.mjs";
+import { TAXONOMY_CATEGORY_MATRIX } from "../server/taxonomy-catalog.mjs";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const itemEditorJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.js"), "utf8");
@@ -149,6 +150,11 @@ const resolveFieldPackForUiTests = (fieldPack = {}, item = { type: "place", cate
     aiTaxonomy: fieldPack?.ai_taxonomy_json || {},
   }),
 });
+const getExpectedTaxonomyKeysForCategory = (category) => {
+  const normalizedCategory = String(category || "").trim().toLowerCase();
+  const config = TAXONOMY_CATEGORY_MATRIX[normalizedCategory];
+  return config ? [...config.required, ...config.agent_triggered] : [];
+};
 const buildRequestedChecksEditorState = (fieldPack = {}) => {
   return buildRequestedChecksEditorStateImpl(resolveFieldPackForUiTests(fieldPack));
 };
@@ -170,6 +176,7 @@ const buildRequestedChecksHandoffPayload = loadNamedFunction(repositoryJs, "buil
   normalizeAiCtaContactJson: (value) => value || null,
   normalizeAiTaxonomyJson: (value) => value || null,
   resolveRequestedChecksWithCatalog,
+  filterRequestedChecksForNewHandoff,
 });
 const normalizeRequestedCheckCandidate = loadNamedFunction(itemEditorJs, "normalizeRequestedCheckCandidate", {
   hasRequestedCheckMeaningfulValue,
@@ -724,6 +731,7 @@ test("ai suggested values do not auto-set requested=true in editor groups", () =
     requested_checks_json: { version: 1, groups: [] },
   }, {
     type: "place",
+    category: "cafes",
   });
 
   const ctaPhone = groups.find((group) => group.group_key === "cta_contact")?.checks.find((check) => check.key === "phone");
@@ -732,6 +740,7 @@ test("ai suggested values do not auto-set requested=true in editor groups", () =
   assert.equal(ctaPhone?.requested, false);
   assert.equal(ctaPhone?.suggested_value, "0812345678");
   assert.equal(taxonomyWaterfront?.requested, true);
+  assert.equal(taxonomyWaterfront?.required, false);
   assert.equal(taxonomyWaterfront?.suggested_value, false);
 });
 
@@ -1671,7 +1680,7 @@ test("article context drops CTA contact checklist prompts and falls back to empt
 
   assert.doesNotMatch(guidanceHtml, /ขอเบอร์ที่ติดต่อได้จริง|ถ้ามีให้ขอลิงก์ที่ใช้ได้จริง|ถ้ามีให้ขอลิงก์เพจที่ถูกต้อง|ถ้ามีให้ขอลิงก์เว็บไซต์หลัก|ยืนยันว่าควรพาคนไปกดอะไรเป็นหลัก/);
   assert.match(guidanceHtml, /Article context/);
-  assert.match(guidanceHtml, /Waterfront|Price level|Average price per person/);
+  assert.match(guidanceHtml, /ระดับราคา|ราคาเฉลี่ยต่อคน|มีแอร์|มีที่จอดรถ/);
   assert.match(guidanceHtml, /CTA Review/);
   assert.match(guidanceHtml, /Curation Review/);
   assert.match(guidanceHtml, /requested-guidance-grid/);
@@ -2229,10 +2238,11 @@ test("buildFieldPackApiPayload merges full standard catalogs with saved custom g
     writer_notes: "",
   });
   const result = buildFieldPackApiPayload();
+  const expectedTaxonomyKeys = getExpectedTaxonomyKeysForCategory("cafes");
 
   assert.deepEqual(result.requested_checks_json.groups.map((group) => group.group_key), ["cta_contact", "taxonomy", "custom"]);
   assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact")?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
-  assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy")?.checks.map((check) => check.key), ["waterfront", "price_level", "average_price_per_person", "air_conditioning", "parking", "outdoor_seating", "pet_friendly", "work_power_outlets"]);
+  assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy")?.checks.map((check) => check.key), expectedTaxonomyKeys);
   assert.equal(result.requested_checks_json.groups.find((group) => group.group_key === "custom")?.checks[0].suggested_value, "front desk only");
 });
 
@@ -2399,7 +2409,7 @@ test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks w
       checks: [
         {
           key: "waterfront",
-          requested: false,
+          requested: true,
           label: "Edited waterfront",
           instruction: "updated taxonomy instruction",
           answer_type: "boolean_with_conditions",
@@ -2427,7 +2437,7 @@ test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks w
         checks: [
           {
             key: "waterfront",
-            requested: false,
+            requested: true,
             label: "Waterfront",
             instruction: "confirm waterfront",
             answer_type: "boolean_with_conditions",
@@ -2474,9 +2484,10 @@ test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks w
   const waterfrontCheck = taxonomyGroup?.checks.find((check) => check.key === "waterfront");
   const parkingCheck = taxonomyGroup?.checks.find((check) => check.key === "parking");
   const legacyCategoryCheck = taxonomyGroup?.checks.find((check) => check.key === "category");
+  const expectedTaxonomyKeys = getExpectedTaxonomyKeysForCategory("cafes");
 
   assert.ok(taxonomyGroup);
-  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["waterfront", "price_level", "average_price_per_person", "air_conditioning", "parking", "outdoor_seating", "pet_friendly", "work_power_outlets"]);
+  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), expectedTaxonomyKeys);
   assert.equal(waterfrontCheck?.requested, true);
   assert.equal(waterfrontCheck?.label, "Edited waterfront");
   assert.equal(waterfrontCheck?.instruction, "updated taxonomy instruction");
@@ -2650,11 +2661,19 @@ test("buildRequestedChecksAutoSaveState emits full standard catalogs and ignores
 
   const ctaGroup = result.groups.find((group) => group.group_key === "cta_contact");
   const taxonomyGroup = result.groups.find((group) => group.group_key === "taxonomy");
+  const expectedTaxonomyKeys = getExpectedTaxonomyKeysForCategory("cafes");
 
   assert.deepEqual(ctaGroup?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
-  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), ["waterfront", "price_level", "average_price_per_person", "air_conditioning", "parking", "outdoor_seating", "pet_friendly", "work_power_outlets"]);
+  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), expectedTaxonomyKeys);
   assert.equal(ctaGroup?.checks.every((check) => check.requested === true), true);
-  assert.equal(taxonomyGroup?.checks.every((check) => check.requested === true), true);
+  assert.equal(
+    taxonomyGroup?.checks.every((check) => {
+      const isRequired = TAXONOMY_CATEGORY_MATRIX.cafes.required.includes(check.key);
+      if (check.key === "waterfront") return check.requested === true;
+      return check.requested === isRequired;
+    }),
+    true
+  );
   assert.equal(ctaGroup?.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
   assert.equal(ctaGroup?.checks.find((check) => check.key === "line_url")?.suggested_value, null);
   assert.equal(taxonomyGroup?.checks.find((check) => check.key === "waterfront")?.suggested_value, true);
@@ -2686,11 +2705,12 @@ test("buildFieldPackApiPayload emits resolved actionable taxonomy catalog when A
   const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
   const waterfrontCheck = taxonomyGroup?.checks.find((check) => check.key === "waterfront");
   const parkingCheck = taxonomyGroup?.checks.find((check) => check.key === "parking");
+  const expectedTaxonomyKeys = getExpectedTaxonomyKeysForCategory("cafes");
 
   assert.ok(ctaGroup);
   assert.ok(taxonomyGroup);
-  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["waterfront", "price_level", "average_price_per_person", "air_conditioning", "parking", "outdoor_seating", "pet_friendly", "work_power_outlets"]);
-  assert.equal(waterfrontCheck?.requested, true);
+  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), expectedTaxonomyKeys);
+  assert.equal(waterfrontCheck?.requested, false);
   assert.equal(waterfrontCheck?.suggested_value, null);
   assert.equal(parkingCheck?.requested, true);
 });
@@ -2713,11 +2733,12 @@ test("buildFieldPackApiPayload emits full standard catalogs when the requested-c
   const result = buildFieldPackApiPayload();
   const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
   const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+  const expectedTaxonomyKeys = getExpectedTaxonomyKeysForCategory("cafes");
 
   assert.ok(ctaGroup);
   assert.ok(taxonomyGroup);
   assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
-  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["waterfront", "price_level", "average_price_per_person", "air_conditioning", "parking", "outdoor_seating", "pet_friendly", "work_power_outlets"]);
+  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), expectedTaxonomyKeys);
   assert.equal(ctaGroup.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
   assert.equal(taxonomyGroup.checks.find((check) => check.key === "waterfront")?.suggested_value, true);
 });
@@ -2742,8 +2763,9 @@ test("category change refresh removes cafe-only facets before save", async () =>
   await refreshRequestedChecksForCurrentItem(refreshRequestedChecksForCurrentItemState.fieldPack);
 
   const taxonomyGroup = refreshRequestedChecksForCurrentItemState.fieldPack.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+  const expectedTaxonomyKeys = getExpectedTaxonomyKeysForCategory("attractions");
   assert.deepEqual(refreshRequestedChecksApiCalls[0]?.body?.item, { type: "place", category: "attractions" });
-  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), ["waterfront", "air_conditioning", "parking", "pet_friendly"]);
+  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), expectedTaxonomyKeys);
 });
 
 test("category change from restaurants to cafes keeps only cafe-applicable facets", async () => {
@@ -2832,6 +2854,7 @@ test("buildFieldPackApiPayload uses the current form category after requested-ch
 
   const result = buildFieldPackApiPayload();
   const taxonomyKeys = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy")?.checks.map((check) => check.key) || [];
+  const expectedTaxonomyKeys = getExpectedTaxonomyKeysForCategory("attractions");
   assert.deepEqual(refreshRequestedChecksApiCalls[0]?.body?.item, { type: "place", category: "attractions" });
-  assert.deepEqual(taxonomyKeys, ["waterfront", "air_conditioning", "parking", "pet_friendly"]);
+  assert.deepEqual(taxonomyKeys, expectedTaxonomyKeys);
 });

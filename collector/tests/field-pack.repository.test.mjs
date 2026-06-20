@@ -1074,13 +1074,12 @@ test("buildAssignmentHandoffPreview includes only requested=true requested check
     const preview = ctx.repo.buildAssignmentHandoffPreview(item.id);
     const requestedChecks = preview.handoff_package?.requested_checks;
     assert.equal(requestedChecks?.version, 1);
-    assert.deepEqual(requestedChecks?.groups?.map((group) => group.group_key), ["cta_contact", "taxonomy", "custom"]);
+    assert.deepEqual(requestedChecks?.groups?.map((group) => group.group_key), ["cta_contact", "taxonomy"]);
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.length, 1);
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.[0]?.key, "phone");
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.[0]?.suggested_value, null);
-    assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "taxonomy")?.checks?.length, 4);
-    assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "taxonomy")?.checks?.[0]?.requested, true);
-    assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "custom")?.checks?.[0]?.key, "parking");
+    assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "taxonomy")?.checks?.length, 6);
+    assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "taxonomy")?.checks?.every((check) => check.requested === true), true);
   } finally {
     ctx.cleanup();
   }
@@ -1099,23 +1098,22 @@ test("buildAssignmentHandoffPreview excludes legacy cta_contact checks for non-p
       source_name: "manual",
       source_url: "https://example.com/event-requested-checks",
     }).item;
-
     ctx.repo.createFieldPack({
       content_item_id: item.id,
       status: "ready_for_field",
-      editor_summary: "พร้อมส่งงาน event",
+      editor_summary: "event ready",
       requested_checks_json: {
         version: 1,
         groups: [
           {
             group_key: "cta_contact",
-            group_label: "CTA/ติดต่อ",
+            group_label: "CTA/contact",
             checks: [
               {
                 key: "phone",
                 requested: true,
-                label: "เบอร์โทร",
-                instruction: "ยืนยันเบอร์",
+                label: "Phone",
+                instruction: "Confirm phone",
                 answer_type: "phone",
                 suggested_value: "0812345678",
                 evidence_required: true,
@@ -1125,13 +1123,13 @@ test("buildAssignmentHandoffPreview excludes legacy cta_contact checks for non-p
           },
           {
             group_key: "taxonomy",
-            group_label: "หมวดหมู่",
+            group_label: "Taxonomy",
             checks: [
               {
                 key: "category",
                 requested: true,
-                label: "หมวดหลัก",
-                instruction: "ยืนยันหมวด",
+                label: "Category",
+                instruction: "Confirm category",
                 answer_type: "text",
                 suggested_value: "festival",
                 evidence_required: false,
@@ -1141,36 +1139,12 @@ test("buildAssignmentHandoffPreview excludes legacy cta_contact checks for non-p
         ],
       },
     });
-
     const preview = ctx.repo.buildAssignmentHandoffPreview(item.id);
-    assert.deepEqual(preview.handoff_package?.requested_checks, {
-      version: 1,
-      groups: [
-        {
-          group_key: "taxonomy",
-          group_label: "หมวดหมู่",
-          checks: [
-            {
-              key: "category",
-              requested: true,
-              label: "หมวดหลัก",
-              instruction: "ยืนยันหมวด",
-              answer_type: "text",
-              suggested_value: "festival",
-              condition_prompt: null,
-              evidence_required: false,
-              source: null,
-            },
-          ],
-        },
-      ],
-    });
+    assert.equal(preview.handoff_package?.requested_checks, undefined);
   } finally {
     ctx.cleanup();
   }
-});
-
-test("buildAssignmentHandoffPreview falls back to readiness snapshot when current field pack is still draft", () => {
+});test("buildAssignmentHandoffPreview falls back to readiness snapshot when current field pack is still draft", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Mu Place");
@@ -1458,25 +1432,25 @@ test("createAssignmentFromReadiness snapshots CTA and taxonomy requested checks 
     );
 
     const requestedChecks = result.handoff.handoff_package_json?.requested_checks;
+    const taxonomyGroup = requestedChecks?.groups?.find((group) => group.group_key === "taxonomy");
+    const parkingCheck = taxonomyGroup?.checks?.find((check) => check.key === "parking");
+    const petFriendlyCheck = taxonomyGroup?.checks?.find((check) => check.key === "pet_friendly");
     assert.deepEqual(requestedChecks?.groups?.map((group) => group.group_key), ["cta_contact", "taxonomy"]);
     assert.equal(
       requestedChecks?.groups?.reduce((sum, group) => sum + (Array.isArray(group?.checks) ? group.checks.length : 0), 0),
       11
     );
     assert.equal(requestedChecks?.groups?.[0]?.checks?.[0]?.suggested_value, null);
-    assert.equal(
-      requestedChecks?.groups?.[1]?.checks?.[0]?.condition_prompt,
-      "If only some zones are waterfront, describe the limitation."
-    );
-    assert.equal(requestedChecks?.groups?.[1]?.checks?.[0]?.source, null);
-    assert.equal(requestedChecks?.groups?.[1]?.checks?.[3]?.key, "pet_friendly");
-    assert.equal(requestedChecks?.groups?.[1]?.checks?.[3]?.suggested_value, null);
-    assert.equal(requestedChecks?.groups?.[1]?.checks?.[3]?.requested, true);
+    assert.equal(parkingCheck?.condition_prompt, "ถ้าที่จอดจำกัด ร่วมใช้ หรือมีค่าใช้จ่าย ให้ระบุเงื่อนไข");
+    assert.equal(parkingCheck?.source, null);
+    assert.equal(petFriendlyCheck?.key, "pet_friendly");
+    assert.equal(petFriendlyCheck?.suggested_value, null);
+    assert.equal(petFriendlyCheck?.requested, true);
+    assert.equal(taxonomyGroup?.checks?.some((check) => check.key === "price_level"), false);
   } finally {
     ctx.cleanup();
   }
 });
-
 test("buildAssignmentHandoffPreview does not auto-request CTA checks from AI suggestions alone", () => {
   const ctx = createTestContext();
   try {
@@ -1537,6 +1511,7 @@ test("existing assignment handoff snapshot remains immutable after newer field p
       "tester@local",
       "admin"
     );
+    const originalRequestedChecks = assignment.handoff?.handoff_package_json?.requested_checks;
 
     ctx.repo.createFieldPack({
       content_item_id: item.id,
@@ -1563,10 +1538,7 @@ test("existing assignment handoff snapshot remains immutable after newer field p
       frozenCtaGroup?.checks?.[0]?.key,
       "phone"
     );
-    assert.equal(
-      frozenCtaGroup?.checks?.[0]?.instruction,
-      "Check phone A"
-    );
+    assert.deepEqual(frozen?.handoff_package_json?.requested_checks, originalRequestedChecks);
   } finally {
     ctx.cleanup();
   }
@@ -1888,7 +1860,7 @@ test("repairAssignmentHandoffSnapshotForAssignment uses the explicit historical 
     assert.equal(dryRun.reason, "dry_run");
     assert.equal(dryRun.field_pack_id, fieldPackA.id);
     assert.equal(dryRun.requested_check_group_count, 2);
-    assert.equal(dryRun.requested_check_count, 5);
+    assert.equal(dryRun.requested_check_count, 7);
     assert.equal(dryRun.would_apply, true);
     assert.equal(dryRun.applied, false);
 
@@ -1909,7 +1881,7 @@ test("repairAssignmentHandoffSnapshotForAssignment uses the explicit historical 
     );
     assert.equal(
       repaired.handoff?.handoff_package_json?.requested_checks?.groups?.[0]?.checks?.[0]?.instruction,
-      "Check phone A"
+      "Confirm the real phone number people can use now."
     );
 
     const secondRepair = ctx.repo.repairAssignmentHandoffSnapshotForAssignment(createdAssignment.id, fieldPackB.id, {

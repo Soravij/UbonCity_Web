@@ -12,8 +12,9 @@ Status:
 - CTA/contact milestone branch `feature/taxonomy-catalog-resolver` complete
 - current implementation baseline remains `372bb50`
 - CTA documentation baseline inherited from `1d08fb1`
-- current task is Taxonomy v1 catalog implementation on `feature/taxonomy-v1-catalog`
-- current taxonomy scaffold is not the final catalog
+- Taxonomy v1 catalog implemented on `feature/taxonomy-v1-catalog`
+- resolver activation semantics implemented on `feature/taxonomy-v1-catalog`
+- Field Pack Agent catalog-awareness implemented on `feature/taxonomy-v1-catalog`
 - backend curated taxonomy storage/filtering remains a later phase
 - Homepage Signals / Content Pool taxonomy integration remains a later phase
 
@@ -77,11 +78,15 @@ Completed on this branch:
 - Hidden legacy draft rows remain preserved through draft merge and payload serialization.
 - No auto-save, auto-submit, or auto-publish behavior was introduced by this patch.
 
-Pending for the next branch:
+Completed on the current Taxonomy v1 branch:
 - taxonomy catalog/default resolver
-- category/subtype mapping-selected checks
+- category-scoped actionable taxonomy checks instead of reserved placeholders
 - AI activation of approved Agent-triggered taxonomy keys and suggested values in the resolver
 - handoff builder changes that emit resolved actionable taxonomy checks instead of placeholders
+
+Pending for later phases:
+- backend curated taxonomy storage/filtering
+- Homepage Signals / Content Pool filtering integration
 
 Relevant tests:
 - `collector/tests/requested-check-return-form.behavior.test.mjs`
