@@ -4,15 +4,18 @@ Last Updated: 2026-06-20
 
 ## Active Branch
 
-`feature/taxonomy-catalog-resolver`
+`feature/taxonomy-v1-catalog`
 
 ## 2026-06-20 CTA Milestone Closure And Taxonomy v1 Documentation Baseline
 
 Status:
-- CTA/contact milestone complete on `feature/taxonomy-catalog-resolver`
+- CTA/contact milestone branch `feature/taxonomy-catalog-resolver` complete
 - current implementation baseline remains `372bb50`
-- documentation baseline is `1d08fb1`
-- Taxonomy v1 implementation continues on `feature/taxonomy-v1-catalog`
+- CTA documentation baseline inherited from `1d08fb1`
+- current task is Taxonomy v1 catalog implementation on `feature/taxonomy-v1-catalog`
+- current taxonomy scaffold is not the final catalog
+- backend curated taxonomy storage/filtering remains a later phase
+- Homepage Signals / Content Pool taxonomy integration remains a later phase
 
 Locked CTA/contact contract:
 - CTA/contact is separate from taxonomy.
@@ -56,9 +59,6 @@ Locked taxonomy direction on this branch:
 - Preserve legacy custom data at rest.
 - Already-issued immutable snapshots containing custom checks remain readable and returnable for compatibility.
 - Do not delete legacy stored data.
-- Backend curated taxonomy storage/filtering remains a later phase.
-- Homepage Signals / Content Pool taxonomy integration remains a later phase.
-
 Relevant docs:
 - root state: [../PROJECT_STATE.md](../PROJECT_STATE.md)
 - root policy: [../PROJECT_POLICY.md](../PROJECT_POLICY.md)
@@ -67,7 +67,7 @@ Relevant docs:
 ## 2026-06-19 Work Return CTA / Curation Lock
 
 Status:
-- completed on current branch as the CTA milestone baseline
+- completed on milestone branch `feature/taxonomy-catalog-resolver` as the CTA milestone baseline
 
 Completed on this branch:
 - CTA Work Return stays on the approved compact list layout.
@@ -478,8 +478,8 @@ D:\UbonRuntime\
 
 # Next Priority
 
-1. Start `feature/taxonomy-v1-catalog`.
-2. Implement the approved Taxonomy v1 catalog on the new branch.
+1. Implement the approved Taxonomy v1 catalog on `feature/taxonomy-v1-catalog`.
+2. Keep the CTA documentation baseline from `1d08fb1` inherited on this branch.
 3. Keep the current taxonomy scaffold from `372bb50` treated as non-final.
 4. Complete backend curated taxonomy storage/filtering in a later phase.
 5. Bridge confirmed taxonomy facts into internal Homepage Signals / Content Pool filtering in a later phase.

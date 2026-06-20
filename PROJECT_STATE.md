@@ -4,13 +4,14 @@ Last Updated: 2026-06-20
 
 ## Current Branch
 
-- `feature/taxonomy-catalog-resolver`
+- `feature/taxonomy-v1-catalog`
 - implementation baseline commit: `372bb50`
+- CTA documentation baseline inherited from `1d08fb1`
 
 ## CTA / Contact Milestone
 
 Status:
-- complete on the current branch
+- complete on milestone branch `feature/taxonomy-catalog-resolver`
 
 Locked CTA rules:
 - CTA/contact is separate from taxonomy.
@@ -27,16 +28,18 @@ Locked CTA rules:
 
 ## Taxonomy Status On This Branch
 
-- Taxonomy code currently present on `feature/taxonomy-catalog-resolver` is implementation scaffolding.
+- CTA milestone branch `feature/taxonomy-catalog-resolver` is complete.
+- Current branch inherits the CTA documentation baseline.
+- Taxonomy code currently present on `feature/taxonomy-v1-catalog` is implementation scaffolding.
 - The current scaffold is not the approved final Taxonomy v1 catalog or defaults.
-- Final Taxonomy v1 catalog work belongs to the next branch: `feature/taxonomy-v1-catalog`.
+- Current task is Taxonomy v1 catalog implementation on `feature/taxonomy-v1-catalog`.
 - Backend curated taxonomy storage remains pending.
 - Homepage Signals / Content Pool taxonomy integration remains pending.
 
 ## Confirmed Direction
 
-- CTA/contact milestone closes on this branch through documentation only.
-- Taxonomy v1 expands next in a new branch before downstream backend/Homepage integration.
+- CTA/contact milestone is already closed on `feature/taxonomy-catalog-resolver`.
+- Taxonomy v1 now continues on the active branch before downstream backend/Homepage integration.
 - Real taxonomy categories for the next branch are:
   - `attractions`
   - `activities`
