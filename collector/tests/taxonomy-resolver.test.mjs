@@ -186,6 +186,72 @@ test("resolver ignores unknown AI keys and preserves false suggested values", ()
   assert.equal(findCheck(taxonomyGroup, "unknown_key"), null);
 });
 
+test("resolver drops invalid raw AI suggested_value but still activates valid agent-triggered boolean row", () => {
+  const result = resolveRequestedChecksWithCatalog({
+    requestedChecks: { version: 1, groups: [] },
+    item: createPlaceItem({ category: "cafes" }),
+    aiTaxonomy: {
+      suggested_checks: [
+        { taxonomy_key: "waterfront", suggested_value: "yes", condition_note: "from AI" },
+      ],
+    },
+  });
+
+  const waterfront = findCheck(findGroup(result, "taxonomy"), "waterfront");
+  assert.equal(waterfront?.requested, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(waterfront || {}, "suggested_value"), true);
+  assert.equal(waterfront?.suggested_value, null);
+  assert.equal(waterfront?.source?.kind, "ai");
+});
+
+test("resolver drops invalid raw AI suggested_value for select rows", () => {
+  const result = resolveRequestedChecksWithCatalog({
+    requestedChecks: { version: 1, groups: [] },
+    item: createPlaceItem({ category: "cafes" }),
+    aiTaxonomy: {
+      suggested_checks: [
+        { taxonomy_key: "price_level", suggested_value: "luxury", condition_note: "raw invalid select" },
+      ],
+    },
+  });
+
+  const priceLevel = findCheck(findGroup(result, "taxonomy"), "price_level");
+  assert.equal(priceLevel?.requested, true);
+  assert.equal(priceLevel?.suggested_value, null);
+});
+
+test("resolver drops invalid raw AI suggested_value for multi_select rows", () => {
+  const result = resolveRequestedChecksWithCatalog({
+    requestedChecks: { version: 1, groups: [] },
+    item: createPlaceItem({ category: "restaurants" }),
+    aiTaxonomy: {
+      suggested_checks: [
+        { taxonomy_key: "dietary_options", suggested_value: ["vegan", "unknown-option"], condition_note: "raw invalid multi" },
+      ],
+    },
+  });
+
+  const dietaryOptions = findCheck(findGroup(result, "taxonomy"), "dietary_options");
+  assert.equal(dietaryOptions?.requested, true);
+  assert.equal(dietaryOptions?.suggested_value, null);
+});
+
+test("resolver drops invalid raw AI suggested_value for number_with_unit rows", () => {
+  const result = resolveRequestedChecksWithCatalog({
+    requestedChecks: { version: 1, groups: [] },
+    item: createPlaceItem({ category: "cafes" }),
+    aiTaxonomy: {
+      suggested_checks: [
+        { taxonomy_key: "average_price_per_person", suggested_value: { number: "free", unit: "THB/person" }, condition_note: "raw invalid number" },
+      ],
+    },
+  });
+
+  const averagePrice = findCheck(findGroup(result, "taxonomy"), "average_price_per_person");
+  assert.equal(averagePrice?.requested, true);
+  assert.equal(averagePrice?.suggested_value, null);
+});
+
 test("resolver forces catalog schema and required keys cannot be removed", () => {
   const result = resolveRequestedChecksWithCatalog({
     requestedChecks: {

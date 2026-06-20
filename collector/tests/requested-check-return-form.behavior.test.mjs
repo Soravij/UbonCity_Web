@@ -509,7 +509,7 @@ test("requested-check section renders CTA before legacy custom groups and hides 
           group_key: "cta_contact",
           group_label: "CTA/contact",
           checks: [
-            { key: "phone", requested: true, label: "Phone", answer_type: "phone", suggested_value: "0812345678" },
+            { key: "phone", requested: true, label: "Phone", answer_type: "phone", evidence_required: true, suggested_value: "0812345678" },
           ],
         },
       ],
@@ -522,6 +522,7 @@ test("requested-check section renders CTA before legacy custom groups and hides 
   assert.ok(ctaIndex >= 0);
   assert.ok(customIndex > ctaIndex);
   assert.equal(sectionHtml.includes('data-requested-check-group="taxonomy"'), false);
+  assert.equal(sectionHtml.includes('data-requested-check-field="evidence"'), true);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.category"'), false);
   assert.match(sectionHtml, /<div class="assignment-brief-label">CTA\/ติดต่อ<\/div>/);
   assert.doesNotMatch(sectionHtml, /<div class="assignment-brief-label">Curation<\/div>/);
@@ -942,6 +943,44 @@ test("requested-check normalize keeps edited prefilled values through rerender m
   assert.equal(normalized.requested_check_returns["cta_contact.phone"].note, "edited");
 });
 
+test("requested-check normalize keeps edited evidence through rerender merges", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: true,
+              label: "Phone",
+              answer_type: "phone",
+              suggested_value: "0812345678",
+              evidence_required: true,
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const normalized = normalizeAssignmentRequestedCheckReturnDraft({
+    requested_check_returns: {
+      "cta_contact.phone": {
+        checked: true,
+        value: "0999999999",
+        evidence: "storefront sign",
+      },
+    },
+  }, handoffPackage);
+
+  assert.equal(normalized.requested_check_returns["cta_contact.phone"].checked, true);
+  assert.equal(normalized.requested_check_returns["cta_contact.phone"].value, "0999999999");
+  assert.equal(normalized.requested_check_returns["cta_contact.phone"].evidence, "storefront sign");
+});
+
 test("requested-check empty loaded state hides the requested-check surface through the submission form", async () => {
   const state = {
     assignments: {
@@ -1174,6 +1213,80 @@ test("requested-check row state toggles taxonomy condition input with checkbox w
   assert.equal(valueField.disabled, false);
   assert.equal(conditionField.disabled, false);
   assert.equal(conditionField.value, "front area");
+});
+
+test("requested-check row state toggles structured multi_select children without erasing selections", () => {
+  const checkedField = { checked: false };
+  const valueMultiA = { disabled: false, checked: true, value: "cafe" };
+  const valueMultiB = { disabled: false, checked: false, value: "family" };
+  const rowNode = {
+    getAttribute(name) {
+      if (name === "data-requested-check-answer-type") return "multi_select";
+      return null;
+    },
+    querySelector(selector) {
+      if (selector === "[data-requested-check-field='checked']") return checkedField;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "[data-requested-check-field='value-multi']") return [valueMultiA, valueMultiB];
+      return [];
+    },
+    classList: {
+      toggle() {},
+    },
+  };
+
+  updateAssignmentRequestedCheckReturnRowState(rowNode);
+  assert.equal(valueMultiA.disabled, true);
+  assert.equal(valueMultiB.disabled, true);
+  assert.equal(valueMultiA.checked, true);
+
+  checkedField.checked = true;
+  updateAssignmentRequestedCheckReturnRowState(rowNode);
+  assert.equal(valueMultiA.disabled, false);
+  assert.equal(valueMultiB.disabled, false);
+  assert.equal(valueMultiA.checked, true);
+});
+
+test("requested-check form reader returns canonical multi_select array from structured controls", () => {
+  const multiSelectRowNode = {
+    getAttribute(name) {
+      if (name === "data-requested-check-return-key") return "taxonomy.tags";
+      if (name === "data-requested-check-answer-type") return "multi_select";
+      return null;
+    },
+    querySelector(selector) {
+      if (selector === "[data-requested-check-field='checked']") return { checked: true };
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector !== "[data-requested-check-field='value-multi']") return [];
+      return [
+        { checked: true, value: "cafe" },
+        { checked: true, value: "family" },
+        { checked: true, value: "cafe" },
+        { checked: false, value: "rooftop" },
+      ];
+    },
+  };
+  const formNode = {
+    querySelectorAll(selector) {
+      return selector === "[data-requested-check-row]" ? [multiSelectRowNode] : [];
+    },
+  };
+  const state = {
+    assignments: {
+      requestedCheckReturnDrafts: {},
+    },
+  };
+  const readDraft = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm", {
+    qs: () => formNode,
+    state,
+  });
+
+  const draft = readDraft(12);
+  assert.deepEqual(draft.requested_check_returns["taxonomy.tags"].value, ["cafe", "family"]);
 });
 
 test("requested-check submission form render path outputs CTA before Curation and preserves edited taxonomy values", () => {

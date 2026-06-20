@@ -6429,18 +6429,13 @@ function normalizeStateValue(value, stateGroup) {
     const requestedCheckSchemaMap = buildRequestedCheckSchemaMapFromHandoffPackage(latestHandoff?.handoff_package_json || null);
     const articlePayload = payload.article_payload_json == null ? null : parseJsonInputStrict(payload.article_payload_json, "article_payload_json", "object");
     const mediaPayload = payload.media_payload_json == null ? null : parseJsonInputStrict(payload.media_payload_json, "media_payload_json", "object");
-    const fieldReturnPayload = payload.field_return_payload_json == null
+    const incomingFieldReturnPayload = payload.field_return_payload_json == null
       ? null
       : normalizeFieldReturnPayloadJson(
         parseJsonInputStrict(payload.field_return_payload_json, "field_return_payload_json", "object"),
         "field_return_payload_json",
         { requestedCheckSchemaMap }
       );
-    validateRequestedCheckReturnsForFinalSubmission(
-      fieldReturnPayload?.requested_check_returns || {},
-      requestedCheckSchemaMap,
-      "field_return_payload_json.requested_check_returns"
-    );
     const contributorNote = payload.contributor_note == null ? null : String(payload.contributor_note || "").trim() || null;
     const reviewerNote = payload.reviewer_note == null ? null : String(payload.reviewer_note || "").trim() || null;
     const reviewedAt = payload.reviewed_at == null || payload.reviewed_at === "" ? null : toNullableDateIso(payload.reviewed_at, "reviewed_at");
@@ -6458,9 +6453,14 @@ function normalizeStateValue(value, stateGroup) {
         const nextMediaPayload = mediaPayload == null
           ? latestSubmission.media_payload_json
           : mergeAssignmentSubmissionMediaPayload(latestSubmission.media_payload_json, mediaPayload);
-        const nextFieldReturnPayload = fieldReturnPayload == null
+        const nextFieldReturnPayload = incomingFieldReturnPayload == null
           ? latestSubmission.field_return_payload_json
-          : fieldReturnPayload;
+          : incomingFieldReturnPayload;
+        validateRequestedCheckReturnsForFinalSubmission(
+          nextFieldReturnPayload?.requested_check_returns || {},
+          requestedCheckSchemaMap,
+          "field_return_payload_json.requested_check_returns"
+        );
         updateAssignmentSubmissionStmt.run(
           submittedByUserId,
           submissionState,
@@ -6480,6 +6480,12 @@ function normalizeStateValue(value, stateGroup) {
       }
     }
 
+    validateRequestedCheckReturnsForFinalSubmission(
+      incomingFieldReturnPayload?.requested_check_returns || {},
+      requestedCheckSchemaMap,
+      "field_return_payload_json.requested_check_returns"
+    );
+
     const createdAt = toBangkokSqlTimestamp();
     const res = insertAssignmentSubmissionStmt.run(
       assignmentId,
@@ -6488,7 +6494,7 @@ function normalizeStateValue(value, stateGroup) {
       submissionState,
       articlePayload ? JSON.stringify(articlePayload) : null,
       mediaPayload ? JSON.stringify(mediaPayload) : null,
-      fieldReturnPayload ? JSON.stringify(fieldReturnPayload) : null,
+      incomingFieldReturnPayload ? JSON.stringify(incomingFieldReturnPayload) : null,
       contributorNote,
       reviewerNote,
       createdAt,

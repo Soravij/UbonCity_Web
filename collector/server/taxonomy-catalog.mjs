@@ -566,7 +566,8 @@ export function normalizeTaxonomyCatalogSuggestedValue(entryOrKey, rawValue) {
     const values = [];
     for (const item of rawValue) {
       const value = String(item || "").trim();
-      if (!value || seen.has(value) || !entry.allowed_values.includes(value)) continue;
+      if (!value || seen.has(value)) continue;
+      if (!entry.allowed_values.includes(value)) return null;
       seen.add(value);
       values.push(value);
     }

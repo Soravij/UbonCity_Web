@@ -2427,6 +2427,87 @@ test("assignment submission round-trips normalized field return payload and igno
   }
 });
 
+test("resubmitted assignment retains prior complete field returns when no replacement field_return_payload_json is supplied", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Resubmit Keep Field Return");
+    const assignee = ctx.createUser("resubmit-keep-field-return");
+    ctx.createReadinessBrief(item.id, "resubmit-keep-field-return");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      field_pack_checklists: [{ checklist_type: "must_verify_fact", item_text: "verify phone" }],
+    });
+
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
+          "cta_contact.line_url": { checked: true, value: "" },
+          "cta_contact.facebook_url": { checked: true, value: "" },
+          "cta_contact.website_url": { checked: true, value: "" },
+          "cta_contact.primary_cta": { checked: true, value: "map" },
+          "taxonomy.parking": { checked: true, value: false, condition_note: "No parking" },
+          "taxonomy.pet_friendly": { checked: true, value: false, evidence: "No pets sign" },
+          "taxonomy.wheelchair_accessible": { checked: true, value: false, evidence: "Steps only" },
+          "taxonomy.toilet_available": { checked: true, value: true },
+          "taxonomy.entry_fee_required": { checked: true, value: false },
+          "taxonomy.setting_type": { checked: true, value: "outdoor" },
+        },
+      },
+      article_payload_json: { summary: "first submission" },
+    });
+    ctx.repo.updateAssignmentState(
+      assignmentId,
+      "submitted",
+      "submitter@local",
+      { actor_role: "user", reason_code: "submission_created" }
+    );
+    ctx.repo.updateAssignmentState(
+      assignmentId,
+      "revision_requested",
+      "reviewer@local",
+      { actor_role: "user", reason_code: "needs_revision" }
+    );
+
+    const resubmitted = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "resubmitted",
+      article_payload_json: { summary: "revised without replacing field return" },
+    });
+
+    assert.equal(resubmitted.id, submission.id);
+    assert.equal(resubmitted.article_payload_json?.summary, "revised without replacing field return");
+    assert.deepEqual(resubmitted.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0811111111");
+    assert.deepEqual(resubmitted.field_return_payload_json.requested_check_returns["taxonomy.setting_type"].value, "outdoor");
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "resubmitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
+        },
+      },
+    }), /missing requested return keys: cta_contact\.line_url/);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("assignment submission rejects missing requested return entries from the immutable handoff snapshot", () => {
   const ctx = createTestContext();
   try {

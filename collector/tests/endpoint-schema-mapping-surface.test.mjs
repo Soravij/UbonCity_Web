@@ -239,6 +239,30 @@ test("assignment submission repository path rejects missing requested returns an
     }));
     assert.equal(resubmitted.article_payload_json.field_return_payload_json, undefined);
     assert.deepEqual(resubmitted.field_return_payload_json.cta_return.phone.value, "0811111111");
+
+    const resubmittedWithoutFieldReturn = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+      assignmentId: assignment.id,
+      submittedByUserId: assignee.id,
+      submissionState: "resubmitted",
+      articlePayloadJson: { body: "draft body revised again" },
+      mediaPayloadJson: { assets: [{ id: 99 }] },
+      fieldReturnPayloadJson: null,
+    }));
+    assert.equal(resubmittedWithoutFieldReturn.article_payload_json.body, "draft body revised again");
+    assert.deepEqual(resubmittedWithoutFieldReturn.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0811111111");
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+      assignmentId: assignment.id,
+      submittedByUserId: assignee.id,
+      submissionState: "resubmitted",
+      articlePayloadJson: { body: "draft body invalid replacement" },
+      mediaPayloadJson: null,
+      fieldReturnPayloadJson: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
+        },
+      },
+    })), /missing requested return keys: cta_contact\.line_url/);
   } finally {
     ctx.cleanup();
   }

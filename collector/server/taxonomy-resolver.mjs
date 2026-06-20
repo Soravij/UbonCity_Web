@@ -95,7 +95,10 @@ function buildCatalogCheck(entry, savedCheck = {}, aiTaxonomy = {}) {
     : null;
   const aiSuggestionRow = rawAiSuggestionRow
     ? {
-      ...rawAiSuggestionRow,
+      taxonomy_key: normalizeKey(rawAiSuggestionRow.taxonomy_key) || entry.taxonomy_key,
+      ...(rawAiSuggestionRow.condition_note != null
+        ? { condition_note: String(rawAiSuggestionRow.condition_note || "").trim() || null }
+        : {}),
       ...(validatedAiSuggestedValue != null ? { suggested_value: validatedAiSuggestedValue } : {}),
     }
     : null;
@@ -109,6 +112,9 @@ function buildCatalogCheck(entry, savedCheck = {}, aiTaxonomy = {}) {
     : (normalizedSavedSuggestedValue != null ? cloneValue(normalizedSavedSuggestedValue) : null);
   const aiConfidence = normalizeKey(aiTaxonomy?.confidence) || "unknown";
   const requestedDecision = getRequestedDecision(savedCheck);
+  const conditionNote = aiSuggestionRow && Object.prototype.hasOwnProperty.call(aiSuggestionRow, "condition_note")
+    ? aiSuggestionRow.condition_note
+    : (savedCheck.condition_note == null ? null : String(savedCheck.condition_note || "").trim() || null);
   return {
     key: entry.taxonomy_key,
     requested: resolveRequestedFlag(entry, savedCheck, aiSuggestionRow),
@@ -121,12 +127,13 @@ function buildCatalogCheck(entry, savedCheck = {}, aiTaxonomy = {}) {
     categories: cloneValue(entry.categories),
     item_types: cloneValue(entry.item_types),
     condition_prompt: entry.condition_prompt || null,
+    condition_note: conditionNote,
     evidence_required: entry.evidence_required === true,
     allowed_values: Array.isArray(entry.allowed_values) ? cloneValue(entry.allowed_values) : null,
     unit_options: Array.isArray(entry.unit_options) ? cloneValue(entry.unit_options) : null,
     downstream_consumers: cloneValue(entry.downstream_consumers),
     suggested_value: suggestedValue,
-    source: hasAiSuggestedValue
+    source: aiSuggestionRow
       ? { kind: "ai", confidence: aiConfidence }
       : (savedCheck.source != null ? cloneValue(savedCheck.source) : null),
   };

@@ -7504,9 +7504,11 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
   const usesSuggestedValue = hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
     && areAssignmentRequestedCheckValuesEqual(row.value, check.suggested_value, check.answer_type);
   const showConditionNote = options?.showConditionNote === true;
+  const showEvidence = check?.evidence_required === true;
   const rowModifierClass = String(options?.rowModifierClass || "").trim();
   const extraClass = rowModifierClass ? ` ${rowModifierClass}` : "";
   const conditionValue = String(row?.condition_note || "");
+  const evidenceValue = String(row?.evidence || "");
   return `
     <div class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row${extraClass}" data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
       <div class="assignment-capture-row requested-check-row-main">
@@ -7523,6 +7525,11 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
         ${showConditionNote ? `
           <div class="requested-check-row-condition">
             <input type="text" data-requested-check-field="condition_note" value="${escapeHtml(conditionValue)}" placeholder="เงื่อนไข/รายละเอียดเพิ่มเติม" ${checked ? "" : "disabled"} />
+          </div>
+        ` : ""}
+        ${showEvidence ? `
+          <div class="requested-check-row-condition">
+            <input type="text" data-requested-check-field="evidence" value="${escapeHtml(evidenceValue)}" placeholder="หลักฐาน" ${checked ? "" : "disabled"} />
           </div>
         ` : ""}
       </div>
@@ -7605,15 +7612,22 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
 function updateAssignmentRequestedCheckReturnRowState(rowNode) {
   if (!rowNode) return;
   const checked = rowNode.querySelector("[data-requested-check-field='checked']")?.checked === true;
-  const answerType = String(rowNode.getAttribute("data-requested-check-answer-type") || "text").trim().toLowerCase() || "text";
   const valueField = rowNode.querySelector("[data-requested-check-field='value']");
   const valueNumberField = rowNode.querySelector("[data-requested-check-field='value-number']");
   const valueUnitField = rowNode.querySelector("[data-requested-check-field='value-unit']");
   const conditionField = rowNode.querySelector("[data-requested-check-field='condition_note']");
+  const evidenceField = rowNode.querySelector("[data-requested-check-field='evidence']");
+  const multiValueFields = typeof rowNode.querySelectorAll === "function"
+    ? Array.from(rowNode.querySelectorAll("[data-requested-check-field='value-multi']"))
+    : [];
   if (valueField) valueField.disabled = !checked;
   if (valueNumberField) valueNumberField.disabled = !checked;
   if (valueUnitField) valueUnitField.disabled = !checked;
+  multiValueFields.forEach((node) => {
+    node.disabled = !checked;
+  });
   if (conditionField) conditionField.disabled = !checked;
+  if (evidenceField) evidenceField.disabled = !checked;
   rowNode.classList.toggle("is-muted", !checked);
 }
 

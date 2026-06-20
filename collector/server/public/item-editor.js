@@ -6029,28 +6029,6 @@ function wire() {
     if (target.getAttribute("data-action") === "add-requested-check") {
       event.preventDefault();
       return;
-      const current = readRequestedChecksEditorState();
-      const customGroup = current.groups.find((group) => group.group_key === "custom");
-      const nextIndex = Array.isArray(customGroup?.checks) ? customGroup.checks.length + 1 : 1;
-      if (!customGroup) {
-        current.groups.push({ group_key: "custom", group_label: "เช็กเพิ่ม", checks: [] });
-      }
-      current.groups.find((group) => group.group_key === "custom").checks.push({
-        key: `custom_${nextIndex}`,
-        requested: false,
-        label: "",
-        instruction: "",
-        answer_type: "text",
-        suggested_value: null,
-        condition_prompt: null,
-        evidence_required: false,
-        source: null,
-      });
-      renderRequestedChecksEditor({ requested_checks_json: current }, { resetBaseline: false });
-      applyEditorActionGuards();
-      renderStepFourGuides();
-      renderRequestedChecksPreview();
-      return;
     }
     if (target.getAttribute("data-action") === "remove-requested-check") {
       target.closest("[data-requested-check-row]")?.remove();
@@ -6241,4 +6219,3 @@ function wire() {
     setStatus(err.message, true);
   }
 })();
-
