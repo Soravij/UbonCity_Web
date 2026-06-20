@@ -1290,7 +1290,16 @@ function isRequestedCheckAnswerComplete(row = {}, schema = null) {
   }
   if (answerType === "number_with_unit") {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-    return typeof value.number === "number" && Number.isFinite(value.number);
+    const hasUnitOptions = Array.isArray(schema?.unit_options) && schema.unit_options.length > 0;
+    const rawNumber = typeof value.number === "string" ? value.number.trim() : value.number;
+    if (rawNumber == null || rawNumber === "") return false;
+    const numeric = typeof rawNumber === "number"
+      ? rawNumber
+      : Number(rawNumber);
+    if (!Number.isFinite(numeric)) return false;
+    if (!hasUnitOptions) return true;
+    const unitValue = value.unit == null ? null : String(value.unit || "").trim() || null;
+    return Boolean(unitValue && schema.unit_options.includes(unitValue));
   }
   if (answerType === "note_only") {
     return true;
@@ -1369,19 +1378,24 @@ function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName, opt
       return typeof rawValue === "boolean" ? rawValue : null;
     }
     if (answerType === "number_with_unit") {
-      if (typeof rawValue === "number" && Number.isFinite(rawValue)) return { number: rawValue, unit: null };
+      const hasUnitOptions = Array.isArray(schema?.unit_options) && schema.unit_options.length > 0;
+      if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+        if (hasUnitOptions) throw new Error(`${fieldName} must be an object with number and unit`);
+        return { number: rawValue, unit: null };
+      }
       if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) return null;
-      const numberIsEmpty = rawValue.number == null || rawValue.number === "";
-      const numeric = numberIsEmpty ? null : Number(rawValue.number);
+      const rawNumber = typeof rawValue.number === "string" ? rawValue.number.trim() : rawValue.number;
+      const numberIsEmpty = rawNumber == null || rawNumber === "";
+      const numeric = numberIsEmpty ? null : Number(rawNumber);
       const unitValue = rawValue.unit == null ? null : String(rawValue.unit || "").trim() || null;
       if (numberIsEmpty) {
-        if (unitValue && Array.isArray(schema?.unit_options) && schema.unit_options.length && !schema.unit_options.includes(unitValue)) {
+        if (unitValue && hasUnitOptions && !schema.unit_options.includes(unitValue)) {
           throw new Error(`${fieldName} has invalid unit`);
         }
         return unitValue ? { number: null, unit: unitValue } : null;
       }
       if (!Number.isFinite(numeric)) return null;
-      if (Array.isArray(schema?.unit_options) && schema.unit_options.length && (!unitValue || !schema.unit_options.includes(unitValue))) {
+      if (hasUnitOptions && (!unitValue || !schema.unit_options.includes(unitValue))) {
         throw new Error(`${fieldName} has invalid unit`);
       }
       return { number: numeric, unit: unitValue };

@@ -215,6 +215,27 @@ test("field pack normalizer removes unknown and wrong-category taxonomy suggesti
   });
 });
 
+test("field pack normalizer partially filters invalid multi_select taxonomy suggestions", () => {
+  const normalized = normalizeFieldPack({
+    field_pack: {
+      ...fieldPackResponse().field_pack,
+      ai_taxonomy_json: {
+        category: "restaurants",
+        suggested_checks: [
+          { taxonomy_key: "dietary_options", suggested_value: ["vegan", "unknown-option", "vegan"] },
+        ],
+      },
+    },
+  }, { item: createItem({ category: "restaurants" }) });
+
+  assert.deepEqual(normalized.ai_taxonomy_json, {
+    category: "restaurants",
+    suggested_checks: [
+      { taxonomy_key: "dietary_options", suggested_value: ["vegan"] },
+    ],
+  });
+});
+
 test("external agent engine normalizes visual context and field pack responses", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];

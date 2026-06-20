@@ -220,13 +220,29 @@ test("resolver drops invalid raw AI suggested_value for select rows", () => {
   assert.equal(priceLevel?.suggested_value, null);
 });
 
-test("resolver drops invalid raw AI suggested_value for multi_select rows", () => {
+test("resolver filters invalid raw AI suggested_value entries for multi_select rows", () => {
   const result = resolveRequestedChecksWithCatalog({
     requestedChecks: { version: 1, groups: [] },
     item: createPlaceItem({ category: "restaurants" }),
     aiTaxonomy: {
       suggested_checks: [
-        { taxonomy_key: "dietary_options", suggested_value: ["vegan", "unknown-option"], condition_note: "raw invalid multi" },
+        { taxonomy_key: "dietary_options", suggested_value: ["vegan", "unknown-option", "vegan"], condition_note: "raw invalid multi" },
+      ],
+    },
+  });
+
+  const dietaryOptions = findCheck(findGroup(result, "taxonomy"), "dietary_options");
+  assert.equal(dietaryOptions?.requested, true);
+  assert.deepEqual(dietaryOptions?.suggested_value, ["vegan"]);
+});
+
+test("resolver returns null for multi_select rows when no valid AI values remain", () => {
+  const result = resolveRequestedChecksWithCatalog({
+    requestedChecks: { version: 1, groups: [] },
+    item: createPlaceItem({ category: "restaurants" }),
+    aiTaxonomy: {
+      suggested_checks: [
+        { taxonomy_key: "dietary_options", suggested_value: ["unknown-option"], condition_note: "raw invalid multi only" },
       ],
     },
   });

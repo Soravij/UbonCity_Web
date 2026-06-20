@@ -2626,6 +2626,173 @@ test("assignment submission accepts requested boolean false and requested phone 
   }
 });
 
+test("assignment submission enforces immutable number_with_unit schema validation while keeping legacy raw-number compatibility", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Return Number With Unit");
+    const assignee = ctx.createUser("requested-return-number-with-unit");
+    ctx.createReadinessBrief(item.id, "requested-return-number-with-unit");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = assignmentResult.assignment.id;
+    const existingHandoff = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
+    const immutableSnapshot = {
+      ...existingHandoff.handoff_package_json,
+      requested_checks: {
+        version: 1,
+        groups: [
+          {
+            group_key: "taxonomy",
+            group_label: "Taxonomy",
+            checks: [
+              {
+                key: "typical_duration",
+                requested: true,
+                label: "Typical duration",
+                instruction: "Confirm typical duration",
+                answer_type: "number_with_unit",
+                unit_options: ["minutes", "hours"],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    ctx.db.prepare(`
+      UPDATE content_assignment_handoff_snapshots
+      SET handoff_package_json=?
+      WHERE id=?
+    `).run(JSON.stringify(immutableSnapshot), existingHandoff.id);
+
+    const buildPayload = (value) => ({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          "taxonomy.typical_duration": { checked: true, value },
+        },
+      },
+    });
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload(120)), /incomplete requested return keys: taxonomy\.typical_duration/);
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: 120, unit: null })), /invalid unit/);
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: 120, unit: "days" })), /invalid unit/);
+
+    const accepted = ctx.repo.addAssignmentSubmission(buildPayload({ number: 120, unit: "minutes" }));
+    assert.deepEqual(accepted.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 120, unit: "minutes" });
+
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "tester@local", { actor_role: "user", reason_code: "submission_created" });
+    ctx.repo.updateAssignmentState(assignmentId, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "needs_revision" });
+
+    const zeroAccepted = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "resubmitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          ...accepted.field_return_payload_json.requested_check_returns,
+          "taxonomy.typical_duration": { checked: true, value: { number: 0, unit: "minutes" } },
+        },
+      },
+    });
+    assert.deepEqual(zeroAccepted.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 0, unit: "minutes" });
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "resubmitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          ...accepted.field_return_payload_json.requested_check_returns,
+          "taxonomy.typical_duration": { checked: true, value: { number: " ", unit: "minutes" } },
+        },
+      },
+    }), /incomplete requested return keys: taxonomy\.typical_duration/);
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "resubmitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          ...accepted.field_return_payload_json.requested_check_returns,
+          "taxonomy.typical_duration": { checked: true, value: { number: 120, unit: null } },
+        },
+      },
+    }), /invalid unit/);
+
+    const legacyItem = ctx.createItem("Requested Return Legacy Number With Unit");
+    const legacyAssignee = ctx.createUser("requested-return-legacy-number-with-unit");
+    ctx.createReadinessBrief(legacyItem.id, "requested-return-legacy-number-with-unit");
+    ctx.repo.createFieldPack({
+      content_item_id: legacyItem.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const legacyAssignment = ctx.repo.createAssignmentFromReadiness(
+      legacyItem.id,
+      { assignee_user_id: legacyAssignee.id, force_override: true, force_reason: "test" },
+      legacyAssignee.id,
+      "tester@local",
+      "admin"
+    );
+    const legacyHandoff = ctx.repo.getLatestAssignmentHandoffByAssignment(legacyAssignment.assignment.id);
+    const legacySnapshot = {
+      ...legacyHandoff.handoff_package_json,
+      requested_checks: {
+        version: 1,
+        groups: [
+          {
+            group_key: "taxonomy",
+            group_label: "Taxonomy",
+            checks: [
+              {
+                key: "typical_duration",
+                requested: true,
+                label: "Typical duration",
+                instruction: "Confirm typical duration",
+                answer_type: "number_with_unit",
+              },
+            ],
+          },
+        ],
+      },
+    };
+    ctx.db.prepare(`
+      UPDATE content_assignment_handoff_snapshots
+      SET handoff_package_json=?
+      WHERE id=?
+    `).run(JSON.stringify(legacySnapshot), legacyHandoff.id);
+
+    const legacySubmission = ctx.repo.addAssignmentSubmission({
+      assignment_id: legacyAssignment.assignment.id,
+      submitted_by_user_id: legacyAssignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          "taxonomy.typical_duration": { checked: true, value: 120 },
+        },
+      },
+    });
+    assert.deepEqual(legacySubmission.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 120, unit: null });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("assignment submission rejects invalid select values and missing evidence based on immutable snapshot metadata", () => {
   const ctx = createTestContext();
   try {
