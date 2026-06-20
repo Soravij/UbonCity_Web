@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "crypto";
 import path from "path";
 
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
+import { resolveRequestedChecksWithCatalog } from "../server/taxonomy-resolver.mjs";
 
 function parseTags(raw) {
   if (!raw) return [];
@@ -812,6 +813,7 @@ function defaultAiTaxonomy() {
     category: null,
     subtype: null,
     tags: [],
+    suggested_checks: [],
     source: [],
     confidence: "unknown",
     note: null,
@@ -1044,10 +1046,29 @@ function normalizeAiTaxonomyJson(value, fieldName = "ai_taxonomy_json") {
     : parseJson(value, null);
   const base = defaultAiTaxonomy();
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  const suggestedChecks = Array.isArray(parsed.suggested_checks)
+    ? parsed.suggested_checks.reduce((acc, row, index) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return acc;
+      const taxonomyKey = String(row.taxonomy_key || "").trim().toLowerCase();
+      if (!taxonomyKey || acc.some((entry) => entry.taxonomy_key === taxonomyKey)) return acc;
+      const next = {
+        taxonomy_key: taxonomyKey,
+      };
+      if (Object.prototype.hasOwnProperty.call(row, "suggested_value")) {
+        next.suggested_value = normalizeJsonSafeValue(row.suggested_value);
+      }
+      if (row.condition_note != null) {
+        next.condition_note = String(row.condition_note || "").trim() || null;
+      }
+      acc.push(next);
+      return acc;
+    }, [])
+    : [];
   return {
     category: parsed.category == null ? null : String(parsed.category || "").trim() || null,
     subtype: parsed.subtype == null ? null : String(parsed.subtype || "").trim() || null,
     tags: normalizeJsonSourceList(parsed.tags, `${fieldName}.tags`),
+    suggested_checks: suggestedChecks,
     source: normalizeJsonSourceList(parsed.source, `${fieldName}.source`),
     confidence: normalizeConfidenceValue(parsed.confidence),
     note: parsed.note == null ? null : String(parsed.note || "").trim() || null,
@@ -8773,9 +8794,15 @@ function normalizeStateValue(value, stateGroup) {
     return next;
   }
 
-  function buildRequestedChecksHandoffPayload(requestedChecks, item) {
+  function buildRequestedChecksHandoffPayload(requestedChecks, item, options = {}) {
     const normalized = normalizeRequestedChecksJson(requestedChecks);
-    const groups = normalized.groups
+    const resolved = resolveRequestedChecksWithCatalog({
+      requestedChecks: normalized,
+      item,
+      aiCtaContact: normalizeAiCtaContactJson(options.aiCtaContact ?? null),
+      aiTaxonomy: normalizeAiTaxonomyJson(options.aiTaxonomy ?? null),
+    });
+    const groups = resolved.groups
       .filter((group) => {
         const normalizedGroupKey = String(group?.group_key || "").trim().toLowerCase();
         if (normalizedGroupKey === "cta_contact") {
@@ -8815,7 +8842,10 @@ function normalizeStateValue(value, stateGroup) {
     const recommendedHook = String(fieldPack?.social_hook || "").trim() || null;
     const socialCaptionAngle = String(fieldPack?.social_caption_angle || "").trim() || null;
     const fieldNotes = String(fieldPack?.field_notes || "").trim() || null;
-    const requestedChecks = buildRequestedChecksHandoffPayload(fieldPack?.requested_checks_json, item);
+    const requestedChecks = buildRequestedChecksHandoffPayload(fieldPack?.requested_checks_json, item, {
+      aiCtaContact: fieldPack?.ai_cta_contact_json,
+      aiTaxonomy: fieldPack?.ai_taxonomy_json,
+    });
 
     return finalizeAssignmentHandoffPackage({
       brief_summary: briefSummary,

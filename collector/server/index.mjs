@@ -25,6 +25,7 @@ import {
 } from "../config/ai.mjs";
 import { openDatabase } from "../db/client.mjs";
 import { createRepository, hasRecognizedEvaluationOverrideInput } from "../db/repository.mjs";
+import { resolveRequestedChecksWithCatalog } from "./taxonomy-resolver.mjs";
 import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/index.mjs";
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import {
@@ -5458,6 +5459,30 @@ function clearExternalUsableMediaAtHandoff(contentItemId, options = {}) {
   };
 }
 
+function resolveFieldPackRequestedChecksForEditor(item, fieldPack) {
+  if (!fieldPack || typeof fieldPack !== "object" || !item || typeof item !== "object") return fieldPack || null;
+  return {
+    ...fieldPack,
+    requested_checks_json: resolveRequestedChecksWithCatalog({
+      requestedChecks: fieldPack.requested_checks_json,
+      item,
+      aiCtaContact: fieldPack.ai_cta_contact_json,
+      aiTaxonomy: fieldPack.ai_taxonomy_json,
+    }),
+  };
+}
+
+function buildRequestedChecksResolutionItem(item, itemOverride = {}) {
+  const baseItem = item && typeof item === "object" ? item : {};
+  const override = itemOverride && typeof itemOverride === "object" ? itemOverride : {};
+  return {
+    ...baseItem,
+    ...override,
+    type: String(override.type || baseItem.type || "").trim().toLowerCase() || String(baseItem.type || "").trim().toLowerCase(),
+    category: String(override.category || baseItem.category || "").trim() || String(baseItem.category || "").trim(),
+  };
+}
+
 function toMediaDedupKey(value) {
   const raw = sanitizeGoogleMapsPhotoUrl(value);
   if (!raw) return "";
@@ -8498,7 +8523,11 @@ app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "u
     if (draftPayload) {
       draftPayload.body = sanitizedBody;
     }
-    const result = repo.saveItemWithFieldPack(itemPayload, fieldPackPayload, actorEmail(req));
+    const resolutionItem = buildRequestedChecksResolutionItem(current, itemPayload);
+    const resolvedFieldPackPayload = fieldPackPayload
+      ? resolveFieldPackRequestedChecksForEditor(resolutionItem, fieldPackPayload)
+      : fieldPackPayload;
+    const result = repo.saveItemWithFieldPack(itemPayload, resolvedFieldPackPayload, actorEmail(req));
     let responseItem = result?.item || null;
     if (responseItem && otherTransportMetaPayload) {
       upsertOtherTransportMetadata(id, responseItem, otherTransportMetaPayload);
@@ -8555,7 +8584,12 @@ app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "u
         is_current: result.field_pack.is_current === true,
       });
     }
-    res.json({ ok: true, item: responseItem, field_pack: result?.field_pack || null, draft: savedDraft || null });
+    res.json({
+      ok: true,
+      item: responseItem,
+      field_pack: resolveFieldPackRequestedChecksForEditor(responseItem || current, result?.field_pack || null),
+      draft: savedDraft || null,
+    });
   } catch (err) {
     const message = String(err?.message || "Failed to save editor work");
     const status = /not found/i.test(message) ? 404 : /conflict|constraint/i.test(message) ? 409 : 400;
@@ -12038,8 +12072,32 @@ app.get("/api/items/:id/field-pack/current", requireRole("owner", "admin", "edit
     return;
   }
 
-  const fieldPack = repo.getCurrentFieldPackByItem(id);
+  const fieldPack = resolveFieldPackRequestedChecksForEditor(item, repo.getCurrentFieldPackByItem(id));
   res.json({ item_id: id, field_pack: fieldPack });
+});
+
+app.post("/api/items/:id/field-pack/requested-checks/resolve", requireRole("owner", "admin", "editor", "freelance", "user"), (req, res) => {
+  const id = Number(req.params.id || 0);
+  if (!id) {
+    res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
+    return;
+  }
+
+  const resolutionItem = buildRequestedChecksResolutionItem(item, req.body?.item || {});
+  const fieldPackPayload = req.body?.field_pack && typeof req.body.field_pack === "object"
+    ? { ...(req.body.field_pack || {}) }
+    : {};
+  const fieldPack = resolveFieldPackRequestedChecksForEditor(resolutionItem, fieldPackPayload) || fieldPackPayload;
+  res.json({ ok: true, item_id: id, field_pack: fieldPack });
 });
 
 app.post("/api/items/:id/field-packs", requireRole("owner", "admin", "user"), (req, res) => {
@@ -12069,7 +12127,7 @@ app.post("/api/items/:id/field-packs", requireRole("owner", "admin", "user"), (r
       status: fieldPack?.status || null,
       is_current: fieldPack?.is_current === true,
     });
-    res.status(201).json({ ok: true, item_id: id, field_pack: fieldPack });
+    res.status(201).json({ ok: true, item_id: id, field_pack: resolveFieldPackRequestedChecksForEditor(item, fieldPack) });
   } catch (err) {
     const msg = String(err?.message || "Cannot create field pack");
     const isConflict = String(err?.code || "") === "CONFLICT" || /UNIQUE|constraint/i.test(msg);
@@ -12114,7 +12172,7 @@ app.put("/api/field-packs/:fieldPackId", requireRole("owner", "admin", "user"), 
     res.json({
       ok: true,
       item_id: Number(fieldPack?.content_item_id || 0) || null,
-      field_pack: fieldPack,
+      field_pack: resolveFieldPackRequestedChecksForEditor(item, fieldPack),
     });
   } catch (err) {
     const msg = String(err?.message || "Cannot update field pack");
@@ -12204,7 +12262,7 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
       ai_engine: String(aiConfig?.agentEngine || "internal").trim().toLowerCase() || "internal",
     });
 
-    res.json({ ok: true, item_id: id, field_pack: fieldPack });
+    res.json({ ok: true, item_id: id, field_pack: resolveFieldPackRequestedChecksForEditor(item, fieldPack) });
   } catch (err) {
     res.status(400).json({ error: String(err?.message || "Cannot regenerate field pack") });
   }

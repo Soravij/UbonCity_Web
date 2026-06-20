@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { resolveRequestedChecksWithCatalog } from "../server/taxonomy-resolver.mjs";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const itemEditorJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.js"), "utf8");
@@ -117,9 +118,19 @@ const readRequestedChecksEditorState = loadNamedFunction(itemEditorJs, "readRequ
   getRequestedCheckDefaultGroupLabel,
 });
 const hasRequestedCheckMeaningfulValue = loadNamedFunction(itemEditorJs, "hasRequestedCheckMeaningfulValue");
-const buildRequestedChecksEditorState = loadNamedFunction(itemEditorJs, "buildRequestedChecksEditorState", {
+const normalizeRequestedCheckKey = loadNamedFunction(itemEditorJs, "normalizeRequestedCheckKey");
+const getAiTaxonomySuggestedValue = loadNamedFunction(itemEditorJs, "getAiTaxonomySuggestedValue", {
+  normalizeRequestedCheckKey,
+});
+const buildResolvedTaxonomyRequestedChecks = loadNamedFunction(itemEditorJs, "buildResolvedTaxonomyRequestedChecks", {
+  normalizeRequestedCheckKey,
+  getAiTaxonomySuggestedValue,
+  hasRequestedCheckMeaningfulValue,
+});
+const buildRequestedChecksEditorStateImpl = loadNamedFunction(itemEditorJs, "buildRequestedChecksEditorState", {
   REQUESTED_CHECK_GROUP_TEMPLATES,
   hasRequestedCheckMeaningfulValue,
+  buildResolvedTaxonomyRequestedChecks,
   state: { item: { type: "place" } },
 });
 const isPlaceRequestedCheckItem = loadNamedFunction(itemEditorJs, "isPlaceRequestedCheckItem", {
@@ -129,12 +140,26 @@ const shouldKeepRequestedCheckGroupForItem = loadNamedFunction(itemEditorJs, "sh
   isPlaceRequestedCheckItem,
   state: { item: { type: "place" } },
 });
-const getRequestedCheckEditorGroups = loadNamedFunction(itemEditorJs, "getRequestedCheckEditorGroups", {
-  buildRequestedChecksEditorState,
+const resolveFieldPackForUiTests = (fieldPack = {}, item = { type: "place", category: "cafes" }) => ({
+  ...fieldPack,
+  requested_checks_json: resolveRequestedChecksWithCatalog({
+    requestedChecks: fieldPack?.requested_checks_json || { version: 1, groups: [] },
+    item,
+    aiCtaContact: fieldPack?.ai_cta_contact_json || {},
+    aiTaxonomy: fieldPack?.ai_taxonomy_json || {},
+  }),
+});
+const buildRequestedChecksEditorState = (fieldPack = {}) => {
+  return buildRequestedChecksEditorStateImpl(resolveFieldPackForUiTests(fieldPack));
+};
+const getRequestedCheckEditorGroupsImpl = loadNamedFunction(itemEditorJs, "getRequestedCheckEditorGroups", {
+  buildRequestedChecksEditorState: buildRequestedChecksEditorStateImpl,
   isPlaceRequestedCheckItem,
   state: { item: { type: "place" } },
 });
-const normalizeRequestedCheckKey = loadNamedFunction(itemEditorJs, "normalizeRequestedCheckKey");
+const getRequestedCheckEditorGroups = (fieldPack = {}, item = { type: "place", category: "cafes" }) => {
+  return getRequestedCheckEditorGroupsImpl(resolveFieldPackForUiTests(fieldPack, item), item);
+};
 const mergeRequestedChecksForSave = loadNamedFunction(itemEditorJs, "mergeRequestedChecksForSave", {
   REQUESTED_CHECK_GROUP_TEMPLATES,
   getRequestedCheckDefaultGroupLabel,
@@ -142,6 +167,9 @@ const mergeRequestedChecksForSave = loadNamedFunction(itemEditorJs, "mergeReques
 });
 const buildRequestedChecksHandoffPayload = loadNamedFunction(repositoryJs, "buildRequestedChecksHandoffPayload", {
   normalizeRequestedChecksJson: (value) => value,
+  normalizeAiCtaContactJson: (value) => value || null,
+  normalizeAiTaxonomyJson: (value) => value || null,
+  resolveRequestedChecksWithCatalog,
 });
 const normalizeRequestedCheckCandidate = loadNamedFunction(itemEditorJs, "normalizeRequestedCheckCandidate", {
   hasRequestedCheckMeaningfulValue,
@@ -176,15 +204,19 @@ const resolveGuidanceRowValue = loadNamedFunction(itemEditorJs, "resolveGuidance
 const extractRequestedCheckArticleContextHints = loadNamedFunction(itemEditorJs, "extractRequestedCheckArticleContextHints");
 const parseTaxonomyContract = loadNamedFunction(itemEditorJs, "parseTaxonomyContract");
 const toReviewList = loadNamedFunction(itemEditorJs, "toReviewList");
-const buildRequestedChecksAutoSaveState = loadNamedFunction(itemEditorJs, "buildRequestedChecksAutoSaveState", {
+const buildRequestedChecksAutoSaveStateImpl = loadNamedFunction(itemEditorJs, "buildRequestedChecksAutoSaveState", {
   REQUESTED_CHECK_GROUP_TEMPLATES,
   parseFieldPackContractFromWriterNotes,
   toReviewList,
   normalizeRequestedCheckKey,
+  buildResolvedTaxonomyRequestedChecks,
   shouldKeepRequestedCheckGroupForItem,
   hasRequestedCheckMeaningfulValue,
   state: { item: { type: "place" } },
 });
+const buildRequestedChecksAutoSaveState = (fieldPack = {}, item = { type: "place", category: "cafes" }) => {
+  return buildRequestedChecksAutoSaveStateImpl(resolveFieldPackForUiTests(fieldPack, item), item);
+};
 const mergeRequestedChecksAutoAndManualState = loadNamedFunction(itemEditorJs, "mergeRequestedChecksAutoAndManualState", {
   REQUESTED_CHECK_GROUP_TEMPLATES,
   state: { item: { type: "place" } },
@@ -335,6 +367,7 @@ const buildRequestedChecksPreviewHtml = loadNamedFunction(itemEditorJs, "buildRe
   }),
 });
 const buildFieldPackApiPayloadState = {
+  item: { type: "place", category: "cafes" },
   fieldPack: {
     requested_checks_json: {
       version: 1,
@@ -369,9 +402,26 @@ const buildFieldPackApiPayloadState = {
     }),
   },
 };
+const buildFieldPackApiPayloadFormState = {
+  type: "place",
+  category: "cafes",
+};
+const getRequestedCheckEditorItem = loadNamedFunction(itemEditorJs, "getRequestedCheckEditorItem", {
+  qs: (id) => {
+    if (id === "e-type") return { value: buildFieldPackApiPayloadFormState.type };
+    if (id === "e-category") return { value: buildFieldPackApiPayloadFormState.category };
+    return null;
+  },
+  state: buildFieldPackApiPayloadState,
+});
 const buildFieldPackApiPayload = loadNamedFunction(itemEditorJs, "buildFieldPackApiPayload", {
   state: buildFieldPackApiPayloadState,
-  qs: (id) => (id === "fp-requested-checks-editor" ? requestedChecksEditorRoot : null),
+  qs: (id) => {
+    if (id === "fp-requested-checks-editor") return requestedChecksEditorRoot;
+    if (id === "e-type") return { value: buildFieldPackApiPayloadFormState.type };
+    if (id === "e-category") return { value: buildFieldPackApiPayloadFormState.category };
+    return null;
+  },
   readFieldPackFormState: () => ({
     id: 1,
     status: "draft",
@@ -413,6 +463,57 @@ const buildFieldPackApiPayload = loadNamedFunction(itemEditorJs, "buildFieldPack
   getRequestedChecksEditorBaselineState,
   setRequestedChecksEditorBaselineState,
   buildRequestedChecksEditorState,
+  getRequestedCheckEditorItem,
+});
+const refreshRequestedChecksForCurrentItemState = {
+  itemId: 99,
+  item: { type: "place", category: "cafes" },
+  fieldPack: null,
+};
+const refreshRequestedChecksApiCalls = [];
+const refreshRequestedChecksRenderCalls = [];
+const refreshRequestedChecksForCurrentItem = loadNamedFunction(itemEditorJs, "refreshRequestedChecksForCurrentItem", {
+  state: refreshRequestedChecksForCurrentItemState,
+  readFieldPackFormState: () => ({
+    id: 1,
+    status: "draft",
+    requested_checks_json: { version: 1, groups: [] },
+  }),
+  getRequestedCheckEditorItem: () => ({
+    ...refreshRequestedChecksForCurrentItemState.item,
+    type: String(buildFieldPackApiPayloadFormState.type || "").trim().toLowerCase(),
+    category: String(buildFieldPackApiPayloadFormState.category || "").trim(),
+  }),
+  api: async (url, options = {}) => {
+    refreshRequestedChecksApiCalls.push({
+      url,
+      body: JSON.parse(options.body || "{}"),
+    });
+    const item = options.body ? JSON.parse(options.body).item : {};
+    const fieldPack = options.body ? JSON.parse(options.body).field_pack : {};
+    return {
+      ok: true,
+      field_pack: {
+        ...fieldPack,
+        requested_checks_json: resolveRequestedChecksWithCatalog({
+          requestedChecks: fieldPack?.requested_checks_json || { version: 1, groups: [] },
+          item,
+          aiCtaContact: fieldPack?.ai_cta_contact_json || {},
+          aiTaxonomy: fieldPack?.ai_taxonomy_json || {},
+        }),
+      },
+    };
+  },
+  renderRequestedChecksEditor: (fieldPack, options = {}) => {
+    refreshRequestedChecksRenderCalls.push({
+      kind: "editor",
+      fieldPack,
+      options,
+    });
+  },
+  renderRequestedChecksPreview: () => {
+    refreshRequestedChecksRenderCalls.push({ kind: "preview" });
+  },
 });
 
 function createRequestedChecksEditorRowNode(check) {
@@ -454,8 +555,16 @@ function createRequestedChecksEditorRoot(groups) {
   };
 }
 
-function setBuildFieldPackApiPayloadState(fieldPack) {
-  buildFieldPackApiPayloadState.fieldPack = fieldPack;
+function setBuildFieldPackApiPayloadState(fieldPack, item = { type: "place", category: "cafes" }) {
+  buildFieldPackApiPayloadState.fieldPack = {
+    ...fieldPack,
+    requested_checks_json: resolveRequestedChecksWithCatalog({
+      requestedChecks: fieldPack?.requested_checks_json || { version: 1, groups: [] },
+      item,
+      aiCtaContact: fieldPack?.ai_cta_contact_json || {},
+      aiTaxonomy: fieldPack?.ai_taxonomy_json || {},
+    }),
+  };
 }
 
 test("delete custom check removes it from saved payload instead of reviving existing state", () => {
@@ -593,6 +702,12 @@ test("requested-check editor hides CTA templates for non-place items", () => {
   assert.equal(groups.some((group) => group.group_key === "taxonomy"), true);
 });
 
+test("browser requested-check templates do not own reserved taxonomy schema rows", () => {
+  const taxonomyTemplate = REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === "taxonomy");
+  assert.ok(taxonomyTemplate);
+  assert.deepEqual(taxonomyTemplate.checks || [], []);
+});
+
 test("ai suggested values do not auto-set requested=true in editor groups", () => {
   const groups = getRequestedCheckEditorGroups({
     ai_cta_contact_json: {
@@ -601,8 +716,9 @@ test("ai suggested values do not auto-set requested=true in editor groups", () =
       confidence: "medium",
     },
     ai_taxonomy_json: {
-      category: "attractions",
-      tags: ["family", "museum"],
+      suggested_checks: [
+        { taxonomy_key: "waterfront", suggested_value: false },
+      ],
       confidence: "medium",
     },
     requested_checks_json: { version: 1, groups: [] },
@@ -611,12 +727,12 @@ test("ai suggested values do not auto-set requested=true in editor groups", () =
   });
 
   const ctaPhone = groups.find((group) => group.group_key === "cta_contact")?.checks.find((check) => check.key === "phone");
-  const taxonomyCategory = groups.find((group) => group.group_key === "taxonomy")?.checks.find((check) => check.key === "category");
+  const taxonomyWaterfront = groups.find((group) => group.group_key === "taxonomy")?.checks.find((check) => check.key === "waterfront");
 
   assert.equal(ctaPhone?.requested, false);
   assert.equal(ctaPhone?.suggested_value, "0812345678");
-  assert.equal(taxonomyCategory?.requested, false);
-  assert.equal(taxonomyCategory?.suggested_value, "attractions");
+  assert.equal(taxonomyWaterfront?.requested, true);
+  assert.equal(taxonomyWaterfront?.suggested_value, false);
 });
 
 test("buildRequestedChecksEditorState prefers current AI suggestions over stale saved values", () => {
@@ -1554,7 +1670,8 @@ test("article context drops CTA contact checklist prompts and falls back to empt
   const guidanceHtml = extractDefaultGuidanceHtml(html);
 
   assert.doesNotMatch(guidanceHtml, /ขอเบอร์ที่ติดต่อได้จริง|ถ้ามีให้ขอลิงก์ที่ใช้ได้จริง|ถ้ามีให้ขอลิงก์เพจที่ถูกต้อง|ถ้ามีให้ขอลิงก์เว็บไซต์หลัก|ยืนยันว่าควรพาคนไปกดอะไรเป็นหลัก/);
-  assert.match(guidanceHtml, /No article context hints\./);
+  assert.match(guidanceHtml, /Article context/);
+  assert.match(guidanceHtml, /Waterfront|Price level|Average price per person/);
   assert.match(guidanceHtml, /CTA Review/);
   assert.match(guidanceHtml, /Curation Review/);
   assert.match(guidanceHtml, /requested-guidance-grid/);
@@ -2115,7 +2232,7 @@ test("buildFieldPackApiPayload merges full standard catalogs with saved custom g
 
   assert.deepEqual(result.requested_checks_json.groups.map((group) => group.group_key), ["cta_contact", "taxonomy", "custom"]);
   assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact")?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
-  assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy")?.checks.map((check) => check.key), ["category", "subtype", "tags"]);
+  assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy")?.checks.map((check) => check.key), ["waterfront", "price_level", "average_price_per_person", "air_conditioning", "parking", "outdoor_seating", "pet_friendly", "work_power_outlets"]);
   assert.equal(result.requested_checks_json.groups.find((group) => group.group_key === "custom")?.checks[0].suggested_value, "front desk only");
 });
 
@@ -2275,26 +2392,26 @@ test("buildFieldPackApiPayload overlays explicitly edited live CTA checks while 
   assert.equal(facebookCheck?.requested, true);
 });
 
-test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks while preserving untouched auto checks", () => {
+test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks while preserving untouched resolved catalog checks", () => {
   requestedChecksEditorRoot = createRequestedChecksEditorRoot([
     {
       groupKey: "taxonomy",
       checks: [
         {
-          key: "category",
+          key: "waterfront",
           requested: false,
-          label: "Edited category",
+          label: "Edited waterfront",
           instruction: "updated taxonomy instruction",
-          answer_type: "text",
+          answer_type: "boolean_with_conditions",
           condition_prompt: "edited taxonomy condition",
           evidence_required: false,
         },
         {
-          key: "subtype",
+          key: "parking",
           requested: false,
-          label: "Subtype",
-          instruction: "confirm subtype",
-          answer_type: "text",
+          label: "Parking",
+          instruction: "confirm parking",
+          answer_type: "boolean_with_conditions",
           condition_prompt: null,
           evidence_required: false,
         },
@@ -2309,20 +2426,20 @@ test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks w
         group_label: "Taxonomy",
         checks: [
           {
-            key: "category",
+            key: "waterfront",
             requested: false,
-            label: "Category",
-            instruction: "confirm category",
-            answer_type: "text",
+            label: "Waterfront",
+            instruction: "confirm waterfront",
+            answer_type: "boolean_with_conditions",
             condition_prompt: null,
             evidence_required: false,
           },
           {
-            key: "subtype",
+            key: "parking",
             requested: false,
-            label: "Subtype",
-            instruction: "confirm subtype",
-            answer_type: "text",
+            label: "Parking",
+            instruction: "confirm parking",
+            answer_type: "boolean_with_conditions",
             condition_prompt: null,
             evidence_required: false,
           },
@@ -2334,8 +2451,10 @@ test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks w
     requested_checks_json: { version: 1, groups: [] },
     ai_cta_contact_json: {},
     ai_taxonomy_json: {
-      category: "attractions",
-      subtype: "museum",
+      suggested_checks: [
+        { taxonomy_key: "waterfront", suggested_value: true },
+        { taxonomy_key: "parking", suggested_value: false },
+      ],
     },
     writer_notes: JSON.stringify({
       contract_version: "1",
@@ -2352,21 +2471,20 @@ test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks w
 
   const result = buildFieldPackApiPayload();
   const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
-  const categoryCheck = taxonomyGroup?.checks.find((check) => check.key === "category");
-  const subtypeCheck = taxonomyGroup?.checks.find((check) => check.key === "subtype");
-  const tagsCheck = taxonomyGroup?.checks.find((check) => check.key === "tags");
+  const waterfrontCheck = taxonomyGroup?.checks.find((check) => check.key === "waterfront");
+  const parkingCheck = taxonomyGroup?.checks.find((check) => check.key === "parking");
+  const legacyCategoryCheck = taxonomyGroup?.checks.find((check) => check.key === "category");
 
   assert.ok(taxonomyGroup);
-  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["category", "subtype", "tags"]);
-  assert.equal(categoryCheck?.requested, true);
-  assert.equal(categoryCheck?.label, "Edited category");
-  assert.equal(categoryCheck?.instruction, "updated taxonomy instruction");
-  assert.equal(categoryCheck?.condition_prompt, "edited taxonomy condition");
-  assert.equal(categoryCheck?.suggested_value, "attractions");
-  assert.equal(subtypeCheck?.requested, true);
-  assert.equal(subtypeCheck?.suggested_value, "museum");
-  assert.equal(tagsCheck?.requested, true);
-  assert.equal(tagsCheck?.suggested_value, null);
+  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["waterfront", "price_level", "average_price_per_person", "air_conditioning", "parking", "outdoor_seating", "pet_friendly", "work_power_outlets"]);
+  assert.equal(waterfrontCheck?.requested, true);
+  assert.equal(waterfrontCheck?.label, "Edited waterfront");
+  assert.equal(waterfrontCheck?.instruction, "updated taxonomy instruction");
+  assert.equal(waterfrontCheck?.condition_prompt, "edited taxonomy condition");
+  assert.equal(waterfrontCheck?.suggested_value, true);
+  assert.equal(parkingCheck?.requested, true);
+  assert.equal(parkingCheck?.suggested_value, false);
+  assert.equal(legacyCategoryCheck, undefined);
 });
 
 test("buildFieldPackApiPayload preserves current custom groups from the live editor without letting stale auto rows override them", () => {
@@ -2512,8 +2630,10 @@ test("buildRequestedChecksAutoSaveState emits full standard catalogs and ignores
       confidence: "high",
     },
     ai_taxonomy_json: {
-      category: "attractions",
-      parking: "lot",
+      suggested_checks: [
+        { taxonomy_key: "waterfront", suggested_value: true },
+        { taxonomy_key: "parking", suggested_value: false },
+      ],
     },
     writer_notes: JSON.stringify({
       contract_version: "1",
@@ -2532,16 +2652,16 @@ test("buildRequestedChecksAutoSaveState emits full standard catalogs and ignores
   const taxonomyGroup = result.groups.find((group) => group.group_key === "taxonomy");
 
   assert.deepEqual(ctaGroup?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
-  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), ["category", "subtype", "tags"]);
+  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), ["waterfront", "price_level", "average_price_per_person", "air_conditioning", "parking", "outdoor_seating", "pet_friendly", "work_power_outlets"]);
   assert.equal(ctaGroup?.checks.every((check) => check.requested === true), true);
   assert.equal(taxonomyGroup?.checks.every((check) => check.requested === true), true);
   assert.equal(ctaGroup?.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
   assert.equal(ctaGroup?.checks.find((check) => check.key === "line_url")?.suggested_value, null);
-  assert.equal(taxonomyGroup?.checks.find((check) => check.key === "category")?.suggested_value, "attractions");
-  assert.equal(taxonomyGroup?.checks.find((check) => check.key === "subtype")?.suggested_value, null);
+  assert.equal(taxonomyGroup?.checks.find((check) => check.key === "waterfront")?.suggested_value, true);
+  assert.equal(taxonomyGroup?.checks.find((check) => check.key === "parking")?.suggested_value, false);
 });
 
-test("buildFieldPackApiPayload emits full taxonomy catalog when AI data is empty", () => {
+test("buildFieldPackApiPayload emits resolved actionable taxonomy catalog when AI data is empty", () => {
   requestedChecksEditorRoot = createRequestedChecksEditorRoot([]);
   setRequestedChecksEditorBaselineState(null);
   setBuildFieldPackApiPayloadState({
@@ -2564,17 +2684,15 @@ test("buildFieldPackApiPayload emits full taxonomy catalog when AI data is empty
   const result = buildFieldPackApiPayload();
   const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
   const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
-  const categoryCheck = taxonomyGroup?.checks.find((check) => check.key === "category");
-  const subtypeCheck = taxonomyGroup?.checks.find((check) => check.key === "subtype");
-  const tagsCheck = taxonomyGroup?.checks.find((check) => check.key === "tags");
+  const waterfrontCheck = taxonomyGroup?.checks.find((check) => check.key === "waterfront");
+  const parkingCheck = taxonomyGroup?.checks.find((check) => check.key === "parking");
 
   assert.ok(ctaGroup);
   assert.ok(taxonomyGroup);
-  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["category", "subtype", "tags"]);
-  assert.equal(categoryCheck?.requested, true);
-  assert.equal(categoryCheck?.suggested_value, null);
-  assert.equal(subtypeCheck?.requested, true);
-  assert.equal(tagsCheck?.requested, true);
+  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["waterfront", "price_level", "average_price_per_person", "air_conditioning", "parking", "outdoor_seating", "pet_friendly", "work_power_outlets"]);
+  assert.equal(waterfrontCheck?.requested, true);
+  assert.equal(waterfrontCheck?.suggested_value, null);
+  assert.equal(parkingCheck?.requested, true);
 });
 
 test("buildFieldPackApiPayload emits full standard catalogs when the requested-check editor root exists but is empty", () => {
@@ -2587,7 +2705,7 @@ test("buildFieldPackApiPayload emits full standard catalogs when the requested-c
       confidence: "high",
     },
     ai_taxonomy_json: {
-      category: "attractions",
+      suggested_checks: [{ taxonomy_key: "waterfront", suggested_value: true }],
     },
     writer_notes: "",
   });
@@ -2599,7 +2717,121 @@ test("buildFieldPackApiPayload emits full standard catalogs when the requested-c
   assert.ok(ctaGroup);
   assert.ok(taxonomyGroup);
   assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
-  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["category", "subtype", "tags"]);
+  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["waterfront", "price_level", "average_price_per_person", "air_conditioning", "parking", "outdoor_seating", "pet_friendly", "work_power_outlets"]);
   assert.equal(ctaGroup.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
-  assert.equal(taxonomyGroup.checks.find((check) => check.key === "category")?.suggested_value, "attractions");
+  assert.equal(taxonomyGroup.checks.find((check) => check.key === "waterfront")?.suggested_value, true);
+});
+
+test("category change refresh removes cafe-only facets before save", async () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([]);
+  setRequestedChecksEditorBaselineState(null);
+  buildFieldPackApiPayloadFormState.type = "place";
+  buildFieldPackApiPayloadFormState.category = "attractions";
+  refreshRequestedChecksApiCalls.length = 0;
+  refreshRequestedChecksRenderCalls.length = 0;
+  refreshRequestedChecksForCurrentItemState.item = { type: "place", category: "cafes" };
+  refreshRequestedChecksForCurrentItemState.fieldPack = null;
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: { version: 1, groups: [] },
+    ai_cta_contact_json: {},
+    ai_taxonomy_json: {},
+    writer_notes: "",
+  }, { type: "place", category: "cafes" });
+  refreshRequestedChecksForCurrentItemState.fieldPack = buildFieldPackApiPayloadState.fieldPack;
+
+  await refreshRequestedChecksForCurrentItem(refreshRequestedChecksForCurrentItemState.fieldPack);
+
+  const taxonomyGroup = refreshRequestedChecksForCurrentItemState.fieldPack.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+  assert.deepEqual(refreshRequestedChecksApiCalls[0]?.body?.item, { type: "place", category: "attractions" });
+  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), ["waterfront", "air_conditioning", "parking", "pet_friendly"]);
+});
+
+test("category change from restaurants to cafes keeps only cafe-applicable facets", async () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([]);
+  setRequestedChecksEditorBaselineState(null);
+  buildFieldPackApiPayloadFormState.type = "place";
+  buildFieldPackApiPayloadFormState.category = "cafes";
+  refreshRequestedChecksApiCalls.length = 0;
+  refreshRequestedChecksRenderCalls.length = 0;
+  refreshRequestedChecksForCurrentItemState.item = { type: "place", category: "restaurants" };
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: { version: 1, groups: [] },
+    ai_cta_contact_json: {},
+    ai_taxonomy_json: {},
+    writer_notes: "",
+  }, { type: "place", category: "restaurants" });
+  refreshRequestedChecksForCurrentItemState.fieldPack = buildFieldPackApiPayloadState.fieldPack;
+
+  await refreshRequestedChecksForCurrentItem(refreshRequestedChecksForCurrentItemState.fieldPack);
+
+  const taxonomyGroup = refreshRequestedChecksForCurrentItemState.fieldPack.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+  const keys = taxonomyGroup?.checks.map((check) => check.key) || [];
+  assert.ok(keys.includes("work_power_outlets"));
+  assert.ok(keys.includes("price_level"));
+  assert.equal(keys.includes("category"), false);
+  assert.equal(keys.includes("subtype"), false);
+  assert.equal(keys.includes("tags"), false);
+});
+
+test("category change preserves custom rows and does not resurrect reserved taxonomy placeholders", async () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([]);
+  setRequestedChecksEditorBaselineState(null);
+  buildFieldPackApiPayloadFormState.type = "place";
+  buildFieldPackApiPayloadFormState.category = "attractions";
+  refreshRequestedChecksApiCalls.length = 0;
+  refreshRequestedChecksRenderCalls.length = 0;
+  refreshRequestedChecksForCurrentItemState.item = { type: "place", category: "cafes" };
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "custom",
+          group_label: "Custom checks",
+          checks: [
+            { key: "custom_wifi", requested: true, label: "Wi-Fi", instruction: "Ask Wi-Fi", answer_type: "text" },
+          ],
+        },
+      ],
+    },
+    ai_cta_contact_json: {},
+    ai_taxonomy_json: {},
+    writer_notes: "",
+  }, { type: "place", category: "cafes" });
+  refreshRequestedChecksForCurrentItemState.fieldPack = buildFieldPackApiPayloadState.fieldPack;
+
+  await refreshRequestedChecksForCurrentItem(refreshRequestedChecksForCurrentItemState.fieldPack);
+
+  const groups = refreshRequestedChecksForCurrentItemState.fieldPack.requested_checks_json.groups;
+  const taxonomyKeys = groups.find((group) => group.group_key === "taxonomy")?.checks.map((check) => check.key) || [];
+  const customKeys = groups.find((group) => group.group_key === "custom")?.checks.map((check) => check.key) || [];
+  assert.equal(taxonomyKeys.includes("category"), false);
+  assert.equal(taxonomyKeys.includes("subtype"), false);
+  assert.equal(taxonomyKeys.includes("tags"), false);
+  assert.deepEqual(customKeys, ["custom_wifi"]);
+});
+
+test("buildFieldPackApiPayload uses the current form category after requested-check refresh", async () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([]);
+  setRequestedChecksEditorBaselineState(null);
+  buildFieldPackApiPayloadFormState.type = "place";
+  buildFieldPackApiPayloadFormState.category = "attractions";
+  refreshRequestedChecksApiCalls.length = 0;
+  refreshRequestedChecksRenderCalls.length = 0;
+  refreshRequestedChecksForCurrentItemState.item = { type: "place", category: "cafes" };
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: { version: 1, groups: [] },
+    ai_cta_contact_json: {},
+    ai_taxonomy_json: {},
+    writer_notes: "",
+  }, { type: "place", category: "cafes" });
+  refreshRequestedChecksForCurrentItemState.fieldPack = buildFieldPackApiPayloadState.fieldPack;
+
+  await refreshRequestedChecksForCurrentItem(refreshRequestedChecksForCurrentItemState.fieldPack);
+  buildFieldPackApiPayloadState.fieldPack = refreshRequestedChecksForCurrentItemState.fieldPack;
+
+  const result = buildFieldPackApiPayload();
+  const taxonomyKeys = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy")?.checks.map((check) => check.key) || [];
+  assert.deepEqual(refreshRequestedChecksApiCalls[0]?.body?.item, { type: "place", category: "attractions" });
+  assert.deepEqual(taxonomyKeys, ["waterfront", "air_conditioning", "parking", "pet_friendly"]);
 });

@@ -75,6 +75,19 @@ function fieldPackResponse() {
       ai_summary: "field brief",
       story_angle: "field angle",
       social_hook: "field hook",
+      ai_cta_contact_json: {
+        phone: "0811111111",
+        primary_cta: "phone",
+      },
+      ai_taxonomy_json: {
+        category: "cafes",
+        suggested_checks: [
+          {
+            taxonomy_key: "waterfront",
+            suggested_value: true,
+          },
+        ],
+      },
       checklists: {
         must_verify_fact: ["verify opening hours"],
         must_capture: [
@@ -110,6 +123,9 @@ test("external agent payload carries structured context and not raw description"
 test("field pack prompt blocks article output and requires handoff contract", () => {
   const prompt = buildFieldPackPrompt(createItem({ agent_profile: { profile_text: "use a practical field producer tone" } }));
   assert.match(prompt, /field_pack/);
+  assert.match(prompt, /ai_cta_contact_json/);
+  assert.match(prompt, /ai_taxonomy_json/);
+  assert.match(prompt, /suggested_checks/);
   assert.match(prompt, /NOT an article-writing task/);
   assert.match(prompt, /reference-only/);
   assert.match(prompt, /not rights-verified/);
@@ -129,6 +145,7 @@ test("field pack revision prompt includes previous pack and revision note", () =
   assert.match(prompt, /revise the current handoff field pack/);
   assert.match(prompt, /previous_field_pack/);
   assert.match(prompt, /revision_note/);
+  assert.match(prompt, /ai_taxonomy_json/);
   assert.match(prompt, /make it more practical/);
   assert.match(prompt, /Never output description_clean/);
 });
@@ -143,6 +160,28 @@ test("field pack normalizer rejects article output fields", () => {
     }),
     /must not include article\/output fields/
   );
+});
+
+test("field pack normalizer preserves structured AI CTA and additive taxonomy suggestions", () => {
+  const normalized = normalizeFieldPack({
+    field_pack: {
+      ...fieldPackResponse().field_pack,
+    },
+  });
+
+  assert.deepEqual(normalized.ai_cta_contact_json, {
+    phone: "0811111111",
+    primary_cta: "phone",
+  });
+  assert.deepEqual(normalized.ai_taxonomy_json, {
+    category: "cafes",
+    suggested_checks: [
+      {
+        taxonomy_key: "waterfront",
+        suggested_value: true,
+      },
+    ],
+  });
 });
 
 test("external agent engine normalizes visual context and field pack responses", async () => {

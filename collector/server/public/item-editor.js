@@ -2549,14 +2549,10 @@ const REQUESTED_CHECK_GROUP_TEMPLATES = [
       { key: "primary_cta", label: "CTA หลัก", answer_type: "select", instruction: "ยืนยันว่าควรพาคนไปกดอะไรเป็นหลัก", condition_prompt: "", evidence_required: false },
     ],
   },
-  {
+    {
     group_key: "taxonomy",
     group_label: "หมวดหมู่",
-    checks: [
-      { key: "category", label: "หมวดหลัก", answer_type: "text", instruction: "ยืนยันหมวดหลักของสถานที่", condition_prompt: "", evidence_required: false },
-      { key: "subtype", label: "หมวดย่อย", answer_type: "text", instruction: "ยืนยันหมวดย่อยที่ตรงที่สุด", condition_prompt: "", evidence_required: false },
-      { key: "tags", label: "แท็ก", answer_type: "multi_select", instruction: "ดูว่ามีแท็กไหนควรเติม", condition_prompt: "", evidence_required: false },
-    ],
+    checks: [],
   },
 ];
 
@@ -2572,6 +2568,11 @@ const REQUESTED_CHECK_ANSWER_TYPE_OPTIONS = [
   ["hours", "เวลาเปิดปิด"],
   ["note_only", "บันทึกอย่างเดียว"],
 ];
+
+const REQUESTED_CHECK_TAXONOMY_GROUP_TEMPLATE = REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === "taxonomy");
+if (REQUESTED_CHECK_TAXONOMY_GROUP_TEMPLATE) {
+  REQUESTED_CHECK_TAXONOMY_GROUP_TEMPLATE.checks = [];
+}
 
 function getRequestedCheckDefaultGroupLabel(groupKey) {
   const normalized = String(groupKey || "").trim().toLowerCase();
@@ -2629,6 +2630,73 @@ function isPlaceRequestedCheckItem(item = state.item) {
   return String(item?.type || "").trim().toLowerCase() === "place";
 }
 
+function getRequestedCheckEditorItem(item = state.item) {
+  const baseItem = item && typeof item === "object" ? item : {};
+  const nextType = String(qs("e-type")?.value || baseItem.type || "").trim().toLowerCase();
+  const nextCategory = String(qs("e-category")?.value || baseItem.category || "").trim();
+  return {
+    ...baseItem,
+    type: nextType || String(baseItem.type || "").trim().toLowerCase(),
+    category: nextCategory || String(baseItem.category || "").trim(),
+  };
+}
+
+function getAiTaxonomySuggestedValue(aiTaxonomy = {}, taxonomyKey = "") {
+  const normalizedKey = normalizeRequestedCheckKey(taxonomyKey);
+  if (!normalizedKey || !aiTaxonomy || typeof aiTaxonomy !== "object") return null;
+  const suggestions = Array.isArray(aiTaxonomy.suggested_checks) ? aiTaxonomy.suggested_checks : [];
+  const suggestedRow = suggestions.find((entry) => normalizeRequestedCheckKey(entry?.taxonomy_key) === normalizedKey);
+  if (suggestedRow && Object.prototype.hasOwnProperty.call(suggestedRow, "suggested_value")) {
+    return suggestedRow.suggested_value;
+  }
+  if (Object.prototype.hasOwnProperty.call(aiTaxonomy, normalizedKey)) return aiTaxonomy[normalizedKey];
+  return null;
+}
+
+function buildResolvedTaxonomyRequestedChecks(fieldPack = {}) {
+  const saved = fieldPack?.requested_checks_json && typeof fieldPack.requested_checks_json === "object"
+    ? fieldPack.requested_checks_json
+    : { version: 1, groups: [] };
+  const savedGroups = new Map(
+    (Array.isArray(saved.groups) ? saved.groups : []).map((group) => [String(group.group_key || "").trim().toLowerCase(), group])
+  );
+  const savedGroup = savedGroups.get("taxonomy") || {};
+  const savedChecks = new Map(
+    (Array.isArray(savedGroup.checks) ? savedGroup.checks : []).map((check) => [normalizeRequestedCheckKey(check.key), check])
+  );
+  const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object" ? fieldPack.ai_taxonomy_json : {};
+  const sourceMeta = {
+    kind: "ai",
+    confidence: aiTaxonomy.confidence || "unknown",
+    note: null,
+  };
+  return (Array.isArray(savedGroup.checks) ? savedGroup.checks : []).map((check) => {
+    const savedCheck = savedChecks.get(normalizeRequestedCheckKey(check.key)) || {};
+    const aiSuggestedValue = getAiTaxonomySuggestedValue(aiTaxonomy, check.key);
+    const savedSuggestedValue = Object.prototype.hasOwnProperty.call(savedCheck, "suggested_value")
+      ? savedCheck.suggested_value
+      : null;
+    const suggestedValue = hasRequestedCheckMeaningfulValue(aiSuggestedValue)
+      ? aiSuggestedValue
+      : (hasRequestedCheckMeaningfulValue(savedSuggestedValue) ? savedSuggestedValue : null);
+    return {
+      key: check.key,
+      requested: savedCheck.requested === true || check.requested === true,
+      label: String(savedCheck.label || check.label || "").trim(),
+      instruction: String(savedCheck.instruction || check.instruction || "").trim(),
+      answer_type: String(savedCheck.answer_type || check.answer_type || "text").trim() || "text",
+      suggested_value: suggestedValue,
+      condition_prompt: savedCheck.condition_prompt == null
+        ? (check.condition_prompt ?? null)
+        : String(savedCheck.condition_prompt || "").trim() || null,
+      evidence_required: savedCheck.evidence_required === true || check.evidence_required === true,
+      source: hasRequestedCheckMeaningfulValue(aiSuggestedValue)
+        ? sourceMeta
+        : (savedCheck.source || null),
+    };
+  });
+}
+
 function shouldKeepRequestedCheckGroupForItem(groupKey, item = state.item) {
   const normalizedGroupKey = String(groupKey || "").trim().toLowerCase();
   if (normalizedGroupKey === "cta_contact") return isPlaceRequestedCheckItem(item);
@@ -2675,8 +2743,8 @@ function mergeRequestedChecksForSave(uiState = {}, existingState = {}) {
       );
       const uiChecks = Array.isArray(uiGroup.checks) ? uiGroup.checks : [];
       const normalizedKeys = uiChecks.map((uiCheck, index) => {
-        if (groupKey !== "custom") return String(templateChecks[index]?.key || "").trim().toLowerCase();
-        return normalizeRequestedCheckKey(uiCheck?.key);
+        if (groupKey === "custom" || groupKey === "taxonomy") return normalizeRequestedCheckKey(uiCheck?.key);
+        return String(templateChecks[index]?.key || "").trim().toLowerCase();
       });
       if (normalizedKeys.some((key) => !key)) {
         throw new Error(`Requested check key is required for group "${groupKey}"`);
@@ -2724,14 +2792,20 @@ function buildRequestedChecksEditorState(fieldPack = {}) {
     (Array.isArray(saved.groups) ? saved.groups : []).map((group) => [String(group.group_key || "").trim().toLowerCase(), group])
   );
   const aiCta = fieldPack?.ai_cta_contact_json && typeof fieldPack.ai_cta_contact_json === "object" ? fieldPack.ai_cta_contact_json : {};
-  const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object" ? fieldPack.ai_taxonomy_json : {};
   const sourceMeta = {
     kind: "ai",
-    confidence: aiCta.confidence || aiTaxonomy.confidence || "unknown",
+    confidence: aiCta.confidence || fieldPack?.ai_taxonomy_json?.confidence || "unknown",
     note: null,
   };
 
   const groups = REQUESTED_CHECK_GROUP_TEMPLATES.map((template) => {
+    if (template.group_key === "taxonomy") {
+      return {
+        group_key: template.group_key,
+        group_label: template.group_label,
+        checks: buildResolvedTaxonomyRequestedChecks(fieldPack),
+      };
+    }
     const savedGroup = savedGroups.get(template.group_key) || {};
     const savedChecks = new Map(
       (Array.isArray(savedGroup.checks) ? savedGroup.checks : []).map((check) => [String(check.key || "").trim().toLowerCase(), check])
@@ -2741,9 +2815,7 @@ function buildRequestedChecksEditorState(fieldPack = {}) {
       group_label: template.group_label,
       checks: template.checks.map((check) => {
         const savedCheck = savedChecks.get(check.key) || {};
-        const aiSuggestedValue = template.group_key === "cta_contact"
-          ? aiCta[check.key]
-          : aiTaxonomy[check.key];
+        const aiSuggestedValue = aiCta[check.key];
         const savedSuggestedValue = Object.prototype.hasOwnProperty.call(savedCheck, "suggested_value")
           ? savedCheck.suggested_value
           : null;
@@ -2923,10 +2995,9 @@ function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}
 
 function buildRequestedChecksAutoSaveState(fieldPack = {}, item = state.item) {
   const aiCta = fieldPack?.ai_cta_contact_json && typeof fieldPack.ai_cta_contact_json === "object" ? fieldPack.ai_cta_contact_json : {};
-  const aiTaxonomy = fieldPack?.ai_taxonomy_json && typeof fieldPack.ai_taxonomy_json === "object" ? fieldPack.ai_taxonomy_json : {};
   const sourceMeta = {
     kind: "ai",
-    confidence: aiCta.confidence || aiTaxonomy.confidence || "unknown",
+    confidence: aiCta.confidence || fieldPack?.ai_taxonomy_json?.confidence || "unknown",
     note: null,
   };
 
@@ -2935,7 +3006,17 @@ function buildRequestedChecksAutoSaveState(fieldPack = {}, item = state.item) {
     groups: REQUESTED_CHECK_GROUP_TEMPLATES
       .filter((template) => shouldKeepRequestedCheckGroupForItem(template?.group_key, item))
       .map((template) => {
-        const groupSource = template.group_key === "cta_contact" ? aiCta : aiTaxonomy;
+        if (template.group_key === "taxonomy") {
+          return {
+            group_key: template.group_key,
+            group_label: template.group_label,
+            checks: buildResolvedTaxonomyRequestedChecks(fieldPack).map((check) => ({
+              ...check,
+              requested: check.requested === true,
+            })),
+          };
+        }
+        const groupSource = aiCta;
         const checks = (Array.isArray(template?.checks) ? template.checks : [])
           .map((check) => {
             const suggestedValue = Object.prototype.hasOwnProperty.call(groupSource, check.key)
@@ -2981,6 +3062,37 @@ function renderRequestedChecksEditor(fieldPack = {}, options = {}) {
   }
   root.innerHTML = buildRequestedChecksEditorHtml(fieldPack, state.item);
   root.querySelectorAll("textarea").forEach((node) => autosizeTextarea(node));
+}
+
+function refreshRequestedChecksForCurrentItem(fieldPack = null, options = {}) {
+  if (!state.itemId) return null;
+  const item = getRequestedCheckEditorItem();
+  const fieldPackSource = {
+    ...(state.fieldPack || {}),
+    ...(fieldPack && typeof fieldPack === "object" ? fieldPack : readFieldPackFormState()),
+  };
+  return api(`/api/items/${state.itemId}/field-pack/requested-checks/resolve`, {
+    method: "POST",
+    body: JSON.stringify({
+      item: {
+        type: item.type,
+        category: item.category,
+      },
+      field_pack: fieldPackSource,
+    }),
+  }).then((result) => {
+    const resolvedFieldPack = result?.field_pack && typeof result.field_pack === "object"
+      ? result.field_pack
+      : fieldPackSource;
+    state.fieldPack = {
+      ...(state.fieldPack || {}),
+      ...fieldPackSource,
+      ...resolvedFieldPack,
+    };
+    renderRequestedChecksEditor(state.fieldPack, { resetBaseline: options.resetBaseline !== false });
+    renderRequestedChecksPreview();
+    return state.fieldPack;
+  });
 }
 
 function readRequestedChecksEditorState() {
@@ -4262,6 +4374,7 @@ function buildFieldPackAssignmentPayload(pack, existing = state.fieldPack || {})
 function buildFieldPackApiPayload() {
   const pack = readFieldPackFormState();
   const existing = state.fieldPack || {};
+  const requestedCheckItem = getRequestedCheckEditorItem();
   const requestedChecksEditor = qs("fp-requested-checks-editor");
   const fieldPackSource = { ...existing, ...pack };
   const savedRequestedChecksJson = existing.requested_checks_json && typeof existing.requested_checks_json === "object"
@@ -4269,7 +4382,7 @@ function buildFieldPackApiPayload() {
     : (pack.requested_checks_json && typeof pack.requested_checks_json === "object"
       ? pack.requested_checks_json
       : null);
-  const autoRequestedChecksJson = buildRequestedChecksAutoSaveState(fieldPackSource, state.item);
+  const autoRequestedChecksJson = buildRequestedChecksAutoSaveState(fieldPackSource, requestedCheckItem);
   let requestedChecksJson = autoRequestedChecksJson;
   if (requestedChecksEditor) {
     const editorRequestedChecksJson = readRequestedChecksEditorState();
@@ -4278,7 +4391,7 @@ function buildFieldPackApiPayload() {
       autoRequestedChecksJson,
       editorRequestedChecksJson,
       baselineRequestedChecksJson,
-      state.item
+      requestedCheckItem
     );
     if (Array.isArray(mergedRequestedChecksJson?.groups) && mergedRequestedChecksJson.groups.length > 0) {
       requestedChecksJson = mergedRequestedChecksJson;
@@ -4288,7 +4401,7 @@ function buildFieldPackApiPayload() {
       autoRequestedChecksJson,
       savedRequestedChecksJson,
       savedRequestedChecksJson,
-      state.item
+      requestedCheckItem
     );
   }
   return {
@@ -5751,7 +5864,16 @@ function wire() {
   });
   qs("e-description")?.addEventListener("input", renderStepFourGuides);
   qs("e-tags")?.addEventListener("input", renderStepFourGuides);
-  qs("e-category")?.addEventListener("change", renderStepFourGuides);
+  qs("e-category")?.addEventListener("change", async () => {
+    renderStepFourGuides();
+    try {
+      await refreshRequestedChecksForCurrentItem();
+      applyEditorActionGuards();
+      renderStepFourGuides();
+    } catch (err) {
+      console.error("Failed to refresh requested checks for category change", err);
+    }
+  });
   qs("e-source-name")?.addEventListener("input", () => {
     renderStepFourGuides();
     renderCleanAiGuard();

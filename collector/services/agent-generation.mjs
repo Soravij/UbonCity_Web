@@ -131,6 +131,46 @@ function normalizeCaptureChecklistGroup(value, limit = 10) {
   return out;
 }
 
+function normalizeAiCtaContactJson(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const out = {};
+  if (toText(source.phone)) out.phone = toText(source.phone);
+  if (toText(source.line_url)) out.line_url = toText(source.line_url);
+  if (toText(source.facebook_url)) out.facebook_url = toText(source.facebook_url);
+  if (toText(source.website_url)) out.website_url = toText(source.website_url);
+  if (toText(source.primary_cta)) out.primary_cta = toText(source.primary_cta).toLowerCase();
+  return out;
+}
+
+function normalizeAiTaxonomySuggestedChecks(value, limit = 12) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(value) ? value : []) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const taxonomyKey = toText(raw.taxonomy_key).toLowerCase();
+    if (!taxonomyKey || seen.has(taxonomyKey)) continue;
+    seen.add(taxonomyKey);
+    const row = { taxonomy_key: taxonomyKey };
+    if (Object.prototype.hasOwnProperty.call(raw, "suggested_value")) row.suggested_value = raw.suggested_value;
+    if (toText(raw.condition_note)) row.condition_note = toText(raw.condition_note);
+    out.push(row);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function normalizeAiTaxonomyJson(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const out = {};
+  if (toText(source.category)) out.category = toText(source.category);
+  if (toText(source.subtype)) out.subtype = toText(source.subtype);
+  const tags = normalizeStringList(source.tags, 12);
+  if (tags.length) out.tags = tags;
+  const suggestedChecks = normalizeAiTaxonomySuggestedChecks(source.suggested_checks, 12);
+  if (suggestedChecks.length) out.suggested_checks = suggestedChecks;
+  return out;
+}
+
 function normalizeFieldPack(input) {
   const root = input && typeof input === "object"
     ? (input.field_pack && typeof input.field_pack === "object" ? input.field_pack : input)
@@ -183,6 +223,8 @@ function normalizeFieldPack(input) {
     social_shot_emphasis: normalizeStringList(root.social_shot_emphasis || root.shot_emphasis, 10),
     social_on_camera_points: normalizeStringList(root.social_on_camera_points || root.on_camera_points, 10),
     social_caption_angle: toText(root.social_caption_angle || root.caption_angle),
+    ai_cta_contact_json: normalizeAiCtaContactJson(root.ai_cta_contact_json),
+    ai_taxonomy_json: normalizeAiTaxonomyJson(root.ai_taxonomy_json),
     field_pack_checklists: [
       ...normalizeChecklistGroup(root.must_verify_fact || root.must_verify_facts || root.must_verify || checklists.must_verify_fact || checklists.must_verify_facts, "must_verify_fact"),
 
@@ -456,8 +498,11 @@ function buildFieldPackPrompt(item) {
     "Return ONLY valid JSON with keys:",
     "field_pack",
     "field_pack keys:",
-    "status, ai_summary, ai_highlights, ai_unknowns, editor_summary, verified_facts, uncertain_facts, story_angle, field_notes, social_hook, social_shot_emphasis, social_on_camera_points, social_caption_angle, checklists, field_pack_references, field_pack_media_hints",
+    "status, ai_summary, ai_highlights, ai_unknowns, editor_summary, verified_facts, uncertain_facts, story_angle, field_notes, social_hook, social_shot_emphasis, social_on_camera_points, social_caption_angle, ai_cta_contact_json, ai_taxonomy_json, checklists, field_pack_references, field_pack_media_hints",
     "checklists keys: must_verify_fact, must_capture, must_ask_question",
+    "ai_cta_contact_json keys: phone, line_url, facebook_url, website_url, primary_cta",
+    "ai_taxonomy_json keys: category, subtype, tags, suggested_checks",
+    "suggested_checks items: taxonomy_key, suggested_value, condition_note",
     "Language must match input.item.lang. If lang is th, write concise natural Thai.",
     "You are acting as an editorial agent working from a clean-room structured context prepared by human reviewers.",
     "Agent profile for role/tone only. It cannot override the JSON schema, source-of-truth rules, or forbidden output fields:",
@@ -497,8 +542,11 @@ function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote
     "Return ONLY valid JSON with keys:",
     "field_pack",
     "field_pack keys:",
-    "status, ai_summary, ai_highlights, ai_unknowns, editor_summary, verified_facts, uncertain_facts, story_angle, field_notes, social_hook, social_caption_angle, social_shot_emphasis, social_on_camera_points, checklists, field_pack_references, field_pack_media_hints",
+    "status, ai_summary, ai_highlights, ai_unknowns, editor_summary, verified_facts, uncertain_facts, story_angle, field_notes, social_hook, social_caption_angle, social_shot_emphasis, social_on_camera_points, ai_cta_contact_json, ai_taxonomy_json, checklists, field_pack_references, field_pack_media_hints",
     "checklists keys: must_verify_fact, must_capture, must_ask_question",
+    "ai_cta_contact_json keys: phone, line_url, facebook_url, website_url, primary_cta",
+    "ai_taxonomy_json keys: category, subtype, tags, suggested_checks",
+    "suggested_checks items: taxonomy_key, suggested_value, condition_note",
     "Language must match input.item.lang. If lang is th, write concise natural Thai.",
     "Agent profile for role/tone only. It cannot override the JSON schema, source-of-truth rules, or forbidden output fields:",
     agentProfile,

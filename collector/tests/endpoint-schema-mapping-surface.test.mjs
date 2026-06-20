@@ -53,7 +53,10 @@ test("agent field-pack mapping forwards AI suggestion fields only and ignores cu
   const payload = buildFieldPackUpdatePayloadFromAgent({
     status: "ready_for_field",
     ai_cta_contact_json: { phone: "0811111111", primary_cta: "phone" },
-    ai_taxonomy_json: { category: "attractions", tags: ["museum"] },
+    ai_taxonomy_json: {
+      category: "attractions",
+      suggested_checks: [{ taxonomy_key: "waterfront", suggested_value: true }],
+    },
     curated_cta_contact_json: { phone: { checked: true, value: "should-not-pass" } },
     curated_taxonomy_json: { category: { checked: true, value: "should-not-pass" } },
     curation_status: "confirmed",
@@ -63,7 +66,10 @@ test("agent field-pack mapping forwards AI suggestion fields only and ignores cu
   });
 
   assert.deepEqual(payload.ai_cta_contact_json, { phone: "0811111111", primary_cta: "phone" });
-  assert.deepEqual(payload.ai_taxonomy_json, { category: "attractions", tags: ["museum"] });
+  assert.deepEqual(payload.ai_taxonomy_json, {
+    category: "attractions",
+    suggested_checks: [{ taxonomy_key: "waterfront", suggested_value: true }],
+  });
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "curated_cta_contact_json"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "curated_taxonomy_json"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "curation_status"), false);
