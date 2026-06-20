@@ -7253,10 +7253,15 @@ function getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage = nu
             label: String(check?.label || "").trim(),
             instruction: String(check?.instruction || "").trim(),
             answer_type: String(check?.answer_type || "text").trim().toLowerCase() || "text",
+            allowed_values: Array.isArray(check?.allowed_values) ? check.allowed_values.map((value) => String(value || "").trim()).filter(Boolean) : null,
+            unit_options: Array.isArray(check?.unit_options) ? check.unit_options.map((value) => String(value || "").trim()).filter(Boolean) : null,
+            activation_mode: check?.activation_mode == null ? null : String(check.activation_mode || "").trim().toLowerCase() || null,
+            required: check?.required === true,
             suggested_value: Object.prototype.hasOwnProperty.call(check || {}, "suggested_value")
               ? check.suggested_value
               : null,
             evidence_required: check?.evidence_required === true,
+            condition_prompt: check?.condition_prompt == null ? null : String(check.condition_prompt || "").trim() || null,
             source: check?.source || null,
           };
         })
@@ -7324,7 +7329,11 @@ function buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPacka
         check_key: check.check_key,
         return_key: check.return_key,
         answer_type: check.answer_type,
-        checked: hasSuggestedValue,
+        allowed_values: Array.isArray(check.allowed_values) ? cloneAssignmentRequestedCheckValue(check.allowed_values, "multi_select") : null,
+        unit_options: Array.isArray(check.unit_options) ? cloneAssignmentRequestedCheckValue(check.unit_options, "multi_select") : null,
+        activation_mode: check.activation_mode == null ? null : String(check.activation_mode || "").trim().toLowerCase() || null,
+        required: check.required === true,
+        checked: false,
         value: hasSuggestedValue
           ? cloneAssignmentRequestedCheckValue(check.suggested_value, check.answer_type)
           : getAssignmentRequestedCheckDefaultValue(check.answer_type),
@@ -7335,6 +7344,7 @@ function buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPacka
         instruction: check.instruction,
         suggested_value: check.suggested_value,
         evidence_required: check.evidence_required,
+        condition_prompt: check.condition_prompt,
         source: check.source,
       };
     });
@@ -7365,7 +7375,15 @@ function normalizeAssignmentRequestedCheckReturnDraft(draft = null, handoffPacka
       value: Object.prototype.hasOwnProperty.call(incomingRow, "value")
         ? incomingRow.value
         : baseRow.value,
-      answer_type: String(incomingRow.answer_type || baseRow.answer_type || "text").trim().toLowerCase() || "text",
+      answer_type: String(baseRow.answer_type || incomingRow.answer_type || "text").trim().toLowerCase() || "text",
+      allowed_values: Array.isArray(baseRow.allowed_values) ? cloneAssignmentRequestedCheckValue(baseRow.allowed_values, "multi_select") : null,
+      unit_options: Array.isArray(baseRow.unit_options) ? cloneAssignmentRequestedCheckValue(baseRow.unit_options, "multi_select") : null,
+      activation_mode: baseRow.activation_mode == null ? null : String(baseRow.activation_mode || "").trim().toLowerCase() || null,
+      required: baseRow.required === true,
+      evidence_required: baseRow.evidence_required === true,
+      condition_prompt: baseRow.condition_prompt == null ? null : String(baseRow.condition_prompt || "").trim() || null,
+      suggested_value: Object.prototype.hasOwnProperty.call(baseRow, "suggested_value") ? baseRow.suggested_value : null,
+      source: baseRow.source || null,
     };
   });
   return { requested_check_returns: requestedCheckReturns };
@@ -7390,6 +7408,8 @@ function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
   const answerType = String(row?.answer_type || "text").trim().toLowerCase() || "text";
   const checked = row?.checked === true;
   const disabledAttr = checked ? "" : "disabled";
+  const allowedValues = Array.isArray(row?.allowed_values) ? row.allowed_values.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  const unitOptions = Array.isArray(row?.unit_options) ? row.unit_options.map((value) => String(value || "").trim()).filter(Boolean) : [];
   if (answerType === "boolean" || answerType === "boolean_with_conditions") {
     const currentValue = row?.value === true ? "true" : (row?.value === false ? "false" : "");
     return `
@@ -7400,8 +7420,32 @@ function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
       </select>
     `;
   }
+  if (answerType === "select" && allowedValues.length) {
+    const currentValue = row?.value == null ? "" : String(row.value || "").trim();
+    return `
+      <select data-requested-check-field="value" ${disabledAttr}>
+        <option value="" ${currentValue === "" ? "selected" : ""}>-- ยังไม่ระบุ --</option>
+        ${allowedValues.map((value) => `<option value="${escapeHtml(value)}" ${currentValue === value ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+      </select>
+    `;
+  }
   if (answerType === "multi_select") {
     const listValue = Array.isArray(row?.value) ? row.value : [];
+    if (allowedValues.length) {
+      return `
+        <div class="requested-check-multi-select-list">
+          ${allowedValues.map((value) => {
+            const selected = listValue.includes(value);
+            return `
+              <label class="assignment-inline-check">
+                <input data-requested-check-field="value-multi" type="checkbox" value="${escapeHtml(value)}" ${selected ? "checked" : ""} ${disabledAttr} />
+                <span>${escapeHtml(value)}</span>
+              </label>
+            `;
+          }).join("")}
+        </div>
+      `;
+    }
     return `<textarea data-requested-check-field="value" rows="1" placeholder="ใส่ทีละบรรทัด"${disabledAttr}>${escapeHtml(listValue.map((value) => String(value || "").trim()).filter(Boolean).join("\n"))}</textarea>`;
   }
   if (answerType === "number_with_unit") {
@@ -7411,13 +7455,21 @@ function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
     const unitValue = row?.value && typeof row.value === "object" && !Array.isArray(row.value)
       ? String(row.value.unit ?? "").trim()
       : "";
+    const unitControl = unitOptions.length
+      ? `
+        <select data-requested-check-field="value-unit" ${disabledAttr}>
+          <option value="" ${unitValue === "" ? "selected" : ""}>-- ยังไม่ระบุ --</option>
+          ${unitOptions.map((value) => `<option value="${escapeHtml(value)}" ${unitValue === value ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+        </select>
+      `
+      : `<input data-requested-check-field="value-unit" type="text" value="${escapeHtml(unitValue)}" placeholder="เช่น คน, คัน, กิโลกรัม" ${disabledAttr} />`;
     return `
       <div class="grid requested-check-row-number-with-unit">
         <div>
           <input data-requested-check-field="value-number" type="number" value="${escapeHtml(numberValue)}" ${disabledAttr} />
         </div>
         <div>
-          <input data-requested-check-field="value-unit" type="text" value="${escapeHtml(unitValue)}" placeholder="เช่น คน, คัน, กิโลกรัม" ${disabledAttr} />
+          ${unitControl}
         </div>
       </div>
     `;
@@ -7480,10 +7532,12 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
 
 function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, handoffPackage = null, draft = null) {
   const visibleGroupOrder = ["cta_contact", "taxonomy"];
+  const getGroupSortWeight = (groupKey = "") => {
+    const index = visibleGroupOrder.indexOf(String(groupKey || "").trim().toLowerCase());
+    return index >= 0 ? index : visibleGroupOrder.length;
+  };
   const groups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage)
-    .filter((group) => visibleGroupOrder.includes(String(group?.group_key || "").trim().toLowerCase()))
-    .sort((left, right) => visibleGroupOrder.indexOf(String(left?.group_key || "").trim().toLowerCase())
-      - visibleGroupOrder.indexOf(String(right?.group_key || "").trim().toLowerCase()));
+    .sort((left, right) => getGroupSortWeight(left?.group_key) - getGroupSortWeight(right?.group_key));
   if (!groups.length) return "";
   const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(draft, handoffPackage);
   return groups.map((group) => {
@@ -7526,11 +7580,22 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
         </div>
       `;
     }
+    if (groupKey === "cta_contact") {
+      return `
+        <div class="assignment-brief-section full-span requested-check-cta-section" data-requested-check-group="${escapeHtml(group.group_key)}">
+          <div class="assignment-brief-label">CTA/ติดต่อ</div>
+          ${checks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {}, {
+            showConditionNote: false,
+          })).join("")}
+        </div>
+      `;
+    }
+    const sectionLabel = String(group?.group_label || groupKey || "Requested checks").trim() || "Requested checks";
     return `
       <div class="assignment-brief-section full-span requested-check-cta-section" data-requested-check-group="${escapeHtml(group.group_key)}">
-        <div class="assignment-brief-label">CTA/ติดต่อ</div>
+        <div class="assignment-brief-label">${escapeHtml(sectionLabel)}</div>
         ${checks.map((check) => buildAssignmentRequestedCheckReturnRowHtml(check, normalizedDraft.requested_check_returns?.[check.return_key] || {}, {
-          showConditionNote: false,
+          showConditionNote: true,
         })).join("")}
       </div>
     `;
@@ -7550,9 +7615,6 @@ function updateAssignmentRequestedCheckReturnRowState(rowNode) {
   if (valueUnitField) valueUnitField.disabled = !checked;
   if (conditionField) conditionField.disabled = !checked;
   rowNode.classList.toggle("is-muted", !checked);
-  if (answerType === "boolean" || answerType === "boolean_with_conditions") {
-    if (valueField) valueField.value = checked ? valueField.value : "";
-  }
 }
 
 function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
@@ -7579,12 +7641,22 @@ function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
       else if (rawValue === "false") value = false;
       else value = null;
     } else if (answerType === "multi_select") {
-      value = String(rowNode.querySelector("[data-requested-check-field='value']")?.value || "").split("\n").map((part) => String(part || "").trim()).filter(Boolean);
+      const structuredValues = typeof rowNode.querySelectorAll === "function"
+        ? Array.from(rowNode.querySelectorAll("[data-requested-check-field='value-multi']"))
+        .filter((node) => node.checked === true)
+        .map((node) => String(node.value || "").trim())
+        .filter(Boolean)
+        : [];
+      value = structuredValues.length
+        ? Array.from(new Set(structuredValues))
+        : String(rowNode.querySelector("[data-requested-check-field='value']")?.value || "").split("\n").map((part) => String(part || "").trim()).filter(Boolean);
     } else if (answerType === "number_with_unit") {
       const numberValue = String(rowNode.querySelector("[data-requested-check-field='value-number']")?.value || "").trim();
       const unitValue = String(rowNode.querySelector("[data-requested-check-field='value-unit']")?.value || "").trim();
-      const numeric = Number(numberValue);
-      value = Number.isFinite(numeric) ? { number: numeric, unit: unitValue || null } : null;
+      const numeric = numberValue === "" ? null : Number(numberValue);
+      value = numberValue === ""
+        ? (unitValue ? { number: null, unit: unitValue || null } : null)
+        : (Number.isFinite(numeric) ? { number: numeric, unit: unitValue || null } : null);
     } else if (answerType === "note_only") {
       value = null;
     } else {

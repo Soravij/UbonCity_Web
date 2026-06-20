@@ -547,6 +547,42 @@ export function getTaxonomyCatalogEntriesForItem(item = {}) {
   return getTaxonomyCatalogEntriesForCategory(category, itemType);
 }
 
+export function normalizeTaxonomyCatalogSuggestedValue(entryOrKey, rawValue) {
+  const entry = typeof entryOrKey === "string"
+    ? getTaxonomyBaseDefinition(entryOrKey)
+    : (entryOrKey && typeof entryOrKey === "object" ? cloneValue(entryOrKey) : null);
+  if (!entry || rawValue == null) return null;
+  const answerType = String(entry.answer_type || "").trim().toLowerCase();
+  if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+    return typeof rawValue === "boolean" ? rawValue : null;
+  }
+  if (answerType === "select") {
+    const value = String(rawValue || "").trim();
+    return Array.isArray(entry.allowed_values) && entry.allowed_values.includes(value) ? value : null;
+  }
+  if (answerType === "multi_select") {
+    if (!Array.isArray(rawValue) || !Array.isArray(entry.allowed_values)) return null;
+    const seen = new Set();
+    const values = [];
+    for (const item of rawValue) {
+      const value = String(item || "").trim();
+      if (!value || seen.has(value) || !entry.allowed_values.includes(value)) continue;
+      seen.add(value);
+      values.push(value);
+    }
+    return values.length ? values : null;
+  }
+  if (answerType === "number_with_unit") {
+    if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) return null;
+    const numberValue = Number(rawValue.number);
+    const unitValue = String(rawValue.unit || "").trim();
+    if (!Number.isFinite(numberValue)) return null;
+    if (!unitValue || !Array.isArray(entry.unit_options) || !entry.unit_options.includes(unitValue)) return null;
+    return { number: numberValue, unit: unitValue };
+  }
+  return null;
+}
+
 export function getTaxonomyCatalogEntryMapForItem(item = {}) {
   return new Map(
     getTaxonomyCatalogEntriesForItem(item).map((entry) => [entry.taxonomy_key, entry])

@@ -715,7 +715,7 @@ test("browser requested-check templates do not own reserved taxonomy schema rows
   assert.deepEqual(taxonomyTemplate.checks || [], []);
 });
 
-test("ai suggested values do not auto-set requested=true in editor groups", () => {
+test("editor groups reflect resolver-requested rows while AI remains suggestion-only", () => {
   const groups = getRequestedCheckEditorGroups({
     ai_cta_contact_json: {
       phone: "0812345678",
@@ -737,7 +737,7 @@ test("ai suggested values do not auto-set requested=true in editor groups", () =
   const ctaPhone = groups.find((group) => group.group_key === "cta_contact")?.checks.find((check) => check.key === "phone");
   const taxonomyWaterfront = groups.find((group) => group.group_key === "taxonomy")?.checks.find((check) => check.key === "waterfront");
 
-  assert.equal(ctaPhone?.requested, false);
+  assert.equal(ctaPhone?.requested, true);
   assert.equal(ctaPhone?.suggested_value, "0812345678");
   assert.equal(taxonomyWaterfront?.requested, true);
   assert.equal(taxonomyWaterfront?.required, false);
@@ -782,7 +782,7 @@ test("buildRequestedChecksEditorState prefers current AI suggestions over stale 
   assert.deepEqual(phoneCheck?.source, { kind: "ai", confidence: "high", note: null });
 });
 
-test("requested-check preview shows only requested=true checks", () => {
+test("requested-check preview excludes custom and reserved taxonomy rows from active guidance", () => {
   const html = buildRequestedChecksPreviewHtml({
     version: 1,
     groups: [
@@ -818,9 +818,8 @@ test("requested-check preview shows only requested=true checks", () => {
   assert.match(html, /LINE/);
   assert.match(html, /Suggested Focus/);
   assert.match(html, /Category/);
-  assert.match(html, /tags/);
   assert.match(html, /Article context/);
-  assert.match(html, /Parking/);
+  assert.doesNotMatch(html, /Parking/);
   assert.doesNotMatch(html, /workflow-badge workflow-badge-sent">Facebook/);
   assert.doesNotMatch(html, /Ã Â¸|Ã Â¹|à¹€à¸˜|à¹€à¸™â‚¬|ï¿½/);
 });
@@ -949,7 +948,7 @@ test("non-place preview omits hidden legacy cta_contact checks", () => {
   assert.doesNotMatch(html, /Ã Â¸|Ã Â¹|à¹€à¸˜|à¹€à¸™â‚¬|ï¿½/);
 });
 
-test("duplicate custom keys are rejected before provenance can merge ambiguously", () => {
+test("hidden custom rows stay preserved from existing state during unrelated save merge", () => {
   const existingState = {
     version: 1,
     groups: [
@@ -976,23 +975,14 @@ test("duplicate custom keys are rejected before provenance can merge ambiguously
     version: 1,
     groups: [
       {
-        group_key: "custom",
-        group_label: "Custom checks",
+        group_key: "taxonomy",
+        group_label: "Taxonomy",
         checks: [
           {
-            key: " parking ",
-            requested: true,
-            label: "Front parking",
-            instruction: "Check the front parking area",
-            answer_type: "text",
-            condition_prompt: null,
-            evidence_required: false,
-          },
-          {
             key: "parking",
-            requested: false,
-            label: "Rear parking",
-            instruction: "Check the rear parking area",
+            requested: true,
+            label: "Parking",
+            instruction: "Check the front parking area",
             answer_type: "text",
             condition_prompt: null,
             evidence_required: false,
@@ -1002,13 +992,15 @@ test("duplicate custom keys are rejected before provenance can merge ambiguously
     ],
   };
 
-  assert.throws(
-    () => mergeRequestedChecksForSave(uiState, existingState),
-    /duplicate requested check key/i
-  );
+  const result = mergeRequestedChecksForSave(uiState, existingState);
+  const preservedCustom = result.groups.find((group) => group.group_key === "custom");
+  assert.ok(preservedCustom);
+  assert.equal(preservedCustom.checks[0].key, "parking");
+  assert.equal(preservedCustom.checks[0].suggested_value, "Parking available");
+  assert.deepEqual(preservedCustom.checks[0].source, { kind: "ai", confidence: "medium" });
 });
 
-test("edited custom key becomes a new identity and does not inherit old provenance", () => {
+test("mergeRequestedChecksForSave does not accept active custom UI rows", () => {
   const existingState = {
     version: 1,
     groups: [
@@ -1052,15 +1044,10 @@ test("edited custom key becomes a new identity and does not inherit old provenan
     ],
   };
 
-  const result = mergeRequestedChecksForSave(uiState, existingState);
-  const customCheck = result.groups.find((group) => group.group_key === "custom")?.checks[0];
-
-  assert.equal(customCheck?.key, "parking_capacity");
-  assert.equal(customCheck?.suggested_value, null);
-  assert.equal(customCheck?.source, null);
+  assert.throws(() => mergeRequestedChecksForSave(uiState, existingState), /Requested check key is required for group "custom"/i);
 });
 
-test("retained custom key preserves provenance while curator fields change", () => {
+test("mergeRequestedChecksForSave keeps existing custom provenance hidden from active UI edits", () => {
   const existingState = {
     version: 1,
     groups: [
@@ -1087,8 +1074,8 @@ test("retained custom key preserves provenance while curator fields change", () 
     version: 1,
     groups: [
       {
-        group_key: "custom",
-        group_label: "Custom checks",
+        group_key: "taxonomy",
+        group_label: "Taxonomy",
         checks: [
           {
             key: "parking",
@@ -1107,11 +1094,11 @@ test("retained custom key preserves provenance while curator fields change", () 
   const result = mergeRequestedChecksForSave(uiState, existingState);
   const customCheck = result.groups.find((group) => group.group_key === "custom")?.checks[0];
 
-  assert.equal(customCheck?.requested, true);
-  assert.equal(customCheck?.label, "Parking details");
-  assert.equal(customCheck?.instruction, "Confirm parking capacity and format");
-  assert.equal(customCheck?.condition_prompt, "If there are multiple zones, separate them");
-  assert.equal(customCheck?.evidence_required, true);
+  assert.equal(customCheck?.requested, false);
+  assert.equal(customCheck?.label, "Parking");
+  assert.equal(customCheck?.instruction, "Confirm parking details");
+  assert.equal(customCheck?.condition_prompt, null);
+  assert.equal(customCheck?.evidence_required, false);
   assert.equal(customCheck?.suggested_value, "Parking available");
   assert.deepEqual(customCheck?.source, { kind: "ai", confidence: "medium" });
 });
@@ -1282,7 +1269,7 @@ test("compact CTA summary keeps missing and suggested fields visible with explic
   const facebookRow = summary.ctaRows.find((row) => row.key === "facebook_url");
   const websiteRow = summary.ctaRows.find((row) => row.key === "website_url");
 
-  assert.deepEqual(phoneRow?.statuses, ["missing"]);
+  assert.deepEqual(phoneRow?.statuses, ["needs verification"]);
   assert.deepEqual(facebookRow?.statuses, ["ai filled", "needs verification"]);
   assert.deepEqual(websiteRow?.statuses, ["confirmed"]);
 });
@@ -2201,7 +2188,7 @@ test("buildRequestedChecksHandoffPayload omits requested_checks when nothing is 
   assert.equal(result, null);
 });
 
-test("buildFieldPackApiPayload merges full standard catalogs with saved custom groups when item editor has no requested-check DOM", () => {
+test("buildFieldPackApiPayload keeps saved custom groups at rest when the requested-check editor DOM is absent", () => {
   requestedChecksEditorRoot = null;
   setBuildFieldPackApiPayloadState({
     requested_checks_json: {
@@ -2498,7 +2485,7 @@ test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks w
   assert.equal(legacyCategoryCheck, undefined);
 });
 
-test("buildFieldPackApiPayload preserves current custom groups from the live editor without letting stale auto rows override them", () => {
+test("buildFieldPackApiPayload preserves hidden saved custom groups while live editor only submits active rows", () => {
   requestedChecksEditorRoot = createRequestedChecksEditorRoot([
     {
       groupKey: "cta_contact",
@@ -2509,20 +2496,6 @@ test("buildFieldPackApiPayload preserves current custom groups from the live edi
           label: "Phone",
           instruction: "confirm phone",
           answer_type: "phone",
-          condition_prompt: null,
-          evidence_required: false,
-        },
-      ],
-    },
-    {
-      groupKey: "custom",
-      checks: [
-        {
-          key: "wifi_password",
-          requested: true,
-          label: "Wi-Fi password",
-          instruction: "Ask for Wi-Fi password",
-          answer_type: "text",
           condition_prompt: null,
           evidence_required: false,
         },
@@ -2542,21 +2515,6 @@ test("buildFieldPackApiPayload preserves current custom groups from the live edi
             label: "Phone",
             instruction: "confirm phone",
             answer_type: "phone",
-            condition_prompt: null,
-            evidence_required: false,
-          },
-        ],
-      },
-      {
-        group_key: "custom",
-        group_label: "Custom checks",
-        checks: [
-          {
-            key: "wifi_password",
-            requested: true,
-            label: "Wi-Fi password",
-            instruction: "Ask for Wi-Fi password",
-            answer_type: "text",
             condition_prompt: null,
             evidence_required: false,
           },

@@ -3,6 +3,7 @@ import {
   getTaxonomyCatalogEntryMapForItem,
   isKnownTaxonomyCatalogKey,
   isTaxonomyCatalogKeyApplicableToItem,
+  normalizeTaxonomyCatalogSuggestedValue,
 } from "./taxonomy-catalog.mjs";
 
 function cloneValue(value) {
@@ -34,11 +35,11 @@ function isPlaceItem(item = {}) {
 
 function defaultCtaTemplateChecks() {
   return [
-    { key: "phone", label: "Phone", instruction: "Confirm the real phone number people can use now.", answer_type: "phone", condition_prompt: null, evidence_required: true },
-    { key: "line_url", label: "LINE URL", instruction: "Confirm the working LINE URL if available.", answer_type: "url", condition_prompt: null, evidence_required: false },
-    { key: "facebook_url", label: "Facebook URL", instruction: "Confirm the correct Facebook page URL if available.", answer_type: "url", condition_prompt: null, evidence_required: false },
-    { key: "website_url", label: "Website URL", instruction: "Confirm the main website URL if available.", answer_type: "url", condition_prompt: null, evidence_required: false },
-    { key: "primary_cta", label: "Primary CTA", instruction: "Confirm the best primary CTA for the user journey.", answer_type: "select", condition_prompt: null, evidence_required: false },
+    { key: "phone", label: "Phone", instruction: "Confirm the real phone number people can use now.", answer_type: "phone", condition_prompt: null, evidence_required: true, required: true, activation_mode: "required", allowed_values: null, unit_options: null },
+    { key: "line_url", label: "LINE URL", instruction: "Confirm the working LINE URL if available.", answer_type: "url", condition_prompt: null, evidence_required: false, required: true, activation_mode: "required", allowed_values: null, unit_options: null },
+    { key: "facebook_url", label: "Facebook URL", instruction: "Confirm the correct Facebook page URL if available.", answer_type: "url", condition_prompt: null, evidence_required: false, required: true, activation_mode: "required", allowed_values: null, unit_options: null },
+    { key: "website_url", label: "Website URL", instruction: "Confirm the main website URL if available.", answer_type: "url", condition_prompt: null, evidence_required: false, required: true, activation_mode: "required", allowed_values: null, unit_options: null },
+    { key: "primary_cta", label: "Primary CTA", instruction: "Confirm the best primary CTA for the user journey.", answer_type: "select", condition_prompt: null, evidence_required: false, required: true, activation_mode: "required", allowed_values: ["map", "phone", "line"], unit_options: null },
   ];
 }
 
@@ -65,27 +66,53 @@ export function getAiTaxonomySuggestedValue(aiTaxonomy = {}, taxonomyKey = "") {
 }
 
 function hasExplicitRequestedDecision(savedCheck = {}) {
-  return Object.prototype.hasOwnProperty.call(savedCheck || {}, "requested");
+  const decision = normalizeKey(savedCheck?.requested_decision);
+  return decision === "selected" || decision === "rejected";
+}
+
+function getRequestedDecision(savedCheck = {}) {
+  const decision = normalizeKey(savedCheck?.requested_decision);
+  if (decision === "selected" || decision === "rejected") return decision;
+  if (!Object.prototype.hasOwnProperty.call(savedCheck || {}, "requested")) return null;
+  if (savedCheck?.activation_mode === "required" || savedCheck?.required === true) return null;
+  if (savedCheck?.requested === true && !savedCheck?.activation_mode) return "selected";
+  return null;
 }
 
 function resolveRequestedFlag(entry, savedCheck = {}, aiSuggestionRow = null) {
   if (entry.activation_mode === "required") return true;
-  if (hasExplicitRequestedDecision(savedCheck)) return savedCheck.requested === true;
-  if (aiSuggestionRow && Object.prototype.hasOwnProperty.call(aiSuggestionRow, "suggested_value")) return true;
+  const requestedDecision = getRequestedDecision(savedCheck);
+  if (requestedDecision === "selected") return true;
+  if (requestedDecision === "rejected") return false;
+  if (aiSuggestionRow) return true;
   return false;
 }
 
 function buildCatalogCheck(entry, savedCheck = {}, aiTaxonomy = {}) {
-  const aiSuggestionRow = findAiTaxonomySuggestionRow(aiTaxonomy, entry.taxonomy_key);
+  const rawAiSuggestionRow = findAiTaxonomySuggestionRow(aiTaxonomy, entry.taxonomy_key);
+  const validatedAiSuggestedValue = rawAiSuggestionRow && Object.prototype.hasOwnProperty.call(rawAiSuggestionRow, "suggested_value")
+    ? normalizeTaxonomyCatalogSuggestedValue(entry, rawAiSuggestionRow.suggested_value)
+    : null;
+  const aiSuggestionRow = rawAiSuggestionRow
+    ? {
+      ...rawAiSuggestionRow,
+      ...(validatedAiSuggestedValue != null ? { suggested_value: validatedAiSuggestedValue } : {}),
+    }
+    : null;
   const hasAiSuggestedValue = aiSuggestionRow && Object.prototype.hasOwnProperty.call(aiSuggestionRow, "suggested_value");
   const savedHasSuggestedValue = Object.prototype.hasOwnProperty.call(savedCheck || {}, "suggested_value");
+  const normalizedSavedSuggestedValue = savedHasSuggestedValue
+    ? normalizeTaxonomyCatalogSuggestedValue(entry, savedCheck.suggested_value)
+    : null;
   const suggestedValue = hasAiSuggestedValue
     ? cloneValue(aiSuggestionRow.suggested_value)
-    : (savedHasSuggestedValue ? cloneValue(savedCheck.suggested_value) : null);
+    : (normalizedSavedSuggestedValue != null ? cloneValue(normalizedSavedSuggestedValue) : null);
   const aiConfidence = normalizeKey(aiTaxonomy?.confidence) || "unknown";
+  const requestedDecision = getRequestedDecision(savedCheck);
   return {
     key: entry.taxonomy_key,
     requested: resolveRequestedFlag(entry, savedCheck, aiSuggestionRow),
+    requested_decision: entry.activation_mode === "required" ? null : requestedDecision,
     label: entry.label,
     instruction: entry.instruction,
     answer_type: entry.answer_type,
@@ -152,12 +179,17 @@ function buildResolvedCtaGroup(existingGroup = null, item = {}, aiCtaContact = {
         : (Object.prototype.hasOwnProperty.call(saved, "suggested_value") ? cloneValue(saved.suggested_value) : null);
       return {
         key: check.key,
-        requested: saved.requested === true,
+        requested: true,
+        requested_decision: null,
         label: check.label,
         instruction: check.instruction,
         answer_type: check.answer_type,
+        activation_mode: check.activation_mode,
+        required: true,
         condition_prompt: check.condition_prompt,
         evidence_required: check.evidence_required === true,
+        allowed_values: Array.isArray(check.allowed_values) ? cloneValue(check.allowed_values) : null,
+        unit_options: Array.isArray(check.unit_options) ? cloneValue(check.unit_options) : null,
         suggested_value: suggestedValue,
         source: hasAiSuggestedValue
           ? { kind: "ai", confidence: normalizeKey(aiCtaContact?.confidence) || "unknown" }

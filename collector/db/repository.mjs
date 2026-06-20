@@ -1249,17 +1249,121 @@ function normalizeFieldReturnTaxonomyJson(value, fieldName = "field_return_paylo
   };
 }
 
-function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName) {
+function buildRequestedCheckSchemaMapFromHandoffPackage(handoffPackage = null) {
+  const normalizePart = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  const groups = Array.isArray(handoffPackage?.requested_checks?.groups) ? handoffPackage.requested_checks.groups : [];
+  const schemaMap = new Map();
+  groups.forEach((group) => {
+    const groupKey = normalizePart(group?.group_key);
+    if (!groupKey) return;
+    (Array.isArray(group?.checks) ? group.checks : []).forEach((check) => {
+      const checkKey = normalizePart(check?.key);
+      const returnKey = normalizeRequestedCheckReturnKey(`${groupKey}.${checkKey}`);
+      if (!returnKey) return;
+      schemaMap.set(returnKey, {
+        return_key: returnKey,
+        answer_type: normalizeRequestedCheckAnswerType(check?.answer_type),
+        allowed_values: Array.isArray(check?.allowed_values) ? check.allowed_values.map((value) => String(value || "").trim()).filter(Boolean) : null,
+        unit_options: Array.isArray(check?.unit_options) ? check.unit_options.map((value) => String(value || "").trim()).filter(Boolean) : null,
+        requested: check?.requested === true,
+        required: check?.required === true,
+        evidence_required: Object.prototype.hasOwnProperty.call(check || {}, "evidence_required")
+          ? check.evidence_required === true
+          : null,
+      });
+    });
+  });
+  return schemaMap;
+}
+
+function isRequestedCheckAnswerComplete(row = {}, schema = null) {
+  const answerType = normalizeRequestedCheckAnswerType(schema?.answer_type || row?.answer_type);
+  const value = row?.value;
+  if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+    return typeof value === "boolean";
+  }
+  if (answerType === "select") {
+    return typeof value === "string" && value.trim().length > 0;
+  }
+  if (answerType === "multi_select") {
+    return Array.isArray(value);
+  }
+  if (answerType === "number_with_unit") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    return typeof value.number === "number" && Number.isFinite(value.number);
+  }
+  if (answerType === "note_only") {
+    return true;
+  }
+  return true;
+}
+
+function validateRequestedCheckReturnsForFinalSubmission(requestedCheckReturns = {}, schemaMap = null, fieldName = "field_return_payload_json.requested_check_returns") {
+  if (!(schemaMap instanceof Map) || schemaMap.size === 0) return;
+  const missingKeys = [];
+  const uncheckedKeys = [];
+  const incompleteKeys = [];
+  const missingEvidenceKeys = [];
+  for (const [returnKey, schema] of schemaMap.entries()) {
+    if (schema?.requested !== true) continue;
+    if (!Object.prototype.hasOwnProperty.call(requestedCheckReturns || {}, returnKey)) {
+      missingKeys.push(returnKey);
+      continue;
+    }
+    const row = requestedCheckReturns?.[returnKey] && typeof requestedCheckReturns[returnKey] === "object"
+      ? requestedCheckReturns[returnKey]
+      : null;
+    if (!row || row.checked !== true) {
+      uncheckedKeys.push(returnKey);
+      continue;
+    }
+    if (!isRequestedCheckAnswerComplete(row, schema)) {
+      incompleteKeys.push(returnKey);
+    }
+    if (schema.evidence_required === true) {
+      const hasEvidence = Boolean(String(row.evidence || "").trim())
+        || Number(row.evidence_deliverable_id || 0) > 0
+        || Boolean(String(row.evidence_source_url || "").trim());
+      if (!hasEvidence) missingEvidenceKeys.push(returnKey);
+    }
+  }
+  if (!missingKeys.length && !uncheckedKeys.length && !incompleteKeys.length && !missingEvidenceKeys.length) return;
+  const errors = [];
+  if (missingKeys.length) errors.push(`missing requested return keys: ${missingKeys.join(", ")}`);
+  if (uncheckedKeys.length) errors.push(`unchecked requested return keys: ${uncheckedKeys.join(", ")}`);
+  if (incompleteKeys.length) errors.push(`incomplete requested return keys: ${incompleteKeys.join(", ")}`);
+  if (missingEvidenceKeys.length) errors.push(`missing evidence for requested return keys: ${missingEvidenceKeys.join(", ")}`);
+  throw new Error(`${fieldName} ${errors.join("; ")}`);
+}
+
+function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName, options = {}) {
+  const schema = options?.schema && typeof options.schema === "object" ? options.schema : null;
+  const checked = options?.checked === true;
   if (rawValue == null) {
     return answerType === "multi_select" ? [] : null;
   }
   try {
     if (answerType === "url") return normalizeOptionalUrlValue(rawValue, fieldName);
     if (["text", "phone", "select", "hours"].includes(answerType)) {
-      return String(rawValue || "").trim() || null;
+      const value = String(rawValue || "").trim() || null;
+      if (answerType === "select" && checked && value && Array.isArray(schema?.allowed_values) && schema.allowed_values.length && !schema.allowed_values.includes(value)) {
+        throw new Error(`${fieldName} has invalid select value`);
+      }
+      return value;
     }
     if (answerType === "multi_select") {
-      return Array.isArray(rawValue) ? normalizeStringListInput(rawValue, fieldName) : [];
+      if (!Array.isArray(rawValue)) {
+        if (Array.isArray(schema?.allowed_values) && schema.allowed_values.length) {
+          throw new Error(`${fieldName} must be an array`);
+        }
+        return [];
+      }
+      const values = normalizeStringListInput(rawValue, fieldName);
+      if (Array.isArray(schema?.allowed_values) && schema.allowed_values.length) {
+        const invalidValue = values.find((value) => !schema.allowed_values.includes(value));
+        if (invalidValue) throw new Error(`${fieldName} has invalid multi_select value`);
+      }
+      return Array.from(new Set(values));
     }
     if (answerType === "boolean" || answerType === "boolean_with_conditions") {
       return typeof rawValue === "boolean" ? rawValue : null;
@@ -1267,13 +1371,24 @@ function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName) {
     if (answerType === "number_with_unit") {
       if (typeof rawValue === "number" && Number.isFinite(rawValue)) return { number: rawValue, unit: null };
       if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) return null;
-      const numeric = Number(rawValue.number);
-      return Number.isFinite(numeric)
-        ? { number: numeric, unit: rawValue.unit == null ? null : String(rawValue.unit || "").trim() || null }
-        : null;
+      const numberIsEmpty = rawValue.number == null || rawValue.number === "";
+      const numeric = numberIsEmpty ? null : Number(rawValue.number);
+      const unitValue = rawValue.unit == null ? null : String(rawValue.unit || "").trim() || null;
+      if (numberIsEmpty) {
+        if (unitValue && Array.isArray(schema?.unit_options) && schema.unit_options.length && !schema.unit_options.includes(unitValue)) {
+          throw new Error(`${fieldName} has invalid unit`);
+        }
+        return unitValue ? { number: null, unit: unitValue } : null;
+      }
+      if (!Number.isFinite(numeric)) return null;
+      if (Array.isArray(schema?.unit_options) && schema.unit_options.length && (!unitValue || !schema.unit_options.includes(unitValue))) {
+        throw new Error(`${fieldName} has invalid unit`);
+      }
+      return { number: numeric, unit: unitValue };
     }
     if (answerType === "note_only") return null;
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && /invalid|must be an array/i.test(String(error.message || ""))) throw error;
     return answerType === "multi_select" ? [] : null;
   }
   return normalizeJsonSafeValue(rawValue);
@@ -1299,16 +1414,18 @@ function inferRequestedCheckAnswerTypeFromReturnRow(row) {
   return "text";
 }
 
-function normalizeRequestedCheckReturnEntry(rawValue, fieldName) {
+function normalizeRequestedCheckReturnEntry(rawValue, fieldName, schema = null) {
   const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
   const checked = Boolean(row.checked);
-  const answerType = inferRequestedCheckAnswerTypeFromReturnRow(row);
+  const answerType = schema?.answer_type
+    ? normalizeRequestedCheckAnswerType(schema.answer_type)
+    : inferRequestedCheckAnswerTypeFromReturnRow(row);
   const evidence = normalizeFieldReturnEvidence(row, fieldName);
   const evidenceText = row.evidence == null ? null : String(row.evidence || "").trim() || null;
   const note = row.note == null ? null : String(row.note || "").trim() || null;
   const conditionNote = row.condition_note == null ? null : String(row.condition_note || "").trim() || null;
   const value = checked
-    ? normalizeRequestedCheckReturnValue(row.value, answerType, `${fieldName}.value`)
+    ? normalizeRequestedCheckReturnValue(row.value, answerType, `${fieldName}.value`, { schema, checked })
     : (answerType === "multi_select" ? null : null);
   const hasEvidence = evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url) || Boolean(evidenceText);
   const hasCondition = Boolean(conditionNote);
@@ -1332,25 +1449,34 @@ function normalizeRequestedCheckReturnEntry(rawValue, fieldName) {
   };
 }
 
-function normalizeRequestedCheckReturns(value, fieldName = "field_return_payload_json.requested_check_returns") {
+function normalizeRequestedCheckReturns(value, fieldName = "field_return_payload_json.requested_check_returns", schemaMap = null) {
   const parsed = value && typeof value === "object" && !Array.isArray(value)
     ? value
     : parseJson(value, null);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const hasSchema = schemaMap instanceof Map && schemaMap.size > 0;
   return Object.entries(parsed).reduce((acc, [key, row]) => {
     const normalizedKey = normalizeRequestedCheckReturnKey(key);
     if (!normalizedKey) return acc;
-    acc[normalizedKey] = normalizeRequestedCheckReturnEntry(row, `${fieldName}.${normalizedKey}`);
+    if (hasSchema && !schemaMap.has(normalizedKey)) {
+      throw new Error(`${fieldName}.${normalizedKey} is not present in immutable handoff snapshot`);
+    }
+    acc[normalizedKey] = normalizeRequestedCheckReturnEntry(
+      row,
+      `${fieldName}.${normalizedKey}`,
+      hasSchema ? schemaMap.get(normalizedKey) || null : null
+    );
     return acc;
   }, {});
 }
 
-function normalizeFieldReturnPayloadJson(value, fieldName = "field_return_payload_json") {
+function normalizeFieldReturnPayloadJson(value, fieldName = "field_return_payload_json", options = {}) {
   const parsed = value && typeof value === "object" && !Array.isArray(value)
     ? value
     : parseJson(value, null);
   const base = defaultFieldReturnPayload();
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  const schemaMap = options?.requestedCheckSchemaMap instanceof Map ? options.requestedCheckSchemaMap : null;
   const checklistResultsRaw = Array.isArray(parsed.checklist_results) ? parsed.checklist_results : [];
   const checklistResults = checklistResultsRaw
     .map((row, index) => {
@@ -1377,7 +1503,7 @@ function normalizeFieldReturnPayloadJson(value, fieldName = "field_return_payloa
     checklist_results: checklistResults,
     cta_return: normalizeFieldReturnCtaJson(parsed.cta_return, `${fieldName}.cta_return`),
     taxonomy_return: normalizeFieldReturnTaxonomyJson(parsed.taxonomy_return, `${fieldName}.taxonomy_return`),
-    requested_check_returns: normalizeRequestedCheckReturns(parsed.requested_check_returns, `${fieldName}.requested_check_returns`),
+    requested_check_returns: normalizeRequestedCheckReturns(parsed.requested_check_returns, `${fieldName}.requested_check_returns`, schemaMap),
     note: parsed.note == null ? null : String(parsed.note || "").trim() || null,
   };
 }
@@ -6299,14 +6425,22 @@ function normalizeStateValue(value, stateGroup) {
     if (submissionState === "submitted" && currentAssignmentState === "revision_requested") {
       throw new Error("use resubmitted when assignment is revision_requested");
     }
+    const latestHandoff = getLatestAssignmentHandoffByAssignment(assignmentId);
+    const requestedCheckSchemaMap = buildRequestedCheckSchemaMapFromHandoffPackage(latestHandoff?.handoff_package_json || null);
     const articlePayload = payload.article_payload_json == null ? null : parseJsonInputStrict(payload.article_payload_json, "article_payload_json", "object");
     const mediaPayload = payload.media_payload_json == null ? null : parseJsonInputStrict(payload.media_payload_json, "media_payload_json", "object");
     const fieldReturnPayload = payload.field_return_payload_json == null
       ? null
       : normalizeFieldReturnPayloadJson(
         parseJsonInputStrict(payload.field_return_payload_json, "field_return_payload_json", "object"),
-        "field_return_payload_json"
+        "field_return_payload_json",
+        { requestedCheckSchemaMap }
       );
+    validateRequestedCheckReturnsForFinalSubmission(
+      fieldReturnPayload?.requested_check_returns || {},
+      requestedCheckSchemaMap,
+      "field_return_payload_json.requested_check_returns"
+    );
     const contributorNote = payload.contributor_note == null ? null : String(payload.contributor_note || "").trim() || null;
     const reviewerNote = payload.reviewer_note == null ? null : String(payload.reviewer_note || "").trim() || null;
     const reviewedAt = payload.reviewed_at == null || payload.reviewed_at === "" ? null : toNullableDateIso(payload.reviewed_at, "reviewed_at");

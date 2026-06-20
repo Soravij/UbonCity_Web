@@ -1075,8 +1075,9 @@ test("buildAssignmentHandoffPreview includes only requested=true requested check
     const requestedChecks = preview.handoff_package?.requested_checks;
     assert.equal(requestedChecks?.version, 1);
     assert.deepEqual(requestedChecks?.groups?.map((group) => group.group_key), ["cta_contact", "taxonomy"]);
-    assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.length, 1);
+    assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.length, 5);
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.[0]?.key, "phone");
+    assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.every((check) => check.requested === true), true);
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.[0]?.suggested_value, null);
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "taxonomy")?.checks?.length, 6);
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "taxonomy")?.checks?.every((check) => check.requested === true), true);
@@ -1451,7 +1452,7 @@ test("createAssignmentFromReadiness snapshots CTA and taxonomy requested checks 
     ctx.cleanup();
   }
 });
-test("buildAssignmentHandoffPreview does not auto-request CTA checks from AI suggestions alone", () => {
+test("buildAssignmentHandoffPreview always includes the required CTA checklist for place items", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("CTA Suggestions Stay Advisory");
@@ -1475,7 +1476,10 @@ test("buildAssignmentHandoffPreview does not auto-request CTA checks from AI sug
 
     const preview = ctx.repo.buildAssignmentHandoffPreview(item.id);
     const ctaGroup = preview.handoff_package?.requested_checks?.groups?.find((group) => group.group_key === "cta_contact");
-    assert.equal(ctaGroup, undefined);
+    assert.ok(ctaGroup);
+    assert.equal(ctaGroup.checks.length, 5);
+    assert.equal(ctaGroup.checks.every((check) => check.requested === true), true);
+    assert.equal(ctaGroup.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
   } finally {
     ctx.cleanup();
   }
@@ -1539,6 +1543,74 @@ test("existing assignment handoff snapshot remains immutable after newer field p
       "phone"
     );
     assert.deepEqual(frozen?.handoff_package_json?.requested_checks, originalRequestedChecks);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("createAssignmentFromReadiness keeps legacy custom rows at rest but filters them from the new immutable handoff snapshot", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Checks Legacy Custom Filter");
+    const assignee = ctx.createUser("requested-checks-legacy-custom");
+    const fieldPack = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready for field handoff",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            group_label: "CTA / Contact",
+            checks: [
+              { key: "phone", requested: true, label: "Phone", instruction: "Confirm phone", answer_type: "phone", suggested_value: "080-111-2222", evidence_required: true },
+            ],
+          },
+          {
+            group_key: "taxonomy",
+            group_label: "Taxonomy",
+            checks: [
+              { key: "waterfront", requested: true, requested_decision: "selected", label: "Waterfront", instruction: "Confirm waterfront", answer_type: "boolean_with_conditions", evidence_required: false },
+              { key: "legacy_unknown", requested: true, label: "Legacy unknown", instruction: "Legacy unknown", answer_type: "text", evidence_required: false },
+            ],
+          },
+          {
+            group_key: "custom",
+            group_label: "Custom checks",
+            checks: [
+              { key: "wifi_password", requested: true, label: "Wi-Fi password", instruction: "Ask for Wi-Fi password", answer_type: "text", evidence_required: false },
+            ],
+          },
+        ],
+      },
+    });
+
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+
+    const savedFieldPack = ctx.repo.getFieldPackBundleById(fieldPack.id);
+    const savedCustomGroup = savedFieldPack.requested_checks_json.groups.find((group) => group.group_key === "custom");
+    const savedTaxonomyGroup = savedFieldPack.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+    const handoffRequestedChecks = assignmentResult.handoff?.handoff_package_json?.requested_checks;
+    const handoffCustomGroup = handoffRequestedChecks?.groups?.find((group) => group.group_key === "custom");
+    const handoffTaxonomyGroup = handoffRequestedChecks?.groups?.find((group) => group.group_key === "taxonomy");
+    const handoffCtaGroup = handoffRequestedChecks?.groups?.find((group) => group.group_key === "cta_contact");
+
+    assert.ok(savedCustomGroup);
+    assert.equal(savedCustomGroup.checks[0]?.key, "wifi_password");
+    assert.equal(savedTaxonomyGroup?.checks?.some((check) => check.key === "legacy_unknown"), true);
+    assert.equal(handoffCustomGroup, undefined);
+    assert.ok(handoffCtaGroup);
+    assert.equal(handoffCtaGroup.checks.some((check) => check.key === "phone"), true);
+    assert.ok(handoffTaxonomyGroup);
+    assert.equal(handoffTaxonomyGroup.checks.some((check) => check.key === "waterfront"), true);
+    assert.equal(handoffTaxonomyGroup.checks.some((check) => check.key === "legacy_unknown"), false);
   } finally {
     ctx.cleanup();
   }
@@ -1860,7 +1932,7 @@ test("repairAssignmentHandoffSnapshotForAssignment uses the explicit historical 
     assert.equal(dryRun.reason, "dry_run");
     assert.equal(dryRun.field_pack_id, fieldPackA.id);
     assert.equal(dryRun.requested_check_group_count, 2);
-    assert.equal(dryRun.requested_check_count, 7);
+    assert.equal(dryRun.requested_check_count, 11);
     assert.equal(dryRun.would_apply, true);
     assert.equal(dryRun.applied, false);
 
@@ -2322,6 +2394,19 @@ test("assignment submission round-trips normalized field return payload and igno
         taxonomy_return: {
           category: { checked: true, found: false, value: "attractions" },
         },
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
+          "cta_contact.line_url": { checked: true, value: "" },
+          "cta_contact.facebook_url": { checked: true, value: "" },
+          "cta_contact.website_url": { checked: true, value: "" },
+          "cta_contact.primary_cta": { checked: true, value: "map" },
+          "taxonomy.parking": { checked: true, value: false, condition_note: "No dedicated parking" },
+          "taxonomy.pet_friendly": { checked: true, value: false, evidence: "No pet signage" },
+          "taxonomy.wheelchair_accessible": { checked: true, value: false, evidence: "Front stairs only" },
+          "taxonomy.toilet_available": { checked: true, value: true },
+          "taxonomy.entry_fee_required": { checked: true, value: false },
+          "taxonomy.setting_type": { checked: true, value: "outdoor" },
+        },
         note: "field return note",
       },
     });
@@ -2337,6 +2422,260 @@ test("assignment submission round-trips normalized field return payload and igno
     const fetched = ctx.repo.getAssignmentSubmissionById(submission.id);
     assert.equal(fetched.field_return_payload_json.checklist_results[0].found, true);
     assert.equal(fetched.field_return_payload_json.note, "field return note");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission rejects missing requested return entries from the immutable handoff snapshot", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Return Missing");
+    const assignee = ctx.createUser("requested-return-missing");
+    ctx.createReadinessBrief(item.id, "requested-return-missing");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentResult.assignment.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {},
+      },
+    }), /missing requested return keys: cta_contact\.phone/);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission rejects unchecked requested return rows from the immutable handoff snapshot", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Return Unchecked");
+    const assignee = ctx.createUser("requested-return-unchecked");
+    ctx.createReadinessBrief(item.id, "requested-return-unchecked");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentResult.assignment.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: false, value: "0812345678", evidence: "signboard" },
+        },
+      },
+    }), /unchecked requested return keys: cta_contact\.phone/);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission accepts requested boolean false and requested phone empty when explicitly checked with required evidence", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Return Explicit Verification");
+    const assignee = ctx.createUser("requested-return-explicit-verification");
+    ctx.createReadinessBrief(item.id, "requested-return-explicit-verification");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentResult.assignment.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: "", evidence: "No phone number on storefront" },
+          "cta_contact.line_url": { checked: true, value: "", evidence: "" },
+          "cta_contact.facebook_url": { checked: true, value: "", evidence: "" },
+          "cta_contact.website_url": { checked: true, value: "", evidence: "" },
+          "cta_contact.primary_cta": { checked: true, value: "map", evidence: "" },
+          "taxonomy.parking": { checked: true, value: false, condition_note: "No customer parking" },
+          "taxonomy.pet_friendly": { checked: true, value: false, evidence: "Pets not allowed sign" },
+          "taxonomy.wheelchair_accessible": { checked: true, value: false, evidence: "Steps at entrance" },
+          "taxonomy.toilet_available": { checked: true, value: false },
+          "taxonomy.entry_fee_required": { checked: true, value: false },
+          "taxonomy.setting_type": { checked: true, value: "outdoor" },
+        },
+      },
+    });
+
+    assert.equal(submission.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, true);
+    assert.equal(submission.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, null);
+    assert.equal(submission.field_return_payload_json.requested_check_returns["taxonomy.parking"].value, false);
+    assert.equal(submission.field_return_payload_json.requested_check_returns["taxonomy.setting_type"].value, "outdoor");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission rejects invalid select values and missing evidence based on immutable snapshot metadata", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Return Invalid Select");
+    const assignee = ctx.createUser("requested-return-invalid-select");
+    ctx.createReadinessBrief(item.id, "requested-return-invalid-select");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentResult.assignment.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: "0812345678" },
+          "cta_contact.line_url": { checked: true, value: "" },
+          "cta_contact.facebook_url": { checked: true, value: "" },
+          "cta_contact.website_url": { checked: true, value: "" },
+          "cta_contact.primary_cta": { checked: true, value: "email" },
+          "taxonomy.parking": { checked: true, value: false },
+          "taxonomy.pet_friendly": { checked: true, value: false },
+          "taxonomy.wheelchair_accessible": { checked: true, value: false },
+          "taxonomy.toilet_available": { checked: true, value: false },
+          "taxonomy.entry_fee_required": { checked: true, value: false },
+          "taxonomy.setting_type": { checked: true, value: "outdoor" },
+        },
+      },
+    }), /cta_contact\.phone\.value has invalid select value|field_return_payload_json\.requested_check_returns\.cta_contact\.primary_cta\.value has invalid select value/);
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentResult.assignment.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: "0812345678" },
+          "cta_contact.line_url": { checked: true, value: "" },
+          "cta_contact.facebook_url": { checked: true, value: "" },
+          "cta_contact.website_url": { checked: true, value: "" },
+          "cta_contact.primary_cta": { checked: true, value: "map" },
+          "taxonomy.parking": { checked: true, value: false },
+          "taxonomy.pet_friendly": { checked: true, value: false },
+          "taxonomy.wheelchair_accessible": { checked: true, value: false },
+          "taxonomy.toilet_available": { checked: true, value: false },
+          "taxonomy.entry_fee_required": { checked: true, value: false },
+          "taxonomy.setting_type": { checked: true, value: "outdoor" },
+        },
+      },
+    }), /missing evidence for requested return keys: cta_contact\.phone/);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission accepts valid select values with required evidence and preserves old custom snapshots unchanged", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Return Legacy Snapshot");
+    const assignee = ctx.createUser("requested-return-legacy-snapshot");
+    ctx.createReadinessBrief(item.id, "requested-return-legacy-snapshot");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const existingHandoff = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentResult.assignment.id);
+    const legacySnapshot = {
+      ...existingHandoff.handoff_package_json,
+      requested_checks: {
+        version: 1,
+        groups: [
+          {
+            group_key: "custom",
+            group_label: "Custom",
+            checks: [
+              {
+                key: "legacy_flag",
+                requested: true,
+                label: "Legacy flag",
+                instruction: "Confirm legacy flag",
+                answer_type: "boolean_with_conditions",
+              },
+            ],
+          },
+        ],
+      },
+    };
+    ctx.db.prepare(`
+      UPDATE content_assignment_handoff_snapshots
+      SET handoff_package_json=?
+      WHERE id=?
+    `).run(JSON.stringify(legacySnapshot), existingHandoff.id);
+
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentResult.assignment.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          "custom.legacy_flag": {
+            checked: true,
+            value: false,
+            condition_note: "Legacy row still supported",
+          },
+        },
+      },
+    });
+
+    const frozenAfterSubmit = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentResult.assignment.id);
+    assert.equal(submission.field_return_payload_json.requested_check_returns["custom.legacy_flag"].value, false);
+    assert.deepEqual(frozenAfterSubmit.handoff_package_json.requested_checks, legacySnapshot.requested_checks);
   } finally {
     ctx.cleanup();
   }

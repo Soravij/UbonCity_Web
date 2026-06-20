@@ -210,7 +210,7 @@ test("field pack normalizer removes unknown and wrong-category taxonomy suggesti
     category: "cafes",
     suggested_checks: [
       { taxonomy_key: "waterfront", suggested_value: false },
-      { taxonomy_key: "parking", suggested_value: { number: 500, unit: "THB/person" } },
+      { taxonomy_key: "parking" },
     ],
   });
 });

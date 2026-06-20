@@ -130,8 +130,8 @@ test("resolver preserves explicit editor selection and rejection for agent-trigg
           group_key: "taxonomy",
           group_label: "Taxonomy",
           checks: [
-            { key: "waterfront", requested: false },
-            { key: "specialty_coffee", requested: true },
+            { key: "waterfront", requested: false, requested_decision: "rejected" },
+            { key: "specialty_coffee", requested: true, requested_decision: "selected" },
           ],
         },
       ],
@@ -147,7 +147,9 @@ test("resolver preserves explicit editor selection and rejection for agent-trigg
 
   const taxonomyGroup = findGroup(result, "taxonomy");
   assert.equal(findCheck(taxonomyGroup, "waterfront")?.requested, false);
+  assert.equal(findCheck(taxonomyGroup, "waterfront")?.requested_decision, "rejected");
   assert.equal(findCheck(taxonomyGroup, "specialty_coffee")?.requested, true);
+  assert.equal(findCheck(taxonomyGroup, "specialty_coffee")?.requested_decision, "selected");
 });
 
 test("resolver activates only applicable agent-triggered AI suggestions", () => {
@@ -247,7 +249,7 @@ test("resolver preserves CTA as place-only and AI CTA stays suggestion-only", ()
   assert.ok(ctaGroup);
   for (const key of ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]) {
     const row = findCheck(ctaGroup, key);
-    assert.equal(row?.requested, false);
+    assert.equal(row?.requested, true);
     assert.equal(row?.source?.kind, "ai");
   }
   assert.equal(findGroup(eventResult, "cta_contact"), null);

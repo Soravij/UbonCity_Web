@@ -416,7 +416,7 @@ test("requested-check section uses namespaced keys and hides reserved taxonomy m
   );
 
   const draft = buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage);
-  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, true);
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, false);
   assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0812345678");
   assert.equal(draft.requested_check_returns["taxonomy.category"].value, "restaurants");
   assert.equal(getAssignmentRequestedCheckDefaultValue("boolean"), null);
@@ -444,7 +444,7 @@ test("requested-check section uses namespaced keys and hides reserved taxonomy m
   assert.doesNotMatch(sectionHtml, /Manual|ข้อมูลเพิ่มเติม/);
 });
 
-test("requested-check draft auto-checks and prefills suggested values without changing namespaced keys", () => {
+test("requested-check draft prefills suggested values without auto-checking namespaced keys", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -480,13 +480,13 @@ test("requested-check draft auto-checks and prefills suggested values without ch
   };
 
   const draft = buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage);
-  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, true);
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, false);
   assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0812345678");
-  assert.equal(draft.requested_check_returns["taxonomy.tags"].checked, true);
+  assert.equal(draft.requested_check_returns["taxonomy.tags"].checked, false);
   assert.deepEqual(draft.requested_check_returns["taxonomy.tags"].value, ["family", "cafe"]);
 });
 
-test("requested-check section renders CTA before Curation and hides custom groups", () => {
+test("requested-check section renders CTA before legacy custom groups and hides reserved taxonomy placeholder rows", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -518,13 +518,15 @@ test("requested-check section renders CTA before Curation and hides custom group
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
   const ctaIndex = sectionHtml.indexOf('data-requested-check-group="cta_contact"');
-  const taxonomyIndex = sectionHtml.indexOf('data-requested-check-group="taxonomy"');
+  const customIndex = sectionHtml.indexOf('data-requested-check-group="custom"');
   assert.ok(ctaIndex >= 0);
-  assert.equal(taxonomyIndex, -1);
+  assert.ok(customIndex > ctaIndex);
+  assert.equal(sectionHtml.includes('data-requested-check-group="taxonomy"'), false);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.category"'), false);
   assert.match(sectionHtml, /<div class="assignment-brief-label">CTA\/ติดต่อ<\/div>/);
   assert.doesNotMatch(sectionHtml, /<div class="assignment-brief-label">Curation<\/div>/);
-  assert.equal(sectionHtml.includes('data-requested-check-group="custom"'), false);
+  assert.equal(sectionHtml.includes('data-requested-check-group="custom"'), true);
+  assert.equal(sectionHtml.includes('data-requested-check-return-key="custom.parking"'), true);
 });
 
 test("requested-check section omits empty groups instead of rendering empty cards", () => {
@@ -1301,7 +1303,7 @@ test("requested-check section does not render condition, evidence, or note contr
   assert.doesNotMatch(sectionHtml, /<details|<summary|รายละเอียด|เงื่อนไข|หลักฐาน|หมายเหตุ/);
 });
 
-test("requested-check return form preserves hidden rows in CTA and Curation mode", () => {
+test("requested-check return form renders legacy custom rows from old immutable snapshots", () => {
   const handoffPackage = {
     requested_checks: {
       version: 1,
@@ -1325,18 +1327,19 @@ test("requested-check return form preserves hidden rows in CTA and Curation mode
   };
 
   const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
-  assert.equal((sectionHtml.match(/class="assignment-brief-section full-span requested-check-cta-section"/g) || []).length, 1);
-  assert.equal((sectionHtml.match(/class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row"/g) || []).length, 1);
-  assert.equal((sectionHtml.match(/class="assignment-capture-row requested-check-row-main"/g) || []).length, 1);
-  assert.equal((sectionHtml.match(/class="assignment-capture-title requested-check-row-label"/g) || []).length, 1);
-  assert.equal((sectionHtml.match(/class="assignment-capture-actions requested-check-row-status"/g) || []).length, 1);
+  assert.equal((sectionHtml.match(/class="assignment-brief-section full-span requested-check-cta-section"/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row"/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/class="assignment-capture-row requested-check-row-main"/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/class="assignment-capture-title requested-check-row-label"/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/class="assignment-capture-actions requested-check-row-status"/g) || []).length, 2);
   assert.equal((sectionHtml.match(/class="requested-check-cta-list"/g) || []).length, 0);
   assert.equal((sectionHtml.match(/class="requested-check-cta-card"/g) || []).length, 0);
   assert.equal((sectionHtml.match(/class="assignment-brief-card"/g) || []).length, 0);
   assert.equal((sectionHtml.match(/class="assignment-brief-grid requested-check-group-grid"/g) || []).length, 0);
-  assert.equal((sectionHtml.match(/data-requested-check-row/g) || []).length, 1);
-  assert.equal(sectionHtml.includes('data-requested-check-group="custom"'), false);
-  assert.equal(sectionHtml.includes('data-requested-check-return-key="custom.parking"'), false);
+  assert.equal((sectionHtml.match(/data-requested-check-row/g) || []).length, 2);
+  assert.equal(sectionHtml.includes('data-requested-check-group="custom"'), true);
+  assert.equal(sectionHtml.includes('data-requested-check-return-key="custom.parking"'), true);
+  assert.match(sectionHtml, /<div class="assignment-brief-label">Custom<\/div>/);
   assert.match(sectionHtml, /data-requested-check-field="value"/);
 });
 

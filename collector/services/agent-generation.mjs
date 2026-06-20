@@ -1,6 +1,10 @@
 import fsSync from "node:fs";
 import { executeBackendAiJson } from "./backend-ai-client.mjs";
-import { getTaxonomyCatalogEntriesForItem, isTaxonomyCatalogKeyApplicableToItem } from "../server/taxonomy-catalog.mjs";
+import {
+  getTaxonomyCatalogEntriesForItem,
+  isTaxonomyCatalogKeyApplicableToItem,
+  normalizeTaxonomyCatalogSuggestedValue,
+} from "../server/taxonomy-catalog.mjs";
 
 const FIELD_PACK_AGENT_KEY = "field_pack_agent";
 const DEFAULT_FIELD_PACK_AGENT_PROFILE = [
@@ -143,16 +147,21 @@ function normalizeAiCtaContactJson(value) {
   return out;
 }
 
-function normalizeAiTaxonomySuggestedChecks(value, limit = 12) {
+function normalizeAiTaxonomySuggestedChecks(value, item = {}, limit = 12) {
   const out = [];
   const seen = new Set();
+  const applicableEntries = getTaxonomyCatalogEntriesForItem(item);
+  const applicableEntryMap = new Map(applicableEntries.map((entry) => [entry.taxonomy_key, entry]));
   for (const raw of Array.isArray(value) ? value : []) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
     const taxonomyKey = toText(raw.taxonomy_key).toLowerCase();
-    if (!taxonomyKey || seen.has(taxonomyKey)) continue;
+    if (!taxonomyKey || seen.has(taxonomyKey) || !applicableEntryMap.has(taxonomyKey)) continue;
     seen.add(taxonomyKey);
     const row = { taxonomy_key: taxonomyKey };
-    if (Object.prototype.hasOwnProperty.call(raw, "suggested_value")) row.suggested_value = raw.suggested_value;
+    if (Object.prototype.hasOwnProperty.call(raw, "suggested_value")) {
+      const normalizedValue = normalizeTaxonomyCatalogSuggestedValue(applicableEntryMap.get(taxonomyKey), raw.suggested_value);
+      if (normalizedValue != null) row.suggested_value = normalizedValue;
+    }
     if (toText(raw.condition_note)) row.condition_note = toText(raw.condition_note);
     out.push(row);
     if (out.length >= limit) break;
@@ -167,8 +176,11 @@ function normalizeAiTaxonomyJson(value, item = {}) {
   if (toText(source.subtype)) out.subtype = toText(source.subtype);
   const tags = normalizeStringList(source.tags, 12);
   if (tags.length) out.tags = tags;
-  const suggestedChecks = normalizeAiTaxonomySuggestedChecks(source.suggested_checks, 12)
-    .filter((row) => isTaxonomyCatalogKeyApplicableToItem(row.taxonomy_key, item));
+  const suggestedChecks = normalizeAiTaxonomySuggestedChecks(
+    source.suggested_checks,
+    item,
+    Math.max(1, getTaxonomyCatalogEntriesForItem(item).length || 1)
+  ).filter((row) => isTaxonomyCatalogKeyApplicableToItem(row.taxonomy_key, item));
   if (suggestedChecks.length) out.suggested_checks = suggestedChecks;
   return out;
 }

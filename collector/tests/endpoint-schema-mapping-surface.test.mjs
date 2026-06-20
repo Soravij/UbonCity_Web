@@ -150,7 +150,7 @@ test("assignment submission mapping keeps field_return_payload_json separate fro
   assert.equal(Object.prototype.hasOwnProperty.call(payload.media_payload_json, "field_return_payload_json"), false);
 });
 
-test("assignment submission repository path still works with and without field_return_payload_json", () => {
+test("assignment submission repository path rejects missing requested returns and accepts complete immutable-snapshot returns", () => {
   const ctx = createRepoContext();
   try {
     const item = ctx.createItem("Assignment Field Return Mapping");
@@ -177,21 +177,38 @@ test("assignment submission repository path still works with and without field_r
       "admin"
     ).assignment;
 
-    const first = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId: assignment.id,
       submittedByUserId: assignee.id,
       submissionState: "submitted",
       articlePayloadJson: { body: "draft body" },
       mediaPayloadJson: null,
       fieldReturnPayloadJson: null,
+    })), /missing requested return keys: cta_contact\.phone/);
+
+    const first = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+      assignmentId: assignment.id,
+      submittedByUserId: assignee.id,
+      submissionState: "submitted",
+      articlePayloadJson: { body: "draft body" },
+      mediaPayloadJson: null,
+      fieldReturnPayloadJson: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
+          "cta_contact.line_url": { checked: true, value: "" },
+          "cta_contact.facebook_url": { checked: true, value: "" },
+          "cta_contact.website_url": { checked: true, value: "" },
+          "cta_contact.primary_cta": { checked: true, value: "map" },
+          "taxonomy.parking": { checked: true, value: false, condition_note: "No parking" },
+          "taxonomy.pet_friendly": { checked: true, value: false, evidence: "No pets sign" },
+          "taxonomy.wheelchair_accessible": { checked: true, value: false, evidence: "Steps only" },
+          "taxonomy.toilet_available": { checked: true, value: true },
+          "taxonomy.entry_fee_required": { checked: true, value: false },
+          "taxonomy.setting_type": { checked: true, value: "outdoor" },
+        },
+      },
     }));
-    assert.deepEqual(first.field_return_payload_json, {
-      checklist_results: [],
-      cta_return: {},
-      taxonomy_return: {},
-      requested_check_returns: {},
-      note: null,
-    });
+    assert.equal(first.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, true);
     assert.deepEqual(first.article_payload_json, { body: "draft body" });
 
     ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "user", reason_code: "test" });
@@ -205,6 +222,19 @@ test("assignment submission repository path still works with and without field_r
       fieldReturnPayloadJson: {
         note: "field return",
         cta_return: { phone: { checked: true, found: false, value: "0811111111" } },
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
+          "cta_contact.line_url": { checked: true, value: "" },
+          "cta_contact.facebook_url": { checked: true, value: "" },
+          "cta_contact.website_url": { checked: true, value: "" },
+          "cta_contact.primary_cta": { checked: true, value: "map" },
+          "taxonomy.parking": { checked: true, value: false, condition_note: "No parking" },
+          "taxonomy.pet_friendly": { checked: true, value: false, evidence: "No pets sign" },
+          "taxonomy.wheelchair_accessible": { checked: true, value: false, evidence: "Steps only" },
+          "taxonomy.toilet_available": { checked: true, value: true },
+          "taxonomy.entry_fee_required": { checked: true, value: false },
+          "taxonomy.setting_type": { checked: true, value: "outdoor" },
+        },
       },
     }));
     assert.equal(resubmitted.article_payload_json.field_return_payload_json, undefined);

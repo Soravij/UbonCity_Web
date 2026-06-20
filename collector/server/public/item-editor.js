@@ -2684,6 +2684,7 @@ function buildResolvedTaxonomyRequestedChecks(fieldPack = {}) {
     return {
       key: check.key,
       requested: check.requested === true,
+      requested_decision: check.requested_decision == null ? null : String(check.requested_decision || "").trim().toLowerCase() || null,
       label: String(check.label || savedCheck.label || "").trim(),
       instruction: String(check.instruction || savedCheck.instruction || "").trim(),
       answer_type: String(check.answer_type || savedCheck.answer_type || "text").trim() || "text",
@@ -2704,6 +2705,7 @@ function buildResolvedTaxonomyRequestedChecks(fieldPack = {}) {
 function shouldKeepRequestedCheckGroupForItem(groupKey, item = state.item) {
   const normalizedGroupKey = String(groupKey || "").trim().toLowerCase();
   if (normalizedGroupKey === "cta_contact") return isPlaceRequestedCheckItem(item);
+  if (normalizedGroupKey === "custom") return false;
   return true;
 }
 
@@ -2721,7 +2723,10 @@ function mergeRequestedChecksForSave(uiState = {}, existingState = {}) {
     (Array.isArray(uiState?.groups) ? uiState.groups : []).map((group) => [String(group.group_key || "").trim().toLowerCase(), group])
   );
   const preservedHiddenGroupKeys = Array.from(existingGroups.keys()).filter((groupKey) => {
-    return groupKey === "cta_contact" && !uiGroups.has(groupKey);
+    if (uiGroups.has(groupKey)) return false;
+    if (groupKey === "cta_contact") return true;
+    if (groupKey === "custom") return true;
+    return !REQUESTED_CHECK_GROUP_TEMPLATES.some((group) => group.group_key === groupKey);
   });
   const orderedGroupKeys = Array.from(new Set([
     ...REQUESTED_CHECK_GROUP_TEMPLATES.map((group) => group.group_key),
@@ -2747,7 +2752,7 @@ function mergeRequestedChecksForSave(uiState = {}, existingState = {}) {
       );
       const uiChecks = Array.isArray(uiGroup.checks) ? uiGroup.checks : [];
       const normalizedKeys = uiChecks.map((uiCheck, index) => {
-        if (groupKey === "custom" || groupKey === "taxonomy") return normalizeRequestedCheckKey(uiCheck?.key);
+        if (groupKey === "taxonomy") return normalizeRequestedCheckKey(uiCheck?.key);
         return String(templateChecks[index]?.key || "").trim().toLowerCase();
       });
       if (normalizedKeys.some((key) => !key)) {
@@ -2768,6 +2773,9 @@ function mergeRequestedChecksForSave(uiState = {}, existingState = {}) {
           return {
             key: checkKey,
             requested: uiCheck.requested === true,
+            requested_decision: uiCheck.requested_decision == null
+              ? (Object.prototype.hasOwnProperty.call(existingCheck, "requested_decision") ? existingCheck.requested_decision : null)
+              : uiCheck.requested_decision,
             label: String(uiCheck.label || existingCheck.label || "").trim(),
             instruction: String(uiCheck.instruction || existingCheck.instruction || "").trim(),
             answer_type: String(uiCheck.answer_type || existingCheck.answer_type || "text").trim() || "text",
@@ -2782,7 +2790,13 @@ function mergeRequestedChecksForSave(uiState = {}, existingState = {}) {
               ? existingCheck.source
               : null,
           };
-        }).filter((check) => check.key || check.label || check.instruction || check.requested || check.suggested_value != null || check.source != null),
+        }).filter((check) => check.key || check.label || check.instruction || check.requested || check.suggested_value != null || check.source != null)
+          .concat(groupKey === "taxonomy"
+            ? (Array.isArray(existingGroup.checks) ? existingGroup.checks : []).filter((check) => {
+              const checkKey = normalizeRequestedCheckKey(check?.key);
+              return checkKey && !seenKeys.has(checkKey);
+            })
+            : []),
       };
     }).filter((group) => Array.isArray(group.checks) && group.checks.length > 0),
   };
@@ -2828,7 +2842,8 @@ function buildRequestedChecksEditorState(fieldPack = {}) {
           : (hasRequestedCheckMeaningfulValue(savedSuggestedValue) ? savedSuggestedValue : null);
         return {
           key: check.key,
-          requested: savedCheck.requested === true,
+          requested: true,
+          requested_decision: null,
           label: String(savedCheck.label || check.label || "").trim(),
           instruction: String(savedCheck.instruction || check.instruction || "").trim(),
           answer_type: String(savedCheck.answer_type || check.answer_type || "text").trim() || "text",
@@ -2862,6 +2877,9 @@ function buildRequestedChecksEditorState(fieldPack = {}) {
     })),
   });
 
+  if (String(groups[groups.length - 1]?.group_key || "").trim().toLowerCase() === "custom") {
+    groups.pop();
+  }
   return {
     version: 1,
     groups,
@@ -2915,6 +2933,7 @@ function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}
   const toEditableSnapshot = (check = {}) => ({
     key: String(check?.key || "").trim().toLowerCase(),
     requested: check?.requested === true,
+    requested_decision: String(check?.requested_decision || "").trim().toLowerCase() || "",
     label: String(check?.label || "").trim(),
     instruction: String(check?.instruction || "").trim(),
     answer_type: String(check?.answer_type || "text").trim() || "text",
@@ -2963,19 +2982,28 @@ function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}
     const checks = (Array.isArray(autoGroup?.checks) ? autoGroup.checks : []).map((autoCheck) => {
       const checkKey = String(autoCheck?.key || "").trim().toLowerCase();
       const manualCheck = manualChecksByKey.get(checkKey);
-    if (!manualCheck) return autoCheck;
-    const baselineCheck = baselineChecksByKey.get(checkKey) || {};
-    if (areEditableSnapshotsEqual(manualCheck, baselineCheck)) return autoCheck;
-    return {
-      ...autoCheck,
-      requested: isAutoLockedRequestedCheck(groupKey, autoCheck)
-        ? true
-        : manualCheck.requested === true,
-      label: String(manualCheck.label || autoCheck.label || "").trim(),
-      instruction: String(manualCheck.instruction || autoCheck.instruction || "").trim(),
-      answer_type: String(manualCheck.answer_type || autoCheck.answer_type || "text").trim() || "text",
-      condition_prompt: manualCheck.condition_prompt == null
-        ? (autoCheck.condition_prompt ?? null)
+      if (!manualCheck) return autoCheck;
+      const baselineCheck = baselineChecksByKey.get(checkKey) || {};
+      if (areEditableSnapshotsEqual(manualCheck, baselineCheck)) return autoCheck;
+      const explicitDecision = String(manualCheck?.requested_decision || "").trim().toLowerCase();
+      const normalizedDecision = explicitDecision === "selected" || explicitDecision === "rejected"
+        ? explicitDecision
+        : null;
+      return {
+        ...autoCheck,
+        requested: isAutoLockedRequestedCheck(groupKey, autoCheck)
+          ? true
+          : (normalizedDecision === "selected"
+            ? true
+            : normalizedDecision === "rejected"
+              ? false
+              : autoCheck.requested === true),
+        requested_decision: isAutoLockedRequestedCheck(groupKey, autoCheck) ? null : normalizedDecision,
+        label: String(manualCheck.label || autoCheck.label || "").trim(),
+        instruction: String(manualCheck.instruction || autoCheck.instruction || "").trim(),
+        answer_type: String(manualCheck.answer_type || autoCheck.answer_type || "text").trim() || "text",
+        condition_prompt: manualCheck.condition_prompt == null
+          ? (autoCheck.condition_prompt ?? null)
           : String(manualCheck.condition_prompt || "").trim() || null,
         evidence_required: manualCheck.evidence_required === true,
       };
@@ -2986,7 +3014,7 @@ function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}
     };
   });
   const autoGroupKeys = new Set(autoGroups.map((group) => String(group?.group_key || "").trim().toLowerCase()).filter(Boolean));
-  const preservedManualGroups = (Array.isArray(manualState?.groups) ? manualState.groups : [])
+  const preservedManualGroups = (Array.isArray(baselineState?.groups) ? baselineState.groups : [])
     .map((group) => ({
       ...group,
       group_key: String(group?.group_key || "").trim().toLowerCase(),
@@ -3032,6 +3060,7 @@ function buildRequestedChecksAutoSaveState(fieldPack = {}, item = state.item) {
             return {
               key: check.key,
               requested: true,
+              requested_decision: null,
               label: String(check.label || "").trim(),
               instruction: String(check.instruction || "").trim(),
               answer_type: String(check.answer_type || "text").trim() || "text",
@@ -3113,6 +3142,14 @@ function readRequestedChecksEditorState() {
       return {
         key: String(rowNode.querySelector("[data-check-field='key']")?.value || "").trim().toLowerCase(),
         requested: rowNode.querySelector("[data-check-field='requested']")?.checked === true,
+        requested_decision: (() => {
+          const explicitDecision = String(
+            rowNode.querySelector("[data-check-field='requested_decision']")?.value
+            || (typeof rowNode.getAttribute === "function" ? rowNode.getAttribute("data-requested-decision") : "")
+            || ""
+          ).trim().toLowerCase();
+          return explicitDecision === "selected" || explicitDecision === "rejected" ? explicitDecision : null;
+        })(),
         label: String(rowNode.querySelector("[data-check-field='label']")?.value || "").trim(),
         instruction: String(rowNode.querySelector("[data-check-field='instruction']")?.value || "").trim(),
         answer_type: answerType,
@@ -3153,12 +3190,12 @@ function buildRequestedCheckCompactGroups(requestedChecks = { version: 1, groups
   const compactMap = new Map([
     ["cta_contact", { key: "cta_contact", label: "CTA Review", checks: [] }],
     ["taxonomy", { key: "taxonomy", label: "Suggested Focus", checks: [] }],
-    ["custom", { key: "custom", label: "Article context", checks: [] }],
   ]);
   const groups = Array.isArray(requestedChecks?.groups) ? requestedChecks.groups : [];
   groups.forEach((group) => {
     const groupKey = String(group?.group_key || "").trim().toLowerCase();
-    const target = compactMap.get(compactMap.has(groupKey) ? groupKey : "custom");
+    const target = compactMap.get(groupKey);
+    if (!target) return;
     (Array.isArray(group?.checks) ? group.checks : []).forEach((check) => target.checks.push(check));
   });
   return Array.from(compactMap.values()).filter((group) => group.checks.length > 0);
@@ -4403,7 +4440,10 @@ function buildFieldPackApiPayload() {
       requestedCheckItem
     );
     if (Array.isArray(mergedRequestedChecksJson?.groups) && mergedRequestedChecksJson.groups.length > 0) {
-      requestedChecksJson = mergedRequestedChecksJson;
+      requestedChecksJson = mergeRequestedChecksForSave(
+        mergedRequestedChecksJson,
+        savedRequestedChecksJson || { version: 1, groups: [] }
+      );
     }
   } else if (Array.isArray(savedRequestedChecksJson?.groups) && savedRequestedChecksJson.groups.length > 0) {
     requestedChecksJson = mergeRequestedChecksAutoAndManualState(
@@ -5987,6 +6027,8 @@ function wire() {
     const groupNode = target.closest("[data-requested-group]");
     if (!groupNode) return;
     if (target.getAttribute("data-action") === "add-requested-check") {
+      event.preventDefault();
+      return;
       const current = readRequestedChecksEditorState();
       const customGroup = current.groups.find((group) => group.group_key === "custom");
       const nextIndex = Array.isArray(customGroup?.checks) ? customGroup.checks.length + 1 : 1;
@@ -6016,6 +6058,19 @@ function wire() {
       renderStepFourGuides();
       renderRequestedChecksPreview();
     }
+  });
+  qs("fp-requested-checks-editor")?.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.getAttribute("data-check-field") !== "requested") return;
+    const rowNode = target.closest("[data-requested-check-row]");
+    if (!rowNode) return;
+    const activationMode = String(rowNode.getAttribute("data-check-activation-mode") || "").trim().toLowerCase();
+    const required = rowNode.getAttribute("data-check-required") === "true" || activationMode === "required";
+    const decisionNode = rowNode.querySelector("[data-check-field='requested_decision']");
+    const nextDecision = required ? "" : (target.checked ? "selected" : "rejected");
+    rowNode.setAttribute("data-requested-decision", nextDecision);
+    if (decisionNode) decisionNode.value = nextDecision;
   });
 
 
