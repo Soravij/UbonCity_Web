@@ -547,6 +547,17 @@ export function getTaxonomyCatalogEntriesForItem(item = {}) {
   return getTaxonomyCatalogEntriesForCategory(category, itemType);
 }
 
+function parseStrictFiniteNumericInput(rawValue) {
+  if (typeof rawValue === "number") {
+    return Number.isFinite(rawValue) ? rawValue : null;
+  }
+  if (typeof rawValue !== "string") return null;
+  const trimmed = rawValue.trim();
+  if (!trimmed) return null;
+  const numeric = Number(trimmed);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 export function normalizeTaxonomyCatalogSuggestedValue(entryOrKey, rawValue) {
   const entry = typeof entryOrKey === "string"
     ? getTaxonomyBaseDefinition(entryOrKey)
@@ -575,7 +586,7 @@ export function normalizeTaxonomyCatalogSuggestedValue(entryOrKey, rawValue) {
   }
   if (answerType === "number_with_unit") {
     if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) return null;
-    const numberValue = Number(rawValue.number);
+    const numberValue = parseStrictFiniteNumericInput(rawValue.number);
     const unitValue = String(rawValue.unit || "").trim();
     if (!Number.isFinite(numberValue)) return null;
     if (!unitValue || !Array.isArray(entry.unit_options) || !entry.unit_options.includes(unitValue)) return null;

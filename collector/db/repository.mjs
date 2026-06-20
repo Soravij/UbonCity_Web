@@ -1291,11 +1291,7 @@ function isRequestedCheckAnswerComplete(row = {}, schema = null) {
   if (answerType === "number_with_unit") {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
     const hasUnitOptions = Array.isArray(schema?.unit_options) && schema.unit_options.length > 0;
-    const rawNumber = typeof value.number === "string" ? value.number.trim() : value.number;
-    if (rawNumber == null || rawNumber === "") return false;
-    const numeric = typeof rawNumber === "number"
-      ? rawNumber
-      : Number(rawNumber);
+    const numeric = parseStrictFiniteNumericInput(value.number);
     if (!Number.isFinite(numeric)) return false;
     if (!hasUnitOptions) return true;
     const unitValue = value.unit == null ? null : String(value.unit || "").trim() || null;
@@ -1305,6 +1301,17 @@ function isRequestedCheckAnswerComplete(row = {}, schema = null) {
     return true;
   }
   return true;
+}
+
+function parseStrictFiniteNumericInput(rawValue) {
+  if (typeof rawValue === "number") {
+    return Number.isFinite(rawValue) ? rawValue : null;
+  }
+  if (typeof rawValue !== "string") return null;
+  const trimmed = rawValue.trim();
+  if (!trimmed) return null;
+  const numeric = Number(trimmed);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function validateRequestedCheckReturnsForFinalSubmission(requestedCheckReturns = {}, schemaMap = null, fieldName = "field_return_payload_json.requested_check_returns") {
@@ -1384,9 +1391,11 @@ function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName, opt
         return { number: rawValue, unit: null };
       }
       if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) return null;
-      const rawNumber = typeof rawValue.number === "string" ? rawValue.number.trim() : rawValue.number;
-      const numberIsEmpty = rawNumber == null || rawNumber === "";
-      const numeric = numberIsEmpty ? null : Number(rawNumber);
+      const hasRawNumberField = Object.prototype.hasOwnProperty.call(rawValue, "number");
+      const numberIsEmpty = !hasRawNumberField
+        || rawValue.number == null
+        || (typeof rawValue.number === "string" && rawValue.number.trim() === "");
+      const numeric = numberIsEmpty ? null : parseStrictFiniteNumericInput(rawValue.number);
       const unitValue = rawValue.unit == null ? null : String(rawValue.unit || "").trim() || null;
       if (numberIsEmpty) {
         if (unitValue && hasUnitOptions && !schema.unit_options.includes(unitValue)) {

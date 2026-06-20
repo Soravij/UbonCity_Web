@@ -236,6 +236,52 @@ test("field pack normalizer partially filters invalid multi_select taxonomy sugg
   });
 });
 
+test("field pack normalizer uses strict numeric parsing for number_with_unit taxonomy suggestions", () => {
+  const invalidInputs = [false, [], ["5"], {}, "", " "];
+  for (const invalidNumber of invalidInputs) {
+    const normalized = normalizeFieldPack({
+      field_pack: {
+        ...fieldPackResponse().field_pack,
+        ai_taxonomy_json: {
+          category: "activities",
+          suggested_checks: [
+            { taxonomy_key: "typical_duration", suggested_value: { number: invalidNumber, unit: "minutes" } },
+          ],
+        },
+      },
+    }, { item: createItem({ category: "activities" }) });
+
+    assert.deepEqual(normalized.ai_taxonomy_json, {
+      category: "activities",
+      suggested_checks: [
+        { taxonomy_key: "typical_duration" },
+      ],
+    });
+  }
+
+  const acceptedInputs = [0, "0", 120, "120"];
+  for (const acceptedNumber of acceptedInputs) {
+    const normalized = normalizeFieldPack({
+      field_pack: {
+        ...fieldPackResponse().field_pack,
+        ai_taxonomy_json: {
+          category: "activities",
+          suggested_checks: [
+            { taxonomy_key: "typical_duration", suggested_value: { number: acceptedNumber, unit: "minutes" } },
+          ],
+        },
+      },
+    }, { item: createItem({ category: "activities" }) });
+
+    assert.deepEqual(normalized.ai_taxonomy_json, {
+      category: "activities",
+      suggested_checks: [
+        { taxonomy_key: "typical_duration", suggested_value: { number: Number(acceptedNumber), unit: "minutes" } },
+      ],
+    });
+  }
+});
+
 test("external agent engine normalizes visual context and field pack responses", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];

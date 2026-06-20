@@ -2687,6 +2687,12 @@ test("assignment submission enforces immutable number_with_unit schema validatio
     });
 
     assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload(120)), /incomplete requested return keys: taxonomy\.typical_duration/);
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: false, unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: [], unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: ["5"], unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: {}, unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: "", unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: " ", unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
     assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: 120, unit: null })), /invalid unit/);
     assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: 120, unit: "days" })), /invalid unit/);
 
@@ -2695,6 +2701,31 @@ test("assignment submission enforces immutable number_with_unit schema validatio
 
     ctx.repo.updateAssignmentState(assignmentId, "submitted", "tester@local", { actor_role: "user", reason_code: "submission_created" });
     ctx.repo.updateAssignmentState(assignmentId, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "needs_revision" });
+
+    const acceptedString = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "resubmitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          ...accepted.field_return_payload_json.requested_check_returns,
+          "taxonomy.typical_duration": { checked: true, value: { number: "120", unit: "minutes" } },
+        },
+      },
+    });
+    assert.deepEqual(acceptedString.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 120, unit: "minutes" });
+    const acceptedZeroString = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "resubmitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          ...accepted.field_return_payload_json.requested_check_returns,
+          "taxonomy.typical_duration": { checked: true, value: { number: "0", unit: "minutes" } },
+        },
+      },
+    });
+    assert.deepEqual(acceptedZeroString.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 0, unit: "minutes" });
 
     const zeroAccepted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
