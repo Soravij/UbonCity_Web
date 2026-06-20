@@ -142,9 +142,18 @@ Placeholders:
 
 - Clean owns the canonical main category.
 - Current canonical category path is `item.category -> buildFieldPackHandoffPackage(...) -> handoffPackage.niche`.
+- CTA/contact is separate from taxonomy.
+- CTA/contact is place-only.
+- Standard CTA checks for place are `phone`, `line_url`, `facebook_url`, `website_url`, and `primary_cta`.
+- Standard CTA checks for place are always requested for human verification.
+- `requested=true` means a human must verify the field, including false, absent, or not found.
+- AI may suggest CTA/taxonomy values but cannot confirm facts.
+- Work Return and human review remain the confirmation source.
 - Work Return recipients must not change category in the assignment return UI.
 - Taxonomy catalog entries must use stable real check keys, not generic placeholder rows.
 - `taxonomy.category`, `taxonomy.subtype`, and `taxonomy.tags` are reserved metadata keys, not editable Curation questions.
+- Real taxonomy categories are `attractions`, `activities`, `hotels`, `cafes`, `restaurants`, and `transport`.
+- Coordinates, map identity/link, Google Maps opening hours, and CTA/contact are excluded from taxonomy.
 - Category defaults are the baseline for Curation.
 - Mapping may add category-relevant checks.
 - AI may add checks and suggested values.
@@ -156,9 +165,17 @@ Placeholders:
 - One taxonomy check maps to one Work Return row.
 - Each visible Curation row supports a main value plus optional `condition_note`.
 - Hidden legacy rows remain preserved through draft merge and payload handling for backward compatibility.
+- `requested_check_returns` remains the canonical Work Return payload.
 - Issued assignments must stay stable when the live taxonomy catalog changes.
 - Any change to an issued handoff requires explicit repair or reissue behavior.
 - If a handoff snapshot contains no actual resolved taxonomy checks, the Work Return Curation section stays hidden.
+- Required taxonomy means the field worker must answer, not that the value must be true.
+- Unknown/non-catalog observations must go to handoff guidance, `must_ask_question`, or Work Return additional notes for writer consideration.
+- Unknown observations do not become catalog keys automatically.
+- Do not create new `custom` groups or new `custom.*` keys in the active taxonomy/requested-check flow.
+- Do not include new `custom.*` rows in newly created handoff snapshots.
+- Do not project `custom.*` into canonical taxonomy facts or Homepage Signals filtering.
+- Preserve legacy `custom.*` data at rest and preserve immutable old snapshots for compatibility.
 
 Responsibility split:
 - `default`: category taxonomy defaults owned by the future taxonomy resolver/catalog

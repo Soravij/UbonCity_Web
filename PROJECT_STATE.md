@@ -1,50 +1,49 @@
 # UbonCity Project State
 
+Last Updated: 2026-06-20
+
 ## Current Branch
 
-- `feature/assignment-return-cta-taxonomy-ui`
+- `feature/taxonomy-catalog-resolver`
+- implementation baseline commit: `372bb50`
 
-## Latest Completed Fix
+## CTA / Contact Milestone
 
-- Assignment Work Return CTA compact list and locked Curation snapshot render behavior.
+Status:
+- complete on the current branch
 
-## 2026-06-19 CTA / Curation Lock
+Locked CTA rules:
+- CTA/contact is separate from taxonomy.
+- Standard CTA checks are place-only and always requested for place items:
+  - `phone`
+  - `line_url`
+  - `facebook_url`
+  - `website_url`
+  - `primary_cta`
+- `requested=true` means a human must verify the item field, including confirming false, absent, or not found.
+- AI may suggest values, but AI cannot confirm CTA facts.
+- Work Return and human review remain the confirmation source.
+- Existing issued assignment snapshots remain immutable.
 
-Completed:
-- CTA Work Return compact UI completed.
-- CTA rows share the approved upload-row visual rules.
-- Curation rows support the current shared row pattern with `condition_note`.
-- Reserved placeholder keys `taxonomy.category`, `taxonomy.subtype`, and `taxonomy.tags` are hidden from Work Return.
-- Curation stays hidden when the handoff snapshot contains no actual resolved taxonomy checks.
-- Clean category source is `item.category -> handoffPackage.niche`.
-- Tests cover hidden-row draft and payload preservation for legacy keys and `custom.*`.
+## Taxonomy Status On This Branch
 
-Pending:
-- Taxonomy catalog / defaults resolver is not implemented yet.
-- Category mapping is not implemented yet.
-- Taxonomy Agent additive check generation is not implemented yet.
-- Future resolver must combine defaults + mapping + AI into a resolved handoff snapshot.
-- Existing assignment snapshots must remain stable; changes require explicit repair/reissue behavior.
-- Next task is taxonomy catalog + resolver/mapping design, not another Work Return UI redesign.
+- Taxonomy code currently present on `feature/taxonomy-catalog-resolver` is implementation scaffolding.
+- The current scaffold is not the approved final Taxonomy v1 catalog or defaults.
+- Final Taxonomy v1 catalog work belongs to the next branch: `feature/taxonomy-v1-catalog`.
+- Backend curated taxonomy storage remains pending.
+- Homepage Signals / Content Pool taxonomy integration remains pending.
 
-## Confirmed Working
+## Confirmed Direction
 
-- Clean media select works.
-- Clean set cover works.
-- Clean AI Draft / Agent workflow works.
-- Publish/Admin Review readiness safety remains expected through local media readiness checks.
-
-## Key Commits
-
-- `8127f98` Relax clean media gate while preserving publish media checks
-- `7b9ec8b` Demote clean image readiness to AI draft warning
-- Restore clean media selection while keeping publish readiness
-
-## Current Media Decision
-
-- Clean stage media selection/cover is workflow context.
-- Publish readiness still requires local usable media.
-- Local-only media blocker belongs to late publish/admin-review gates, not early Clean selection.
+- CTA/contact milestone closes on this branch through documentation only.
+- Taxonomy v1 expands next in a new branch before downstream backend/Homepage integration.
+- Real taxonomy categories for the next branch are:
+  - `attractions`
+  - `activities`
+  - `hotels`
+  - `cafes`
+  - `restaurants`
+  - `transport`
 
 ## Policy Reference
 
@@ -52,9 +51,11 @@ Pending:
 
 ## Pending / Update Later
 
+- Taxonomy v1 catalog implementation on `feature/taxonomy-v1-catalog`
+- Backend curated taxonomy storage/filtering
+- Homepage Signals / Content Pool taxonomy integration
 - Full role matrix
 - Full publish workflow state machine
-- Taxonomy catalog/resolver and mapping implementation
 - Translation policy
 - Production deployment policy
 - Backup/restore policy
