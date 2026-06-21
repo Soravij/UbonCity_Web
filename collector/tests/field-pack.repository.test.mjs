@@ -1078,7 +1078,7 @@ test("buildAssignmentHandoffPreview includes only requested=true requested check
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.length, 5);
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.[0]?.key, "phone");
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.every((check) => check.requested === true), true);
-    assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.[0]?.suggested_value, null);
+    assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "cta_contact")?.checks?.[0]?.suggested_value, "0812345678");
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "taxonomy")?.checks?.length, 6);
     assert.equal(requestedChecks?.groups?.find((group) => group.group_key === "taxonomy")?.checks?.every((check) => check.requested === true), true);
   } finally {
@@ -1441,7 +1441,7 @@ test("createAssignmentFromReadiness snapshots CTA and taxonomy requested checks 
       requestedChecks?.groups?.reduce((sum, group) => sum + (Array.isArray(group?.checks) ? group.checks.length : 0), 0),
       11
     );
-    assert.equal(requestedChecks?.groups?.[0]?.checks?.[0]?.suggested_value, null);
+    assert.equal(requestedChecks?.groups?.[0]?.checks?.[0]?.suggested_value, "0801112222");
     assert.equal(parkingCheck?.condition_prompt, "ถ้าที่จอดจำกัด ร่วมใช้ หรือมีค่าใช้จ่าย ให้ระบุเงื่อนไข");
     assert.equal(parkingCheck?.source, null);
     assert.equal(petFriendlyCheck?.key, "pet_friendly");
@@ -1480,6 +1480,7 @@ test("buildAssignmentHandoffPreview always includes the required CTA checklist f
     assert.equal(ctaGroup.checks.length, 5);
     assert.equal(ctaGroup.checks.every((check) => check.requested === true), true);
     assert.equal(ctaGroup.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
+    assert.equal(ctaGroup.checks.find((check) => check.key === "facebook_url")?.suggested_value, "https://facebook.com/example");
   } finally {
     ctx.cleanup();
   }

@@ -3360,11 +3360,83 @@ function extractVerifiedFactValue(verifiedFacts = [], aliases = []) {
   return "";
 }
 
-function extractThaiPhoneCandidate(value) {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  const match = text.match(/(?:\+66[-\s]?)?(?:0\d{1,2}[-\s]?\d{3}[-\s]?\d{4}|\d{9,10})/);
-  return match ? String(match[0]).trim() : "";
+function normalizeThaiPhoneGuidanceValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!/^\+?[0-9\s\-()]+$/.test(raw)) return "";
+  const plusCount = (raw.match(/\+/g) || []).length;
+  if (plusCount > 1 || (plusCount === 1 && !raw.startsWith("+"))) return "";
+  const compact = raw.replace(/[\s\-()]/g, "");
+  if (!compact) return "";
+  let localNumber = compact;
+  if (compact.startsWith("+66")) {
+    const nationalNumber = compact.slice(3);
+    if (!nationalNumber || nationalNumber.startsWith("0")) return "";
+    localNumber = `0${nationalNumber}`;
+  } else if (compact.startsWith("66")) {
+    const nationalNumber = compact.slice(2);
+    if (!nationalNumber || nationalNumber.startsWith("0")) return "";
+    localNumber = `0${nationalNumber}`;
+  } else if (compact.startsWith("+")) {
+    return "";
+  }
+  return /^0\d{8,9}$/.test(localNumber) ? localNumber : "";
+}
+
+function normalizePrimaryCtaGuidanceValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "map" || normalized === "phone" || normalized === "line" ? normalized : "";
+}
+
+function normalizeGuidanceUrlByType(value, type = "website") {
+  const raw = String(value || "").trim();
+  if (!raw || !/^https?:\/\//i.test(raw)) return "";
+  try {
+    const sanitizedRaw = raw.replace(/[.,;!?:。ฯ،]+$/u, "");
+    const url = new URL(sanitizedRaw);
+    url.hash = "";
+    const normalized = url.toString();
+    const host = String(url.hostname || "").trim().toLowerCase().replace(/^www\./, "");
+    const path = String(url.pathname || "").toLowerCase();
+    if (type === "facebook") {
+      return host === "facebook.com" || host.endsWith(".facebook.com") || host === "fb.com" ? normalized : "";
+    }
+    if (type === "line") {
+      return host === "line.me" || host.endsWith(".line.me") || host === "lin.ee" ? normalized : "";
+    }
+    if (
+      host === "facebook.com"
+      || host.endsWith(".facebook.com")
+      || host === "fb.com"
+      || host === "line.me"
+      || host.endsWith(".line.me")
+      || host === "lin.ee"
+    ) {
+      return "";
+    }
+    if (
+      host.endsWith("wongnai.com")
+      || host === "maps.app.goo.gl"
+      || host === "g.page"
+      || (host === "goo.gl" && path.startsWith("/maps"))
+      || host === "maps.google.com"
+      || host === "google.com"
+      || host.startsWith("maps.google.")
+      || host === "lh3.googleusercontent.com"
+      || host.endsWith(".googleusercontent.com")
+      || host.endsWith(".fbcdn.net")
+      || host.startsWith("scontent.")
+      || host === "streetviewpixels-pa.googleapis.com"
+      || host === "api.mapbox.com"
+      || (host.includes("google.") && (url.searchParams.has("cid") || path.includes("/maps") || path.includes("/place/")))
+      || /\.(jpg|jpeg|png|webp|gif|svg|mp4)$/i.test(path)
+    ) {
+      return "";
+    }
+    return normalized;
+  } catch {
+    return "";
+  }
 }
 
 function collectGuidanceReferenceUrls(references = []) {
@@ -3727,8 +3799,8 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
     phone: ["phone", "phone_number", "telephone", "tel", "contact.phone", "cta.phone", "national_phone_number", "international_phone_number"],
     facebook_url: ["facebook_url", "facebook", "facebookUrl", "contact.facebook_url", "cta.facebook_url"],
     line_url: ["line_url", "line", "lineUrl", "contact.line_url", "cta.line_url"],
-    website_url: ["website_url", "website", "websiteUrl", "contact.website_url", "cta.website_url", "source_url"],
-    primary_cta: ["primary_cta", "cta.primary_cta", "map_url", "location_url"],
+    website_url: ["website_url", "website", "websiteUrl", "contact.website_url", "cta.website_url"],
+    primary_cta: ["primary_cta", "cta.primary_cta"],
   };
 
   const ctaRows = isPlaceItem
@@ -3745,10 +3817,18 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
         cleanCandidates.push({ value: curatedValue.value, statuses: ["suggested"] });
       }
       if (hasRequestedCheckMeaningfulValue(aiValue.value)) {
+        let normalizedAiValue = aiValue.value;
+        if (key === "phone") normalizedAiValue = normalizeThaiPhoneGuidanceValue(aiValue.value);
+        if (key === "facebook_url") normalizedAiValue = normalizeGuidanceUrlByType(aiValue.value, "facebook");
+        if (key === "line_url") normalizedAiValue = normalizeGuidanceUrlByType(aiValue.value, "line");
+        if (key === "website_url") normalizedAiValue = normalizeGuidanceUrlByType(aiValue.value, "website");
+        if (key === "primary_cta") normalizedAiValue = normalizePrimaryCtaGuidanceValue(aiValue.value);
+        if (normalizedAiValue) {
         cleanCandidates.push({
-          value: aiValue.value,
-          statuses: aiValue.found ? ["found"] : ["ai filled", "needs verification"],
+          value: normalizedAiValue,
+          statuses: ["ai filled", "needs verification"],
         });
+        }
       }
       [
         sourceObjects.publishableSource,
@@ -3760,28 +3840,21 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
         sourceObjects.writerCta,
       ].forEach((source) => {
         const aliasValue = readGuidanceAliasValue(source, aliases);
-        if (aliasValue != null) cleanCandidates.push({ value: aliasValue, statuses: ["ai filled", "needs verification"] });
+        if (aliasValue == null) return;
+        let normalizedAliasValue = aliasValue;
+        if (key === "phone") normalizedAliasValue = normalizeThaiPhoneGuidanceValue(aliasValue);
+        if (key === "facebook_url") normalizedAliasValue = normalizeGuidanceUrlByType(aliasValue, "facebook");
+        if (key === "line_url") normalizedAliasValue = normalizeGuidanceUrlByType(aliasValue, "line");
+        if (key === "website_url") normalizedAliasValue = normalizeGuidanceUrlByType(aliasValue, "website");
+        if (key === "primary_cta") normalizedAliasValue = normalizePrimaryCtaGuidanceValue(aliasValue);
+        if (normalizedAliasValue) cleanCandidates.push({ value: normalizedAliasValue, statuses: ["ai filled", "needs verification"] });
       });
       if (key === "facebook_url" && referencesByUse.facebook_url) {
-        cleanCandidates.push({ value: referencesByUse.facebook_url, statuses: ["suggested"] });
-      }
-      if (key === "phone") {
-        const phoneFromFacts = extractThaiPhoneCandidate(
-          [
-            ...toReviewList(sourceObjects.writerNotesContract?.verification?.verified_facts),
-            String(fieldPack?.writer_notes || ""),
-          ].join(" | ")
-        );
-        if (phoneFromFacts) cleanCandidates.push({ value: phoneFromFacts, statuses: ["found", "verified"] });
+        const facebookUrl = normalizeGuidanceUrlByType(referencesByUse.facebook_url, "facebook");
+        if (facebookUrl) cleanCandidates.push({ value: facebookUrl, statuses: ["suggested", "needs verification"] });
       }
       if (key === "primary_cta" && referencesByUse.map_url) {
         cleanCandidates.unshift({ value: "map", statuses: ["suggested"] });
-      }
-      if (key === "primary_cta") {
-        const mapCandidate = cleanCandidates.find((candidate) => String(normalizeGuidanceDisplayValue(candidate?.value, key) || "").trim());
-        if (mapCandidate && !hasRequestedCheckMeaningfulValue(confirmedValue.value) && !fieldReturn?.found) {
-          cleanCandidates.unshift({ value: "map", statuses: ["suggested"] });
-        }
       }
       const requestedCheck = selectedChecks.find((selected) => String(selected?.key || "").trim().toLowerCase() === key) || null;
       const resolvedRow = resolveGuidanceRowValue({

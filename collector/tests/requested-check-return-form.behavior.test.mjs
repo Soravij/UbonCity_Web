@@ -339,12 +339,14 @@ const readAssignmentRequestedCheckReturnDraftFromForm = loadNamedFunction(appJs,
 
 const normalizeRequestedCheckAnswerType = loadNamedFunction(repositoryJs, "normalizeRequestedCheckAnswerType");
 const normalizeRequestedCheckReturnKey = loadNamedFunction(repositoryJs, "normalizeRequestedCheckReturnKey");
+const parseStrictFiniteNumericInput = loadNamedFunction(repositoryJs, "parseStrictFiniteNumericInput");
 const inferRequestedCheckAnswerTypeFromReturnRow = loadNamedFunction(repositoryJs, "inferRequestedCheckAnswerTypeFromReturnRow", {
   normalizeRequestedCheckAnswerType,
   hasMeaningfulValue,
 });
 const normalizeRequestedCheckReturnValue = loadNamedFunction(repositoryJs, "normalizeRequestedCheckReturnValue", {
   normalizeOptionalUrlValue,
+  parseStrictFiniteNumericInput,
   normalizeStringListInput,
   normalizeJsonSafeValue,
 });
@@ -435,6 +437,8 @@ test("requested-check section uses namespaced keys and hides reserved taxonomy m
   assert.equal((sectionHtml.match(/class="assignment-capture-row requested-check-row-main"/g) || []).length, 2);
   assert.equal((sectionHtml.match(/class="assignment-capture-title requested-check-row-label"/g) || []).length, 2);
   assert.equal((sectionHtml.match(/class="assignment-capture-actions requested-check-row-status"/g) || []).length, 2);
+  assert.equal((sectionHtml.match(/class="requested-check-row-secondary"/g) || []).length, 1);
+  assert.match(sectionHtml, /หลักฐาน \(จำเป็น\)/);
   assert.equal((sectionHtml.match(/class="requested-check-cta-list"/g) || []).length, 0);
   assert.equal((sectionHtml.match(/class="requested-check-cta-card"/g) || []).length, 0);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.category"'), false);
@@ -482,8 +486,36 @@ test("requested-check draft prefills suggested values without auto-checking name
   const draft = buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage);
   assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, false);
   assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0812345678");
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].evidence, "");
   assert.equal(draft.requested_check_returns["taxonomy.tags"].checked, false);
   assert.deepEqual(draft.requested_check_returns["taxonomy.tags"].value, ["family", "cafe"]);
+});
+
+test("requested-check draft prefills CTA values for new handoffs with checked false", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            { key: "phone", requested: true, label: "Phone", answer_type: "phone", suggested_value: "0659391488", evidence_required: true },
+            { key: "facebook_url", requested: true, label: "Facebook", answer_type: "url", suggested_value: "https://www.facebook.com/hippieroaster/?locale=th_TH" },
+          ],
+        },
+      ],
+    },
+  };
+
+  const draft = buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage);
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, false);
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0659391488");
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].evidence, "");
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].suggested_value, "0659391488");
+  assert.equal(draft.requested_check_returns["cta_contact.facebook_url"].checked, false);
+  assert.equal(draft.requested_check_returns["cta_contact.facebook_url"].value, "https://www.facebook.com/hippieroaster/?locale=th_TH");
+  assert.equal(Object.prototype.hasOwnProperty.call(draft.requested_check_returns, "cta_contact.primary_cta"), false);
 });
 
 test("requested-check section renders CTA before legacy custom groups and hides reserved taxonomy placeholder rows", () => {
@@ -1249,6 +1281,33 @@ test("requested-check row state toggles structured multi_select children without
   assert.equal(valueMultiA.checked, true);
 });
 
+test("requested-check row html renders evidence-required CTA controls in the visible secondary surface", () => {
+  const html = buildAssignmentRequestedCheckReturnRowHtml(
+    {
+      return_key: "cta_contact.phone",
+      group_key: "cta_contact",
+      check_key: "phone",
+      label: "Phone",
+      answer_type: "phone",
+      suggested_value: "0659391488",
+      evidence_required: true,
+    },
+    {
+      checked: false,
+      value: "0659391488",
+      evidence: "",
+    },
+    {
+      showConditionNote: false,
+    }
+  );
+
+  assert.match(html, /class="requested-check-row-secondary"/);
+  assert.match(html, /หลักฐาน \(จำเป็น\)/);
+  assert.match(html, /data-requested-check-field="evidence"/);
+  assert.doesNotMatch(html, /found|verified/);
+});
+
 test("requested-check form reader returns canonical multi_select array from structured controls", () => {
   const multiSelectRowNode = {
     getAttribute(name) {
@@ -1479,7 +1538,7 @@ test("requested-check taxonomy section is omitted when only reserved placeholder
   assert.doesNotMatch(sectionHtml, /data-requested-check-group="taxonomy"|Curation|ตัวเลือกเพิ่มเติม|taxonomy\.category|taxonomy\.tags/);
 });
 
-test("requested-check mobile CSS keeps one-column CTA rows without secondary controls", () => {
+test("requested-check mobile CSS keeps one-column CTA rows with stacked secondary controls", () => {
   assert.match(stylesCss, /@media \(max-width: 900px\)/);
   assert.match(stylesCss, /requested-check-row-main/);
   assert.match(stylesCss, /requested-check-cta-section/);
@@ -1520,7 +1579,8 @@ test("requested-check mobile CSS keeps one-column CTA rows without secondary con
     /#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-cta-row\s*\+\s*\.requested-check-cta-row\s*\{[\s\S]*?margin-top:\s*4px;/
   );
   assert.match(stylesCss, /requested-check-row-value \{\s*grid-column: 2 \/ -1;/);
-  assert.doesNotMatch(stylesCss, /requested-check-row-secondary|requested-check-row-details/);
+  assert.match(stylesCss, /requested-check-row-secondary/);
+  assert.match(stylesCss, /requested-check-row-secondary-label/);
 });
 
 test("requested-check payload builder keeps field_return_payload_json separate and strips internal metadata", () => {

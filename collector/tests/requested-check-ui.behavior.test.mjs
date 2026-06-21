@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { filterRequestedChecksForNewHandoff, resolveRequestedChecksWithCatalog } from "../server/taxonomy-resolver.mjs";
 import { TAXONOMY_CATEGORY_MATRIX } from "../server/taxonomy-catalog.mjs";
+import { CTA_PHONE_CASES, CTA_URL_CASES } from "./cta-contact-parity-cases.mjs";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const itemEditorJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.js"), "utf8");
@@ -189,7 +190,9 @@ const getGuidanceSourceObjects = loadNamedFunction(itemEditorJs, "getGuidanceSou
 const readGuidanceAliasValue = loadNamedFunction(itemEditorJs, "readGuidanceAliasValue");
 const normalizeGuidanceDisplayValue = loadNamedFunction(itemEditorJs, "normalizeGuidanceDisplayValue");
 const extractVerifiedFactValue = loadNamedFunction(itemEditorJs, "extractVerifiedFactValue");
-const extractThaiPhoneCandidate = loadNamedFunction(itemEditorJs, "extractThaiPhoneCandidate");
+const normalizeThaiPhoneGuidanceValue = loadNamedFunction(itemEditorJs, "normalizeThaiPhoneGuidanceValue");
+const normalizePrimaryCtaGuidanceValue = loadNamedFunction(itemEditorJs, "normalizePrimaryCtaGuidanceValue");
+const normalizeGuidanceUrlByType = loadNamedFunction(itemEditorJs, "normalizeGuidanceUrlByType");
 const collectGuidanceReferenceUrls = loadNamedFunction(itemEditorJs, "collectGuidanceReferenceUrls");
 const truncateRequestedGuidanceValue = loadNamedFunction(itemEditorJs, "truncateRequestedGuidanceValue");
 const buildRequestedCheckStatusRow = loadNamedFunction(itemEditorJs, "buildRequestedCheckStatusRow", {
@@ -259,7 +262,9 @@ const buildRequestedChecksCompactSummaryData = loadNamedFunction(itemEditorJs, "
   getGuidanceSourceObjects,
   readGuidanceAliasValue,
   normalizeGuidanceDisplayValue,
-  extractThaiPhoneCandidate,
+  normalizeThaiPhoneGuidanceValue,
+  normalizePrimaryCtaGuidanceValue,
+  normalizeGuidanceUrlByType,
   collectGuidanceReferenceUrls,
   resolveGuidanceRowValue,
   resolveItemGuidanceScope,
@@ -1285,9 +1290,154 @@ test("CTA review resolves phone from clean source aliases before marking missing
   }, { type: "place", category: "restaurants" }), { type: "place", category: "restaurants" });
 
   const phoneRow = summary.ctaRows.find((row) => row.key === "phone");
-  assert.equal(phoneRow?.value, "096-3435931");
+  assert.equal(phoneRow?.value, "0963435931");
   assert.doesNotMatch(phoneRow?.value || "", /No value/i);
   assert.ok(!phoneRow?.statuses.includes("missing"));
+});
+
+test("CTA phone normalization in the compact review path is strict about accepted formats", () => {
+  CTA_PHONE_CASES.accepted.forEach((value) => {
+    assert.ok(normalizeThaiPhoneGuidanceValue(value), `expected accepted phone: ${value}`);
+  });
+  CTA_PHONE_CASES.rejected.forEach((value) => {
+    assert.equal(normalizeThaiPhoneGuidanceValue(value), "", `expected rejected phone: ${value}`);
+  });
+});
+
+test("browser CTA normalizers stay aligned with canonical parity corpus", () => {
+  CTA_PHONE_CASES.accepted.forEach((value) => {
+    assert.ok(normalizeThaiPhoneGuidanceValue(value), `browser should accept phone ${value}`);
+  });
+  CTA_PHONE_CASES.rejected.forEach((value) => {
+    assert.equal(normalizeThaiPhoneGuidanceValue(value), "", `browser should reject phone ${value}`);
+  });
+  CTA_URL_CASES.forEach(({ label, type, input, expected }) => {
+    const actual = normalizeGuidanceUrlByType(input, type) || "";
+    assert.equal(actual, expected, `browser parity mismatch for ${label}`);
+  });
+});
+
+test("browser website normalizer accepts official business /maps pages", () => {
+  assert.equal(
+    normalizeGuidanceUrlByType("https://official.example/maps", "website"),
+    "https://official.example/maps"
+  );
+});
+
+test("compact CTA summary does not treat generic source_url as website suggestion", () => {
+  const groups = getRequestedCheckEditorGroups({
+    requested_checks_json: { version: 1, groups: [] },
+    publishable_source: {
+      source_url: "https://reference.example/article",
+    },
+  }, { type: "place", category: "cafes" });
+
+  const summary = buildRequestedChecksCompactSummaryData({
+    requested_checks_json: { version: 1, groups: [] },
+    publishable_source: {
+      source_url: "https://reference.example/article",
+    },
+  }, groups, { type: "place", category: "cafes" });
+
+  const websiteRow = summary.ctaRows.find((row) => row.key === "website_url");
+  assert.equal(Boolean(websiteRow?.value), false);
+  assert.deepEqual(websiteRow?.statuses, ["needs verification"]);
+});
+
+test("compact CTA summary validates source primary_cta aliases before suggesting map", () => {
+  const invalidGroups = getRequestedCheckEditorGroups({
+    requested_checks_json: { version: 1, groups: [] },
+    publishable_source: {
+      primary_cta: "facebook",
+    },
+  }, { type: "place", category: "cafes" });
+  const invalidSummary = buildRequestedChecksCompactSummaryData({
+    requested_checks_json: { version: 1, groups: [] },
+    publishable_source: {
+      primary_cta: "facebook",
+    },
+  }, invalidGroups, { type: "place", category: "cafes" });
+
+  const validGroups = getRequestedCheckEditorGroups({
+    requested_checks_json: { version: 1, groups: [] },
+    publishable_source: {
+      primary_cta: "line",
+    },
+  }, { type: "place", category: "cafes" });
+  const validSummary = buildRequestedChecksCompactSummaryData({
+    requested_checks_json: { version: 1, groups: [] },
+    publishable_source: {
+      primary_cta: "line",
+    },
+  }, validGroups, { type: "place", category: "cafes" });
+
+  const invalidPrimaryRow = invalidSummary.ctaRows.find((row) => row.key === "primary_cta");
+  const validPrimaryRow = validSummary.ctaRows.find((row) => row.key === "primary_cta");
+
+  assert.equal(Boolean(invalidPrimaryRow?.value), false);
+  assert.deepEqual(invalidPrimaryRow?.statuses, ["needs verification"]);
+  assert.equal(validPrimaryRow?.value, "line");
+  assert.deepEqual(validPrimaryRow?.statuses, ["ai filled", "needs verification"]);
+});
+
+test("compact CTA summary keeps source-derived phone and Facebook as needs verification without false verified status", () => {
+  const groups = getRequestedCheckEditorGroups({
+    requested_checks_json: { version: 1, groups: [] },
+    ai_cta_contact_json: {
+      phone: "0659391488",
+      facebook_url: "https://www.facebook.com/hippieroaster/?locale=th_TH",
+    },
+    writer_notes: "cid=4182277082282715109",
+  }, { type: "place", category: "cafes" });
+
+  const summary = buildRequestedChecksCompactSummaryData({
+    requested_checks_json: { version: 1, groups: [] },
+    ai_cta_contact_json: {
+      phone: "0659391488",
+      facebook_url: "https://www.facebook.com/hippieroaster/?locale=th_TH",
+    },
+    writer_notes: "cid=4182277082282715109",
+  }, groups, { type: "place", category: "cafes" });
+
+  const phoneRow = summary.ctaRows.find((row) => row.key === "phone");
+  const facebookRow = summary.ctaRows.find((row) => row.key === "facebook_url");
+
+  assert.equal(phoneRow?.value, "0659391488");
+  assert.deepEqual(phoneRow?.statuses, ["ai filled", "needs verification"]);
+  assert.equal(String(phoneRow?.value || "").includes("4182277082"), false);
+  assert.equal(facebookRow?.value, "https://www.facebook.com/hippieroaster/?locale=th_TH");
+  assert.deepEqual(facebookRow?.statuses, ["ai filled", "needs verification"]);
+});
+
+test("compact CTA summary hides invalid persisted AI CTA values", () => {
+  const groups = getRequestedCheckEditorGroups({
+    requested_checks_json: { version: 1, groups: [] },
+    ai_cta_contact_json: {
+      phone: "4182277082",
+      facebook_url: "https://maps.app.goo.gl/example",
+      website_url: "https://www.wongnai.com/reviews/example",
+    },
+  }, { type: "place", category: "cafes" });
+
+  const summary = buildRequestedChecksCompactSummaryData({
+    requested_checks_json: { version: 1, groups: [] },
+    ai_cta_contact_json: {
+      phone: "4182277082",
+      facebook_url: "https://maps.app.goo.gl/example",
+      website_url: "https://www.wongnai.com/reviews/example",
+    },
+  }, groups, { type: "place", category: "cafes" });
+
+  const phoneRow = summary.ctaRows.find((row) => row.key === "phone");
+  const facebookRow = summary.ctaRows.find((row) => row.key === "facebook_url");
+  const websiteRow = summary.ctaRows.find((row) => row.key === "website_url");
+
+  assert.equal(Boolean(phoneRow?.value), false);
+  assert.deepEqual(phoneRow?.statuses, ["needs verification"]);
+  assert.equal(Boolean(facebookRow?.value), false);
+  assert.deepEqual(facebookRow?.statuses, ["needs verification"]);
+  assert.equal(Boolean(websiteRow?.value), false);
+  assert.deepEqual(websiteRow?.statuses, ["needs verification"]);
 });
 
 test("curation review resolves category from clean source data", () => {
@@ -1418,7 +1568,7 @@ test("facebook reference URL maps into CTA review when ai and curated shells are
   assert.match(primaryCtaRow, /map/i);
 });
 
-test("phone fallback only maps from verified facts when a thai phone pattern is present", () => {
+test("writer_notes verified facts no longer backfill CTA phone without structured CTA candidates", () => {
   const writerNotes = JSON.stringify({
     contract_version: "1",
     taxonomy_version: "page_curation_taxonomy_v1",
@@ -1439,8 +1589,8 @@ test("phone fallback only maps from verified facts when a thai phone pattern is 
   const ctaHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "CTA Review");
   const phoneRow = extractCompactSummaryRow(ctaHtml, "Phone");
 
-  assert.match(phoneRow, /096-3435931/);
-  assert.doesNotMatch(phoneRow, /No value/i);
+  assert.match(phoneRow, /No value/i);
+  assert.doesNotMatch(phoneRow, /096-3435931/);
 });
 
 test("opening hours note stays missing when writer_notes contract has no hours data", () => {
@@ -2105,7 +2255,7 @@ test("CTA review normalizes object-shaped values instead of dumping raw JSON", (
   const ctaHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "CTA Review");
 
   assert.match(ctaHtml, /https:\/\/example\.com/);
-  assert.match(ctaHtml, /found/i);
+  assert.match(ctaHtml, /ai filled/i);
   assert.doesNotMatch(ctaHtml, /\{"checked":false,"found":false,"value":null\}/);
   assert.doesNotMatch(ctaHtml, /\{"checked":true,"found":true,"value":"https:\/\/example\.com"\}/);
 });

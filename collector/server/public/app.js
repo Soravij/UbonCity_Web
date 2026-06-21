@@ -7485,16 +7485,19 @@ function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
 
 function buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row) {
   return `
-    <div class="grid requested-check-row-secondary">
-      <div>
+    <div class="requested-check-row-secondary">
+      <label class="requested-check-row-secondary-field">
+        <span class="requested-check-row-secondary-label">เงื่อนไข</span>
         <input data-requested-check-field="condition_note" type="text" value="${escapeHtml(String(row.condition_note || ""))}" placeholder="เงื่อนไข" />
-      </div>
-      <div>
+      </label>
+      <label class="requested-check-row-secondary-field">
+        <span class="requested-check-row-secondary-label">หลักฐาน</span>
         <input data-requested-check-field="evidence" type="text" value="${escapeHtml(String(row.evidence || ""))}" placeholder="หลักฐาน" />
-      </div>
-      <div>
+      </label>
+      <label class="requested-check-row-secondary-field">
+        <span class="requested-check-row-secondary-label">หมายเหตุ</span>
         <input data-requested-check-field="note" type="text" value="${escapeHtml(String(row.note || ""))}" placeholder="หมายเหตุ" />
-      </div>
+      </label>
     </div>
   `;
 }
@@ -7509,6 +7512,23 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
   const extraClass = rowModifierClass ? ` ${rowModifierClass}` : "";
   const conditionValue = String(row?.condition_note || "");
   const evidenceValue = String(row?.evidence || "");
+  const secondaryFields = [];
+  if (showConditionNote) {
+    secondaryFields.push(`
+      <label class="requested-check-row-secondary-field">
+        <span class="requested-check-row-secondary-label">เงื่อนไข/รายละเอียดเพิ่มเติม</span>
+        <input type="text" data-requested-check-field="condition_note" value="${escapeHtml(conditionValue)}" placeholder="เงื่อนไข/รายละเอียดเพิ่มเติม" ${checked ? "" : "disabled"} />
+      </label>
+    `);
+  }
+  if (showEvidence) {
+    secondaryFields.push(`
+      <label class="requested-check-row-secondary-field">
+        <span class="requested-check-row-secondary-label">หลักฐาน (จำเป็น)</span>
+        <input type="text" data-requested-check-field="evidence" value="${escapeHtml(evidenceValue)}" placeholder="หลักฐาน" ${checked ? "" : "disabled"} />
+      </label>
+    `);
+  }
   return `
     <div class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row${extraClass}" data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
       <div class="assignment-capture-row requested-check-row-main">
@@ -7522,17 +7542,8 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
         <div class="requested-check-row-value">
           ${buildAssignmentRequestedCheckReturnValueInputHtml(row)}
         </div>
-        ${showConditionNote ? `
-          <div class="requested-check-row-condition">
-            <input type="text" data-requested-check-field="condition_note" value="${escapeHtml(conditionValue)}" placeholder="เงื่อนไข/รายละเอียดเพิ่มเติม" ${checked ? "" : "disabled"} />
-          </div>
-        ` : ""}
-        ${showEvidence ? `
-          <div class="requested-check-row-condition">
-            <input type="text" data-requested-check-field="evidence" value="${escapeHtml(evidenceValue)}" placeholder="หลักฐาน" ${checked ? "" : "disabled"} />
-          </div>
-        ` : ""}
       </div>
+      ${secondaryFields.length ? `<div class="requested-check-row-secondary">${secondaryFields.join("")}</div>` : ""}
     </div>
   `;
 }

@@ -121,6 +121,100 @@ test("resolver required keys are always requested and agent-triggered keys defau
   }
 });
 
+test("resolver keeps CTA suggestions suggestion-only and validates saved CTA suggested values", () => {
+  const result = resolveRequestedChecksWithCatalog({
+    requestedChecks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: true,
+              requested_decision: null,
+              label: "Phone",
+              instruction: "stale",
+              answer_type: "phone",
+              suggested_value: "4182277082",
+              source: { kind: "manual" },
+            },
+            {
+              key: "facebook_url",
+              requested: true,
+              requested_decision: null,
+              label: "Facebook URL",
+              instruction: "stale",
+              answer_type: "url",
+              suggested_value: "https://maps.google.com/?cid=4182277082282715109",
+              source: { kind: "manual" },
+            },
+          ],
+        },
+      ],
+    },
+    item: createPlaceItem({ category: "cafes" }),
+    aiCtaContact: {
+      phone: "4182277082",
+      facebook_url: "https://maps.google.com/?cid=4182277082282715109",
+      website_url: "https://www.wongnai.com/reviews/842964bb159942f887e7cc5244fda433",
+      primary_cta: "facebook",
+    },
+  });
+
+  const ctaGroup = findGroup(result, "cta_contact");
+  assert.ok(ctaGroup);
+  assert.equal(findCheck(ctaGroup, "phone")?.requested, true);
+  assert.equal(findCheck(ctaGroup, "phone")?.suggested_value, null);
+  assert.equal(findCheck(ctaGroup, "facebook_url")?.suggested_value, null);
+  assert.equal(findCheck(ctaGroup, "website_url")?.suggested_value, null);
+  assert.equal(findCheck(ctaGroup, "primary_cta")?.suggested_value, null);
+});
+
+test("resolver preserves valid saved CTA suggested values when AI does not provide a valid replacement", () => {
+  const result = resolveRequestedChecksWithCatalog({
+    requestedChecks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/contact",
+          checks: [
+            {
+              key: "phone",
+              requested: true,
+              requested_decision: null,
+              label: "Phone",
+              instruction: "saved",
+              answer_type: "phone",
+              suggested_value: "0659391488",
+            },
+            {
+              key: "facebook_url",
+              requested: true,
+              requested_decision: null,
+              label: "Facebook URL",
+              instruction: "saved",
+              answer_type: "url",
+              suggested_value: "https://www.facebook.com/hippieroaster/?locale=th_TH",
+            },
+          ],
+        },
+      ],
+    },
+    item: createPlaceItem({ category: "cafes" }),
+    aiCtaContact: {
+      phone: "4182277082",
+      facebook_url: "https://maps.google.com/?cid=4182277082282715109",
+    },
+  });
+
+  const ctaGroup = findGroup(result, "cta_contact");
+  assert.equal(findCheck(ctaGroup, "phone")?.suggested_value, "0659391488");
+  assert.equal(findCheck(ctaGroup, "facebook_url")?.suggested_value, "https://www.facebook.com/hippieroaster/?locale=th_TH");
+});
+
 test("resolver preserves explicit editor selection and rejection for agent-triggered keys", () => {
   const result = resolveRequestedChecksWithCatalog({
     requestedChecks: {

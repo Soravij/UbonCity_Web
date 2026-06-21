@@ -5,6 +5,12 @@ import {
   isTaxonomyCatalogKeyApplicableToItem,
   normalizeTaxonomyCatalogSuggestedValue,
 } from "../server/taxonomy-catalog.mjs";
+import {
+  deriveCtaContactCandidatesFromStructuredContext,
+  hasCompactCtaCandidates,
+  mergeAiCtaWithDeterministicCandidates,
+  normalizeAiCtaContactJson,
+} from "../server/cta-contact-normalizer.mjs";
 
 const FIELD_PACK_AGENT_KEY = "field_pack_agent";
 const DEFAULT_FIELD_PACK_AGENT_PROFILE = [
@@ -136,17 +142,6 @@ function normalizeCaptureChecklistGroup(value, limit = 10) {
   return out;
 }
 
-function normalizeAiCtaContactJson(value) {
-  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const out = {};
-  if (toText(source.phone)) out.phone = toText(source.phone);
-  if (toText(source.line_url)) out.line_url = toText(source.line_url);
-  if (toText(source.facebook_url)) out.facebook_url = toText(source.facebook_url);
-  if (toText(source.website_url)) out.website_url = toText(source.website_url);
-  if (toText(source.primary_cta)) out.primary_cta = toText(source.primary_cta).toLowerCase();
-  return out;
-}
-
 function normalizeAiTaxonomySuggestedChecks(value, item = {}, limit = 12) {
   const out = [];
   const seen = new Set();
@@ -249,6 +244,11 @@ function normalizeFieldPack(input, options = {}) {
     field_pack_references: Array.isArray(root.field_pack_references) ? root.field_pack_references : [],
     field_pack_media_hints: Array.isArray(root.field_pack_media_hints) ? root.field_pack_media_hints : [],
   };
+
+  fieldPack.ai_cta_contact_json = mergeAiCtaWithDeterministicCandidates(
+    fieldPack.ai_cta_contact_json,
+    item?.structured_context
+  );
 
   if (
     !fieldPack.ai_summary
@@ -398,6 +398,7 @@ function buildPromptInput(item) {
   const completeness = context?.completeness && typeof context.completeness === "object" ? context.completeness : {};
   const evidencePolicy = context?.evidence_policy && typeof context.evidence_policy === "object" ? context.evidence_policy : {};
   const task = context?.task && typeof context.task === "object" ? context.task : {};
+  const ctaCandidates = deriveCtaContactCandidatesFromStructuredContext(context);
 
   return {
     item: {
@@ -469,6 +470,7 @@ function buildPromptInput(item) {
       supporting_sources: toArray(evidencePolicy?.supporting_sources),
       external_links_policy: toText(evidencePolicy?.external_links_policy),
     },
+    ...(hasCompactCtaCandidates(ctaCandidates) ? { cta_contact_candidates: ctaCandidates } : {}),
     task: {
       mode: toText(task?.mode),
       output_contract: toText(task?.output_contract),
@@ -555,6 +557,13 @@ function buildFieldPackPrompt(item) {
     "Use image_context and visual_context only for visible cues and shot planning.",
     "Use reference_media_context only as reference-only visual context for planning.",
     "reference_media_context is not rights-verified, not publish media, and must not be treated as cover/gallery/inline approval.",
+    "cta_contact_candidates contains validated source-backed CTA suggestions derived by the server from structured context.",
+    "If a cta_contact_candidates value is supported by the context, copy it into field_pack.ai_cta_contact_json as a suggestion unless a matching value is already present.",
+    "Keep CTA fields suggestion-only. Do not mark CTA values confirmed or verified.",
+    "Do not invent conflicting contact values when cta_contact_candidates already provides a source-backed field.",
+    "Preserve Facebook URLs as facebook_url. Do not convert Facebook reference URLs into website_url.",
+    "Do not convert provenance/reference/article URLs into website_url.",
+    "The deterministic server fallback remains authoritative whenever AI omits or conflicts with a source-backed CTA field.",
     "Use evidence_blocks only as a clue layer to enrich specificity; never let evidence_blocks override approved_context.",
     "If evidence is thin, put unknowns into ai_unknowns or must_verify_fact. Do not invent facts.",
     "Write action-oriented instructions for a field/content team.",
@@ -602,6 +611,13 @@ function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote
     "Never output description_clean, description_raw, body, article, meta_title, or meta_description.",
     "Use approved_context as the PRIMARY source of truth.",
     "Use previous_field_pack as the starting point, then apply revision_note.",
+    "cta_contact_candidates contains validated source-backed CTA suggestions derived by the server from structured context.",
+    "If a cta_contact_candidates value is supported by the context, copy it into field_pack.ai_cta_contact_json as a suggestion unless a matching value is already present.",
+    "Keep CTA fields suggestion-only. Do not mark CTA values confirmed or verified.",
+    "Do not invent conflicting contact values when cta_contact_candidates already provides a source-backed field.",
+    "Preserve Facebook URLs as facebook_url. Do not convert Facebook reference URLs into website_url.",
+    "Do not convert provenance/reference/article URLs into website_url.",
+    "The deterministic server fallback remains authoritative whenever AI omits or conflicts with a source-backed CTA field.",
     "Keep must_capture as structured objects with capture_type (photo/video/both) and one concrete shot per item.",
     "Do not combine multiple shots, angles, or locations in one must_capture item.",
     "For capture_type=video, ensure each item is an executable video shot, not a broad topic.",
@@ -622,6 +638,7 @@ function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote
 }
 
 function debugPrompt(stage, promptText, metadata = {}) {
+  if (process.env.COLLECTOR_DEBUG_PROMPTS !== "1") return;
   try {
     const logDir = './logs';
     if (!fsSync.existsSync(logDir)) fsSync.mkdirSync(logDir);

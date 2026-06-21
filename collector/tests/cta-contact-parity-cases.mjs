@@ -1,0 +1,136 @@
+export const CTA_PHONE_CASES = {
+  accepted: [
+    "0659391488",
+    "065 939 1488",
+    "065-939-1488",
+    "045123456",
+    "045-123-456",
+    "+66 65 939 1488",
+    "66 65 939 1488",
+  ],
+  rejected: [
+    "abc0659391488xyz",
+    "phone0659391488",
+    "0659391488ext123",
+    "66012345678",
+    "+660659391488",
+    "4182277082",
+  ],
+};
+
+export const CTA_URL_CASES = [
+  {
+    label: "Facebook URL",
+    type: "facebook",
+    input: "https://www.facebook.com/hippieroaster/?locale=th_TH",
+    expected: "https://www.facebook.com/hippieroaster/?locale=th_TH",
+  },
+  {
+    label: "LINE URL",
+    type: "line",
+    input: "https://line.me/ti/p/example",
+    expected: "https://line.me/ti/p/example",
+  },
+  {
+    label: "official website",
+    type: "website",
+    input: "https://official.example/contact",
+    expected: "https://official.example/contact",
+  },
+  {
+    label: "official maps page",
+    type: "website",
+    input: "https://official.example/maps",
+    expected: "https://official.example/maps",
+  },
+  {
+    label: "official api contact page",
+    type: "website",
+    input: "https://official.example/api/contact",
+    expected: "https://official.example/api/contact",
+  },
+  {
+    label: "Wongnai URL",
+    type: "website",
+    input: "https://www.wongnai.com/reviews/example",
+    expected: "",
+  },
+  {
+    label: "maps.app.goo.gl",
+    type: "website",
+    input: "https://maps.app.goo.gl/example",
+    expected: "",
+  },
+  {
+    label: "g.page",
+    type: "website",
+    input: "https://g.page/example",
+    expected: "",
+  },
+  {
+    label: "Google CID",
+    type: "website",
+    input: "https://maps.google.com/?cid=4182277082282715109",
+    expected: "",
+  },
+  {
+    label: "maps.google.com root host",
+    type: "website",
+    input: "https://maps.google.com/",
+    expected: "",
+  },
+  {
+    label: "maps.google.co.th root host",
+    type: "website",
+    input: "https://maps.google.co.th/",
+    expected: "",
+  },
+  {
+    label: "maps.google.co.jp root host",
+    type: "website",
+    input: "https://maps.google.co.jp/",
+    expected: "",
+  },
+  {
+    label: "regional Google Maps URL",
+    type: "website",
+    input: "https://www.google.co.th/maps/place/example",
+    expected: "",
+  },
+  {
+    label: "googleusercontent CDN URL",
+    type: "website",
+    input: "https://lh3.googleusercontent.com/abc",
+    expected: "",
+  },
+  {
+    label: "fbcdn media URL",
+    type: "website",
+    input: "https://static.xx.fbcdn.net/example",
+    expected: "",
+  },
+  {
+    label: "facebook scontent media URL",
+    type: "website",
+    input: "https://scontent.xx.fbcdn.net/example.jpg",
+    expected: "",
+  },
+  {
+    label: "streetviewpixels URL",
+    type: "website",
+    input: "https://streetviewpixels-pa.googleapis.com/abc",
+    expected: "",
+  },
+  {
+    label: "mapbox API URL",
+    type: "website",
+    input: "https://api.mapbox.com/styles/v1/foo",
+    expected: "",
+  },
+  {
+    label: "image CDN URL",
+    type: "website",
+    input: "https://cdn.example.com/image.jpg",
+    expected: "",
+  },
+];

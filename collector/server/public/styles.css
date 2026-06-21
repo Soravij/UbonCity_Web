@@ -1793,14 +1793,31 @@ button.fail {
 }
 
 #assignment-submission-requested-checks-fields .requested-check-curation-row .requested-check-row-main {
-  grid-template-columns: 20px 150px 76px minmax(160px, 0.65fr) minmax(220px, 1fr);
+  grid-template-columns: 20px 150px 76px minmax(0, 1fr);
 }
 
-#assignment-submission-requested-checks-fields .requested-check-row-condition {
+#assignment-submission-requested-checks-fields .requested-check-row-secondary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+  margin-left: calc(20px + 150px + 76px + 16px);
   min-width: 0;
 }
 
-#assignment-submission-requested-checks-fields .requested-check-row-condition input {
+#assignment-submission-requested-checks-fields .requested-check-row-secondary-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+#assignment-submission-requested-checks-fields .requested-check-row-secondary-label {
+  font-size: 0.82rem;
+  line-height: 1.2;
+  color: var(--muted);
+}
+
+#assignment-submission-requested-checks-fields .requested-check-row-secondary input {
   width: 100%;
   min-width: 0;
   height: 32px;
@@ -1850,8 +1867,8 @@ button.fail {
     grid-column: 2 / -1;
   }
 
-  #assignment-submission-requested-checks-fields .requested-check-curation-row .requested-check-row-condition {
-    grid-column: 2 / -1;
+  #assignment-submission-requested-checks-fields .requested-check-row-secondary {
+    margin-left: 20px;
   }
 
   #assignment-submission-requested-checks-fields .requested-check-row-number-with-unit {

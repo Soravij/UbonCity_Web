@@ -5,6 +5,7 @@ import {
   buildExternalAgentPayload,
   buildFieldPackPrompt,
   buildFieldPackRevisionPrompt,
+  buildPromptInput,
   createAgentGenerationEngine,
   normalizeFieldPack,
 } from "../services/agent-generation.mjs";
@@ -66,6 +67,77 @@ function createItem(overrides = {}) {
     },
     ...overrides,
   };
+}
+
+function createHippieRoasterItem(overrides = {}) {
+  return createItem({
+    id: 53,
+    title: "Hippie Roaster",
+    category: "cafes",
+    structured_context: {
+      context_version: "v1",
+      content_item_id: 53,
+      item: {
+        id: 53,
+        title: "Hippie Roaster",
+        type: "place",
+        category: "cafes",
+        lang: "th",
+      },
+      approved_context: [
+        {
+          context_type: "mention",
+          selected_text: "Phone: 0659391488",
+          provenance: {
+            evidence_source_url: "https://www.wongnai.com/reviews/842964bb159942f887e7cc5244fda433",
+          },
+        },
+        {
+          context_type: "mention",
+          selected_text: "Phone: 065 939 1488",
+          provenance: {
+            evidence_source_url: "https://maps.google.com/?cid=4182277082282715109",
+          },
+        },
+        {
+          context_type: "mention",
+          selected_text: "Website: https://www.facebook.com/hippieroaster?locale=th_TH",
+          provenance: {
+            evidence_source_url: "https://www.facebook.com/hippieroaster/?locale=th_TH",
+          },
+        },
+      ],
+      evidence_blocks: [
+        {
+          block_type: "mention",
+          text_value: "Phone: 0659391488",
+          source_url: "https://www.wongnai.com/reviews/842964bb159942f887e7cc5244fda433",
+        },
+        {
+          block_type: "mention",
+          text_value: "Phone: 065 939 1488",
+          source_url: "https://maps.google.com/?cid=4182277082282715109",
+        },
+        {
+          block_type: "mention",
+          text_value: "Website: https://www.facebook.com/hippieroaster?locale=th_TH",
+          source_url: "https://www.facebook.com/hippieroaster/?locale=th_TH",
+        },
+      ],
+      image_context: {
+        selected_urls: ["https://example.com/photo.jpg"],
+        gallery_urls: ["https://example.com/photo.jpg"],
+        inline_urls: [],
+        selected_count: 1,
+      },
+      completeness: {
+        has_minimum_required: true,
+        minimum_missing: [],
+        quality_gaps: [],
+      },
+    },
+    ...overrides,
+  });
 }
 
 function fieldPackResponse() {
@@ -136,6 +208,8 @@ test("field pack prompt blocks article output and requires handoff contract", ()
   assert.match(prompt, /must_capture/);
   assert.match(prompt, /capture_type/);
   assert.match(prompt, /Never output description_clean/);
+  assert.match(prompt, /cta_contact_candidates contains validated source-backed CTA suggestions/);
+  assert.match(prompt, /deterministic server fallback remains authoritative/);
   assert.match(prompt, /use a practical field producer tone/);
 });
 
@@ -152,8 +226,19 @@ test("field pack revision prompt includes previous pack and revision note", () =
   assert.match(prompt, /ai_taxonomy_json/);
   assert.match(prompt, /taxonomy_catalog/);
   assert.match(prompt, /Do not invent taxonomy keys/);
+  assert.match(prompt, /cta_contact_candidates contains validated source-backed CTA suggestions/);
+  assert.match(prompt, /deterministic server fallback remains authoritative/);
   assert.match(prompt, /make it more practical/);
   assert.match(prompt, /Never output description_clean/);
+});
+
+test("prompt input includes compact CTA candidates from structured context", () => {
+  const promptInput = buildPromptInput(createHippieRoasterItem());
+  assert.deepEqual(promptInput.cta_contact_candidates, {
+    phone: "0659391488",
+    facebook_url: "https://www.facebook.com/hippieroaster/?locale=th_TH",
+  });
+  assert.equal(JSON.stringify(promptInput.cta_contact_candidates).includes("4182277082"), false);
 });
 
 test("field pack normalizer rejects article output fields", () => {
@@ -187,6 +272,78 @@ test("field pack normalizer preserves structured AI CTA and additive taxonomy su
         suggested_value: true,
       },
     ],
+  });
+});
+
+test("field pack normalizer falls back to deterministic CTA candidates when AI omits ai_cta_contact_json", () => {
+  const normalized = normalizeFieldPack({
+    field_pack: {
+      status: "draft",
+      ai_summary: "field brief",
+      story_angle: "field angle",
+      social_hook: "field hook",
+    },
+  }, { item: createHippieRoasterItem() });
+
+  assert.deepEqual(normalized.ai_cta_contact_json, {
+    phone: "0659391488",
+    facebook_url: "https://www.facebook.com/hippieroaster/?locale=th_TH",
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(normalized.ai_cta_contact_json, "website_url"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(normalized.ai_cta_contact_json, "primary_cta"), false);
+});
+
+test("field pack normalizer keeps deterministic CTA candidates authoritative over conflicting AI", () => {
+  const normalized = normalizeFieldPack({
+    field_pack: {
+      status: "draft",
+      ai_summary: "field brief",
+      story_angle: "field angle",
+      social_hook: "field hook",
+      ai_cta_contact_json: {
+        phone: "0999999999",
+        facebook_url: "https://www.facebook.com/another-page",
+        primary_cta: "phone",
+      },
+    },
+  }, { item: createHippieRoasterItem() });
+
+  assert.deepEqual(normalized.ai_cta_contact_json, {
+    phone: "0659391488",
+    facebook_url: "https://www.facebook.com/hippieroaster/?locale=th_TH",
+    primary_cta: "phone",
+  });
+});
+
+test("field pack normalizer does not invent unsupported primary_cta from facebook-only deterministic records", () => {
+  const normalized = normalizeFieldPack({
+    field_pack: {
+      status: "draft",
+      ai_summary: "field brief",
+      story_angle: "field angle",
+      social_hook: "field hook",
+    },
+  }, {
+    item: createItem({
+      category: "cafes",
+      structured_context: {
+        item: { id: 54, title: "Only Facebook", type: "place", category: "cafes", lang: "th" },
+        approved_context: [
+          {
+            context_type: "mention",
+            selected_text: "Website: https://www.facebook.com/onlyfacebook",
+            provenance: {
+              evidence_source_url: "https://www.facebook.com/onlyfacebook/",
+            },
+          },
+        ],
+        evidence_blocks: [],
+      },
+    }),
+  });
+
+  assert.deepEqual(normalized.ai_cta_contact_json, {
+    facebook_url: "https://www.facebook.com/onlyfacebook/",
   });
 });
 
@@ -350,6 +507,50 @@ test("external agent engine normalizes visual context and field pack responses",
     assert.equal(calls[2].body.agent_profile.profile_text, "custom tone profile");
     assert.equal(calls[2].body.previous_field_pack.ai_summary, "field brief");
     assert.equal(calls[2].body.revision_note, "make it more practical");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("external agent engine fills CTA candidates when AI omits ai_cta_contact_json in generate and revise responses", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    if (String(url) === "https://example.com/photo.jpg" || String(url) === "https://example.com/reference.jpg") {
+      return new Response("fake-image-bytes", {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    }
+    const body = JSON.parse(String(options.body || "{}"));
+    if (body.task === "generate_visual_context") {
+      return Response.json({ visual_context: { visual_summary: "ok" } });
+    }
+    return Response.json({
+      field_pack: {
+        status: "draft",
+        ai_summary: "field brief",
+        story_angle: "field angle",
+        social_hook: "field hook",
+      },
+    });
+  };
+
+  try {
+    const engine = createAgentGenerationEngine({
+      enabled: true,
+      agentEngine: "external",
+      externalAgentUrl: "https://agent.example/run/",
+      externalAgentToken: "secret-token",
+      model: "agent-v1",
+    });
+    const item = createHippieRoasterItem();
+    const visual = await engine.generateVisualContext(item);
+    const generated = await engine.generateFieldPack({ ...item, visual_context: visual });
+    const revised = await engine.reviseFieldPack({ ...item, visual_context: visual }, generated, "tighten");
+    assert.equal(generated.ai_cta_contact_json.phone, "0659391488");
+    assert.equal(generated.ai_cta_contact_json.facebook_url, "https://www.facebook.com/hippieroaster/?locale=th_TH");
+    assert.equal(revised.ai_cta_contact_json.phone, "0659391488");
+    assert.equal(revised.ai_cta_contact_json.facebook_url, "https://www.facebook.com/hippieroaster/?locale=th_TH");
   } finally {
     globalThis.fetch = originalFetch;
   }

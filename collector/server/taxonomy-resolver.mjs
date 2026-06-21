@@ -1,3 +1,4 @@
+import { getValidCtaSuggestedValue } from "./cta-contact-normalizer.mjs";
 import {
   getTaxonomyCatalogEntriesForItem,
   getTaxonomyCatalogEntryMapForItem,
@@ -180,10 +181,16 @@ function buildResolvedCtaGroup(existingGroup = null, item = {}, aiCtaContact = {
     group_label: String(existingGroup?.group_label || "CTA/contact").trim() || "CTA/contact",
     checks: defaultCtaTemplateChecks().map((check) => {
       const saved = savedChecks.get(check.key) || {};
-      const hasAiSuggestedValue = Object.prototype.hasOwnProperty.call(aiCtaContact || {}, check.key);
+      const validatedAiSuggestedValue = Object.prototype.hasOwnProperty.call(aiCtaContact || {}, check.key)
+        ? getValidCtaSuggestedValue(check.key, aiCtaContact[check.key])
+        : null;
+      const validatedSavedSuggestedValue = Object.prototype.hasOwnProperty.call(saved, "suggested_value")
+        ? getValidCtaSuggestedValue(check.key, saved.suggested_value)
+        : null;
+      const hasAiSuggestedValue = validatedAiSuggestedValue != null;
       const suggestedValue = hasAiSuggestedValue
-        ? cloneValue(aiCtaContact[check.key])
-        : (Object.prototype.hasOwnProperty.call(saved, "suggested_value") ? cloneValue(saved.suggested_value) : null);
+        ? cloneValue(validatedAiSuggestedValue)
+        : (validatedSavedSuggestedValue != null ? cloneValue(validatedSavedSuggestedValue) : null);
       return {
         key: check.key,
         requested: true,
