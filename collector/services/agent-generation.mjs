@@ -11,6 +11,13 @@ import {
   mergeAiCtaWithDeterministicCandidates,
   normalizeAiCtaContactJson,
 } from "../server/cta-contact-normalizer.mjs";
+import {
+  isCtaTraceEnabled,
+  summarizeCtaCandidates,
+  summarizeCtaValue,
+  summarizeStructuredContext,
+  traceCtaStage,
+} from "./cta-trace.mjs";
 
 const FIELD_PACK_AGENT_KEY = "field_pack_agent";
 const DEFAULT_FIELD_PACK_AGENT_PROFILE = [
@@ -245,10 +252,35 @@ function normalizeFieldPack(input, options = {}) {
     field_pack_media_hints: Array.isArray(root.field_pack_media_hints) ? root.field_pack_media_hints : [],
   };
 
+  const explicitCtaCandidates = options?.ctaCandidates && typeof options.ctaCandidates === "object"
+    ? normalizeAiCtaContactJson(options.ctaCandidates)
+    : (item?.cta_contact_candidates && typeof item.cta_contact_candidates === "object"
+        ? normalizeAiCtaContactJson(item.cta_contact_candidates)
+        : null);
+  const deterministicCtaContext = hasCompactCtaCandidates(explicitCtaCandidates)
+    ? { cta_contact_candidates: explicitCtaCandidates }
+    : item?.structured_context;
+
+  if (isCtaTraceEnabled()) {
+    traceCtaStage("normalizeFieldPack.before_merge", {
+      item_id: Number(item?.id || 0) || null,
+      ...summarizeStructuredContext(item?.structured_context),
+      ...summarizeCtaCandidates(hasCompactCtaCandidates(explicitCtaCandidates) ? explicitCtaCandidates : deriveCtaContactCandidatesFromStructuredContext(item?.structured_context)),
+      ...summarizeCtaValue(fieldPack.ai_cta_contact_json, "ai"),
+    });
+  }
+
   fieldPack.ai_cta_contact_json = mergeAiCtaWithDeterministicCandidates(
     fieldPack.ai_cta_contact_json,
-    item?.structured_context
+    deterministicCtaContext
   );
+
+  if (isCtaTraceEnabled()) {
+    traceCtaStage("normalizeFieldPack.after_merge", {
+      item_id: Number(item?.id || 0) || null,
+      ...summarizeCtaValue(fieldPack.ai_cta_contact_json, "cta"),
+    });
+  }
 
   if (
     !fieldPack.ai_summary
@@ -398,7 +430,20 @@ function buildPromptInput(item) {
   const completeness = context?.completeness && typeof context.completeness === "object" ? context.completeness : {};
   const evidencePolicy = context?.evidence_policy && typeof context.evidence_policy === "object" ? context.evidence_policy : {};
   const task = context?.task && typeof context.task === "object" ? context.task : {};
-  const ctaCandidates = deriveCtaContactCandidatesFromStructuredContext(context);
+  const explicitCtaCandidates = item?.cta_contact_candidates && typeof item.cta_contact_candidates === "object"
+    ? normalizeAiCtaContactJson(item.cta_contact_candidates)
+    : null;
+  const ctaCandidates = hasCompactCtaCandidates(explicitCtaCandidates)
+    ? explicitCtaCandidates
+    : deriveCtaContactCandidatesFromStructuredContext(context);
+
+  if (isCtaTraceEnabled()) {
+    traceCtaStage("buildPromptInput", {
+      item_id: Number(item?.id || 0) || null,
+      ...summarizeStructuredContext(context),
+      ...summarizeCtaCandidates(ctaCandidates),
+    });
+  }
 
   return {
     item: {

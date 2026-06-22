@@ -1,3 +1,5 @@
+import { isCtaTraceEnabled, summarizeCtaValue, traceCtaStage } from "../services/cta-trace.mjs";
+
 function cloneValue(value) {
   if (value == null) return value;
   if (typeof structuredClone === "function") return structuredClone(value);
@@ -6,6 +8,12 @@ function cloneValue(value) {
 
 export function buildFieldPackUpdatePayloadFromAgent(source = {}) {
   const fieldPack = source && typeof source === "object" ? source : {};
+  if (isCtaTraceEnabled()) {
+    traceCtaStage("buildFieldPackUpdatePayloadFromAgent", {
+      item_id: Number(fieldPack.content_item_id || fieldPack.item_id || 0) || null,
+      ...summarizeCtaValue(fieldPack.ai_cta_contact_json, "cta"),
+    });
+  }
   return {
     status: String(fieldPack.status || "ready_for_field").trim().toLowerCase() || "ready_for_field",
     writer_ready: Boolean(fieldPack.writer_ready),

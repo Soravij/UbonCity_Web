@@ -291,6 +291,18 @@ export function normalizeAiCtaContactJson(value) {
 }
 
 export function deriveCtaContactCandidatesFromStructuredContext(structuredContext = {}) {
+  if (structuredContext?.cta_contact_candidates && typeof structuredContext.cta_contact_candidates === "object") {
+    const explicit = normalizeAiCtaContactJson(structuredContext.cta_contact_candidates);
+    if (hasCompactCtaCandidates(explicit)) {
+      return Object.entries(explicit).reduce((acc, [key, value]) => {
+        if (value == null) return acc;
+        if (typeof value === "string" && !value.trim()) return acc;
+        acc[key] = value;
+        return acc;
+      }, {});
+    }
+  }
+
   const records = getStructuredContextRecords(structuredContext);
   const candidates = {};
   const seenUrls = new Set();

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "crypto";
 import path from "path";
 
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
+import { isCtaTraceEnabled, summarizeCtaJsonString, summarizeCtaValue, traceCtaStage } from "../services/cta-trace.mjs";
 import { filterRequestedChecksForNewHandoff, resolveRequestedChecksWithCatalog } from "../server/taxonomy-resolver.mjs";
 
 function parseTags(raw) {
@@ -10014,7 +10015,14 @@ function normalizeStateValue(value, stateGroup) {
     if (!itemId) return null;
     const row = getCurrentFieldPackByItemStmt.get(itemId);
     if (!row) return null;
-    return getFieldPackBundleById(row.id);
+    const pack = getFieldPackBundleById(row.id);
+    if (isCtaTraceEnabled()) {
+      traceCtaStage("repository.getCurrentFieldPackByItem", {
+        item_id: itemId,
+        ...summarizeCtaValue(pack?.ai_cta_contact_json, "cta"),
+      });
+    }
+    return pack;
   }
 
   function listFieldPacksByItem(contentItemId) {
@@ -10160,6 +10168,12 @@ function normalizeStateValue(value, stateGroup) {
 
   function createFieldPackInternal(payload = {}) {
     const normalized = normalizeFieldPackPayload(payload, { requireContentItemId: true });
+    if (isCtaTraceEnabled()) {
+      traceCtaStage("repository.createFieldPack.normalized", {
+        item_id: Number(normalized.content_item_id || 0) || null,
+        ...summarizeCtaJsonString(normalized.ai_cta_contact_json, "cta"),
+      });
+    }
     const item = getItem(normalized.content_item_id);
     if (!item) throw new Error("content item not found");
     assertFieldPackSourcesBelongToItem(normalized.content_item_id, normalized);
@@ -10377,6 +10391,12 @@ function normalizeStateValue(value, stateGroup) {
       content_item_id: existing.content_item_id,
     };
     const normalized = normalizeFieldPackPayload(mergedPayload, { requireContentItemId: true });
+    if (isCtaTraceEnabled()) {
+      traceCtaStage("repository.updateFieldPack.normalized", {
+        item_id: Number(existing.content_item_id || 0) || null,
+        ...summarizeCtaJsonString(normalized.ai_cta_contact_json, "cta"),
+      });
+    }
     assertFieldPackSourcesBelongToItem(existing.content_item_id, normalized);
 
     if (normalized.is_current) {

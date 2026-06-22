@@ -1409,6 +1409,22 @@ test("compact CTA summary keeps source-derived phone and Facebook as needs verif
   assert.deepEqual(facebookRow?.statuses, ["ai filled", "needs verification"]);
 });
 
+test("Item Editor displays saved AI CTA phone as suggested and needs verification", () => {
+  const summary = buildRequestedChecksCompactSummaryData({
+    ai_cta_contact_json: {
+      phone: "0804415224",
+    },
+    requested_checks_json: {
+      version: 1,
+      groups: [],
+    },
+  }, [], { type: "place", category: "cafes" });
+
+  const phoneRow = summary.ctaRows.find((row) => row.key === "phone");
+  assert.equal(phoneRow?.value, "0804415224");
+  assert.deepEqual(phoneRow?.statuses, ["ai filled", "needs verification"]);
+});
+
 test("compact CTA summary hides invalid persisted AI CTA values", () => {
   const groups = getRequestedCheckEditorGroups({
     requested_checks_json: { version: 1, groups: [] },

@@ -49,6 +49,8 @@ import {
 } from "../services/workflow.mjs";
 import { generateExecutionChannelForItem } from "../services/execution-generation.mjs";
 import { buildCleanStructuredContext, validateCleanMinimum } from "../services/clean-context.mjs";
+import { deriveCtaContactCandidatesFromStructuredContext } from "./cta-contact-normalizer.mjs";
+import { isCtaTraceEnabled, summarizeCtaCandidates, summarizeStructuredContext, traceCtaStage } from "../services/cta-trace.mjs";
 import {
   DEFAULT_FIELD_PACK_AGENT_PROFILE,
   FIELD_PACK_AGENT_KEY,
@@ -12205,6 +12207,14 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
   }
 
   const cleanContext = buildCleanStructuredContext(repo, id);
+  const ctaCandidates = deriveCtaContactCandidatesFromStructuredContext(cleanContext);
+  if (isCtaTraceEnabled()) {
+    traceCtaStage("buildCleanStructuredContext", {
+      item_id: Number(id || 0) || null,
+      ...summarizeStructuredContext(cleanContext),
+      ...summarizeCtaCandidates(ctaCandidates),
+    });
+  }
   if (!cleanContext?.completeness?.has_minimum_required) {
     res.status(400).json({
       error: "Clean context does not meet minimum requirements",
@@ -12224,6 +12234,7 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
       ...item,
       agent_profile: fieldPackAgentProfile,
       structured_context: cleanContext,
+      cta_contact_candidates: ctaCandidates,
       visual_context: null,
     };
     let agentFieldPack = null;
@@ -12236,7 +12247,7 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
       }
       agentFieldPack = await agentEngine.reviseFieldPack(agentInput, currentFieldPack, revisionNote);
       fieldPack = repo.updateFieldPack(currentFieldPack.id, {
-        ...buildFieldPackUpdatePayloadFromAgent(agentFieldPack),
+        ...buildFieldPackUpdatePayloadFromAgent({ ...agentFieldPack, content_item_id: id }),
         updated_by: actorEmail(req),
       });
     } else {
@@ -12248,7 +12259,7 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
         throw new Error("Agent engine does not support field pack generation");
       }
       fieldPack = repo.createFieldPack({
-        ...buildFieldPackUpdatePayloadFromAgent(agentFieldPack),
+        ...buildFieldPackUpdatePayloadFromAgent({ ...agentFieldPack, content_item_id: id }),
         content_item_id: id,
         updated_by: actorEmail(req),
       });

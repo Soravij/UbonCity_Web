@@ -6,6 +6,10 @@ import path from "node:path";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
+import { buildCleanStructuredContext } from "../services/clean-context.mjs";
+import { buildPromptInput, normalizeFieldPack } from "../services/agent-generation.mjs";
+import { deriveCtaContactCandidatesFromStructuredContext } from "../server/cta-contact-normalizer.mjs";
+import { buildFieldPackUpdatePayloadFromAgent } from "../server/endpoint-schema-mapping.mjs";
 
 process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "FieldPack!Test1";
 
@@ -1481,6 +1485,72 @@ test("buildAssignmentHandoffPreview always includes the required CTA checklist f
     assert.equal(ctaGroup.checks.every((check) => check.requested === true), true);
     assert.equal(ctaGroup.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
     assert.equal(ctaGroup.checks.find((check) => check.key === "facebook_url")?.suggested_value, "https://facebook.com/example");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("workflow CTA candidates survive prompt input normalize save and reload without re-reading structured_context later", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Golden Hour Coffee");
+    const evidence = ctx.repo.addEvidenceBlock(item.id, {
+      block_type: "mention",
+      text_value: "Phone: 080 441 5224",
+      source_url: "https://example.com/golden-hour-phone",
+      status: "active",
+    });
+    ctx.repo.addApprovedContextBlock(item.id, {
+      evidence_block_id: evidence.id,
+      context_type: "mention",
+      selected_text: "Phone: 080 441 5224",
+      status: "active",
+      provenance_json: {
+        evidence_source_url: "https://example.com/golden-hour-phone",
+      },
+    });
+
+    const cleanContext = buildCleanStructuredContext(ctx.repo, item.id);
+    const ctaCandidates = deriveCtaContactCandidatesFromStructuredContext(cleanContext);
+    const promptInput = buildPromptInput({
+      ...item,
+      structured_context: cleanContext,
+      cta_contact_candidates: ctaCandidates,
+    });
+
+    assert.equal(promptInput.cta_contact_candidates.phone, "0804415224");
+
+    const normalized = normalizeFieldPack({
+      field_pack: {
+        status: "draft",
+        ai_summary: "field brief",
+        story_angle: "sunset cafe angle",
+        social_hook: "golden hour coffee stop",
+      },
+    }, {
+      item: {
+        ...item,
+        cta_contact_candidates: ctaCandidates,
+      },
+      ctaCandidates,
+    });
+
+    assert.equal(normalized.ai_cta_contact_json.phone, "0804415224");
+
+    const payload = buildFieldPackUpdatePayloadFromAgent({
+      ...normalized,
+      content_item_id: item.id,
+    });
+    assert.equal(payload.ai_cta_contact_json.phone, "0804415224");
+
+    ctx.repo.createFieldPack({
+      ...payload,
+      content_item_id: item.id,
+      updated_by: "tester@local",
+    });
+
+    const reloaded = ctx.repo.getCurrentFieldPackByItem(item.id);
+    assert.equal(reloaded.ai_cta_contact_json.phone, "0804415224");
   } finally {
     ctx.cleanup();
   }
