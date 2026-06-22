@@ -1297,8 +1297,17 @@ function isRequestedCheckAnswerComplete(row = {}, schema = null) {
   if (answerType === "boolean" || answerType === "boolean_with_conditions") {
     return typeof value === "boolean";
   }
-  if (["text", "phone", "url", "hours"].includes(answerType)) {
-    return hasMeaningfulValue(value);
+  if (["text", "phone", "hours"].includes(answerType)) {
+    return typeof value === "string" && value.trim().length > 0;
+  }
+  if (answerType === "url") {
+    if (!(typeof value === "string" && value.trim().length > 0)) return false;
+    try {
+      normalizeHttpUrl(value, `requested_check_returns.${schema?.return_key || row?.return_key || "value"}`);
+      return true;
+    } catch {
+      return false;
+    }
   }
   if (answerType === "select") {
     if (!(typeof value === "string" && value.trim().length > 0)) return false;
@@ -1371,9 +1380,11 @@ function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName, opt
   if (rawValue == null) {
     return answerType === "multi_select" ? [] : null;
   }
-  if (answerType === "url") return normalizeOptionalUrlValue(rawValue, fieldName);
+  if (answerType === "url") {
+    return typeof rawValue === "string" ? String(rawValue).trim() || null : normalizeJsonSafeValue(rawValue);
+  }
   if (["text", "phone", "hours"].includes(answerType)) {
-    return String(rawValue || "").trim() || null;
+    return typeof rawValue === "string" ? String(rawValue).trim() || null : normalizeJsonSafeValue(rawValue);
   }
   if (answerType === "select") {
     return typeof rawValue === "string" ? String(rawValue).trim() || null : normalizeJsonSafeValue(rawValue);
@@ -1522,6 +1533,12 @@ function buildAcceptedAssignmentValidationSummary({
     }
     if (Number(submission.content_item_id || 0) !== contentItemId) {
       blockers.push({ code: "submission_item_mismatch", message: "Submission belongs to another content item" });
+    }
+    const sourceHandoffSnapshotId = Number(submission.source_handoff_snapshot_id || 0) || 0;
+    if (!sourceHandoffSnapshotId) {
+      blockers.push({ code: "submission_source_handoff_missing", message: "Submission is missing source handoff snapshot binding" });
+    } else if (Number(handoffSnapshot?.id || 0) !== sourceHandoffSnapshotId) {
+      blockers.push({ code: "submission_source_handoff_mismatch", message: "Submission source handoff snapshot does not match acceptance handoff snapshot" });
     }
   }
   if (blockers.length) {
@@ -1830,6 +1847,7 @@ function normalizeAssignmentSubmissionRow(row) {
   if (!row) return null;
   return {
     ...row,
+    source_handoff_snapshot_id: row.source_handoff_snapshot_id == null ? null : Number(row.source_handoff_snapshot_id || 0) || null,
     article_payload_json: parseJson(row.article_payload_json, null),
     media_payload_json: parseJson(row.media_payload_json, null),
     field_return_payload_json: normalizeFieldReturnPayloadJson(row.field_return_payload_json),
@@ -3425,6 +3443,7 @@ function ensureFieldPackAssignmentForeignKeySupport(db) {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           assignment_id INTEGER NOT NULL,
           content_item_id INTEGER NOT NULL,
+          source_handoff_snapshot_id INTEGER,
           submitted_by_user_id INTEGER NOT NULL,
           submission_state TEXT NOT NULL DEFAULT 'submitted',
           article_payload_json TEXT,
@@ -3436,10 +3455,12 @@ function ensureFieldPackAssignmentForeignKeySupport(db) {
           reviewed_at TEXT,
           FOREIGN KEY(assignment_id) REFERENCES content_assignments(id) ON DELETE CASCADE,
           FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
+          FOREIGN KEY(source_handoff_snapshot_id) REFERENCES content_assignment_handoff_snapshots(id) ON DELETE SET NULL,
           FOREIGN KEY(submitted_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
         );
       `,
-      insertColumns: "id, assignment_id, content_item_id, submitted_by_user_id, submission_state, article_payload_json, media_payload_json, contributor_note, reviewer_note, created_at, updated_at, reviewed_at",
+      insertColumns: "id, assignment_id, content_item_id, source_handoff_snapshot_id, submitted_by_user_id, submission_state, article_payload_json, media_payload_json, contributor_note, reviewer_note, created_at, updated_at, reviewed_at",
+      selectColumns: "id, assignment_id, content_item_id, NULL AS source_handoff_snapshot_id, submitted_by_user_id, submission_state, article_payload_json, media_payload_json, contributor_note, reviewer_note, created_at, updated_at, reviewed_at",
       indexSql: [
         "CREATE INDEX IF NOT EXISTS idx_assignment_submissions_assignment ON content_assignment_submissions(assignment_id, created_at DESC);",
         "CREATE INDEX IF NOT EXISTS idx_assignment_submissions_item ON content_assignment_submissions(content_item_id, created_at DESC);",
@@ -3523,7 +3544,7 @@ function ensureFieldPackAssignmentForeignKeySupport(db) {
       db.exec(tableConfig.createSql);
       db.exec(`
         INSERT INTO ${tableConfig.name} (${tableConfig.insertColumns})
-        SELECT ${tableConfig.insertColumns}
+        SELECT ${tableConfig.selectColumns || tableConfig.insertColumns}
         FROM ${tableConfig.legacyName};
       `);
       db.exec(`DROP TABLE ${tableConfig.legacyName};`);
@@ -3790,6 +3811,9 @@ function ensureAssignmentSubmissionFieldReturnSupport(db) {
   const cols = db.prepare("PRAGMA table_info(content_assignment_submissions)").all();
   if (!Array.isArray(cols) || !cols.length) return;
   const names = new Set(cols.map((c) => String(c?.name || "").trim()));
+  if (!names.has("source_handoff_snapshot_id")) {
+    db.exec("ALTER TABLE content_assignment_submissions ADD COLUMN source_handoff_snapshot_id INTEGER;");
+  }
   if (!names.has("field_return_payload_json")) {
     db.exec("ALTER TABLE content_assignment_submissions ADD COLUMN field_return_payload_json TEXT;");
   }
@@ -4873,24 +4897,10 @@ export function createRepository(db) {
 
   const insertAssignmentSubmissionStmt = db.prepare(`
     INSERT INTO content_assignment_submissions (
-      assignment_id, content_item_id, submitted_by_user_id, submission_state,
+      assignment_id, content_item_id, source_handoff_snapshot_id, submitted_by_user_id, submission_state,
       article_payload_json, media_payload_json, field_return_payload_json,
       contributor_note, reviewer_note, created_at, updated_at, reviewed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const updateAssignmentSubmissionStmt = db.prepare(`
-    UPDATE content_assignment_submissions
-    SET
-      submitted_by_user_id=?,
-      submission_state=?,
-      article_payload_json=?,
-      media_payload_json=?,
-      field_return_payload_json=?,
-      contributor_note=COALESCE(?, contributor_note),
-      reviewer_note=COALESCE(?, reviewer_note),
-      reviewed_at=COALESCE(?, reviewed_at),
-      updated_at=?
-    WHERE id=?
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const listAssignmentSubmissionsStmt = db.prepare(`
@@ -6360,7 +6370,8 @@ function normalizeStateValue(value, stateGroup) {
       && Number(handoffSnapshot.content_item_id || 0) === Number(assignment.content_item_id || 0);
     const validSubmission = submission
       && Number(submission.assignment_id || 0) === Number(assignment.id || 0)
-      && Number(submission.content_item_id || 0) === Number(assignment.content_item_id || 0);
+      && Number(submission.content_item_id || 0) === Number(assignment.content_item_id || 0)
+      && Number(submission.source_handoff_snapshot_id || 0) === handoffSnapshotId;
     return {
       ...assignment,
       accepted_binding_status: validHandoff && validSubmission ? "pinned" : "invalid_binding",
@@ -6439,9 +6450,12 @@ function normalizeStateValue(value, stateGroup) {
     let acceptanceValidation = null;
 
     if (shouldSetAcceptedBinding) {
-      const handoffSnapshot = getLatestAssignmentHandoffByAssignment(id);
       const latestSubmissionId = Number(existing.latest_submission_id || 0) || null;
       const submission = latestSubmissionId ? getAssignmentSubmissionById(latestSubmissionId) : null;
+      const sourceHandoffSnapshotId = Number(submission?.source_handoff_snapshot_id || 0) || null;
+      const handoffSnapshot = sourceHandoffSnapshotId
+        ? normalizeAssignmentHandoffRow(assignmentHandoffByIdStmt.get(sourceHandoffSnapshotId))
+        : null;
       acceptanceValidation = buildAcceptedAssignmentValidationSummary({
         assignment: normalizeAssignmentRow(existing),
         item,
@@ -6665,6 +6679,14 @@ function normalizeStateValue(value, stateGroup) {
       throw new Error("use resubmitted when assignment is revision_requested");
     }
     const latestHandoff = getLatestAssignmentHandoffByAssignment(assignmentId);
+    if (!latestHandoff) throw new Error("assignment handoff snapshot not found");
+    if (Number(latestHandoff.assignment_id || 0) !== assignmentId) {
+      throw new Error("handoff snapshot belongs to another assignment");
+    }
+    if (Number(latestHandoff.content_item_id || 0) !== Number(assignment.content_item_id || 0)) {
+      throw new Error("handoff snapshot belongs to another content item");
+    }
+    const sourceHandoffSnapshotId = Number(latestHandoff.id || 0) || null;
     const requestedCheckSchemaMap = buildRequestedCheckSchemaMapFromHandoffPackage(latestHandoff?.handoff_package_json || null);
     const articlePayload = payload.article_payload_json == null ? null : parseJsonInputStrict(payload.article_payload_json, "article_payload_json", "object");
     const mediaPayload = payload.media_payload_json == null ? null : parseJsonInputStrict(payload.media_payload_json, "media_payload_json", "object");
@@ -6679,48 +6701,29 @@ function normalizeStateValue(value, stateGroup) {
     const reviewerNote = payload.reviewer_note == null ? null : String(payload.reviewer_note || "").trim() || null;
     const reviewedAt = payload.reviewed_at == null || payload.reviewed_at === "" ? null : toNullableDateIso(payload.reviewed_at, "reviewed_at");
 
-    if (submissionState === "resubmitted") {
-      const latestSubmissionId = Number(assignment.latest_submission_id || 0) || null;
-      const latestSubmission = latestSubmissionId
-        ? normalizeAssignmentSubmissionRow(getAssignmentSubmissionByIdStmt.get(latestSubmissionId))
-        : null;
-      if (latestSubmission && Number(latestSubmission.assignment_id || 0) === assignmentId) {
-        const updatedAt = toBangkokSqlTimestamp();
-        const nextArticlePayload = articlePayload == null
-          ? latestSubmission.article_payload_json
-          : mergeAssignmentSubmissionObjectPayload(latestSubmission.article_payload_json, articlePayload);
-        const nextMediaPayload = mediaPayload == null
-          ? latestSubmission.media_payload_json
-          : mergeAssignmentSubmissionMediaPayload(latestSubmission.media_payload_json, mediaPayload);
-        const nextFieldReturnPayload = incomingFieldReturnPayload == null
-          ? latestSubmission.field_return_payload_json
-          : incomingFieldReturnPayload;
-        validateRequestedCheckReturnsForFinalSubmission(
-          nextFieldReturnPayload?.requested_check_returns || {},
-          requestedCheckSchemaMap,
-          "field_return_payload_json.requested_check_returns"
-        );
-        updateAssignmentSubmissionStmt.run(
-          submittedByUserId,
-          submissionState,
-          nextArticlePayload ? JSON.stringify(nextArticlePayload) : null,
-          nextMediaPayload ? JSON.stringify(nextMediaPayload) : null,
-          nextFieldReturnPayload ? JSON.stringify(nextFieldReturnPayload) : null,
-          contributorNote,
-          reviewerNote,
-          reviewedAt,
-          updatedAt,
-          latestSubmissionId
-        );
-        setAssignmentLatestSubmission(assignmentId, latestSubmissionId);
-        return normalizeAssignmentSubmissionRow(
-          db.prepare("SELECT * FROM content_assignment_submissions WHERE id=? LIMIT 1").get(latestSubmissionId)
-        );
-      }
-    }
+    const latestSubmissionId = Number(assignment.latest_submission_id || 0) || null;
+    const latestSubmission = latestSubmissionId
+      ? normalizeAssignmentSubmissionRow(getAssignmentSubmissionByIdStmt.get(latestSubmissionId))
+      : null;
+
+    const nextArticlePayload = submissionState === "resubmitted" && latestSubmission
+      ? (articlePayload == null
+        ? latestSubmission.article_payload_json
+        : mergeAssignmentSubmissionObjectPayload(latestSubmission.article_payload_json, articlePayload))
+      : articlePayload;
+    const nextMediaPayload = submissionState === "resubmitted" && latestSubmission
+      ? (mediaPayload == null
+        ? latestSubmission.media_payload_json
+        : mergeAssignmentSubmissionMediaPayload(latestSubmission.media_payload_json, mediaPayload))
+      : mediaPayload;
+    const nextFieldReturnPayload = submissionState === "resubmitted" && latestSubmission
+      ? (incomingFieldReturnPayload == null
+        ? latestSubmission.field_return_payload_json
+        : incomingFieldReturnPayload)
+      : incomingFieldReturnPayload;
 
     validateRequestedCheckReturnsForFinalSubmission(
-      incomingFieldReturnPayload?.requested_check_returns || {},
+      nextFieldReturnPayload?.requested_check_returns || {},
       requestedCheckSchemaMap,
       "field_return_payload_json.requested_check_returns"
     );
@@ -6729,11 +6732,12 @@ function normalizeStateValue(value, stateGroup) {
     const res = insertAssignmentSubmissionStmt.run(
       assignmentId,
       Number(assignment.content_item_id),
+      sourceHandoffSnapshotId,
       submittedByUserId,
       submissionState,
-      articlePayload ? JSON.stringify(articlePayload) : null,
-      mediaPayload ? JSON.stringify(mediaPayload) : null,
-      incomingFieldReturnPayload ? JSON.stringify(incomingFieldReturnPayload) : null,
+      nextArticlePayload ? JSON.stringify(nextArticlePayload) : null,
+      nextMediaPayload ? JSON.stringify(nextMediaPayload) : null,
+      nextFieldReturnPayload ? JSON.stringify(nextFieldReturnPayload) : null,
       contributorNote,
       reviewerNote,
       createdAt,

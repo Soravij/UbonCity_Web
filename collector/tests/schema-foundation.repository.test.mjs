@@ -114,6 +114,7 @@ test("repository migration adds schema foundation columns for field packs drafts
     assert.equal(readColumnNames(ctx.db, "field_packs").includes("requested_checks_json"), true);
     assert.equal(readColumnNames(ctx.db, "field_packs").includes("curation_status"), true);
     assert.equal(readColumnNames(ctx.db, "content_assignment_submissions").includes("field_return_payload_json"), true);
+    assert.equal(readColumnNames(ctx.db, "content_assignment_submissions").includes("source_handoff_snapshot_id"), true);
     assert.equal(readColumnNames(ctx.db, "content_drafts").includes("confirmed_cta_contact_json"), true);
     assert.equal(readColumnNames(ctx.db, "content_drafts").includes("confirmed_meta_status"), true);
   } finally {
