@@ -1,6 +1,6 @@
 # Taxonomy v1 Scope
 
-Last Updated: 2026-06-20
+Last Updated: 2026-06-22
 
 ## Scope
 
@@ -13,6 +13,8 @@ Implementation status:
 - Field Pack Agent category-aware catalog input is now implemented
 - backend curated taxonomy storage/filtering remains a later phase
 - internal Homepage Signals / Content Pool filtering remains a later phase
+- the current scaffold is not yet the final published-storage or Homepage Curation mapping
+- final merge remains blocked until the end-to-end taxonomy matrix is proven through runtime
 
 ## CTA Milestone Final Contract
 
@@ -175,6 +177,32 @@ Agent-triggered:
 - `outdoor_seating`: required for cafes, restaurants
 - `pet_friendly`: required for attractions, hotels, cafes, restaurants
 - `work_power_outlets`: required for cafes
+
+## Merge Gate And Acceptance Boundaries
+
+Do not treat the Taxonomy v1 work as final until all of the following are proven:
+
+- taxonomy catalog -> AI Field Pack suggestion -> Item Editor Curation Review -> requested checks -> requested_check_returns -> editor confirmation -> confirmed_taxonomy_json -> Article Workspace / submission payload -> Backend review ingest -> review_contents -> approval decision -> published places/events -> homepage decision/signal mapping
+- `GET /api/homepage-curation/candidates` exposes the intended fields
+- Admin Homepage Curation displays and consumes the intended signals
+- representative runtime fixtures pass for:
+  - attraction
+  - activity
+  - hotel
+  - cafe
+  - restaurant
+  - transport
+- CTA and taxonomy pass a final real Collector -> Backend -> Admin test
+- no auto-confirmation is introduced
+- existing issued handoff snapshots remain unchanged
+
+Document only what is currently proven:
+
+- completed and runtime verified
+- implemented but not runtime verified
+- pending audit
+- deferred
+- merge blockers
 
 ## custom.* Disabled Policy
 

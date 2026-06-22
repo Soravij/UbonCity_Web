@@ -1,17 +1,35 @@
 # UbonCity Project State
 
-Last Updated: 2026-06-20
+Last Updated: 2026-06-22
 
 ## Current Branch
 
 - `feature/taxonomy-v1-catalog`
+- Draft PR `#25` `Complete CTA and taxonomy pipeline`
 - implementation baseline commit: `372bb50`
 - CTA documentation baseline inherited from `1d08fb1`
+
+Draft gate:
+- PR `#25` must remain Draft
+- do not merge until the final taxonomy pipeline is complete and runtime acceptance is proven
 
 ## CTA / Contact Milestone
 
 Status:
 - complete on milestone branch `feature/taxonomy-catalog-resolver`
+
+Verified CTA path:
+- Item Editor Generate/Regenerate -> `POST /api/run/ai-draft` -> `runAiDraftStage()` -> `normalizeFieldPack()` -> `buildFieldPackPayloadFromAgent()` -> `saveAgentFieldPack()` -> repository create/update -> `getCurrentFieldPackByItem()` -> CTA Review UI
+
+Runtime verification:
+- item `51` `Golden Hour Coffee` showed `ai_cta_contact_json.phone = 0804415224`
+- current AI-generated CTA fields persist through the real workflow save path
+- deterministic source candidates override conflicting AI contact values
+- AI regeneration can clear stale CTA contact suggestions
+- deterministic/null path does not erase existing CTA data
+- existing issued assignment snapshots remain immutable
+- CTA remains place-only
+- AI suggestions never auto-confirm CTA/contact
 
 Locked CTA rules:
 - CTA/contact is separate from taxonomy.
@@ -35,6 +53,7 @@ Locked CTA rules:
 - Field Pack Agent catalog-awareness is implemented on `feature/taxonomy-v1-catalog`.
 - Backend curated taxonomy storage remains pending.
 - Homepage Signals / Content Pool taxonomy integration remains pending.
+- The current taxonomy scaffold is not the approved final end-to-end mapping.
 
 ## Confirmed Direction
 
@@ -47,6 +66,7 @@ Locked CTA rules:
   - `cafes`
   - `restaurants`
   - `transport`
+- Taxonomy end-to-end merge remains blocked until backend storage, published storage destinations, Homepage Curation signal derivation, candidate API exposure, and admin consumption are verified.
 
 ## Policy Reference
 

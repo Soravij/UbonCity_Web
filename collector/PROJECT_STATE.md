@@ -1,10 +1,14 @@
 # PROJECT_STATE
 
-Last Updated: 2026-06-20
+Last Updated: 2026-06-22
 
 ## Active Branch
 
 `feature/taxonomy-v1-catalog`
+
+Draft PR:
+- `#25` `Complete CTA and taxonomy pipeline`
+- remains Draft until final taxonomy pipeline completion and runtime acceptance
 
 ## 2026-06-20 CTA Milestone Closure And Taxonomy v1 Documentation Baseline
 
@@ -17,6 +21,15 @@ Status:
 - Field Pack Agent catalog-awareness implemented on `feature/taxonomy-v1-catalog`
 - backend curated taxonomy storage/filtering remains a later phase
 - Homepage Signals / Content Pool taxonomy integration remains a later phase
+
+2026-06-22 runtime verification:
+- the live Item Editor CTA path is proven end to end
+- item `51` `Golden Hour Coffee` preserved `ai_cta_contact_json.phone = 0804415224` through the workflow save path
+- deterministic source candidates override conflicting AI contact values
+- stale CTA contact suggestions can be cleared on regeneration
+- issued handoff snapshots remain immutable
+- no auto-confirmation was introduced
+- focused tests passed for the workflow CTA propagation path and repository persistence
 
 Locked CTA/contact contract:
 - CTA/contact is separate from taxonomy.
@@ -46,6 +59,7 @@ Locked taxonomy direction on this branch:
   - `cafes`
   - `restaurants`
   - `transport`
+- The current Taxonomy v1 scaffold is not the final end-to-end Homepage Curation mapping.
 - Coordinates, map identity/link fields, Google Maps opening hours, and CTA/contact are excluded from taxonomy.
 - Required taxonomy means the field worker must answer; it does not mean the value must be true.
 - Approved catalog keys may be either required or Agent-triggered.
@@ -56,6 +70,7 @@ Locked taxonomy direction on this branch:
   - `must_ask_question`
   - Work Return additional notes
 - Unknown/non-catalog ideas do not become canonical taxonomy keys automatically.
+- Backend curated taxonomy storage and Homepage Signals / Content Pool integration remain pending.
 - Do not include any `custom` group or `custom.*` row in newly created handoff snapshots, including legacy stored rows.
 - Preserve legacy custom data at rest.
 - Already-issued immutable snapshots containing custom checks remain readable and returnable for compatibility.
