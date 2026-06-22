@@ -19,6 +19,7 @@ import { createTranslationGenerator } from "../translation/service.mjs";
 import { runAutomaticTranslationChecks } from "../quality/translation-checks.mjs";
 import { executeBackendAiJson, isBackendAiConfigured } from "./backend-ai-client.mjs";
 import { buildCleanStructuredContext, buildFieldPackContractFromCleanContext, validateCleanMinimum } from "./clean-context.mjs";
+import { isCtaTraceEnabled, summarizeCtaValue, traceCtaStage } from "./cta-trace.mjs";
 
 function traceAiDraft(stage, details = {}) {
   const ts = new Date().toISOString();
@@ -2016,6 +2017,38 @@ function normalizeAgentFieldPackMediaHints(value) {
   }).filter(Boolean);
 }
 
+function cloneJsonValue(value) {
+  if (value == null) return value;
+  if (typeof structuredClone === "function") return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
+}
+
+function mergeAiCtaContactMetadata(existingValue, nextValue) {
+  const existing = existingValue && typeof existingValue === "object" && !Array.isArray(existingValue)
+    ? existingValue
+    : null;
+  const next = nextValue && typeof nextValue === "object" && !Array.isArray(nextValue)
+    ? nextValue
+    : null;
+  if (!existing && !next) return null;
+  const merged = {};
+  const nextContactFields = ["phone", "line_url", "facebook_url", "website_url", "primary_cta"];
+  for (const key of nextContactFields) {
+    if (!next || !Object.prototype.hasOwnProperty.call(next, key)) continue;
+    const value = next[key];
+    if (value != null) merged[key] = cloneJsonValue(value);
+  }
+  const nextConfidence = next && Object.prototype.hasOwnProperty.call(next, "confidence")
+    ? next.confidence
+    : undefined;
+  const existingConfidence = existing && Object.prototype.hasOwnProperty.call(existing, "confidence")
+    ? existing.confidence
+    : undefined;
+  const resolvedConfidence = nextConfidence ?? existingConfidence;
+  if (resolvedConfidence != null) merged.confidence = cloneJsonValue(resolvedConfidence);
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
 function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = null) {
   const source = fieldPack && typeof fieldPack === "object" ? fieldPack : {};
   const existingId = Number(existingFieldPack?.id || 0) || 0;
@@ -2043,6 +2076,7 @@ function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = null) {
     social_shot_emphasis: Array.isArray(source.social_shot_emphasis) ? source.social_shot_emphasis : [],
     social_on_camera_points: Array.isArray(source.social_on_camera_points) ? source.social_on_camera_points : [],
     social_caption_angle: String(source.social_caption_angle || "").trim(),
+    ai_cta_contact_json: mergeAiCtaContactMetadata(existingFieldPack?.ai_cta_contact_json, source.ai_cta_contact_json),
     field_pack_checklists: Array.isArray(source.field_pack_checklists) ? source.field_pack_checklists : [],
     field_pack_references: normalizeAgentFieldPackReferences(source.field_pack_references),
     field_pack_media_hints: normalizeAgentFieldPackMediaHints(source.field_pack_media_hints),
@@ -2188,6 +2222,13 @@ function saveAgentFieldPack(repo, item, fieldPack, actorEmail, options = {}) {
     content_item_id: item.id,
     updated_by: actorEmail,
   };
+  if (isCtaTraceEnabled()) {
+    traceCtaStage("actualFieldPackSavePayload", {
+      item_id: Number(item?.id || 0) || null,
+      caller_path: String(options.callerPath || "runAiDraftStage:/api/run/ai-draft"),
+      ...summarizeCtaValue(payload.ai_cta_contact_json, "cta"),
+    });
+  }
   const savedFieldPack = existingFieldPack?.id
     ? repo.updateFieldPack(existingFieldPack.id, payload)
     : repo.createFieldPack(payload);
@@ -2389,6 +2430,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
       const savedFieldPack = saveAgentFieldPack(repo, finalItem, finalFieldPack, actorEmail, {
         cleanContract: finalItem?.clean_field_pack_contract || null,
         sourceDraftInputSnapshotId: finalItem?.source_draft_input_snapshot_id || null,
+        callerPath: "/api/run/ai-draft",
       });
       traceAiDraft("field_pack.save.ok", {
         item_id: Number(finalItem?.id || 0) || null,
@@ -2422,6 +2464,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
       const savedFieldPack = saveAgentFieldPack(repo, finalItem, null, actorEmail, {
         cleanContract: finalItem?.clean_field_pack_contract || null,
         sourceDraftInputSnapshotId: finalItem?.source_draft_input_snapshot_id || null,
+        callerPath: "/api/run/ai-draft",
       });
       traceAiDraft("field_pack.save.ok", {
         item_id: Number(finalItem?.id || 0) || null,
