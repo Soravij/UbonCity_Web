@@ -18,7 +18,7 @@ function createDbContext(prefix = "collector-schema-foundation-") {
     } catch {}
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
-  return { db, cleanup };
+  return { db, dbPath, schemaPath, cleanup };
 }
 
 function readColumnNames(db, tableName) {
@@ -118,6 +118,75 @@ test("repository migration adds schema foundation columns for field packs drafts
     assert.equal(readColumnNames(ctx.db, "content_drafts").includes("confirmed_meta_status"), true);
   } finally {
     ctx.cleanup();
+  }
+});
+
+test("accepted binding migration is idempotent across reopening the same legacy database", () => {
+  const ctx = createDbContext("collector-schema-foundation-accepted-binding-");
+  try {
+    ctx.db.exec("DROP TABLE IF EXISTS content_assignments;");
+    ctx.db.exec(`
+      CREATE TABLE content_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assignment_uid TEXT NOT NULL,
+        content_item_id INTEGER NOT NULL,
+        assignment_kind TEXT NOT NULL DEFAULT 'field',
+        assignee_user_id INTEGER,
+        assignee_name TEXT,
+        assignee_contact TEXT,
+        external_assignee_profile_json TEXT,
+        assigned_by_user_id INTEGER,
+        state TEXT NOT NULL DEFAULT 'assigned',
+        brief_json TEXT,
+        requirements_json TEXT,
+        due_at TEXT,
+        latest_submission_id INTEGER,
+        latest_submission_at TEXT,
+        revision_round INTEGER NOT NULL DEFAULT 0,
+        accepted_at TEXT,
+        contributor_note TEXT,
+        internal_note TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    ctx.db.prepare(`
+      INSERT INTO content_items (
+        item_uid, type, category, lang, title, normalized_title, slug, description_raw, workflow_status
+      ) VALUES ('legacy-accepted-item', 'place', 'attractions', 'th', 'Legacy Accepted', 'legacy accepted', 'legacy-accepted', 'raw', 'raw')
+    `).run();
+    const itemId = Number(ctx.db.prepare("SELECT id FROM content_items WHERE item_uid='legacy-accepted-item'").get()?.id || 0);
+    ctx.db.prepare("INSERT INTO users (email, display_name, password_hash, role) VALUES ('legacy-accepted@local', 'Legacy Accepted', 'hash', 'user')").run();
+    const userId = Number(ctx.db.prepare("SELECT id FROM users WHERE email='legacy-accepted@local'").get()?.id || 0);
+    ctx.db.prepare(`
+      INSERT INTO content_assignments (
+        assignment_uid, content_item_id, assignment_kind, assignee_user_id, assigned_by_user_id, state, accepted_at
+      ) VALUES ('legacy-accepted-assignment', ?, 'field', ?, ?, 'accepted', CURRENT_TIMESTAMP)
+    `).run(itemId, userId, userId);
+    createRepository(ctx.db);
+    ctx.db.close();
+
+    const reopenedDb = openDatabase(ctx.dbPath, ctx.schemaPath);
+    try {
+      const repo = createRepository(reopenedDb);
+      const columns = readColumnNames(reopenedDb, "content_assignments");
+      assert.equal(columns.filter((name) => name === "accepted_at").length, 1);
+      assert.equal(columns.filter((name) => name === "accepted_handoff_snapshot_id").length, 1);
+      assert.equal(columns.filter((name) => name === "accepted_submission_id").length, 1);
+      const assignmentId = Number(reopenedDb.prepare("SELECT id FROM content_assignments WHERE assignment_uid='legacy-accepted-assignment'").get()?.id || 0);
+      const assignment = repo.getAssignmentById(assignmentId);
+      assert.equal(assignment.accepted_binding_status, "legacy_unpinned");
+      assert.equal(assignment.accepted_handoff_snapshot_id, null);
+      assert.equal(assignment.accepted_submission_id, null);
+    } finally {
+      try {
+        reopenedDb.close();
+      } catch {}
+    }
+  } finally {
+    try {
+      ctx.cleanup();
+    } catch {}
   }
 });
 

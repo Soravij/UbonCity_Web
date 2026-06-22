@@ -3,6 +3,11 @@ import path from "path";
 
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
 import { isCtaTraceEnabled, summarizeCtaJsonString, summarizeCtaValue, traceCtaStage } from "../services/cta-trace.mjs";
+import {
+  isKnownTaxonomyCatalogKey,
+  isTaxonomyCatalogKeyApplicableToItem,
+  normalizeTaxonomyCatalogCategory,
+} from "../server/taxonomy-catalog.mjs";
 import { filterRequestedChecksForNewHandoff, resolveRequestedChecksWithCatalog } from "../server/taxonomy-resolver.mjs";
 
 function parseTags(raw) {
@@ -330,7 +335,7 @@ const TRANSITION_RULES = Object.freeze({
     revision_requested: new Set(["resubmitted", "in_progress", "closed"]),
     resubmitted: new Set(["accepted", "revision_requested", "closed"]),
     accepted: new Set(["closed", "revision_requested"]),
-    closed: new Set([]),
+    closed: new Set(["revision_requested"]),
   }),
 });
 
@@ -1019,8 +1024,12 @@ function normalizeRequestedChecksJson(value, fieldName = "requested_checks_json"
 }
 
 function hasMeaningfulValue(value) {
+  if (value === false) return true;
+  if (value == null) return false;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "object" && !Array.isArray(value)) return Object.keys(value).length > 0;
   if (Array.isArray(value)) return value.length > 0;
-  return String(value || "").trim().length > 0;
+  return String(value).trim().length > 0;
 }
 
 function normalizeAiCtaContactJson(value, fieldName = "ai_cta_contact_json") {
@@ -1263,14 +1272,19 @@ function buildRequestedCheckSchemaMapFromHandoffPackage(handoffPackage = null) {
       if (!returnKey) return;
       schemaMap.set(returnKey, {
         return_key: returnKey,
+        group_key: groupKey,
+        check_key: checkKey,
         answer_type: normalizeRequestedCheckAnswerType(check?.answer_type),
         allowed_values: Array.isArray(check?.allowed_values) ? check.allowed_values.map((value) => String(value || "").trim()).filter(Boolean) : null,
         unit_options: Array.isArray(check?.unit_options) ? check.unit_options.map((value) => String(value || "").trim()).filter(Boolean) : null,
         requested: check?.requested === true,
         required: check?.required === true,
+        activation_mode: String(check?.activation_mode || "").trim().toLowerCase() || null,
         evidence_required: Object.prototype.hasOwnProperty.call(check || {}, "evidence_required")
           ? check.evidence_required === true
           : null,
+        categories: Array.isArray(check?.categories) ? check.categories.map((value) => String(value || "").trim().toLowerCase()).filter(Boolean) : [],
+        item_types: Array.isArray(check?.item_types) ? check.item_types.map((value) => String(value || "").trim().toLowerCase()).filter(Boolean) : [],
       });
     });
   });
@@ -1283,11 +1297,18 @@ function isRequestedCheckAnswerComplete(row = {}, schema = null) {
   if (answerType === "boolean" || answerType === "boolean_with_conditions") {
     return typeof value === "boolean";
   }
+  if (["text", "phone", "url", "hours"].includes(answerType)) {
+    return hasMeaningfulValue(value);
+  }
   if (answerType === "select") {
-    return typeof value === "string" && value.trim().length > 0;
+    if (!(typeof value === "string" && value.trim().length > 0)) return false;
+    return !(Array.isArray(schema?.allowed_values) && schema.allowed_values.length) || schema.allowed_values.includes(value);
   }
   if (answerType === "multi_select") {
-    return Array.isArray(value);
+    if (!Array.isArray(value)) return false;
+    return !Array.isArray(schema?.allowed_values)
+      || schema.allowed_values.length === 0
+      || value.every((entry) => typeof entry === "string" && schema.allowed_values.includes(entry));
   }
   if (answerType === "number_with_unit") {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -1304,6 +1325,29 @@ function isRequestedCheckAnswerComplete(row = {}, schema = null) {
   return true;
 }
 
+function hasRequestedCheckEvidence(row = {}) {
+  return Boolean(String(row?.evidence || "").trim())
+    || Number(row?.evidence_deliverable_id || 0) > 0
+    || Boolean(String(row?.evidence_source_url || "").trim());
+}
+
+function inferRequestedCheckReturnStatus(row = {}, schema = null) {
+  if (!row || row.checked !== true) return "unanswered";
+  const answerType = normalizeRequestedCheckAnswerType(schema?.answer_type || row?.answer_type);
+  const complete = isRequestedCheckAnswerComplete(row, schema);
+  const hasEvidence = hasRequestedCheckEvidence(row);
+  const hasCondition = Boolean(String(row?.condition_note || "").trim());
+  const hasNote = Boolean(String(row?.note || "").trim());
+  if (schema?.evidence_required === true && !hasEvidence) return "malformed";
+  if (complete) return "reported";
+  if (answerType === "note_only") {
+    return hasNote || hasCondition || hasEvidence ? "reported" : "not_found";
+  }
+  if (row.found === false && row.value == null) return "not_found";
+  if (row.value == null && !hasEvidence && !hasCondition && !hasNote) return "not_found";
+  return "malformed";
+}
+
 function parseStrictFiniteNumericInput(rawValue) {
   if (typeof rawValue === "number") {
     return Number.isFinite(rawValue) ? rawValue : null;
@@ -1316,41 +1360,9 @@ function parseStrictFiniteNumericInput(rawValue) {
 }
 
 function validateRequestedCheckReturnsForFinalSubmission(requestedCheckReturns = {}, schemaMap = null, fieldName = "field_return_payload_json.requested_check_returns") {
-  if (!(schemaMap instanceof Map) || schemaMap.size === 0) return;
-  const missingKeys = [];
-  const uncheckedKeys = [];
-  const incompleteKeys = [];
-  const missingEvidenceKeys = [];
-  for (const [returnKey, schema] of schemaMap.entries()) {
-    if (schema?.requested !== true) continue;
-    if (!Object.prototype.hasOwnProperty.call(requestedCheckReturns || {}, returnKey)) {
-      missingKeys.push(returnKey);
-      continue;
-    }
-    const row = requestedCheckReturns?.[returnKey] && typeof requestedCheckReturns[returnKey] === "object"
-      ? requestedCheckReturns[returnKey]
-      : null;
-    if (!row || row.checked !== true) {
-      uncheckedKeys.push(returnKey);
-      continue;
-    }
-    if (!isRequestedCheckAnswerComplete(row, schema)) {
-      incompleteKeys.push(returnKey);
-    }
-    if (schema.evidence_required === true) {
-      const hasEvidence = Boolean(String(row.evidence || "").trim())
-        || Number(row.evidence_deliverable_id || 0) > 0
-        || Boolean(String(row.evidence_source_url || "").trim());
-      if (!hasEvidence) missingEvidenceKeys.push(returnKey);
-    }
-  }
-  if (!missingKeys.length && !uncheckedKeys.length && !incompleteKeys.length && !missingEvidenceKeys.length) return;
-  const errors = [];
-  if (missingKeys.length) errors.push(`missing requested return keys: ${missingKeys.join(", ")}`);
-  if (uncheckedKeys.length) errors.push(`unchecked requested return keys: ${uncheckedKeys.join(", ")}`);
-  if (incompleteKeys.length) errors.push(`incomplete requested return keys: ${incompleteKeys.join(", ")}`);
-  if (missingEvidenceKeys.length) errors.push(`missing evidence for requested return keys: ${missingEvidenceKeys.join(", ")}`);
-  throw new Error(`${fieldName} ${errors.join("; ")}`);
+  void requestedCheckReturns;
+  void schemaMap;
+  void fieldName;
 }
 
 function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName, options = {}) {
@@ -1359,62 +1371,40 @@ function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName, opt
   if (rawValue == null) {
     return answerType === "multi_select" ? [] : null;
   }
-  try {
-    if (answerType === "url") return normalizeOptionalUrlValue(rawValue, fieldName);
-    if (["text", "phone", "select", "hours"].includes(answerType)) {
-      const value = String(rawValue || "").trim() || null;
-      if (answerType === "select" && checked && value && Array.isArray(schema?.allowed_values) && schema.allowed_values.length && !schema.allowed_values.includes(value)) {
-        throw new Error(`${fieldName} has invalid select value`);
-      }
-      return value;
+  if (answerType === "url") return normalizeOptionalUrlValue(rawValue, fieldName);
+  if (["text", "phone", "hours"].includes(answerType)) {
+    return String(rawValue || "").trim() || null;
+  }
+  if (answerType === "select") {
+    return typeof rawValue === "string" ? String(rawValue).trim() || null : normalizeJsonSafeValue(rawValue);
+  }
+  if (answerType === "multi_select") {
+    if (!Array.isArray(rawValue)) return normalizeJsonSafeValue(rawValue);
+    return rawValue.map((value) => String(value == null ? "" : value).trim());
+  }
+  if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+    return typeof rawValue === "boolean" ? rawValue : normalizeJsonSafeValue(rawValue);
+  }
+  if (answerType === "number_with_unit") {
+    const hasUnitOptions = Array.isArray(schema?.unit_options) && schema.unit_options.length > 0;
+    if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+      if (hasUnitOptions) return rawValue;
+      return { number: rawValue, unit: null };
     }
-    if (answerType === "multi_select") {
-      if (!Array.isArray(rawValue)) {
-        if (Array.isArray(schema?.allowed_values) && schema.allowed_values.length) {
-          throw new Error(`${fieldName} must be an array`);
-        }
-        return [];
-      }
-      const values = normalizeStringListInput(rawValue, fieldName);
-      if (Array.isArray(schema?.allowed_values) && schema.allowed_values.length) {
-        const invalidValue = values.find((value) => !schema.allowed_values.includes(value));
-        if (invalidValue) throw new Error(`${fieldName} has invalid multi_select value`);
-      }
-      return Array.from(new Set(values));
-    }
-    if (answerType === "boolean" || answerType === "boolean_with_conditions") {
-      return typeof rawValue === "boolean" ? rawValue : null;
-    }
-    if (answerType === "number_with_unit") {
-      const hasUnitOptions = Array.isArray(schema?.unit_options) && schema.unit_options.length > 0;
-      if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
-        if (hasUnitOptions) throw new Error(`${fieldName} must be an object with number and unit`);
-        return { number: rawValue, unit: null };
-      }
-      if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) return null;
-      const hasRawNumberField = Object.prototype.hasOwnProperty.call(rawValue, "number");
-      const numberIsEmpty = !hasRawNumberField
-        || rawValue.number == null
-        || (typeof rawValue.number === "string" && rawValue.number.trim() === "");
-      const numeric = numberIsEmpty ? null : parseStrictFiniteNumericInput(rawValue.number);
-      const unitValue = rawValue.unit == null ? null : String(rawValue.unit || "").trim() || null;
-      if (numberIsEmpty) {
-        if (unitValue && hasUnitOptions && !schema.unit_options.includes(unitValue)) {
-          throw new Error(`${fieldName} has invalid unit`);
-        }
-        return unitValue ? { number: null, unit: unitValue } : null;
-      }
-      if (!Number.isFinite(numeric)) return null;
-      if (hasUnitOptions && (!unitValue || !schema.unit_options.includes(unitValue))) {
-        throw new Error(`${fieldName} has invalid unit`);
-      }
+    if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) return normalizeJsonSafeValue(rawValue);
+    const hasRawNumberField = Object.prototype.hasOwnProperty.call(rawValue, "number");
+    const numberValue = hasRawNumberField ? rawValue.number : null;
+    const unitValue = rawValue.unit == null ? null : String(rawValue.unit || "").trim() || null;
+    const numeric = parseStrictFiniteNumericInput(numberValue);
+    if (Number.isFinite(numeric) && (!hasUnitOptions || (unitValue && schema.unit_options.includes(unitValue)))) {
       return { number: numeric, unit: unitValue };
     }
-    if (answerType === "note_only") return null;
-  } catch (error) {
-    if (error instanceof Error && /invalid|must be an array/i.test(String(error.message || ""))) throw error;
-    return answerType === "multi_select" ? [] : null;
+    return normalizeJsonSafeValue({
+      number: numberValue,
+      unit: unitValue,
+    });
   }
+  if (answerType === "note_only") return null;
   return normalizeJsonSafeValue(rawValue);
 }
 
@@ -1455,10 +1445,8 @@ function normalizeRequestedCheckReturnEntry(rawValue, fieldName, schema = null) 
   const hasCondition = Boolean(conditionNote);
   const hasNote = Boolean(note);
   const found = checked && (
-    hasMeaningfulValue(value)
-    || hasEvidence
-    || (answerType === "note_only" && (hasNote || hasCondition))
-    || (answerType === "boolean_with_conditions" && (value === true || hasCondition))
+    isRequestedCheckAnswerComplete({ value, answer_type: answerType }, schema || { answer_type: answerType })
+    || (answerType === "note_only" && (hasNote || hasCondition || hasEvidence))
   );
   return {
     checked,
@@ -1492,6 +1480,127 @@ function normalizeRequestedCheckReturns(value, fieldName = "field_return_payload
     );
     return acc;
   }, {});
+}
+
+function normalizeAcceptanceCategoryContext(item = {}) {
+  return normalizeTaxonomyCatalogCategory(item?.category || item?.niche || "");
+}
+
+function buildAcceptedAssignmentValidationSummary({
+  assignment = null,
+  item = null,
+  handoffSnapshot = null,
+  submission = null,
+} = {}) {
+  const blockers = [];
+  const warnings = [];
+  const statuses = [];
+  const assignmentId = Number(assignment?.id || 0) || 0;
+  const contentItemId = Number(assignment?.content_item_id || 0) || 0;
+  const normalizedItem = item && typeof item === "object"
+    ? {
+      ...item,
+      category: normalizeAcceptanceCategoryContext(item),
+      type: String(item?.type || "").trim().toLowerCase() || null,
+    }
+    : null;
+
+  if (!handoffSnapshot?.id) blockers.push({ code: "handoff_snapshot_missing", message: "Missing handoff snapshot" });
+  if (!submission?.id) blockers.push({ code: "latest_submission_missing", message: "Missing latest submission" });
+  if (!assignmentId || !contentItemId) blockers.push({ code: "assignment_missing", message: "Assignment is incomplete" });
+  if (handoffSnapshot?.id) {
+    if (Number(handoffSnapshot.assignment_id || 0) !== assignmentId) {
+      blockers.push({ code: "handoff_snapshot_assignment_mismatch", message: "Handoff snapshot belongs to another assignment" });
+    }
+    if (Number(handoffSnapshot.content_item_id || 0) !== contentItemId) {
+      blockers.push({ code: "handoff_snapshot_item_mismatch", message: "Handoff snapshot belongs to another content item" });
+    }
+  }
+  if (submission?.id) {
+    if (Number(submission.assignment_id || 0) !== assignmentId) {
+      blockers.push({ code: "submission_assignment_mismatch", message: "Submission belongs to another assignment" });
+    }
+    if (Number(submission.content_item_id || 0) !== contentItemId) {
+      blockers.push({ code: "submission_item_mismatch", message: "Submission belongs to another content item" });
+    }
+  }
+  if (blockers.length) {
+    return {
+      ok: false,
+      category_context: normalizedItem?.category || "",
+      blockers,
+      warnings,
+      statuses,
+      summary: {
+        issued_count: 0,
+        reported_count: 0,
+        not_found_count: 0,
+        unanswered_count: 0,
+        malformed_count: 0,
+      },
+    };
+  }
+
+  const schemaMap = buildRequestedCheckSchemaMapFromHandoffPackage(handoffSnapshot?.handoff_package_json || null);
+  const requestedReturns = submission?.field_return_payload_json?.requested_check_returns && typeof submission.field_return_payload_json.requested_check_returns === "object"
+    ? submission.field_return_payload_json.requested_check_returns
+    : {};
+
+  for (const [returnKey, schema] of schemaMap.entries()) {
+    if (schema?.requested !== true) continue;
+    if (schema.group_key === "taxonomy") {
+      if (!isKnownTaxonomyCatalogKey(schema.check_key)) {
+        blockers.push({ code: "unknown_taxonomy_key", return_key: returnKey, status: "malformed", message: `${returnKey} is not a known canonical taxonomy key` });
+        continue;
+      }
+      if (!isTaxonomyCatalogKeyApplicableToItem(schema.check_key, normalizedItem || {})) {
+        blockers.push({ code: "non_applicable_taxonomy_key", return_key: returnKey, status: "malformed", message: `${returnKey} is not applicable to the normalized category` });
+        continue;
+      }
+    }
+    const row = Object.prototype.hasOwnProperty.call(requestedReturns, returnKey)
+      ? requestedReturns[returnKey]
+      : null;
+    const status = inferRequestedCheckReturnStatus(row, schema);
+    statuses.push({
+      return_key: returnKey,
+      group_key: schema.group_key,
+      check_key: schema.check_key,
+      activation_mode: schema.activation_mode || null,
+      required: schema.required === true,
+      status,
+    });
+    if (status === "malformed") {
+      blockers.push({ code: "malformed_requested_check_return", return_key: returnKey, status, message: `${returnKey} is malformed` });
+      continue;
+    }
+    if (status === "unanswered" && schema.required === true) {
+      blockers.push({ code: "required_requested_check_unanswered", return_key: returnKey, status, message: `${returnKey} is unanswered but required` });
+      continue;
+    }
+    if (status === "unanswered" && schema.activation_mode === "agent_triggered") {
+      warnings.push({ code: "optional_requested_check_unanswered", return_key: returnKey, status, message: `${returnKey} is unanswered but optional` });
+      continue;
+    }
+    if (status === "not_found") {
+      warnings.push({ code: "requested_check_not_found", return_key: returnKey, status, message: `${returnKey} was checked but no usable value was found` });
+    }
+  }
+
+  return {
+    ok: blockers.length === 0,
+    category_context: normalizedItem?.category || "",
+    blockers,
+    warnings,
+    statuses,
+    summary: {
+      issued_count: statuses.length,
+      reported_count: statuses.filter((entry) => entry.status === "reported").length,
+      not_found_count: statuses.filter((entry) => entry.status === "not_found").length,
+      unanswered_count: statuses.filter((entry) => entry.status === "unanswered").length,
+      malformed_count: statuses.filter((entry) => entry.status === "malformed").length,
+    },
+  };
 }
 
 function normalizeFieldReturnPayloadJson(value, fieldName = "field_return_payload_json", options = {}) {
@@ -1709,6 +1818,9 @@ function normalizeAssignmentRow(row) {
     assignment_kind: explicitAssignmentKind || derivedAssignmentKind,
     external_assignee_profile_json: externalAssigneeProfile,
     assignee_email: externalAssigneeEmail || internalAssigneeEmail || null,
+    accepted_handoff_snapshot_id: row.accepted_handoff_snapshot_id == null ? null : Number(row.accepted_handoff_snapshot_id || 0) || null,
+    accepted_submission_id: row.accepted_submission_id == null ? null : Number(row.accepted_submission_id || 0) || null,
+    accepted_binding_status: "not_accepted",
     image_reset_required: Number(row.image_reset_required || 0) === 1,
     video_reset_required: Number(row.video_reset_required || 0) === 1,
   };
@@ -3463,6 +3575,8 @@ function ensureAssignmentTableSupport(db) {
           latest_submission_at TEXT,
           revision_round INTEGER NOT NULL DEFAULT 0,
           accepted_at TEXT,
+          accepted_handoff_snapshot_id INTEGER,
+          accepted_submission_id INTEGER,
           image_reset_required INTEGER NOT NULL DEFAULT 0,
           image_reset_reason TEXT,
           video_reset_required INTEGER NOT NULL DEFAULT 0,
@@ -3480,7 +3594,7 @@ function ensureAssignmentTableSupport(db) {
         INSERT INTO content_assignments (
           id, assignment_uid, content_item_id, assignment_kind, assignee_user_id, assignee_name, assignee_contact, external_assignee_profile_json,
           assigned_by_user_id, state, brief_json, requirements_json, due_at, latest_submission_id,
-          latest_submission_at, revision_round, accepted_at, image_reset_required, image_reset_reason, video_reset_required, video_reset_reason, contributor_note, internal_note, created_at, updated_at
+          latest_submission_at, revision_round, accepted_at, accepted_handoff_snapshot_id, accepted_submission_id, image_reset_required, image_reset_reason, video_reset_required, video_reset_reason, contributor_note, internal_note, created_at, updated_at
         )
         SELECT
           id, assignment_uid, content_item_id,
@@ -3490,7 +3604,7 @@ function ensureAssignmentTableSupport(db) {
           ${hasAssigneeContact ? "assignee_contact" : "NULL"},
           ${names.has("external_assignee_profile_json") ? "external_assignee_profile_json" : "NULL"},
           assigned_by_user_id, state, brief_json, requirements_json, due_at, latest_submission_id,
-          latest_submission_at, revision_round, NULL, 0, NULL, 0, NULL, contributor_note, internal_note, created_at, updated_at
+          latest_submission_at, revision_round, ${names.has("accepted_at") ? "accepted_at" : "NULL"}, NULL, NULL, 0, NULL, 0, NULL, contributor_note, internal_note, created_at, updated_at
         FROM content_assignments_legacy_external;
       `);
       db.exec("DROP TABLE content_assignments_legacy_external;");
@@ -3523,6 +3637,12 @@ function ensureAssignmentTableSupport(db) {
   }
   if (!names.has("accepted_at")) {
     db.exec("ALTER TABLE content_assignments ADD COLUMN accepted_at TEXT;");
+  }
+  if (!names.has("accepted_handoff_snapshot_id")) {
+    db.exec("ALTER TABLE content_assignments ADD COLUMN accepted_handoff_snapshot_id INTEGER;");
+  }
+  if (!names.has("accepted_submission_id")) {
+    db.exec("ALTER TABLE content_assignments ADD COLUMN accepted_submission_id INTEGER;");
   }
   if (!names.has("image_reset_required")) {
     db.exec("ALTER TABLE content_assignments ADD COLUMN image_reset_required INTEGER NOT NULL DEFAULT 0;");
@@ -4693,6 +4813,16 @@ export function createRepository(db) {
         WHEN ? THEN NULL
         ELSE accepted_at
       END,
+      accepted_handoff_snapshot_id=CASE
+        WHEN ? THEN ?
+        WHEN ? THEN NULL
+        ELSE accepted_handoff_snapshot_id
+      END,
+      accepted_submission_id=CASE
+        WHEN ? THEN ?
+        WHEN ? THEN NULL
+        ELSE accepted_submission_id
+      END,
       updated_at=CURRENT_TIMESTAMP
     WHERE id=?
   `);
@@ -4859,6 +4989,11 @@ export function createRepository(db) {
     WHERE assignment_id=?
     ORDER BY id DESC
     LIMIT 1
+  `);
+  const assignmentHandoffByIdStmt = db.prepare(`
+    SELECT *
+    FROM content_assignment_handoff_snapshots
+    WHERE id=?
   `);
 
   const attachLatestSubmissionToAssignmentStmt = db.prepare(`
@@ -6193,8 +6328,47 @@ function normalizeStateValue(value, stateGroup) {
     };
   }
 
+  function resolveAcceptedBindingStatusForAssignmentRow(row) {
+    const assignment = normalizeAssignmentRow(row);
+    if (!assignment) return null;
+    const state = String(assignment.state || "").trim().toLowerCase();
+    if (!(state === "accepted" || state === "closed")) {
+      return {
+        ...assignment,
+        accepted_binding_status: "not_accepted",
+      };
+    }
+    const hasAcceptedAt = Boolean(String(assignment.accepted_at || "").trim());
+    const handoffSnapshotId = Number(assignment.accepted_handoff_snapshot_id || 0) || 0;
+    const submissionId = Number(assignment.accepted_submission_id || 0) || 0;
+    if (hasAcceptedAt && !handoffSnapshotId && !submissionId) {
+      return {
+        ...assignment,
+        accepted_binding_status: "legacy_unpinned",
+      };
+    }
+    if (!hasAcceptedAt || !handoffSnapshotId || !submissionId) {
+      return {
+        ...assignment,
+        accepted_binding_status: "invalid_binding",
+      };
+    }
+    const handoffSnapshot = normalizeAssignmentHandoffRow(assignmentHandoffByIdStmt.get(handoffSnapshotId));
+    const submission = normalizeAssignmentSubmissionRow(getAssignmentSubmissionByIdStmt.get(submissionId));
+    const validHandoff = handoffSnapshot
+      && Number(handoffSnapshot.assignment_id || 0) === Number(assignment.id || 0)
+      && Number(handoffSnapshot.content_item_id || 0) === Number(assignment.content_item_id || 0);
+    const validSubmission = submission
+      && Number(submission.assignment_id || 0) === Number(assignment.id || 0)
+      && Number(submission.content_item_id || 0) === Number(assignment.content_item_id || 0);
+    return {
+      ...assignment,
+      accepted_binding_status: validHandoff && validSubmission ? "pinned" : "invalid_binding",
+    };
+  }
+
   function getAssignmentById(assignmentId) {
-    return normalizeAssignmentRow(getAssignmentByIdStmt.get(Number(assignmentId || 0)));
+    return resolveAcceptedBindingStatusForAssignmentRow(getAssignmentByIdStmt.get(Number(assignmentId || 0)));
   }
 
   function setAssignmentLatestSubmission(assignmentId, submissionId) {
@@ -6214,25 +6388,25 @@ function normalizeStateValue(value, stateGroup) {
   }
 
   function listAssignmentsByItem(contentItemId) {
-    return listAssignmentsByItemStmt.all(Number(contentItemId || 0)).map(normalizeAssignmentRow);
+    return listAssignmentsByItemStmt.all(Number(contentItemId || 0)).map(resolveAcceptedBindingStatusForAssignmentRow);
   }
 
   function listAssignmentsByAssignee(assigneeUserId, limit = 50) {
     const safeLimit = Math.max(1, Math.min(200, Number(limit) || 50));
-    return listAssignmentsByAssigneeStmt.all(Number(assigneeUserId || 0), safeLimit).map(normalizeAssignmentRow);
+    return listAssignmentsByAssigneeStmt.all(Number(assigneeUserId || 0), safeLimit).map(resolveAcceptedBindingStatusForAssignmentRow);
   }
 
   function listAssignments(limit = 50) {
     const safeLimit = Math.max(1, Math.min(200, Number(limit) || 50));
-    return listAssignmentsStmt.all(safeLimit).map(normalizeAssignmentRow);
+    return listAssignmentsStmt.all(safeLimit).map(resolveAcceptedBindingStatusForAssignmentRow);
   }
 
   function listExternalAssignmentsByAssigner(assignerUserId, limit = 50) {
     const safeLimit = Math.max(1, Math.min(200, Number(limit) || 50));
-    return listExternalAssignmentsByAssignerStmt.all(Number(assignerUserId || 0), safeLimit).map(normalizeAssignmentRow);
+    return listExternalAssignmentsByAssignerStmt.all(Number(assignerUserId || 0), safeLimit).map(resolveAcceptedBindingStatusForAssignmentRow);
   }
 
-  function updateAssignmentState(assignmentId, nextState, actorEmail = "system@local", payload = {}) {
+  function updateAssignmentStateInternal(assignmentId, nextState, actorEmail = "system@local", payload = {}) {
     const id = Number(assignmentId || 0);
     const normalizedState = normalizeStateValue(nextState, "assignment");
     if (!id) throw new Error("assignmentId is required");
@@ -6257,6 +6431,30 @@ function normalizeStateValue(value, stateGroup) {
     const wasAcceptedLifecycle = existingAssignmentState === "accepted" || existingAssignmentState === "closed";
     const isAcceptedLifecycle = normalizedState === "accepted" || normalizedState === "closed";
     const shouldClearAcceptedAt = wasAcceptedLifecycle && !isAcceptedLifecycle ? 1 : 0;
+    const item = getItem(Number(existing.content_item_id || 0)) || null;
+    const shouldSetAcceptedBinding = normalizedState === "accepted" ? 1 : 0;
+    const shouldClearAcceptedBinding = shouldClearAcceptedAt;
+    let acceptedHandoffSnapshotId = null;
+    let acceptedSubmissionId = null;
+    let acceptanceValidation = null;
+
+    if (shouldSetAcceptedBinding) {
+      const handoffSnapshot = getLatestAssignmentHandoffByAssignment(id);
+      const latestSubmissionId = Number(existing.latest_submission_id || 0) || null;
+      const submission = latestSubmissionId ? getAssignmentSubmissionById(latestSubmissionId) : null;
+      acceptanceValidation = buildAcceptedAssignmentValidationSummary({
+        assignment: normalizeAssignmentRow(existing),
+        item,
+        handoffSnapshot,
+        submission,
+      });
+      if (!acceptanceValidation.ok) {
+        throw new Error(acceptanceValidation.blockers.map((entry) => entry.message).join("; "));
+      }
+      acceptedHandoffSnapshotId = Number(handoffSnapshot?.id || 0) || null;
+      acceptedSubmissionId = Number(submission?.id || 0) || null;
+    }
+
     updateAssignmentStateStmt.run(
       normalizedState,
       contributorNote,
@@ -6264,6 +6462,12 @@ function normalizeStateValue(value, stateGroup) {
       shouldIncrementRevision,
       shouldSetAcceptedAt,
       shouldClearAcceptedAt,
+      shouldSetAcceptedBinding,
+      acceptedHandoffSnapshotId,
+      shouldClearAcceptedBinding,
+      shouldSetAcceptedBinding,
+      acceptedSubmissionId,
+      shouldClearAcceptedBinding,
       id
     );
     if (shouldSyncWorkflow) {
@@ -6284,7 +6488,18 @@ function normalizeStateValue(value, stateGroup) {
         }
       );
     }
-    return normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
+    const updated = resolveAcceptedBindingStatusForAssignmentRow(getAssignmentByIdStmt.get(id));
+    if (acceptanceValidation) {
+      return {
+        ...updated,
+        acceptance_validation: acceptanceValidation,
+      };
+    }
+    return updated;
+  }
+
+  function updateAssignmentState(assignmentId, nextState, actorEmail = "system@local", payload = {}) {
+    return runInTransaction(db, () => updateAssignmentStateInternal(assignmentId, nextState, actorEmail, payload));
   }
 
   function updateAssignmentMediaResetPolicy(assignmentId, payload = {}) {
@@ -6363,7 +6578,7 @@ function normalizeStateValue(value, stateGroup) {
         videoResetReason,
         id
       );
-      const assignment = updateAssignmentState(id, "revision_requested", actorEmail, {
+      const assignment = updateAssignmentStateInternal(id, "revision_requested", actorEmail, {
         contributor_note: contributorNote,
         internal_note: internalNote,
         actor_role: actorRole,
