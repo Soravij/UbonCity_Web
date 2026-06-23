@@ -42,6 +42,7 @@ export function buildFieldPackUpdatePayloadFromAgent(source = {}) {
 
 export function buildAssignmentSubmissionPayload({
   assignmentId,
+  sourceHandoffSnapshotId,
   submittedByUserId,
   submissionState,
   articlePayloadJson,
@@ -53,6 +54,7 @@ export function buildAssignmentSubmissionPayload({
 } = {}) {
   return {
     assignment_id: assignmentId,
+    source_handoff_snapshot_id: sourceHandoffSnapshotId,
     submitted_by_user_id: submittedByUserId,
     submission_state: submissionState,
     article_payload_json: articlePayloadJson,

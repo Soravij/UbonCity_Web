@@ -49,6 +49,10 @@ function createRepoContext() {
   return { db, repo, cleanup, createItem, createUser };
 }
 
+function currentHandoffSnapshotId(ctx, assignmentId) {
+  return Number(ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId)?.id || 0) || 0;
+}
+
 test("agent field-pack mapping forwards AI suggestion fields only and ignores curated fields", () => {
   const payload = buildFieldPackUpdatePayloadFromAgent({
     status: "ready_for_field",
@@ -133,6 +137,7 @@ test("regenerate-style update preserves existing curated metadata because agent 
 test("assignment submission mapping keeps field_return_payload_json separate from article and media payloads", () => {
   const payload = buildAssignmentSubmissionPayload({
     assignmentId: 12,
+    sourceHandoffSnapshotId: 56,
     submittedByUserId: 34,
     submissionState: "submitted",
     articlePayloadJson: { title: "Article payload" },
@@ -146,6 +151,7 @@ test("assignment submission mapping keeps field_return_payload_json separate fro
     note: "field return",
     taxonomy_return: { category: { checked: true, value: "attractions" } },
   });
+  assert.equal(payload.source_handoff_snapshot_id, 56);
   assert.equal(Object.prototype.hasOwnProperty.call(payload.article_payload_json, "field_return_payload_json"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(payload.media_payload_json, "field_return_payload_json"), false);
 });
@@ -177,19 +183,30 @@ test("assignment submission repository path rejects missing requested returns an
       "admin"
     ).assignment;
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+    const first = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId: assignment.id,
+      sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
       submittedByUserId: assignee.id,
       submissionState: "submitted",
       articlePayloadJson: { body: "draft body" },
       mediaPayloadJson: null,
       fieldReturnPayloadJson: null,
-    })), /missing requested return keys: cta_contact\.phone/);
+    }));
+    assert.deepEqual(first.article_payload_json, { body: "draft body" });
+    assert.deepEqual(first.field_return_payload_json?.requested_check_returns || {}, {});
 
-    const first = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+    ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "user", reason_code: "test" });
+    assert.throws(() => ctx.repo.updateAssignmentState(assignment.id, "accepted", "tester@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /required unanswered|unanswered|cta_contact\.phone/i);
+    ctx.repo.updateAssignmentState(assignment.id, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "test" });
+
+    const completed = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId: assignment.id,
+      sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
       submittedByUserId: assignee.id,
-      submissionState: "submitted",
+      submissionState: "resubmitted",
       articlePayloadJson: { body: "draft body" },
       mediaPayloadJson: null,
       fieldReturnPayloadJson: {
@@ -208,13 +225,14 @@ test("assignment submission repository path rejects missing requested returns an
         },
       },
     }));
-    assert.equal(first.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, true);
-    assert.deepEqual(first.article_payload_json, { body: "draft body" });
+    assert.equal(completed.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, true);
+    assert.deepEqual(completed.article_payload_json, { body: "draft body" });
 
     ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "user", reason_code: "test" });
     ctx.repo.updateAssignmentState(assignment.id, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "test" });
     const resubmitted = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId: assignment.id,
+      sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
       submittedByUserId: assignee.id,
       submissionState: "resubmitted",
       articlePayloadJson: { body: "draft body revised" },
@@ -242,6 +260,7 @@ test("assignment submission repository path rejects missing requested returns an
 
     const resubmittedWithoutFieldReturn = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId: assignment.id,
+      sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
       submittedByUserId: assignee.id,
       submissionState: "resubmitted",
       articlePayloadJson: { body: "draft body revised again" },
@@ -251,8 +270,9 @@ test("assignment submission repository path rejects missing requested returns an
     assert.equal(resubmittedWithoutFieldReturn.article_payload_json.body, "draft body revised again");
     assert.deepEqual(resubmittedWithoutFieldReturn.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0811111111");
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+    const partialResubmitted = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId: assignment.id,
+      sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
       submittedByUserId: assignee.id,
       submissionState: "resubmitted",
       articlePayloadJson: { body: "draft body invalid replacement" },
@@ -262,7 +282,8 @@ test("assignment submission repository path rejects missing requested returns an
           "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
         },
       },
-    })), /missing requested return keys: cta_contact\.line_url/);
+    }));
+    assert.equal(partialResubmitted.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, true);
   } finally {
     ctx.cleanup();
   }

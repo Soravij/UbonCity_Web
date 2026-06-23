@@ -80,7 +80,7 @@ function createContext() {
   }
 
   function createAssignment(itemId, assigneeUserId) {
-    return repo.createAssignment({
+    const assignment = repo.createAssignment({
       content_item_id: itemId,
       assignee_user_id: assigneeUserId,
       assigned_by_user_id: assigneeUserId,
@@ -89,6 +89,30 @@ function createContext() {
       brief_json: { summary: "check fields" },
       requirements_json: { expected_deliverables: [] },
     });
+    db.prepare(`
+      INSERT INTO content_assignment_handoff_snapshots (
+        assignment_id, content_item_id, readiness_brief_id, handoff_package_json, guard_status, created_by
+      ) VALUES (?, ?, NULL, ?, 'ready', 'tester@local')
+    `).run(
+      assignment.id,
+      itemId,
+      JSON.stringify({
+        version: 1,
+        requested_checks: {
+          version: 1,
+          groups: [
+            {
+              group_key: "cta_contact",
+              group_label: "CTA / Contact",
+              checks: [
+                { key: "phone", requested: true, label: "Phone", answer_type: "phone", evidence_required: false },
+              ],
+            },
+          ],
+        },
+      })
+    );
+    return assignment;
   }
 
   return { db, repo, cleanup, createItem, createUser, createAssignment };
@@ -146,6 +170,10 @@ globalThis.__hooks = { buildArticleProcessPayload };
   return context.__hooks.buildArticleProcessPayload;
 }
 
+function currentHandoffSnapshotId(ctx, assignmentId) {
+  return Number(ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId)?.id || 0) || 0;
+}
+
 test("repo field return evidence helper returns safe defaults with no submissions", () => {
   const ctx = createContext();
   try {
@@ -164,6 +192,7 @@ test("repo field return evidence helper returns normalized evidence without raw 
     const assignment = ctx.createAssignment(item.id, user.id);
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignment.id),
       submitted_by_user_id: user.id,
       submission_state: "submitted",
       article_payload_json: { title: "should stay hidden" },
@@ -176,19 +205,13 @@ test("repo field return evidence helper returns normalized evidence without raw 
             value: "0812345678",
             evidence: "call confirmed",
           },
-          "custom.parking": {
-            checked: false,
-            found: true,
-            value: "ignored",
-            note: "unchecked rows should normalize found=false",
-          },
         },
       },
     });
     const evidence = ctx.repo.buildFieldReturnEvidenceByItem(item.id);
 
     assert.equal(evidence.version, 1);
-    assert.equal(evidence.items.length, 2);
+    assert.equal(evidence.items.length, 1);
     assert.deepEqual(evidence.items[0], {
       key: "cta_contact.phone",
       group_key: "cta_contact",
@@ -205,8 +228,6 @@ test("repo field return evidence helper returns normalized evidence without raw 
       assignment_id: assignment.id,
       submission_id: submission.id,
     });
-    assert.equal(evidence.items[1].key, "custom.parking");
-    assert.equal(evidence.items[1].found, false);
     assert.equal(Object.prototype.hasOwnProperty.call(evidence.items[0], "article_payload_json"), false);
     assert.equal(Object.prototype.hasOwnProperty.call(evidence.items[0], "media_payload_json"), false);
     assert.equal(Object.prototype.hasOwnProperty.call(evidence.items[0], "field_return_payload_json"), false);
@@ -223,6 +244,7 @@ test("article-process payload exposes summarized field return evidence with subm
     const assignment = ctx.createAssignment(item.id, user.id);
     ctx.repo.addAssignmentSubmission({
       assignment_id: assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignment.id),
       submitted_by_user_id: user.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -275,6 +297,7 @@ test("article-process payload returns safe empty field return evidence for event
     const assignment = ctx.createAssignment(item.id, user.id);
     ctx.repo.addAssignmentSubmission({
       assignment_id: assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignment.id),
       submitted_by_user_id: user.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -308,6 +331,7 @@ test("field return evidence submitted_at uses updated_at after resubmission", ()
     const assignment = ctx.createAssignment(item.id, user.id);
     const initialSubmission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignment.id),
       submitted_by_user_id: user.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -326,6 +350,7 @@ test("field return evidence submitted_at uses updated_at after resubmission", ()
     ctx.db.prepare("UPDATE content_assignments SET state='revision_requested' WHERE id=?").run(assignment.id);
     const resubmission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignment.id),
       submitted_by_user_id: user.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -340,7 +365,7 @@ test("field return evidence submitted_at uses updated_at after resubmission", ()
     });
     const refreshedEvidence = ctx.repo.buildFieldReturnEvidenceByItem(item.id);
 
-    assert.equal(resubmission.id, initialSubmission.id);
+    assert.notEqual(resubmission.id, initialSubmission.id);
     assert.notEqual(String(resubmission.updated_at || ""), "");
     assert.equal(refreshedEvidence.items[0].submitted_at, resubmission.updated_at);
     assert.equal(refreshedEvidence.items[0].value, "0822222222");

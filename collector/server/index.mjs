@@ -10758,6 +10758,7 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
       || ASSIGNMENT_REASON_CODE_DEFAULTS[assignmentAction];
     const submission = repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId,
+      sourceHandoffSnapshotId: req.body?.source_handoff_snapshot_id,
       submittedByUserId: req.authUser?.id,
       submissionState: normalizedSubmissionState,
       articlePayloadJson: normalizedArticlePayload,

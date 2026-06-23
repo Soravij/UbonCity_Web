@@ -220,6 +220,7 @@ const state = {
     serverSubmissionDraftLoaded: {},
     serverSubmissionDraftSaveTimers: {},
     handoffSourcePackages: {},
+    handoffSourceSnapshotIds: {},
     handoffSourceLoaded: {},
     requestedCheckReturnDrafts: {},
     latestUploadedAssets: [],
@@ -3144,6 +3145,7 @@ async function loadAssignmentRequestedCheckHandoffSource(assignment = null) {
     : null;
   if (inlineHandoffPackage) {
     state.assignments.handoffSourcePackages[assignmentId] = inlineHandoffPackage;
+    state.assignments.handoffSourceSnapshotIds[assignmentId] = Number(assignment?.handoff_snapshot_id || 0) || null;
     state.assignments.handoffSourceLoaded[assignmentId] = true;
     rerenderAssignmentRequestedCheckSurfaces(assignmentId);
     return inlineHandoffPackage;
@@ -3159,11 +3161,13 @@ async function loadAssignmentRequestedCheckHandoffSource(assignment = null) {
     state.assignments.handoffSourcePackages[assignmentId] = result?.handoff?.handoff_package_json && typeof result.handoff.handoff_package_json === "object"
       ? result.handoff.handoff_package_json
       : null;
+    state.assignments.handoffSourceSnapshotIds[assignmentId] = Number(result?.handoff?.id || 0) || null;
     state.assignments.handoffSourceLoaded[assignmentId] = true;
     rerenderAssignmentRequestedCheckSurfaces(assignmentId);
     return state.assignments.handoffSourcePackages[assignmentId] || null;
   } catch {
     state.assignments.handoffSourcePackages[assignmentId] = null;
+    state.assignments.handoffSourceSnapshotIds[assignmentId] = null;
     state.assignments.handoffSourceLoaded[assignmentId] = false;
     return null;
   }
@@ -9253,8 +9257,13 @@ async function createAssignmentSubmission() {
   const requestedCheckReturnPayload = buildAssignmentRequestedCheckReturnPayloadFromDraft(
     syncAssignmentRequestedCheckReturnDraftFromForm(assignmentId)
   );
+  const sourceHandoffSnapshotId = Number(state.assignments.handoffSourceSnapshotIds?.[assignmentId] || 0) || 0;
+  if (!sourceHandoffSnapshotId) {
+    throw new Error("ไม่พบ handoff snapshot ที่ใช้เปิดฟอร์มนี้ กรุณาโหลด assignment ใหม่ก่อนส่งงาน");
+  }
   writeAssignmentSubmissionDraft(assignmentId, articlePayload, assignment);
   body.article_payload_json = articlePayload;
+  body.source_handoff_snapshot_id = sourceHandoffSnapshotId;
   if (requestedCheckReturnPayload) {
     body.field_return_payload_json = requestedCheckReturnPayload;
   }

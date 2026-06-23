@@ -350,11 +350,24 @@ const normalizeRequestedCheckReturnValue = loadNamedFunction(repositoryJs, "norm
   normalizeStringListInput,
   normalizeJsonSafeValue,
 });
+const isRequestedCheckAnswerComplete = loadNamedFunction(repositoryJs, "isRequestedCheckAnswerComplete", {
+  normalizeRequestedCheckAnswerType,
+  parseStrictFiniteNumericInput,
+  normalizeHttpUrl: normalizeOptionalUrlValue,
+});
 const normalizeRequestedCheckReturnEntry = loadNamedFunction(repositoryJs, "normalizeRequestedCheckReturnEntry", {
+  normalizeRequestedCheckAnswerType,
   inferRequestedCheckAnswerTypeFromReturnRow,
   normalizeFieldReturnEvidence,
   normalizeRequestedCheckReturnValue,
   hasMeaningfulValue,
+  isRequestedCheckAnswerComplete,
+});
+const hasRequestedCheckEvidence = loadNamedFunction(repositoryJs, "hasRequestedCheckEvidence");
+const inferRequestedCheckReturnStatus = loadNamedFunction(repositoryJs, "inferRequestedCheckReturnStatus", {
+  normalizeRequestedCheckAnswerType,
+  isRequestedCheckAnswerComplete,
+  hasRequestedCheckEvidence,
 });
 const normalizeRequestedCheckReturns = loadNamedFunction(repositoryJs, "normalizeRequestedCheckReturns", {
   normalizeRequestedCheckReturnKey,
@@ -1025,6 +1038,7 @@ test("requested-check empty loaded state hides the requested-check surface throu
         },
       },
       handoffSourcePackages: {},
+      handoffSourceSnapshotIds: {},
       handoffSourceLoaded: {},
     },
   };
@@ -1668,6 +1682,69 @@ test("requested-check evidence free text persists through normalizer", () => {
   assert.equal(normalized.note, "มีป้ายชัดเจน");
 });
 
+test("requested-check multi_select semantics keep null empty unchecked and invalid states distinct", () => {
+  const schema = {
+    answer_type: "multi_select",
+    allowed_values: ["cafe", "family"],
+  };
+
+  const notFound = normalizeRequestedCheckReturnEntry({
+    checked: true,
+    answer_type: "multi_select",
+    value: null,
+  }, "field_return_payload_json.requested_check_returns.taxonomy.tags", schema);
+  assert.equal(notFound.value, null);
+  assert.equal(inferRequestedCheckReturnStatus(notFound, schema), "not_found");
+
+  const explicitEmpty = normalizeRequestedCheckReturnEntry({
+    checked: true,
+    answer_type: "multi_select",
+    value: [],
+  }, "field_return_payload_json.requested_check_returns.taxonomy.tags", schema);
+  assert.deepEqual(explicitEmpty.value, []);
+  assert.equal(inferRequestedCheckReturnStatus(explicitEmpty, schema), "reported");
+
+  const unanswered = normalizeRequestedCheckReturnEntry({
+    checked: false,
+    answer_type: "multi_select",
+    value: [],
+  }, "field_return_payload_json.requested_check_returns.taxonomy.tags", schema);
+  assert.equal(unanswered.value, null);
+  assert.equal(inferRequestedCheckReturnStatus(unanswered, schema), "unanswered");
+
+  const malformed = normalizeRequestedCheckReturnEntry({
+    checked: true,
+    answer_type: "multi_select",
+    value: "cafe",
+  }, "field_return_payload_json.requested_check_returns.taxonomy.tags", schema);
+  assert.equal(malformed.value, "cafe");
+  assert.equal(inferRequestedCheckReturnStatus(malformed, schema), "malformed");
+});
+
+test("requested-check note_only empty is not_found and note-or-evidence is reported", () => {
+  const schema = { answer_type: "note_only" };
+
+  const empty = normalizeRequestedCheckReturnEntry({
+    checked: true,
+    answer_type: "note_only",
+  }, "field_return_payload_json.requested_check_returns.custom.parking", schema);
+  assert.equal(inferRequestedCheckReturnStatus(empty, schema), "not_found");
+
+  const withNote = normalizeRequestedCheckReturnEntry({
+    checked: true,
+    answer_type: "note_only",
+    note: "No sign posted",
+  }, "field_return_payload_json.requested_check_returns.custom.parking", schema);
+  assert.equal(inferRequestedCheckReturnStatus(withNote, schema), "reported");
+
+  const withEvidence = normalizeRequestedCheckReturnEntry({
+    checked: true,
+    answer_type: "note_only",
+    evidence: "Photo evidence",
+  }, "field_return_payload_json.requested_check_returns.custom.parking", schema);
+  assert.equal(inferRequestedCheckReturnStatus(withEvidence, schema), "reported");
+});
+
 test("requested-check evidence free text does not force found when unchecked", () => {
   const normalized = normalizeRequestedCheckReturnEntry({
     checked: false,
@@ -1693,6 +1770,7 @@ test("handoff source load rerenders brief and submission surfaces after async fe
     assignments: {
       selectedId: 12,
       handoffSourcePackages: {},
+      handoffSourceSnapshotIds: {},
       handoffSourceLoaded: {},
     },
   };
@@ -1754,6 +1832,7 @@ test("edited requested-check draft survives async handoff load and rerender path
         },
       },
       handoffSourcePackages: {},
+      handoffSourceSnapshotIds: {},
       handoffSourceLoaded: {},
     },
   };

@@ -1000,6 +1000,9 @@ CREATE TABLE IF NOT EXISTS content_assignments (
   latest_submission_id INTEGER,
   latest_submission_at TEXT,
   revision_round INTEGER NOT NULL DEFAULT 0,
+  accepted_at TEXT,
+  accepted_handoff_snapshot_id INTEGER,
+  accepted_submission_id INTEGER,
   contributor_note TEXT,
   internal_note TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1016,6 +1019,7 @@ CREATE TABLE IF NOT EXISTS content_assignment_submissions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   assignment_id INTEGER NOT NULL,
   content_item_id INTEGER NOT NULL,
+  source_handoff_snapshot_id INTEGER,
   submitted_by_user_id INTEGER NOT NULL,
   submission_state TEXT NOT NULL DEFAULT 'submitted',
   article_payload_json TEXT,
@@ -1027,6 +1031,7 @@ CREATE TABLE IF NOT EXISTS content_assignment_submissions (
   reviewed_at TEXT,
   FOREIGN KEY(assignment_id) REFERENCES content_assignments(id) ON DELETE CASCADE,
   FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
+  FOREIGN KEY(source_handoff_snapshot_id) REFERENCES content_assignment_handoff_snapshots(id) ON DELETE SET NULL,
   FOREIGN KEY(submitted_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
 );
 CREATE INDEX IF NOT EXISTS idx_assignment_submissions_assignment ON content_assignment_submissions(assignment_id, created_at DESC);

@@ -334,6 +334,103 @@ function toBangkokSqlTimestampForTest(value = new Date()) {
   }).format(value).replace("T", " ");
 }
 
+function buildValidAttractionRequestedCheckReturns(overrides = {}) {
+  const base = {
+    "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
+    "cta_contact.line_url": { checked: true, value: "" },
+    "cta_contact.facebook_url": { checked: true, value: "" },
+    "cta_contact.website_url": { checked: true, value: "" },
+    "cta_contact.primary_cta": { checked: true, value: "map" },
+    "taxonomy.parking": { checked: true, value: false, condition_note: "No dedicated parking" },
+    "taxonomy.pet_friendly": { checked: true, value: false, evidence: "No pet signage" },
+    "taxonomy.wheelchair_accessible": { checked: true, value: false, evidence: "Front stairs only" },
+    "taxonomy.toilet_available": { checked: true, value: true },
+    "taxonomy.entry_fee_required": { checked: true, value: false },
+    "taxonomy.setting_type": { checked: true, value: "outdoor" },
+  };
+  const next = { ...base };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === null) {
+      delete next[key];
+      continue;
+    }
+    next[key] = value;
+  }
+  return next;
+}
+
+function buildRequestedReturnsFromHandoff(handoffPackage, overrides = {}) {
+  const result = {};
+  const groups = Array.isArray(handoffPackage?.requested_checks?.groups) ? handoffPackage.requested_checks.groups : [];
+  for (const group of groups) {
+    const groupKey = String(group?.group_key || "").trim().toLowerCase();
+    for (const check of Array.isArray(group?.checks) ? group.checks : []) {
+      const checkKey = String(check?.key || "").trim().toLowerCase();
+      const returnKey = `${groupKey}.${checkKey}`;
+      if (Object.prototype.hasOwnProperty.call(overrides, returnKey)) {
+        if (overrides[returnKey] !== null) result[returnKey] = overrides[returnKey];
+        continue;
+      }
+      if (groupKey === "cta_contact") {
+        if (checkKey === "phone") result[returnKey] = { checked: true, value: "0811111111", evidence: "storefront signage" };
+        else if (checkKey === "primary_cta") result[returnKey] = { checked: true, value: "map" };
+        else result[returnKey] = { checked: true, value: "" };
+        continue;
+      }
+      const answerType = String(check?.answer_type || "").trim().toLowerCase();
+      if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+        result[returnKey] = {
+          checked: true,
+          value: false,
+          ...(check?.evidence_required === true ? { evidence: `${checkKey} evidence` } : {}),
+        };
+      } else if (answerType === "select") {
+        result[returnKey] = { checked: true, value: Array.isArray(check?.allowed_values) ? check.allowed_values[0] || null : null };
+      } else if (answerType === "multi_select") {
+        result[returnKey] = { checked: true, value: [] };
+      } else if (answerType === "number_with_unit") {
+        result[returnKey] = { checked: true, value: { number: 1, unit: Array.isArray(check?.unit_options) ? check.unit_options[0] || null : null } };
+      } else if (answerType === "note_only") {
+        result[returnKey] = { checked: true, note: "verified" };
+      } else {
+        result[returnKey] = { checked: true, value: "verified" };
+      }
+    }
+  }
+  return result;
+}
+
+function captureAssignmentAtomicState(ctx, assignmentId) {
+  const assignment = ctx.repo.getAssignmentById(assignmentId);
+  const itemId = Number(assignment?.content_item_id || 0) || 0;
+  const workflow = itemId ? ctx.repo.ensureWorkflowModel(itemId) : null;
+  const workflowTransitionCount = itemId
+    ? Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM content_workflow_transitions WHERE content_item_id=?").get(itemId)?.c || 0)
+    : 0;
+  return {
+    assignment: {
+      id: Number(assignment?.id || 0) || 0,
+      state: assignment?.state || null,
+      accepted_at: assignment?.accepted_at || null,
+      accepted_handoff_snapshot_id: assignment?.accepted_handoff_snapshot_id ?? null,
+      accepted_submission_id: assignment?.accepted_submission_id ?? null,
+      revision_round: Number(assignment?.revision_round || 0) || 0,
+      latest_submission_id: assignment?.latest_submission_id ?? null,
+      accepted_binding_status: assignment?.accepted_binding_status || null,
+    },
+    workflow_assignment_state: workflow?.assignment_state || null,
+    workflow_transition_count: workflowTransitionCount,
+  };
+}
+
+function currentHandoffSnapshotId(ctx, assignmentId) {
+  return Number(ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId)?.id || 0) || 0;
+}
+
+function assertAssignmentAtomicStateEqual(actual, expected) {
+  assert.deepEqual(actual, expected);
+}
+
 test("createFieldPack rejects source draft/review/snapshot from another item", () => {
   const ctx = createTestContext();
   try {
@@ -2259,7 +2356,7 @@ test("createAssignmentSubmissionDeliverable rejects source_asset_id from another
   }
 });
 
-test("resubmitted assignment reuses latest submission row and preserves media when no new media payload is sent", () => {
+test("resubmitted assignment creates a new immutable submission row and preserves prior media when no new media payload is sent", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Resubmit Keep Media");
@@ -2277,6 +2374,7 @@ test("resubmitted assignment reuses latest submission row and preserves media wh
     const assignmentId = Number(assignmentResult.assignment.id || 0);
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       article_payload_json: { summary: "first submission" },
@@ -2316,32 +2414,39 @@ test("resubmitted assignment reuses latest submission row and preserves media wh
 
     const resubmitted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       article_payload_json: { summary: "revised submission" },
       contributor_note: "revised text only",
     });
 
-    assert.equal(resubmitted.id, submission.id);
+    assert.notEqual(resubmitted.id, submission.id);
     assert.equal(resubmitted.submission_state, "resubmitted");
     assert.equal(resubmitted.article_payload_json?.summary, "revised submission");
     assert.equal(Array.isArray(resubmitted.media_payload_json?.assets), true);
     assert.equal(resubmitted.media_payload_json.assets.length, 1);
     assert.equal(resubmitted.media_payload_json.assets[0]?.public_url, "/media/uploads/keep-media.jpg");
+    assert.equal(Number(resubmitted.source_handoff_snapshot_id || 0) > 0, true);
+    assert.equal(Number(submission.source_handoff_snapshot_id || 0) > 0, true);
 
     const assignmentAfter = ctx.repo.getAssignmentById(assignmentId);
-    assert.equal(Number(assignmentAfter.latest_submission_id || 0), submission.id);
+    assert.equal(Number(assignmentAfter.latest_submission_id || 0), resubmitted.id);
 
     const latestBundle = ctx.repo.getLatestAssignmentDeliverablesBundle(assignmentId);
-    assert.equal(Number(latestBundle.latest_submission_id || 0), submission.id);
-    assert.equal(Array.isArray(latestBundle.deliverables_by_type?.photos), true);
-    assert.equal(latestBundle.deliverables_by_type.photos.length, 1);
+    assert.equal(Number(latestBundle.latest_submission_id || 0), resubmitted.id);
+    const originalSubmissionReloaded = ctx.repo.getAssignmentSubmissionById(submission.id);
+    assert.equal(originalSubmissionReloaded.article_payload_json?.summary, "first submission");
+    assert.equal(Array.isArray(originalSubmissionReloaded.media_payload_json?.assets), true);
+    assert.equal(originalSubmissionReloaded.media_payload_json.assets.length, 1);
+    const originalDeliverables = ctx.repo.listAssignmentSubmissionDeliverablesBySubmission(assignmentId, submission.id);
+    assert.equal(originalDeliverables.length, 1);
   } finally {
     ctx.cleanup();
   }
 });
 
-test("resubmitted assignment merges incoming media payload into the existing submission package", () => {
+test("resubmitted assignment creates a new row and merges incoming media payload from the previous submission package", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Resubmit Merge Media");
@@ -2358,6 +2463,7 @@ test("resubmitted assignment merges incoming media payload into the existing sub
     const assignmentId = Number(assignmentResult.assignment.id || 0);
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       media_payload_json: {
@@ -2387,6 +2493,7 @@ test("resubmitted assignment merges incoming media payload into the existing sub
 
     const resubmitted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       media_payload_json: {
@@ -2401,12 +2508,18 @@ test("resubmitted assignment merges incoming media payload into the existing sub
       },
     });
 
-    assert.equal(resubmitted.id, submission.id);
+    assert.notEqual(resubmitted.id, submission.id);
     assert.equal(Array.isArray(resubmitted.media_payload_json?.assets), true);
     assert.equal(resubmitted.media_payload_json.assets.length, 2);
     assert.deepEqual(
       resubmitted.media_payload_json.assets.map((asset) => asset.public_url),
       ["/media/uploads/photo-one.jpg", "/media/uploads/video-two.mp4"]
+    );
+    const originalSubmissionReloaded = ctx.repo.getAssignmentSubmissionById(submission.id);
+    assert.equal(originalSubmissionReloaded.media_payload_json.assets.length, 1);
+    assert.deepEqual(
+      originalSubmissionReloaded.media_payload_json.assets.map((asset) => asset.public_url),
+      ["/media/uploads/photo-one.jpg"]
     );
   } finally {
     ctx.cleanup();
@@ -2440,6 +2553,7 @@ test("assignment submission round-trips normalized field return payload and igno
 
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -2498,7 +2612,7 @@ test("assignment submission round-trips normalized field return payload and igno
   }
 });
 
-test("resubmitted assignment retains prior complete field returns when no replacement field_return_payload_json is supplied", () => {
+test("resubmitted assignment creates a new row and retains prior complete field returns when no replacement field_return_payload_json is supplied", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Resubmit Keep Field Return");
@@ -2520,6 +2634,7 @@ test("resubmitted assignment retains prior complete field returns when no replac
     const assignmentId = Number(assignmentResult.assignment.id || 0);
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -2554,18 +2669,22 @@ test("resubmitted assignment retains prior complete field returns when no replac
 
     const resubmitted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       article_payload_json: { summary: "revised without replacing field return" },
     });
 
-    assert.equal(resubmitted.id, submission.id);
+    assert.notEqual(resubmitted.id, submission.id);
     assert.equal(resubmitted.article_payload_json?.summary, "revised without replacing field return");
     assert.deepEqual(resubmitted.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0811111111");
     assert.deepEqual(resubmitted.field_return_payload_json.requested_check_returns["taxonomy.setting_type"].value, "outdoor");
+    const originalSubmissionReloaded = ctx.repo.getAssignmentSubmissionById(submission.id);
+    assert.equal(originalSubmissionReloaded.article_payload_json?.summary, "first submission");
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const partialResubmitted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -2573,13 +2692,15 @@ test("resubmitted assignment retains prior complete field returns when no replac
           "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
         },
       },
-    }), /missing requested return keys: cta_contact\.line_url/);
+    });
+    assert.notEqual(partialResubmitted.id, resubmitted.id);
+    assert.deepEqual(Object.keys(partialResubmitted.field_return_payload_json.requested_check_returns), ["cta_contact.phone"]);
   } finally {
     ctx.cleanup();
   }
 });
 
-test("assignment submission rejects missing requested return entries from the immutable handoff snapshot", () => {
+test("assignment submission accepts missing requested return entries from the immutable handoff snapshot and defers completeness to acceptance", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Requested Return Missing");
@@ -2599,20 +2720,22 @@ test("assignment submission rejects missing requested return entries from the im
       "admin"
     );
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
         requested_check_returns: {},
       },
-    }), /missing requested return keys: cta_contact\.phone/);
+    });
+    assert.deepEqual(submission.field_return_payload_json.requested_check_returns, {});
   } finally {
     ctx.cleanup();
   }
 });
 
-test("assignment submission rejects unchecked requested return rows from the immutable handoff snapshot", () => {
+test("assignment submission accepts unchecked requested return rows and preserves unanswered state for handoff review", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Requested Return Unchecked");
@@ -2632,16 +2755,18 @@ test("assignment submission rejects unchecked requested return rows from the imm
       "admin"
     );
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
-        requested_check_returns: {
+        requested_check_returns: buildValidAttractionRequestedCheckReturns({
           "cta_contact.phone": { checked: false, value: "0812345678", evidence: "signboard" },
-        },
+        }),
       },
-    }), /unchecked requested return keys: cta_contact\.phone/);
+    });
+    assert.equal(submission.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, false);
   } finally {
     ctx.cleanup();
   }
@@ -2669,6 +2794,7 @@ test("assignment submission accepts requested boolean false and requested phone 
 
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -2697,10 +2823,11 @@ test("assignment submission accepts requested boolean false and requested phone 
   }
 });
 
-test("assignment submission enforces immutable number_with_unit schema validation while keeping legacy raw-number compatibility", () => {
+test("assignment acceptance preserves raw malformed canonical number_with_unit values and rejects them only at accept time", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Requested Return Number With Unit");
+    ctx.db.prepare("UPDATE content_items SET category='activities' WHERE id=?").run(item.id);
     const assignee = ctx.createUser("requested-return-number-with-unit");
     ctx.createReadinessBrief(item.id, "requested-return-number-with-unit");
     ctx.repo.createFieldPack({
@@ -2748,6 +2875,7 @@ test("assignment submission enforces immutable number_with_unit schema validatio
 
     const buildPayload = (value) => ({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -2757,24 +2885,33 @@ test("assignment submission enforces immutable number_with_unit schema validatio
       },
     });
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload(120)), /incomplete requested return keys: taxonomy\.typical_duration/);
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: false, unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: [], unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: ["5"], unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: {}, unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: "", unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: " ", unit: "minutes" })), /incomplete requested return keys: taxonomy\.typical_duration/);
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: 120, unit: null })), /invalid unit/);
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildPayload({ number: 120, unit: "days" })), /invalid unit/);
+    const incompleteAccepted = ctx.repo.addAssignmentSubmission(buildPayload(120));
+    assert.deepEqual(incompleteAccepted.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 120, unit: null });
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "tester@local", { actor_role: "user", reason_code: "submission_created" });
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentId, "accepted", "tester@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /malformed|typical_duration/i);
+    ctx.repo.updateAssignmentState(assignmentId, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "needs_revision" });
 
-    const accepted = ctx.repo.addAssignmentSubmission(buildPayload({ number: 120, unit: "minutes" }));
+    const resubmitPayload = (value) => ({ ...buildPayload(value), submission_state: "resubmitted" });
+    assert.deepEqual(ctx.repo.addAssignmentSubmission(resubmitPayload({ number: false, unit: "minutes" })).field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: false, unit: "minutes" });
+    assert.deepEqual(ctx.repo.addAssignmentSubmission(resubmitPayload({ number: [], unit: "minutes" })).field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: [], unit: "minutes" });
+    assert.deepEqual(ctx.repo.addAssignmentSubmission(resubmitPayload({ number: ["5"], unit: "minutes" })).field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: ["5"], unit: "minutes" });
+    assert.deepEqual(ctx.repo.addAssignmentSubmission(resubmitPayload({ number: {}, unit: "minutes" })).field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: {}, unit: "minutes" });
+    assert.deepEqual(ctx.repo.addAssignmentSubmission(resubmitPayload({ number: "", unit: "minutes" })).field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: "", unit: "minutes" });
+    assert.deepEqual(ctx.repo.addAssignmentSubmission(resubmitPayload({ number: " ", unit: "minutes" })).field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: " ", unit: "minutes" });
+    assert.deepEqual(ctx.repo.addAssignmentSubmission(resubmitPayload({ number: 120, unit: null })).field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 120, unit: null });
+    assert.deepEqual(ctx.repo.addAssignmentSubmission(resubmitPayload({ number: 120, unit: "days" })).field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 120, unit: "days" });
+
+    const accepted = ctx.repo.addAssignmentSubmission(resubmitPayload({ number: 120, unit: "minutes" }));
     assert.deepEqual(accepted.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 120, unit: "minutes" });
 
-    ctx.repo.updateAssignmentState(assignmentId, "submitted", "tester@local", { actor_role: "user", reason_code: "submission_created" });
     ctx.repo.updateAssignmentState(assignmentId, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "needs_revision" });
 
     const acceptedString = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -2787,6 +2924,7 @@ test("assignment submission enforces immutable number_with_unit schema validatio
     assert.deepEqual(acceptedString.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 120, unit: "minutes" });
     const acceptedZeroString = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -2800,6 +2938,7 @@ test("assignment submission enforces immutable number_with_unit schema validatio
 
     const zeroAccepted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -2811,8 +2950,9 @@ test("assignment submission enforces immutable number_with_unit schema validatio
     });
     assert.deepEqual(zeroAccepted.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 0, unit: "minutes" });
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const malformedAccepted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -2821,10 +2961,18 @@ test("assignment submission enforces immutable number_with_unit schema validatio
           "taxonomy.typical_duration": { checked: true, value: { number: " ", unit: "minutes" } },
         },
       },
-    }), /incomplete requested return keys: taxonomy\.typical_duration/);
+    });
+    assert.deepEqual(malformedAccepted.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: " ", unit: "minutes" });
+    ctx.repo.updateAssignmentState(assignmentId, "resubmitted", "tester@local", { actor_role: "user", reason_code: "submission_resubmitted" });
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentId, "accepted", "tester@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /malformed|typical_duration/i);
+    ctx.repo.updateAssignmentState(assignmentId, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "needs_revision" });
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const invalidUnitAccepted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -2833,7 +2981,13 @@ test("assignment submission enforces immutable number_with_unit schema validatio
           "taxonomy.typical_duration": { checked: true, value: { number: 120, unit: null } },
         },
       },
-    }), /invalid unit/);
+    });
+    assert.deepEqual(invalidUnitAccepted.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 120, unit: null });
+    ctx.repo.updateAssignmentState(assignmentId, "resubmitted", "tester@local", { actor_role: "user", reason_code: "submission_resubmitted" });
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentId, "accepted", "tester@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /malformed|typical_duration|unit/i);
 
     const legacyItem = ctx.createItem("Requested Return Legacy Number With Unit");
     const legacyAssignee = ctx.createUser("requested-return-legacy-number-with-unit");
@@ -2881,6 +3035,7 @@ test("assignment submission enforces immutable number_with_unit schema validatio
 
     const legacySubmission = ctx.repo.addAssignmentSubmission({
       assignment_id: legacyAssignment.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, legacyAssignment.assignment.id),
       submitted_by_user_id: legacyAssignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -2895,7 +3050,79 @@ test("assignment submission enforces immutable number_with_unit schema validatio
   }
 });
 
-test("assignment submission rejects invalid select values and missing evidence based on immutable snapshot metadata", () => {
+test("assignment acceptance preserves invalid object phone text hours and url values and blocks them as malformed", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Requested Return Invalid Typed Raw Values");
+    const assignee = ctx.createUser("requested-return-invalid-typed-raw-values");
+    ctx.createReadinessBrief(item.id, "requested-return-invalid-typed-raw-values");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignment = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const assignmentId = Number(assignment.id || 0) || 0;
+    const handoff = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
+    const mutatedSnapshot = {
+      ...handoff.handoff_package_json,
+      requested_checks: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            group_label: "CTA / Contact",
+            checks: [
+              { key: "phone", requested: true, label: "Phone", instruction: "Confirm phone", answer_type: "phone", required: true, evidence_required: true },
+              { key: "website_url", requested: true, label: "Website", instruction: "Confirm website", answer_type: "url", required: false },
+              { key: "hours_raw", requested: true, label: "Hours", instruction: "Confirm hours", answer_type: "hours", required: false },
+              { key: "summary_note", requested: true, label: "Summary", instruction: "Confirm summary", answer_type: "text", required: false },
+            ],
+          },
+        ],
+      },
+    };
+    ctx.db.prepare("UPDATE content_assignment_handoff_snapshots SET handoff_package_json=? WHERE id=?").run(
+      JSON.stringify(mutatedSnapshot),
+      handoff.id
+    );
+
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: { raw: "08123" }, evidence: "signboard" },
+          "cta_contact.website_url": { checked: true, value: "not-a-valid-url" },
+          "cta_contact.hours_raw": { checked: true, value: { open: "8" } },
+          "cta_contact.summary_note": { checked: true, value: { unexpected: true } },
+        },
+      },
+    });
+    assert.deepEqual(submission.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, { raw: "08123" });
+    assert.equal(submission.field_return_payload_json.requested_check_returns["cta_contact.website_url"].value, "not-a-valid-url");
+    assert.deepEqual(submission.field_return_payload_json.requested_check_returns["cta_contact.hours_raw"].value, { open: "8" });
+    assert.deepEqual(submission.field_return_payload_json.requested_check_returns["cta_contact.summary_note"].value, { unexpected: true });
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", { actor_role: "user", reason_code: "submission_created" });
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /malformed|phone|website_url|hours_raw|summary_note/i);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission preserves invalid select values and defers malformed blocking to acceptance", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Requested Return Invalid Select");
@@ -2915,8 +3142,9 @@ test("assignment submission rejects invalid select values and missing evidence b
       "admin"
     );
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const invalidSelectSubmission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -2934,12 +3162,20 @@ test("assignment submission rejects invalid select values and missing evidence b
           "taxonomy.setting_type": { checked: true, value: "outdoor" },
         },
       },
-    }), /cta_contact\.phone\.value has invalid select value|field_return_payload_json\.requested_check_returns\.cta_contact\.primary_cta\.value has invalid select value/);
+    });
+    assert.equal(invalidSelectSubmission.field_return_payload_json.requested_check_returns["cta_contact.primary_cta"].value, "email");
+    ctx.repo.updateAssignmentState(assignmentResult.assignment.id, "submitted", "submitter@local", { actor_role: "user", reason_code: "submission_created" });
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentResult.assignment.id, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /malformed|primary_cta/i);
+    ctx.repo.updateAssignmentState(assignmentResult.assignment.id, "revision_requested", "reviewer@local", { actor_role: "admin", reason_code: "needs_revision" });
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
-      submission_state: "submitted",
+      submission_state: "resubmitted",
       field_return_payload_json: {
         requested_check_returns: {
           "cta_contact.phone": { checked: true, value: "0812345678" },
@@ -2955,7 +3191,13 @@ test("assignment submission rejects invalid select values and missing evidence b
           "taxonomy.setting_type": { checked: true, value: "outdoor" },
         },
       },
-    }), /missing evidence for requested return keys: cta_contact\.phone/);
+    });
+    ctx.repo.updateAssignmentState(assignmentResult.assignment.id, "resubmitted", "submitter@local", { actor_role: "user", reason_code: "submission_resubmitted" });
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentResult.assignment.id, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /malformed|evidence|cta_contact\.phone/i);
+    assert.equal(submission.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0812345678");
   } finally {
     ctx.cleanup();
   }
@@ -3010,6 +3252,7 @@ test("assignment submission accepts valid select values with required evidence a
 
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -3026,6 +3269,758 @@ test("assignment submission accepts valid select values with required evidence a
     const frozenAfterSubmit = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentResult.assignment.id);
     assert.equal(submission.field_return_payload_json.requested_check_returns["custom.legacy_flag"].value, false);
     assert.deepEqual(frozenAfterSubmit.handoff_package_json.requested_checks, legacySnapshot.requested_checks);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment acceptance pins exact handoff snapshot and submission ids across lifecycle transitions", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Accepted Binding Lifecycle");
+    const assignee = ctx.createUser("accepted-binding-lifecycle");
+    ctx.createReadinessBrief(item.id, "accepted-binding-lifecycle");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignment = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const assignmentId = Number(assignment.id || 0);
+    const issuedHandoff = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
+    const firstSubmission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: buildValidAttractionRequestedCheckReturns(),
+      },
+    });
+
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", {
+      actor_role: "user",
+      reason_code: "submission_created",
+    });
+    const accepted = ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    });
+    assert.equal(accepted.accepted_handoff_snapshot_id, issuedHandoff.id);
+    assert.equal(accepted.accepted_submission_id, firstSubmission.id);
+    assert.equal(Boolean(accepted.accepted_at), true);
+    const acceptedAgain = ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    });
+    assert.equal(acceptedAgain.accepted_handoff_snapshot_id, issuedHandoff.id);
+    assert.equal(acceptedAgain.accepted_submission_id, firstSubmission.id);
+
+    const reopened = ctx.repo.updateAssignmentState(assignmentId, "revision_requested", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "needs_revision",
+    });
+    assert.equal(reopened.accepted_handoff_snapshot_id, null);
+    assert.equal(reopened.accepted_submission_id, null);
+    assert.equal(reopened.accepted_at, null);
+
+    const secondHandoffJson = {
+      ...issuedHandoff.handoff_package_json,
+      source: {
+        ...(issuedHandoff.handoff_package_json?.source || {}),
+        revision_label: "second-round",
+      },
+    };
+    const secondHandoffInsert = ctx.db.prepare(`
+      INSERT INTO content_assignment_handoff_snapshots (
+        assignment_id, content_item_id, readiness_brief_id, handoff_package_json, guard_status, created_by
+      ) VALUES (?, ?, ?, ?, 'ready', 'tester@local')
+    `).run(
+      assignmentId,
+      item.id,
+      issuedHandoff.readiness_brief_id == null ? null : Number(issuedHandoff.readiness_brief_id || 0) || null,
+      JSON.stringify(secondHandoffJson)
+    );
+    const secondHandoffId = Number(secondHandoffInsert.lastInsertRowid || 0) || 0;
+    const secondSubmission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: secondHandoffId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "resubmitted",
+      field_return_payload_json: {
+        requested_check_returns: buildValidAttractionRequestedCheckReturns({
+          "cta_contact.phone": { checked: true, value: "0822222222", evidence: "updated storefront signage" },
+        }),
+      },
+    });
+    ctx.repo.updateAssignmentState(assignmentId, "resubmitted", "submitter@local", {
+      actor_role: "user",
+      reason_code: "submission_resubmitted",
+    });
+
+    const reaccepted = ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    });
+    assert.equal(reaccepted.accepted_handoff_snapshot_id, secondHandoffId);
+    assert.equal(reaccepted.accepted_submission_id, secondSubmission.id);
+    assert.equal(Boolean(reaccepted.accepted_at), true);
+
+    const closed = ctx.repo.updateAssignmentState(assignmentId, "closed", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_closed",
+    });
+    assert.equal(closed.accepted_handoff_snapshot_id, secondHandoffId);
+    assert.equal(closed.accepted_submission_id, secondSubmission.id);
+    assert.equal(Boolean(closed.accepted_at), true);
+
+    const sameStateAccepted = ctx.repo.updateAssignmentState(assignmentId, "closed", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_closed",
+    });
+    assert.equal(sameStateAccepted.accepted_handoff_snapshot_id, secondHandoffId);
+    assert.equal(sameStateAccepted.accepted_submission_id, secondSubmission.id);
+
+    ctx.db.prepare("UPDATE content_assignments SET latest_submission_id=? WHERE id=?").run(firstSubmission.id, assignmentId);
+    const driftAfterSubmissionPointerChange = ctx.repo.getAssignmentById(assignmentId);
+    assert.equal(driftAfterSubmissionPointerChange.accepted_submission_id, secondSubmission.id);
+
+    const postAcceptHandoffInsert = ctx.db.prepare(`
+      INSERT INTO content_assignment_handoff_snapshots (
+        assignment_id, content_item_id, readiness_brief_id, handoff_package_json, guard_status, created_by
+      ) VALUES (?, ?, ?, ?, 'ready', 'tester@local')
+    `).run(
+      assignmentId,
+      item.id,
+      issuedHandoff.readiness_brief_id == null ? null : Number(issuedHandoff.readiness_brief_id || 0) || null,
+      JSON.stringify({
+        ...secondHandoffJson,
+        source: {
+          ...(secondHandoffJson.source || {}),
+          revision_label: "post-accept-drift",
+        },
+      })
+    );
+    assert.equal(Number(postAcceptHandoffInsert.lastInsertRowid || 0) > 0, true);
+    const driftAfterHandoffInsert = ctx.repo.getAssignmentById(assignmentId);
+    assert.equal(driftAfterHandoffInsert.accepted_handoff_snapshot_id, secondHandoffId);
+
+    const reopenedFromClosed = ctx.repo.updateAssignmentState(assignmentId, "revision_requested", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "needs_revision",
+    });
+    assert.equal(reopenedFromClosed.accepted_handoff_snapshot_id, null);
+    assert.equal(reopenedFromClosed.accepted_submission_id, null);
+    assert.equal(reopenedFromClosed.accepted_at, null);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("submission and acceptance stay bound to the worker-loaded handoff snapshot even when a newer handoff appears before submit", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Accepted Binding Uses Submission Source");
+    ctx.db.prepare("UPDATE content_items SET category='activities' WHERE id=?").run(item.id);
+    const assignee = ctx.createUser("accepted-binding-submission-source");
+    ctx.createReadinessBrief(item.id, "accepted-binding-submission-source");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignment = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const assignmentId = Number(assignment.id || 0) || 0;
+    const handoffA = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
+    const handoffBInsert = ctx.db.prepare(`
+      INSERT INTO content_assignment_handoff_snapshots (
+        assignment_id, content_item_id, readiness_brief_id, handoff_package_json, guard_status, created_by
+      ) VALUES (?, ?, ?, ?, 'ready', 'tester@local')
+    `).run(
+      assignmentId,
+      item.id,
+      handoffA.readiness_brief_id == null ? null : Number(handoffA.readiness_brief_id || 0) || null,
+      JSON.stringify({
+        ...handoffA.handoff_package_json,
+        source: {
+          ...(handoffA.handoff_package_json?.source || {}),
+          revision_label: "handoff-b",
+        },
+      })
+    );
+    const handoffBId = Number(handoffBInsert.lastInsertRowid || 0) || 0;
+    assert.notEqual(handoffBId, handoffA.id);
+
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: handoffA.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: buildRequestedReturnsFromHandoff(handoffA.handoff_package_json),
+      },
+    });
+    assert.equal(submission.source_handoff_snapshot_id, handoffA.id);
+    assert.notEqual(submission.source_handoff_snapshot_id, handoffBId);
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", { actor_role: "user", reason_code: "submission_created" });
+
+    const accepted = ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    });
+    assert.equal(accepted.accepted_submission_id, submission.id);
+    assert.equal(accepted.accepted_handoff_snapshot_id, handoffA.id);
+    assert.notEqual(accepted.accepted_handoff_snapshot_id, handoffBId);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission rejects missing dangling and cross-owned source handoff snapshot ids", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Source Handoff Validation");
+    const assignee = ctx.createUser("source-handoff-validation");
+    ctx.createReadinessBrief(item.id, "source-handoff-validation");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignment = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const assignmentId = Number(assignment.id || 0) || 0;
+    const validReturns = buildValidAttractionRequestedCheckReturns();
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: validReturns,
+      },
+    }), /source_handoff_snapshot_id is required/i);
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: 999999,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: validReturns,
+      },
+    }), /handoff snapshot not found/i);
+
+    const otherItem = ctx.createItem("Source Handoff Validation Other");
+    const otherAssignee = ctx.createUser("source-handoff-validation-other");
+    ctx.createReadinessBrief(otherItem.id, "source-handoff-validation-other");
+    ctx.repo.createFieldPack({
+      content_item_id: otherItem.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const otherAssignment = ctx.repo.createAssignmentFromReadiness(
+      otherItem.id,
+      { assignee_user_id: otherAssignee.id, force_override: true, force_reason: "test" },
+      otherAssignee.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const otherHandoff = ctx.repo.getLatestAssignmentHandoffByAssignment(otherAssignment.id);
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: otherHandoff.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: validReturns,
+      },
+    }), /belongs to another assignment|another content item/i);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("editorial assignment submissions remain valid without a handoff snapshot binding", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Editorial Submission Without Handoff");
+    const assignee = ctx.createUser("editorial-submission-without-handoff");
+    const editorialAssignment = ctx.repo.createAssignment(
+      {
+        content_item_id: item.id,
+        assignee_user_id: assignee.id,
+        assignment_kind: "editorial",
+        brief_json: { brief_summary: "Editorial brief" },
+        requirements_json: { priority: "normal" },
+      },
+      assignee.id,
+      {
+        actor_email: "tester@local",
+        actor_role: "admin",
+        reason_code: "assignment_created_sync_manual",
+      }
+    );
+
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: editorialAssignment.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      contributor_note: "editorial submit",
+    });
+    assert.equal(submission.source_handoff_snapshot_id, null);
+
+    ctx.repo.updateAssignmentState(editorialAssignment.id, "submitted", "submitter@local", {
+      actor_role: "user",
+      reason_code: "submission_created",
+    });
+    ctx.repo.updateAssignmentState(editorialAssignment.id, "revision_requested", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "needs_revision",
+    });
+
+    const resubmission = ctx.repo.addAssignmentSubmission({
+      assignment_id: editorialAssignment.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "resubmitted",
+      contributor_note: "editorial resubmit",
+    });
+    assert.equal(resubmission.source_handoff_snapshot_id, null);
+    assert.notEqual(resubmission.id, submission.id);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("editorial accepted binding stays pinned from accepted through close and becomes invalid when the accepted submission is corrupted", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Editorial Accepted Binding");
+    const assignee = ctx.createUser("editorial-accepted-binding");
+    const editorialAssignment = ctx.repo.createAssignment(
+      {
+        content_item_id: item.id,
+        assignee_user_id: assignee.id,
+        assignment_kind: "editorial",
+        brief_json: { brief_summary: "Editorial brief" },
+        requirements_json: { priority: "normal" },
+      },
+      assignee.id,
+      {
+        actor_email: "tester@local",
+        actor_role: "admin",
+        reason_code: "assignment_created_sync_manual",
+      }
+    );
+    const assignmentId = Number(editorialAssignment.id || 0) || 0;
+
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      contributor_note: "editorial submit",
+    });
+    assert.equal(submission.source_handoff_snapshot_id, null);
+
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", {
+      actor_role: "user",
+      reason_code: "submission_created",
+    });
+    const accepted = ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    });
+    assert.equal(accepted.accepted_binding_status, "pinned");
+    assert.equal(accepted.accepted_submission_id, submission.id);
+    assert.equal(accepted.accepted_handoff_snapshot_id, null);
+
+    const closed = ctx.repo.updateAssignmentState(assignmentId, "closed", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_closed",
+    });
+    assert.equal(closed.accepted_binding_status, "pinned");
+    assert.equal(closed.accepted_submission_id, submission.id);
+    assert.equal(closed.accepted_handoff_snapshot_id, null);
+
+    ctx.db.prepare("DELETE FROM content_assignment_submissions WHERE id=?").run(submission.id);
+    const corrupted = ctx.repo.getAssignmentById(assignmentId);
+    assert.equal(corrupted.accepted_binding_status, "invalid_binding");
+    assert.equal(corrupted.accepted_submission_id, submission.id);
+    assert.equal(corrupted.accepted_handoff_snapshot_id, null);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment binding status distinguishes pinned legacy and invalid pointer states", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Accepted Binding Status");
+    const assignee = ctx.createUser("accepted-binding-status");
+    ctx.createReadinessBrief(item.id, "accepted-binding-status");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignment = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const assignmentId = Number(assignment.id || 0) || 0;
+    const handoff = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: buildValidAttractionRequestedCheckReturns(),
+      },
+    });
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", { actor_role: "user", reason_code: "submission_created" });
+    const accepted = ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    });
+    assert.equal(accepted.accepted_binding_status, "pinned");
+
+    ctx.db.prepare("UPDATE content_assignments SET accepted_handoff_snapshot_id=NULL WHERE id=?").run(assignmentId);
+    assert.equal(ctx.repo.getAssignmentById(assignmentId).accepted_binding_status, "invalid_binding");
+
+    ctx.db.prepare("UPDATE content_assignments SET accepted_handoff_snapshot_id=?, accepted_submission_id=NULL WHERE id=?").run(handoff.id, assignmentId);
+    assert.equal(ctx.repo.getAssignmentById(assignmentId).accepted_binding_status, "invalid_binding");
+
+    ctx.db.prepare("UPDATE content_assignments SET accepted_handoff_snapshot_id=?, accepted_submission_id=? WHERE id=?").run(handoff.id, submission.id, assignmentId);
+    assert.equal(ctx.repo.getAssignmentById(assignmentId).accepted_binding_status, "pinned");
+
+    ctx.db.prepare("DELETE FROM content_assignment_handoff_snapshots WHERE id=?").run(handoff.id);
+    assert.equal(ctx.repo.getAssignmentById(assignmentId).accepted_binding_status, "invalid_binding");
+
+    const replacementHandoff = ctx.db.prepare(`
+      INSERT INTO content_assignment_handoff_snapshots (
+        assignment_id, content_item_id, readiness_brief_id, handoff_package_json, guard_status, created_by
+      ) VALUES (?, ?, ?, ?, 'ready', 'tester@local')
+    `).run(assignmentId, item.id, null, JSON.stringify({ version: 1, requested_checks: { version: 1, groups: [] } }));
+    ctx.db.prepare("UPDATE content_assignments SET accepted_handoff_snapshot_id=? WHERE id=?").run(Number(replacementHandoff.lastInsertRowid || 0), assignmentId);
+    ctx.db.prepare("DELETE FROM content_assignment_submissions WHERE id=?").run(submission.id);
+    assert.equal(ctx.repo.getAssignmentById(assignmentId).accepted_binding_status, "invalid_binding");
+
+    const replacementSubmissionInsert = ctx.db.prepare(`
+      INSERT INTO content_assignment_submissions (
+        assignment_id, content_item_id, source_handoff_snapshot_id, submitted_by_user_id, submission_state, field_return_payload_json
+      ) VALUES (?, ?, ?, ?, 'resubmitted', ?)
+    `).run(
+      assignmentId,
+      item.id,
+      Number(replacementHandoff.lastInsertRowid || 0),
+      assignee.id,
+      JSON.stringify({ requested_check_returns: buildValidAttractionRequestedCheckReturns() })
+    );
+    const replacementSubmission = ctx.repo.getAssignmentSubmissionById(Number(replacementSubmissionInsert.lastInsertRowid || 0));
+    ctx.db.prepare("UPDATE content_assignments SET accepted_submission_id=? WHERE id=?").run(replacementSubmission.id, assignmentId);
+    assert.equal(ctx.repo.getAssignmentById(assignmentId).accepted_binding_status, "pinned");
+
+    const otherItem = ctx.createItem("Accepted Binding Status Other");
+    const otherUser = ctx.createUser("accepted-binding-status-other");
+    ctx.createReadinessBrief(otherItem.id, "accepted-binding-status-other");
+    ctx.repo.createFieldPack({
+      content_item_id: otherItem.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const otherAssignment = ctx.repo.createAssignmentFromReadiness(
+      otherItem.id,
+      { assignee_user_id: otherUser.id, force_override: true, force_reason: "test" },
+      otherUser.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const otherHandoff = ctx.repo.getLatestAssignmentHandoffByAssignment(otherAssignment.id);
+    ctx.db.prepare("UPDATE content_assignments SET accepted_handoff_snapshot_id=? WHERE id=?").run(otherHandoff.id, assignmentId);
+    assert.equal(ctx.repo.getAssignmentById(assignmentId).accepted_binding_status, "invalid_binding");
+
+    ctx.db.prepare("UPDATE content_assignments SET state='assigned', accepted_handoff_snapshot_id=?, accepted_submission_id=? WHERE id=?").run(
+      Number(replacementHandoff.lastInsertRowid || 0),
+      replacementSubmission.id,
+      assignmentId
+    );
+    assert.equal(ctx.repo.getAssignmentById(assignmentId).accepted_binding_status, "not_accepted");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment acceptance failures roll back assignment and workflow state", () => {
+  const ctx = createTestContext();
+  try {
+    const itemA = ctx.createItem("Acceptance Binding A");
+    const userA = ctx.createUser("acceptance-binding-a");
+    ctx.createReadinessBrief(itemA.id, "acceptance-binding-a");
+    ctx.repo.createFieldPack({
+      content_item_id: itemA.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignmentA = ctx.repo.createAssignmentFromReadiness(
+      itemA.id,
+      { assignee_user_id: userA.id, force_override: true, force_reason: "test" },
+      userA.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const assignmentAId = Number(assignmentA.id || 0);
+    const handoffA = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentAId);
+    const submissionA = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentAId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentAId),
+      submitted_by_user_id: userA.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: buildValidAttractionRequestedCheckReturns(),
+      },
+    });
+    void submissionA;
+    ctx.repo.updateAssignmentState(assignmentAId, "submitted", "submitter@local", { actor_role: "user", reason_code: "submission_created" });
+
+    const beforeMissingHandoff = captureAssignmentAtomicState(ctx, assignmentAId);
+    ctx.db.prepare("DELETE FROM content_assignment_handoff_snapshots WHERE id=?").run(handoffA.id);
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentAId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /handoff snapshot/i);
+    assertAssignmentAtomicStateEqual(captureAssignmentAtomicState(ctx, assignmentAId), beforeMissingHandoff);
+
+    ctx.db.prepare("UPDATE content_assignments SET latest_submission_id=NULL WHERE id=?").run(assignmentAId);
+    const restoredMissingSubmission = ctx.db.prepare(`
+      INSERT INTO content_assignment_handoff_snapshots (
+        assignment_id, content_item_id, readiness_brief_id, handoff_package_json, guard_status, created_by
+      ) VALUES (?, ?, ?, ?, 'ready', 'tester@local')
+    `).run(
+      assignmentAId,
+      itemA.id,
+      handoffA.readiness_brief_id == null ? null : Number(handoffA.readiness_brief_id || 0) || null,
+      JSON.stringify(handoffA.handoff_package_json)
+    );
+    assert.equal(Number(restoredMissingSubmission.lastInsertRowid || 0) > 0, true);
+    const beforeMissingSubmission = captureAssignmentAtomicState(ctx, assignmentAId);
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentAId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /latest submission|missing latest submission|missing submission/i);
+    assertAssignmentAtomicStateEqual(captureAssignmentAtomicState(ctx, assignmentAId), beforeMissingSubmission);
+
+    ctx.db.prepare("UPDATE content_assignments SET latest_submission_id=? WHERE id=?").run(submissionA.id, assignmentAId);
+
+    const itemB = ctx.createItem("Acceptance Binding B");
+    const userB = ctx.createUser("acceptance-binding-b");
+    ctx.createReadinessBrief(itemB.id, "acceptance-binding-b");
+    ctx.repo.createFieldPack({
+      content_item_id: itemB.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignmentB = ctx.repo.createAssignmentFromReadiness(
+      itemB.id,
+      { assignee_user_id: userB.id, force_override: true, force_reason: "test" },
+      userB.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const assignmentBId = Number(assignmentB.id || 0);
+    const submissionB = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentBId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentBId),
+      submitted_by_user_id: userB.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: buildValidAttractionRequestedCheckReturns(),
+      },
+    });
+    ctx.repo.updateAssignmentState(assignmentBId, "submitted", "submitter@local", { actor_role: "user", reason_code: "submission_created" });
+
+    const handoffB = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentBId);
+    const beforeCrossItemHandoff = captureAssignmentAtomicState(ctx, assignmentBId);
+    ctx.db.prepare("UPDATE content_assignment_handoff_snapshots SET content_item_id=? WHERE id=?").run(itemA.id, handoffB.id);
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentBId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /belongs to another assignment|content item/i);
+    assertAssignmentAtomicStateEqual(captureAssignmentAtomicState(ctx, assignmentBId), beforeCrossItemHandoff);
+
+    ctx.db.prepare("UPDATE content_assignment_handoff_snapshots SET content_item_id=? WHERE id=?").run(itemB.id, handoffB.id);
+    ctx.db.prepare("UPDATE content_assignments SET latest_submission_id=? WHERE id=?").run(submissionB.id, assignmentAId);
+    const restoredHandoffA = ctx.db.prepare(`
+      INSERT INTO content_assignment_handoff_snapshots (
+        assignment_id, content_item_id, readiness_brief_id, handoff_package_json, guard_status, created_by
+      ) VALUES (?, ?, ?, ?, 'ready', 'tester@local')
+    `).run(
+      assignmentAId,
+      itemA.id,
+      null,
+      JSON.stringify(handoffB.handoff_package_json)
+    );
+    assert.equal(Number(restoredHandoffA.lastInsertRowid || 0) > 0, true);
+    const beforeCrossAssignmentSubmission = captureAssignmentAtomicState(ctx, assignmentAId);
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentAId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /submission belongs to another assignment|content item/i);
+    assertAssignmentAtomicStateEqual(captureAssignmentAtomicState(ctx, assignmentAId), beforeCrossAssignmentSubmission);
+
+    const beforeCrossAssignmentHandoff = captureAssignmentAtomicState(ctx, assignmentAId);
+    ctx.db.prepare("UPDATE content_assignment_handoff_snapshots SET assignment_id=? WHERE id=?").run(assignmentBId, Number(restoredHandoffA.lastInsertRowid || 0));
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentAId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /another assignment|handoff snapshot/i);
+    assertAssignmentAtomicStateEqual(captureAssignmentAtomicState(ctx, assignmentAId), beforeCrossAssignmentHandoff);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment acceptance enforces required completeness, allows optional unanswered warnings, and keeps legacy accepted rows readable", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Acceptance Validation Statuses");
+    ctx.db.prepare("UPDATE content_items SET category='cafe' WHERE id=?").run(item.id);
+    const assignee = ctx.createUser("acceptance-validation-statuses");
+    ctx.createReadinessBrief(item.id, "acceptance-validation-statuses");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignment = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const assignmentId = Number(assignment.id || 0);
+    const handoff = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
+    const baseRequestedReturns = buildRequestedReturnsFromHandoff(handoff.handoff_package_json);
+    const mutatedSnapshot = {
+      ...handoff.handoff_package_json,
+      requested_checks: {
+        version: 1,
+        groups: [
+          ...(Array.isArray(handoff.handoff_package_json?.requested_checks?.groups)
+            ? handoff.handoff_package_json.requested_checks.groups
+            : []),
+          {
+            group_key: "taxonomy",
+            group_label: "Taxonomy",
+            checks: [
+              {
+                key: "waterfront",
+                requested: true,
+                label: "Waterfront",
+                instruction: "Confirm waterfront access",
+              answer_type: "boolean_with_conditions",
+              activation_mode: "agent_triggered",
+              required: false,
+              categories: ["cafes"],
+              item_types: ["place"],
+            },
+          ],
+        },
+      ],
+      },
+    };
+    ctx.db.prepare("UPDATE content_assignment_handoff_snapshots SET handoff_package_json=? WHERE id=?").run(
+      JSON.stringify(mutatedSnapshot),
+      handoff.id
+    );
+
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          ...baseRequestedReturns,
+          "cta_contact.phone": { checked: false, value: "0811111111", evidence: "unchecked" },
+          "taxonomy.waterfront": null,
+        },
+      },
+    });
+    void submission;
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", { actor_role: "user", reason_code: "submission_created" });
+    assert.throws(() => ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /required unanswered|unanswered|non-applicable/i);
+
+    ctx.db.prepare("UPDATE content_assignment_submissions SET field_return_payload_json=? WHERE id=(SELECT latest_submission_id FROM content_assignments WHERE id=?)").run(
+      JSON.stringify({
+        requested_check_returns: {
+          ...baseRequestedReturns,
+          "cta_contact.phone": { checked: true, value: "", evidence: "No public phone found" },
+          "taxonomy.waterfront": { checked: false, value: null },
+        },
+      }),
+      assignmentId
+    );
+
+    const accepted = ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    });
+    assert.equal(Array.isArray(accepted.acceptance_validation?.warnings), true);
+    assert.equal(
+      accepted.acceptance_validation.warnings.some((entry) => String(entry?.status || "").trim() === "not_found"),
+      true
+    );
+    assert.equal(
+      accepted.acceptance_validation.warnings.some((entry) => String(entry?.status || "").trim() === "unanswered"),
+      true
+    );
+    assert.equal(accepted.acceptance_validation.category_context, "cafes");
+
+    ctx.db.prepare(`
+      INSERT INTO content_assignments (
+        assignment_uid, content_item_id, assignment_kind, assignee_user_id, assigned_by_user_id, state, accepted_at
+      ) VALUES ('legacy-unpinned-assignment', ?, 'field', ?, ?, 'accepted', ?)
+    `).run(item.id, assignee.id, assignee.id, toBangkokSqlTimestampForTest(new Date("2026-06-22T03:00:00.000Z")));
+    const legacyId = Number(ctx.db.prepare("SELECT id FROM content_assignments WHERE assignment_uid='legacy-unpinned-assignment'").get()?.id || 0);
+    const legacy = ctx.repo.getAssignmentById(legacyId);
+    assert.equal(legacy.accepted_binding_status, "legacy_unpinned");
+    assert.equal(legacy.accepted_handoff_snapshot_id, null);
+    assert.equal(legacy.accepted_submission_id, null);
   } finally {
     ctx.cleanup();
   }
@@ -3048,6 +4043,7 @@ test("text-like deliverables update the latest submission row instead of creatin
     const assignmentId = Number(assignmentResult.assignment.id || 0);
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
     });
