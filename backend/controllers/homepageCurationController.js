@@ -12,6 +12,28 @@ function getActorId(req) {
   return Number.isFinite(id) && id > 0 ? id : null;
 }
 
+function isPlainObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+export function parseTaxonomyFiltersQuery(rawValue) {
+  if (rawValue == null) return { taxonomyFilters: null };
+  if (Array.isArray(rawValue)) return { error: true };
+
+  const raw = String(rawValue || "").trim();
+  if (!raw) return { taxonomyFilters: null };
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!isPlainObject(parsed)) return { error: true };
+    return { taxonomyFilters: parsed };
+  } catch {
+    return { error: true };
+  }
+}
+
 export async function getHomepageCurationLayoutHandler(req, res) {
   try {
     const layoutKey = req.query.layout_key || "home";
@@ -65,13 +87,22 @@ export async function getPublishedHomepageLayoutHandler(req, res) {
   }
 }
 
-export async function searchHomepageCurationCandidatesHandler(req, res) {
+export async function searchHomepageCurationCandidatesHandler(req, res, deps = {}) {
   try {
-    const items = await searchHomepageCurationCandidates({
+    const parsedTaxonomyFilters = parseTaxonomyFiltersQuery(req.query?.taxonomy_filters);
+    if (parsedTaxonomyFilters.error) {
+      res.status(400).json({ error: "Invalid taxonomy_filters" });
+      return;
+    }
+    const searchCandidates = typeof deps.searchHomepageCurationCandidates === "function"
+      ? deps.searchHomepageCurationCandidates
+      : searchHomepageCurationCandidates;
+    const items = await searchCandidates({
       entityType: req.query.entity_type || "place",
       lang: req.query.lang || "th",
       q: req.query.q || "",
       limit: req.query.limit || 20,
+      taxonomyFilters: parsedTaxonomyFilters.taxonomyFilters,
     });
     res.json({ items });
   } catch (error) {

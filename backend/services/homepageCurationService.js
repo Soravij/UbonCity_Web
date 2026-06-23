@@ -1,4 +1,5 @@
 import pool from "../config/db.js";
+import { filterPlacesByCuratedTaxonomy } from "./curatedTaxonomyFilterService.js";
 
 const VALID_SOURCE_MODES = new Set(["manual-first-hybrid", "manual-only", "rule-only"]);
 const VALID_FALLBACK_MODES = new Set(["latest-approved", "featured", "none"]);
@@ -164,6 +165,25 @@ function parseJson(value, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function isPlainObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function parseCuratedTaxonomyValue(value) {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return isPlainObject(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return isPlainObject(value) ? value : null;
 }
 
 function normalizeStringList(value) {
@@ -750,6 +770,7 @@ export async function searchHomepageCurationCandidates({
   lang = "th",
   q = "",
   limit = 20,
+  taxonomyFilters = null,
 }) {
   const normalizedType = VALID_ENTITY_TYPES.has(String(entityType || "").trim().toLowerCase())
     ? String(entityType).trim().toLowerCase()
@@ -758,6 +779,7 @@ export async function searchHomepageCurationCandidates({
   const normalizedQ = String(q || "").trim();
   const maxLimit = Math.max(1, Math.min(50, Number(limit || 20) || 20));
   const wildcard = `%${normalizedQ}%`;
+  const hasTaxonomyFilters = isPlainObject(taxonomyFilters) && Object.keys(taxonomyFilters).length > 0;
 
   if (normalizedType === "event") {
     try {
@@ -793,13 +815,36 @@ export async function searchHomepageCurationCandidates({
   }
 
   const [rows] = await pool.query(
-    `SELECT
+    hasTaxonomyFilters
+      ? `SELECT
        p.id,
        'place' AS entity_type,
        c.slug AS category,
        COALESCE(NULLIF(TRIM(p.slug), ''), CONCAT('place-', p.id)) AS slug,
        COALESCE(pt_req.title, pt_th.title) AS title,
-       COALESCE(pt_req.description, pt_th.description) AS description
+       COALESCE(pt_req.description, pt_th.description) AS description,
+       p.curated_taxonomy_json
+     FROM places p
+     JOIN categories c ON c.id = p.category_id
+     LEFT JOIN place_translations pt_req ON pt_req.place_id = p.id AND pt_req.lang=?
+     LEFT JOIN place_translations pt_th ON pt_th.place_id = p.id AND pt_th.lang='th'
+     WHERE p.is_approved=1
+       AND (pt_req.id IS NOT NULL OR pt_th.id IS NOT NULL)
+       AND (
+         ?='' OR
+         COALESCE(pt_req.title, pt_th.title) LIKE ? OR
+         COALESCE(pt_req.description, pt_th.description) LIKE ? OR
+         COALESCE(NULLIF(TRIM(p.slug), ''), CONCAT('place-', p.id)) LIKE ?
+       )
+     ORDER BY p.id DESC`
+      : `SELECT
+       p.id,
+       'place' AS entity_type,
+       c.slug AS category,
+       COALESCE(NULLIF(TRIM(p.slug), ''), CONCAT('place-', p.id)) AS slug,
+       COALESCE(pt_req.title, pt_th.title) AS title,
+       COALESCE(pt_req.description, pt_th.description) AS description,
+       p.curated_taxonomy_json
      FROM places p
      JOIN categories c ON c.id = p.category_id
      LEFT JOIN place_translations pt_req ON pt_req.place_id = p.id AND pt_req.lang=?
@@ -814,8 +859,18 @@ export async function searchHomepageCurationCandidates({
        )
      ORDER BY p.id DESC
      LIMIT ?`,
-    [normalizedLang, normalizedQ, wildcard, wildcard, wildcard, maxLimit]
+    hasTaxonomyFilters
+      ? [normalizedLang, normalizedQ, wildcard, wildcard, wildcard]
+      : [normalizedLang, normalizedQ, wildcard, wildcard, wildcard, maxLimit]
   );
+  const normalizedRows = rows.map((row) => ({
+    ...row,
+    curated_taxonomy_json: parseCuratedTaxonomyValue(row?.curated_taxonomy_json),
+  }));
 
-  return rows;
+  if (!hasTaxonomyFilters) {
+    return normalizedRows;
+  }
+
+  return filterPlacesByCuratedTaxonomy(normalizedRows, taxonomyFilters).slice(0, maxLimit);
 }
