@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildTaxonomyFilters,
   createTaxonomyFilterRow,
+  hasMeaningfulTaxonomyFilterRow,
   formatTaxonomyValue,
 } from "../src/utils/homepageTaxonomyFilters.js";
 
@@ -22,13 +23,13 @@ test("createTaxonomyFilterRow returns the expected blank row shape", () => {
   });
 });
 
-test("buildTaxonomyFilters normalizes boolean, number, string, and multi-select values", () => {
+test("buildTaxonomyFilters normalizes boolean, number, string, and list values", () => {
   const result = buildTaxonomyFilters(
     [
       { key: "parking", value_type: "boolean", value: "false" },
       { key: "typical_duration", value_type: "number", value: "0" },
       { key: "price_level", value_type: "string", value: " standard " },
-      { key: "service_scope", value_type: "multi_select", value: " city, airport " },
+      { key: "service_scope", value_type: "list", value: " city, airport " },
     ],
     ALLOWED_KEYS
   );
@@ -57,9 +58,9 @@ test("buildTaxonomyFilters rejects invalid and disallowed rows", () => {
     filters: null,
     error: "Invalid number value",
   });
-  assert.deepEqual(buildTaxonomyFilters([{ key: "parking", value_type: "multi_select", value: " , " }], ALLOWED_KEYS), {
+  assert.deepEqual(buildTaxonomyFilters([{ key: "parking", value_type: "list", value: " , " }], ALLOWED_KEYS), {
     filters: null,
-    error: "Invalid multi-select value",
+    error: "Invalid list value",
   });
   assert.deepEqual(buildTaxonomyFilters([{ key: "unknown_key", value_type: "string", value: "x" }], ALLOWED_KEYS), {
     filters: null,
@@ -77,7 +78,7 @@ test("buildTaxonomyFilters rejects invalid and disallowed rows", () => {
     filters: null,
     error: "Unsupported taxonomy key",
   });
-  assert.deepEqual(buildTaxonomyFilters([{ key: "tags", value_type: "multi_select", value: "coffee" }], ALLOWED_KEYS), {
+  assert.deepEqual(buildTaxonomyFilters([{ key: "tags", value_type: "list", value: "coffee" }], ALLOWED_KEYS), {
     filters: null,
     error: "Unsupported taxonomy key",
   });
@@ -100,10 +101,17 @@ test("buildTaxonomyFilters keeps empty row sets nullable and does not mutate inp
   });
 });
 
+test("hasMeaningfulTaxonomyFilterRow ignores blank untouched rows and keeps partial rows", () => {
+  assert.equal(hasMeaningfulTaxonomyFilterRow({ key: "", value_type: "string", value: "" }), false);
+  assert.equal(hasMeaningfulTaxonomyFilterRow({ key: "parking", value_type: "boolean", value: "" }), true);
+  assert.equal(hasMeaningfulTaxonomyFilterRow({ key: "", value_type: "string", value: "x" }), true);
+});
+
 test("formatTaxonomyValue renders primitives and arrays safely", () => {
   assert.equal(formatTaxonomyValue(false), "false");
   assert.equal(formatTaxonomyValue(0), "0");
   assert.equal(formatTaxonomyValue("standard"), "standard");
   assert.equal(formatTaxonomyValue(["city", "airport"]), "city, airport");
   assert.equal(formatTaxonomyValue(null), "-");
+  assert.equal(formatTaxonomyValue({ parking: false }), "-");
 });

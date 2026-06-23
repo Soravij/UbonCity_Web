@@ -814,7 +814,9 @@ export async function searchHomepageCurationCandidates({
     }
   }
 
-  const placeSelect = `SELECT
+  const [rows] = await pool.query(
+    hasTaxonomyFilters
+      ? `SELECT
        p.id,
        'place' AS entity_type,
        c.slug AS category,
@@ -834,11 +836,32 @@ export async function searchHomepageCurationCandidates({
          COALESCE(pt_req.description, pt_th.description) LIKE ? OR
          COALESCE(NULLIF(TRIM(p.slug), ''), CONCAT('place-', p.id)) LIKE ?
        )
-     ORDER BY p.id DESC`;
-  const placeParams = [normalizedLang, normalizedQ, wildcard, wildcard, wildcard];
-  const [rows] = await pool.query(
-    hasTaxonomyFilters ? placeSelect : `${placeSelect}\n     LIMIT ?`,
-    hasTaxonomyFilters ? placeParams : [...placeParams, maxLimit]
+     ORDER BY p.id DESC`
+      : `SELECT
+       p.id,
+       'place' AS entity_type,
+       c.slug AS category,
+       COALESCE(NULLIF(TRIM(p.slug), ''), CONCAT('place-', p.id)) AS slug,
+       COALESCE(pt_req.title, pt_th.title) AS title,
+       COALESCE(pt_req.description, pt_th.description) AS description,
+       p.curated_taxonomy_json
+     FROM places p
+     JOIN categories c ON c.id = p.category_id
+     LEFT JOIN place_translations pt_req ON pt_req.place_id = p.id AND pt_req.lang=?
+     LEFT JOIN place_translations pt_th ON pt_th.place_id = p.id AND pt_th.lang='th'
+     WHERE p.is_approved=1
+       AND (pt_req.id IS NOT NULL OR pt_th.id IS NOT NULL)
+       AND (
+         ?='' OR
+         COALESCE(pt_req.title, pt_th.title) LIKE ? OR
+         COALESCE(pt_req.description, pt_th.description) LIKE ? OR
+         COALESCE(NULLIF(TRIM(p.slug), ''), CONCAT('place-', p.id)) LIKE ?
+       )
+     ORDER BY p.id DESC
+     LIMIT ?`,
+    hasTaxonomyFilters
+      ? [normalizedLang, normalizedQ, wildcard, wildcard, wildcard]
+      : [normalizedLang, normalizedQ, wildcard, wildcard, wildcard, maxLimit]
   );
   const normalizedRows = rows.map((row) => ({
     ...row,

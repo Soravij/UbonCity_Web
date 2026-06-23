@@ -55,15 +55,37 @@ function normalizeValueByType(valueType, rawValue) {
     return { value: parsed };
   }
 
-  if (normalizedType === "multi_select") {
+  if (normalizedType === "list") {
     const values = normalizeListValue(rawValue);
-    if (!values.length) return { error: "Invalid multi-select value" };
+    if (!values.length) return { error: "Invalid list value" };
     return { value: values };
   }
 
   const normalized = normalizeStringValue(rawValue);
   if (!normalized) return { error: "Invalid string value" };
   return { value: normalized };
+}
+
+export function hasMeaningfulTaxonomyFilterRow(row) {
+  if (!isPlainObject(row)) return false;
+  const key = normalizeKey(row.key);
+  const valueType = String(row.value_type || "string").trim().toLowerCase();
+  const hasRawValue = Object.prototype.hasOwnProperty.call(row, "value");
+  const rawValue = row.value;
+
+  if (key) return true;
+  if (!hasRawValue) return false;
+
+  if (valueType === "boolean") {
+    return rawValue === true || rawValue === false || String(rawValue ?? "").trim().toLowerCase() === "true" || String(rawValue ?? "").trim().toLowerCase() === "false";
+  }
+  if (valueType === "number") {
+    return String(rawValue ?? "").trim().length > 0 || (typeof rawValue === "number" && Number.isFinite(rawValue));
+  }
+  if (valueType === "list") {
+    return normalizeListValue(rawValue).length > 0;
+  }
+  return normalizeStringValue(rawValue).length > 0;
 }
 
 function hasMeaningfulValue(valueType, rawValue) {
@@ -74,7 +96,7 @@ function hasMeaningfulValue(valueType, rawValue) {
   if (normalizedType === "number") {
     return String(rawValue ?? "").trim().length > 0 || (typeof rawValue === "number" && Number.isFinite(rawValue));
   }
-  if (normalizedType === "multi_select") {
+  if (normalizedType === "list") {
     return normalizeListValue(rawValue).length > 0;
   }
   return normalizeStringValue(rawValue).length > 0;
@@ -125,12 +147,6 @@ export function buildTaxonomyFilters(rows, allowedKeys = []) {
 export function formatTaxonomyValue(value) {
   if (value == null) return "-";
   if (Array.isArray(value)) return value.map((item) => String(item)).join(", ");
-  if (typeof value === "object") {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return "[object]";
-    }
-  }
+  if (typeof value === "object") return "-";
   return String(value);
 }

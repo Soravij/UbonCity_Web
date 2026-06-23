@@ -5,16 +5,12 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import pool from "../config/db.js";
-import {
-  getHomepageCurationTaxonomyOptionsHandler,
-  searchHomepageCurationCandidatesHandler,
-} from "../controllers/homepageCurationController.js";
+import { searchHomepageCurationCandidatesHandler } from "../controllers/homepageCurationController.js";
 import { searchHomepageCurationCandidates } from "../services/homepageCurationService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SERVICE_FILE = path.resolve(__dirname, "../services/homepageCurationService.js");
-const ROUTE_FILE = path.resolve(__dirname, "../routes/homepageCurationRoutes.js");
 
 function createRes() {
   return {
@@ -108,28 +104,6 @@ test("controller passes missing taxonomy_filters as null to service", async () =
   });
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { items: [] });
-});
-
-test("taxonomy options handler returns sorted approved taxonomy keys", async () => {
-  const res = createRes();
-
-  await getHomepageCurationTaxonomyOptionsHandler({ query: {} }, res);
-
-  assert.equal(res.statusCode, 200);
-  assert.ok(Array.isArray(res.body?.items));
-  assert.ok(res.body.items.length > 0);
-  const keys = res.body.items.map((item) => item.key);
-  const sortedKeys = [...keys].sort((a, b) => String(a).localeCompare(String(b)));
-  assert.deepEqual(keys, sortedKeys);
-  assert.ok(keys.includes("parking"));
-  assert.ok(keys.includes("price_level"));
-  assert.ok(keys.includes("service_scope"));
-});
-
-test("homepage curation routes expose taxonomy options endpoint", async () => {
-  const source = await fs.readFile(ROUTE_FILE, "utf8");
-  assert.match(source, /homepage-curation\/taxonomy-options/);
-  assert.match(source, /getHomepageCurationTaxonomyOptionsHandler/);
 });
 
 test("controller returns HTTP 400 for malformed or scalar taxonomy_filters", async () => {

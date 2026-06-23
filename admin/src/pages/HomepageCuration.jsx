@@ -3,6 +3,7 @@ import { api, authHeaders } from "../api/api";
 import {
   buildTaxonomyFilters,
   createTaxonomyFilterRow,
+  hasMeaningfulTaxonomyFilterRow,
   formatTaxonomyValue,
 } from "../utils/homepageTaxonomyFilters.js";
 
@@ -252,6 +253,30 @@ function summarizeTaxonomyFacts(taxonomy, limit = 6) {
     .map(([key, value]) => `${key}: ${formatTaxonomyValue(value)}`);
 }
 
+function getTaxonomyFilterErrorMessage(error) {
+  const normalized = String(error || "").trim();
+  switch (normalized) {
+    case "Select a taxonomy key":
+      return "กรุณาเลือกข้อมูล Taxonomy";
+    case "Unsupported taxonomy key":
+      return "ข้อมูล Taxonomy นี้ไม่รองรับ";
+    case "Duplicate taxonomy key":
+      return "ข้อมูล Taxonomy ซ้ำ";
+    case "Missing taxonomy value":
+      return "กรุณากรอกค่า Taxonomy";
+    case "Invalid boolean value":
+      return "ค่าบูลีนไม่ถูกต้อง";
+    case "Invalid number value":
+      return "ค่าตัวเลขไม่ถูกต้อง";
+    case "Invalid list value":
+      return "ค่ารายการไม่ถูกต้อง";
+    case "Invalid string value":
+      return "กรุณากรอกค่า Taxonomy";
+    default:
+      return normalized ? "ตัวกรอง Taxonomy ไม่ถูกต้อง" : "";
+  }
+}
+
 function getDefaultCandidateEntityType(block) {
   return isEventBlock(block) ? "event" : "place";
 }
@@ -388,12 +413,6 @@ export default function HomepageCuration({ token }) {
   useEffect(() => {
     loadLayout(lang);
   }, [lang, loadLayout]);
-
-  useEffect(() => {
-    if (activeTab !== TAB_SIGNALS) return undefined;
-    loadTaxonomyOptions();
-    return undefined;
-  }, [activeTab, loadTaxonomyOptions]);
 
   const loadPreview = useCallback(async (draftBlocks = serializedDraft, nextLang = lang) => {
     const requestId = previewRequestSeq.current + 1;
@@ -553,6 +572,9 @@ export default function HomepageCuration({ token }) {
 
   function addPoolTaxonomyRow() {
     setPoolTaxonomyRows((current) => [...current, createTaxonomyFilterRow()]);
+    if (String(poolState.entity_type || "").trim().toLowerCase() === "place" && !taxonomyOptionsLoaded && !taxonomyOptionsLoading) {
+      void loadTaxonomyOptions();
+    }
   }
 
   function updatePoolTaxonomyRow(rowIndex, patch) {
@@ -594,7 +616,11 @@ export default function HomepageCuration({ token }) {
   async function searchPoolCandidates() {
     const normalizedEntityType = String(poolState.entity_type || "place").trim().toLowerCase();
     let allowedTaxonomyKeys = taxonomyOptionKeys;
-    if (normalizedEntityType === "place" && !taxonomyOptionsLoaded) {
+    const meaningfulTaxonomyRows = normalizedEntityType === "place"
+      ? poolTaxonomyRows.filter((row) => hasMeaningfulTaxonomyFilterRow(row))
+      : [];
+
+    if (normalizedEntityType === "place" && meaningfulTaxonomyRows.length > 0 && !taxonomyOptionsLoaded) {
       const loadResult = await loadTaxonomyOptions();
       if (!loadResult.ok) {
         setPoolState((current) => ({
@@ -614,7 +640,7 @@ export default function HomepageCuration({ token }) {
         setPoolState((current) => ({
           ...current,
           loading: false,
-          error: built.error,
+          error: getTaxonomyFilterErrorMessage(built.error),
         }));
         return;
       }
@@ -1160,15 +1186,22 @@ export default function HomepageCuration({ token }) {
               {poolState.entity_type === "place" ? (
                 <div className="homepage-curation-rule-panel">
                   <div className="card-title-row">
-                    <h4>Taxonomy filters</h4>
-                    <button type="button" className="ghost tiny-btn" onClick={addPoolTaxonomyRow}>
-                      Add filter
-                    </button>
+                    <h4>ตัวกรอง Taxonomy</h4>
+                    <div className="actions">
+                      {poolTaxonomyRows.length ? (
+                        <button type="button" className="ghost tiny-btn" onClick={() => setPoolTaxonomyRows([])}>
+                          ล้างตัวกรองทั้งหมด
+                        </button>
+                      ) : null}
+                      <button type="button" className="ghost tiny-btn" onClick={addPoolTaxonomyRow}>
+                        เพิ่มตัวกรอง Taxonomy
+                      </button>
+                    </div>
                   </div>
                   <p className="muted">
-                    Filters apply to place candidate search only. Event searches ignore these values.
+                    ตัวกรอง Taxonomy ใช้กับสถานที่เท่านั้น
                   </p>
-                  {taxonomyOptionsLoading ? <p className="muted">Loading taxonomy options...</p> : null}
+                  {taxonomyOptionsLoading ? <p className="muted">กำลังโหลดตัวเลือก Taxonomy...</p> : null}
                   {taxonomyOptionsError ? <p className="status">{taxonomyOptionsError}</p> : null}
 
                   {poolTaxonomyRows.length ? (
@@ -1176,9 +1209,9 @@ export default function HomepageCuration({ token }) {
                       {poolTaxonomyRows.map((row, rowIndex) => (
                         <div key={`taxonomy-filter-${rowIndex}`} className="homepage-curation-manual-row">
                           <label>
-                            Key
+                            ข้อมูล Taxonomy
                             <select value={row.key} onChange={(event) => updatePoolTaxonomyRow(rowIndex, { key: event.target.value })}>
-                              <option value="">Select key</option>
+                              <option value="">เลือกข้อมูล Taxonomy</option>
                               {taxonomyOptions.map((option) => (
                                 <option key={option.key} value={option.key}>
                                   {option.label}
@@ -1187,7 +1220,7 @@ export default function HomepageCuration({ token }) {
                             </select>
                           </label>
                           <label>
-                            Type
+                            ชนิดค่า
                             <select
                               value={row.value_type}
                               onChange={(event) => updatePoolTaxonomyRow(rowIndex, { value_type: event.target.value, value: "" })}
@@ -1195,17 +1228,17 @@ export default function HomepageCuration({ token }) {
                               <option value="string">String</option>
                               <option value="boolean">Boolean</option>
                               <option value="number">Number</option>
-                              <option value="multi_select">Multi-select</option>
+                              <option value="list">List</option>
                             </select>
                           </label>
                           <label className="full">
-                            Value
+                            ค่า
                             {row.value_type === "boolean" ? (
                               <select
                                 value={String(row.value ?? "")}
                                 onChange={(event) => updatePoolTaxonomyRow(rowIndex, { value: event.target.value })}
                               >
-                                <option value="">Select value</option>
+                                <option value="">เลือกค่า</option>
                                 <option value="true">true</option>
                                 <option value="false">false</option>
                               </select>
@@ -1220,24 +1253,24 @@ export default function HomepageCuration({ token }) {
                               <input
                                 value={String(row.value ?? "")}
                                 onChange={(event) => updatePoolTaxonomyRow(rowIndex, { value: event.target.value })}
-                                placeholder={row.value_type === "multi_select" ? "city, airport" : "Type value"}
+                                placeholder={row.value_type === "list" ? "city, airport" : "Type value"}
                               />
                             )}
                           </label>
                           <div className="actions">
                             <button type="button" className="danger tiny-btn" onClick={() => removePoolTaxonomyRow(rowIndex)}>
-                              Remove
+                              ลบ
                             </button>
                           </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="muted">No taxonomy filters added.</p>
+                    <p className="muted">ยังไม่มีตัวกรอง Taxonomy</p>
                   )}
                 </div>
               ) : (
-                <p className="muted">Taxonomy filters are ignored for event candidate search.</p>
+                <p className="muted">ตัวกรอง Taxonomy ใช้กับสถานที่เท่านั้น</p>
               )}
 
               <div className="actions">
