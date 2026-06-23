@@ -73,6 +73,17 @@ function normalizePersistedJsonObject(value) {
   }
 }
 
+function parsePersistedJsonObject(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "object" && !Array.isArray(value)) return normalizePersistedJsonObject(value);
+  try {
+    const parsed = JSON.parse(String(value));
+    return normalizePersistedJsonObject(parsed);
+  } catch {
+    return null;
+  }
+}
+
 function sanitizeFileNameSegment(value, fallback = "media") {
   const normalized = String(value || "").trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-");
   return normalized.replace(/^-+|-+$/g, "") || fallback;
@@ -499,20 +510,27 @@ export async function ingestReviewContent(payload, options = {}) {
   const uploadedFileMap = buildUploadedFileMap(uploadedFiles, options?.mediaIndex || null);
   const multipartMode = Boolean(options?.multipart);
   const trustedSnapshotSource = Boolean(options?.trustedSnapshotSource);
+  const reviewSourceKind = String(payload?.review_source_kind || "").trim().toLowerCase();
+  const isTrustedFieldReview = trustedSnapshotSource && reviewSourceKind === "field_accepted_binding";
   const currentBatchUid = crypto.randomUUID();
-  const handoffSnapshotJson = trustedSnapshotSource ? normalizePersistedJsonObject(payload?.handoff_snapshot_json) : null;
-  if (trustedSnapshotSource && content.content_type === "place" && !handoffSnapshotJson) {
-    throw new Error("handoff_snapshot_json is required for field review ingest");
-  }
 
   const [existingRows] = await pool.query(
-    `SELECT id, status, current_batch_uid
+    `SELECT id, status, current_batch_uid, handoff_snapshot_json
      FROM review_contents
      WHERE source_system=? AND source_content_item_id=? AND content_type=?
      LIMIT 1`,
     [sourceSystem, sourceContentItemId, content.content_type]
   );
   const existing = existingRows.length ? existingRows[0] : null;
+  const existingHandoffSnapshotJson = parsePersistedJsonObject(existing?.handoff_snapshot_json);
+  const incomingHandoffSnapshotJson = normalizePersistedJsonObject(payload?.handoff_snapshot_json);
+  let nextHandoffSnapshotJson = existingHandoffSnapshotJson;
+  if (isTrustedFieldReview) {
+    if (!incomingHandoffSnapshotJson) {
+      throw new Error("handoff_snapshot_json is required for field review ingest");
+    }
+    nextHandoffSnapshotJson = incomingHandoffSnapshotJson;
+  }
 
   const connection = await pool.getConnection();
   const mirroredRows = [];
@@ -536,7 +554,7 @@ export async function ingestReviewContent(payload, options = {}) {
           sourceContentItemId,
           content,
           currentBatchUid,
-          handoffSnapshotJson,
+          handoffSnapshotJson: nextHandoffSnapshotJson,
         })
       );
       reviewContentId = Number(insertResult.insertId || 0) || 0;
@@ -558,7 +576,7 @@ export async function ingestReviewContent(payload, options = {}) {
           rawContentPayload,
           currentBatchUid,
           reviewContentId,
-          handoffSnapshotJson,
+          handoffSnapshotJson: nextHandoffSnapshotJson,
         })
       );
     }

@@ -5001,6 +5001,7 @@ function buildReviewIngestPayload(options = {}) {
     source_system: "collector-app",
     source_content_item_id: contentItemId,
     source_base_url: sourceBaseUrl,
+    review_source_kind: "field_accepted_binding",
     handoff_snapshot_json: handoffSnapshotJson,
     content: {
       ...buildReviewIngestContentPayload({
