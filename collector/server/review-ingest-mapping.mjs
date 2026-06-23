@@ -49,6 +49,54 @@ export function pickReviewIngestConfirmedCtaContact({
   return result;
 }
 
+export function resolveReviewIngestSourceContext({
+  repo = null,
+  contentItemId = 0,
+} = {}) {
+  if (!repo || typeof repo.listAssignmentsByItem !== "function") {
+    throw new Error("repo is required");
+  }
+
+  const itemId = Number(contentItemId || 0) || 0;
+  if (!itemId) {
+    throw new Error("content_item_id is required");
+  }
+
+  const assignments = Array.isArray(repo.listAssignmentsByItem(itemId))
+    ? repo.listAssignmentsByItem(itemId)
+    : [];
+  const fieldAssignments = assignments.filter((assignment) => String(assignment?.assignment_kind || "").trim().toLowerCase() === "field");
+  const editorialAssignments = assignments.filter((assignment) => String(assignment?.assignment_kind || "").trim().toLowerCase() === "editorial");
+  const activeEditorialAssignment = editorialAssignments.find((assignment) => {
+    const state = String(assignment?.state || "").trim().toLowerCase();
+    return ["assigned", "in_progress", "submitted", "resubmitted", "revision_requested"].includes(state);
+  }) || null;
+
+  const acceptedFieldSnapshot = fieldAssignments.length > 0
+    ? repo.buildAcceptedFieldReviewSnapshotByItem(itemId)
+    : null;
+
+  if (acceptedFieldSnapshot) {
+    return {
+      review_source_kind: "field_accepted_binding",
+      handoff_snapshot_json: acceptedFieldSnapshot,
+    };
+  }
+
+  if (fieldAssignments.length > 0) {
+    throw new Error("pinned accepted field assignment is required before admin review");
+  }
+
+  if (activeEditorialAssignment) {
+    return {
+      review_source_kind: "editorial_article_workspace",
+      handoff_snapshot_json: null,
+    };
+  }
+
+  throw new Error("editorial review assignment is required before admin review");
+}
+
 export function buildReviewIngestContentPayload({
   contentType = "place",
   sourceLang = "th",

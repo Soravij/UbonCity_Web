@@ -11,6 +11,7 @@ function normalizeSql(sql) {
 function createHarness({
   existingReviewRow = null,
   failOn = null,
+  pauseOnFirstExistingRead = false,
 } = {}) {
   const committed = {
     reviewRow: existingReviewRow ? JSON.parse(JSON.stringify(existingReviewRow)) : null,
@@ -25,6 +26,18 @@ function createHarness({
     updateParams: null,
     active: false,
   };
+  let existingReadCount = 0;
+  let resolveFirstExistingReadSeen = null;
+  let resolveFirstExistingReadRelease = null;
+  let firstExistingReadRelease = Promise.resolve();
+  const firstExistingReadSeen = new Promise((resolve) => {
+    resolveFirstExistingReadSeen = resolve;
+  });
+  if (pauseOnFirstExistingRead) {
+    firstExistingReadRelease = new Promise((resolve) => {
+      resolveFirstExistingReadRelease = resolve;
+    });
+  }
 
   const originalQuery = pool.query;
   const originalGetConnection = pool.getConnection;
@@ -36,10 +49,17 @@ function createHarness({
     };
   }
 
-  function snapshotFromUpdateParams(params) {
+  function snapshotFromUpdateParams(sql, params) {
+    const hasHandoffSnapshotColumn = normalizeSql(sql).includes("handoff_snapshot_json");
+    if (hasHandoffSnapshotColumn) {
+      return {
+        handoff_snapshot_json: params.at(-2) == null ? null : JSON.parse(String(params.at(-2))),
+        review_payload_json: params.at(-3) == null ? null : JSON.parse(String(params.at(-3))),
+      };
+    }
     return {
-      handoff_snapshot_json: params.at(-2) == null ? null : JSON.parse(String(params.at(-2))),
-      review_payload_json: params.at(-3) == null ? null : JSON.parse(String(params.at(-3))),
+      handoff_snapshot_json: null,
+      review_payload_json: params.at(-2) == null ? null : JSON.parse(String(params.at(-2))),
     };
   }
 
@@ -48,12 +68,18 @@ function createHarness({
     if (normalized.includes("from review_contents where source_system")) {
       const row = committed.reviewRow;
       if (!row) return [[]];
-      return [[{
+      const clonedRow = {
         id: row.id,
         status: row.status,
         current_batch_uid: row.current_batch_uid,
         handoff_snapshot_json: row.handoff_snapshot_json == null ? null : JSON.stringify(row.handoff_snapshot_json),
-      }]];
+      };
+      existingReadCount += 1;
+      if (pauseOnFirstExistingRead && existingReadCount === 1) {
+        resolveFirstExistingReadSeen?.();
+        await firstExistingReadRelease;
+      }
+      return [[clonedRow]];
     }
     if (normalized === "select * from review_contents where id=? limit 1") {
       const row = committed.reviewRow;
@@ -141,13 +167,18 @@ function createHarness({
       }
       if (normalized.startsWith("update review_contents")) {
         tx.updateParams = Array.isArray(params) ? params.slice() : [];
-        const snapshot = snapshotFromUpdateParams(tx.updateParams);
+        const hasHandoffSnapshotColumn = normalizeSql(sql).includes("handoff_snapshot_json");
+        const snapshot = snapshotFromUpdateParams(sql, tx.updateParams);
         tx.reviewRow = {
           ...(committed.reviewRow || { id: 501 }),
           status: "pending_review",
-          current_batch_uid: params.at(-4) ?? committed.reviewRow?.current_batch_uid ?? null,
+          current_batch_uid: hasHandoffSnapshotColumn
+            ? params.at(-4) ?? committed.reviewRow?.current_batch_uid ?? null
+            : params.at(-3) ?? committed.reviewRow?.current_batch_uid ?? null,
           review_payload_json: snapshot.review_payload_json,
-          handoff_snapshot_json: snapshot.handoff_snapshot_json,
+          handoff_snapshot_json: hasHandoffSnapshotColumn
+            ? snapshot.handoff_snapshot_json
+            : (committed.reviewRow?.handoff_snapshot_json ?? null),
         };
         if (failOn === "review_contents_update") {
           throw new Error("injected failure after review update");
@@ -180,6 +211,11 @@ function createHarness({
   return {
     committed,
     tx,
+    firstExistingReadSeen,
+    releaseFirstExistingRead: () => {
+      resolveFirstExistingReadRelease?.();
+      resolveFirstExistingReadRelease = null;
+    },
     restore() {
       pool.query = originalQuery;
       pool.getConnection = originalGetConnection;
@@ -370,6 +406,72 @@ test("review ingest rollback clears row snapshot action and media writes after f
     assert.equal(harness.committed.reviewAssets.length, 0);
   } finally {
     globalThis.fetch = originalFetch;
+    harness.restore();
+  }
+});
+
+test("untrusted reingest cannot overwrite a newer trusted handoff snapshot during concurrent update", async () => {
+  const harness = createHarness({
+    existingReviewRow: {
+      id: 501,
+      current_batch_uid: "batch-1",
+      status: "pending_review",
+      handoff_snapshot_json: {
+        version: 1,
+        assignment_id: 12,
+        accepted_handoff_snapshot_id: 34,
+        accepted_submission_id: 56,
+        accepted_at: "2026-06-23T00:00:00.000Z",
+        revision_round: 1,
+      },
+      review_payload_json: { snapshot_meta: { translation_langs: ["en"] } },
+    },
+    pauseOnFirstExistingRead: true,
+  });
+  try {
+    const basePayload = {
+      source_system: "collector-app",
+      source_content_item_id: 42,
+      source_base_url: "https://collector.example",
+      content: {
+        content_type: "place",
+        lang: "th",
+        category: "attractions",
+        title: "Race Place",
+        body: "<p>Body</p>",
+        excerpt: "Excerpt",
+        meta_title: "Meta",
+        meta_description: "Meta desc",
+      },
+    };
+
+    const untrustedPromise = ingestReviewContent({
+      ...basePayload,
+      review_source_kind: "editorial_article_workspace",
+    }, { trustedSnapshotSource: false });
+
+    await harness.firstExistingReadSeen;
+
+    const trustedPromise = ingestReviewContent({
+      ...basePayload,
+      review_source_kind: "field_accepted_binding",
+      handoff_snapshot_json: {
+        version: 1,
+        assignment_id: 12,
+        accepted_handoff_snapshot_id: 35,
+        accepted_submission_id: 57,
+        accepted_at: "2026-06-23T01:00:00.000Z",
+        revision_round: 2,
+      },
+    }, { trustedSnapshotSource: true });
+
+    await trustedPromise;
+    harness.releaseFirstExistingRead();
+    await untrustedPromise;
+
+    assert.equal(harness.committed.reviewRow.handoff_snapshot_json.accepted_handoff_snapshot_id, 35);
+    assert.equal(harness.committed.reviewRow.handoff_snapshot_json.accepted_submission_id, 57);
+  } finally {
     harness.restore();
   }
 });

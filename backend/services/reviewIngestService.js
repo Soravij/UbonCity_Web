@@ -373,6 +373,25 @@ export function buildReviewContentUpdateParams({
   ];
 }
 
+export function buildReviewContentUpdateParamsWithoutHandoff({
+  existing = null,
+  content,
+  rawContentPayload,
+  currentBatchUid,
+  reviewContentId,
+} = {}) {
+  const preservedCtaFields = mergeExistingReviewContentCtaFields(existing, content, rawContentPayload);
+  return [
+    content.lang, content.category, content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
+    content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url, content.google_place_id,
+    content.transport_subtype, content.transport_contact_name, content.transport_contact_phone, preservedCtaFields.phone, preservedCtaFields.line_url, preservedCtaFields.facebook_url, preservedCtaFields.website_url,
+    preservedCtaFields.primary_cta, content.tracking_entity_type, content.tracking_entity_id, content.transport_contact_details,
+    content.transport_link_url, content.slug, content.slug ? 1 : 0, content.public_entity_type, content.public_entity_id,
+    currentBatchUid, JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
+    reviewContentId,
+  ];
+}
+
 function flattenMediaManifest(manifest = {}) {
   const queue = [];
   if (manifest?.cover) queue.push({ usage_type: "cover", entry: manifest.cover, position: 0 });
@@ -513,6 +532,7 @@ export async function ingestReviewContent(payload, options = {}) {
   const reviewSourceKind = String(payload?.review_source_kind || "").trim().toLowerCase();
   const isTrustedFieldReview = trustedSnapshotSource && reviewSourceKind === "field_accepted_binding";
   const currentBatchUid = crypto.randomUUID();
+  const shouldPersistHandoffSnapshot = isTrustedFieldReview;
 
   const [existingRows] = await pool.query(
     `SELECT id, status, current_batch_uid, handoff_snapshot_json
@@ -524,8 +544,8 @@ export async function ingestReviewContent(payload, options = {}) {
   const existing = existingRows.length ? existingRows[0] : null;
   const existingHandoffSnapshotJson = parsePersistedJsonObject(existing?.handoff_snapshot_json);
   const incomingHandoffSnapshotJson = normalizePersistedJsonObject(payload?.handoff_snapshot_json);
-  let nextHandoffSnapshotJson = existingHandoffSnapshotJson;
-  if (isTrustedFieldReview) {
+  let nextHandoffSnapshotJson = null;
+  if (shouldPersistHandoffSnapshot) {
     if (!incomingHandoffSnapshotJson) {
       throw new Error("handoff_snapshot_json is required for field review ingest");
     }
@@ -561,24 +581,44 @@ export async function ingestReviewContent(payload, options = {}) {
     } else {
       reviewContentId = Number(existing.id || 0) || 0;
       await cleanupUnpublishedBatchAssets(reviewContentId, existing.current_batch_uid, connection);
-      await connection.query(
-        `UPDATE review_contents
-         SET status='pending_review', lang=?, category=?, title=?, body=?, excerpt=?, meta_title=?, meta_description=?,
-             event_period_text=?, location_text=?, latitude=?, longitude=?, map_url=?, google_place_id=?,
-             transport_subtype=?, transport_contact_name=?, transport_contact_phone=?, phone=?, line_url=?, facebook_url=?, website_url=?, primary_cta=?,
-             tracking_entity_type=?, tracking_entity_id=?, transport_contact_details=?,
-             transport_link_url=?, slug=?, slug_locked=?, public_entity_type=?, public_entity_id=?,
-             current_batch_uid=?, review_payload_json=?, handoff_snapshot_json=?, updated_at=CURRENT_TIMESTAMP
-         WHERE id=?`,
-        buildReviewContentUpdateParams({
-          existing,
-          content,
-          rawContentPayload,
-          currentBatchUid,
-          reviewContentId,
-          handoffSnapshotJson: nextHandoffSnapshotJson,
-        })
-      );
+      if (shouldPersistHandoffSnapshot) {
+        await connection.query(
+          `UPDATE review_contents
+           SET status='pending_review', lang=?, category=?, title=?, body=?, excerpt=?, meta_title=?, meta_description=?,
+               event_period_text=?, location_text=?, latitude=?, longitude=?, map_url=?, google_place_id=?,
+               transport_subtype=?, transport_contact_name=?, transport_contact_phone=?, phone=?, line_url=?, facebook_url=?, website_url=?, primary_cta=?,
+               tracking_entity_type=?, tracking_entity_id=?, transport_contact_details=?,
+               transport_link_url=?, slug=?, slug_locked=?, public_entity_type=?, public_entity_id=?,
+               current_batch_uid=?, review_payload_json=?, handoff_snapshot_json=?, updated_at=CURRENT_TIMESTAMP
+           WHERE id=?`,
+          buildReviewContentUpdateParams({
+            existing,
+            content,
+            rawContentPayload,
+            currentBatchUid,
+            reviewContentId,
+            handoffSnapshotJson: nextHandoffSnapshotJson,
+          })
+        );
+      } else {
+        await connection.query(
+          `UPDATE review_contents
+           SET status='pending_review', lang=?, category=?, title=?, body=?, excerpt=?, meta_title=?, meta_description=?,
+               event_period_text=?, location_text=?, latitude=?, longitude=?, map_url=?, google_place_id=?,
+               transport_subtype=?, transport_contact_name=?, transport_contact_phone=?, phone=?, line_url=?, facebook_url=?, website_url=?, primary_cta=?,
+               tracking_entity_type=?, tracking_entity_id=?, transport_contact_details=?,
+               transport_link_url=?, slug=?, slug_locked=?, public_entity_type=?, public_entity_id=?,
+               current_batch_uid=?, review_payload_json=?, updated_at=CURRENT_TIMESTAMP
+           WHERE id=?`,
+          buildReviewContentUpdateParamsWithoutHandoff({
+            existing,
+            content,
+            rawContentPayload,
+            currentBatchUid,
+            reviewContentId,
+          })
+        );
+      }
     }
 
     for (const mediaRow of mediaQueue) {

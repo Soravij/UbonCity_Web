@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
+import { resolveReviewIngestSourceContext } from "../server/review-ingest-mapping.mjs";
 
 function createContext() {
   const db = openDatabase(":memory:", "D:/UbonCity_Web/collector/database/schema.sql");
@@ -140,7 +141,47 @@ function createContext() {
     };
   }
 
-  return { db, repo, cleanup, createUser, createItem, createAcceptedFieldAssignment };
+  function createEditorialAssignment(item, userId, state = "assigned") {
+    const assignment = repo.createAssignment({
+      content_item_id: item.id,
+      assignee_user_id: userId,
+      assigned_by_user_id: userId,
+      assignment_kind: "editorial",
+      state,
+      brief_json: { summary: "editorial review" },
+      requirements_json: { expected_deliverables: [] },
+    }, userId, { actor_role: "admin", reason_code: "test_assignment" });
+    return assignment;
+  }
+
+  function createLegacyUnpinnedFieldAssignment(item, userId) {
+    const assignment = repo.createAssignment({
+      content_item_id: item.id,
+      assignee_user_id: userId,
+      assigned_by_user_id: userId,
+      assignment_kind: "field",
+      state: "accepted",
+      brief_json: { summary: "legacy field review" },
+      requirements_json: { expected_deliverables: [] },
+    }, userId, { actor_role: "admin", reason_code: "test_assignment" });
+    db.prepare(`
+      UPDATE content_assignments
+      SET accepted_at=CURRENT_TIMESTAMP, accepted_handoff_snapshot_id=NULL, accepted_submission_id=NULL
+      WHERE id=?
+    `).run(assignment.id);
+    return assignment;
+  }
+
+  return {
+    db,
+    repo,
+    cleanup,
+    createUser,
+    createItem,
+    createAcceptedFieldAssignment,
+    createEditorialAssignment,
+    createLegacyUnpinnedFieldAssignment,
+  };
 }
 
 test("accepted field review snapshot freezes accepted binding and ignores later handoff or submission drift", () => {
@@ -237,6 +278,37 @@ test("invalid accepted field binding returns no review snapshot", () => {
 
     ctx.db.prepare("UPDATE content_assignments SET accepted_handoff_snapshot_id=NULL WHERE id=?").run(assignmentId);
     assert.equal(ctx.repo.buildAcceptedFieldReviewSnapshotByItem(item.id), null);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("review ingest provenance resolves field snapshot, editorial null, and blocks invalid field fallback", () => {
+  const ctx = createContext();
+  try {
+    const fieldUserId = ctx.createUser("provenance-field");
+    const editorialUserId = ctx.createUser("provenance-editorial");
+
+    const fieldItem = ctx.createItem("Field Provenance Place");
+    const fieldAssignment = ctx.createAcceptedFieldAssignment(fieldItem, fieldUserId);
+    const fieldSource = resolveReviewIngestSourceContext({ repo: ctx.repo, contentItemId: fieldItem.id });
+    assert.equal(fieldSource.review_source_kind, "field_accepted_binding");
+    assert.ok(fieldSource.handoff_snapshot_json);
+    assert.equal(fieldSource.handoff_snapshot_json.accepted_submission_id, fieldAssignment.submission.id);
+
+    const editorialItem = ctx.createItem("Editorial Provenance Place");
+    ctx.createEditorialAssignment(editorialItem, editorialUserId, "submitted");
+    const editorialSource = resolveReviewIngestSourceContext({ repo: ctx.repo, contentItemId: editorialItem.id });
+    assert.equal(editorialSource.review_source_kind, "editorial_article_workspace");
+    assert.equal(editorialSource.handoff_snapshot_json, null);
+
+    const blockedItem = ctx.createItem("Blocked Provenance Place");
+    ctx.createLegacyUnpinnedFieldAssignment(blockedItem, fieldUserId);
+    ctx.createEditorialAssignment(blockedItem, editorialUserId, "submitted");
+    assert.throws(
+      () => resolveReviewIngestSourceContext({ repo: ctx.repo, contentItemId: blockedItem.id }),
+      /pinned accepted field assignment is required before admin review/
+    );
   } finally {
     ctx.cleanup();
   }
