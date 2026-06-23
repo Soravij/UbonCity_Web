@@ -6344,6 +6344,8 @@ function normalizeStateValue(value, stateGroup) {
     const assignment = normalizeAssignmentRow(row);
     if (!assignment) return null;
     const state = String(assignment.state || "").trim().toLowerCase();
+    const assignmentKind = String(assignment.assignment_kind || "").trim().toLowerCase() || "field";
+    const requiresHandoffBinding = assignmentKind === "field";
     if (!(state === "accepted" || state === "closed")) {
       return {
         ...assignment,
@@ -6359,24 +6361,31 @@ function normalizeStateValue(value, stateGroup) {
         accepted_binding_status: "legacy_unpinned",
       };
     }
-    if (!hasAcceptedAt || !handoffSnapshotId || !submissionId) {
+    if (!hasAcceptedAt || !submissionId || (requiresHandoffBinding && !handoffSnapshotId)) {
       return {
         ...assignment,
         accepted_binding_status: "invalid_binding",
       };
     }
-    const handoffSnapshot = normalizeAssignmentHandoffRow(assignmentHandoffByIdStmt.get(handoffSnapshotId));
     const submission = normalizeAssignmentSubmissionRow(getAssignmentSubmissionByIdStmt.get(submissionId));
+    const validSubmission = submission
+      && Number(submission.assignment_id || 0) === Number(assignment.id || 0)
+      && Number(submission.content_item_id || 0) === Number(assignment.content_item_id || 0);
+    if (!requiresHandoffBinding) {
+      return {
+        ...assignment,
+        accepted_binding_status: validSubmission ? "pinned" : "invalid_binding",
+      };
+    }
+    const handoffSnapshot = normalizeAssignmentHandoffRow(assignmentHandoffByIdStmt.get(handoffSnapshotId));
     const validHandoff = handoffSnapshot
       && Number(handoffSnapshot.assignment_id || 0) === Number(assignment.id || 0)
       && Number(handoffSnapshot.content_item_id || 0) === Number(assignment.content_item_id || 0);
-    const validSubmission = submission
-      && Number(submission.assignment_id || 0) === Number(assignment.id || 0)
-      && Number(submission.content_item_id || 0) === Number(assignment.content_item_id || 0)
+    const validFieldSubmission = validSubmission
       && Number(submission.source_handoff_snapshot_id || 0) === handoffSnapshotId;
     return {
       ...assignment,
-      accepted_binding_status: validHandoff && validSubmission ? "pinned" : "invalid_binding",
+      accepted_binding_status: validHandoff && validFieldSubmission ? "pinned" : "invalid_binding",
     };
   }
 

@@ -3614,6 +3614,66 @@ test("editorial assignment submissions remain valid without a handoff snapshot b
   }
 });
 
+test("editorial accepted binding stays pinned from accepted through close and becomes invalid when the accepted submission is corrupted", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Editorial Accepted Binding");
+    const assignee = ctx.createUser("editorial-accepted-binding");
+    const editorialAssignment = ctx.repo.createAssignment(
+      {
+        content_item_id: item.id,
+        assignee_user_id: assignee.id,
+        assignment_kind: "editorial",
+        brief_json: { brief_summary: "Editorial brief" },
+        requirements_json: { priority: "normal" },
+      },
+      assignee.id,
+      {
+        actor_email: "tester@local",
+        actor_role: "admin",
+        reason_code: "assignment_created_sync_manual",
+      }
+    );
+    const assignmentId = Number(editorialAssignment.id || 0) || 0;
+
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      contributor_note: "editorial submit",
+    });
+    assert.equal(submission.source_handoff_snapshot_id, null);
+
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", {
+      actor_role: "user",
+      reason_code: "submission_created",
+    });
+    const accepted = ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    });
+    assert.equal(accepted.accepted_binding_status, "pinned");
+    assert.equal(accepted.accepted_submission_id, submission.id);
+    assert.equal(accepted.accepted_handoff_snapshot_id, null);
+
+    const closed = ctx.repo.updateAssignmentState(assignmentId, "closed", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_closed",
+    });
+    assert.equal(closed.accepted_binding_status, "pinned");
+    assert.equal(closed.accepted_submission_id, submission.id);
+    assert.equal(closed.accepted_handoff_snapshot_id, null);
+
+    ctx.db.prepare("DELETE FROM content_assignment_submissions WHERE id=?").run(submission.id);
+    const corrupted = ctx.repo.getAssignmentById(assignmentId);
+    assert.equal(corrupted.accepted_binding_status, "invalid_binding");
+    assert.equal(corrupted.accepted_submission_id, submission.id);
+    assert.equal(corrupted.accepted_handoff_snapshot_id, null);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("assignment binding status distinguishes pinned legacy and invalid pointer states", () => {
   const ctx = createTestContext();
   try {
