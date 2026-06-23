@@ -1329,7 +1329,7 @@ function isRequestedCheckAnswerComplete(row = {}, schema = null) {
     return Boolean(unitValue && schema.unit_options.includes(unitValue));
   }
   if (answerType === "note_only") {
-    return true;
+    return false;
   }
   return true;
 }
@@ -1369,16 +1369,26 @@ function parseStrictFiniteNumericInput(rawValue) {
 }
 
 function validateRequestedCheckReturnsForFinalSubmission(requestedCheckReturns = {}, schemaMap = null, fieldName = "field_return_payload_json.requested_check_returns") {
-  void requestedCheckReturns;
-  void schemaMap;
-  void fieldName;
+  if (!(schemaMap instanceof Map) || schemaMap.size < 1) return;
+  const normalized = requestedCheckReturns && typeof requestedCheckReturns === "object" && !Array.isArray(requestedCheckReturns)
+    ? requestedCheckReturns
+    : {};
+  const missingKeys = [];
+  for (const normalizedKey of schemaMap.keys()) {
+    if (!Object.prototype.hasOwnProperty.call(normalized, normalizedKey)) {
+      missingKeys.push(normalizedKey);
+    }
+  }
+  if (missingKeys.length) {
+    throw new Error(`missing requested return keys: ${missingKeys.join(", ")}`);
+  }
 }
 
 function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName, options = {}) {
   const schema = options?.schema && typeof options.schema === "object" ? options.schema : null;
   const checked = options?.checked === true;
   if (rawValue == null) {
-    return answerType === "multi_select" ? [] : null;
+    return null;
   }
   if (answerType === "url") {
     return typeof rawValue === "string" ? String(rawValue).trim() || null : normalizeJsonSafeValue(rawValue);
@@ -1391,7 +1401,7 @@ function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName, opt
   }
   if (answerType === "multi_select") {
     if (!Array.isArray(rawValue)) return normalizeJsonSafeValue(rawValue);
-    return rawValue.map((value) => String(value == null ? "" : value).trim());
+    return normalizeStringListInput(rawValue);
   }
   if (answerType === "boolean" || answerType === "boolean_with_conditions") {
     return typeof rawValue === "boolean" ? rawValue : normalizeJsonSafeValue(rawValue);
@@ -6678,16 +6688,17 @@ function normalizeStateValue(value, stateGroup) {
     if (submissionState === "submitted" && currentAssignmentState === "revision_requested") {
       throw new Error("use resubmitted when assignment is revision_requested");
     }
-    const latestHandoff = getLatestAssignmentHandoffByAssignment(assignmentId);
-    if (!latestHandoff) throw new Error("assignment handoff snapshot not found");
-    if (Number(latestHandoff.assignment_id || 0) !== assignmentId) {
+    const sourceHandoffSnapshotId = Number(payload.source_handoff_snapshot_id || 0) || 0;
+    if (!sourceHandoffSnapshotId) throw new Error("source_handoff_snapshot_id is required");
+    const sourceHandoffSnapshot = normalizeAssignmentHandoffRow(assignmentHandoffByIdStmt.get(sourceHandoffSnapshotId));
+    if (!sourceHandoffSnapshot) throw new Error("assignment handoff snapshot not found");
+    if (Number(sourceHandoffSnapshot.assignment_id || 0) !== assignmentId) {
       throw new Error("handoff snapshot belongs to another assignment");
     }
-    if (Number(latestHandoff.content_item_id || 0) !== Number(assignment.content_item_id || 0)) {
+    if (Number(sourceHandoffSnapshot.content_item_id || 0) !== Number(assignment.content_item_id || 0)) {
       throw new Error("handoff snapshot belongs to another content item");
     }
-    const sourceHandoffSnapshotId = Number(latestHandoff.id || 0) || null;
-    const requestedCheckSchemaMap = buildRequestedCheckSchemaMapFromHandoffPackage(latestHandoff?.handoff_package_json || null);
+    const requestedCheckSchemaMap = buildRequestedCheckSchemaMapFromHandoffPackage(sourceHandoffSnapshot?.handoff_package_json || null);
     const articlePayload = payload.article_payload_json == null ? null : parseJsonInputStrict(payload.article_payload_json, "article_payload_json", "object");
     const mediaPayload = payload.media_payload_json == null ? null : parseJsonInputStrict(payload.media_payload_json, "media_payload_json", "object");
     const incomingFieldReturnPayload = payload.field_return_payload_json == null

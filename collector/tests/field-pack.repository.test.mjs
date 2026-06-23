@@ -423,6 +423,10 @@ function captureAssignmentAtomicState(ctx, assignmentId) {
   };
 }
 
+function currentHandoffSnapshotId(ctx, assignmentId) {
+  return Number(ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId)?.id || 0) || 0;
+}
+
 function assertAssignmentAtomicStateEqual(actual, expected) {
   assert.deepEqual(actual, expected);
 }
@@ -2370,6 +2374,7 @@ test("resubmitted assignment creates a new immutable submission row and preserve
     const assignmentId = Number(assignmentResult.assignment.id || 0);
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       article_payload_json: { summary: "first submission" },
@@ -2409,6 +2414,7 @@ test("resubmitted assignment creates a new immutable submission row and preserve
 
     const resubmitted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       article_payload_json: { summary: "revised submission" },
@@ -2457,6 +2463,7 @@ test("resubmitted assignment creates a new row and merges incoming media payload
     const assignmentId = Number(assignmentResult.assignment.id || 0);
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       media_payload_json: {
@@ -2486,6 +2493,7 @@ test("resubmitted assignment creates a new row and merges incoming media payload
 
     const resubmitted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       media_payload_json: {
@@ -2545,6 +2553,7 @@ test("assignment submission round-trips normalized field return payload and igno
 
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -2625,6 +2634,7 @@ test("resubmitted assignment creates a new row and retains prior complete field 
     const assignmentId = Number(assignmentResult.assignment.id || 0);
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -2659,6 +2669,7 @@ test("resubmitted assignment creates a new row and retains prior complete field 
 
     const resubmitted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       article_payload_json: { summary: "revised without replacing field return" },
@@ -2671,8 +2682,9 @@ test("resubmitted assignment creates a new row and retains prior complete field 
     const originalSubmissionReloaded = ctx.repo.getAssignmentSubmissionById(submission.id);
     assert.equal(originalSubmissionReloaded.article_payload_json?.summary, "first submission");
 
-    const partialResubmitted = ctx.repo.addAssignmentSubmission({
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -2680,15 +2692,13 @@ test("resubmitted assignment creates a new row and retains prior complete field 
           "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
         },
       },
-    });
-    assert.notEqual(partialResubmitted.id, resubmitted.id);
-    assert.deepEqual(Object.keys(partialResubmitted.field_return_payload_json.requested_check_returns), ["cta_contact.phone"]);
+    }), /missing requested return keys/i);
   } finally {
     ctx.cleanup();
   }
 });
 
-test("assignment submission accepts missing requested return entries from the immutable handoff snapshot and defers completeness to acceptance", () => {
+test("assignment submission rejects missing requested return entries from the immutable handoff snapshot", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Requested Return Missing");
@@ -2708,15 +2718,15 @@ test("assignment submission accepts missing requested return entries from the im
       "admin"
     );
 
-    const submission = ctx.repo.addAssignmentSubmission({
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
         requested_check_returns: {},
       },
-    });
-    assert.deepEqual(submission.field_return_payload_json.requested_check_returns, {});
+    }), /missing requested return keys/i);
   } finally {
     ctx.cleanup();
   }
@@ -2744,12 +2754,13 @@ test("assignment submission accepts unchecked requested return rows and preserve
 
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
-        requested_check_returns: {
+        requested_check_returns: buildValidAttractionRequestedCheckReturns({
           "cta_contact.phone": { checked: false, value: "0812345678", evidence: "signboard" },
-        },
+        }),
       },
     });
     assert.equal(submission.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, false);
@@ -2780,6 +2791,7 @@ test("assignment submission accepts requested boolean false and requested phone 
 
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -2860,6 +2872,7 @@ test("assignment acceptance preserves raw malformed canonical number_with_unit v
 
     const buildPayload = (value) => ({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -2895,6 +2908,7 @@ test("assignment acceptance preserves raw malformed canonical number_with_unit v
 
     const acceptedString = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -2907,6 +2921,7 @@ test("assignment acceptance preserves raw malformed canonical number_with_unit v
     assert.deepEqual(acceptedString.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value, { number: 120, unit: "minutes" });
     const acceptedZeroString = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -2920,6 +2935,7 @@ test("assignment acceptance preserves raw malformed canonical number_with_unit v
 
     const zeroAccepted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -2933,6 +2949,7 @@ test("assignment acceptance preserves raw malformed canonical number_with_unit v
 
     const malformedAccepted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -2952,6 +2969,7 @@ test("assignment acceptance preserves raw malformed canonical number_with_unit v
 
     const invalidUnitAccepted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -3014,6 +3032,7 @@ test("assignment acceptance preserves raw malformed canonical number_with_unit v
 
     const legacySubmission = ctx.repo.addAssignmentSubmission({
       assignment_id: legacyAssignment.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, legacyAssignment.assignment.id),
       submitted_by_user_id: legacyAssignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -3074,6 +3093,7 @@ test("assignment acceptance preserves invalid object phone text hours and url va
 
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -3121,6 +3141,7 @@ test("assignment submission preserves invalid select values and defers malformed
 
     const invalidSelectSubmission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -3149,6 +3170,7 @@ test("assignment submission preserves invalid select values and defers malformed
 
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -3227,6 +3249,7 @@ test("assignment submission accepts valid select values with required evidence a
 
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -3271,6 +3294,7 @@ test("assignment acceptance pins exact handoff snapshot and submission ids acros
     const issuedHandoff = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
     const firstSubmission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -3324,6 +3348,7 @@ test("assignment acceptance pins exact handoff snapshot and submission ids acros
     const secondHandoffId = Number(secondHandoffInsert.lastInsertRowid || 0) || 0;
     const secondSubmission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: secondHandoffId,
       submitted_by_user_id: assignee.id,
       submission_state: "resubmitted",
       field_return_payload_json: {
@@ -3396,7 +3421,7 @@ test("assignment acceptance pins exact handoff snapshot and submission ids acros
   }
 });
 
-test("acceptance binds the accepted handoff to the submission source snapshot instead of a later latest handoff", () => {
+test("submission and acceptance stay bound to the worker-loaded handoff snapshot even when a newer handoff appears before submit", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Accepted Binding Uses Submission Source");
@@ -3418,17 +3443,6 @@ test("acceptance binds the accepted handoff to the submission source snapshot in
     ).assignment;
     const assignmentId = Number(assignment.id || 0) || 0;
     const handoffA = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
-    const submission = ctx.repo.addAssignmentSubmission({
-      assignment_id: assignmentId,
-      submitted_by_user_id: assignee.id,
-      submission_state: "submitted",
-      field_return_payload_json: {
-        requested_check_returns: buildRequestedReturnsFromHandoff(handoffA.handoff_package_json),
-      },
-    });
-    assert.equal(submission.source_handoff_snapshot_id, handoffA.id);
-    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", { actor_role: "user", reason_code: "submission_created" });
-
     const handoffBInsert = ctx.db.prepare(`
       INSERT INTO content_assignment_handoff_snapshots (
         assignment_id, content_item_id, readiness_brief_id, handoff_package_json, guard_status, created_by
@@ -3448,6 +3462,19 @@ test("acceptance binds the accepted handoff to the submission source snapshot in
     const handoffBId = Number(handoffBInsert.lastInsertRowid || 0) || 0;
     assert.notEqual(handoffBId, handoffA.id);
 
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: handoffA.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: buildRequestedReturnsFromHandoff(handoffA.handoff_package_json),
+      },
+    });
+    assert.equal(submission.source_handoff_snapshot_id, handoffA.id);
+    assert.notEqual(submission.source_handoff_snapshot_id, handoffBId);
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", { actor_role: "user", reason_code: "submission_created" });
+
     const accepted = ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
       actor_role: "admin",
       reason_code: "assignment_submission_accepted",
@@ -3455,6 +3482,79 @@ test("acceptance binds the accepted handoff to the submission source snapshot in
     assert.equal(accepted.accepted_submission_id, submission.id);
     assert.equal(accepted.accepted_handoff_snapshot_id, handoffA.id);
     assert.notEqual(accepted.accepted_handoff_snapshot_id, handoffBId);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission rejects missing dangling and cross-owned source handoff snapshot ids", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Source Handoff Validation");
+    const assignee = ctx.createUser("source-handoff-validation");
+    ctx.createReadinessBrief(item.id, "source-handoff-validation");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const assignment = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const assignmentId = Number(assignment.id || 0) || 0;
+    const validReturns = buildValidAttractionRequestedCheckReturns();
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: validReturns,
+      },
+    }), /source_handoff_snapshot_id is required/i);
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: 999999,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: validReturns,
+      },
+    }), /handoff snapshot not found/i);
+
+    const otherItem = ctx.createItem("Source Handoff Validation Other");
+    const otherAssignee = ctx.createUser("source-handoff-validation-other");
+    ctx.createReadinessBrief(otherItem.id, "source-handoff-validation-other");
+    ctx.repo.createFieldPack({
+      content_item_id: otherItem.id,
+      status: "ready_for_field",
+      editor_summary: "ready",
+      requested_checks_json: { version: 1, groups: [] },
+    });
+    const otherAssignment = ctx.repo.createAssignmentFromReadiness(
+      otherItem.id,
+      { assignee_user_id: otherAssignee.id, force_override: true, force_reason: "test" },
+      otherAssignee.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+    const otherHandoff = ctx.repo.getLatestAssignmentHandoffByAssignment(otherAssignment.id);
+
+    assert.throws(() => ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: otherHandoff.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: validReturns,
+      },
+    }), /belongs to another assignment|another content item/i);
   } finally {
     ctx.cleanup();
   }
@@ -3483,6 +3583,7 @@ test("assignment binding status distinguishes pinned legacy and invalid pointer 
     const handoff = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -3586,6 +3687,7 @@ test("assignment acceptance failures roll back assignment and workflow state", (
     const handoffA = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentAId);
     const submissionA = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentAId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentAId),
       submitted_by_user_id: userA.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -3643,6 +3745,7 @@ test("assignment acceptance failures roll back assignment and workflow state", (
     const assignmentBId = Number(assignmentB.id || 0);
     const submissionB = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentBId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentBId),
       submitted_by_user_id: userB.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -3750,6 +3853,7 @@ test("assignment acceptance enforces required completeness, allows optional unan
 
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
       field_return_payload_json: {
@@ -3825,6 +3929,7 @@ test("text-like deliverables update the latest submission row instead of creatin
     const assignmentId = Number(assignmentResult.assignment.id || 0);
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
+      source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
       submission_state: "submitted",
     });
