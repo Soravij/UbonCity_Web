@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS review_contents (
   public_entity_id BIGINT NULL,
   current_batch_uid CHAR(36) NOT NULL,
   review_payload_json LONGTEXT NULL,
+  handoff_snapshot_json LONGTEXT NULL,
   published_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

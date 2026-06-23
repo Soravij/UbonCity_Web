@@ -32,6 +32,7 @@ export async function ensureReviewInfrastructure() {
       public_entity_id BIGINT NULL,
       current_batch_uid CHAR(36) NOT NULL,
       review_payload_json LONGTEXT NULL,
+      handoff_snapshot_json LONGTEXT NULL,
       published_at DATETIME NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -137,6 +138,10 @@ export async function ensureReviewInfrastructure() {
     {
       name: "tracking_entity_id",
       alterSql: "ALTER TABLE review_contents ADD COLUMN tracking_entity_id BIGINT NULL AFTER tracking_entity_type",
+    },
+    {
+      name: "handoff_snapshot_json",
+      alterSql: "ALTER TABLE review_contents ADD COLUMN handoff_snapshot_json LONGTEXT NULL AFTER review_payload_json",
     },
   ];
 
@@ -295,6 +300,7 @@ export async function getReviewContentById(id) {
     public_entity_id: row.public_entity_id == null ? null : Number(row.public_entity_id || 0) || null,
     current_batch_uid: String(row.current_batch_uid || "").trim(),
     review_payload: parseJsonText(row.review_payload_json, {}),
+    handoff_snapshot_json: parseJsonText(row.handoff_snapshot_json, null),
     published_at: row.published_at || null,
     assets,
     description: row.body || "",

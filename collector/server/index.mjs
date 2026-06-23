@@ -4969,6 +4969,12 @@ function buildReviewIngestPayload(options = {}) {
     .filter((t) => isTranslationRecheckPassed(t, currentSourceFingerprint))
     .map((t) => String(t.lang || "").trim().toLowerCase())
     .filter(Boolean);
+  const handoffSnapshotJson = contentType === "place"
+    ? repo.buildAcceptedFieldReviewSnapshotByItem(contentItemId)
+    : null;
+  if (contentType === "place" && !handoffSnapshotJson) {
+    throw new Error("pinned accepted field assignment is required before admin review");
+  }
 
   if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
     if (unresolvedCollectorUploadUrls.length > 0) {
@@ -4995,6 +5001,7 @@ function buildReviewIngestPayload(options = {}) {
     source_system: "collector-app",
     source_content_item_id: contentItemId,
     source_base_url: sourceBaseUrl,
+    handoff_snapshot_json: handoffSnapshotJson,
     content: {
       ...buildReviewIngestContentPayload({
         contentType,

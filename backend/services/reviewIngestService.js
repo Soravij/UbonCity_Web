@@ -64,6 +64,15 @@ function buildClientError(message, diagnostics = null) {
   return error;
 }
 
+function normalizePersistedJsonObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
 function sanitizeFileNameSegment(value, fallback = "media") {
   const normalized = String(value || "").trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-");
   return normalized.replace(/^-+|-+$/g, "") || fallback;
@@ -317,6 +326,7 @@ export function buildReviewContentInsertParams({
   sourceContentItemId,
   content,
   currentBatchUid,
+  handoffSnapshotJson = null,
 } = {}) {
   return [
     sourceSystem, sourceContentItemId, content.content_type, "pending_review", content.lang, content.category,
@@ -327,6 +337,7 @@ export function buildReviewContentInsertParams({
     content.transport_contact_details, content.transport_link_url, content.slug, content.slug ? 1 : 0,
     content.public_entity_type, content.public_entity_id, currentBatchUid,
     JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
+    handoffSnapshotJson == null ? null : JSON.stringify(handoffSnapshotJson),
   ];
 }
 
@@ -336,6 +347,7 @@ export function buildReviewContentUpdateParams({
   rawContentPayload,
   currentBatchUid,
   reviewContentId,
+  handoffSnapshotJson = null,
 } = {}) {
   const preservedCtaFields = mergeExistingReviewContentCtaFields(existing, content, rawContentPayload);
   return [
@@ -345,6 +357,7 @@ export function buildReviewContentUpdateParams({
     preservedCtaFields.primary_cta, content.tracking_entity_type, content.tracking_entity_id, content.transport_contact_details,
     content.transport_link_url, content.slug, content.slug ? 1 : 0, content.public_entity_type, content.public_entity_id,
     currentBatchUid, JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
+    handoffSnapshotJson == null ? null : JSON.stringify(handoffSnapshotJson),
     reviewContentId,
   ];
 }
@@ -485,7 +498,12 @@ export async function ingestReviewContent(payload, options = {}) {
   const uploadedFiles = Array.isArray(options?.uploadedFiles) ? options.uploadedFiles : [];
   const uploadedFileMap = buildUploadedFileMap(uploadedFiles, options?.mediaIndex || null);
   const multipartMode = Boolean(options?.multipart);
+  const trustedSnapshotSource = Boolean(options?.trustedSnapshotSource);
   const currentBatchUid = crypto.randomUUID();
+  const handoffSnapshotJson = trustedSnapshotSource ? normalizePersistedJsonObject(payload?.handoff_snapshot_json) : null;
+  if (trustedSnapshotSource && content.content_type === "place" && !handoffSnapshotJson) {
+    throw new Error("handoff_snapshot_json is required for field review ingest");
+  }
 
   const [existingRows] = await pool.query(
     `SELECT id, status, current_batch_uid
@@ -511,13 +529,14 @@ export async function ingestReviewContent(payload, options = {}) {
           google_place_id, transport_subtype, transport_contact_name, transport_contact_phone, phone, line_url, facebook_url, website_url, primary_cta,
           tracking_entity_type, tracking_entity_id,
           transport_contact_details, transport_link_url, slug, slug_locked, public_entity_type, public_entity_id,
-          current_batch_uid, review_payload_json
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          current_batch_uid, review_payload_json, handoff_snapshot_json
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         buildReviewContentInsertParams({
           sourceSystem,
           sourceContentItemId,
           content,
           currentBatchUid,
+          handoffSnapshotJson,
         })
       );
       reviewContentId = Number(insertResult.insertId || 0) || 0;
@@ -531,7 +550,7 @@ export async function ingestReviewContent(payload, options = {}) {
              transport_subtype=?, transport_contact_name=?, transport_contact_phone=?, phone=?, line_url=?, facebook_url=?, website_url=?, primary_cta=?,
              tracking_entity_type=?, tracking_entity_id=?, transport_contact_details=?,
              transport_link_url=?, slug=?, slug_locked=?, public_entity_type=?, public_entity_id=?,
-             current_batch_uid=?, review_payload_json=?, updated_at=CURRENT_TIMESTAMP
+             current_batch_uid=?, review_payload_json=?, handoff_snapshot_json=?, updated_at=CURRENT_TIMESTAMP
          WHERE id=?`,
         buildReviewContentUpdateParams({
           existing,
@@ -539,6 +558,7 @@ export async function ingestReviewContent(payload, options = {}) {
           rawContentPayload,
           currentBatchUid,
           reviewContentId,
+          handoffSnapshotJson,
         })
       );
     }

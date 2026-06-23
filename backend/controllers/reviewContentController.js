@@ -39,6 +39,7 @@ export async function ingestReviewContentAction(req, res) {
       uploadedFiles: Array.isArray(req.files) ? req.files : [],
       mediaIndex,
       multipart: isMultipart,
+      trustedSnapshotSource: Boolean(String(req.headers["x-review-sync-token"] || "").trim()),
     });
     return res.json({ item });
   } catch (err) {

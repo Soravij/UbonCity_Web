@@ -45,6 +45,25 @@ test("review ingest insert params persist CTA/contact into review_contents paylo
   assert.equal(params[24], "line");
 });
 
+test("review ingest insert params append frozen handoff snapshot payload", () => {
+  const content = createSanitizedContent();
+  const handoffSnapshotJson = {
+    version: 1,
+    assignment_id: 77,
+    accepted_handoff_snapshot_id: 88,
+  };
+
+  const params = buildReviewContentInsertParams({
+    sourceSystem: "collector-app",
+    sourceContentItemId: 42,
+    content,
+    currentBatchUid: "batch-1",
+    handoffSnapshotJson,
+  });
+
+  assert.deepEqual(JSON.parse(params.at(-1)), handoffSnapshotJson);
+});
+
 test("review ingest update params preserve existing CTA/contact when payload omits them", () => {
   const existing = {
     phone: "0812345678",
@@ -113,6 +132,27 @@ test("review ingest update params apply explicit CTA/contact replacements", () =
   assert.equal(params[18], "https://facebook.com/updated");
   assert.equal(params[19], "https://example.com/updated");
   assert.equal(params[20], "line");
+});
+
+test("review ingest update params append frozen handoff snapshot payload before row id", () => {
+  const content = createSanitizedContent();
+  const handoffSnapshotJson = {
+    version: 1,
+    assignment_id: 77,
+    accepted_handoff_snapshot_id: 88,
+  };
+
+  const params = buildReviewContentUpdateParams({
+    existing: null,
+    content,
+    rawContentPayload: {},
+    currentBatchUid: "batch-3",
+    reviewContentId: 100,
+    handoffSnapshotJson,
+  });
+
+  assert.deepEqual(JSON.parse(params.at(-2)), handoffSnapshotJson);
+  assert.equal(params.at(-1), 100);
 });
 
 test("approve mapping passes CTA/contact from review content to place fields", () => {
