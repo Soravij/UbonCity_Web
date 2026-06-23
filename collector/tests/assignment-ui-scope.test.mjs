@@ -1572,6 +1572,11 @@ test("assignment routes use management-line scope helpers instead of global admi
     "article-process submit-review must guard subtree mutation before submit logic"
   );
   assert.equal(
+    indexServer.includes('error: "latest assignment handoff snapshot is required before submit-review"'),
+    false,
+    "article-process submit-review must not require a handoff snapshot for editorial submissions"
+  );
+  assert.equal(
     routeGuardBefore(
       'app.put("/api/items/:id/workflow-model", requireRole("owner", "admin", "user"), (req, res) => {',
       'if (!ensureItemMutationAccess(req, res, item)) {',

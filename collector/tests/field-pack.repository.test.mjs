@@ -2682,7 +2682,7 @@ test("resubmitted assignment creates a new row and retains prior complete field 
     const originalSubmissionReloaded = ctx.repo.getAssignmentSubmissionById(submission.id);
     assert.equal(originalSubmissionReloaded.article_payload_json?.summary, "first submission");
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const partialResubmitted = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
       source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
@@ -2692,13 +2692,15 @@ test("resubmitted assignment creates a new row and retains prior complete field 
           "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
         },
       },
-    }), /missing requested return keys/i);
+    });
+    assert.notEqual(partialResubmitted.id, resubmitted.id);
+    assert.deepEqual(Object.keys(partialResubmitted.field_return_payload_json.requested_check_returns), ["cta_contact.phone"]);
   } finally {
     ctx.cleanup();
   }
 });
 
-test("assignment submission rejects missing requested return entries from the immutable handoff snapshot", () => {
+test("assignment submission accepts missing requested return entries from the immutable handoff snapshot and defers completeness to acceptance", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Requested Return Missing");
@@ -2718,7 +2720,7 @@ test("assignment submission rejects missing requested return entries from the im
       "admin"
     );
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
       source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
@@ -2726,7 +2728,8 @@ test("assignment submission rejects missing requested return entries from the im
       field_return_payload_json: {
         requested_check_returns: {},
       },
-    }), /missing requested return keys/i);
+    });
+    assert.deepEqual(submission.field_return_payload_json.requested_check_returns, {});
   } finally {
     ctx.cleanup();
   }
@@ -3555,6 +3558,57 @@ test("assignment submission rejects missing dangling and cross-owned source hand
         requested_check_returns: validReturns,
       },
     }), /belongs to another assignment|another content item/i);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("editorial assignment submissions remain valid without a handoff snapshot binding", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Editorial Submission Without Handoff");
+    const assignee = ctx.createUser("editorial-submission-without-handoff");
+    const editorialAssignment = ctx.repo.createAssignment(
+      {
+        content_item_id: item.id,
+        assignee_user_id: assignee.id,
+        assignment_kind: "editorial",
+        brief_json: { brief_summary: "Editorial brief" },
+        requirements_json: { priority: "normal" },
+      },
+      assignee.id,
+      {
+        actor_email: "tester@local",
+        actor_role: "admin",
+        reason_code: "assignment_created_sync_manual",
+      }
+    );
+
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: editorialAssignment.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      contributor_note: "editorial submit",
+    });
+    assert.equal(submission.source_handoff_snapshot_id, null);
+
+    ctx.repo.updateAssignmentState(editorialAssignment.id, "submitted", "submitter@local", {
+      actor_role: "user",
+      reason_code: "submission_created",
+    });
+    ctx.repo.updateAssignmentState(editorialAssignment.id, "revision_requested", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "needs_revision",
+    });
+
+    const resubmission = ctx.repo.addAssignmentSubmission({
+      assignment_id: editorialAssignment.id,
+      submitted_by_user_id: assignee.id,
+      submission_state: "resubmitted",
+      contributor_note: "editorial resubmit",
+    });
+    assert.equal(resubmission.source_handoff_snapshot_id, null);
+    assert.notEqual(resubmission.id, submission.id);
   } finally {
     ctx.cleanup();
   }

@@ -1369,19 +1369,9 @@ function parseStrictFiniteNumericInput(rawValue) {
 }
 
 function validateRequestedCheckReturnsForFinalSubmission(requestedCheckReturns = {}, schemaMap = null, fieldName = "field_return_payload_json.requested_check_returns") {
-  if (!(schemaMap instanceof Map) || schemaMap.size < 1) return;
-  const normalized = requestedCheckReturns && typeof requestedCheckReturns === "object" && !Array.isArray(requestedCheckReturns)
-    ? requestedCheckReturns
-    : {};
-  const missingKeys = [];
-  for (const normalizedKey of schemaMap.keys()) {
-    if (!Object.prototype.hasOwnProperty.call(normalized, normalizedKey)) {
-      missingKeys.push(normalizedKey);
-    }
-  }
-  if (missingKeys.length) {
-    throw new Error(`missing requested return keys: ${missingKeys.join(", ")}`);
-  }
+  void requestedCheckReturns;
+  void schemaMap;
+  void fieldName;
 }
 
 function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName, options = {}) {
@@ -1518,6 +1508,8 @@ function buildAcceptedAssignmentValidationSummary({
   const statuses = [];
   const assignmentId = Number(assignment?.id || 0) || 0;
   const contentItemId = Number(assignment?.content_item_id || 0) || 0;
+  const assignmentKind = String(assignment?.assignment_kind || "").trim().toLowerCase() || "field";
+  const requiresHandoffBinding = assignmentKind === "field";
   const normalizedItem = item && typeof item === "object"
     ? {
       ...item,
@@ -1526,10 +1518,10 @@ function buildAcceptedAssignmentValidationSummary({
     }
     : null;
 
-  if (!handoffSnapshot?.id) blockers.push({ code: "handoff_snapshot_missing", message: "Missing handoff snapshot" });
+  if (requiresHandoffBinding && !handoffSnapshot?.id) blockers.push({ code: "handoff_snapshot_missing", message: "Missing handoff snapshot" });
   if (!submission?.id) blockers.push({ code: "latest_submission_missing", message: "Missing latest submission" });
   if (!assignmentId || !contentItemId) blockers.push({ code: "assignment_missing", message: "Assignment is incomplete" });
-  if (handoffSnapshot?.id) {
+  if (requiresHandoffBinding && handoffSnapshot?.id) {
     if (Number(handoffSnapshot.assignment_id || 0) !== assignmentId) {
       blockers.push({ code: "handoff_snapshot_assignment_mismatch", message: "Handoff snapshot belongs to another assignment" });
     }
@@ -1545,9 +1537,9 @@ function buildAcceptedAssignmentValidationSummary({
       blockers.push({ code: "submission_item_mismatch", message: "Submission belongs to another content item" });
     }
     const sourceHandoffSnapshotId = Number(submission.source_handoff_snapshot_id || 0) || 0;
-    if (!sourceHandoffSnapshotId) {
+    if (requiresHandoffBinding && !sourceHandoffSnapshotId) {
       blockers.push({ code: "submission_source_handoff_missing", message: "Submission is missing source handoff snapshot binding" });
-    } else if (Number(handoffSnapshot?.id || 0) !== sourceHandoffSnapshotId) {
+    } else if (requiresHandoffBinding && Number(handoffSnapshot?.id || 0) !== sourceHandoffSnapshotId) {
       blockers.push({ code: "submission_source_handoff_mismatch", message: "Submission source handoff snapshot does not match acceptance handoff snapshot" });
     }
   }
@@ -6688,15 +6680,20 @@ function normalizeStateValue(value, stateGroup) {
     if (submissionState === "submitted" && currentAssignmentState === "revision_requested") {
       throw new Error("use resubmitted when assignment is revision_requested");
     }
+    const assignmentKind = String(assignment.assignment_kind || "").trim().toLowerCase() || "field";
+    const requiresHandoffBinding = assignmentKind === "field";
     const sourceHandoffSnapshotId = Number(payload.source_handoff_snapshot_id || 0) || 0;
-    if (!sourceHandoffSnapshotId) throw new Error("source_handoff_snapshot_id is required");
-    const sourceHandoffSnapshot = normalizeAssignmentHandoffRow(assignmentHandoffByIdStmt.get(sourceHandoffSnapshotId));
-    if (!sourceHandoffSnapshot) throw new Error("assignment handoff snapshot not found");
-    if (Number(sourceHandoffSnapshot.assignment_id || 0) !== assignmentId) {
-      throw new Error("handoff snapshot belongs to another assignment");
-    }
-    if (Number(sourceHandoffSnapshot.content_item_id || 0) !== Number(assignment.content_item_id || 0)) {
-      throw new Error("handoff snapshot belongs to another content item");
+    let sourceHandoffSnapshot = null;
+    if (requiresHandoffBinding) {
+      if (!sourceHandoffSnapshotId) throw new Error("source_handoff_snapshot_id is required");
+      sourceHandoffSnapshot = normalizeAssignmentHandoffRow(assignmentHandoffByIdStmt.get(sourceHandoffSnapshotId));
+      if (!sourceHandoffSnapshot) throw new Error("assignment handoff snapshot not found");
+      if (Number(sourceHandoffSnapshot.assignment_id || 0) !== assignmentId) {
+        throw new Error("handoff snapshot belongs to another assignment");
+      }
+      if (Number(sourceHandoffSnapshot.content_item_id || 0) !== Number(assignment.content_item_id || 0)) {
+        throw new Error("handoff snapshot belongs to another content item");
+      }
     }
     const requestedCheckSchemaMap = buildRequestedCheckSchemaMapFromHandoffPackage(sourceHandoffSnapshot?.handoff_package_json || null);
     const articlePayload = payload.article_payload_json == null ? null : parseJsonInputStrict(payload.article_payload_json, "article_payload_json", "object");
@@ -6743,7 +6740,7 @@ function normalizeStateValue(value, stateGroup) {
     const res = insertAssignmentSubmissionStmt.run(
       assignmentId,
       Number(assignment.content_item_id),
-      sourceHandoffSnapshotId,
+      requiresHandoffBinding ? sourceHandoffSnapshotId : null,
       submittedByUserId,
       submissionState,
       nextArticlePayload ? JSON.stringify(nextArticlePayload) : null,

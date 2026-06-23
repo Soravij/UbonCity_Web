@@ -183,7 +183,7 @@ test("assignment submission repository path rejects missing requested returns an
       "admin"
     ).assignment;
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+    const first = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId: assignment.id,
       sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
       submittedByUserId: assignee.id,
@@ -191,13 +191,22 @@ test("assignment submission repository path rejects missing requested returns an
       articlePayloadJson: { body: "draft body" },
       mediaPayloadJson: null,
       fieldReturnPayloadJson: null,
-    })), /missing requested return keys: cta_contact\.phone/);
+    }));
+    assert.deepEqual(first.article_payload_json, { body: "draft body" });
+    assert.deepEqual(first.field_return_payload_json?.requested_check_returns || {}, {});
 
-    const first = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+    ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "user", reason_code: "test" });
+    assert.throws(() => ctx.repo.updateAssignmentState(assignment.id, "accepted", "tester@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    }), /required unanswered|unanswered|cta_contact\.phone/i);
+    ctx.repo.updateAssignmentState(assignment.id, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "test" });
+
+    const completed = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId: assignment.id,
       sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
       submittedByUserId: assignee.id,
-      submissionState: "submitted",
+      submissionState: "resubmitted",
       articlePayloadJson: { body: "draft body" },
       mediaPayloadJson: null,
       fieldReturnPayloadJson: {
@@ -216,8 +225,8 @@ test("assignment submission repository path rejects missing requested returns an
         },
       },
     }));
-    assert.equal(first.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, true);
-    assert.deepEqual(first.article_payload_json, { body: "draft body" });
+    assert.equal(completed.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, true);
+    assert.deepEqual(completed.article_payload_json, { body: "draft body" });
 
     ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "user", reason_code: "test" });
     ctx.repo.updateAssignmentState(assignment.id, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "test" });
@@ -261,7 +270,7 @@ test("assignment submission repository path rejects missing requested returns an
     assert.equal(resubmittedWithoutFieldReturn.article_payload_json.body, "draft body revised again");
     assert.deepEqual(resubmittedWithoutFieldReturn.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0811111111");
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+    const partialResubmitted = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId: assignment.id,
       sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
       submittedByUserId: assignee.id,
@@ -273,7 +282,8 @@ test("assignment submission repository path rejects missing requested returns an
           "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
         },
       },
-    })), /missing requested return keys: cta_contact\.line_url/);
+    }));
+    assert.equal(partialResubmitted.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, true);
   } finally {
     ctx.cleanup();
   }

@@ -8887,19 +8887,8 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
       const assignmentState = String(editorialAssignment.state || "").trim().toLowerCase();
       const submissionState = assignmentState === "revision_requested" ? "resubmitted" : "submitted";
       const submissionAction = submissionState === "resubmitted" ? "resubmit" : "submit";
-      const sourceHandoffSnapshotId = Number(repo.getLatestAssignmentHandoffByAssignment(editorialAssignment.id)?.id || 0) || 0;
-      if (!sourceHandoffSnapshotId) {
-        res.status(409).json({
-          ok: false,
-          error: "latest assignment handoff snapshot is required before submit-review",
-          failure_reason: "missing_assignment_handoff_snapshot",
-          assignment_id: editorialAssignment.id,
-        });
-        return;
-      }
       const submission = repo.addAssignmentSubmission({
         assignment_id: editorialAssignment.id,
-        source_handoff_snapshot_id: sourceHandoffSnapshotId,
         submitted_by_user_id: req.authUser?.id,
         submission_state: submissionState,
         contributor_note: note,
