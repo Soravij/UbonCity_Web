@@ -10,6 +10,9 @@ import {
 } from "./collectorImportReviewService.js";
 import { assertBackendIntegrationReadiness } from "./integrationReadinessService.js";
 import { assertNoEmerConflictForPublish } from "./publishGuardService.js";
+import { isKnownTaxonomyCatalogKey } from "../constants/taxonomyCatalog.js";
+
+let ensuredCuratedTaxonomyColumn = false;
 
 function slugify(input) {
   const base = String(input || "")
@@ -76,6 +79,66 @@ function applyPublishedMediaUrlRewrites(input, rewrites = []) {
   return output;
 }
 
+function parseJsonMaybe(value) {
+  if (value == null) return null;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function cloneJsonValue(value) {
+  if (value == null) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function normalizeCuratedTaxonomyKey(key) {
+  return String(key || "").trim().toLowerCase();
+}
+
+function normalizeCuratedTaxonomyObject(taxonomyValue) {
+  const parsed = parseJsonMaybe(taxonomyValue);
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+    return { hasTaxonomySource: false, taxonomy: null };
+  }
+
+  const parsedEntries = Object.entries(parsed);
+  if (parsedEntries.length === 0) {
+    return { hasTaxonomySource: true, taxonomy: {} };
+  }
+
+  const curated = {};
+  for (const [rawKey, rawValue] of parsedEntries) {
+    const key = normalizeCuratedTaxonomyKey(rawKey);
+    if (!key || key.startsWith("custom.")) continue;
+    if (!isKnownTaxonomyCatalogKey(key)) continue;
+    if (rawValue === undefined) continue;
+    curated[key] = cloneJsonValue(rawValue);
+  }
+
+  if (Object.keys(curated).length === 0) {
+    return { hasTaxonomySource: false, taxonomy: null };
+  }
+
+  return { hasTaxonomySource: true, taxonomy: curated };
+}
+
+export function extractCuratedTaxonomyFromReviewSnapshot(snapshotValue) {
+  const snapshot = parseJsonMaybe(snapshotValue);
+  if (!snapshot || Array.isArray(snapshot) || typeof snapshot !== "object") {
+    return { hasTaxonomySource: false, taxonomy: null };
+  }
+  if (!Object.prototype.hasOwnProperty.call(snapshot, "confirmed_taxonomy_json")) {
+    return { hasTaxonomySource: false, taxonomy: null };
+  }
+  return normalizeCuratedTaxonomyObject(snapshot.confirmed_taxonomy_json);
+}
+
 export function mapReviewContentCtaFieldsToPlaceRecord(content = {}) {
   return {
     phone: content.phone ?? null,
@@ -86,6 +149,15 @@ export function mapReviewContentCtaFieldsToPlaceRecord(content = {}) {
     tracking_entity_type: content.tracking_entity_type ?? null,
     tracking_entity_id: content.tracking_entity_id ?? null,
   };
+}
+
+async function ensureCuratedTaxonomyColumn() {
+  if (ensuredCuratedTaxonomyColumn) return;
+  const [columns] = await pool.query("SHOW COLUMNS FROM places LIKE 'curated_taxonomy_json'");
+  if (!columns.length) {
+    await pool.query("ALTER TABLE places ADD COLUMN curated_taxonomy_json LONGTEXT NULL");
+  }
+  ensuredCuratedTaxonomyColumn = true;
 }
 
 async function ensureUniquePlaceSlug(connection, initialSlug, excludePlaceId = null) {
@@ -104,7 +176,7 @@ async function ensureUniquePlaceSlug(connection, initialSlug, excludePlaceId = n
 
 async function upsertPublishedPlace(connection, content, slug) {
   const [existingRows] = await connection.query(
-    "SELECT id, slug FROM places WHERE id=? LIMIT 1",
+    "SELECT id, slug, curated_taxonomy_json FROM places WHERE id=? LIMIT 1",
     [content.public_entity_id || 0]
   );
   const categorySlug = String(content.category || "attractions").trim().toLowerCase() || "attractions";
@@ -115,9 +187,16 @@ async function upsertPublishedPlace(connection, content, slug) {
   let placeId = null;
   let resolvedSlug = null;
   const placeCtaFields = mapReviewContentCtaFieldsToPlaceRecord(content);
+  const curatedTaxonomyResult = extractCuratedTaxonomyFromReviewSnapshot(content.handoff_snapshot_json);
+  const curatedTaxonomyPayload = curatedTaxonomyResult.hasTaxonomySource
+    ? JSON.stringify(curatedTaxonomyResult.taxonomy)
+    : null;
   if (existingRows.length) {
     placeId = Number(existingRows[0].id || 0) || null;
     const existingSlug = String(existingRows[0].slug || "").trim() || null;
+    const existingCuratedTaxonomyPayload = existingRows[0].curated_taxonomy_json == null
+      ? null
+      : existingRows[0].curated_taxonomy_json;
     resolvedSlug = selectPreferredPlaceSlug(content, slug, existingSlug);
     resolvedSlug = await ensureUniquePlaceSlug(connection, resolvedSlug, placeId);
     await connection.query(
@@ -125,7 +204,7 @@ async function upsertPublishedPlace(connection, content, slug) {
        SET category_id=?, slug=?, is_approved=1,
            latitude=?, longitude=?, map_url=?, google_place_id=?, transport_subtype=?,
            transport_contact_name=?, transport_contact_phone=?, phone=?, line_url=?, facebook_url=?, website_url=?, primary_cta=?, tracking_entity_type=?, tracking_entity_id=?,
-           transport_contact_details=?, transport_link_url=?
+           transport_contact_details=?, transport_link_url=?, curated_taxonomy_json=?
        WHERE id=?`,
       [
         categoryId,
@@ -146,6 +225,7 @@ async function upsertPublishedPlace(connection, content, slug) {
         placeCtaFields.tracking_entity_id,
         content.transport_contact_details,
         content.transport_link_url,
+        curatedTaxonomyResult.hasTaxonomySource ? curatedTaxonomyPayload : existingCuratedTaxonomyPayload,
         placeId,
       ]
     );
@@ -156,8 +236,8 @@ async function upsertPublishedPlace(connection, content, slug) {
       `INSERT INTO places (
         category_id, slug, image, is_approved, latitude, longitude, map_url, google_place_id,
         transport_subtype, transport_contact_name, transport_contact_phone, phone, line_url, facebook_url, website_url, primary_cta, tracking_entity_type, tracking_entity_id,
-        transport_contact_details, transport_link_url
-      ) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        transport_contact_details, transport_link_url, curated_taxonomy_json
+      ) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         categoryId,
         resolvedSlug,
@@ -178,6 +258,7 @@ async function upsertPublishedPlace(connection, content, slug) {
         placeCtaFields.tracking_entity_id,
         content.transport_contact_details,
         content.transport_link_url,
+        curatedTaxonomyPayload,
       ]
     );
     placeId = Number(insertResult.insertId || 0) || null;
@@ -282,6 +363,7 @@ async function rewritePublishedEntityContent(connection, content, entityId, medi
 }
 
 export async function approveReviewContent({ reviewContent, actorUserId, reviewNote = null }) {
+  await ensureCuratedTaxonomyColumn();
   const connection = await pool.getConnection();
   let mediaCleanupFilePaths = [];
   let promotedFilePaths = [];

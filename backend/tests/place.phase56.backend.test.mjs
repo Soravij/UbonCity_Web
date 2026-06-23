@@ -757,4 +757,118 @@ test("phase 5-6 backend targeted coverage", async (t) => {
       assert.match(item.description, /https:\/\/api\.test\.local\/uploads\/inline-22\.jpg/);
     });
   });
+
+  await t.test("getPlaceDetail returns curated taxonomy as parsed object", async () => {
+    const req = {
+      ...createBaseReq(),
+      params: { category: "cafes", slug: "detail-taxonomy" },
+      query: { lang: "th" },
+    };
+    const res = createMockRes();
+
+    const detailRows = [
+      {
+        id: 23,
+        category: "cafes",
+        slug: "detail-taxonomy",
+        image: null,
+        is_approved: 1,
+        decision_featured_score: null,
+        decision_scenario_tags: "",
+        decision_trend_flags: "",
+        decision_moment_tags: "",
+        decision_insight_flags: "",
+        decision_cover_image: null,
+        decision_thumbnail_image: null,
+        curated_taxonomy_json: JSON.stringify({
+          parking: false,
+          price_level: "budget",
+          tags: ["coffee", "dessert"],
+        }),
+        lang: "th",
+        title: "Detail Taxonomy",
+        description: "Body",
+        req_description: "Body",
+        th_description: "Body",
+        meta_title: "MT",
+        meta_description: "MD",
+      },
+    ];
+
+    await withMockedPool(async (call) => {
+      const sql = normalizeSql(call.sql);
+      if (sql.startsWith("show columns from places like")) return [[{ Field: "ok" }]];
+      if (sql.includes("from places p") && sql.includes("where c.slug=? and p.slug=?")) return [detailRows];
+      if (sql.includes("from content_image_usages ciu")) return [[]];
+      throw new Error(`Unexpected SQL in curated taxonomy detail test: ${call.sql}`);
+    }, async () => {
+      await getPlaceDetail(req, res);
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(res.body.item.curated_taxonomy_json, {
+        parking: false,
+        price_level: "budget",
+        tags: ["coffee", "dessert"],
+      });
+    });
+  });
+
+  await t.test("getPlaces returns null curated taxonomy for legacy rows", async () => {
+    const req = {
+      ...createBaseReq(),
+      query: { category: "cafes", lang: "th" },
+    };
+    const res = createMockRes();
+
+    const listRows = [
+      {
+        id: 24,
+        category: "cafes",
+        slug: "legacy-taxonomy",
+        title: "Legacy",
+        description: "Body",
+        req_description: "Body",
+        th_description: "Body",
+        meta_title: "MT",
+        meta_description: "MD",
+        image: null,
+        latitude: null,
+        longitude: null,
+        map_url: null,
+        google_place_id: null,
+        transport_subtype: null,
+        transport_contact_name: null,
+        transport_contact_phone: null,
+        phone: null,
+        line_url: null,
+        facebook_url: null,
+        website_url: null,
+        primary_cta: null,
+        tracking_entity_type: null,
+        tracking_entity_id: null,
+        transport_contact_details: null,
+        transport_link_url: null,
+        curated_taxonomy_json: null,
+        is_approved: 1,
+        decision_featured_score: null,
+        decision_scenario_tags: null,
+        decision_trend_flags: null,
+        decision_moment_tags: null,
+        decision_insight_flags: null,
+        decision_cover_image: null,
+        decision_thumbnail_image: null,
+      },
+    ];
+
+    await withMockedPool(async (call) => {
+      const sql = normalizeSql(call.sql);
+      if (sql.startsWith("show columns from places like")) return [[{ Field: "ok" }]];
+      if (sql.includes("from places p join categories c on c.id = p.category_id")) return [listRows];
+      if (sql.includes("from content_image_usages ciu")) return [[]];
+      throw new Error(`Unexpected SQL in curated taxonomy list test: ${call.sql}`);
+    }, async () => {
+      await getPlaces(req, res);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.body.items[0].curated_taxonomy_json, null);
+    });
+  });
 });
