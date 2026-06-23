@@ -17,6 +17,7 @@ const DECISION_COLUMN_DEFINITIONS = [
   "decision_insight_flags VARCHAR(500) NULL",
   "decision_cover_image VARCHAR(1200) NULL",
   "decision_thumbnail_image VARCHAR(1200) NULL",
+  "curated_taxonomy_json LONGTEXT NULL",
   "latitude DECIMAL(10,7) NULL",
   "longitude DECIMAL(10,7) NULL",
   "map_url VARCHAR(1200) NULL",
@@ -137,6 +138,24 @@ function extractPlainTextForMeta(value) {
     .replace(/!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function parseCuratedTaxonomyJson(value) {
+  if (value == null) return null;
+  if (typeof value === "object") {
+    if (Array.isArray(value)) return null;
+    return JSON.parse(JSON.stringify(value));
+  }
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 
@@ -334,6 +353,7 @@ async function fetchNearbyCandidates(req, {
        p.tracking_entity_id,
        p.transport_contact_details,
        p.transport_link_url,
+       p.curated_taxonomy_json,
        p.is_approved,
        p.decision_featured_score,
        p.decision_scenario_tags,
@@ -520,6 +540,7 @@ function normalizeDecisionAndMedia(row, media = { cover: null, gallery: [], inli
     tracking_entity_id: row?.tracking_entity_id == null ? null : Number(row.tracking_entity_id) || null,
     transport_contact_details: String(row?.transport_contact_details || "").trim() || null,
     transport_link_url: String(row?.transport_link_url || "").trim() || null,
+    curated_taxonomy_json: parseCuratedTaxonomyJson(row?.curated_taxonomy_json),
   };
 }
 
@@ -756,11 +777,12 @@ export const getPlaces = async (req, res) => {
        p.primary_cta,
        p.tracking_entity_type,
        p.tracking_entity_id,
-       p.transport_contact_details,
-        p.transport_link_url,
-        p.is_approved,
-        p.is_emer,
-          p.decision_featured_score,
+         p.transport_contact_details,
+         p.transport_link_url,
+         p.curated_taxonomy_json,
+         p.is_approved,
+         p.is_emer,
+         p.decision_featured_score,
          p.decision_scenario_tags,
          p.decision_trend_flags,
          p.decision_moment_tags,
@@ -834,7 +856,8 @@ export const getPlaceDetail = async (req, res) => {
          p.tracking_entity_type,
          p.tracking_entity_id,
          p.transport_contact_details,
-         p.transport_link_url
+         p.transport_link_url,
+         p.curated_taxonomy_json
        FROM places p
        JOIN categories c ON c.id = p.category_id
        LEFT JOIN place_translations pt_req ON pt_req.place_id = p.id AND pt_req.lang=?
@@ -885,7 +908,8 @@ export const getPlaceDetail = async (req, res) => {
              p.tracking_entity_type,
              p.tracking_entity_id,
              p.transport_contact_details,
-             p.transport_link_url
+             p.transport_link_url,
+             p.curated_taxonomy_json
            FROM places p
            JOIN categories c ON c.id = p.category_id
            LEFT JOIN place_translations pt_req ON pt_req.place_id = p.id AND pt_req.lang=?
