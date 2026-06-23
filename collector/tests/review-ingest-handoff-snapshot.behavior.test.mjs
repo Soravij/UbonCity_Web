@@ -86,34 +86,206 @@ function createContext() {
                 },
               ],
             },
+            {
+              group_key: "taxonomy",
+              group_label: "Taxonomy",
+              checks: [
+                {
+                  key: "parking",
+                  label: "Parking",
+                  answer_type: "boolean",
+                  requested: true,
+                  required: false,
+                  activation_mode: "required",
+                  categories: ["attractions"],
+                  item_types: ["place"],
+                },
+                {
+                  key: "price_level",
+                  label: "Price level",
+                  answer_type: "select",
+                  requested: true,
+                  required: false,
+                  activation_mode: "required",
+                  categories: ["attractions"],
+                  item_types: ["place"],
+                },
+                {
+                  key: "service_scope",
+                  label: "Service scope",
+                  answer_type: "multi_select",
+                  requested: true,
+                  required: false,
+                  activation_mode: "required",
+                  categories: ["attractions"],
+                  item_types: ["place"],
+                },
+                {
+                  key: "category",
+                  label: "Category",
+                  answer_type: "select",
+                  requested: true,
+                  required: false,
+                  activation_mode: "required",
+                  categories: ["attractions"],
+                  item_types: ["place"],
+                },
+                {
+                  key: "subtype",
+                  label: "Subtype",
+                  answer_type: "select",
+                  requested: true,
+                  required: false,
+                  activation_mode: "required",
+                  categories: ["attractions"],
+                  item_types: ["place"],
+                },
+                {
+                  key: "tags",
+                  label: "Tags",
+                  answer_type: "multi_select",
+                  requested: true,
+                  required: false,
+                  activation_mode: "required",
+                  categories: ["attractions"],
+                  item_types: ["place"],
+                },
+                {
+                  key: "custom_legacy_flag",
+                  label: "Custom legacy flag",
+                  answer_type: "boolean",
+                  requested: true,
+                  required: false,
+                  activation_mode: "required",
+                  categories: ["attractions"],
+                  item_types: ["place"],
+                },
+                {
+                  key: "unknown_key",
+                  label: "Unknown key",
+                  answer_type: "text",
+                  requested: true,
+                  required: false,
+                  activation_mode: "required",
+                  categories: ["attractions"],
+                  item_types: ["place"],
+                },
+                {
+                  key: "booking_required",
+                  label: "Booking required",
+                  answer_type: "boolean",
+                  requested: true,
+                  required: false,
+                  activation_mode: "required",
+                  categories: ["attractions"],
+                  item_types: ["place"],
+                },
+                {
+                  key: "pet_friendly",
+                  label: "Pet friendly",
+                  answer_type: "boolean",
+                  requested: true,
+                  required: false,
+                  activation_mode: "required",
+                  categories: ["attractions"],
+                  item_types: ["place"],
+                },
+              ],
+            },
           ],
         },
       })
     );
     const handoffId = Number(handoffResult.lastInsertRowid || 0) || 0;
 
+    const acceptedFieldReturnPayload = {
+      requested_check_returns: {
+        "cta_contact.phone": {
+          checked: true,
+          found: true,
+          value: "0812345678",
+          evidence: "confirmed by phone",
+          note: "worker note",
+        },
+        "taxonomy.parking": {
+          checked: true,
+          found: true,
+          value: false,
+          note: "taxonomy",
+        },
+        "taxonomy.price_level": {
+          checked: true,
+          found: true,
+          value: "standard",
+          note: "taxonomy",
+        },
+        "taxonomy.service_scope": {
+          checked: true,
+          found: true,
+          value: ["city", "airport"],
+          note: "taxonomy",
+        },
+        "taxonomy.category": {
+          checked: true,
+          found: true,
+          value: "cafes",
+          note: "legacy classification",
+        },
+        "taxonomy.subtype": {
+          checked: true,
+          found: true,
+          value: "coffee_shop",
+          note: "legacy classification",
+        },
+        "taxonomy.tags": {
+          checked: true,
+          found: true,
+          value: ["coffee"],
+          note: "legacy classification",
+        },
+        "taxonomy.custom_legacy_flag": {
+          checked: true,
+          found: true,
+          value: true,
+          note: "custom legacy",
+        },
+        "taxonomy.unknown_key": {
+          checked: true,
+          found: true,
+          value: "drop-me",
+          note: "unknown",
+        },
+        "taxonomy.booking_required": {
+          checked: false,
+          found: true,
+          value: true,
+          note: "unchecked",
+        },
+        "taxonomy.pet_friendly": {
+          checked: true,
+          found: true,
+          note: "missing value",
+        },
+      },
+      taxonomy_return: {
+        category: { checked: true, value: "cafes", note: "taxonomy" },
+        subtype: { checked: true, value: "coffee_shop", note: "taxonomy" },
+        tags: { checked: true, value: ["coffee"], note: "taxonomy" },
+      },
+    };
+
     const submission = repo.addAssignmentSubmission({
       assignment_id: assignment.id,
       source_handoff_snapshot_id: handoffId,
       submitted_by_user_id: userId,
       submission_state: "submitted",
-      field_return_payload_json: {
-        requested_check_returns: {
-          "cta_contact.phone": {
-            checked: true,
-            found: true,
-            value: "0812345678",
-            evidence: "confirmed by phone",
-            note: "worker note",
-          },
-        },
-        taxonomy_return: {
-          category: { checked: true, value: "cafes", note: "taxonomy" },
-          subtype: { checked: true, value: "coffee_shop", note: "taxonomy" },
-          tags: { checked: true, value: ["coffee"], note: "taxonomy" },
-        },
-      },
+      field_return_payload_json: acceptedFieldReturnPayload,
     });
+    db.prepare("UPDATE content_assignment_submissions SET field_return_payload_json=? WHERE id=?").run(
+      JSON.stringify(acceptedFieldReturnPayload),
+      submission.id
+    );
+    const acceptedSubmission = repo.getAssignmentSubmissionById(submission.id);
 
     repo.updateAssignmentState(assignment.id, "submitted", "tester@local", {
       actor_role: "user",
@@ -138,15 +310,21 @@ function createContext() {
         tags: ["coffee"],
       },
     });
-    const accepted = repo.updateAssignmentState(assignment.id, "accepted", "tester@local", {
-      actor_role: "admin",
-      reason_code: "assignment_submission_accepted",
-    });
+    db.prepare(`
+      UPDATE content_assignments
+      SET state='accepted',
+          accepted_at=CURRENT_TIMESTAMP,
+          accepted_handoff_snapshot_id=?,
+          accepted_submission_id=?,
+          latest_submission_id=?
+      WHERE id=?
+    `).run(handoffId, acceptedSubmission.id, acceptedSubmission.id, assignment.id);
+    const accepted = repo.getAssignmentById(assignment.id);
 
     return {
       accepted,
       handoffId,
-      submission,
+      submission: acceptedSubmission,
       item,
       assignmentId: assignment.id,
       userId,
@@ -211,9 +389,26 @@ test("accepted field review snapshot freezes accepted binding and ignores later 
     assert.equal(snapshotBefore.accepted_handoff_snapshot_id, handoffId);
     assert.equal(snapshotBefore.accepted_submission_id, submission.id);
     assert.equal(snapshotBefore.confirmed_cta_contact_json.phone, "0812345678");
-    assert.equal(snapshotBefore.confirmed_taxonomy_json.category, "cafes");
+    assert.deepEqual(snapshotBefore.confirmed_taxonomy_json, {
+      parking: false,
+      price_level: "standard",
+      service_scope: ["city", "airport"],
+    });
+    assert.equal(Object.hasOwn(snapshotBefore.confirmed_taxonomy_json, "category"), false);
+    assert.equal(Object.hasOwn(snapshotBefore.confirmed_taxonomy_json, "subtype"), false);
+    assert.equal(Object.hasOwn(snapshotBefore.confirmed_taxonomy_json, "tags"), false);
+    assert.equal(Object.hasOwn(snapshotBefore.confirmed_taxonomy_json, "custom.legacy_flag"), false);
+    assert.equal(Object.hasOwn(snapshotBefore.confirmed_taxonomy_json, "unknown_key"), false);
+    assert.equal(Object.hasOwn(snapshotBefore.confirmed_taxonomy_json, "booking_required"), false);
+    assert.equal(Object.hasOwn(snapshotBefore.confirmed_taxonomy_json, "pet_friendly"), false);
     assert.equal(snapshotBefore.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0812345678");
     assert.equal(snapshotBefore.field_return_payload_json.requested_check_returns["cta_contact.phone"].status, "reported");
+    assert.equal(submission.field_return_payload_json.requested_check_returns["taxonomy.parking"].value, false);
+    assert.equal(submission.field_return_payload_json.requested_check_returns["taxonomy.price_level"].value, "standard");
+    assert.deepEqual(submission.field_return_payload_json.requested_check_returns["taxonomy.service_scope"].value, ["city", "airport"]);
+    const storedSubmissionRow = ctx.db.prepare("SELECT field_return_payload_json FROM content_assignment_submissions WHERE id=?").get(submission.id);
+    const storedSubmissionPayload = JSON.parse(storedSubmissionRow.field_return_payload_json);
+    assert.equal(Object.hasOwn(storedSubmissionPayload.requested_check_returns["taxonomy.pet_friendly"], "value"), false);
 
     const handoffResult = ctx.db.prepare(`
       INSERT INTO content_assignment_handoff_snapshots (
@@ -265,11 +460,21 @@ test("accepted field review snapshot freezes accepted binding and ignores later 
             value: "0999999999",
             evidence: "updated by later submission",
           },
-        },
-        taxonomy_return: {
-          category: { checked: true, value: "restaurants" },
-          subtype: { checked: true, value: "cafe" },
-          tags: { checked: true, value: ["coffee", "dessert"] },
+          "taxonomy.parking": {
+            checked: true,
+            found: true,
+            value: true,
+          },
+          "taxonomy.price_level": {
+            checked: true,
+            found: true,
+            value: "premium",
+          },
+          "taxonomy.service_scope": {
+            checked: true,
+            found: true,
+            value: ["city"],
+          },
         },
       })
     ).lastInsertRowid || 0);

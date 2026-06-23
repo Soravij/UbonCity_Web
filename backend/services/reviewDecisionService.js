@@ -107,13 +107,22 @@ function normalizeCuratedTaxonomyObject(taxonomyValue) {
     return { hasTaxonomySource: false, taxonomy: null };
   }
 
+  const parsedEntries = Object.entries(parsed);
+  if (parsedEntries.length === 0) {
+    return { hasTaxonomySource: true, taxonomy: {} };
+  }
+
   const curated = {};
-  for (const [rawKey, rawValue] of Object.entries(parsed)) {
+  for (const [rawKey, rawValue] of parsedEntries) {
     const key = normalizeCuratedTaxonomyKey(rawKey);
     if (!key || key.startsWith("custom.")) continue;
     if (!isKnownTaxonomyCatalogKey(key)) continue;
     if (rawValue === undefined) continue;
     curated[key] = cloneJsonValue(rawValue);
+  }
+
+  if (Object.keys(curated).length === 0) {
+    return { hasTaxonomySource: false, taxonomy: null };
   }
 
   return { hasTaxonomySource: true, taxonomy: curated };

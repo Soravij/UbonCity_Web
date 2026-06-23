@@ -325,6 +325,13 @@ test("extractCuratedTaxonomyFromReviewSnapshot requires confirmed_taxonomy_json 
   const emptySnapshot = {
     confirmed_taxonomy_json: {},
   };
+  const legacyOnlySnapshot = {
+    confirmed_taxonomy_json: {
+      category: "cafes",
+      subtype: "cafe",
+      tags: ["coffee"],
+    },
+  };
   const validSnapshot = {
     confirmed_taxonomy_json: {
       parking: false,
@@ -350,6 +357,10 @@ test("extractCuratedTaxonomyFromReviewSnapshot requires confirmed_taxonomy_json 
   assert.deepEqual(extractCuratedTaxonomyFromReviewSnapshot(emptySnapshot), {
     hasTaxonomySource: true,
     taxonomy: {},
+  });
+  assert.deepEqual(extractCuratedTaxonomyFromReviewSnapshot(legacyOnlySnapshot), {
+    hasTaxonomySource: false,
+    taxonomy: null,
   });
   assert.deepEqual(extractCuratedTaxonomyFromReviewSnapshot(validSnapshot), {
     hasTaxonomySource: true,
@@ -463,6 +474,99 @@ test("approveReviewContent preserves existing place taxonomy when taxonomy sourc
     });
   } finally {
     harness.restore();
+  }
+});
+
+test("approveReviewContent treats legacy classification-only confirmed taxonomy as no source", async () => {
+  const existingHarness = createApproveHarness({
+    reviewContent: {
+      id: 509,
+      status: "pending_review",
+      content_type: "place",
+      category: "cafes",
+      title: "Legacy Classification Existing",
+      body: "<p>Body</p>",
+      excerpt: "Excerpt",
+      meta_title: "Meta",
+      meta_description: "Meta description",
+      lang: "th",
+      current_batch_uid: "batch-9",
+      source_system: "collector-app",
+      source_content_item_id: 106,
+      public_entity_id: 79,
+      slug: "legacy-classification-existing",
+      handoff_snapshot_json: {
+        version: 1,
+        confirmed_taxonomy_json: {
+          category: "cafes",
+          subtype: "cafe",
+          tags: ["coffee"],
+        },
+      },
+    },
+    existingPlaceRow: {
+      id: 79,
+      slug: "legacy-classification-existing",
+      curated_taxonomy_json: {
+        parking: true,
+        price_level: "moderate",
+      },
+    },
+  });
+  try {
+    const result = await approveReviewContent({
+      reviewContent: { id: 509 },
+      actorUserId: 7,
+      reviewNote: "approve legacy classification existing place",
+    });
+
+    assert.equal(result.status, "published");
+    assert.deepEqual(existingHarness.committed.placeRow.curated_taxonomy_json, {
+      parking: true,
+      price_level: "moderate",
+    });
+  } finally {
+    existingHarness.restore();
+  }
+
+  const newPlaceHarness = createApproveHarness({
+    reviewContent: {
+      id: 510,
+      status: "pending_review",
+      content_type: "place",
+      category: "cafes",
+      title: "Legacy Classification New",
+      body: "<p>Body</p>",
+      excerpt: "Excerpt",
+      meta_title: "Meta",
+      meta_description: "Meta description",
+      lang: "th",
+      current_batch_uid: "batch-10",
+      source_system: "collector-app",
+      source_content_item_id: 107,
+      public_entity_id: null,
+      slug: "legacy-classification-new",
+      handoff_snapshot_json: {
+        version: 1,
+        confirmed_taxonomy_json: {
+          category: "cafes",
+          subtype: "cafe",
+          tags: ["coffee"],
+        },
+      },
+    },
+  });
+  try {
+    const result = await approveReviewContent({
+      reviewContent: { id: 510 },
+      actorUserId: 7,
+      reviewNote: "approve legacy classification new place",
+    });
+
+    assert.equal(result.status, "published");
+    assert.equal(newPlaceHarness.committed.placeRow.curated_taxonomy_json, null);
+  } finally {
+    newPlaceHarness.restore();
   }
 });
 
