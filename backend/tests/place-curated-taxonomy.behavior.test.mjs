@@ -314,31 +314,55 @@ function createApproveHarness({
   };
 }
 
-test("extractCuratedTaxonomyFromReviewSnapshot filters unknown keys and preserves typed values", () => {
-  const snapshot = {
+test("extractCuratedTaxonomyFromReviewSnapshot requires confirmed_taxonomy_json and ignores root keys", () => {
+  const rootOnlySnapshot = {
+    category: "cafes",
+    subtype: "cafe",
+    tags: ["coffee"],
+    parking: false,
+  };
+  const malformedSnapshot = "{not-json";
+  const emptySnapshot = {
+    confirmed_taxonomy_json: {},
+  };
+  const validSnapshot = {
     confirmed_taxonomy_json: {
-      category: false,
+      parking: false,
       price_level: 0,
+      setting_type: "outdoor",
+      service_scope: ["delivery"],
+      category: "cafes",
       subtype: "cafe",
       tags: ["coffee", "dessert"],
       "custom.legacy_flag": true,
       unknown_key: "drop-me",
     },
   };
-  const cloned = cloneJson(snapshot);
 
-  const curated = extractCuratedTaxonomyFromReviewSnapshot(snapshot);
-
-  assert.deepEqual(curated, {
-    category: false,
-    price_level: 0,
-    subtype: "cafe",
-    tags: ["coffee", "dessert"],
+  assert.deepEqual(extractCuratedTaxonomyFromReviewSnapshot(rootOnlySnapshot), {
+    hasTaxonomySource: false,
+    taxonomy: null,
   });
-  assert.deepEqual(snapshot, cloned);
+  assert.deepEqual(extractCuratedTaxonomyFromReviewSnapshot(malformedSnapshot), {
+    hasTaxonomySource: false,
+    taxonomy: null,
+  });
+  assert.deepEqual(extractCuratedTaxonomyFromReviewSnapshot(emptySnapshot), {
+    hasTaxonomySource: true,
+    taxonomy: {},
+  });
+  assert.deepEqual(extractCuratedTaxonomyFromReviewSnapshot(validSnapshot), {
+    hasTaxonomySource: true,
+    taxonomy: {
+      parking: false,
+      price_level: 0,
+      setting_type: "outdoor",
+      service_scope: ["delivery"],
+    },
+  });
 });
 
-test("approveReviewContent stores frozen place taxonomy and preserves legacy taxonomy when snapshot is missing", async () => {
+test("approveReviewContent stores frozen place taxonomy from confirmed_taxonomy_json only", async () => {
   const harness = createApproveHarness({
     reviewContent: {
       id: 501,
@@ -359,12 +383,15 @@ test("approveReviewContent stores frozen place taxonomy and preserves legacy tax
       handoff_snapshot_json: {
         version: 1,
         confirmed_taxonomy_json: {
-          category: false,
+          parking: false,
           price_level: 0,
-          subtype: "cafe",
-          tags: ["coffee"],
+          setting_type: "outdoor",
+          service_scope: ["delivery"],
           "custom.legacy_flag": true,
           unknown_key: "drop-me",
+          category: "cafes",
+          subtype: "cafe",
+          tags: ["coffee"],
         },
       },
     },
@@ -378,17 +405,17 @@ test("approveReviewContent stores frozen place taxonomy and preserves legacy tax
 
     assert.equal(result.status, "published");
     assert.deepEqual(harness.committed.placeRow.curated_taxonomy_json, {
-      category: false,
+      parking: false,
       price_level: 0,
-      subtype: "cafe",
-      tags: ["coffee"],
+      setting_type: "outdoor",
+      service_scope: ["delivery"],
     });
   } finally {
     harness.restore();
   }
 });
 
-test("approveReviewContent preserves existing place taxonomy when snapshot is missing or malformed", async () => {
+test("approveReviewContent preserves existing place taxonomy when taxonomy source is missing", async () => {
   const harness = createApproveHarness({
     reviewContent: {
       id: 502,
@@ -406,7 +433,12 @@ test("approveReviewContent preserves existing place taxonomy when snapshot is mi
       source_content_item_id: 100,
       public_entity_id: 77,
       slug: "place-taxonomy-existing",
-      handoff_snapshot_json: null,
+      handoff_snapshot_json: {
+        version: 1,
+        category: "cafes",
+        subtype: "cafe",
+        tags: ["coffee"],
+      },
     },
     existingPlaceRow: {
       id: 77,
@@ -434,10 +466,90 @@ test("approveReviewContent preserves existing place taxonomy when snapshot is mi
   }
 });
 
+test("approveReviewContent stores explicit empty taxonomy on new place and replaces existing taxonomy on update", async () => {
+  const newPlaceHarness = createApproveHarness({
+    reviewContent: {
+      id: 505,
+      status: "pending_review",
+      content_type: "place",
+      category: "cafes",
+      title: "Empty Snapshot New Place",
+      body: "<p>Body</p>",
+      excerpt: "Excerpt",
+      meta_title: "Meta",
+      meta_description: "Meta description",
+      lang: "th",
+      current_batch_uid: "batch-5",
+      source_system: "collector-app",
+      source_content_item_id: 103,
+      public_entity_id: null,
+      slug: "empty-snapshot-new",
+      handoff_snapshot_json: {
+        version: 1,
+        confirmed_taxonomy_json: {},
+      },
+    },
+  });
+  try {
+    const newPlaceResult = await approveReviewContent({
+      reviewContent: { id: 505 },
+      actorUserId: 7,
+      reviewNote: "approve empty taxonomy new place",
+    });
+    assert.equal(newPlaceResult.status, "published");
+    assert.deepEqual(newPlaceHarness.committed.placeRow.curated_taxonomy_json, {});
+  } finally {
+    newPlaceHarness.restore();
+  }
+
+  const existingHarness = createApproveHarness({
+    reviewContent: {
+      id: 506,
+      status: "pending_review",
+      content_type: "place",
+      category: "cafes",
+      title: "Empty Snapshot Existing Place",
+      body: "<p>Body</p>",
+      excerpt: "Excerpt",
+      meta_title: "Meta",
+      meta_description: "Meta description",
+      lang: "th",
+      current_batch_uid: "batch-6",
+      source_system: "collector-app",
+      source_content_item_id: 104,
+      public_entity_id: 88,
+      slug: "empty-snapshot-existing",
+      handoff_snapshot_json: {
+        version: 1,
+        confirmed_taxonomy_json: {},
+      },
+    },
+    existingPlaceRow: {
+      id: 88,
+      slug: "empty-snapshot-existing",
+      curated_taxonomy_json: {
+        parking: false,
+        price_level: "budget",
+      },
+    },
+  });
+  try {
+    const existingResult = await approveReviewContent({
+      reviewContent: { id: 506 },
+      actorUserId: 7,
+      reviewNote: "approve empty taxonomy existing place",
+    });
+    assert.equal(existingResult.status, "published");
+    assert.deepEqual(existingHarness.committed.placeRow.curated_taxonomy_json, {});
+  } finally {
+    existingHarness.restore();
+  }
+});
+
 test("approveReviewContent preserves existing place taxonomy when the frozen snapshot is malformed", async () => {
   const harness = createApproveHarness({
     reviewContent: {
-      id: 505,
+      id: 508,
       status: "pending_review",
       content_type: "place",
       category: "cafes",
@@ -465,7 +577,7 @@ test("approveReviewContent preserves existing place taxonomy when the frozen sna
   });
   try {
     const result = await approveReviewContent({
-      reviewContent: { id: 505 },
+      reviewContent: { id: 508 },
       actorUserId: 7,
       reviewNote: "approve malformed snapshot",
     });
@@ -475,6 +587,46 @@ test("approveReviewContent preserves existing place taxonomy when the frozen sna
       parking: false,
       price_level: "standard",
     });
+  } finally {
+    harness.restore();
+  }
+});
+
+test("approveReviewContent stores NULL for a new place with no taxonomy source", async () => {
+  const harness = createApproveHarness({
+    reviewContent: {
+      id: 507,
+      status: "pending_review",
+      content_type: "place",
+      category: "cafes",
+      title: "No Taxonomy Source",
+      body: "<p>Body</p>",
+      excerpt: "Excerpt",
+      meta_title: "Meta",
+      meta_description: "Meta description",
+      lang: "th",
+      current_batch_uid: "batch-7",
+      source_system: "collector-app",
+      source_content_item_id: 105,
+      public_entity_id: null,
+      slug: "no-taxonomy-source",
+      handoff_snapshot_json: {
+        version: 1,
+        category: "cafes",
+        subtype: "cafe",
+        tags: ["coffee"],
+      },
+    },
+  });
+  try {
+    const result = await approveReviewContent({
+      reviewContent: { id: 507 },
+      actorUserId: 7,
+      reviewNote: "approve new place without taxonomy source",
+    });
+
+    assert.equal(result.status, "published");
+    assert.equal(harness.committed.placeRow.curated_taxonomy_json, null);
   } finally {
     harness.restore();
   }

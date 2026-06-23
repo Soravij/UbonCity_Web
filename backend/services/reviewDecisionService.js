@@ -10,9 +10,8 @@ import {
 } from "./collectorImportReviewService.js";
 import { assertBackendIntegrationReadiness } from "./integrationReadinessService.js";
 import { assertNoEmerConflictForPublish } from "./publishGuardService.js";
-import { isKnownTaxonomyCatalogKey } from "../../collector/server/taxonomy-catalog.mjs";
+import { isKnownTaxonomyCatalogKey } from "../constants/taxonomyCatalog.js";
 
-const CURATED_TAXONOMY_LEGACY_KEYS = new Set(["category", "subtype", "tags"]);
 let ensuredCuratedTaxonomyColumn = false;
 
 function slugify(input) {
@@ -104,28 +103,31 @@ function normalizeCuratedTaxonomyKey(key) {
 
 function normalizeCuratedTaxonomyObject(taxonomyValue) {
   const parsed = parseJsonMaybe(taxonomyValue);
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") return null;
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+    return { hasTaxonomySource: false, taxonomy: null };
+  }
 
   const curated = {};
   for (const [rawKey, rawValue] of Object.entries(parsed)) {
     const key = normalizeCuratedTaxonomyKey(rawKey);
     if (!key || key.startsWith("custom.")) continue;
-    if (!isKnownTaxonomyCatalogKey(key) && !CURATED_TAXONOMY_LEGACY_KEYS.has(key)) continue;
+    if (!isKnownTaxonomyCatalogKey(key)) continue;
     if (rawValue === undefined) continue;
     curated[key] = cloneJsonValue(rawValue);
   }
 
-  return Object.keys(curated).length ? curated : null;
+  return { hasTaxonomySource: true, taxonomy: curated };
 }
 
 export function extractCuratedTaxonomyFromReviewSnapshot(snapshotValue) {
   const snapshot = parseJsonMaybe(snapshotValue);
-  if (!snapshot || Array.isArray(snapshot) || typeof snapshot !== "object") return null;
-
-  const confirmedTaxonomySource = Object.prototype.hasOwnProperty.call(snapshot, "confirmed_taxonomy_json")
-    ? snapshot.confirmed_taxonomy_json
-    : snapshot;
-  return normalizeCuratedTaxonomyObject(confirmedTaxonomySource);
+  if (!snapshot || Array.isArray(snapshot) || typeof snapshot !== "object") {
+    return { hasTaxonomySource: false, taxonomy: null };
+  }
+  if (!Object.prototype.hasOwnProperty.call(snapshot, "confirmed_taxonomy_json")) {
+    return { hasTaxonomySource: false, taxonomy: null };
+  }
+  return normalizeCuratedTaxonomyObject(snapshot.confirmed_taxonomy_json);
 }
 
 export function mapReviewContentCtaFieldsToPlaceRecord(content = {}) {
@@ -176,8 +178,10 @@ async function upsertPublishedPlace(connection, content, slug) {
   let placeId = null;
   let resolvedSlug = null;
   const placeCtaFields = mapReviewContentCtaFieldsToPlaceRecord(content);
-  const curatedTaxonomyJson = extractCuratedTaxonomyFromReviewSnapshot(content.handoff_snapshot_json);
-  const curatedTaxonomyPayload = curatedTaxonomyJson == null ? null : JSON.stringify(curatedTaxonomyJson);
+  const curatedTaxonomyResult = extractCuratedTaxonomyFromReviewSnapshot(content.handoff_snapshot_json);
+  const curatedTaxonomyPayload = curatedTaxonomyResult.hasTaxonomySource
+    ? JSON.stringify(curatedTaxonomyResult.taxonomy)
+    : null;
   if (existingRows.length) {
     placeId = Number(existingRows[0].id || 0) || null;
     const existingSlug = String(existingRows[0].slug || "").trim() || null;
@@ -212,7 +216,7 @@ async function upsertPublishedPlace(connection, content, slug) {
         placeCtaFields.tracking_entity_id,
         content.transport_contact_details,
         content.transport_link_url,
-        curatedTaxonomyPayload ?? existingCuratedTaxonomyPayload,
+        curatedTaxonomyResult.hasTaxonomySource ? curatedTaxonomyPayload : existingCuratedTaxonomyPayload,
         placeId,
       ]
     );
