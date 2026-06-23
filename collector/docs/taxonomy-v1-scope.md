@@ -11,10 +11,10 @@ Implementation status:
 - the approved Taxonomy v1 catalog is now implemented on `feature/taxonomy-v1-catalog`
 - resolver activation semantics are now implemented
 - Field Pack Agent category-aware catalog input is now implemented
-- backend curated taxonomy storage/filtering remains a later phase
-- internal Homepage Signals / Content Pool filtering remains a later phase
-- the current scaffold is not yet the final published-storage or Homepage Curation mapping
-- final merge remains blocked until the end-to-end taxonomy matrix is proven through runtime
+- backend curated taxonomy storage/filtering is implemented and automated-test verified
+- internal Homepage Signals / Content Pool filtering is implemented and automated-test verified
+- the static end-to-end closure matrix is implemented as a completed static milestone on `feature/taxonomy-phase5a-closure-matrix`
+- final merge remains blocked until runtime acceptance is proven across representative fixtures
 
 ## CTA Milestone Final Contract
 
@@ -195,6 +195,8 @@ Do not treat the Taxonomy v1 work as final until all of the following are proven
 - CTA and taxonomy pass a final real Collector -> Backend -> Admin test
 - no auto-confirmation is introduced
 - existing issued handoff snapshots remain unchanged
+- static closure documentation and catalog parity are complete
+- runtime acceptance status remains pending until real fixtures are proven
 
 Document only what is currently proven:
 
@@ -236,6 +238,5 @@ Document only what is currently proven:
 
 ## Remaining Later Phases
 
-1. Complete backend curated taxonomy storage/filtering.
-2. Bridge confirmed taxonomy facts into internal Homepage Signals / Content Pool filtering.
-3. Keep public homepage behavior unchanged and keep human selection manual.
+1. Prove runtime acceptance on representative fixtures.
+2. Keep public homepage behavior unchanged and keep human selection manual.

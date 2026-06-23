@@ -51,14 +51,16 @@ Locked CTA rules:
 - Taxonomy v1 catalog is now implemented on `feature/taxonomy-v1-catalog`.
 - Resolver activation semantics are implemented on `feature/taxonomy-v1-catalog`.
 - Field Pack Agent catalog-awareness is implemented on `feature/taxonomy-v1-catalog`.
-- Backend curated taxonomy storage remains pending.
-- Homepage Signals / Content Pool taxonomy integration remains pending.
-- The current taxonomy scaffold is not the approved final end-to-end mapping.
+- Backend curated taxonomy storage/filtering is implemented and automated-test verified.
+- Homepage Signals / Content Pool taxonomy integration is implemented and automated-test verified.
+- The static taxonomy closure matrix is implemented as a completed static milestone on `feature/taxonomy-phase5a-closure-matrix`.
+- Runtime acceptance across representative fixtures remains pending.
+- The current taxonomy scaffold is now backed by a static end-to-end closure document.
 
 ## Confirmed Direction
 
 - CTA/contact milestone is already closed on `feature/taxonomy-catalog-resolver`.
-- Taxonomy v1 now continues on the active branch before downstream backend/Homepage integration.
+- Taxonomy v1 now continues on `feature/taxonomy-v1-catalog` with runtime acceptance still pending.
 - Real taxonomy categories for the current Taxonomy v1 branch are:
   - `attractions`
   - `activities`
@@ -66,7 +68,7 @@ Locked CTA rules:
   - `cafes`
   - `restaurants`
   - `transport`
-- Taxonomy end-to-end merge remains blocked until backend storage, published storage destinations, Homepage Curation signal derivation, candidate API exposure, and admin consumption are verified.
+- Taxonomy end-to-end merge remains blocked until runtime acceptance is proven on representative fixtures.
 
 ## Policy Reference
 
@@ -74,8 +76,7 @@ Locked CTA rules:
 
 ## Pending / Update Later
 
-- Backend curated taxonomy storage/filtering
-- Homepage Signals / Content Pool taxonomy integration
+- Runtime acceptance across representative fixtures
 - Full role matrix
 - Full publish workflow state machine
 - Translation policy

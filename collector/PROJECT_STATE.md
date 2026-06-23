@@ -19,8 +19,10 @@ Status:
 - Taxonomy v1 catalog implemented on `feature/taxonomy-v1-catalog`
 - resolver activation semantics implemented on `feature/taxonomy-v1-catalog`
 - Field Pack Agent catalog-awareness implemented on `feature/taxonomy-v1-catalog`
-- backend curated taxonomy storage/filtering remains a later phase
-- Homepage Signals / Content Pool taxonomy integration remains a later phase
+- backend curated taxonomy storage/filtering implemented and automated-test verified
+- Homepage Signals / Content Pool taxonomy integration implemented and automated-test verified
+- static taxonomy closure matrix implemented as a completed static milestone on `feature/taxonomy-phase5a-closure-matrix`
+- runtime acceptance across representative fixtures remains pending
 
 2026-06-22 runtime verification:
 - the live Item Editor CTA path is proven end to end
@@ -70,7 +72,9 @@ Locked taxonomy direction on this branch:
   - `must_ask_question`
   - Work Return additional notes
 - Unknown/non-catalog ideas do not become canonical taxonomy keys automatically.
-- Backend curated taxonomy storage and Homepage Signals / Content Pool integration remain pending.
+- Backend curated taxonomy storage/filtering is now implemented and automated-test verified.
+- Homepage Signals / Content Pool taxonomy integration is now implemented and automated-test verified.
+- The static closure matrix is implemented and checked in this phase.
 - Do not include any `custom` group or `custom.*` row in newly created handoff snapshots, including legacy stored rows.
 - Preserve legacy custom data at rest.
 - Already-issued immutable snapshots containing custom checks remain readable and returnable for compatibility.
@@ -100,8 +104,7 @@ Completed on the current Taxonomy v1 branch:
 - handoff builder changes that emit resolved actionable taxonomy checks instead of placeholders
 
 Pending for later phases:
-- backend curated taxonomy storage/filtering
-- Homepage Signals / Content Pool filtering integration
+- runtime acceptance across representative fixtures
 
 Relevant tests:
 - `collector/tests/requested-check-return-form.behavior.test.mjs`
