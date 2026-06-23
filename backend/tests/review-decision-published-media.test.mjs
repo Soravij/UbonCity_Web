@@ -132,6 +132,9 @@ function createApproveHarness() {
       if (normalized === "select id, slug from places where id=? limit 1") {
         return [[]];
       }
+      if (normalized === "select id, slug, curated_taxonomy_json from places where id=? limit 1") {
+        return [[]];
+      }
       if (normalized.startsWith("insert into places (")) {
         return [{ insertId: state.placeInsertId }];
       }
@@ -274,6 +277,7 @@ function createApproveHarness() {
   const poolQuery = async (sql, params = []) => {
     const normalized = normalizeSql(sql);
     if (normalized.startsWith("create table if not exists collector_import_reviews")) return [{ warningStatus: 0 }];
+    if (normalized === "show columns from places like 'curated_taxonomy_json'") return [[{ Field: "curated_taxonomy_json" }]];
     if (normalized === "show columns from collector_import_reviews like 'article_snapshot_json'") return [[{ Field: "article_snapshot_json" }]];
     if (normalized === "show columns from collector_import_reviews like 'translations_snapshot_json'") return [[{ Field: "translations_snapshot_json" }]];
     if (normalized.startsWith("create table if not exists collector_import_review_actions")) return [{ warningStatus: 0 }];
@@ -486,6 +490,7 @@ function createEventApproveHarness() {
   const poolQuery = async (sql, params = []) => {
     const normalized = normalizeSql(sql);
     if (normalized.startsWith("create table if not exists collector_import_reviews")) return [{ warningStatus: 0 }];
+    if (normalized === "show columns from places like 'curated_taxonomy_json'") return [[{ Field: "curated_taxonomy_json" }]];
     if (normalized === "show columns from collector_import_reviews like 'article_snapshot_json'") return [[{ Field: "article_snapshot_json" }]];
     if (normalized === "show columns from collector_import_reviews like 'translations_snapshot_json'") return [[{ Field: "translations_snapshot_json" }]];
     if (normalized.startsWith("create table if not exists collector_import_review_actions")) return [{ warningStatus: 0 }];

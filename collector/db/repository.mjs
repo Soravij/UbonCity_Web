@@ -9762,7 +9762,6 @@ function normalizeStateValue(value, stateGroup) {
 
     const latestDraft = latestDraftByItem(itemId) || {};
     const confirmedCtaContact = normalizeConfirmedCtaContactJson(latestDraft.confirmed_cta_contact_json);
-    const confirmedTaxonomy = normalizeConfirmedTaxonomyJson(latestDraft.confirmed_taxonomy_json);
     const requestedCheckSchemaMap = buildRequestedCheckSchemaMapFromHandoffPackage(handoffSnapshot.handoff_package_json);
     const workerTaxonomyReturn = normalizeFieldReturnTaxonomyJson(
       submission.field_return_payload_json?.taxonomy_return,
@@ -9778,6 +9777,9 @@ function normalizeStateValue(value, stateGroup) {
         acc[normalizedKey] = normalizedEntry;
         return acc;
       }, {})
+      : {};
+    const confirmedTaxonomy = Object.keys(requestedCheckReturns).length
+      ? buildConfirmedTaxonomyFacetsFromAcceptedSubmission(requestedCheckReturns)
       : {};
 
     return {
@@ -9804,6 +9806,27 @@ function normalizeStateValue(value, stateGroup) {
         confirmed_taxonomy_json: confirmedTaxonomy,
       },
     };
+  }
+
+  function buildConfirmedTaxonomyFacetsFromAcceptedSubmission(requestedCheckReturns = {}) {
+    if (!requestedCheckReturns || typeof requestedCheckReturns !== "object" || Array.isArray(requestedCheckReturns)) {
+      return {};
+    }
+
+    return Object.entries(requestedCheckReturns).reduce((acc, [rawKey, rawEntry]) => {
+      const normalizedRequestedKey = String(rawKey || "").trim().toLowerCase();
+      if (!normalizedRequestedKey.startsWith("taxonomy.")) return acc;
+
+      const catalogKey = normalizedRequestedKey.slice("taxonomy.".length).trim().toLowerCase();
+      if (!catalogKey || !isKnownTaxonomyCatalogKey(catalogKey)) return acc;
+      if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) return acc;
+      if (rawEntry.checked !== true) return acc;
+      if (!Object.prototype.hasOwnProperty.call(rawEntry, "value")) return acc;
+      if (rawEntry.value == null) return acc;
+
+      acc[catalogKey] = JSON.parse(JSON.stringify(rawEntry.value));
+      return acc;
+    }, {});
   }
 
   function createAssignmentFromReadiness(
