@@ -1,142 +1,130 @@
 # Taxonomy V1 End-To-End Matrix
 
 Static acceptance status: COMPLETE
-Runtime acceptance status: PENDING
+Runtime acceptance: PENDING
 
 This document is static-only. It proves catalog parity, closure matrix completeness, and source contract markers.
 It does not claim runtime acceptance.
 
-## Scope Summary
+Collector owns the human confirmation workflow.
+Backend owns published storage and filtering.
+AI suggestions never auto-confirm taxonomy facts.
+Issued assignment snapshots remain immutable.
+Public homepage behavior remains unchanged.
+Homepage selection remains human-controlled.
 
-- Taxonomy v1 categories are place-only.
-- Canonical taxonomy keys are the approved catalog keys in the collector catalog and backend key list.
-- `category`, `subtype`, `tags`, and `custom.*` remain excluded from canonical taxonomy facts.
-- Published homepage behavior is unchanged by this document.
-- PR `#25` remains Draft.
+## Canonical Transport Contract
 
-## Canonical Source Contract
+Collector catalog
+→ requested checks / assignment snapshot
+→ Work Return requested_check_returns
+→ accepted field review snapshot.confirmed_taxonomy_json
+→ Collector review ingest mapping sends the accepted snapshot as handoff_snapshot_json
+→ Backend review ingest stores review_contents.handoff_snapshot_json
+→ approval reads handoff_snapshot_json.confirmed_taxonomy_json
+→ places.curated_taxonomy_json
+→ GET /api/homepage-curation/candidates
+→ Admin Signals / Content Pool taxonomy_filters
 
-collector catalog:
-`collector/server/taxonomy-catalog.mjs`
-
-collector handoff marker:
-`collector/server/review-ingest-mapping.mjs`
-
-backend ingest marker:
-`backend/services/reviewIngestService.js`
-
-backend approval marker:
-`backend/services/reviewDecisionService.js`
-
-homepage candidate marker:
-`backend/services/homepageCurationService.js`
-
-candidate controller marker:
-`backend/controllers/homepageCurationController.js`
-
-homepage curation route marker:
-`backend/routes/homepageCurationRoutes.js`
-
-admin consumer marker:
-`admin/src/pages/HomepageCuration.jsx`
-
-Canonical static chain:
-`taxonomy catalog -> requested checks -> requested_check_returns -> confirmed_taxonomy_json -> review_source_kind -> handoff_snapshot_json -> review_contents -> curated_taxonomy_json -> homepage candidates -> admin taxonomy_filters`
+`review_source_kind` identifies review source integrity.
+`handoff_snapshot_json` is the immutable review transport/storage container.
+Neither is a canonical taxonomy fact itself.
 
 ## Source Contract Markers
 
 | Layer | File | Marker | Status |
 | --- | --- | --- | --- |
-| Collector catalog | `collector/server/taxonomy-catalog.mjs` | approved category matrix, place-only item types, downstream consumers | VERIFIED |
-| Collector handoff | `collector/server/review-ingest-mapping.mjs` | `review_source_kind` | VERIFIED |
-| Backend ingest | `backend/services/reviewIngestService.js` | `review_source_kind`, `handoff_snapshot_json` | VERIFIED |
-| Backend approval | `backend/services/reviewDecisionService.js` | `curated_taxonomy_json` | VERIFIED |
+| Collector accepted snapshot | `collector/tests/review-ingest-handoff-snapshot.behavior.test.mjs` | `confirmed_taxonomy_json` | VERIFIED |
+| Collector review mapping | `collector/server/review-ingest-mapping.mjs` | `buildAcceptedFieldReviewSnapshotByItem`, `handoff_snapshot_json` | VERIFIED |
+| Backend review storage | `backend/services/reviewIngestService.js` | `handoffSnapshotJson`, `handoff_snapshot_json` | VERIFIED |
+| Backend storage schema | `backend/migrations/012_review_contents.sql` | `handoff_snapshot_json` | VERIFIED |
+| Backend approval extraction | `backend/services/reviewDecisionService.js` | `confirmed_taxonomy_json`, `curated_taxonomy_json`, `extractCuratedTaxonomyFromReviewSnapshot` | VERIFIED |
 | Homepage candidate service | `backend/services/homepageCurationService.js` | `curated_taxonomy_json` | VERIFIED |
 | Candidate controller | `backend/controllers/homepageCurationController.js` | `taxonomy_filters` | VERIFIED |
-| Homepage curation routes | `backend/routes/homepageCurationRoutes.js` | `protect, authorizeAdmin` and candidate/taxonomy-options routes | VERIFIED |
 | Admin consumer | `admin/src/pages/HomepageCuration.jsx` | `taxonomy_filters` | VERIFIED |
 
-## Category Closure Summary
+## Canonical Key Matrix
 
-| Category | Required keys | Agent-triggered keys | Static status | Runtime status |
-| --- | --- | --- | --- | --- |
-| attractions | 6 | 5 | VERIFIED | PENDING |
-| activities | 8 | 5 | VERIFIED | PENDING |
-| hotels | 8 | 6 | VERIFIED | PENDING |
-| cafes | 8 | 5 | VERIFIED | PENDING |
-| restaurants | 8 | 4 | VERIFIED | PENDING |
-| transport | 6 | 5 | VERIFIED | PENDING |
+| Taxonomy key | Applicable categories | Answer type | Confirmed snapshot source | Backend review storage | Published destination | Internal consumer | Static status | Runtime status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `age_restriction` | activities | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `air_conditioning` | hotels, cafes, restaurants, transport | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `airport_shuttle` | hotels | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `airport_transfer` | transport | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `average_price_per_person` | activities, cafes, restaurants | number_with_unit | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `booking_required` | activities, transport | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `breakfast_available` | hotels | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `cashless_payment` | transport | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `charter_available` | transport | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `child_friendly` | attractions, activities | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `child_seat_available` | transport | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `delivery_available` | restaurants | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `dietary_options` | restaurants | multi_select | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `entry_fee_required` | attractions | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `equipment_provided` | activities | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `family_room_available` | hotels | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `group_seating_available` | restaurants | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `guide_available` | activities | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `gym_available` | hotels | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `hiking_required` | attractions | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `kids_area` | cafes | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `luggage_supported` | transport | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `meal_available` | cafes | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `meeting_room_available` | hotels | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `onsite_restaurant` | hotels | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `outdoor_seating` | cafes, restaurants | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `parking` | attractions, activities, hotels, cafes, restaurants | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `pet_friendly` | attractions, hotels, cafes, restaurants | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `pet_transport_allowed` | transport | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `physical_difficulty` | activities | select | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `price_level` | activities, hotels, cafes, restaurants | select | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `pricing_model` | transport | select | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `private_group_available` | activities | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `private_room_available` | restaurants | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `religious_dress_code` | attractions | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `reservation_available` | cafes, restaurants | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `service_scope` | transport | multi_select | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `setting_type` | attractions | select | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `specialty_coffee` | cafes | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `swimming_allowed` | attractions | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `swimming_pool` | hotels | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `toilet_available` | attractions | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `typical_duration` | activities | number_with_unit | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `waterfront` | attractions, cafes, hotels, restaurants | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `weather_dependent` | activities | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `wheelchair_accessible` | attractions, activities, hotels, transport | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `wifi_available` | hotels, cafes | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
+| `work_power_outlets` | cafes | boolean_with_conditions | accepted field review snapshot.confirmed_taxonomy_json | review_contents.handoff_snapshot_json | places.curated_taxonomy_json | Homepage Signals / Content Pool | VERIFIED | PENDING |
 
-## Taxonomy Key Closure Matrix
+## Intentional Exclusions
 
-| Key | Applicable categories | Activation mode by category | Answer type | Closure status |
-| --- | --- | --- | --- | --- |
-| age_restriction | activities | required: activities | boolean_with_conditions | YES |
-| air_conditioning | hotels, cafes, restaurants, transport | required: hotels, cafes, restaurants, transport | boolean_with_conditions | YES |
-| airport_shuttle | hotels | agent-triggered: hotels | boolean_with_conditions | PARTIAL |
-| airport_transfer | transport | agent-triggered: transport | boolean_with_conditions | PARTIAL |
-| average_price_per_person | activities, cafes, restaurants | required: activities, cafes, restaurants | number_with_unit | YES |
-| booking_required | activities, transport | required: activities, transport | boolean_with_conditions | YES |
-| breakfast_available | hotels | required: hotels | boolean_with_conditions | YES |
-| cashless_payment | transport | agent-triggered: transport | boolean_with_conditions | PARTIAL |
-| charter_available | transport | agent-triggered: transport | boolean_with_conditions | PARTIAL |
-| child_friendly | attractions, activities | agent-triggered: attractions, activities | boolean_with_conditions | PARTIAL |
-| child_seat_available | transport | agent-triggered: transport | boolean_with_conditions | PARTIAL |
-| delivery_available | restaurants | agent-triggered: restaurants | boolean_with_conditions | PARTIAL |
-| dietary_options | restaurants | required: restaurants | multi_select | YES |
-| entry_fee_required | attractions | required: attractions | boolean_with_conditions | YES |
-| equipment_provided | activities | required: activities | boolean_with_conditions | YES |
-| family_room_available | hotels | agent-triggered: hotels | boolean_with_conditions | PARTIAL |
-| group_seating_available | restaurants | agent-triggered: restaurants | boolean_with_conditions | PARTIAL |
-| guide_available | activities | agent-triggered: activities | boolean_with_conditions | PARTIAL |
-| gym_available | hotels | agent-triggered: hotels | boolean_with_conditions | PARTIAL |
-| hiking_required | attractions | agent-triggered: attractions | boolean_with_conditions | PARTIAL |
-| kids_area | cafes | agent-triggered: cafes | boolean_with_conditions | PARTIAL |
-| luggage_supported | transport | required: transport | boolean_with_conditions | YES |
-| meal_available | cafes | agent-triggered: cafes | boolean_with_conditions | PARTIAL |
-| meeting_room_available | hotels | agent-triggered: hotels | boolean_with_conditions | PARTIAL |
-| onsite_restaurant | hotels | agent-triggered: hotels | boolean_with_conditions | PARTIAL |
-| outdoor_seating | cafes, restaurants | required: cafes, restaurants | boolean_with_conditions | YES |
-| parking | attractions, activities, hotels, cafes, restaurants | required: attractions, hotels, cafes, restaurants; agent-triggered: activities | boolean_with_conditions | PARTIAL |
-| pet_friendly | attractions, hotels, cafes, restaurants | required: attractions, hotels, cafes, restaurants | boolean_with_conditions | YES |
-| pet_transport_allowed | transport | agent-triggered: transport | boolean_with_conditions | PARTIAL |
-| physical_difficulty | activities | required: activities | select | YES |
-| price_level | activities, hotels, cafes, restaurants | required: activities, hotels, cafes, restaurants | select | YES |
-| pricing_model | transport | required: transport | select | YES |
-| private_group_available | activities | agent-triggered: activities | boolean_with_conditions | PARTIAL |
-| private_room_available | restaurants | agent-triggered: restaurants | boolean_with_conditions | PARTIAL |
-| religious_dress_code | attractions | agent-triggered: attractions | boolean_with_conditions | PARTIAL |
-| reservation_available | cafes, restaurants | required: restaurants; agent-triggered: cafes | boolean_with_conditions | PARTIAL |
-| service_scope | transport | required: transport | multi_select | YES |
-| setting_type | attractions | required: attractions | select | YES |
-| specialty_coffee | cafes | agent-triggered: cafes | boolean_with_conditions | PARTIAL |
-| swimming_allowed | attractions | agent-triggered: attractions | boolean_with_conditions | PARTIAL |
-| swimming_pool | hotels | required: hotels | boolean_with_conditions | YES |
-| toilet_available | attractions | required: attractions | boolean_with_conditions | YES |
-| typical_duration | activities | required: activities | number_with_unit | YES |
-| waterfront | attractions, cafes, hotels, restaurants | agent-triggered: attractions, cafes, hotels, restaurants | boolean_with_conditions | PARTIAL |
-| weather_dependent | activities | required: activities | boolean_with_conditions | YES |
-| wheelchair_accessible | attractions, activities, hotels, transport | required: attractions, hotels, transport; agent-triggered: activities | boolean_with_conditions | PARTIAL |
-| wifi_available | hotels, cafes | required: hotels, cafes | boolean_with_conditions | YES |
-| work_power_outlets | cafes | required: cafes | boolean_with_conditions | YES |
+| Excluded value | Reason | Storage compatibility | Homepage Signals availability |
+| --- | --- | --- | --- |
+| `category` | Legacy classification field, not curated taxonomy fact | Legacy stored values remain preserved | Not available |
+| `subtype` | Legacy classification field, not curated taxonomy fact | Legacy stored values remain preserved | Not available |
+| `tags` | Legacy classification field, not curated taxonomy fact | Legacy stored values remain preserved | Not available |
+| `custom.*` | Disabled for new canonical taxonomy | Legacy stored values remain preserved | Not available |
+| unknown/non-catalog observations | Guidance, `must_ask_question`, or Work Return additional notes only | Legacy observations remain preserved | Not available |
+| Event taxonomy | Taxonomy v1 is place-only | Event workflows remain separate | Not available |
 
 ## Runtime Acceptance Checklist
 
 Runtime acceptance status: PENDING
 
-| Category | Runtime fixture | Status |
-| --- | --- | --- |
-| attractions | representative place fixture | PENDING |
-| activities | representative place fixture | PENDING |
-| hotels | representative place fixture | PENDING |
-| cafes | representative place fixture | PENDING |
-| restaurants | representative place fixture | PENDING |
-| transport | representative place fixture | PENDING |
+| Category | Representative item ID | Field Pack generated | Assignment issued | Work Return accepted | confirmed_taxonomy_json verified | Backend review ingest verified | Approval/published storage verified | Candidate API filter verified | Admin Content Pool verified | CTA path verified | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| attractions | TBD | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| activities | TBD | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| hotels | TBD | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| cafes | TBD | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| restaurants | TBD | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| transport | TBD | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
 
 ## Static Acceptance Notes
 
-- `confirmed_taxonomy_json` is the collector-to-backend bridge marker.
-- `curated_taxonomy_json` is the backend approval bridge marker.
+- `confirmed_taxonomy_json` is the accepted snapshot taxonomy payload.
+- `review_contents.handoff_snapshot_json` is the backend review storage container.
+- `places.curated_taxonomy_json` is the published place destination.
 - `taxonomy_filters` is the internal homepage candidate/admin consumer marker.
 - No runtime evidence is claimed here.
 - No production source files are modified by this document.

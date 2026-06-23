@@ -4,7 +4,7 @@ Last Updated: 2026-06-22
 
 ## Current Branch
 
-- `feature/taxonomy-phase5a-closure-matrix`
+- `feature/taxonomy-v1-catalog`
 - Draft PR `#25` `Complete CTA and taxonomy pipeline`
 - implementation baseline commit: `372bb50`
 - CTA documentation baseline inherited from `1d08fb1`
@@ -53,14 +53,14 @@ Locked CTA rules:
 - Field Pack Agent catalog-awareness is implemented on `feature/taxonomy-v1-catalog`.
 - Backend curated taxonomy storage/filtering is implemented and automated-test verified.
 - Homepage Signals / Content Pool taxonomy integration is implemented and automated-test verified.
-- The static taxonomy closure matrix is implemented on `feature/taxonomy-phase5a-closure-matrix`.
+- The static taxonomy closure matrix is implemented as a completed static milestone on `feature/taxonomy-phase5a-closure-matrix`.
 - Runtime acceptance across representative fixtures remains pending.
 - The current taxonomy scaffold is now backed by a static end-to-end closure document.
 
 ## Confirmed Direction
 
 - CTA/contact milestone is already closed on `feature/taxonomy-catalog-resolver`.
-- Taxonomy v1 now continues on the active branch with runtime acceptance still pending.
+- Taxonomy v1 now continues on `feature/taxonomy-v1-catalog` with runtime acceptance still pending.
 - Real taxonomy categories for the current Taxonomy v1 branch are:
   - `attractions`
   - `activities`

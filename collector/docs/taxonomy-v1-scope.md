@@ -13,7 +13,7 @@ Implementation status:
 - Field Pack Agent category-aware catalog input is now implemented
 - backend curated taxonomy storage/filtering is implemented and automated-test verified
 - internal Homepage Signals / Content Pool filtering is implemented and automated-test verified
-- the static end-to-end closure matrix is implemented on `feature/taxonomy-phase5a-closure-matrix`
+- the static end-to-end closure matrix is implemented as a completed static milestone on `feature/taxonomy-phase5a-closure-matrix`
 - final merge remains blocked until runtime acceptance is proven across representative fixtures
 
 ## CTA Milestone Final Contract

@@ -4,7 +4,7 @@ Last Updated: 2026-06-22
 
 ## Active Branch
 
-`feature/taxonomy-phase5a-closure-matrix`
+`feature/taxonomy-v1-catalog`
 
 Draft PR:
 - `#25` `Complete CTA and taxonomy pipeline`
@@ -21,7 +21,7 @@ Status:
 - Field Pack Agent catalog-awareness implemented on `feature/taxonomy-v1-catalog`
 - backend curated taxonomy storage/filtering implemented and automated-test verified
 - Homepage Signals / Content Pool taxonomy integration implemented and automated-test verified
-- static taxonomy closure matrix implemented on `feature/taxonomy-phase5a-closure-matrix`
+- static taxonomy closure matrix implemented as a completed static milestone on `feature/taxonomy-phase5a-closure-matrix`
 - runtime acceptance across representative fixtures remains pending
 
 2026-06-22 runtime verification:
