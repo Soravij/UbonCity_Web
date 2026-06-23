@@ -64,6 +64,26 @@ function buildClientError(message, diagnostics = null) {
   return error;
 }
 
+function normalizePersistedJsonObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
+function parsePersistedJsonObject(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "object" && !Array.isArray(value)) return normalizePersistedJsonObject(value);
+  try {
+    const parsed = JSON.parse(String(value));
+    return normalizePersistedJsonObject(parsed);
+  } catch {
+    return null;
+  }
+}
+
 function sanitizeFileNameSegment(value, fallback = "media") {
   const normalized = String(value || "").trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-");
   return normalized.replace(/^-+|-+$/g, "") || fallback;
@@ -317,6 +337,7 @@ export function buildReviewContentInsertParams({
   sourceContentItemId,
   content,
   currentBatchUid,
+  handoffSnapshotJson = null,
 } = {}) {
   return [
     sourceSystem, sourceContentItemId, content.content_type, "pending_review", content.lang, content.category,
@@ -327,10 +348,32 @@ export function buildReviewContentInsertParams({
     content.transport_contact_details, content.transport_link_url, content.slug, content.slug ? 1 : 0,
     content.public_entity_type, content.public_entity_id, currentBatchUid,
     JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
+    handoffSnapshotJson == null ? null : JSON.stringify(handoffSnapshotJson),
   ];
 }
 
 export function buildReviewContentUpdateParams({
+  existing = null,
+  content,
+  rawContentPayload,
+  currentBatchUid,
+  reviewContentId,
+  handoffSnapshotJson = null,
+} = {}) {
+  const preservedCtaFields = mergeExistingReviewContentCtaFields(existing, content, rawContentPayload);
+  return [
+    content.lang, content.category, content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
+    content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url, content.google_place_id,
+    content.transport_subtype, content.transport_contact_name, content.transport_contact_phone, preservedCtaFields.phone, preservedCtaFields.line_url, preservedCtaFields.facebook_url, preservedCtaFields.website_url,
+    preservedCtaFields.primary_cta, content.tracking_entity_type, content.tracking_entity_id, content.transport_contact_details,
+    content.transport_link_url, content.slug, content.slug ? 1 : 0, content.public_entity_type, content.public_entity_id,
+    currentBatchUid, JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
+    handoffSnapshotJson == null ? null : JSON.stringify(handoffSnapshotJson),
+    reviewContentId,
+  ];
+}
+
+export function buildReviewContentUpdateParamsWithoutHandoff({
   existing = null,
   content,
   rawContentPayload,
@@ -485,16 +528,29 @@ export async function ingestReviewContent(payload, options = {}) {
   const uploadedFiles = Array.isArray(options?.uploadedFiles) ? options.uploadedFiles : [];
   const uploadedFileMap = buildUploadedFileMap(uploadedFiles, options?.mediaIndex || null);
   const multipartMode = Boolean(options?.multipart);
+  const trustedSnapshotSource = Boolean(options?.trustedSnapshotSource);
+  const reviewSourceKind = String(payload?.review_source_kind || "").trim().toLowerCase();
+  const isTrustedFieldReview = trustedSnapshotSource && reviewSourceKind === "field_accepted_binding";
   const currentBatchUid = crypto.randomUUID();
+  const shouldPersistHandoffSnapshot = isTrustedFieldReview;
 
   const [existingRows] = await pool.query(
-    `SELECT id, status, current_batch_uid
+    `SELECT id, status, current_batch_uid, handoff_snapshot_json
      FROM review_contents
      WHERE source_system=? AND source_content_item_id=? AND content_type=?
      LIMIT 1`,
     [sourceSystem, sourceContentItemId, content.content_type]
   );
   const existing = existingRows.length ? existingRows[0] : null;
+  const existingHandoffSnapshotJson = parsePersistedJsonObject(existing?.handoff_snapshot_json);
+  const incomingHandoffSnapshotJson = normalizePersistedJsonObject(payload?.handoff_snapshot_json);
+  let nextHandoffSnapshotJson = null;
+  if (shouldPersistHandoffSnapshot) {
+    if (!incomingHandoffSnapshotJson) {
+      throw new Error("handoff_snapshot_json is required for field review ingest");
+    }
+    nextHandoffSnapshotJson = incomingHandoffSnapshotJson;
+  }
 
   const connection = await pool.getConnection();
   const mirroredRows = [];
@@ -511,36 +567,58 @@ export async function ingestReviewContent(payload, options = {}) {
           google_place_id, transport_subtype, transport_contact_name, transport_contact_phone, phone, line_url, facebook_url, website_url, primary_cta,
           tracking_entity_type, tracking_entity_id,
           transport_contact_details, transport_link_url, slug, slug_locked, public_entity_type, public_entity_id,
-          current_batch_uid, review_payload_json
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          current_batch_uid, review_payload_json, handoff_snapshot_json
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         buildReviewContentInsertParams({
           sourceSystem,
           sourceContentItemId,
           content,
           currentBatchUid,
+          handoffSnapshotJson: nextHandoffSnapshotJson,
         })
       );
       reviewContentId = Number(insertResult.insertId || 0) || 0;
     } else {
       reviewContentId = Number(existing.id || 0) || 0;
       await cleanupUnpublishedBatchAssets(reviewContentId, existing.current_batch_uid, connection);
-      await connection.query(
-        `UPDATE review_contents
-         SET status='pending_review', lang=?, category=?, title=?, body=?, excerpt=?, meta_title=?, meta_description=?,
-             event_period_text=?, location_text=?, latitude=?, longitude=?, map_url=?, google_place_id=?,
-             transport_subtype=?, transport_contact_name=?, transport_contact_phone=?, phone=?, line_url=?, facebook_url=?, website_url=?, primary_cta=?,
-             tracking_entity_type=?, tracking_entity_id=?, transport_contact_details=?,
-             transport_link_url=?, slug=?, slug_locked=?, public_entity_type=?, public_entity_id=?,
-             current_batch_uid=?, review_payload_json=?, updated_at=CURRENT_TIMESTAMP
-         WHERE id=?`,
-        buildReviewContentUpdateParams({
-          existing,
-          content,
-          rawContentPayload,
-          currentBatchUid,
-          reviewContentId,
-        })
-      );
+      if (shouldPersistHandoffSnapshot) {
+        await connection.query(
+          `UPDATE review_contents
+           SET status='pending_review', lang=?, category=?, title=?, body=?, excerpt=?, meta_title=?, meta_description=?,
+               event_period_text=?, location_text=?, latitude=?, longitude=?, map_url=?, google_place_id=?,
+               transport_subtype=?, transport_contact_name=?, transport_contact_phone=?, phone=?, line_url=?, facebook_url=?, website_url=?, primary_cta=?,
+               tracking_entity_type=?, tracking_entity_id=?, transport_contact_details=?,
+               transport_link_url=?, slug=?, slug_locked=?, public_entity_type=?, public_entity_id=?,
+               current_batch_uid=?, review_payload_json=?, handoff_snapshot_json=?, updated_at=CURRENT_TIMESTAMP
+           WHERE id=?`,
+          buildReviewContentUpdateParams({
+            existing,
+            content,
+            rawContentPayload,
+            currentBatchUid,
+            reviewContentId,
+            handoffSnapshotJson: nextHandoffSnapshotJson,
+          })
+        );
+      } else {
+        await connection.query(
+          `UPDATE review_contents
+           SET status='pending_review', lang=?, category=?, title=?, body=?, excerpt=?, meta_title=?, meta_description=?,
+               event_period_text=?, location_text=?, latitude=?, longitude=?, map_url=?, google_place_id=?,
+               transport_subtype=?, transport_contact_name=?, transport_contact_phone=?, phone=?, line_url=?, facebook_url=?, website_url=?, primary_cta=?,
+               tracking_entity_type=?, tracking_entity_id=?, transport_contact_details=?,
+               transport_link_url=?, slug=?, slug_locked=?, public_entity_type=?, public_entity_id=?,
+               current_batch_uid=?, review_payload_json=?, updated_at=CURRENT_TIMESTAMP
+           WHERE id=?`,
+          buildReviewContentUpdateParamsWithoutHandoff({
+            existing,
+            content,
+            rawContentPayload,
+            currentBatchUid,
+            reviewContentId,
+          })
+        );
+      }
     }
 
     for (const mediaRow of mediaQueue) {

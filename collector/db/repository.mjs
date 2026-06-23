@@ -9731,6 +9731,81 @@ function normalizeStateValue(value, stateGroup) {
     };
   }
 
+  function buildAcceptedFieldReviewSnapshotByItem(contentItemId) {
+    const itemId = Number(contentItemId || 0) || 0;
+    if (!itemId) return null;
+    const item = getItem(itemId);
+    if (!item) return null;
+    const assignment = listAssignmentsByItem(itemId)
+      .filter((row) => String(row?.assignment_kind || "").trim().toLowerCase() === "field")
+      .filter((row) => String(row?.accepted_binding_status || "").trim().toLowerCase() === "pinned")
+      .sort((a, b) => {
+        const aAcceptedAt = Date.parse(String(a?.accepted_at || "")) || 0;
+        const bAcceptedAt = Date.parse(String(b?.accepted_at || "")) || 0;
+        if (bAcceptedAt !== aAcceptedAt) return bAcceptedAt - aAcceptedAt;
+        return Number(b?.id || 0) - Number(a?.id || 0);
+      })[0] || null;
+    if (!assignment) return null;
+
+    const acceptedHandoffSnapshotId = Number(assignment.accepted_handoff_snapshot_id || 0) || 0;
+    const acceptedSubmissionId = Number(assignment.accepted_submission_id || 0) || 0;
+    if (!acceptedHandoffSnapshotId || !acceptedSubmissionId) return null;
+
+    const handoffSnapshot = normalizeAssignmentHandoffRow(assignmentHandoffByIdStmt.get(acceptedHandoffSnapshotId));
+    const submission = getAssignmentSubmissionById(acceptedSubmissionId);
+    if (!handoffSnapshot || !submission) return null;
+    if (Number(handoffSnapshot.assignment_id || 0) !== Number(assignment.id || 0)) return null;
+    if (Number(handoffSnapshot.content_item_id || 0) !== itemId) return null;
+    if (Number(submission.assignment_id || 0) !== Number(assignment.id || 0)) return null;
+    if (Number(submission.content_item_id || 0) !== itemId) return null;
+    if (Number(submission.source_handoff_snapshot_id || 0) !== acceptedHandoffSnapshotId) return null;
+
+    const latestDraft = latestDraftByItem(itemId) || {};
+    const confirmedCtaContact = normalizeConfirmedCtaContactJson(latestDraft.confirmed_cta_contact_json);
+    const confirmedTaxonomy = normalizeConfirmedTaxonomyJson(latestDraft.confirmed_taxonomy_json);
+    const requestedCheckSchemaMap = buildRequestedCheckSchemaMapFromHandoffPackage(handoffSnapshot.handoff_package_json);
+    const workerTaxonomyReturn = normalizeFieldReturnTaxonomyJson(
+      submission.field_return_payload_json?.taxonomy_return,
+      "field_return_payload_json.taxonomy_return"
+    );
+    const requestedCheckReturns = submission.field_return_payload_json?.requested_check_returns
+      && typeof submission.field_return_payload_json.requested_check_returns === "object"
+      ? Object.entries(submission.field_return_payload_json.requested_check_returns).reduce((acc, [key, entry]) => {
+        const normalizedKey = String(key || "").trim().toLowerCase();
+        if (!normalizedKey) return acc;
+        const normalizedEntry = JSON.parse(JSON.stringify(entry || {}));
+        normalizedEntry.status = inferRequestedCheckReturnStatus(normalizedEntry, requestedCheckSchemaMap.get(normalizedKey) || null);
+        acc[normalizedKey] = normalizedEntry;
+        return acc;
+      }, {})
+      : {};
+
+    return {
+      version: 1,
+      source_kind: "accepted_field_binding",
+      content_item_id: itemId,
+      content_type: String(item.type || "").trim().toLowerCase() || null,
+      assignment_id: Number(assignment.id || 0) || null,
+      assignment_kind: "field",
+      accepted_binding_status: "pinned",
+      accepted_handoff_snapshot_id: acceptedHandoffSnapshotId,
+      accepted_submission_id: acceptedSubmissionId,
+      accepted_at: String(assignment.accepted_at || "").trim() || null,
+      revision_round: Number(assignment.revision_round || 0) || 0,
+      requested_check_returns: requestedCheckReturns,
+      field_return_payload_json: {
+        taxonomy_return: workerTaxonomyReturn,
+        requested_check_returns: requestedCheckReturns,
+      },
+      confirmed_cta_contact_json: confirmedCtaContact,
+      confirmed_taxonomy_json: confirmedTaxonomy,
+      taxonomy_signals: {
+        taxonomy_return: workerTaxonomyReturn,
+        confirmed_taxonomy_json: confirmedTaxonomy,
+      },
+    };
+  }
+
   function createAssignmentFromReadiness(
     contentItemId,
     payload = {},
@@ -13067,6 +13142,7 @@ function normalizeStateValue(value, stateGroup) {
     buildAssignmentHandoffPreview,
     buildPublishableSourceByItem,
     buildFieldReturnEvidenceByItem,
+    buildAcceptedFieldReviewSnapshotByItem,
     buildGovernanceSummaryByItem,
     updateAssignmentState,
     updateAssignmentMediaResetPolicy,

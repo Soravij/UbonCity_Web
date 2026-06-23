@@ -71,7 +71,7 @@ import {
   buildFieldPackUpdatePayloadFromAgent,
   mergeConfirmedDraftMetadata,
 } from "./endpoint-schema-mapping.mjs";
-import { buildReviewIngestContentPayload } from "./review-ingest-mapping.mjs";
+import { buildReviewIngestContentPayload, resolveReviewIngestPayloadSourceContext } from "./review-ingest-mapping.mjs";
 
 const ARTICLE_AGENT_KEY = "article_agent";
 const DEFAULT_ARTICLE_AGENT_PROFILE = [
@@ -4969,6 +4969,9 @@ function buildReviewIngestPayload(options = {}) {
     .filter((t) => isTranslationRecheckPassed(t, currentSourceFingerprint))
     .map((t) => String(t.lang || "").trim().toLowerCase())
     .filter(Boolean);
+  const reviewIngestSource = resolveReviewIngestPayloadSourceContext({ repo, contentItemId, contentType });
+  const handoffSnapshotJson = reviewIngestSource.handoff_snapshot_json;
+  const reviewSourceKind = reviewIngestSource.review_source_kind;
 
   if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
     if (unresolvedCollectorUploadUrls.length > 0) {
@@ -4995,6 +4998,8 @@ function buildReviewIngestPayload(options = {}) {
     source_system: "collector-app",
     source_content_item_id: contentItemId,
     source_base_url: sourceBaseUrl,
+    review_source_kind: reviewSourceKind,
+    handoff_snapshot_json: handoffSnapshotJson,
     content: {
       ...buildReviewIngestContentPayload({
         contentType,
