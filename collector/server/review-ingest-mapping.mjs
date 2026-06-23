@@ -97,6 +97,21 @@ export function resolveReviewIngestSourceContext({
   throw new Error("editorial review assignment is required before admin review");
 }
 
+export function resolveReviewIngestPayloadSourceContext({
+  repo = null,
+  contentItemId = 0,
+  contentType = "place",
+} = {}) {
+  const normalizedContentType = String(contentType || "").trim().toLowerCase() === "event" ? "event" : "place";
+  if (normalizedContentType === "event") {
+    return {
+      review_source_kind: "event_editorial_queue",
+      handoff_snapshot_json: null,
+    };
+  }
+  return resolveReviewIngestSourceContext({ repo, contentItemId });
+}
+
 export function buildReviewIngestContentPayload({
   contentType = "place",
   sourceLang = "th",

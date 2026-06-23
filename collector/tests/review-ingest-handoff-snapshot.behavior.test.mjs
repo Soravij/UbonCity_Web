@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
-import { resolveReviewIngestSourceContext } from "../server/review-ingest-mapping.mjs";
+import { resolveReviewIngestPayloadSourceContext, resolveReviewIngestSourceContext } from "../server/review-ingest-mapping.mjs";
 
 function createContext() {
   const db = openDatabase(":memory:", "D:/UbonCity_Web/collector/database/schema.sql");
@@ -27,6 +27,18 @@ function createContext() {
     return repo.createItemWithWorkflowHead({
       type: "place",
       category: "attractions",
+      title,
+      description_raw: `${title} raw`,
+      source_type: "manual",
+      source_name: "manual",
+      source_url: `https://${title.toLowerCase().replace(/\s+/g, "-")}.example.com`,
+    }).item;
+  }
+
+  function createEventItem(title) {
+    return repo.createItemWithWorkflowHead({
+      type: "event",
+      category: "event",
       title,
       description_raw: `${title} raw`,
       source_type: "manual",
@@ -178,6 +190,7 @@ function createContext() {
     cleanup,
     createUser,
     createItem,
+    createEventItem,
     createAcceptedFieldAssignment,
     createEditorialAssignment,
     createLegacyUnpinnedFieldAssignment,
@@ -309,6 +322,24 @@ test("review ingest provenance resolves field snapshot, editorial null, and bloc
       () => resolveReviewIngestSourceContext({ repo: ctx.repo, contentItemId: blockedItem.id }),
       /pinned accepted field assignment is required before admin review/
     );
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("event review ingest provenance resolves to event queue without assignments", () => {
+  const ctx = createContext();
+  try {
+    const eventItem = ctx.createEventItem("Event Queue Item");
+
+    const eventSource = resolveReviewIngestPayloadSourceContext({
+      repo: ctx.repo,
+      contentItemId: eventItem.id,
+      contentType: "event",
+    });
+
+    assert.equal(eventSource.review_source_kind, "event_editorial_queue");
+    assert.equal(eventSource.handoff_snapshot_json, null);
   } finally {
     ctx.cleanup();
   }
