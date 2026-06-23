@@ -6,6 +6,7 @@ import {
   searchHomepageCurationCandidates,
   updateHomepageCurationDraft,
 } from "../services/homepageCurationService.js";
+import { getTaxonomyV1KeyList } from "../constants/taxonomyCatalog.js";
 
 function getActorId(req) {
   const id = Number(req.user?.id || 0);
@@ -108,6 +109,18 @@ export async function searchHomepageCurationCandidatesHandler(req, res, deps = {
   } catch (error) {
     console.error("Failed to search homepage curation candidates:", error);
     res.status(500).json({ error: "Failed to search homepage curation candidates" });
+  }
+}
+
+export async function getHomepageCurationTaxonomyOptionsHandler(req, res) {
+  try {
+    const items = getTaxonomyV1KeyList()
+      .map((key) => ({ key }))
+      .sort((a, b) => String(a.key).localeCompare(String(b.key)));
+    res.json({ items });
+  } catch (error) {
+    console.error("Failed to load homepage curation taxonomy options:", error);
+    res.status(500).json({ error: "Failed to load homepage curation taxonomy options" });
   }
 }
 

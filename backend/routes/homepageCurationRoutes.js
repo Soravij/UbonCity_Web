@@ -2,6 +2,7 @@ import express from "express";
 import {
   getHomepageCurationLayoutHandler,
   getPublishedHomepageLayoutHandler,
+  getHomepageCurationTaxonomyOptionsHandler,
   previewHomepageCurationLayoutHandler,
   publishHomepageCurationLayoutHandler,
   searchHomepageCurationCandidatesHandler,
@@ -13,6 +14,7 @@ const router = express.Router();
 
 router.get("/homepage-layout", getPublishedHomepageLayoutHandler);
 router.get("/homepage-curation/layout", protect, authorizeAdmin, getHomepageCurationLayoutHandler);
+router.get("/homepage-curation/taxonomy-options", protect, authorizeAdmin, getHomepageCurationTaxonomyOptionsHandler);
 router.get("/homepage-curation/candidates", protect, authorizeAdmin, searchHomepageCurationCandidatesHandler);
 router.post("/homepage-curation/preview", protect, authorizeAdmin, previewHomepageCurationLayoutHandler);
 router.put("/homepage-curation/layout", protect, authorizeAdmin, updateHomepageCurationLayoutHandler);

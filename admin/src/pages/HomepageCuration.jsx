@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, authHeaders } from "../api/api";
+import {
+  buildTaxonomyFilters,
+  createTaxonomyFilterRow,
+  hasMeaningfulTaxonomyFilterRow,
+  formatTaxonomyValue,
+} from "../utils/homepageTaxonomyFilters.js";
 
 const LANGUAGE_OPTIONS = [
   { value: "th", label: "ไทย" },
@@ -227,6 +233,50 @@ function createCandidateState(entityType = "place") {
   };
 }
 
+function isPlainObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function formatTaxonomyKeyLabel(key) {
+  return String(key || "")
+    .trim()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function summarizeTaxonomyFacts(taxonomy, limit = 6) {
+  if (!isPlainObject(taxonomy)) return [];
+  return Object.entries(taxonomy)
+    .slice(0, limit)
+    .map(([key, value]) => `${key}: ${formatTaxonomyValue(value)}`);
+}
+
+function getTaxonomyFilterErrorMessage(error) {
+  const normalized = String(error || "").trim();
+  switch (normalized) {
+    case "Select a taxonomy key":
+      return "กรุณาเลือกข้อมูล Taxonomy";
+    case "Unsupported taxonomy key":
+      return "ข้อมูล Taxonomy นี้ไม่รองรับ";
+    case "Duplicate taxonomy key":
+      return "ข้อมูล Taxonomy ซ้ำ";
+    case "Missing taxonomy value":
+      return "กรุณากรอกค่า Taxonomy";
+    case "Invalid boolean value":
+      return "ค่าบูลีนไม่ถูกต้อง";
+    case "Invalid number value":
+      return "ค่าตัวเลขไม่ถูกต้อง";
+    case "Invalid list value":
+      return "ค่ารายการไม่ถูกต้อง";
+    case "Invalid string value":
+      return "กรุณากรอกค่า Taxonomy";
+    default:
+      return normalized ? "ตัวกรอง Taxonomy ไม่ถูกต้อง" : "";
+  }
+}
+
 function getDefaultCandidateEntityType(block) {
   return isEventBlock(block) ? "event" : "place";
 }
@@ -253,6 +303,11 @@ export default function HomepageCuration({ token }) {
   const [candidateByBlock, setCandidateByBlock] = useState({});
   const [previewBlocks, setPreviewBlocks] = useState([]);
   const [poolState, setPoolState] = useState(createCandidateState("place"));
+  const [poolTaxonomyRows, setPoolTaxonomyRows] = useState([]);
+  const [taxonomyOptions, setTaxonomyOptions] = useState([]);
+  const [taxonomyOptionsLoaded, setTaxonomyOptionsLoaded] = useState(false);
+  const [taxonomyOptionsLoading, setTaxonomyOptionsLoading] = useState(false);
+  const [taxonomyOptionsError, setTaxonomyOptionsError] = useState("");
   const [poolTargetBlockKey, setPoolTargetBlockKey] = useState("");
   const previewRequestSeq = useRef(0);
 
@@ -261,6 +316,11 @@ export default function HomepageCuration({ token }) {
   const publishedBlockCount = useMemo(
     () => (Array.isArray(layoutMeta?.published_blocks) ? layoutMeta.published_blocks.length : 0),
     [layoutMeta]
+  );
+
+  const taxonomyOptionKeys = useMemo(
+    () => taxonomyOptions.map((option) => String(option?.key || "").trim().toLowerCase()).filter(Boolean),
+    [taxonomyOptions]
   );
 
   const eligiblePoolBlocks = useMemo(
@@ -307,6 +367,48 @@ export default function HomepageCuration({ token }) {
       setLoading(false);
     }
   }, [lang, resetCandidateState, token]);
+
+  const loadTaxonomyOptions = useCallback(async () => {
+    if (taxonomyOptionsLoading || taxonomyOptionsLoaded) {
+      return {
+        ok: true,
+        keys: taxonomyOptionKeys,
+      };
+    }
+    setTaxonomyOptionsLoading(true);
+    setTaxonomyOptionsError("");
+    try {
+      const res = await api.get("/homepage-curation/taxonomy-options", {
+        headers: authHeaders(token),
+      });
+      const items = Array.isArray(res.data?.items) ? res.data.items : [];
+      setTaxonomyOptions(
+        items
+          .map((item) => {
+            const key = String(item?.key || "").trim().toLowerCase();
+            if (!key) return null;
+            return {
+              key,
+              label: formatTaxonomyKeyLabel(key),
+            };
+          })
+          .filter(Boolean)
+      );
+      setTaxonomyOptionsLoaded(true);
+      return {
+        ok: true,
+        keys: items
+          .map((item) => String(item?.key || "").trim().toLowerCase())
+          .filter(Boolean),
+      };
+    } catch (error) {
+      const message = error.response?.data?.error || "ไม่สามารถโหลดตัวเลือก taxonomy";
+      setTaxonomyOptionsError(message);
+      return { ok: false, error: message };
+    } finally {
+      setTaxonomyOptionsLoading(false);
+    }
+  }, [taxonomyOptionKeys, taxonomyOptionsLoaded, taxonomyOptionsLoading, token]);
 
   useEffect(() => {
     loadLayout(lang);
@@ -468,6 +570,23 @@ export default function HomepageCuration({ token }) {
     }));
   }
 
+  function addPoolTaxonomyRow() {
+    setPoolTaxonomyRows((current) => [...current, createTaxonomyFilterRow()]);
+    if (String(poolState.entity_type || "").trim().toLowerCase() === "place" && !taxonomyOptionsLoaded && !taxonomyOptionsLoading) {
+      void loadTaxonomyOptions();
+    }
+  }
+
+  function updatePoolTaxonomyRow(rowIndex, patch) {
+    setPoolTaxonomyRows((current) =>
+      current.map((row, index) => (index === rowIndex ? { ...row, ...patch } : row))
+    );
+  }
+
+  function removePoolTaxonomyRow(rowIndex) {
+    setPoolTaxonomyRows((current) => current.filter((_, index) => index !== rowIndex));
+  }
+
   async function searchCandidates(block) {
     const key = String(block?.key || "");
     const state = candidateByBlock[key] || createCandidateState(getDefaultCandidateEntityType(block));
@@ -495,6 +614,39 @@ export default function HomepageCuration({ token }) {
   }
 
   async function searchPoolCandidates() {
+    const normalizedEntityType = String(poolState.entity_type || "place").trim().toLowerCase();
+    let allowedTaxonomyKeys = taxonomyOptionKeys;
+    const meaningfulTaxonomyRows = normalizedEntityType === "place"
+      ? poolTaxonomyRows.filter((row) => hasMeaningfulTaxonomyFilterRow(row))
+      : [];
+
+    if (normalizedEntityType === "place" && meaningfulTaxonomyRows.length > 0 && !taxonomyOptionsLoaded) {
+      const loadResult = await loadTaxonomyOptions();
+      if (!loadResult.ok) {
+        setPoolState((current) => ({
+          ...current,
+          loading: false,
+          error: loadResult.error || "ไม่สามารถโหลดตัวเลือก taxonomy",
+        }));
+        return;
+      }
+      allowedTaxonomyKeys = Array.isArray(loadResult.keys) && loadResult.keys.length ? loadResult.keys : taxonomyOptionKeys;
+    }
+
+    let taxonomyFilters = null;
+    if (normalizedEntityType === "place" && poolTaxonomyRows.length) {
+      const built = buildTaxonomyFilters(poolTaxonomyRows, allowedTaxonomyKeys);
+      if (built.error) {
+        setPoolState((current) => ({
+          ...current,
+          loading: false,
+          error: getTaxonomyFilterErrorMessage(built.error),
+        }));
+        return;
+      }
+      taxonomyFilters = built.filters;
+    }
+
     setPoolState((current) => ({
       ...current,
       loading: true,
@@ -504,10 +656,11 @@ export default function HomepageCuration({ token }) {
     try {
       const res = await api.get("/homepage-curation/candidates", {
         params: {
-          entity_type: poolState.entity_type,
+          entity_type: normalizedEntityType,
           lang,
           q: poolState.q,
           limit: 20,
+          ...(taxonomyFilters ? { taxonomy_filters: JSON.stringify(taxonomyFilters) } : {}),
         },
         headers: authHeaders(token),
       });
@@ -1030,6 +1183,96 @@ export default function HomepageCuration({ token }) {
                 </label>
               </div>
 
+              {poolState.entity_type === "place" ? (
+                <div className="homepage-curation-rule-panel">
+                  <div className="card-title-row">
+                    <h4>ตัวกรอง Taxonomy</h4>
+                    <div className="actions">
+                      {poolTaxonomyRows.length ? (
+                        <button type="button" className="ghost tiny-btn" onClick={() => setPoolTaxonomyRows([])}>
+                          ล้างตัวกรองทั้งหมด
+                        </button>
+                      ) : null}
+                      <button type="button" className="ghost tiny-btn" onClick={addPoolTaxonomyRow}>
+                        เพิ่มตัวกรอง Taxonomy
+                      </button>
+                    </div>
+                  </div>
+                  <p className="muted">
+                    ตัวกรอง Taxonomy ใช้กับสถานที่เท่านั้น
+                  </p>
+                  {taxonomyOptionsLoading ? <p className="muted">กำลังโหลดตัวเลือก Taxonomy...</p> : null}
+                  {taxonomyOptionsError ? <p className="status">{taxonomyOptionsError}</p> : null}
+
+                  {poolTaxonomyRows.length ? (
+                    <div className="homepage-curation-manual-list">
+                      {poolTaxonomyRows.map((row, rowIndex) => (
+                        <div key={`taxonomy-filter-${rowIndex}`} className="homepage-curation-manual-row">
+                          <label>
+                            ข้อมูล Taxonomy
+                            <select value={row.key} onChange={(event) => updatePoolTaxonomyRow(rowIndex, { key: event.target.value })}>
+                              <option value="">เลือกข้อมูล Taxonomy</option>
+                              {taxonomyOptions.map((option) => (
+                                <option key={option.key} value={option.key}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            ชนิดค่า
+                            <select
+                              value={row.value_type}
+                              onChange={(event) => updatePoolTaxonomyRow(rowIndex, { value_type: event.target.value, value: "" })}
+                            >
+                              <option value="string">String</option>
+                              <option value="boolean">Boolean</option>
+                              <option value="number">Number</option>
+                              <option value="list">List</option>
+                            </select>
+                          </label>
+                          <label className="full">
+                            ค่า
+                            {row.value_type === "boolean" ? (
+                              <select
+                                value={String(row.value ?? "")}
+                                onChange={(event) => updatePoolTaxonomyRow(rowIndex, { value: event.target.value })}
+                              >
+                                <option value="">เลือกค่า</option>
+                                <option value="true">true</option>
+                                <option value="false">false</option>
+                              </select>
+                            ) : row.value_type === "number" ? (
+                              <input
+                                type="number"
+                                step="any"
+                                value={String(row.value ?? "")}
+                                onChange={(event) => updatePoolTaxonomyRow(rowIndex, { value: event.target.value })}
+                              />
+                            ) : (
+                              <input
+                                value={String(row.value ?? "")}
+                                onChange={(event) => updatePoolTaxonomyRow(rowIndex, { value: event.target.value })}
+                                placeholder={row.value_type === "list" ? "city, airport" : "Type value"}
+                              />
+                            )}
+                          </label>
+                          <div className="actions">
+                            <button type="button" className="danger tiny-btn" onClick={() => removePoolTaxonomyRow(rowIndex)}>
+                              ลบ
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted">ยังไม่มีตัวกรอง Taxonomy</p>
+                  )}
+                </div>
+              ) : (
+                <p className="muted">ตัวกรอง Taxonomy ใช้กับสถานที่เท่านั้น</p>
+              )}
+
               <div className="actions">
                 <button type="button" className="ghost" onClick={searchPoolCandidates} disabled={poolState.loading}>
                   {poolState.loading ? "กำลังค้นหา..." : "ค้นหารายการ"}
@@ -1047,6 +1290,7 @@ export default function HomepageCuration({ token }) {
                 {poolState.items.map((candidate) => {
                   const selectedBlock = blocks.find((block) => block.key === poolTargetBlockKey);
                   const canUseInBlock = canUseCandidateInBlock(selectedBlock, candidate.entity_type);
+                  const taxonomyFacts = candidate.entity_type === "place" ? summarizeTaxonomyFacts(candidate.curated_taxonomy_json) : [];
 
                   return (
                     <div key={`pool-${candidate.entity_type}-${candidate.id}`} className="homepage-curation-manual-row">
@@ -1057,6 +1301,11 @@ export default function HomepageCuration({ token }) {
                           {candidate.category ? ` | ${candidate.category}` : ""}
                           {candidate.slug ? ` | รหัส: ${candidate.slug}` : ""}
                         </p>
+                        {taxonomyFacts.length ? (
+                          <p className="muted">
+                            {taxonomyFacts.join(" · ")}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="actions">
                         <button type="button" className="ghost tiny-btn" onClick={() => addPoolCandidateToBlock(candidate)} disabled={!canUseInBlock}>
