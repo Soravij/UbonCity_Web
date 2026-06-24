@@ -102,6 +102,15 @@ test("viewport coordinates work when place-pin coordinates are absent", async ()
   assert.equal(row.normalized_json.longitude, 105.222);
 });
 
+test("zero coordinates survive the full manual adapter normalize path", async () => {
+  const url = "https://www.google.com/maps/place/Test/@0,0,12z/data=!3m1!1e3!3d0!4d0";
+  const row = await collectOne(url, async (requestUrl) => createMockResponse({ url: requestUrl }));
+
+  assert.equal(row.normalized_json.latitude, 0);
+  assert.equal(row.normalized_json.longitude, 0);
+  assert.equal(row.normalized_json.map_url, url);
+});
+
 test("q query coordinates work", async () => {
   const url = "https://www.google.com/maps/search/?q=14.4422717,105.2741437";
   const row = await collectOne(url, async (requestUrl) => createMockResponse({ url: requestUrl }));
@@ -170,6 +179,23 @@ test("reliable fetched metadata title wins over decoded URL fallback", async () 
   assert.equal(row.normalized_json.title, "Fetched Title");
 });
 
+test("explicit title equal to decoded place title is preserved even with fetched metadata", async () => {
+  const decodedTitle = "น้ำตกห้วยหลวง ภูจองนายอย";
+  const row = await withFetchMock(
+    async (requestUrl) =>
+      createMockResponse({
+        url: requestUrl,
+        html: "<html><head><title>Different Fetched Title</title></head><body></body></html>",
+      }),
+    async () => {
+      const [result] = await collectFromManualPayload([{ source_url: SAMPLE_URL, title: decodedTitle }]);
+      return result;
+    }
+  );
+
+  assert.equal(row.normalized_json.title, decodedTitle);
+});
+
 test("generic fetched Google Maps title falls back to decoded place title", async () => {
   const row = await collectOne(SAMPLE_URL, async (requestUrl) =>
     createMockResponse({
@@ -188,6 +214,22 @@ test("malformed percent encoding in place title does not throw", async () => {
   assert.equal(row.normalized_json.map_url, url);
   assert.equal(row.normalized_json.latitude, 14.111);
   assert.equal(row.normalized_json.longitude, 105.222);
+});
+
+test("non-http Google Maps schemes are rejected", async () => {
+  const urls = [
+    "ftp://google.com/maps/place/Test/@14.1,105.2",
+    "file://google.com/maps/place/Test/@14.1,105.2",
+    "javascript://google.com/maps/place/Test/@14.1,105.2",
+    "data://google.com/maps/place/Test/@14.1,105.2",
+    "custom://google.com/maps/place/Test/@14.1,105.2",
+  ];
+  for (const url of urls) {
+    const row = await collectOne(url, async (requestUrl) => createMockResponse({ url: requestUrl }));
+    assert.equal(row.normalized_json.map_url, "");
+    assert.equal(row.normalized_json.latitude, null);
+    assert.equal(row.normalized_json.longitude, null);
+  }
 });
 
 test("fetch failure still preserves parsed coordinates and map_url", async () => {
@@ -249,6 +291,22 @@ test("supported Maps hosts reject unrelated Google and non-Maps URLs", async () 
     assert.equal(row.normalized_json.latitude, null);
     assert.equal(row.normalized_json.longitude, null);
   }
+});
+
+test("legacy generated host-path placeholder behavior remains compatible", async () => {
+  const row = await withFetchMock(
+    async (requestUrl) =>
+      createMockResponse({
+        url: requestUrl,
+        html: "<html><head><title>Fetched Title</title></head><body></body></html>",
+      }),
+    async () => {
+      const [result] = await collectFromManualPayload([{ source_url: "https://example.com/manual/page", title: "example.com/manual/page" }]);
+      return result;
+    }
+  );
+
+  assert.equal(row.normalized_json.title, "Fetched Title");
 });
 
 test("outer timeout fallback preserves locally parsed coordinates and map_url", async () => {

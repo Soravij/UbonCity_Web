@@ -1516,6 +1516,7 @@ const MERGE_GOOGLE_MAPS_HOSTS = new Set([
 function isRecognizedMergeGoogleMapsUrl(value) {
   try {
     const parsed = new URL(String(value || "").trim());
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
     const host = String(parsed.hostname || "").replace(/^www\./i, "").toLowerCase();
     const path = String(parsed.pathname || "");
     if (!MERGE_GOOGLE_MAPS_HOSTS.has(host)) return false;

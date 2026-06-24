@@ -207,6 +207,7 @@ const GOOGLE_MAPS_HOSTS = new Set([
 function getRecognizedGoogleMapsKind(value) {
   try {
     const parsed = new URL(toText(value));
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
     const host = toHostLabel(parsed.hostname).toLowerCase();
     const path = String(parsed.pathname || "");
     if (!GOOGLE_MAPS_HOSTS.has(host)) return "";
@@ -316,6 +317,10 @@ function selectManualGoogleMapsDetails(...values) {
 function buildFallbackTitle(sourceUrl) {
   const googleMapsTitle = extractGoogleMapsPlaceTitle(sourceUrl);
   if (googleMapsTitle) return googleMapsTitle;
+  return buildLegacyFallbackTitle(sourceUrl);
+}
+
+function buildLegacyFallbackTitle(sourceUrl) {
   try {
     const parsed = new URL(sourceUrl);
     const host = toHostLabel(parsed.hostname);
@@ -337,7 +342,7 @@ function deriveHostName(value) {
 function isGeneratedManualTitle(value, sourceUrl) {
   const text = toText(value);
   if (!text) return false;
-  return text === buildFallbackTitle(sourceUrl);
+  return text === buildLegacyFallbackTitle(sourceUrl);
 }
 
 function isGeneratedManualDescription(value) {

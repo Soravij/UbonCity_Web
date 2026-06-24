@@ -440,6 +440,43 @@ test("existing coordinate and map_url policy stays conservative and independent"
   }
 });
 
+test("non-http Google Maps source URLs do not backfill coordinates or map_url in merge path", () => {
+  const urls = [
+    "ftp://google.com/maps/place/Test/@14.1,105.2",
+    "file://google.com/maps/place/Test/@14.1,105.2",
+    "javascript://google.com/maps/place/Test/@14.1,105.2",
+    "data://google.com/maps/place/Test/@14.1,105.2",
+    "custom://google.com/maps/place/Test/@14.1,105.2",
+  ];
+
+  for (const mapUrl of urls) {
+    const result = executeScenario({
+      case_id: `non-http-${mapUrl.split(":")[0]}`,
+      mode: "merge",
+      initial_item: {
+        title: "Non-http title",
+        description_raw: "Non-http raw",
+        description_clean: "Non-http clean",
+        category: "attractions",
+        source_url: buildSourceUrl("non-http"),
+        latitude: null,
+        longitude: null,
+        map_url: "",
+        tags: ["keep", "this"],
+      },
+      source: {
+        submittedUrl: mapUrl,
+        fetchedUrl: mapUrl,
+        mapUrl,
+      },
+    });
+
+    assert.equal(result.after1?.item?.latitude ?? null, null);
+    assert.equal(result.after1?.item?.longitude ?? null, null);
+    assert.equal(result.after1?.item?.map_url ?? "", "");
+  }
+});
+
 test("existing stored coordinate presence is trim-aware and never mixes partial pairs", () => {
   const cases = [
     {
