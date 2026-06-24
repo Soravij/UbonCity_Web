@@ -195,7 +195,127 @@ function toHostLabel(value) {
   return toText(value).replace(/^www\./i, "");
 }
 
+const GOOGLE_MAPS_HOSTS = new Set([
+  "google.com",
+  "google.co.th",
+  "maps.google.com",
+  "maps.google.co.th",
+  "maps.app.goo.gl",
+  "goo.gl",
+]);
+
+function getRecognizedGoogleMapsKind(value) {
+  try {
+    const parsed = new URL(toText(value));
+    const host = toHostLabel(parsed.hostname).toLowerCase();
+    const path = String(parsed.pathname || "");
+    if (!GOOGLE_MAPS_HOSTS.has(host)) return "";
+    if ((host === "google.com" || host === "google.co.th") && !/^\/maps(?:\/|$)/i.test(path)) return "";
+    if (host === "goo.gl" && !/^\/maps(?:\/|$)/i.test(path)) return "";
+    return host;
+  } catch {
+    return "";
+  }
+}
+
+function isRecognizedGoogleMapsUrl(value) {
+  return Boolean(getRecognizedGoogleMapsKind(value));
+}
+
+function extractGoogleMapsPlaceTitle(value) {
+  try {
+    const parsed = new URL(toText(value));
+    if (!isRecognizedGoogleMapsUrl(parsed.toString())) return "";
+    const match = String(parsed.pathname || "").match(/\/maps\/place\/([^/?#]+)/i);
+    if (!match?.[1]) return "";
+    return safeDecodeURIComponent(String(match[1]).replace(/\+/g, " ")).trim();
+  } catch {
+    return "";
+  }
+}
+
+function parseGoogleMapsCoordinatePair(value) {
+  const text = toText(value);
+  const match = text.match(/^\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*$/);
+  if (!match) return { matched: false, value: null };
+  const latitude = Number(match[1]);
+  const longitude = Number(match[2]);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return { matched: true, value: null };
+  if (latitude < -90 || latitude > 90) return { matched: true, value: null };
+  if (longitude < -180 || longitude > 180) return { matched: true, value: null };
+  return { matched: true, value: { latitude, longitude } };
+}
+
+function extractGoogleMapsUrlDetails(value) {
+  const text = toText(value);
+  if (!text || !isRecognizedGoogleMapsUrl(text)) return null;
+
+  const pinMatch = text.match(/!3d([-+]?\d+(?:\.\d+)?)!4d([-+]?\d+(?:\.\d+)?)/i);
+  if (pinMatch?.[1] && pinMatch?.[2]) {
+    const parsed = parseGoogleMapsCoordinatePair(`${pinMatch[1]},${pinMatch[2]}`);
+    if (!parsed.value) return { recognized: true, mapUrl: text, title: extractGoogleMapsPlaceTitle(text), coordinate: null, tier: "pin" };
+    return { recognized: true, mapUrl: text, title: extractGoogleMapsPlaceTitle(text), coordinate: parsed.value, tier: "pin" };
+  }
+
+  try {
+    const parsedUrl = new URL(text);
+    for (const key of ["q", "query"]) {
+      for (const rawValue of parsedUrl.searchParams.getAll(key)) {
+        const parsed = parseGoogleMapsCoordinatePair(rawValue);
+        if (parsed.matched) {
+          if (!parsed.value) return { recognized: true, mapUrl: text, title: extractGoogleMapsPlaceTitle(text), coordinate: null, tier: "query" };
+          return { recognized: true, mapUrl: text, title: extractGoogleMapsPlaceTitle(text), coordinate: parsed.value, tier: "query" };
+        }
+      }
+    }
+  } catch {
+    return { recognized: true, mapUrl: text, title: extractGoogleMapsPlaceTitle(text), coordinate: null, tier: null };
+  }
+
+  const viewportMatch = text.match(/@([-+]?\d+(?:\.\d+)?),\s*([-+]?\d+(?:\.\d+)?)/i);
+  if (viewportMatch?.[1] && viewportMatch?.[2]) {
+    const parsed = parseGoogleMapsCoordinatePair(`${viewportMatch[1]},${viewportMatch[2]}`);
+    if (!parsed.value) return { recognized: true, mapUrl: text, title: extractGoogleMapsPlaceTitle(text), coordinate: null, tier: "viewport" };
+    return { recognized: true, mapUrl: text, title: extractGoogleMapsPlaceTitle(text), coordinate: parsed.value, tier: "viewport" };
+  }
+
+  return { recognized: true, mapUrl: text, title: extractGoogleMapsPlaceTitle(text), coordinate: null, tier: null };
+}
+
+function selectManualGoogleMapsDetails(...values) {
+  const candidates = [];
+  for (const rawValue of values) {
+    const value = toText(rawValue);
+    const details = extractGoogleMapsUrlDetails(value);
+    if (details) candidates.push(details);
+  }
+
+  const mapUrl = toText(candidates.find((candidate) => candidate?.mapUrl)?.mapUrl);
+  const title = firstNonEmpty(...candidates.map((candidate) => candidate?.title));
+  for (const tier of ["pin", "query", "viewport"]) {
+    const selected = candidates.find((candidate) => candidate?.tier === tier && candidate?.coordinate);
+    if (selected) {
+      return {
+        title,
+        mapUrl,
+        latitude: selected.coordinate.latitude,
+        longitude: selected.coordinate.longitude,
+      };
+    }
+  }
+  return mapUrl
+    ? {
+        title,
+        mapUrl,
+        latitude: null,
+        longitude: null,
+      }
+    : null;
+}
+
 function buildFallbackTitle(sourceUrl) {
+  const googleMapsTitle = extractGoogleMapsPlaceTitle(sourceUrl);
+  if (googleMapsTitle) return googleMapsTitle;
   try {
     const parsed = new URL(sourceUrl);
     const host = toHostLabel(parsed.hostname);
@@ -1417,7 +1537,9 @@ function resolveDomainMetadata(html, finalUrl, sourceUrl, options = {}) {
   })();
   const generic = extractGenericMetadata(html, sourceUrl, finalUrl);
   if (host.includes("wongnai.com")) return extractWongnaiEnrichment(html, finalUrl, generic, options);
-  if (host.includes("google.") || host.includes("goo.gl")) return extractGoogleMapsLinkEnrichment(finalUrl || sourceUrl, generic);
+  if (isRecognizedGoogleMapsUrl(finalUrl || sourceUrl) || isRecognizedGoogleMapsUrl(sourceUrl)) {
+    return extractGoogleMapsLinkEnrichment(finalUrl || sourceUrl, generic);
+  }
   if (host.includes("facebook.com") || host.includes("fb.com")) return extractFacebookEnrichment(html, generic);
   if (host.includes("tiktok.com")) return extractTikTokEnrichment(html, generic);
   return generic;
@@ -1507,22 +1629,31 @@ async function fetchUrlMetadata(sourceUrl) {
   };
 }
 
-function buildManualFallbackRow(row = {}, errorMessage = "") {
+function buildManualFallbackRow(row = {}, errorMessage = "", manualUrlDetails = null) {
   const sourceUrl = toText(row.source_url || row.url || row.website_url);
+  const mapUrl = toText(manualUrlDetails?.mapUrl);
+  const parsedLatitude = manualUrlDetails?.latitude ?? null;
+  const parsedLongitude = manualUrlDetails?.longitude ?? null;
+  const fallbackTitle = firstNonEmpty(manualUrlDetails?.title, buildFallbackTitle(sourceUrl));
   return normalizeRawItem(
     {
       ...row,
       type: toText(row.type || "place") || "place",
       category: toText(row.category || "attractions") || "attractions",
       lang: toText(row.lang || "th") || "th",
-      title: toText(row.title || row.name || buildFallbackTitle(sourceUrl)),
+      title: toText(row.title || row.name || fallbackTitle),
       description: toText(row.description || row.caption || row.review_text || "Imported from pasted URL"),
       source_name: toText(row.source_name || "manual-url"),
       source_url: sourceUrl,
       website_url: sourceUrl,
       source_ref: toText(row.source_ref || sourceUrl),
+      map_url: mapUrl,
+      latitude: parsedLatitude,
+      longitude: parsedLongitude,
       payload_json: {
         ...(row.payload_json && typeof row.payload_json === "object" ? row.payload_json : {}),
+        submitted_url: sourceUrl,
+        fetched_url: sourceUrl,
         metadata_fetch_error: toText(errorMessage || "manual_url enrichment failed"),
       },
     },
@@ -1537,6 +1668,8 @@ async function enrichManualRow(row = {}) {
       return normalizeRawItem(row, "manual");
     }
 
+    const sourceManualUrlDetails = selectManualGoogleMapsDetails(sourceUrl);
+
     let fetchResult = null;
     let fetchError = "";
     try {
@@ -1547,6 +1680,7 @@ async function enrichManualRow(row = {}) {
 
     const finalUrl = toText(fetchResult?.finalUrl || sourceUrl);
     const metadata = fetchResult?.metadata || {};
+    const resolvedManualUrlDetails = selectManualGoogleMapsDetails(finalUrl, sourceUrl) || sourceManualUrlDetails;
     const host = (() => {
       try {
         return toHostLabel(new URL(finalUrl).hostname);
@@ -1579,7 +1713,7 @@ async function enrichManualRow(row = {}) {
       addressText,
       openingHours[0] || "",
     ]).join(" | ") || (host ? `Imported from pasted URL: ${host}` : "Imported from pasted URL");
-    const title = firstNonEmpty(metadata.title, safeRowTitle, buildFallbackTitle(finalUrl));
+    const title = firstNonEmpty(metadata.title, safeRowTitle, resolvedManualUrlDetails?.title, buildFallbackTitle(finalUrl));
     const imageUrl = firstNonEmpty(row.image, row.image_url, metadata.image, mediaUrls[0]);
     const canonicalUrl = firstNonEmpty(metadata.canonical, finalUrl);
     const resolvedCategory = firstNonEmpty(preferredCategory, metadata.category, rowCategory, "attractions");
@@ -1591,17 +1725,18 @@ async function enrichManualRow(row = {}) {
         type: toText(row.type || "place") || "place",
         category: resolvedCategory,
         lang: toText(row.lang || "th") || "th",
-        title,
+        title: firstNonEmpty(title, resolvedManualUrlDetails?.title),
         description,
         image: imageUrl,
         source_name: firstNonEmpty(row.source_name, metadata.sourceName, host, "manual-url"),
-        source_url: finalUrl,
+        source_url: sourceUrl,
         website_url: canonicalUrl,
         editorial_summary: firstNonEmpty(metadata.description, safeRowEditorial, description),
         tags,
         source_ref: firstNonEmpty(row.source_ref, canonicalUrl, finalUrl),
-        latitude: metadata.latitude,
-        longitude: metadata.longitude,
+        map_url: toText(resolvedManualUrlDetails?.mapUrl),
+        latitude: resolvedManualUrlDetails?.latitude ?? metadata.latitude,
+        longitude: resolvedManualUrlDetails?.longitude ?? metadata.longitude,
         rating: metadata.rating,
         user_rating_count: metadata.reviewCount,
         review_count: metadata.reviewCount,
@@ -1677,7 +1812,8 @@ async function enrichManualRow(row = {}) {
       "manual"
     );
   } catch (error) {
-    return buildManualFallbackRow(row, error?.message);
+    const sourceUrl = toText(row.source_url || row.url || row.website_url);
+    return buildManualFallbackRow(row, error?.message, selectManualGoogleMapsDetails(sourceUrl));
   }
 }
 
@@ -1693,7 +1829,8 @@ async function enrichManualRowWithTimeout(row = {}) {
       }),
     ]);
   } catch (error) {
-    return buildManualFallbackRow(row, error?.message);
+    const sourceUrl = toText(row.source_url || row.url || row.website_url);
+    return buildManualFallbackRow(row, error?.message, selectManualGoogleMapsDetails(sourceUrl));
   } finally {
     if (timer) clearTimeout(timer);
   }
