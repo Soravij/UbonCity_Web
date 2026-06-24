@@ -170,6 +170,17 @@ test("reliable fetched metadata title wins over decoded URL fallback", async () 
   assert.equal(row.normalized_json.title, "Fetched Title");
 });
 
+test("generic fetched Google Maps title falls back to decoded place title", async () => {
+  const row = await collectOne(SAMPLE_URL, async (requestUrl) =>
+    createMockResponse({
+      url: requestUrl,
+      html: "<html><head><title>Google Maps</title></head><body></body></html>",
+    })
+  );
+
+  assert.equal(row.normalized_json.title, "น้ำตกห้วยหลวง ภูจองนายอย");
+});
+
 test("malformed percent encoding in place title does not throw", async () => {
   const url = "https://www.google.com/maps/place/%E0%B8%ZZ/@14.111,105.222,12z/data=!3m1!1e3";
   const row = await collectOne(url, async (requestUrl) => createMockResponse({ url: requestUrl }));

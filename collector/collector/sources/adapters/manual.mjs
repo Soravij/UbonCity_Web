@@ -349,6 +349,11 @@ function isGeneratedManualEditorial(value) {
   return toText(value) === "นำเข้าจาก URL ที่ผู้ใช้วางเข้าระบบ";
 }
 
+function isGenericGoogleMapsFetchedTitle(value) {
+  const text = toText(value).toLowerCase();
+  return text === "google maps" || text === "google" || text === "maps";
+}
+
 function extractMetaContent(html, key, attr = "name") {
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(
@@ -1713,7 +1718,12 @@ async function enrichManualRow(row = {}) {
       addressText,
       openingHours[0] || "",
     ]).join(" | ") || (host ? `Imported from pasted URL: ${host}` : "Imported from pasted URL");
-    const title = firstNonEmpty(metadata.title, safeRowTitle, resolvedManualUrlDetails?.title, buildFallbackTitle(finalUrl));
+    const isGoogleMapsPlaceUrl = isRecognizedGoogleMapsUrl(finalUrl) || isRecognizedGoogleMapsUrl(sourceUrl);
+    const reliableMetadataTitle = isGoogleMapsPlaceUrl && isGenericGoogleMapsFetchedTitle(metadata.title) ? "" : metadata.title;
+    const googleMapsFallbackTitle = firstNonEmpty(resolvedManualUrlDetails?.title, buildFallbackTitle(finalUrl));
+    const title = isGoogleMapsPlaceUrl
+      ? firstNonEmpty(safeRowTitle, reliableMetadataTitle, googleMapsFallbackTitle)
+      : firstNonEmpty(reliableMetadataTitle, safeRowTitle, buildFallbackTitle(finalUrl));
     const imageUrl = firstNonEmpty(row.image, row.image_url, metadata.image, mediaUrls[0]);
     const canonicalUrl = firstNonEmpty(metadata.canonical, finalUrl);
     const resolvedCategory = firstNonEmpty(preferredCategory, metadata.category, rowCategory, "attractions");
