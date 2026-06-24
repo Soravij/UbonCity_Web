@@ -1504,6 +1504,107 @@ function preserveSecondaryItemFacts(masterItem, sourceItem) {
   };
 }
 
+const MERGE_GOOGLE_MAPS_HOSTS = new Set([
+  "google.com",
+  "google.co.th",
+  "maps.google.com",
+  "maps.google.co.th",
+  "maps.app.goo.gl",
+  "goo.gl",
+]);
+
+function isRecognizedMergeGoogleMapsUrl(value) {
+  try {
+    const parsed = new URL(String(value || "").trim());
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+    const host = String(parsed.hostname || "").replace(/^www\./i, "").toLowerCase();
+    const path = String(parsed.pathname || "");
+    if (!MERGE_GOOGLE_MAPS_HOSTS.has(host)) return false;
+    if ((host === "google.com" || host === "google.co.th") && !/^\/maps(?:\/|$)/i.test(path)) return false;
+    if (host === "goo.gl" && !/^\/maps(?:\/|$)/i.test(path)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function parseMergeCoordinateComponent(value, min, max) {
+  if (value == null) {
+    return { present: false, value: null };
+  }
+  const text = String(value).trim();
+  if (!text) {
+    return { present: false, value: null };
+  }
+  const numeric = Number(text);
+  if (!Number.isFinite(numeric)) {
+    return { present: true, value: null };
+  }
+  if (numeric < min || numeric > max) {
+    return { present: true, value: null };
+  }
+  return { present: true, value: numeric };
+}
+
+function backfillMergedItemLocationAndMapUrl(masterItemId, sourceItem = {}) {
+  const masterId = Number(masterItemId || 0);
+  if (!masterId) {
+    return { item: null, latitude_backfilled: false, longitude_backfilled: false, map_url_backfilled: false };
+  }
+
+  const current = repo.getItem(masterId);
+  if (!current || Number(current.is_deleted || 0) === 1) {
+    return { item: null, latitude_backfilled: false, longitude_backfilled: false, map_url_backfilled: false };
+  }
+
+  const currentLatitude = parseMergeCoordinateComponent(current.latitude, -90, 90);
+  const currentLongitude = parseMergeCoordinateComponent(current.longitude, -180, 180);
+  const currentHasPair = currentLatitude.present
+    && currentLongitude.present
+    && currentLatitude.value != null
+    && currentLongitude.value != null;
+  const currentHasPartialPair = currentLatitude.present !== currentLongitude.present;
+
+  const sourceLatitude = parseMergeCoordinateComponent(sourceItem?.latitude, -90, 90);
+  const sourceLongitude = parseMergeCoordinateComponent(sourceItem?.longitude, -180, 180);
+  const sourceHasPair = sourceLatitude.present
+    && sourceLongitude.present
+    && sourceLatitude.value != null
+    && sourceLongitude.value != null;
+
+  const patch = {};
+  let latitudeBackfilled = false;
+  let longitudeBackfilled = false;
+
+  if (!currentHasPair && !currentHasPartialPair && sourceHasPair) {
+    patch.latitude = sourceLatitude.value;
+    patch.longitude = sourceLongitude.value;
+    latitudeBackfilled = true;
+    longitudeBackfilled = true;
+  }
+
+  const currentMapUrl = String(current.map_url || "").trim();
+  const sourceMapUrl = String(sourceItem?.map_url || "").trim();
+  if (!currentMapUrl && isRecognizedMergeGoogleMapsUrl(sourceMapUrl)) {
+    patch.map_url = sourceMapUrl;
+  }
+
+  if (Object.keys(patch).length > 0) {
+    const assignments = Object.keys(patch).map((field) => `${field}=@${field}`).join(", ");
+    db.prepare(`UPDATE content_items SET ${assignments}, updated_at=CURRENT_TIMESTAMP WHERE id=@id AND is_deleted=0`).run({
+      id: masterId,
+      ...patch,
+    });
+  }
+
+  return {
+    item: repo.getItem(masterId),
+    latitude_backfilled: latitudeBackfilled,
+    longitude_backfilled: longitudeBackfilled,
+    map_url_backfilled: Boolean(patch.map_url),
+  };
+}
+
 function getMergeBlockersForItem(itemId) {
   const blockers = [];
   const checks = [
@@ -6191,8 +6292,10 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
     }
 
     attachCollectedSourceRecord(existingItemId, rawItem, adapter);
+    const backfill = backfillMergedItemLocationAndMapUrl(existingItemId, itemInput);
+    const mergedItem = backfill?.item || repo.getItem(existingItemId);
     const sourceRecords = repo.listSourceRecordsByItem(existingItemId);
-    const seeded = seedEvidenceBlocksForItem(existingItem, {
+    const seeded = seedEvidenceBlocksForItem(mergedItem, {
       normalized,
       sourceType: adapter,
       sourceRecords,
@@ -6201,7 +6304,7 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
 
     return {
       mode: "merge",
-      item: repo.getItem(existingItemId),
+      item: mergedItem,
       seeded_evidence_count: Number(seeded?.added || 0),
       bridged_image_count: 0,
       reference_media_count: referenceMediaCount,
@@ -14678,12 +14781,22 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-app.listen(port, bindHost, () => {
-  if (slugBackfillResult && (slugBackfillResult.content_items_updated || slugBackfillResult.published_articles_updated)) {
-    console.log("[slug.backfill]", slugBackfillResult);
-  }
-  console.log(`Collector app running on http://${bindHost}:${port}`);
+export { buildCollectedImportSeed, importCollectedRawItem, importCollectedRawItemsTxn };
+
+process.once("exit", () => {
+  try {
+    db.close();
+  } catch {}
 });
+
+if (String(process.env.COLLECTOR_DISABLE_LISTEN || "").trim() !== "1") {
+  app.listen(port, bindHost, () => {
+    if (slugBackfillResult && (slugBackfillResult.content_items_updated || slugBackfillResult.published_articles_updated)) {
+      console.log("[slug.backfill]", slugBackfillResult);
+    }
+    console.log(`Collector app running on http://${bindHost}:${port}`);
+  });
+}
 
 
 

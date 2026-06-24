@@ -28,6 +28,23 @@ function toStringArray(value, limit = 7) {
   return value.map((x) => toStringValue(x)).filter(Boolean).slice(0, Math.max(1, Number(limit || 7)));
 }
 
+function isBlankCoordinateValue(value) {
+  return value == null || (typeof value === "string" && value.trim() === "");
+}
+
+function selectCoordinateInput(primary, fallback) {
+  return isBlankCoordinateValue(primary) ? fallback : primary;
+}
+
+function toCoordinateNumber(primary, fallback) {
+  const selected = selectCoordinateInput(primary, fallback);
+  if (selected == null) return null;
+  const text = String(selected).replace(/,/g, "").trim();
+  if (!text) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
 function toLooseStringArray(value, limit = 7) {
   if (Array.isArray(value)) {
     return toStringArray(value, limit);
@@ -73,8 +90,8 @@ export function normalizeRawItem(input = {}, sourceType = "social") {
       title: toStringValue(input.title || input.name),
       description: toStringValue(input.description || input.caption || input.review_text),
       image: toStringValue(input.image || input.image_url || input.thumbnail_url),
-      latitude: toNumber(input.latitude || input.lat),
-      longitude: toNumber(input.longitude || input.lng),
+      latitude: toCoordinateNumber(input.latitude, input.lat),
+      longitude: toCoordinateNumber(input.longitude, input.lng),
       map_url: toStringValue(input.map_url),
       google_place_id: toStringValue(input.google_place_id),
       source_name: toStringValue(input.source_name || sourceType),
