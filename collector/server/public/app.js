@@ -219,6 +219,7 @@ const state = {
     serverSubmissionDraftPayloads: {},
     serverSubmissionDraftLoaded: {},
     serverSubmissionDraftSaveTimers: {},
+    serverSubmissionDraftSaveTokens: {},
     handoffSourcePackages: {},
     handoffSourceSnapshotIds: {},
     handoffSourceLoaded: {},
@@ -990,6 +991,7 @@ async function api(path, options = {}) {
       redirectToLoginWithExpiredSession();
     }
     const err = new Error(data.error || "คำขอล้มเหลว");
+    err.status = res.status;
     if (data && typeof data === "object") {
       err.payload = data;
     }
@@ -1056,11 +1058,22 @@ function getAssignmentSubmissionDraftKey(assignmentId, assignment = null) {
   return `${id}:${round}`;
 }
 
+let assignmentSubmissionDraftSaveAttemptCounter = 0;
+
 function setAssignmentDraftSaveStatus(text = "", isError = false) {
   const node = qs("assignment-draft-save-status");
   if (!node) return;
   node.textContent = String(text || "").trim();
   node.style.color = isError ? "#b42318" : "";
+}
+
+function setAssignmentSubmissionDraftSaveStatusForAttempt(draftKey, saveAttemptToken, text, isError = false) {
+  const key = String(draftKey || "").trim();
+  const token = String(saveAttemptToken || "").trim();
+  if (!key || !token) return false;
+  if (state.assignments.serverSubmissionDraftSaveTokens?.[key] !== token) return false;
+  setAssignmentDraftSaveStatus(text, isError);
+  return true;
 }
 
 function normalizeAssignmentSubmissionPromptAnswers(items = [], prompts = []) {
@@ -1199,27 +1212,35 @@ function clearServerDraftSaveTimer(assignmentId) {
   }
 }
 
-async function saveAssignmentSubmissionServerDraft(assignmentId, payload, scheduledDraftKey = "") {
+async function saveAssignmentSubmissionServerDraft(assignmentId, payload, scheduledDraftKey = "", scheduledRevisionRound = 0, saveAttemptToken = "") {
   const id = Number(assignmentId || 0) || 0;
   if (!id || isEditorUser()) return null;
   const assignment = getAssignmentById(id);
   if (!assignment) return null;
   const currentDraftKey = getAssignmentSubmissionDraftKey(id, assignment);
   const resolvedScheduledDraftKey = String(scheduledDraftKey || currentDraftKey || "").trim();
+  const resolvedScheduledRevisionRound = Number(scheduledRevisionRound || 0) || 0;
+  const resolvedSaveAttemptToken = String(saveAttemptToken || "").trim();
   if (!resolvedScheduledDraftKey || resolvedScheduledDraftKey !== currentDraftKey) {
+    return null;
+  }
+  if (!resolvedSaveAttemptToken || state.assignments.serverSubmissionDraftSaveTokens?.[resolvedScheduledDraftKey] !== resolvedSaveAttemptToken) {
     return null;
   }
   const assignmentState = String(assignment?.state || "").trim().toLowerCase();
   if (!["assigned", "in_progress", "revision_requested", "resubmitted"].includes(assignmentState)) {
     return null;
   }
-  setAssignmentDraftSaveStatus("กำลังบันทึก...");
+  setAssignmentSubmissionDraftSaveStatusForAttempt(resolvedScheduledDraftKey, resolvedSaveAttemptToken, "กำลังบันทึก...");
   const hasArticlePayload = Object.prototype.hasOwnProperty.call(payload || {}, "article_payload_json") || !payload || !Object.prototype.hasOwnProperty.call(payload, "field_return_payload_json");
   const hasFieldReturnPayload = Object.prototype.hasOwnProperty.call(payload || {}, "field_return_payload_json");
   const articlePayload = payload?.article_payload_json && typeof payload.article_payload_json === "object"
     ? payload.article_payload_json
     : payload;
   const normalized = {};
+  if (resolvedScheduledRevisionRound > 0) {
+    normalized.expected_revision_round = resolvedScheduledRevisionRound;
+  }
   if (hasArticlePayload) {
     normalized.article_payload_json = normalizeAssignmentSubmissionPayload(articlePayload, assignment, state.assignments.contextFieldPack);
   }
@@ -1228,10 +1249,24 @@ async function saveAssignmentSubmissionServerDraft(assignmentId, payload, schedu
       ? payload.field_return_payload_json
       : null;
   }
-  const result = await api(`/api/assignments/${id}/draft`, {
-    method: "PUT",
-    body: JSON.stringify(normalized),
-  });
+  let result;
+  try {
+    result = await api(`/api/assignments/${id}/draft`, {
+      method: "PUT",
+      body: JSON.stringify(normalized),
+    });
+  } catch (err) {
+    if (Number(err?.status || 0) === 409 && String(err?.payload?.error || "").trim() === "revision_round_changed") {
+      if (setAssignmentSubmissionDraftSaveStatusForAttempt(resolvedScheduledDraftKey, resolvedSaveAttemptToken, "")) {
+        delete state.assignments.serverSubmissionDraftSaveTokens[resolvedScheduledDraftKey];
+      }
+      return null;
+    }
+    if (state.assignments.serverSubmissionDraftSaveTokens?.[resolvedScheduledDraftKey] !== resolvedSaveAttemptToken) {
+      return null;
+    }
+    throw err;
+  }
   const latestAssignment = getAssignmentById(id);
   const latestDraftKey = latestAssignment ? getAssignmentSubmissionDraftKey(id, latestAssignment) : "";
   if (resolvedScheduledDraftKey !== latestDraftKey) {
@@ -1252,7 +1287,9 @@ async function saveAssignmentSubmissionServerDraft(assignmentId, payload, schedu
   };
   state.assignments.serverSubmissionDraftLoaded[resolvedScheduledDraftKey] = true;
   const savedAt = new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
-  setAssignmentDraftSaveStatus(`บันทึกล่าสุด ${savedAt}`);
+  if (setAssignmentSubmissionDraftSaveStatusForAttempt(resolvedScheduledDraftKey, resolvedSaveAttemptToken, `บันทึกล่าสุด ${savedAt}`)) {
+    delete state.assignments.serverSubmissionDraftSaveTokens[resolvedScheduledDraftKey];
+  }
   return state.assignments.serverSubmissionDraftPayloads[resolvedScheduledDraftKey];
 }
 
@@ -1260,11 +1297,17 @@ function scheduleSaveAssignmentSubmissionServerDraft(assignmentId, payload, assi
   const id = Number(assignmentId || 0) || 0;
   if (!id || isEditorUser()) return;
   const scheduledDraftKey = String(getAssignmentSubmissionDraftKey(id, assignment) || "").trim();
+  const scheduledRevisionRound = Number(assignment?.revision_round || 0) || 0;
   if (!scheduledDraftKey) return;
+  const saveAttemptToken = `${scheduledDraftKey}:${Date.now()}:${++assignmentSubmissionDraftSaveAttemptCounter}`;
+  state.assignments.serverSubmissionDraftSaveTokens[scheduledDraftKey] = saveAttemptToken;
   clearServerDraftSaveTimer(scheduledDraftKey);
   state.assignments.serverSubmissionDraftSaveTimers[scheduledDraftKey] = window.setTimeout(() => {
-    saveAssignmentSubmissionServerDraft(id, payload, scheduledDraftKey).catch(() => {
-      setAssignmentDraftSaveStatus("บันทึกไม่สำเร็จ", true);
+    saveAssignmentSubmissionServerDraft(id, payload, scheduledDraftKey, scheduledRevisionRound, saveAttemptToken).catch(() => {
+      if (state.assignments.serverSubmissionDraftSaveTokens?.[scheduledDraftKey] === saveAttemptToken) {
+        setAssignmentDraftSaveStatus("บันทึกไม่สำเร็จ", true);
+        delete state.assignments.serverSubmissionDraftSaveTokens[scheduledDraftKey];
+      }
     });
     delete state.assignments.serverSubmissionDraftSaveTimers[scheduledDraftKey];
   }, 1000);

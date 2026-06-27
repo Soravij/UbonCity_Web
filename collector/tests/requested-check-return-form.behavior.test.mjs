@@ -77,6 +77,7 @@ async function createAssignmentAutosaveHarness({
       serverSubmissionDraftPayloads: {},
       serverSubmissionDraftLoaded: {},
       serverSubmissionDraftSaveTimers: {},
+      serverSubmissionDraftSaveTokens: {},
       contextFieldPack: null,
     },
   };
@@ -105,6 +106,14 @@ async function createAssignmentAutosaveHarness({
     setAssignmentDraftSaveStatus: (text, isError = false) => {
       statusCalls.push({ text: String(text || ""), isError: isError === true });
     },
+    setAssignmentSubmissionDraftSaveStatusForAttempt: (draftKey, saveAttemptToken, text, isError = false) => {
+      const key = String(draftKey || "").trim();
+      const token = String(saveAttemptToken || "").trim();
+      if (!key || !token) return false;
+      if (state.assignments.serverSubmissionDraftSaveTokens?.[key] !== token) return false;
+      statusCalls.push({ text: String(text || ""), isError: isError === true });
+      return true;
+    },
     api: async (url, options) => {
       apiCalls.push({ url, options });
       return apiImpl(url, options);
@@ -121,8 +130,12 @@ async function createAssignmentAutosaveHarness({
     isEditorUser: () => false,
     clearServerDraftSaveTimer,
     saveAssignmentSubmissionServerDraft,
+    setAssignmentDraftSaveStatus: (text, isError = false) => {
+      statusCalls.push({ text: String(text || ""), isError: isError === true });
+    },
     window: fakeWindow,
     getAssignmentSubmissionDraftKey: getDraftKey,
+    assignmentSubmissionDraftSaveAttemptCounter: 0,
   });
 
   return {
@@ -2863,10 +2876,15 @@ test("autosave keeps revision-specific timers separate and skips stale revision 
 });
 
 test("autosave ignores a stale response when revision changes before PUT resolves", async () => {
-  const deferred = createDeferred();
+  const deferredOne = createDeferred();
+  const deferredTwo = createDeferred();
+  let callCount = 0;
   const harness = await createAssignmentAutosaveHarness({
     currentRevisionRound: 1,
-    apiImpl: async () => deferred.promise,
+    apiImpl: async () => {
+      callCount += 1;
+      return callCount === 1 ? deferredOne.promise : deferredTwo.promise;
+    },
   });
   const {
     state,
@@ -2876,11 +2894,16 @@ test("autosave ignores a stale response when revision changes before PUT resolve
     saveAssignmentSubmissionServerDraft,
   } = harness;
 
-  const savePromise = saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 1" } }, "12:1");
+  state.assignments.serverSubmissionDraftSaveTokens["12:1"] = "token-1";
+  const savePromise = saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 1" } }, "12:1", 1, "token-1");
   assert.equal(apiCalls.length, 1);
 
+  state.assignments.serverSubmissionDraftSaveTokens["12:2"] = "token-2";
   currentAssignmentRef.current.revision_round = 2;
-  deferred.resolve({
+  const saveTwoPromise = saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, "12:2", 2, "token-2");
+  assert.equal(apiCalls.length, 2);
+
+  deferredOne.resolve({
     draft: {
       article_payload_json: {
         additional_text: "revision 1 saved",
@@ -2888,12 +2911,22 @@ test("autosave ignores a stale response when revision changes before PUT resolve
     },
   });
   await savePromise;
+  assert.equal(statusCalls.at(-1)?.text, "กำลังบันทึก...");
+
+  deferredTwo.resolve({
+    draft: {
+      article_payload_json: {
+        additional_text: "revision 2 saved",
+      },
+    },
+  });
+  await saveTwoPromise;
 
   assert.equal(state.assignments.serverSubmissionDraftPayloads["12:1"], undefined);
-  assert.equal(state.assignments.serverSubmissionDraftPayloads["12:2"], undefined);
+  assert.equal(state.assignments.serverSubmissionDraftPayloads["12:2"]?.article_payload_json?.additional_text, "revision 2 saved");
   assert.equal(state.assignments.serverSubmissionDraftLoaded["12:1"], undefined);
-  assert.equal(state.assignments.serverSubmissionDraftLoaded["12:2"], undefined);
-  assert.equal(statusCalls.some((entry) => String(entry.text || "").startsWith("บันทึกล่าสุด")), false);
+  assert.equal(state.assignments.serverSubmissionDraftLoaded["12:2"], true);
+  assert.equal(statusCalls.at(-1)?.text.startsWith("บันทึกล่าสุด"), true);
 });
 
 test("autosave still saves the current revision normally", async () => {
@@ -2914,12 +2947,79 @@ test("autosave still saves the current revision normally", async () => {
     saveAssignmentSubmissionServerDraft,
   } = harness;
 
-  await saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, "12:2");
+  state.assignments.serverSubmissionDraftSaveTokens["12:2"] = "token-2";
+  await saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, "12:2", 2, "token-2");
 
   assert.equal(apiCalls.length, 1);
+  assert.equal(JSON.parse(apiCalls[0].options.body).expected_revision_round, 2);
   assert.equal(state.assignments.serverSubmissionDraftPayloads["12:2"]?.article_payload_json?.additional_text, "revision 2 saved");
   assert.equal(state.assignments.serverSubmissionDraftLoaded["12:2"], true);
   assert.equal(statusCalls.at(-1)?.text.startsWith("บันทึกล่าสุด"), true);
+});
+
+test("autosave revision mismatch 409 returns null without cache writes or error state", async () => {
+  const harness = await createAssignmentAutosaveHarness({
+    currentRevisionRound: 2,
+    apiImpl: async () => {
+      const error = new Error("revision_round_changed");
+      error.status = 409;
+      error.payload = {
+        error: "revision_round_changed",
+        expected_revision_round: 2,
+        current_revision_round: 3,
+      };
+      throw error;
+    },
+  });
+  const {
+    state,
+    apiCalls,
+    statusCalls,
+    saveAssignmentSubmissionServerDraft,
+  } = harness;
+
+  state.assignments.serverSubmissionDraftSaveTokens["12:2"] = "token-2";
+  const result = await saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, "12:2", 2, "token-2");
+
+  assert.equal(result, null);
+  assert.equal(apiCalls.length, 1);
+  assert.equal(JSON.parse(apiCalls[0].options.body).expected_revision_round, 2);
+  assert.deepEqual(state.assignments.serverSubmissionDraftPayloads, {});
+  assert.deepEqual(state.assignments.serverSubmissionDraftLoaded, {});
+  assert.equal(statusCalls.at(-1)?.text, "");
+  assert.equal(statusCalls.some((entry) => entry.isError === true), false);
+});
+
+test("autosave ordinary error still surfaces save failure", async () => {
+  const harness = await createAssignmentAutosaveHarness({
+    currentRevisionRound: 2,
+    apiImpl: async () => {
+      const error = new Error("network down");
+      error.status = 500;
+      error.payload = { error: "network down" };
+      throw error;
+    },
+  });
+  const {
+    state,
+    pendingTimers,
+    statusCalls,
+    scheduleSaveAssignmentSubmissionServerDraft,
+  } = harness;
+
+  state.assignments.serverSubmissionDraftSaveTokens["12:2"] = "token-2";
+  scheduleSaveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, { id: 12, revision_round: 2, state: "in_progress" });
+  const timer = pendingTimers.values().next().value;
+  assert.ok(timer);
+  timer();
+  for (let index = 0; index < 10 && statusCalls.at(-1)?.text === "กำลังบันทึก..."; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.equal(statusCalls.at(-1)?.text, "บันทึกไม่สำเร็จ");
+  assert.equal(statusCalls.at(-1)?.isError, true);
+  assert.deepEqual(state.assignments.serverSubmissionDraftPayloads, {});
+  assert.deepEqual(state.assignments.serverSubmissionDraftLoaded, {});
 });
 
 // Repository final-submission validator tests

@@ -2876,6 +2876,50 @@ function resolveAssignmentCurrentRound(assignment) {
   return Math.max(1, (Number(assignment?.revision_round || 0) || 0) + 1);
 }
 
+function validateAssignmentSubmissionDraftExpectedRevisionRound(value) {
+  const round = Number(value || 0);
+  return Number.isInteger(round) && round > 0 ? round : 0;
+}
+
+function handleAssignmentSubmissionDraftPut(req, res, assignment, actorId) {
+  const expiresAt = deriveAssignmentDraftExpiryIso(assignment);
+  const currentRound = resolveAssignmentCurrentRound(assignment);
+  const expectedRound = validateAssignmentSubmissionDraftExpectedRevisionRound(req.body?.expected_revision_round);
+  if (!expectedRound) {
+    res.status(400).json({ error: "expected_revision_round must be a positive integer" });
+    return null;
+  }
+  if (expectedRound !== currentRound) {
+    res.status(409).json({
+      error: "revision_round_changed",
+      expected_revision_round: expectedRound,
+      current_revision_round: currentRound,
+    });
+    return null;
+  }
+  const hasArticlePayload = Object.prototype.hasOwnProperty.call(req.body || {}, "article_payload_json");
+  const hasFieldReturnPayload = Object.prototype.hasOwnProperty.call(req.body || {}, "field_return_payload_json");
+  const normalizedDraftPayload = hasArticlePayload
+    ? normalizeAssignmentDraftArticlePayload(req.body?.article_payload_json || null, assignment)
+    : undefined;
+  const normalizedFieldReturnPayload = hasFieldReturnPayload
+    ? (req.body?.field_return_payload_json == null
+      ? null
+      : repo.normalizeFieldReturnPayloadJson(req.body.field_return_payload_json, "field_return_payload_json"))
+    : undefined;
+  const draftPayload = {
+    assignment_id: Number(req.params.id || 0),
+    user_id: actorId,
+    revision_round: currentRound,
+    expires_at: expiresAt,
+  };
+  if (hasArticlePayload) draftPayload.article_payload_json = normalizedDraftPayload;
+  if (hasFieldReturnPayload) draftPayload.field_return_payload_json = normalizedFieldReturnPayload;
+  const draft = repo.upsertAssignmentSubmissionDraft(draftPayload);
+  res.json({ ok: true, draft, revision_round: currentRound });
+  return draft;
+}
+
 function parseRequiredBooleanInput(value, fallback = false) {
   if (value === true || value === false) return value;
   const text = String(value == null ? "" : value).trim().toLowerCase();
@@ -10516,28 +10560,7 @@ app.put("/api/assignments/:id/draft", requireRole("owner", "admin", "editor", "f
     return;
   }
   try {
-    const expiresAt = deriveAssignmentDraftExpiryIso(assignment);
-    const currentRound = resolveAssignmentCurrentRound(assignment);
-    const hasArticlePayload = Object.prototype.hasOwnProperty.call(req.body || {}, "article_payload_json");
-    const hasFieldReturnPayload = Object.prototype.hasOwnProperty.call(req.body || {}, "field_return_payload_json");
-    const normalizedDraftPayload = hasArticlePayload
-      ? normalizeAssignmentDraftArticlePayload(req.body?.article_payload_json || null, assignment)
-      : undefined;
-    const normalizedFieldReturnPayload = hasFieldReturnPayload
-      ? (req.body?.field_return_payload_json == null
-        ? null
-        : repo.normalizeFieldReturnPayloadJson(req.body.field_return_payload_json, "field_return_payload_json"))
-      : undefined;
-    const draftPayload = {
-      assignment_id: assignmentId,
-      user_id: actorId,
-      revision_round: currentRound,
-      expires_at: expiresAt,
-    };
-    if (hasArticlePayload) draftPayload.article_payload_json = normalizedDraftPayload;
-    if (hasFieldReturnPayload) draftPayload.field_return_payload_json = normalizedFieldReturnPayload;
-    const draft = repo.upsertAssignmentSubmissionDraft(draftPayload);
-    res.json({ ok: true, draft, revision_round: currentRound });
+    handleAssignmentSubmissionDraftPut(req, res, assignment, actorId);
   } catch (err) {
     res.status(400).json({ error: String(err?.message || "Cannot save assignment draft") });
   }
