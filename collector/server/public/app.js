@@ -6182,6 +6182,7 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     assignment_id: Number(row?.assignment_id || 0) || null,
     assignment_round: Number(row?.assignment_round || 0) || null,
     assignment_media_type: normalizeAssignmentCaptureMediaType(row?.assignment_media_type) || null,
+    assignment_slot_key: String(row?.assignment_slot_key || row?.slotKey || row?.slot_key || "").trim().toLowerCase() || null,
     assignment_surface: String(row?.assignment_surface || "").trim() || null,
     assignment_sync_batch_id: String(row?.assignment_sync_batch_id || "").trim() || null,
     created_at: String(row?.created_at || "").trim() || null,
@@ -6264,7 +6265,7 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
 }
 
 function getAssignmentAssetSlotTypeKeyFromAsset(asset) {
-  const explicitSlotKey = String(asset?.slotKey || asset?.slot_key || "").trim().toLowerCase();
+  const explicitSlotKey = String(asset?.slotKey || asset?.slot_key || asset?.assignment_slot_key || "").trim().toLowerCase();
   const explicitMediaType = normalizeAssignmentCaptureMediaType(
     asset?.mediaType || asset?.media_type || asset?.assignment_media_type
   );
@@ -9166,6 +9167,8 @@ async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = [], opt
         total_chunks: totalChunks,
         chunk_size_bytes: CHUNK_SIZE_BYTES,
         sync_batch_id: syncBatchId,
+        slot_key: String(entry?.slotKey || entry?.slug || "").trim().toLowerCase() || null,
+        media_type: String(entry?.mediaType || "").trim().toLowerCase() || null,
       }),
     });
     const uploadId = String(startResult?.upload_id || "").trim();
@@ -9208,6 +9211,8 @@ async function uploadAssignmentSubmissionFiles(assignmentId, fileQueue = [], opt
         const form = new FormData();
         form.append("file", entry.original, entry.renamed);
         form.append("sync_batch_id", syncBatchId);
+        form.append("slot_key", String(entry?.slotKey || entry?.slug || "").trim().toLowerCase() || "");
+        form.append("media_type", String(entry?.mediaType || "").trim().toLowerCase() || "");
         result = await api(`/api/assignments/${assignmentId}/assets/upload`, {
           method: "POST",
           body: form,

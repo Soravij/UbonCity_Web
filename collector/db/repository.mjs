@@ -3150,6 +3150,9 @@ function ensureContentAssetWorkflowColumns(db) {
   if (!names.has("assignment_media_type")) {
     db.exec("ALTER TABLE content_assets ADD COLUMN assignment_media_type TEXT;");
   }
+  if (!names.has("assignment_slot_key")) {
+    db.exec("ALTER TABLE content_assets ADD COLUMN assignment_slot_key TEXT;");
+  }
   if (!names.has("assignment_surface")) {
     db.exec("ALTER TABLE content_assets ADD COLUMN assignment_surface TEXT;");
   }

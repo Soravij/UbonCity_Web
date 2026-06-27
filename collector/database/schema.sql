@@ -150,6 +150,12 @@ CREATE TABLE IF NOT EXISTS content_assets (
   is_cover INTEGER NOT NULL DEFAULT 0,
   placement_type TEXT NOT NULL DEFAULT 'unused',
   sort_order INTEGER NOT NULL DEFAULT 0,
+  assignment_id INTEGER,
+  assignment_round INTEGER NOT NULL DEFAULT 0,
+  assignment_media_type TEXT,
+  assignment_slot_key TEXT,
+  assignment_surface TEXT,
+  assignment_sync_batch_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
   FOREIGN KEY(asset_id) REFERENCES assets(id) ON DELETE CASCADE

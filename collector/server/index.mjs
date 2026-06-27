@@ -3085,7 +3085,7 @@ function findMissingPromptAnswers(expectedPrompts = [], answerRows = []) {
 
 function getAssignmentCaptureAssetSlotTypeKey(asset) {
   const source = asset && typeof asset === "object" ? asset : {};
-  const explicitSlotKey = String(source?.slotKey || source?.slot_key || "").trim().toLowerCase();
+  const explicitSlotKey = String(source?.slotKey || source?.slot_key || source?.assignment_slot_key || "").trim().toLowerCase();
   const explicitMediaType = normalizeAssignmentCaptureMediaType(source?.mediaType || source?.media_type || source?.assignment_media_type);
   if (explicitSlotKey && explicitMediaType) return `${explicitSlotKey}|${explicitMediaType}`;
   const fileName = String(source?.file_name || "").trim();
@@ -3103,7 +3103,7 @@ function normalizeAssignmentMediaPayloadAssets(mediaPayload) {
     id: Number(asset?.id || 0) || null,
     file_name: String(asset?.file_name || "").trim() || null,
     mime_type: String(asset?.mime_type || "").trim().toLowerCase() || null,
-    slotKey: String(asset?.slotKey || asset?.slot_key || "").trim().toLowerCase() || null,
+    slotKey: String(asset?.slotKey || asset?.slot_key || asset?.assignment_slot_key || "").trim().toLowerCase() || null,
     mediaType: normalizeAssignmentCaptureMediaType(asset?.mediaType || asset?.media_type || asset?.assignment_media_type) || null,
     capture_type: String(asset?.capture_type || "").trim().toLowerCase() || null,
     prompt: String(asset?.prompt || "").trim() || null,
@@ -5504,6 +5504,14 @@ function sanitizeAssignmentSyncBatchId(value, fallback = "") {
   const normalized = raw.replace(/[^a-zA-Z0-9._:-]/g, "");
   if (!normalized) return String(fallback || "").trim();
   return normalized.slice(0, 128);
+}
+
+function sanitizeAssignmentCaptureSlotKey(value, fallback = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return String(fallback || "").trim().toLowerCase();
+  const normalized = raw.replace(/[^a-z0-9-]/g, "");
+  if (!normalized.startsWith("shot-")) return String(fallback || "").trim().toLowerCase();
+  return normalized.slice(0, 96);
 }
 
 function parseIsoMs(value) {
@@ -14036,7 +14044,7 @@ app.get("/api/assets", (req, res) => {
     rows = db
       .prepare(`
       SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type,
-             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface, ca.assignment_sync_batch_id,
+             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_slot_key, ca.assignment_surface, ca.assignment_sync_batch_id,
              c.title AS content_title
       FROM assets a
       LEFT JOIN content_assets ca ON ca.asset_id = a.id
@@ -14049,7 +14057,7 @@ app.get("/api/assets", (req, res) => {
     rows = db
       .prepare(`
       SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type,
-             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface, ca.assignment_sync_batch_id,
+             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_slot_key, ca.assignment_surface, ca.assignment_sync_batch_id,
              c.title AS content_title
       FROM assets a
       LEFT JOIN content_assets ca ON ca.asset_id = a.id
@@ -14065,6 +14073,8 @@ app.get("/api/assets", (req, res) => {
       selected_in_clean: Number(row.selected_in_clean || 0),
       is_cover: Number(row.is_cover || 0),
       placement_type: String(row.placement_type || "unused"),
+      slotKey: String(row.assignment_slot_key || "").trim().toLowerCase() || null,
+      mediaType: String(row.assignment_media_type || "").trim().toLowerCase() || null,
       public_url: parseAssetPathForUrl(row.storage_path),
     }))
     .filter((row) => isCollectorControlledLocalAssetRow(row))
@@ -14162,6 +14172,8 @@ app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admi
   const requestedChunkSize = Number(req.body?.chunk_size_bytes || ASSIGNMENT_CHUNK_SIZE_BYTES);
   const chunkSizeBytes = ASSIGNMENT_CHUNK_SIZE_BYTES;
   const syncBatchId = sanitizeAssignmentSyncBatchId(req.body?.sync_batch_id);
+  const requestedSlotKey = sanitizeAssignmentCaptureSlotKey(req.body?.slot_key);
+  const requestedMediaType = normalizeAssignmentCaptureMediaType(req.body?.media_type);
 
   if (!fileNameRaw) {
     res.status(400).json({ error: "file_name is required" });
@@ -14218,6 +14230,8 @@ app.post("/api/assignments/:id/assets/uploads/start", requireRole("owner", "admi
     total_chunks: Math.floor(totalChunks),
     chunk_size_bytes: chunkSizeBytes,
     sync_batch_id: syncBatchId,
+    slot_key: requestedSlotKey || null,
+    media_type: requestedMediaType || null,
     received_chunks: {},
     created_at: now,
     updated_at: now,
@@ -14431,6 +14445,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   const contentItemId = Number(assignment.content_item_id || 0) || 0;
   const assignmentRound = resolveAssignmentCurrentRound(assignment);
   const syncBatchId = sanitizeAssignmentSyncBatchId(manifest?.sync_batch_id);
+  const persistedSlotKey = sanitizeAssignmentCaptureSlotKey(manifest?.slot_key);
   if (!syncBatchId) {
     await fs.unlink(finalAbsolutePath).catch(() => {});
     await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
@@ -14444,7 +14459,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   `
   );
   const linkAsset = db.prepare(
-    "INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order, assignment_id, assignment_round, assignment_media_type, assignment_surface, assignment_sync_batch_id) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)"
+    "INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order, assignment_id, assignment_round, assignment_media_type, assignment_slot_key, assignment_surface, assignment_sync_batch_id) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)"
   );
   const assetUid = crypto.randomUUID();
   const mediaType = normalizedMime.startsWith("video/") ? "video" : "image";
@@ -14474,6 +14489,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
       assignmentId,
       assignmentRound,
       mediaType,
+      persistedSlotKey || null,
       "assignment_work",
       syncBatchId
     );
@@ -14515,6 +14531,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
       asset_id: assetId,
       mime_type: normalizedMime,
       assignment_media_type: mediaType,
+      assignment_slot_key: persistedSlotKey || null,
       assignment_sync_batch_id: syncBatchId,
     }, {
       assignment_id: assignmentId,
@@ -14535,6 +14552,13 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
     public_url: parseAssetPathForUrl(finalRelativePath),
     file_name: safeName,
     mime_type: normalizedMime,
+    slotKey: persistedSlotKey || null,
+    mediaType,
+    assignment_media_type: mediaType,
+    assignment_slot_key: persistedSlotKey || null,
+    assignment_round: assignmentRound,
+    assignment_surface: "assignment_work",
+    assignment_sync_batch_id: syncBatchId,
     role: assetRole,
   };
   res.status(201).json({
@@ -14574,6 +14598,7 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
   const contentItemId = Number(assignment.content_item_id || 0) || 0;
   const assignmentRound = resolveAssignmentCurrentRound(assignment);
   const syncBatchId = sanitizeAssignmentSyncBatchId(req.body?.sync_batch_id);
+  const requestedSlotKey = sanitizeAssignmentCaptureSlotKey(req.body?.slot_key);
   if (!syncBatchId) {
     res.status(400).json({ error: "sync_batch_id is required" });
     return;
@@ -14585,7 +14610,7 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
   `
   );
   const linkAsset = db.prepare(
-    "INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order, assignment_id, assignment_round, assignment_media_type, assignment_surface, assignment_sync_batch_id) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)"
+    "INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order, assignment_id, assignment_round, assignment_media_type, assignment_slot_key, assignment_surface, assignment_sync_batch_id) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)"
   );
   const uploaded = [];
 
@@ -14626,6 +14651,7 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
       assignmentId,
       assignmentRound,
       mediaType,
+      requestedSlotKey || null,
       "assignment_work",
       syncBatchId
     );
@@ -14637,6 +14663,7 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
       asset_id: assetId,
       mime_type: file.mimetype || null,
       assignment_media_type: mediaType,
+      assignment_slot_key: requestedSlotKey || null,
       assignment_sync_batch_id: syncBatchId,
     }, {
       assignment_id: assignmentId,
@@ -14648,6 +14675,13 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
       public_url: parseAssetPathForUrl(relativePath),
       file_name: file.originalname,
       mime_type: file.mimetype,
+      slotKey: requestedSlotKey || null,
+      mediaType,
+      assignment_media_type: mediaType,
+      assignment_slot_key: requestedSlotKey || null,
+      assignment_round: assignmentRound,
+      assignment_surface: "assignment_work",
+      assignment_sync_batch_id: syncBatchId,
       role: assetRole,
     });
   }

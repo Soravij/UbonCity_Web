@@ -211,6 +211,37 @@ ${extractNamedFunctionSource(appJs, "getAssignmentAssetSlotTypeKeyFromAsset")}
 return getAssignmentAssetSlotTypeKeyFromAsset;`
 )();
 
+const buildAssignmentSubmissionMediaPayloadForTest = new Function(
+  `${extractNamedFunctionSource(appJs, "toCaptureSlug")}
+${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(appJs, "buildAssignmentCaptureSlotKey")}
+${extractNamedFunctionSource(appJs, "isVideoCapturePrompt")}
+${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureUploadItems")}
+${extractNamedFunctionSource(appJs, "getAssignmentAssetSlotTypeKeyFromAsset")}
+${extractNamedFunctionSource(appJs, "buildAssignmentCaptureItemLookup")}
+${extractNamedFunctionSource(appJs, "buildAssignmentSubmissionMediaPayload")}
+return buildAssignmentSubmissionMediaPayload;`
+)();
+
+const getAssignmentServerSyncedAssetsForCaptureItemsForTest = new Function(
+  "state",
+  "helpers",
+  `const ASSIGNMENT_WORK_SYNC_EXPIRY_MS = 24 * 60 * 60 * 1000;
+const ASSIGNMENT_CAPTURE_MAX_IMAGES_PER_SLOT = 5;
+const ASSIGNMENT_CAPTURE_MAX_VIDEOS_PER_SLOT = 2;
+const getAssignmentById = helpers.getAssignmentById;
+const getAssignmentCurrentRound = helpers.getAssignmentCurrentRound;
+const buildAssignmentServerAssetSyncSignature = helpers.buildAssignmentServerAssetSyncSignature;
+${extractNamedFunctionSource(appJs, "toCaptureSlug")}
+${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(appJs, "buildAssignmentCaptureSlotKey")}
+${extractNamedFunctionSource(appJs, "isVideoCapturePrompt")}
+${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureUploadItems")}
+${extractNamedFunctionSource(appJs, "getAssignmentAssetSlotTypeKeyFromAsset")}
+${extractNamedFunctionSource(appJs, "getAssignmentServerSyncedAssetsForCaptureItems")}
+return (assignmentId, captureItems) => getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureItems);`
+);
+
 test("normalizeAssignmentCaptureUploadItems preserves capture_type and splits both into two slot keys", () => {
   const normalized = normalizeAssignmentCaptureUploadItemsForTest([
     { item_text: "หน้าร้าน", item_order: 0, capture_type: "photo" },
@@ -303,6 +334,112 @@ test("getAssignmentAssetSlotTypeKeyFromAsset prefers canonical media key from as
     assignment_media_type: "video",
   });
   assert.equal(key, "shot-3-scene|video");
+});
+
+test("submission media payload keeps synced video asset metadata from upload response", () => {
+  const captureItems = [
+    { item_text: "Walkthrough clip", item_order: 4, capture_type: "video" },
+  ];
+  const slotKey = buildAssignmentCaptureSlotKeyForBackendTest("Walkthrough clip", 4, "video", "video");
+
+  const payload = buildAssignmentSubmissionMediaPayloadForTest([
+    {
+      id: 501,
+      file_name: "upload.mp4",
+      mime_type: "video/mp4",
+      slotKey,
+      mediaType: "video",
+      assignment_media_type: "video",
+      assignment_round: 2,
+      assignment_surface: "assignment_work",
+      assignment_sync_batch_id: "batch-video-1",
+    },
+  ], captureItems);
+
+  assert.deepEqual(payload, {
+    assets: [
+      {
+        id: 501,
+        file_name: "upload.mp4",
+        mime_type: "video/mp4",
+        public_url: null,
+        slotKey,
+        mediaType: "video",
+        capture_type: "video",
+        prompt: "Walkthrough clip",
+      },
+    ],
+  });
+});
+
+test("server-synced asset reload keeps video asset matched by persisted slot metadata", () => {
+  const captureItems = [
+    { item_text: "Walkthrough clip", item_order: 4, capture_type: "video" },
+  ];
+  const slotKey = buildAssignmentCaptureSlotKeyForBackendTest("Walkthrough clip", 4, "video", "video");
+  const state = {
+    assignments: {
+      assetLookup: [
+        {
+          id: 601,
+          file_name: "round2-video.mp4",
+          mime_type: "video/mp4",
+          assignment_id: 24,
+          assignment_round: 2,
+          assignment_surface: "assignment_work",
+          assignment_media_type: "video",
+          assignment_slot_key: slotKey,
+          assignment_sync_batch_id: "batch-video-reload",
+          created_at: new Date().toISOString(),
+        },
+      ],
+    },
+  };
+  const run = getAssignmentServerSyncedAssetsForCaptureItemsForTest(state, {
+    getAssignmentById() {
+      return { id: 24, image_reset_required: 0, video_reset_required: 1 };
+    },
+    getAssignmentCurrentRound() {
+      return 2;
+    },
+    buildAssignmentServerAssetSyncSignature() {
+      return "sig-video";
+    },
+  });
+
+  const result = run(24, captureItems);
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.missing, []);
+  assert.equal(result.assets.length, 1);
+  assert.equal(result.assets[0].assignment_slot_key, slotKey);
+  assert.equal(result.assets[0].assignment_media_type, "video");
+
+  const payload = buildAssignmentSubmissionMediaPayloadForTest(result.assets, captureItems);
+  assert.equal(payload.assets.length, 1);
+  assert.equal(payload.assets[0].slotKey, slotKey);
+  assert.equal(payload.assets[0].mediaType, "video");
+});
+
+test("persisted slot metadata beats non-canonical filename and missing metadata does not guess slot", () => {
+  const slotKey = "shot-5-walkthrough-clip";
+
+  assert.equal(
+    getAssignmentAssetSlotTypeKeyFromAssetForTest({
+      file_name: "round2-video.mp4",
+      mime_type: "video/mp4",
+      assignment_slot_key: slotKey,
+      assignment_media_type: "video",
+    }),
+    `${slotKey}|video`
+  );
+
+  assert.equal(
+    getAssignmentAssetSlotTypeKeyFromAssetForTest({
+      file_name: "round2-video.mp4",
+      mime_type: "video/mp4",
+    }),
+    ""
+  );
 });
 
 test("backend capture validation accepts structured video payload assets by canonical slot key", () => {
