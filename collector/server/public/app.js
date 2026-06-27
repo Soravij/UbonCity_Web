@@ -1158,8 +1158,12 @@ function writeAssignmentSubmissionDraft(assignmentId, payload, assignment = null
   const currentDraft = state.assignments.submissionDrafts?.[draftKey] && typeof state.assignments.submissionDrafts[draftKey] === "object"
     ? state.assignments.submissionDrafts[draftKey]
     : {};
-  state.assignments.submissionDrafts[draftKey] = normalized;
-  scheduleSaveAssignmentSubmissionServerDraft(id, { ...currentDraft, ...normalized }, assignment);
+  const mergedDraft = {
+    ...currentDraft,
+    ...normalized,
+  };
+  state.assignments.submissionDrafts[draftKey] = mergedDraft;
+  scheduleSaveAssignmentSubmissionServerDraft(id, mergedDraft, assignment);
 }
 
 function clearAssignmentSubmissionDraft(assignmentId) {
@@ -7400,9 +7404,16 @@ function buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPacka
         activation_mode: check.activation_mode == null ? null : String(check.activation_mode || "").trim().toLowerCase() || null,
         required: check.required === true,
         checked: false,
-        value: hasSuggestedValue
-          ? cloneAssignmentRequestedCheckValue(check.suggested_value, check.answer_type)
-          : getAssignmentRequestedCheckDefaultValue(check.answer_type),
+        value: isAssignmentRequestedCheckTaxonomyBooleanRow({
+          group_key: group.group_key,
+          answer_type: check.answer_type,
+        })
+          ? false
+          : (
+            hasSuggestedValue
+              ? cloneAssignmentRequestedCheckValue(check.suggested_value, check.answer_type)
+              : getAssignmentRequestedCheckDefaultValue(check.answer_type)
+          ),
         condition_note: "",
         evidence: "",
         note: "",

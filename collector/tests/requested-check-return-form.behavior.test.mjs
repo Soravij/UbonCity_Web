@@ -307,15 +307,16 @@ const getAssignmentRequestedCheckGroupsFromHandoffPackage = loadNamedFunction(ap
   buildAssignmentRequestedCheckReturnKey,
 });
 const getAssignmentRequestedCheckDefaultValue = loadNamedFunction(appJs, "getAssignmentRequestedCheckDefaultValue");
+const isAssignmentRequestedCheckTaxonomyBooleanRow = loadNamedFunction(appJs, "isAssignmentRequestedCheckTaxonomyBooleanRow");
 const buildAssignmentRequestedCheckReturnDraftFromHandoffPackage = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnDraftFromHandoffPackage", {
   getAssignmentRequestedCheckGroupsFromHandoffPackage,
   getAssignmentRequestedCheckDefaultValue,
   cloneAssignmentRequestedCheckValue,
+  isAssignmentRequestedCheckTaxonomyBooleanRow,
 });
 const normalizeAssignmentRequestedCheckReturnDraft = loadNamedFunction(appJs, "normalizeAssignmentRequestedCheckReturnDraft", {
   buildAssignmentRequestedCheckReturnDraftFromHandoffPackage,
 });
-const isAssignmentRequestedCheckTaxonomyBooleanRow = loadNamedFunction(appJs, "isAssignmentRequestedCheckTaxonomyBooleanRow");
 const buildAssignmentRequestedCheckReturnSubmissionRow = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnSubmissionRow", {
   isAssignmentRequestedCheckTaxonomyBooleanRow,
 });
@@ -547,6 +548,32 @@ test("requested-check draft prefills CTA values for new handoffs with checked fa
   assert.equal(draft.requested_check_returns["cta_contact.facebook_url"].checked, false);
   assert.equal(draft.requested_check_returns["cta_contact.facebook_url"].value, "https://www.facebook.com/hippieroaster/?locale=th_TH");
   assert.equal(Object.prototype.hasOwnProperty.call(draft.requested_check_returns, "cta_contact.primary_cta"), false);
+});
+
+test("requested-check draft keeps taxonomy boolean suggestions separate from confirmed checkbox state", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            { key: "parking", requested: true, label: "Parking", answer_type: "boolean", suggested_value: true },
+            { key: "pet_friendly", requested: true, label: "Pet Friendly", answer_type: "boolean", suggested_value: false },
+          ],
+        },
+      ],
+    },
+  };
+
+  const draft = buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage);
+  assert.equal(draft.requested_check_returns["taxonomy.parking"].checked, false);
+  assert.equal(draft.requested_check_returns["taxonomy.parking"].value, false);
+  assert.equal(draft.requested_check_returns["taxonomy.parking"].suggested_value, true);
+  assert.equal(draft.requested_check_returns["taxonomy.pet_friendly"].checked, false);
+  assert.equal(draft.requested_check_returns["taxonomy.pet_friendly"].value, false);
+  assert.equal(draft.requested_check_returns["taxonomy.pet_friendly"].suggested_value, false);
 });
 test("requested-check draft prefill ignores empty current draft objects and falls back to latest submission values", () => {
   const handoffPackage = {
@@ -1144,8 +1171,8 @@ test("taxonomy boolean row renders as a single checkbox control with helper text
       evidence_required: false,
     },
     {
-      checked: true,
-      value: true,
+      checked: false,
+      value: false,
       condition_note: "",
       evidence: "",
     },
@@ -1159,6 +1186,7 @@ test("taxonomy boolean row renders as a single checkbox control with helper text
   assert.equal(rowHtml.includes('data-requested-check-field="value"'), false);
   assert.equal(rowHtml.includes("ไม่เลือก = ไม่มี"), true);
   assert.equal(rowHtml.includes("AI แนะนำ"), true);
+  assert.doesNotMatch(rowHtml, /type="checkbox"\s+checked\b/);
 });
 
 test("non-taxonomy boolean rows keep the original true-false value control", () => {
@@ -1210,6 +1238,131 @@ test("taxonomy boolean suggestion false does not auto-confirm or remove the AI b
   assert.equal(rowHtml.includes("AI แนะนำ"), true);
   assert.match(rowHtml, /type="checkbox"/);
   assert.doesNotMatch(rowHtml, /type="checkbox"\s+checked\b/);
+});
+
+test("taxonomy boolean prior confirmed true from draft still renders checked", () => {
+  const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(
+    {
+      return_key: "taxonomy.parking",
+      group_key: "taxonomy",
+      check_key: "parking",
+      label: "Parking",
+      answer_type: "boolean",
+      suggested_value: false,
+      evidence_required: false,
+    },
+    {
+      checked: true,
+      value: true,
+      condition_note: "",
+      evidence: "",
+    },
+    {}
+  );
+
+  assert.match(rowHtml, /type="checkbox"\s+checked\b/);
+  assert.equal(rowHtml.includes("AI แนะนำ"), true);
+});
+
+test("writeAssignmentSubmissionDraft merges local article and requested-check sections before scheduling save", () => {
+  const state = {
+    assignments: {
+      contextFieldPack: null,
+      requestedCheckReturnDrafts: {
+        12: {
+      requested_check_returns: {
+        "taxonomy.parking": { checked: false, value: false, group_key: "taxonomy", answer_type: "boolean" },
+      },
+    },
+      },
+      submissionDrafts: {
+        "12:1": {
+          article_payload_json: { additional_text: "existing article" },
+        },
+      },
+    },
+  };
+  const scheduledPayloads = [];
+  const writeDraft = loadNamedFunction(appJs, "writeAssignmentSubmissionDraft", {
+    state,
+    getAssignmentSubmissionDraftKey: () => "12:1",
+    normalizeAssignmentSubmissionPayload: (payload) => payload,
+    buildAssignmentRequestedCheckReturnPayloadFromDraft,
+    scheduleSaveAssignmentSubmissionServerDraft: (id, payload) => {
+      scheduledPayloads.push({ id, payload });
+    },
+  });
+  const readDraft = loadNamedFunction(appJs, "readAssignmentSubmissionDraft", {
+    state,
+    getAssignmentSubmissionDraftKey: () => "12:1",
+    normalizeAssignmentSubmissionPayload: (payload) => payload,
+  });
+
+  writeDraft(12, null, { id: 12 }, { includeArticle: false, includeRequestedChecks: true });
+
+  assert.deepEqual(state.assignments.submissionDrafts["12:1"], {
+    article_payload_json: { additional_text: "existing article" },
+    field_return_payload_json: {
+      requested_check_returns: {
+        "taxonomy.parking": {
+          checked: true,
+          value: false,
+          condition_note: null,
+          evidence: null,
+          note: null,
+        },
+      },
+    },
+  });
+  assert.deepEqual(scheduledPayloads[0], {
+    id: 12,
+    payload: state.assignments.submissionDrafts["12:1"],
+  });
+  assert.deepEqual(readDraft(12, { id: 12 }), { additional_text: "existing article" });
+});
+
+test("writeAssignmentSubmissionDraft preserves requested-check section during article-only local save", () => {
+  const state = {
+    assignments: {
+      contextFieldPack: null,
+      requestedCheckReturnDrafts: {},
+      submissionDrafts: {
+        "12:1": {
+          article_payload_json: { additional_text: "existing article" },
+          field_return_payload_json: {
+            requested_check_returns: {
+              "taxonomy.parking": { checked: true, value: false },
+            },
+          },
+        },
+      },
+    },
+  };
+  const scheduledPayloads = [];
+  const writeDraft = loadNamedFunction(appJs, "writeAssignmentSubmissionDraft", {
+    state,
+    getAssignmentSubmissionDraftKey: () => "12:1",
+    normalizeAssignmentSubmissionPayload: (payload) => payload,
+    buildAssignmentRequestedCheckReturnPayloadFromDraft,
+    scheduleSaveAssignmentSubmissionServerDraft: (id, payload) => {
+      scheduledPayloads.push({ id, payload });
+    },
+  });
+
+  writeDraft(12, { additional_text: "updated article" }, { id: 12 }, { includeArticle: true, includeRequestedChecks: false });
+
+  assert.deepEqual(state.assignments.submissionDrafts["12:1"], {
+    article_payload_json: { additional_text: "updated article" },
+    field_return_payload_json: {
+      requested_check_returns: {
+        "taxonomy.parking": { checked: true, value: false },
+      },
+    },
+  });
+  assert.deepEqual(scheduledPayloads[0], {
+    id: 12,
+    payload: state.assignments.submissionDrafts["12:1"],
+  });
 });
 
 test("requested-check normalize keeps edited prefilled values through rerender merges", () => {
