@@ -57,100 +57,6 @@ function loadNamedAsyncFunction(sourceText, functionName, dependencies = {}) {
   return AsyncFunction(...dependencyNames, `${source}; return ${functionName};`)(...dependencyValues);
 }
 
-function createDeferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-async function createAssignmentAutosaveHarness({
-  currentRevisionRound = 1,
-  apiImpl = async () => ({ draft: null }),
-} = {}) {
-  const state = {
-    assignments: {
-      selectedId: 12,
-      serverSubmissionDraftPayloads: {},
-      serverSubmissionDraftLoaded: {},
-      serverSubmissionDraftSaveTimers: {},
-      serverSubmissionDraftSaveTokens: {},
-      contextFieldPack: null,
-    },
-  };
-  const currentAssignment = { id: 12, revision_round: currentRevisionRound, state: "in_progress" };
-  const currentAssignmentRef = { current: currentAssignment };
-  const apiCalls = [];
-  const statusCalls = [];
-  const pendingTimers = new Map();
-  let nextTimerId = 1;
-  const fakeWindow = {
-    setTimeout(callback) {
-      const timerId = nextTimerId;
-      nextTimerId += 1;
-      pendingTimers.set(timerId, callback);
-      return timerId;
-    },
-    clearTimeout(timerId) {
-      pendingTimers.delete(timerId);
-    },
-  };
-  const getDraftKey = (assignmentId, assignment) => `${assignmentId}:${Number(assignment?.revision_round || 0) || 0}`;
-  const saveAssignmentSubmissionServerDraft = await loadNamedAsyncFunction(appJs, "saveAssignmentSubmissionServerDraft", {
-    state,
-    isEditorUser: () => false,
-    getAssignmentById: () => currentAssignmentRef.current,
-    setAssignmentDraftSaveStatus: (text, isError = false) => {
-      statusCalls.push({ text: String(text || ""), isError: isError === true });
-    },
-    setAssignmentSubmissionDraftSaveStatusForAttempt: (draftKey, saveAttemptToken, text, isError = false) => {
-      const key = String(draftKey || "").trim();
-      const token = String(saveAttemptToken || "").trim();
-      if (!key || !token) return false;
-      if (state.assignments.serverSubmissionDraftSaveTokens?.[key] !== token) return false;
-      statusCalls.push({ text: String(text || ""), isError: isError === true });
-      return true;
-    },
-    api: async (url, options) => {
-      apiCalls.push({ url, options });
-      return apiImpl(url, options);
-    },
-    normalizeAssignmentSubmissionPayload: (payload) => payload,
-    getAssignmentSubmissionDraftKey: getDraftKey,
-  });
-  const clearServerDraftSaveTimer = loadNamedFunction(appJs, "clearServerDraftSaveTimer", {
-    state,
-    window: fakeWindow,
-  });
-  const scheduleSaveAssignmentSubmissionServerDraft = loadNamedFunction(appJs, "scheduleSaveAssignmentSubmissionServerDraft", {
-    state,
-    isEditorUser: () => false,
-    clearServerDraftSaveTimer,
-    saveAssignmentSubmissionServerDraft,
-    setAssignmentDraftSaveStatus: (text, isError = false) => {
-      statusCalls.push({ text: String(text || ""), isError: isError === true });
-    },
-    window: fakeWindow,
-    getAssignmentSubmissionDraftKey: getDraftKey,
-    assignmentSubmissionDraftSaveAttemptCounter: 0,
-  });
-
-  return {
-    state,
-    currentAssignmentRef,
-    apiCalls,
-    statusCalls,
-    pendingTimers,
-    fakeWindow,
-    saveAssignmentSubmissionServerDraft,
-    scheduleSaveAssignmentSubmissionServerDraft,
-    getDraftKey,
-  };
-}
-
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -294,7 +200,6 @@ function createRequestedCheckRenderHarness(state) {
         state,
         getLatestAssignmentSubmissionRow: () => null,
         getAssignmentSubmissionDraftKey: () => "12:1",
-        getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
         normalizeAssignmentRequestedCheckReturnDraft,
         hasUsableAssignmentRequestedCheckReturnRows,
       }),
@@ -309,13 +214,11 @@ function createRequestedCheckRenderHarness(state) {
       renderAssignmentRequestedCheckSection: loadNamedFunction(appJs, "renderAssignmentRequestedCheckSection", {
         state,
         qs: (id) => nodes.get(id) || null,
-        getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
         getAssignmentRequestedCheckGroupsFromHandoffPackage,
         getAssignmentRequestedCheckReturnDraftPrefill: loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
           state,
           getLatestAssignmentSubmissionRow: () => null,
           getAssignmentSubmissionDraftKey: () => "12:1",
-          getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
           normalizeAssignmentRequestedCheckReturnDraft,
           hasUsableAssignmentRequestedCheckReturnRows,
         }),
@@ -323,7 +226,6 @@ function createRequestedCheckRenderHarness(state) {
         buildAssignmentRequestedCheckReturnSectionHtml,
         setAssignmentRequestedCheckReturnDraftState: loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
           state,
-          getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
         }),
         hasUsableAssignmentRequestedCheckReturnRows,
         updateAssignmentRequestedCheckReturnRowState: () => {},
@@ -441,13 +343,8 @@ const getAssignmentRequestedCheckReturnRows = loadNamedFunction(appJs, "getAssig
 const hasUsableAssignmentRequestedCheckReturnRows = loadNamedFunction(appJs, "hasUsableAssignmentRequestedCheckReturnRows", {
   getAssignmentRequestedCheckReturnRows,
 });
-const getAssignmentRequestedCheckLifecycleDraftKey = loadNamedFunction(appJs, "getAssignmentRequestedCheckLifecycleDraftKey", {
-  getAssignmentById: () => null,
-  getAssignmentSubmissionDraftKey: (assignmentId, assignment) => `${assignmentId}:${assignment?.revision_round || 0}`,
-});
 const setAssignmentRequestedCheckReturnDraftState = loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
   state: { assignments: {} },
-  getAssignmentRequestedCheckLifecycleDraftKey,
 });
 const buildAssignmentRequestedCheckReturnSubmissionRow = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnSubmissionRow", {
   isAssignmentRequestedCheckTaxonomyBooleanRow,
@@ -480,6 +377,7 @@ const buildAssignmentRequestedCheckReturnSectionHtml = loadNamedFunction(appJs, 
   escapeHtml,
 });
 const updateAssignmentRequestedCheckReturnRowState = loadNamedFunction(appJs, "updateAssignmentRequestedCheckReturnRowState");
+const readAssignmentRequestedCheckReturnDraftFromForm = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm");
 
 const normalizeRequestedCheckAnswerType = loadNamedFunction(repositoryJs, "normalizeRequestedCheckAnswerType");
 const normalizeRequestedCheckReturnKey = loadNamedFunction(repositoryJs, "normalizeRequestedCheckReturnKey");
@@ -751,7 +649,6 @@ test("requested-check draft prefill ignores empty current draft objects and fall
     state,
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
     getAssignmentSubmissionDraftKey: () => "12:1",
-    getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
     normalizeAssignmentRequestedCheckReturnDraft,
     hasUsableAssignmentRequestedCheckReturnRows,
   });
@@ -817,7 +714,6 @@ test("requested-check draft prefill prefers current local draft over server draf
     state,
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
     getAssignmentSubmissionDraftKey: () => "12:1",
-    getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
     normalizeAssignmentRequestedCheckReturnDraft,
     hasUsableAssignmentRequestedCheckReturnRows,
   });
@@ -845,7 +741,7 @@ test("requested-check draft prefill prefers current revision server draft over l
     assignments: {
       selectedId: 12,
       requestedCheckReturnDrafts: {
-        "12:1": {
+        12: {
           requested_check_returns: {},
         },
       },
@@ -873,7 +769,6 @@ test("requested-check draft prefill prefers current revision server draft over l
     state,
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
     getAssignmentSubmissionDraftKey: () => "12:1",
-    getAssignmentRequestedCheckLifecycleDraftKey: () => "12:1",
     normalizeAssignmentRequestedCheckReturnDraft,
     hasUsableAssignmentRequestedCheckReturnRows,
   });
@@ -923,7 +818,6 @@ test("requested-check draft prefill lets usable server draft beat non-dirty sche
     state,
     getLatestAssignmentSubmissionRow: () => null,
     getAssignmentSubmissionDraftKey: () => "12:1",
-    getAssignmentRequestedCheckLifecycleDraftKey: () => "12:1",
     normalizeAssignmentRequestedCheckReturnDraft,
     hasUsableAssignmentRequestedCheckReturnRows,
   });
@@ -981,7 +875,6 @@ test("requested-check draft prefill lets latest submission beat empty server ret
     state,
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
     getAssignmentSubmissionDraftKey: () => "12:1",
-    getAssignmentRequestedCheckLifecycleDraftKey: () => "12:1",
     normalizeAssignmentRequestedCheckReturnDraft,
     hasUsableAssignmentRequestedCheckReturnRows,
   });
@@ -1521,7 +1414,7 @@ test("writeAssignmentSubmissionDraft merges local article and requested-check se
     assignments: {
       contextFieldPack: null,
       requestedCheckReturnDrafts: {
-        "12:1": {
+        12: {
       requested_check_returns: {
         "taxonomy.parking": { checked: false, value: false, group_key: "taxonomy", answer_type: "boolean" },
       },
@@ -1733,13 +1626,11 @@ test("requested-check empty loaded state hides the requested-check surface throu
       renderAssignmentRequestedCheckSection: loadNamedFunction(appJs, "renderAssignmentRequestedCheckSection", {
         state,
         qs: harness.qs,
-        getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
         getAssignmentRequestedCheckGroupsFromHandoffPackage,
         getAssignmentRequestedCheckReturnDraftPrefill: loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
           state,
           getLatestAssignmentSubmissionRow: () => null,
           getAssignmentSubmissionDraftKey: () => "12:1",
-          getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
           normalizeAssignmentRequestedCheckReturnDraft,
           hasUsableAssignmentRequestedCheckReturnRows,
         }),
@@ -1747,7 +1638,6 @@ test("requested-check empty loaded state hides the requested-check surface throu
         buildAssignmentRequestedCheckReturnSectionHtml,
         setAssignmentRequestedCheckReturnDraftState: loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
           state,
-          getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
         }),
         hasUsableAssignmentRequestedCheckReturnRows,
         updateAssignmentRequestedCheckReturnRowState: () => {},
@@ -1822,7 +1712,6 @@ test("requested-check form reader merges visible CTA values into the existing dr
   const readDraft = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm", {
     qs: () => formNode,
     state,
-    getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
   });
 
   const draft = readDraft(12);
@@ -1895,7 +1784,6 @@ test("requested-check form reader keeps hidden custom rows and reads taxonomy co
   const readDraft = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm", {
     qs: () => formNode,
     state,
-    getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
   });
 
   const draft = readDraft(12);
@@ -2053,7 +1941,6 @@ test("requested-check form reader returns canonical multi_select array from stru
   const readDraft = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm", {
     qs: () => formNode,
     state,
-    getAssignmentRequestedCheckLifecycleDraftKey: () => "12",
   });
 
   const draft = readDraft(12);
@@ -2649,17 +2536,17 @@ test("loadAssignmentSubmissionServerDraft rerenders requested-check surface afte
     assignments: {
       selectedId: 12,
       requestedCheckReturnDrafts: {
-        "12:1": {
+        12: {
           requested_check_returns: {
             "taxonomy.parking": { checked: false, value: false },
           },
         },
       },
       requestedCheckReturnDraftDirty: {
-        "12:1": false,
+        12: false,
       },
       requestedCheckReturnDraftSources: {
-        "12:1": "schema_default",
+        12: "schema_default",
       },
       serverSubmissionDraftPayloads: {},
       serverSubmissionDraftLoaded: {},
@@ -2684,7 +2571,6 @@ test("loadAssignmentSubmissionServerDraft rerenders requested-check surface afte
     normalizeAssignmentRequestedCheckReturnDraft,
     setAssignmentRequestedCheckReturnDraftState: loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
       state,
-      getAssignmentRequestedCheckLifecycleDraftKey: () => "12:1",
     }),
     getAssignmentById: (id) => ({ id }),
     renderAssignmentRequestedCheckSection: (assignment, handoffPackage, draft) => {
@@ -2696,330 +2582,6 @@ test("loadAssignmentSubmissionServerDraft rerenders requested-check surface afte
   assert.equal(calls.length, 1);
   assert.equal(calls[0].assignmentId, 12);
   assert.equal(calls[0].draft?.requested_check_returns?.["taxonomy.parking"]?.value, true);
-});
-
-test("loadAssignmentSubmissionServerDraft ignores stale response from an older revision round of the same assignment", async () => {
-  const calls = [];
-  const state = {
-    assignments: {
-      selectedId: 12,
-      requestedCheckReturnDrafts: {
-        "12:2": {
-          requested_check_returns: {
-            "taxonomy.parking": { checked: true, value: false },
-          },
-        },
-      },
-      requestedCheckReturnDraftDirty: {
-        "12:2": false,
-      },
-      requestedCheckReturnDraftSources: {
-        "12:2": "schema_default",
-      },
-      serverSubmissionDraftPayloads: {},
-      serverSubmissionDraftLoaded: {},
-      contextFieldPack: null,
-    },
-  };
-  const loadDraft = await loadNamedAsyncFunction(appJs, "loadAssignmentSubmissionServerDraft", {
-    state,
-    isEditorUser: () => false,
-    api: async () => ({
-      draft: {
-        field_return_payload_json: {
-          requested_check_returns: {
-            "taxonomy.parking": { checked: true, value: true },
-          },
-        },
-      },
-    }),
-    getAssignmentSubmissionDraftKey: (assignmentId, assignment) => `${assignmentId}:${assignment?.revision_round || 0}`,
-    normalizeAssignmentSubmissionPayload: (payload) => payload,
-    hasUsableAssignmentRequestedCheckReturnRows,
-    normalizeAssignmentRequestedCheckReturnDraft,
-    setAssignmentRequestedCheckReturnDraftState: loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
-      state,
-      getAssignmentRequestedCheckLifecycleDraftKey: (assignmentId, assignment) => `${assignmentId}:${assignment?.revision_round || 0}`,
-    }),
-    getAssignmentById: (id) => ({ id, revision_round: 2 }),
-    renderAssignmentRequestedCheckSection: () => {
-      calls.push("rerender");
-    },
-  });
-
-  await loadDraft({ id: 12, revision_round: 1 });
-  assert.deepEqual(calls, []);
-  assert.equal(state.assignments.requestedCheckReturnDrafts["12:2"].requested_check_returns["taxonomy.parking"].value, false);
-  assert.equal(state.assignments.requestedCheckReturnDraftSources["12:2"], "schema_default");
-  assert.equal(state.assignments.serverSubmissionDraftPayloads["12:1"]?.field_return_payload_json?.requested_check_returns?.["taxonomy.parking"]?.value, true);
-});
-
-test("requested-check lifecycle dirty and cleanup are isolated per revision draft key", () => {
-  const state = {
-    assignments: {
-      selectedId: 12,
-      requestedCheckReturnDrafts: {
-        "12:1": {
-          requested_check_returns: {
-            "taxonomy.parking": { checked: true, value: true },
-          },
-        },
-        "12:2": {
-          requested_check_returns: {
-            "taxonomy.parking": { checked: true, value: false },
-          },
-        },
-      },
-      requestedCheckReturnDraftDirty: {
-        "12:1": true,
-        "12:2": false,
-      },
-      requestedCheckReturnDraftSources: {
-        "12:1": "user_edit",
-        "12:2": "schema_default",
-      },
-      handoffSourcePackages: {
-        12: {
-          requested_checks: {
-            version: 1,
-            groups: [
-              {
-                group_key: "taxonomy",
-                checks: [{ key: "parking", requested: true, answer_type: "boolean" }],
-              },
-            ],
-          },
-        },
-      },
-      serverSubmissionDraftPayloads: {
-        "12:2": {
-          field_return_payload_json: {
-            requested_check_returns: {
-              "taxonomy.parking": { checked: true, value: false },
-            },
-          },
-        },
-      },
-      latestSubmissionRows: {},
-      submissionDrafts: {
-        "12:1": { article_payload_json: { additional_text: "round 1" } },
-        "12:2": { article_payload_json: { additional_text: "round 2" } },
-      },
-    },
-  };
-  const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
-    state,
-    getLatestAssignmentSubmissionRow: () => null,
-    getAssignmentSubmissionDraftKey: (assignmentId, assignment) => `${assignmentId}:${assignment?.revision_round || 0}`,
-    getAssignmentRequestedCheckLifecycleDraftKey: (assignmentId, assignment) => `${assignmentId}:${assignment?.revision_round || 0}`,
-    normalizeAssignmentRequestedCheckReturnDraft,
-    hasUsableAssignmentRequestedCheckReturnRows,
-  });
-  const clearDraft = loadNamedFunction(appJs, "clearAssignmentSubmissionDraft", {
-    state,
-    getAssignmentById: () => ({ id: 12, revision_round: 1 }),
-    getAssignmentSubmissionDraftKey: (assignmentId, assignment) => `${assignmentId}:${assignment?.revision_round || 0}`,
-  });
-
-  const roundTwoDraft = loadPrefill({ id: 12, revision_round: 2 }, state.assignments.handoffSourcePackages[12]);
-  assert.equal(roundTwoDraft.requested_check_returns["taxonomy.parking"].value, false);
-
-  clearDraft(12);
-
-  assert.equal(state.assignments.requestedCheckReturnDrafts["12:1"], undefined);
-  assert.notEqual(state.assignments.requestedCheckReturnDrafts["12:2"], undefined);
-  assert.equal(state.assignments.requestedCheckReturnDraftDirty["12:1"], undefined);
-  assert.equal(state.assignments.requestedCheckReturnDraftDirty["12:2"], false);
-  assert.equal(state.assignments.submissionDrafts["12:1"], undefined);
-  assert.notEqual(state.assignments.submissionDrafts["12:2"], undefined);
-});
-
-test("autosave keeps revision-specific timers separate and skips stale revision PUTs", async () => {
-  const harness = await createAssignmentAutosaveHarness({
-    currentRevisionRound: 1,
-    apiImpl: async () => ({
-      draft: {
-        article_payload_json: {
-          additional_text: "saved",
-        },
-      },
-    }),
-  });
-  const {
-    state,
-    currentAssignmentRef,
-    apiCalls,
-    statusCalls,
-    pendingTimers,
-    scheduleSaveAssignmentSubmissionServerDraft,
-  } = harness;
-
-  scheduleSaveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 1" } }, currentAssignmentRef.current);
-  const revisionOneTimerId = state.assignments.serverSubmissionDraftSaveTimers["12:1"];
-  assert.ok(revisionOneTimerId);
-
-  currentAssignmentRef.current.revision_round = 2;
-  scheduleSaveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, currentAssignmentRef.current);
-
-  assert.ok(state.assignments.serverSubmissionDraftSaveTimers["12:1"]);
-  assert.ok(state.assignments.serverSubmissionDraftSaveTimers["12:2"]);
-
-  const revisionOneTimer = pendingTimers.get(revisionOneTimerId);
-  assert.ok(revisionOneTimer);
-  revisionOneTimer();
-  await Promise.resolve();
-
-  assert.equal(apiCalls.length, 0);
-  assert.deepEqual(state.assignments.serverSubmissionDraftPayloads, {});
-  assert.deepEqual(state.assignments.serverSubmissionDraftLoaded, {});
-  assert.deepEqual(statusCalls, []);
-});
-
-test("autosave ignores a stale response when revision changes before PUT resolves", async () => {
-  const deferredOne = createDeferred();
-  const deferredTwo = createDeferred();
-  let callCount = 0;
-  const harness = await createAssignmentAutosaveHarness({
-    currentRevisionRound: 1,
-    apiImpl: async () => {
-      callCount += 1;
-      return callCount === 1 ? deferredOne.promise : deferredTwo.promise;
-    },
-  });
-  const {
-    state,
-    currentAssignmentRef,
-    apiCalls,
-    statusCalls,
-    saveAssignmentSubmissionServerDraft,
-  } = harness;
-
-  state.assignments.serverSubmissionDraftSaveTokens["12:1"] = "token-1";
-  const savePromise = saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 1" } }, "12:1", 1, "token-1");
-  assert.equal(apiCalls.length, 1);
-
-  state.assignments.serverSubmissionDraftSaveTokens["12:2"] = "token-2";
-  currentAssignmentRef.current.revision_round = 2;
-  const saveTwoPromise = saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, "12:2", 2, "token-2");
-  assert.equal(apiCalls.length, 2);
-
-  deferredOne.resolve({
-    draft: {
-      article_payload_json: {
-        additional_text: "revision 1 saved",
-      },
-    },
-  });
-  await savePromise;
-  assert.equal(statusCalls.at(-1)?.text, "กำลังบันทึก...");
-
-  deferredTwo.resolve({
-    draft: {
-      article_payload_json: {
-        additional_text: "revision 2 saved",
-      },
-    },
-  });
-  await saveTwoPromise;
-
-  assert.equal(state.assignments.serverSubmissionDraftPayloads["12:1"], undefined);
-  assert.equal(state.assignments.serverSubmissionDraftPayloads["12:2"]?.article_payload_json?.additional_text, "revision 2 saved");
-  assert.equal(state.assignments.serverSubmissionDraftLoaded["12:1"], undefined);
-  assert.equal(state.assignments.serverSubmissionDraftLoaded["12:2"], true);
-  assert.equal(statusCalls.at(-1)?.text.startsWith("บันทึกล่าสุด"), true);
-});
-
-test("autosave still saves the current revision normally", async () => {
-  const harness = await createAssignmentAutosaveHarness({
-    currentRevisionRound: 2,
-    apiImpl: async () => ({
-      draft: {
-        article_payload_json: {
-          additional_text: "revision 2 saved",
-        },
-      },
-    }),
-  });
-  const {
-    state,
-    apiCalls,
-    statusCalls,
-    saveAssignmentSubmissionServerDraft,
-  } = harness;
-
-  state.assignments.serverSubmissionDraftSaveTokens["12:2"] = "token-2";
-  await saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, "12:2", 2, "token-2");
-
-  assert.equal(apiCalls.length, 1);
-  assert.equal(JSON.parse(apiCalls[0].options.body).expected_revision_round, 2);
-  assert.equal(state.assignments.serverSubmissionDraftPayloads["12:2"]?.article_payload_json?.additional_text, "revision 2 saved");
-  assert.equal(state.assignments.serverSubmissionDraftLoaded["12:2"], true);
-  assert.equal(statusCalls.at(-1)?.text.startsWith("บันทึกล่าสุด"), true);
-});
-
-test("autosave revision mismatch 409 returns null without cache writes or error state", async () => {
-  const harness = await createAssignmentAutosaveHarness({
-    currentRevisionRound: 2,
-    apiImpl: async () => {
-      const error = new Error("revision_round_changed");
-      error.status = 409;
-      error.payload = {
-        error: "revision_round_changed",
-        expected_revision_round: 2,
-        current_revision_round: 3,
-      };
-      throw error;
-    },
-  });
-  const {
-    state,
-    apiCalls,
-    statusCalls,
-    saveAssignmentSubmissionServerDraft,
-  } = harness;
-
-  state.assignments.serverSubmissionDraftSaveTokens["12:2"] = "token-2";
-  const result = await saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, "12:2", 2, "token-2");
-
-  assert.equal(result, null);
-  assert.equal(apiCalls.length, 1);
-  assert.equal(JSON.parse(apiCalls[0].options.body).expected_revision_round, 2);
-  assert.deepEqual(state.assignments.serverSubmissionDraftPayloads, {});
-  assert.deepEqual(state.assignments.serverSubmissionDraftLoaded, {});
-  assert.equal(statusCalls.at(-1)?.text, "");
-  assert.equal(statusCalls.some((entry) => entry.isError === true), false);
-});
-
-test("autosave ordinary error still surfaces save failure", async () => {
-  const harness = await createAssignmentAutosaveHarness({
-    currentRevisionRound: 2,
-    apiImpl: async () => {
-      const error = new Error("network down");
-      error.status = 500;
-      error.payload = { error: "network down" };
-      throw error;
-    },
-  });
-  const {
-    state,
-    pendingTimers,
-    statusCalls,
-    scheduleSaveAssignmentSubmissionServerDraft,
-  } = harness;
-
-  state.assignments.serverSubmissionDraftSaveTokens["12:2"] = "token-2";
-  scheduleSaveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, { id: 12, revision_round: 2, state: "in_progress" });
-  const timer = pendingTimers.values().next().value;
-  assert.ok(timer);
-  timer();
-  for (let index = 0; index < 10 && statusCalls.at(-1)?.text === "กำลังบันทึก..."; index += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-
-  assert.equal(statusCalls.at(-1)?.text, "บันทึกไม่สำเร็จ");
-  assert.equal(statusCalls.at(-1)?.isError, true);
-  assert.deepEqual(state.assignments.serverSubmissionDraftPayloads, {});
-  assert.deepEqual(state.assignments.serverSubmissionDraftLoaded, {});
 });
 
 // Repository final-submission validator tests

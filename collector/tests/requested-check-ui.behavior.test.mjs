@@ -227,7 +227,6 @@ function createAssignmentRequestedCheckValidationHarness(rows = []) {
   const readDraft = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm", {
     qs,
     state: readDraftState,
-    getAssignmentRequestedCheckLifecycleDraftKey: (assignmentId) => String(assignmentId || 0),
   });
   return {
     qs,

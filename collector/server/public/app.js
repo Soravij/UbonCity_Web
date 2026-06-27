@@ -219,7 +219,6 @@ const state = {
     serverSubmissionDraftPayloads: {},
     serverSubmissionDraftLoaded: {},
     serverSubmissionDraftSaveTimers: {},
-    serverSubmissionDraftSaveTokens: {},
     handoffSourcePackages: {},
     handoffSourceSnapshotIds: {},
     handoffSourceLoaded: {},
@@ -991,7 +990,6 @@ async function api(path, options = {}) {
       redirectToLoginWithExpiredSession();
     }
     const err = new Error(data.error || "คำขอล้มเหลว");
-    err.status = res.status;
     if (data && typeof data === "object") {
       err.payload = data;
     }
@@ -1058,22 +1056,11 @@ function getAssignmentSubmissionDraftKey(assignmentId, assignment = null) {
   return `${id}:${round}`;
 }
 
-let assignmentSubmissionDraftSaveAttemptCounter = 0;
-
 function setAssignmentDraftSaveStatus(text = "", isError = false) {
   const node = qs("assignment-draft-save-status");
   if (!node) return;
   node.textContent = String(text || "").trim();
   node.style.color = isError ? "#b42318" : "";
-}
-
-function setAssignmentSubmissionDraftSaveStatusForAttempt(draftKey, saveAttemptToken, text, isError = false) {
-  const key = String(draftKey || "").trim();
-  const token = String(saveAttemptToken || "").trim();
-  if (!key || !token) return false;
-  if (state.assignments.serverSubmissionDraftSaveTokens?.[key] !== token) return false;
-  setAssignmentDraftSaveStatus(text, isError);
-  return true;
 }
 
 function normalizeAssignmentSubmissionPromptAnswers(items = [], prompts = []) {
@@ -1165,7 +1152,7 @@ function writeAssignmentSubmissionDraft(assignmentId, payload, assignment = null
     normalized.article_payload_json = normalizeAssignmentSubmissionPayload(payload, assignment, state.assignments.contextFieldPack);
   }
   if (includeRequestedChecks) {
-    const requestedCheckDraft = state.assignments.requestedCheckReturnDrafts?.[draftKey] || null;
+    const requestedCheckDraft = state.assignments.requestedCheckReturnDrafts?.[id] || null;
     normalized.field_return_payload_json = requestedCheckDraft
       ? buildAssignmentRequestedCheckReturnPayloadFromDraft(requestedCheckDraft)
       : null;
@@ -1190,57 +1177,44 @@ function clearAssignmentSubmissionDraft(assignmentId) {
     delete state.assignments.submissionDrafts[draftKey];
   }
   if (state.assignments.requestedCheckReturnDrafts && typeof state.assignments.requestedCheckReturnDrafts === "object") {
-    delete state.assignments.requestedCheckReturnDrafts[draftKey];
+    delete state.assignments.requestedCheckReturnDrafts[id];
   }
   if (state.assignments.requestedCheckReturnDraftDirty && typeof state.assignments.requestedCheckReturnDraftDirty === "object") {
-    delete state.assignments.requestedCheckReturnDraftDirty[draftKey];
+    delete state.assignments.requestedCheckReturnDraftDirty[id];
   }
   if (state.assignments.requestedCheckReturnDraftSources && typeof state.assignments.requestedCheckReturnDraftSources === "object") {
-    delete state.assignments.requestedCheckReturnDraftSources[draftKey];
+    delete state.assignments.requestedCheckReturnDraftSources[id];
   }
 }
 
 function clearServerDraftSaveTimer(assignmentId) {
-  const timerKey = String(assignmentId || "").trim();
-  if (!timerKey) return;
+  const id = Number(assignmentId || 0) || 0;
+  if (!id) return;
   const timers = state.assignments.serverSubmissionDraftSaveTimers;
   if (!timers || typeof timers !== "object") return;
-  const timerId = timers[timerKey];
+  const timerId = timers[id];
   if (timerId) {
     window.clearTimeout(timerId);
-    delete timers[timerKey];
+    delete timers[id];
   }
 }
 
-async function saveAssignmentSubmissionServerDraft(assignmentId, payload, scheduledDraftKey = "", scheduledRevisionRound = 0, saveAttemptToken = "") {
+async function saveAssignmentSubmissionServerDraft(assignmentId, payload) {
   const id = Number(assignmentId || 0) || 0;
   if (!id || isEditorUser()) return null;
   const assignment = getAssignmentById(id);
   if (!assignment) return null;
-  const currentDraftKey = getAssignmentSubmissionDraftKey(id, assignment);
-  const resolvedScheduledDraftKey = String(scheduledDraftKey || currentDraftKey || "").trim();
-  const resolvedScheduledRevisionRound = Number(scheduledRevisionRound || 0) || 0;
-  const resolvedSaveAttemptToken = String(saveAttemptToken || "").trim();
-  if (!resolvedScheduledDraftKey || resolvedScheduledDraftKey !== currentDraftKey) {
-    return null;
-  }
-  if (!resolvedSaveAttemptToken || state.assignments.serverSubmissionDraftSaveTokens?.[resolvedScheduledDraftKey] !== resolvedSaveAttemptToken) {
-    return null;
-  }
   const assignmentState = String(assignment?.state || "").trim().toLowerCase();
   if (!["assigned", "in_progress", "revision_requested", "resubmitted"].includes(assignmentState)) {
     return null;
   }
-  setAssignmentSubmissionDraftSaveStatusForAttempt(resolvedScheduledDraftKey, resolvedSaveAttemptToken, "กำลังบันทึก...");
+  setAssignmentDraftSaveStatus("กำลังบันทึก...");
   const hasArticlePayload = Object.prototype.hasOwnProperty.call(payload || {}, "article_payload_json") || !payload || !Object.prototype.hasOwnProperty.call(payload, "field_return_payload_json");
   const hasFieldReturnPayload = Object.prototype.hasOwnProperty.call(payload || {}, "field_return_payload_json");
   const articlePayload = payload?.article_payload_json && typeof payload.article_payload_json === "object"
     ? payload.article_payload_json
     : payload;
   const normalized = {};
-  if (resolvedScheduledRevisionRound > 0) {
-    normalized.expected_revision_round = resolvedScheduledRevisionRound;
-  }
   if (hasArticlePayload) {
     normalized.article_payload_json = normalizeAssignmentSubmissionPayload(articlePayload, assignment, state.assignments.contextFieldPack);
   }
@@ -1249,31 +1223,13 @@ async function saveAssignmentSubmissionServerDraft(assignmentId, payload, schedu
       ? payload.field_return_payload_json
       : null;
   }
-  let result;
-  try {
-    result = await api(`/api/assignments/${id}/draft`, {
-      method: "PUT",
-      body: JSON.stringify(normalized),
-    });
-  } catch (err) {
-    if (Number(err?.status || 0) === 409 && String(err?.payload?.error || "").trim() === "revision_round_changed") {
-      if (setAssignmentSubmissionDraftSaveStatusForAttempt(resolvedScheduledDraftKey, resolvedSaveAttemptToken, "")) {
-        delete state.assignments.serverSubmissionDraftSaveTokens[resolvedScheduledDraftKey];
-      }
-      return null;
-    }
-    if (state.assignments.serverSubmissionDraftSaveTokens?.[resolvedScheduledDraftKey] !== resolvedSaveAttemptToken) {
-      return null;
-    }
-    throw err;
-  }
-  const latestAssignment = getAssignmentById(id);
-  const latestDraftKey = latestAssignment ? getAssignmentSubmissionDraftKey(id, latestAssignment) : "";
-  if (resolvedScheduledDraftKey !== latestDraftKey) {
-    return null;
-  }
+  const result = await api(`/api/assignments/${id}/draft`, {
+    method: "PUT",
+    body: JSON.stringify(normalized),
+  });
   const serverDraft = result?.draft && typeof result.draft === "object" ? result.draft : normalized;
-  state.assignments.serverSubmissionDraftPayloads[resolvedScheduledDraftKey] = {
+  const draftKey = getAssignmentSubmissionDraftKey(id, assignment);
+  state.assignments.serverSubmissionDraftPayloads[draftKey] = {
     article_payload_json: normalizeAssignmentSubmissionPayload(
       serverDraft?.article_payload_json && typeof serverDraft.article_payload_json === "object"
         ? serverDraft.article_payload_json
@@ -1285,31 +1241,21 @@ async function saveAssignmentSubmissionServerDraft(assignmentId, payload, schedu
       ? serverDraft.field_return_payload_json
       : null,
   };
-  state.assignments.serverSubmissionDraftLoaded[resolvedScheduledDraftKey] = true;
+  state.assignments.serverSubmissionDraftLoaded[draftKey] = true;
   const savedAt = new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
-  if (setAssignmentSubmissionDraftSaveStatusForAttempt(resolvedScheduledDraftKey, resolvedSaveAttemptToken, `บันทึกล่าสุด ${savedAt}`)) {
-    delete state.assignments.serverSubmissionDraftSaveTokens[resolvedScheduledDraftKey];
-  }
-  return state.assignments.serverSubmissionDraftPayloads[resolvedScheduledDraftKey];
+  setAssignmentDraftSaveStatus(`บันทึกล่าสุด ${savedAt}`);
+  return state.assignments.serverSubmissionDraftPayloads[draftKey];
 }
 
 function scheduleSaveAssignmentSubmissionServerDraft(assignmentId, payload, assignment = null) {
   const id = Number(assignmentId || 0) || 0;
   if (!id || isEditorUser()) return;
-  const scheduledDraftKey = String(getAssignmentSubmissionDraftKey(id, assignment) || "").trim();
-  const scheduledRevisionRound = Number(assignment?.revision_round || 0) || 0;
-  if (!scheduledDraftKey) return;
-  const saveAttemptToken = `${scheduledDraftKey}:${Date.now()}:${++assignmentSubmissionDraftSaveAttemptCounter}`;
-  state.assignments.serverSubmissionDraftSaveTokens[scheduledDraftKey] = saveAttemptToken;
-  clearServerDraftSaveTimer(scheduledDraftKey);
-  state.assignments.serverSubmissionDraftSaveTimers[scheduledDraftKey] = window.setTimeout(() => {
-    saveAssignmentSubmissionServerDraft(id, payload, scheduledDraftKey, scheduledRevisionRound, saveAttemptToken).catch(() => {
-      if (state.assignments.serverSubmissionDraftSaveTokens?.[scheduledDraftKey] === saveAttemptToken) {
-        setAssignmentDraftSaveStatus("บันทึกไม่สำเร็จ", true);
-        delete state.assignments.serverSubmissionDraftSaveTokens[scheduledDraftKey];
-      }
+  clearServerDraftSaveTimer(id);
+  state.assignments.serverSubmissionDraftSaveTimers[id] = window.setTimeout(() => {
+    saveAssignmentSubmissionServerDraft(id, payload).catch(() => {
+      setAssignmentDraftSaveStatus("บันทึกไม่สำเร็จ", true);
     });
-    delete state.assignments.serverSubmissionDraftSaveTimers[scheduledDraftKey];
+    delete state.assignments.serverSubmissionDraftSaveTimers[id];
   }, 1000);
 }
 
@@ -1317,17 +1263,17 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
   if (isEditorUser()) return null;
   const assignmentId = Number(assignment?.id || 0) || 0;
   if (!assignmentId) return null;
-  const requestDraftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
-  const loadState = state.assignments.serverSubmissionDraftLoaded?.[requestDraftKey];
+  const draftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
+  const loadState = state.assignments.serverSubmissionDraftLoaded?.[draftKey];
   if (loadState === true) {
-    return state.assignments.serverSubmissionDraftPayloads?.[requestDraftKey] || null;
+    return state.assignments.serverSubmissionDraftPayloads?.[draftKey] || null;
   }
   if (loadState === "loading") return null;
-  state.assignments.serverSubmissionDraftLoaded[requestDraftKey] = "loading";
+  state.assignments.serverSubmissionDraftLoaded[draftKey] = "loading";
   try {
     const result = await api(`/api/assignments/${assignmentId}/draft`);
     const draft = result?.draft && typeof result.draft === "object" ? result.draft : null;
-    state.assignments.serverSubmissionDraftPayloads[requestDraftKey] = draft
+    state.assignments.serverSubmissionDraftPayloads[draftKey] = draft
       ? {
         article_payload_json: normalizeAssignmentSubmissionPayload(
           draft?.article_payload_json && typeof draft.article_payload_json === "object" ? draft.article_payload_json : null,
@@ -1339,32 +1285,23 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
           : null,
       }
       : null;
-    state.assignments.serverSubmissionDraftLoaded[requestDraftKey] = true;
-    const currentAssignment = getAssignmentById(assignmentId) || assignment;
-    const currentDraftKey = getAssignmentSubmissionDraftKey(assignmentId, currentAssignment);
-    const serverFieldReturnPayload = state.assignments.serverSubmissionDraftPayloads?.[requestDraftKey]?.field_return_payload_json || null;
+    state.assignments.serverSubmissionDraftLoaded[draftKey] = true;
+    const serverFieldReturnPayload = state.assignments.serverSubmissionDraftPayloads?.[draftKey]?.field_return_payload_json || null;
     const serverReturns = serverFieldReturnPayload?.requested_check_returns;
     if (
-      requestDraftKey === currentDraftKey
-      &&
       Number(state.assignments.selectedId || 0) === assignmentId
       && hasUsableAssignmentRequestedCheckReturnRows(serverFieldReturnPayload)
-      && state.assignments.requestedCheckReturnDraftDirty?.[requestDraftKey] !== true
+      && state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] !== true
     ) {
-      const selectedAssignment = currentAssignment;
+      const selectedAssignment = getAssignmentById(assignmentId) || assignment;
       const handoffPackage = state.assignments.handoffSourcePackages?.[assignmentId] || null;
       const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: serverReturns }, handoffPackage);
-      setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, {
-        assignment: selectedAssignment,
-        draftKey: requestDraftKey,
-        source: "server_draft",
-        dirty: false,
-      });
+      setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, { source: "server_draft", dirty: false });
       renderAssignmentRequestedCheckSection(selectedAssignment, handoffPackage, normalizedDraft);
     }
-    return state.assignments.serverSubmissionDraftPayloads[requestDraftKey];
+    return state.assignments.serverSubmissionDraftPayloads[draftKey];
   } catch {
-    state.assignments.serverSubmissionDraftLoaded[requestDraftKey] = false;
+    state.assignments.serverSubmissionDraftLoaded[draftKey] = false;
     return null;
   }
 }
@@ -1372,9 +1309,9 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
 async function deleteAssignmentSubmissionServerDraft(assignmentId) {
   const id = Number(assignmentId || 0) || 0;
   if (!id || isEditorUser()) return;
+  clearServerDraftSaveTimer(id);
   const assignment = getAssignmentById(id);
   const draftKey = getAssignmentSubmissionDraftKey(id, assignment);
-  clearServerDraftSaveTimer(draftKey);
   try {
     await api(`/api/assignments/${id}/draft`, { method: "DELETE" });
   } catch {
@@ -1419,20 +1356,9 @@ function hasUsableAssignmentRequestedCheckReturnRows(value = null) {
   return Boolean(rows && Object.keys(rows).length);
 }
 
-function getAssignmentRequestedCheckLifecycleDraftKey(assignmentId, assignment = null) {
-  const id = Number(assignmentId || 0) || 0;
-  if (!id) return "";
-  const resolvedAssignment = assignment && typeof assignment === "object"
-    ? assignment
-    : getAssignmentById(id);
-  return String(getAssignmentSubmissionDraftKey(id, resolvedAssignment) || "").trim();
-}
-
 function setAssignmentRequestedCheckReturnDraftState(assignmentId, draft = null, options = {}) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return null;
-  const draftKey = String(options?.draftKey || getAssignmentRequestedCheckLifecycleDraftKey(id, options?.assignment)).trim();
-  if (!draftKey) return null;
   if (!state.assignments.requestedCheckReturnDrafts || typeof state.assignments.requestedCheckReturnDrafts !== "object") {
     state.assignments.requestedCheckReturnDrafts = {};
   }
@@ -1443,15 +1369,15 @@ function setAssignmentRequestedCheckReturnDraftState(assignmentId, draft = null,
     state.assignments.requestedCheckReturnDraftSources = {};
   }
   if (draft) {
-    state.assignments.requestedCheckReturnDrafts[draftKey] = draft;
+    state.assignments.requestedCheckReturnDrafts[id] = draft;
   } else {
-    delete state.assignments.requestedCheckReturnDrafts[draftKey];
+    delete state.assignments.requestedCheckReturnDrafts[id];
   }
   if (Object.prototype.hasOwnProperty.call(options, "dirty")) {
-    state.assignments.requestedCheckReturnDraftDirty[draftKey] = options.dirty === true;
+    state.assignments.requestedCheckReturnDraftDirty[id] = options.dirty === true;
   }
   if (Object.prototype.hasOwnProperty.call(options, "source")) {
-    state.assignments.requestedCheckReturnDraftSources[draftKey] = options.source == null ? null : String(options.source || "").trim() || null;
+    state.assignments.requestedCheckReturnDraftSources[id] = options.source == null ? null : String(options.source || "").trim() || null;
   }
   return draft;
 }
@@ -6958,7 +6884,6 @@ function renderAssignmentRequestedCheckSection(assignment = null, handoffPackage
   const requestedChecksWrapNode = qs("assignment-submission-requested-checks-wrap");
   const requestedChecksNode = qs("assignment-submission-requested-checks-fields");
   const assignmentId = Number(assignment?.id || state.assignments.selectedId || 0) || 0;
-  const draftKey = getAssignmentRequestedCheckLifecycleDraftKey(assignmentId, assignment);
   if (!requestedChecksNode) return null;
   const requestedCheckGroups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage);
   const handoffLoadState = assignmentId > 0 ? state.assignments.handoffSourceLoaded?.[assignmentId] : null;
@@ -6987,10 +6912,10 @@ function renderAssignmentRequestedCheckSection(assignment = null, handoffPackage
     }
     return null;
   }
-  const source = state.assignments.requestedCheckReturnDraftDirty?.[draftKey] === true
+  const source = state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] === true
     ? "user_edit"
     : (
-      state.assignments.requestedCheckReturnDraftSources?.[draftKey]
+      state.assignments.requestedCheckReturnDraftSources?.[assignmentId]
       || (
         hasUsableAssignmentRequestedCheckReturnRows({ requested_check_returns: normalizedDraft?.requested_check_returns })
           ? "schema_default"
@@ -6998,10 +6923,8 @@ function renderAssignmentRequestedCheckSection(assignment = null, handoffPackage
       )
     );
   setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, {
-    assignment,
-    draftKey,
     source,
-    dirty: state.assignments.requestedCheckReturnDraftDirty?.[draftKey] === true,
+    dirty: state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] === true,
   });
   requestedChecksNode.className = "assignment-brief-grid";
   requestedChecksNode.innerHTML = requestedCheckSectionHtml;
@@ -7231,18 +7154,13 @@ async function ensureAssignmentSubmissionPrefillLoaded(assignment = null) {
     const latestFieldReturnPayload = latestSubmission?.field_return_payload_json || null;
     if (
       selectedId === assignmentId
-      && state.assignments.requestedCheckReturnDraftDirty?.[selectedDraftKey] !== true
+      && state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] !== true
       && !hasUsableAssignmentRequestedCheckReturnRows(serverDraftPayload)
       && hasUsableAssignmentRequestedCheckReturnRows(latestFieldReturnPayload)
     ) {
       const handoffPackage = state.assignments.handoffSourcePackages?.[assignmentId] || null;
       const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(latestFieldReturnPayload, handoffPackage);
-      setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, {
-        assignment: selectedAssignment,
-        draftKey: selectedDraftKey,
-        source: "latest_submission",
-        dirty: false,
-      });
+      setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, { source: "latest_submission", dirty: false });
       renderAssignmentRequestedCheckSection(getAssignmentSubmissionFormAssignment(selectedAssignment, getAssignmentPageMode()), handoffPackage, normalizedDraft);
     }
     if (
@@ -7646,13 +7564,13 @@ function normalizeAssignmentRequestedCheckReturnDraft(draft = null, handoffPacka
 function getAssignmentRequestedCheckReturnDraftPrefill(assignment = null, handoffPackage = null) {
   const assignmentId = Number(assignment?.id || state.assignments.selectedId || 0) || 0;
   if (!assignmentId) return null;
-  const draftKey = getAssignmentRequestedCheckLifecycleDraftKey(assignmentId, assignment);
-  const existingDraft = state.assignments.requestedCheckReturnDrafts?.[draftKey] || null;
-  const existingSource = state.assignments.requestedCheckReturnDraftSources?.[draftKey] || null;
-  const existingDirty = state.assignments.requestedCheckReturnDraftDirty?.[draftKey] === true;
+  const existingDraft = state.assignments.requestedCheckReturnDrafts?.[assignmentId] || null;
+  const existingSource = state.assignments.requestedCheckReturnDraftSources?.[assignmentId] || null;
+  const existingDirty = state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] === true;
   if (existingDirty && hasUsableAssignmentRequestedCheckReturnRows(existingDraft)) {
     return normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackage);
   }
+  const draftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
   const serverDraftPayload = state.assignments.serverSubmissionDraftPayloads?.[draftKey]?.field_return_payload_json || null;
   const serverDraftReturns = serverDraftPayload?.requested_check_returns;
   if (hasUsableAssignmentRequestedCheckReturnRows(serverDraftPayload)) {
@@ -8032,8 +7950,7 @@ function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
   if (!id) return null;
   const formNode = qs("assignment-submission-requested-checks-fields");
   if (!formNode) return null;
-  const draftKey = getAssignmentRequestedCheckLifecycleDraftKey(id);
-  const existingRows = state.assignments.requestedCheckReturnDrafts?.[draftKey]?.requested_check_returns;
+  const existingRows = state.assignments.requestedCheckReturnDrafts?.[id]?.requested_check_returns;
   const requested_check_returns = existingRows && typeof existingRows === "object"
     ? JSON.parse(JSON.stringify(existingRows))
     : {};
@@ -8103,12 +8020,11 @@ function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
 function syncAssignmentRequestedCheckReturnDraftFromForm(assignmentId = state.assignments.selectedId) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return null;
-  const assignment = getAssignmentById(id);
   const currentDraft = readAssignmentRequestedCheckReturnDraftFromForm(id);
   const handoffPackage = state.assignments.handoffSourcePackages?.[id] || null;
   const normalized = normalizeAssignmentRequestedCheckReturnDraft(currentDraft, handoffPackage);
-  setAssignmentRequestedCheckReturnDraftState(id, normalized, { assignment, source: "user_edit", dirty: true });
-  writeAssignmentSubmissionDraft(id, null, assignment, { includeArticle: false, includeRequestedChecks: true });
+  setAssignmentRequestedCheckReturnDraftState(id, normalized, { source: "user_edit", dirty: true });
+  writeAssignmentSubmissionDraft(id, null, getAssignmentById(id), { includeArticle: false, includeRequestedChecks: true });
   return normalized;
 }
 
