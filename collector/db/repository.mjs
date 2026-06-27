@@ -1340,6 +1340,35 @@ function hasRequestedCheckEvidence(row = {}) {
     || Boolean(String(row?.evidence_source_url || "").trim());
 }
 
+function hasMeaningfulRequestedCheckValue(value) {
+  if (value === false) return true;
+  if (value === 0) return true;
+  if (value == null) return false;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.some((entry) => hasMeaningfulRequestedCheckValue(entry));
+  if (typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "number") && Object.prototype.hasOwnProperty.call(value, "unit")) {
+      return Number.isFinite(parseStrictFiniteNumericInput(value.number));
+    }
+    return Object.keys(value).length > 0;
+  }
+  return String(value).trim().length > 0;
+}
+
+function hasSuppliedRequestedCheckValue(row = {}, answerType = "text") {
+  if (!row || row.checked !== true) return false;
+  const value = row.value;
+  if (value == null) return false;
+  if (answerType === "number_with_unit") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    return Number.isFinite(parseStrictFiniteNumericInput(value.number));
+  }
+  if (["boolean", "boolean_with_conditions"].includes(answerType)) {
+    return typeof value === "boolean";
+  }
+  return hasMeaningfulRequestedCheckValue(value);
+}
+
 function inferRequestedCheckReturnStatus(row = {}, schema = null) {
   if (!row || row.checked !== true) return "unanswered";
   const answerType = normalizeRequestedCheckAnswerType(schema?.answer_type || row?.answer_type);
@@ -1347,13 +1376,20 @@ function inferRequestedCheckReturnStatus(row = {}, schema = null) {
   const hasEvidence = hasRequestedCheckEvidence(row);
   const hasCondition = Boolean(String(row?.condition_note || "").trim());
   const hasNote = Boolean(String(row?.note || "").trim());
-  if (schema?.evidence_required === true && !hasEvidence) return "malformed";
-  if (complete) return "reported";
+
+  if (complete) {
+    if (schema?.evidence_required === true && !hasEvidence) return "malformed";
+    return "reported";
+  }
+
   if (answerType === "note_only") {
     return hasNote || hasCondition || hasEvidence ? "reported" : "not_found";
   }
-  if (row.found === false && row.value == null) return "not_found";
-  if (row.value == null && !hasEvidence && !hasCondition && !hasNote) return "not_found";
+
+  if (!hasSuppliedRequestedCheckValue(row, answerType)) {
+    return "not_found";
+  }
+
   return "malformed";
 }
 
@@ -1369,9 +1405,59 @@ function parseStrictFiniteNumericInput(rawValue) {
 }
 
 function validateRequestedCheckReturnsForFinalSubmission(requestedCheckReturns = {}, schemaMap = null, fieldName = "field_return_payload_json.requested_check_returns") {
-  void requestedCheckReturns;
-  void schemaMap;
-  void fieldName;
+  if (!(schemaMap instanceof Map) || !schemaMap.size) return;
+  const errors = [];
+
+  for (const [returnKey, schema] of schemaMap.entries()) {
+    if (schema?.requested !== true) continue;
+    const row = Object.prototype.hasOwnProperty.call(requestedCheckReturns, returnKey)
+      ? requestedCheckReturns[returnKey]
+      : null;
+    const status = inferRequestedCheckReturnStatus(row, schema);
+
+    if (status === "malformed") {
+      const complete = isRequestedCheckAnswerComplete(row, schema);
+      if (complete && schema?.evidence_required === true) {
+        errors.push({
+          return_key: returnKey,
+          group_key: schema.group_key,
+          check_key: schema.check_key,
+          code: "required_evidence_missing",
+          status,
+          message: `${returnKey} has valid answer but is missing required evidence`,
+        });
+      } else {
+        errors.push({
+          return_key: returnKey,
+          group_key: schema.group_key,
+          check_key: schema.check_key,
+          code: "malformed_requested_check_return",
+          status,
+          message: `${returnKey} is malformed`,
+        });
+      }
+      continue;
+    }
+
+    if (status === "unanswered" && schema.required === true) {
+      errors.push({
+        return_key: returnKey,
+        group_key: schema.group_key,
+        check_key: schema.check_key,
+        code: "required_unanswered",
+        status,
+        message: `${returnKey} is unanswered but required`,
+      });
+      continue;
+    }
+  }
+
+  if (errors.length) {
+    const err = new Error("requested_check_validation_failed");
+    err.code = "REQUESTED_CHECK_VALIDATION_FAILED";
+    err.validation_errors = errors;
+    throw err;
+  }
 }
 
 function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName, options = {}) {

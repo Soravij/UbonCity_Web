@@ -7,6 +7,7 @@ import { TAXONOMY_CATEGORY_MATRIX } from "../server/taxonomy-catalog.mjs";
 import { CTA_PHONE_CASES, CTA_URL_CASES } from "./cta-contact-parity-cases.mjs";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
+const appJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.js"), "utf8");
 const itemEditorJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.js"), "utf8");
 const itemEditorHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.html"), "utf8");
 const repositoryJs = fs.readFileSync(path.join(collectorRoot, "db", "repository.mjs"), "utf8");
@@ -81,6 +82,212 @@ function loadNamedFunction(sourceText, functionName, dependencies = {}) {
   const dependencyNames = Object.keys(dependencies);
   const dependencyValues = Object.values(dependencies);
   return Function(...dependencyNames, `${source}; return ${functionName};`)(...dependencyValues);
+}
+
+function extractArrowFunctionSource(sourceText, marker) {
+  const markerIndex = sourceText.indexOf(marker);
+  assert.notEqual(markerIndex, -1, `Marker not found: ${marker}`);
+  const arrowIndex = sourceText.indexOf("(event) =>", markerIndex);
+  assert.notEqual(arrowIndex, -1, `Arrow callback not found for ${marker}`);
+  const bodyStart = sourceText.indexOf("{", arrowIndex);
+  assert.notEqual(bodyStart, -1, `Arrow callback body missing for ${marker}`);
+  let depth = 0;
+  for (let index = bodyStart; index < sourceText.length; index += 1) {
+    const char = sourceText[index];
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return sourceText.slice(arrowIndex, index + 1);
+      }
+    }
+  }
+  throw new Error(`Could not extract arrow callback for ${marker}`);
+}
+
+function createMockDomNode(initial = {}) {
+  const classSet = new Set();
+  const attributes = new Map();
+  const node = {
+    innerHTML: "",
+    textContent: "",
+    value: "",
+    checked: false,
+    disabled: false,
+    style: {},
+    parentNode: null,
+    nextSibling: null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    appendChild(child) {
+      if (child) child.parentNode = node;
+      return child;
+    },
+    remove() {},
+    setAttribute(name, value) {
+      attributes.set(String(name), String(value));
+    },
+    getAttribute(name) {
+      return attributes.has(String(name)) ? attributes.get(String(name)) : null;
+    },
+  };
+  Object.defineProperty(node, "className", {
+    get() {
+      return [...classSet].join(" ");
+    },
+    set(value) {
+      classSet.clear();
+      String(value || "")
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter(Boolean)
+        .forEach((token) => classSet.add(token));
+    },
+    enumerable: true,
+    configurable: true,
+  });
+  node.classList = {
+    add(...tokens) {
+      tokens.flat().map((token) => String(token || "").trim()).filter(Boolean).forEach((token) => classSet.add(token));
+    },
+    remove(...tokens) {
+      tokens.flat().map((token) => String(token || "").trim()).filter(Boolean).forEach((token) => classSet.delete(token));
+    },
+    toggle(token, force) {
+      const name = String(token || "").trim();
+      if (!name) return false;
+      const shouldAdd = force === undefined ? !classSet.has(name) : force === true;
+      if (shouldAdd) classSet.add(name);
+      else classSet.delete(name);
+      return classSet.has(name);
+    },
+    contains(token) {
+      return classSet.has(String(token || "").trim());
+    },
+  };
+  Object.assign(node, initial);
+  return node;
+}
+
+function createAssignmentRequestedCheckValidationHarness(rows = []) {
+  const nodes = new Map();
+  const labelParentNode = createMockDomNode({
+    insertBefore(node, referenceNode) {
+      void referenceNode;
+      if (node && node.id) nodes.set(node.id, node);
+      if (node) node.parentNode = labelParentNode;
+      return node;
+    },
+  });
+  const requestedChecksLabelNode = createMockDomNode({ parentNode: labelParentNode });
+  const rowNodes = rows.map((row) => createAssignmentRequestedCheckValidationRowNode(row));
+  const requestedChecksNode = createMockDomNode({
+    querySelectorAll(selector) {
+      return selector === "[data-requested-check-row]" ? rowNodes : [];
+    },
+  });
+  nodes.set("assignment-submission-requested-checks-fields", requestedChecksNode);
+  nodes.set("assignment-submission-requested-checks-label", requestedChecksLabelNode);
+  const documentNode = {
+    createElement(tagName) {
+      void tagName;
+      return createMockDomNode();
+    },
+    querySelectorAll(selector) {
+      if (selector === "[data-requested-check-row].requested-check-row-invalid" || selector === ".requested-check-row-invalid") {
+        return rowNodes.filter((rowNode) => rowNode.classList.contains("requested-check-row-invalid"));
+      }
+      return [];
+    },
+    querySelector(selector) {
+      if (selector === ".requested-check-row-invalid") {
+        return rowNodes.find((rowNode) => rowNode.classList.contains("requested-check-row-invalid")) || null;
+      }
+      return null;
+    },
+  };
+  const qs = (id) => nodes.get(id) || null;
+  const clearValidationErrors = loadNamedFunction(appJs, "clearAllAssignmentRequestedCheckValidationErrors", {
+    qs,
+    document: documentNode,
+  });
+  const displayValidationErrors = loadNamedFunction(appJs, "displayAssignmentRequestedCheckValidationErrors", {
+    qs,
+    document: documentNode,
+  });
+  const updateRowState = loadNamedFunction(appJs, "updateAssignmentRequestedCheckReturnRowState");
+  const requestedCheckInputHandler = Function(
+    "qs",
+    "document",
+    "updateAssignmentRequestedCheckReturnRowState",
+    "syncAssignmentRequestedCheckReturnDraftFromForm",
+    `return ${extractArrowFunctionSource(appJs, 'qs("assignment-submission-requested-checks-fields")?.addEventListener("input"')};`
+  )(qs, documentNode, updateRowState, () => {});
+  const readDraftState = { assignments: { requestedCheckReturnDrafts: {} } };
+  const readDraft = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm", {
+    qs,
+    state: readDraftState,
+  });
+  return {
+    qs,
+    nodes,
+    rowNodes,
+    documentNode,
+    clearValidationErrors,
+    displayValidationErrors,
+    requestedCheckInputHandler,
+    readDraft(assignmentId = 77) {
+      return readDraft(assignmentId);
+    },
+  };
+}
+
+function createAssignmentRequestedCheckValidationRowNode(row = {}) {
+  const checkedField = createMockDomNode({ checked: row.checked === true });
+  const valueField = createMockDomNode({ value: row.value ?? "" });
+  const conditionField = createMockDomNode({ value: row.condition_note ?? "" });
+  const evidenceField = createMockDomNode({ value: row.evidence ?? "" });
+  const noteField = createMockDomNode({ value: row.note ?? "" });
+  const mainRow = createMockDomNode();
+  const rowNode = createMockDomNode({
+    appendChild(child) {
+      if (child) {
+        child.parentNode = rowNode;
+        rowNode.validationMessageNode = child;
+      }
+      return child;
+    },
+    getAttribute(name) {
+      if (name === "data-requested-check-return-key") return row.return_key || "";
+      if (name === "data-requested-check-answer-type") return row.answer_type || "text";
+      return null;
+    },
+    querySelector(selector) {
+      if (selector === "[data-requested-check-field='checked']") return checkedField;
+      if (selector === "[data-requested-check-field='value']") return valueField;
+      if (selector === "[data-requested-check-field='condition_note']") return conditionField;
+      if (selector === "[data-requested-check-field='evidence']") return evidenceField;
+      if (selector === "[data-requested-check-field='note']") return noteField;
+      if (selector === ".requested-check-row-main") return mainRow;
+      if (selector === ".requested-check-row-validation-message") return rowNode.validationMessageNode || null;
+      return null;
+    },
+    querySelectorAll(selector) {
+      return selector === "[data-requested-check-field='value-multi']" ? [] : [];
+    },
+  });
+  mainRow.insertAdjacentElement = (position, node) => {
+    assert.equal(position, "afterend");
+    if (node) {
+      node.parentNode = rowNode;
+      node.remove = () => {
+        rowNode.validationMessageNode = null;
+      };
+      rowNode.validationMessageNode = node;
+    }
+    return node;
+  };
+  return rowNode;
 }
 
 function extractCompactSummaryRow(html, label) {
@@ -2981,4 +3188,175 @@ test("buildFieldPackApiPayload uses the current form category after requested-ch
   const expectedTaxonomyKeys = getExpectedTaxonomyKeysForCategory("attractions");
   assert.deepEqual(refreshRequestedChecksApiCalls[0]?.body?.item, { type: "place", category: "attractions" });
   assert.deepEqual(taxonomyKeys, expectedTaxonomyKeys);
+});
+
+test("requested-check validation UI matches rows by exact return_key and renders summary plus per-row messages", () => {
+  const harness = createAssignmentRequestedCheckValidationHarness([
+    { return_key: "taxonomy.parking", answer_type: "text", checked: true, value: "garage" },
+    { return_key: "taxonomy.parking_fee", answer_type: "text", checked: false, value: "" },
+  ]);
+  const draftBefore = harness.readDraft();
+
+  harness.displayValidationErrors({
+    payload: {
+      message: "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน",
+      validation_errors: [
+        { return_key: "taxonomy.parking", message: "parking is required" },
+        { return_key: "taxonomy.unknown", message: "unknown should be ignored" },
+      ],
+    },
+  });
+
+  const summaryNode = harness.qs("assignment-submission-requested-checks-error");
+  assert.ok(summaryNode);
+  assert.equal(summaryNode.textContent, "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน");
+  assert.equal(summaryNode.classList.contains("hidden"), false);
+  assert.equal(harness.rowNodes[0].classList.contains("requested-check-row-invalid"), true);
+  assert.equal(harness.rowNodes[1].classList.contains("requested-check-row-invalid"), false);
+  assert.equal(harness.rowNodes[0].querySelector(".requested-check-row-validation-message")?.textContent, "parking is required");
+  assert.equal(harness.rowNodes[1].querySelector(".requested-check-row-validation-message"), null);
+  assert.deepEqual(harness.readDraft(), draftBefore);
+});
+
+test("requested-check validation input clear removes only the edited row error and keeps other invalid rows plus summary", () => {
+  const harness = createAssignmentRequestedCheckValidationHarness([
+    { return_key: "taxonomy.parking", answer_type: "text", checked: true, value: "garage" },
+    { return_key: "cta_contact.phone", answer_type: "text", checked: true, value: "0812345678" },
+  ]);
+  harness.displayValidationErrors({
+    payload: {
+      message: "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน",
+      validation_errors: [
+        { return_key: "taxonomy.parking", message: "parking is invalid" },
+        { return_key: "cta_contact.phone", message: "phone is invalid" },
+      ],
+    },
+  });
+
+  harness.requestedCheckInputHandler({
+    target: {
+      closest(selector) {
+        return selector === "[data-requested-check-row]" ? harness.rowNodes[0] : null;
+      },
+    },
+  });
+
+  const summaryNode = harness.qs("assignment-submission-requested-checks-error");
+  assert.equal(harness.rowNodes[0].classList.contains("requested-check-row-invalid"), false);
+  assert.equal(harness.rowNodes[0].querySelector(".requested-check-row-validation-message"), null);
+  assert.equal(harness.rowNodes[1].classList.contains("requested-check-row-invalid"), true);
+  assert.equal(harness.rowNodes[1].querySelector(".requested-check-row-validation-message")?.textContent, "phone is invalid");
+  assert.equal(summaryNode?.classList.contains("hidden"), false);
+  assert.equal(summaryNode?.textContent, "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน");
+});
+
+test("requested-check validation input clear hides summary after the last row error is removed", () => {
+  const harness = createAssignmentRequestedCheckValidationHarness([
+    { return_key: "taxonomy.tags", answer_type: "multi_select", checked: true, value: "" },
+  ]);
+  harness.displayValidationErrors({
+    payload: {
+      message: "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน",
+      validation_errors: [
+        { return_key: "taxonomy.tags", message: "tags is invalid" },
+      ],
+    },
+  });
+
+  harness.requestedCheckInputHandler({
+    target: {
+      closest(selector) {
+        return selector === "[data-requested-check-row]" ? harness.rowNodes[0] : null;
+      },
+    },
+  });
+
+  const summaryNode = harness.qs("assignment-submission-requested-checks-error");
+  assert.equal(harness.rowNodes[0].classList.contains("requested-check-row-invalid"), false);
+  assert.equal(harness.rowNodes[0].querySelector(".requested-check-row-validation-message"), null);
+  assert.ok(summaryNode);
+  assert.equal(summaryNode.textContent, "");
+  assert.equal(summaryNode.classList.contains("hidden"), true);
+});
+
+test("requested-check validation submit rerender clears stale row errors before showing new ones without changing form values", () => {
+  const harness = createAssignmentRequestedCheckValidationHarness([
+    { return_key: "taxonomy.parking", answer_type: "text", checked: true, value: "covered lot", condition_note: "rear entrance" },
+    { return_key: "cta_contact.phone", answer_type: "text", checked: true, value: "" },
+  ]);
+  const draftBefore = harness.readDraft();
+
+  harness.displayValidationErrors({
+    payload: {
+      message: "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน",
+      validation_errors: [
+        { return_key: "taxonomy.parking", message: "parking is invalid" },
+      ],
+    },
+  });
+  harness.clearValidationErrors();
+  harness.displayValidationErrors({
+    payload: {
+      message: "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน",
+      validation_errors: [
+        { return_key: "cta_contact.phone", message: "phone is missing" },
+      ],
+    },
+  });
+
+  const summaryNode = harness.qs("assignment-submission-requested-checks-error");
+  assert.equal(harness.rowNodes[0].classList.contains("requested-check-row-invalid"), false);
+  assert.equal(harness.rowNodes[1].classList.contains("requested-check-row-invalid"), true);
+  assert.equal(harness.rowNodes[0].querySelector(".requested-check-row-validation-message"), null);
+  assert.equal(harness.rowNodes[1].querySelector(".requested-check-row-validation-message")?.textContent, "phone is missing");
+  assert.equal(summaryNode?.textContent, "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน");
+  assert.deepEqual(harness.readDraft(), draftBefore);
+});
+
+test("requested-check validation UI ignores checked blank not_found rows and unrelated errors", () => {
+  const harness = createAssignmentRequestedCheckValidationHarness([
+    { return_key: "cta_contact.line_url", answer_type: "text", checked: true, value: "" },
+  ]);
+  const draftBefore = harness.readDraft();
+
+  assert.doesNotThrow(() => {
+    harness.displayValidationErrors(new Error("ordinary failure"));
+    harness.displayValidationErrors({
+      payload: {
+        message: "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน",
+        validation_errors: [
+          { return_key: "taxonomy.parking", message: "other row only" },
+        ],
+      },
+    });
+  });
+
+  assert.equal(harness.qs("assignment-submission-requested-checks-error")?.textContent || "", "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน");
+  assert.equal(harness.rowNodes[0].classList.contains("requested-check-row-invalid"), false);
+  assert.equal(harness.rowNodes[0].querySelector(".requested-check-row-validation-message"), null);
+  assert.deepEqual(harness.readDraft(), draftBefore);
+});
+
+test("requested-check validation UI treats structured payload errors as row state only and ordinary Error as no-op", () => {
+  const harness = createAssignmentRequestedCheckValidationHarness([
+    { return_key: "taxonomy.tags", answer_type: "text", checked: false, value: "" },
+  ]);
+
+  harness.displayValidationErrors({
+    payload: {
+      message: "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน",
+      validation_errors: [
+        { return_key: "taxonomy.tags", message: "tags is malformed" },
+      ],
+    },
+  });
+  assert.equal(harness.rowNodes[0].classList.contains("requested-check-row-invalid"), true);
+  assert.equal(harness.rowNodes[0].querySelector(".requested-check-row-validation-message")?.textContent, "tags is malformed");
+
+  harness.clearValidationErrors();
+  harness.displayValidationErrors(new Error("network blew up"));
+
+  assert.equal(harness.rowNodes[0].classList.contains("requested-check-row-invalid"), false);
+  assert.equal(harness.rowNodes[0].querySelector(".requested-check-row-validation-message"), null);
+  assert.equal(harness.qs("assignment-submission-requested-checks-error")?.textContent || "", "");
 });

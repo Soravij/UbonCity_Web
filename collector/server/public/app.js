@@ -987,7 +987,11 @@ async function api(path, options = {}) {
       applyLogoutUI();
       redirectToLoginWithExpiredSession();
     }
-    throw new Error(data.error || "คำขอล้มเหลว");
+    const err = new Error(data.error || "คำขอล้มเหลว");
+    if (data && typeof data === "object") {
+      err.payload = data;
+    }
+    throw err;
   }
 
   const contentType = res.headers.get("content-type") || "";
@@ -7624,6 +7628,70 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
   }).join("");
 }
 
+function clearAllAssignmentRequestedCheckValidationErrors() {
+  const summaryNode = qs("assignment-submission-requested-checks-error");
+  if (summaryNode) {
+    summaryNode.textContent = "";
+    summaryNode.classList.add("hidden");
+  }
+  document.querySelectorAll("[data-requested-check-row].requested-check-row-invalid").forEach((rowNode) => {
+    rowNode.classList.remove("requested-check-row-invalid");
+    const messageNode = rowNode.querySelector(".requested-check-row-validation-message");
+    if (messageNode) messageNode.remove();
+  });
+}
+
+function displayAssignmentRequestedCheckValidationErrors(err) {
+  const payload = err?.payload && typeof err.payload === "object" ? err.payload : null;
+  const errors = Array.isArray(payload?.validation_errors) ? payload.validation_errors : [];
+  if (!errors.length) return;
+
+  const requestedChecksNode = qs("assignment-submission-requested-checks-fields");
+  if (!requestedChecksNode) return;
+
+  const labelNode = qs("assignment-submission-requested-checks-label");
+  let summaryNode = qs("assignment-submission-requested-checks-error");
+  if (!summaryNode) {
+    summaryNode = document.createElement("div");
+    summaryNode.id = "assignment-submission-requested-checks-error";
+    summaryNode.className = "assignment-brief-text";
+    summaryNode.style.color = "#b42318";
+    summaryNode.style.fontWeight = "bold";
+    summaryNode.style.marginBottom = "8px";
+    if (labelNode && labelNode.parentNode) {
+      labelNode.parentNode.insertBefore(summaryNode, labelNode.nextSibling);
+    }
+  }
+  summaryNode.classList.remove("hidden");
+  summaryNode.textContent = String(payload?.message || "").trim() || "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน";
+
+  const rows = typeof requestedChecksNode.querySelectorAll === "function"
+    ? Array.from(requestedChecksNode.querySelectorAll("[data-requested-check-row]"))
+    : [];
+  for (const rowNode of rows) {
+    const returnKey = String(rowNode.getAttribute("data-requested-check-return-key") || "").trim().toLowerCase();
+    const issue = errors.find((entry) => String(entry?.return_key || "").trim().toLowerCase() === returnKey);
+    if (!issue) continue;
+
+    rowNode.classList.add("requested-check-row-invalid");
+
+    let messageNode = rowNode.querySelector(".requested-check-row-validation-message");
+    if (!messageNode) {
+      messageNode = document.createElement("div");
+      messageNode.className = "requested-check-row-validation-message assignment-brief-text";
+      messageNode.style.color = "#b42318";
+      messageNode.style.marginTop = "4px";
+      const mainRow = rowNode.querySelector(".requested-check-row-main");
+      if (mainRow) {
+        mainRow.insertAdjacentElement("afterend", messageNode);
+      } else {
+        rowNode.appendChild(messageNode);
+      }
+    }
+    messageNode.textContent = String(issue?.message || "").trim() || "ข้อมูลไม่ถูกต้อง";
+  }
+}
+
 function updateAssignmentRequestedCheckReturnRowState(rowNode) {
   if (!rowNode) return;
   const checked = rowNode.querySelector("[data-requested-check-field='checked']")?.checked === true;
@@ -10347,6 +10415,16 @@ function wireAssignments() {
     const target = event.target?.closest?.("[data-requested-check-row]") || null;
     if (target) {
       updateAssignmentRequestedCheckReturnRowState(target);
+      if (target.classList.contains("requested-check-row-invalid")) {
+        target.classList.remove("requested-check-row-invalid");
+        const messageNode = target.querySelector(".requested-check-row-validation-message");
+        if (messageNode) messageNode.remove();
+        const summaryNode = qs("assignment-submission-requested-checks-error");
+        if (summaryNode && !document.querySelector(".requested-check-row-invalid")) {
+          summaryNode.textContent = "";
+          summaryNode.classList.add("hidden");
+        }
+      }
     }
     syncAssignmentRequestedCheckReturnDraftFromForm();
   });
@@ -10354,6 +10432,16 @@ function wireAssignments() {
     const target = event.target?.closest?.("[data-requested-check-row]") || null;
     if (target) {
       updateAssignmentRequestedCheckReturnRowState(target);
+      if (target.classList.contains("requested-check-row-invalid")) {
+        target.classList.remove("requested-check-row-invalid");
+        const messageNode = target.querySelector(".requested-check-row-validation-message");
+        if (messageNode) messageNode.remove();
+        const summaryNode = qs("assignment-submission-requested-checks-error");
+        if (summaryNode && !document.querySelector(".requested-check-row-invalid")) {
+          summaryNode.textContent = "";
+          summaryNode.classList.add("hidden");
+        }
+      }
     }
     syncAssignmentRequestedCheckReturnDraftFromForm();
   });
@@ -10455,7 +10543,9 @@ function wireAssignments() {
       await withButtonLoading(btn, "กำลังส่ง...", async () => {
         await createAssignmentSubmission();
       });
-    } catch (err) {
+  } catch (err) {
+      clearAllAssignmentRequestedCheckValidationErrors();
+      displayAssignmentRequestedCheckValidationErrors(err);
       setStatus("assignment-status", err.message, true);
     }
   });

@@ -156,7 +156,7 @@ test("assignment submission mapping keeps field_return_payload_json separate fro
   assert.equal(Object.prototype.hasOwnProperty.call(payload.media_payload_json, "field_return_payload_json"), false);
 });
 
-test("assignment submission repository path rejects missing requested returns and accepts complete immutable-snapshot returns", () => {
+test("assignment submission repository path rejects missing requested returns and accepts complete immutable-snapshot returns with structured validation errors", () => {
   const ctx = createRepoContext();
   try {
     const item = ctx.createItem("Assignment Field Return Mapping");
@@ -183,30 +183,32 @@ test("assignment submission repository path rejects missing requested returns an
       "admin"
     ).assignment;
 
-    const first = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
-      assignmentId: assignment.id,
-      sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
-      submittedByUserId: assignee.id,
-      submissionState: "submitted",
-      articlePayloadJson: { body: "draft body" },
-      mediaPayloadJson: null,
-      fieldReturnPayloadJson: null,
-    }));
-    assert.deepEqual(first.article_payload_json, { body: "draft body" });
-    assert.deepEqual(first.field_return_payload_json?.requested_check_returns || {}, {});
-
-    ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "user", reason_code: "test" });
-    assert.throws(() => ctx.repo.updateAssignmentState(assignment.id, "accepted", "tester@local", {
-      actor_role: "admin",
-      reason_code: "assignment_submission_accepted",
-    }), /required unanswered|unanswered|cta_contact\.phone/i);
-    ctx.repo.updateAssignmentState(assignment.id, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "test" });
+    let validationError = null;
+    try {
+      ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+        assignmentId: assignment.id,
+        sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
+        submittedByUserId: assignee.id,
+        submissionState: "submitted",
+        articlePayloadJson: { body: "draft body" },
+        mediaPayloadJson: null,
+        fieldReturnPayloadJson: null,
+      }));
+    } catch (err) {
+      validationError = err;
+    }
+    assert.ok(validationError, "missing required requested returns should reject");
+    assert.equal(validationError.code, "REQUESTED_CHECK_VALIDATION_FAILED");
+    assert.equal(validationError.message, "requested_check_validation_failed");
+    assert.ok(Array.isArray(validationError.validation_errors));
+    assert.ok(validationError.validation_errors.some((entry) => entry.return_key === "cta_contact.phone"));
+    assert.ok(validationError.validation_errors.every((entry) => entry.code === "required_unanswered"));
 
     const completed = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId: assignment.id,
       sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
       submittedByUserId: assignee.id,
-      submissionState: "resubmitted",
+      submissionState: "submitted",
       articlePayloadJson: { body: "draft body" },
       mediaPayloadJson: null,
       fieldReturnPayloadJson: {
@@ -270,7 +272,7 @@ test("assignment submission repository path rejects missing requested returns an
     assert.equal(resubmittedWithoutFieldReturn.article_payload_json.body, "draft body revised again");
     assert.deepEqual(resubmittedWithoutFieldReturn.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0811111111");
 
-    const partialResubmitted = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+    assert.throws(() => ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
       assignmentId: assignment.id,
       sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
       submittedByUserId: assignee.id,
@@ -282,8 +284,7 @@ test("assignment submission repository path rejects missing requested returns an
           "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
         },
       },
-    }));
-    assert.equal(partialResubmitted.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, true);
+    })), /requested_check_validation_failed|required_unanswered/i);
   } finally {
     ctx.cleanup();
   }

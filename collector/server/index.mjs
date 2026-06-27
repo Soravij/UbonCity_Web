@@ -10683,6 +10683,23 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
   }
 });
 
+function buildSubmissionErrorResponse(err) {
+  if (err && err.code === "REQUESTED_CHECK_VALIDATION_FAILED" && Array.isArray(err.validation_errors) && err.validation_errors.length) {
+    return {
+      status: 400,
+      body: {
+        error: "requested_check_validation_failed",
+        message: "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน",
+        validation_errors: err.validation_errors,
+      },
+    };
+  }
+  return {
+    status: 400,
+    body: { error: String(err?.message || "Cannot create submission") },
+  };
+}
+
 app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "editor", "freelance", "user"), (req, res) => {
   const assignmentId = Number(req.params.id || 0);
   if (!assignmentId) {
@@ -10838,7 +10855,8 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
     }
     res.status(201).json({ ok: true, submission });
   } catch (err) {
-    res.status(400).json({ error: String(err?.message || "Cannot create submission") });
+    const { status, body } = buildSubmissionErrorResponse(err);
+    res.status(status).json(body);
   }
 });
 

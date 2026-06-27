@@ -364,10 +364,16 @@ const normalizeRequestedCheckReturnEntry = loadNamedFunction(repositoryJs, "norm
   isRequestedCheckAnswerComplete,
 });
 const hasRequestedCheckEvidence = loadNamedFunction(repositoryJs, "hasRequestedCheckEvidence");
+const hasMeaningfulRequestedCheckValue = loadNamedFunction(repositoryJs, "hasMeaningfulRequestedCheckValue");
+const hasSuppliedRequestedCheckValue = loadNamedFunction(repositoryJs, "hasSuppliedRequestedCheckValue", {
+  hasMeaningfulRequestedCheckValue,
+  parseStrictFiniteNumericInput,
+});
 const inferRequestedCheckReturnStatus = loadNamedFunction(repositoryJs, "inferRequestedCheckReturnStatus", {
   normalizeRequestedCheckAnswerType,
   isRequestedCheckAnswerComplete,
   hasRequestedCheckEvidence,
+  hasSuppliedRequestedCheckValue,
 });
 const normalizeRequestedCheckReturns = loadNamedFunction(repositoryJs, "normalizeRequestedCheckReturns", {
   normalizeRequestedCheckReturnKey,
@@ -1885,4 +1891,328 @@ test("edited requested-check draft survives async handoff load and rerender path
   assert.equal(calls[1].includes('value="0812345678"'), false);
   assert.equal(state.assignments.requestedCheckReturnDrafts[12].requested_check_returns["cta_contact.phone"].value, "0999999999");
   assert.equal(state.assignments.requestedCheckReturnDrafts[12].requested_check_returns["cta_contact.phone"].note, "edited");
+});
+
+// Repository final-submission validator tests
+const validateRequestedCheckReturnsForFinalSubmission = loadNamedFunction(repositoryJs, "validateRequestedCheckReturnsForFinalSubmission", {
+  inferRequestedCheckReturnStatus,
+  isRequestedCheckAnswerComplete,
+  hasRequestedCheckEvidence,
+});
+
+test("validator rejects required unchecked row with stable error code", () => {
+  const schemaMap = new Map();
+  schemaMap.set("taxonomy.parking", {
+    return_key: "taxonomy.parking",
+    group_key: "taxonomy",
+    check_key: "parking",
+    required: true,
+    requested: true,
+    answer_type: "boolean",
+  });
+
+  let caught = null;
+  try {
+    validateRequestedCheckReturnsForFinalSubmission({}, schemaMap);
+  } catch (err) {
+    caught = err;
+  }
+
+  assert.ok(caught, "validator should throw");
+  assert.equal(caught.code, "REQUESTED_CHECK_VALIDATION_FAILED");
+  assert.equal(caught.message, "requested_check_validation_failed");
+  assert.ok(Array.isArray(caught.validation_errors));
+  assert.equal(caught.validation_errors.length, 1);
+  assert.equal(caught.validation_errors[0].return_key, "taxonomy.parking");
+  assert.equal(caught.validation_errors[0].group_key, "taxonomy");
+  assert.equal(caught.validation_errors[0].check_key, "parking");
+  assert.equal(caught.validation_errors[0].code, "required_unanswered");
+  assert.equal(caught.validation_errors[0].status, "unanswered");
+  assert.ok(caught.validation_errors[0].message);
+});
+
+test("validator allows optional unchecked row", () => {
+  const schemaMap = new Map();
+  schemaMap.set("taxonomy.parking", {
+    return_key: "taxonomy.parking",
+    group_key: "taxonomy",
+    check_key: "parking",
+    required: false,
+    requested: true,
+    answer_type: "boolean",
+  });
+
+  assert.doesNotThrow(() => {
+    validateRequestedCheckReturnsForFinalSubmission({}, schemaMap);
+  });
+});
+
+test("validator allows checked blank with evidence_required as not_found", () => {
+  const schemaMap = new Map();
+  schemaMap.set("cta_contact.phone", {
+    return_key: "cta_contact.phone",
+    group_key: "cta_contact",
+    check_key: "phone",
+    required: true,
+    requested: true,
+    evidence_required: true,
+    answer_type: "phone",
+  });
+
+  assert.doesNotThrow(() => {
+    validateRequestedCheckReturnsForFinalSubmission({
+      "cta_contact.phone": {
+        checked: true,
+        value: "",
+        evidence: "",
+      },
+    }, schemaMap);
+  });
+});
+
+test("validator rejects valid reported value missing required evidence", () => {
+  const schemaMap = new Map();
+  schemaMap.set("cta_contact.phone", {
+    return_key: "cta_contact.phone",
+    group_key: "cta_contact",
+    check_key: "phone",
+    required: true,
+    requested: true,
+    evidence_required: true,
+    answer_type: "phone",
+  });
+
+  let caught = null;
+  try {
+    validateRequestedCheckReturnsForFinalSubmission({
+      "cta_contact.phone": {
+        checked: true,
+        value: "0804415224",
+        evidence: "",
+      },
+    }, schemaMap);
+  } catch (err) {
+    caught = err;
+  }
+
+  assert.ok(caught, "should reject");
+  assert.equal(caught.validation_errors.length, 1);
+  assert.equal(caught.validation_errors[0].code, "required_evidence_missing");
+  assert.equal(caught.validation_errors[0].return_key, "cta_contact.phone");
+});
+
+test("validator allows valid reported value with evidence", () => {
+  const schemaMap = new Map();
+  schemaMap.set("cta_contact.phone", {
+    return_key: "cta_contact.phone",
+    group_key: "cta_contact",
+    check_key: "phone",
+    required: true,
+    requested: true,
+    evidence_required: true,
+    answer_type: "phone",
+  });
+
+  assert.doesNotThrow(() => {
+    validateRequestedCheckReturnsForFinalSubmission({
+      "cta_contact.phone": {
+        checked: true,
+        value: "0804415224",
+        evidence: "storefront sign",
+      },
+    }, schemaMap);
+  });
+});
+
+test("validator rejects non-empty malformed multi_select value", () => {
+  const schemaMap = new Map();
+  schemaMap.set("taxonomy.tags", {
+    return_key: "taxonomy.tags",
+    group_key: "taxonomy",
+    check_key: "tags",
+    required: true,
+    requested: true,
+    answer_type: "multi_select",
+    allowed_values: ["cafe", "restaurant"],
+  });
+
+  let caught = null;
+  try {
+    validateRequestedCheckReturnsForFinalSubmission({
+      "taxonomy.tags": {
+        checked: true,
+        value: "cafe",
+      },
+    }, schemaMap);
+  } catch (err) {
+    caught = err;
+  }
+
+  assert.ok(caught, "should reject non-empty malformed");
+  assert.equal(caught.validation_errors.length, 1);
+  assert.equal(caught.validation_errors[0].code, "malformed_requested_check_return");
+});
+
+test("validator bundles multiple errors in one throw", () => {
+  const schemaMap = new Map();
+  schemaMap.set("taxonomy.parking", {
+    return_key: "taxonomy.parking",
+    group_key: "taxonomy",
+    check_key: "parking",
+    required: true,
+    requested: true,
+    answer_type: "boolean",
+  });
+  schemaMap.set("cta_contact.phone", {
+    return_key: "cta_contact.phone",
+    group_key: "cta_contact",
+    check_key: "phone",
+    required: true,
+    requested: true,
+    evidence_required: true,
+    answer_type: "phone",
+  });
+
+  let caught = null;
+  try {
+    validateRequestedCheckReturnsForFinalSubmission({
+      "cta_contact.phone": {
+        checked: true,
+        value: "0804415224",
+        evidence: "",
+      },
+    }, schemaMap);
+  } catch (err) {
+    caught = err;
+  }
+
+  assert.ok(caught, "should bundle errors");
+  assert.ok(Array.isArray(caught.validation_errors));
+  assert.ok(caught.validation_errors.length >= 2, "should have at least 2 errors");
+  const codes = caught.validation_errors.map((e) => e.code);
+  assert.ok(codes.includes("required_unanswered"), "should include required_unanswered");
+  assert.ok(codes.includes("required_evidence_missing"), "should include required_evidence_missing");
+});
+
+// API route response helper test
+const buildSubmissionErrorResponse = (() => {
+  return function buildSubmissionErrorResponse(err) {
+    if (err && err.code === "REQUESTED_CHECK_VALIDATION_FAILED" && Array.isArray(err.validation_errors) && err.validation_errors.length) {
+      return {
+        status: 400,
+        body: {
+          error: "requested_check_validation_failed",
+          message: "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน",
+          validation_errors: err.validation_errors,
+        },
+      };
+    }
+    return {
+      status: 400,
+      body: { error: String(err?.message || "Cannot create submission") },
+    };
+  };
+})();
+
+test("buildSubmissionErrorResponse returns structured 400 for validation error", () => {
+  const err = new Error("requested_check_validation_failed");
+  err.code = "REQUESTED_CHECK_VALIDATION_FAILED";
+  err.validation_errors = [{
+    return_key: "taxonomy.parking",
+    group_key: "taxonomy",
+    check_key: "parking",
+    code: "required_unanswered",
+    status: "unanswered",
+    message: "taxonomy.parking is unanswered but required",
+  }];
+
+  const result = buildSubmissionErrorResponse(err);
+  assert.equal(result.status, 400);
+  assert.equal(result.body.error, "requested_check_validation_failed");
+  assert.equal(result.body.message, "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน");
+  assert.ok(Array.isArray(result.body.validation_errors));
+  assert.equal(result.body.validation_errors.length, 1);
+  assert.equal(result.body.validation_errors[0].return_key, "taxonomy.parking");
+  assert.equal(result.body.validation_errors[0].group_key, "taxonomy");
+  assert.equal(result.body.validation_errors[0].check_key, "parking");
+  assert.equal(result.body.validation_errors[0].code, "required_unanswered");
+  assert.equal(result.body.validation_errors[0].status, "unanswered");
+  assert.equal(Object.prototype.hasOwnProperty.call(result.body, "stack"), false);
+});
+
+test("buildSubmissionErrorResponse returns fallback for ordinary Error", () => {
+  const err = new Error("Something broke");
+  const result = buildSubmissionErrorResponse(err);
+  assert.equal(result.status, 400);
+  assert.equal(result.body.error, "Something broke");
+  assert.equal(Object.prototype.hasOwnProperty.call(result.body, "validation_errors"), false);
+});
+
+// Browser API payload test
+const apiFunctionSource = extractFunctionSource(appJs, "api");
+const __global_qs = (id) => null;
+const __global_setStatus = () => {};
+const __global_persistAuthReturnTo = () => {};
+const __global_applyLogoutUI = () => {};
+const __global_redirectToLoginWithExpiredSession = () => {};
+const stateStub = { token: "" };
+
+const apiTest = Function(
+  "state", "qs", "setStatus", "persistAuthReturnTo", "applyLogoutUI", "redirectToLoginWithExpiredSession",
+  `${apiFunctionSource}; return api;`
+)(stateStub, __global_qs, __global_setStatus, __global_persistAuthReturnTo, __global_applyLogoutUI, __global_redirectToLoginWithExpiredSession);
+
+test("api helper preserves structured payload on non-2xx JSON response", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 400,
+      headers: new Map([["content-type", "application/json"]]),
+      json: async () => ({
+        error: "requested_check_validation_failed",
+        message: "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน",
+        validation_errors: [{ return_key: "taxonomy.parking", code: "required_unanswered" }],
+      }),
+    });
+    let caught = null;
+    try {
+      await apiTest("/api/assignments/1/submissions", { method: "POST" });
+    } catch (err) {
+      caught = err;
+    }
+    assert.ok(caught, "should throw");
+    assert.equal(caught.message, "requested_check_validation_failed");
+    assert.ok(caught.payload, "should have payload");
+    assert.equal(caught.payload.error, "requested_check_validation_failed");
+    assert.equal(caught.payload.message, "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน");
+    assert.ok(Array.isArray(caught.payload.validation_errors));
+    assert.equal(caught.payload.validation_errors[0].return_key, "taxonomy.parking");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("api helper preserves fallback error message for non-JSON", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 500,
+      headers: new Map([["content-type", "text/plain"]]),
+      json: async () => { throw new Error("not json"); },
+    });
+    let caught = null;
+    try {
+      await apiTest("/api/nonexistent", { method: "GET" });
+    } catch (err) {
+      caught = err;
+    }
+    assert.ok(caught, "should throw");
+    assert.equal(caught.message, "คำขอล้มเหลว");
+    assert.ok(caught.payload);
+    assert.equal(caught.payload.error, "คำขอล้มเหลว");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
