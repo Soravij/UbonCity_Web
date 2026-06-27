@@ -2717,7 +2717,7 @@ test("resubmitted assignment creates a new row and retains prior complete field 
     const originalSubmissionReloaded = ctx.repo.getAssignmentSubmissionById(submission.id);
     assert.equal(originalSubmissionReloaded.article_payload_json?.summary, "first submission");
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const resubmittedWithoutReplacement = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
       source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
@@ -2727,13 +2727,14 @@ test("resubmitted assignment creates a new row and retains prior complete field 
           "cta_contact.phone": { checked: true, value: "0811111111", evidence: "storefront signage" },
         },
       },
-    }), /requested_check_validation_failed|required_unanswered/i);
+    });
+    assert.deepEqual(resubmittedWithoutReplacement.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0811111111");
   } finally {
     ctx.cleanup();
   }
 });
 
-test("assignment submission rejects missing requested return entries from the immutable handoff snapshot", () => {
+test("assignment submission allows missing requested return entries from the immutable handoff snapshot", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Requested Return Missing");
@@ -2753,7 +2754,7 @@ test("assignment submission rejects missing requested return entries from the im
       "admin"
     );
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
       source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
@@ -2761,13 +2762,14 @@ test("assignment submission rejects missing requested return entries from the im
       field_return_payload_json: {
         requested_check_returns: {},
       },
-    }), /requested_check_validation_failed|required_unanswered/i);
+    });
+    assert.deepEqual(submission.field_return_payload_json.requested_check_returns, {});
   } finally {
     ctx.cleanup();
   }
 });
 
-test("assignment submission rejects unchecked required requested return rows at submit time", () => {
+test("assignment submission allows unchecked required requested return rows at submit time", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Requested Return Unchecked");
@@ -2787,7 +2789,7 @@ test("assignment submission rejects unchecked required requested return rows at 
       "admin"
     );
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
       source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
@@ -2797,7 +2799,8 @@ test("assignment submission rejects unchecked required requested return rows at 
           "cta_contact.phone": { checked: false, value: "0812345678", evidence: "signboard" },
         }),
       },
-    }), /requested_check_validation_failed|required_unanswered/i);
+    });
+    assert.equal(submission.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, false);
   } finally {
     ctx.cleanup();
   }
@@ -2916,9 +2919,10 @@ test("assignment acceptance still blocks legacy malformed canonical number_with_
       },
     });
 
-    assert.throws(
-      () => ctx.repo.addAssignmentSubmission(buildPayload("submitted", { number: 120, unit: null })),
-      /requested_check_validation_failed|malformed/i
+    const submittedMalformedDuration = ctx.repo.addAssignmentSubmission(buildPayload("submitted", { number: 120, unit: null }));
+    assert.deepEqual(
+      submittedMalformedDuration.field_return_payload_json.requested_check_returns["taxonomy.typical_duration"].value,
+      { number: 120, unit: null }
     );
 
     insertLegacyAssignmentSubmission(ctx, {
@@ -2990,7 +2994,7 @@ test("assignment acceptance preserves invalid object phone text hours and url va
       handoff.id
     );
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const submittedMalformedTypedValues = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
       source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
@@ -3003,7 +3007,8 @@ test("assignment acceptance preserves invalid object phone text hours and url va
           "cta_contact.summary_note": { checked: true, value: { unexpected: true } },
         },
       },
-    }), /requested_check_validation_failed|malformed/i);
+    });
+    assert.deepEqual(submittedMalformedTypedValues.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, { raw: "08123" });
 
     const submission = insertLegacyAssignmentSubmission(ctx, {
       assignmentId,
@@ -3033,7 +3038,7 @@ test("assignment acceptance preserves invalid object phone text hours and url va
   }
 });
 
-test("assignment submission rejects invalid select values at submit time and acceptance still blocks legacy malformed select rows", () => {
+test("assignment submission allows invalid select values at submit time and acceptance still blocks legacy malformed select rows", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Requested Return Invalid Select");
@@ -3053,7 +3058,7 @@ test("assignment submission rejects invalid select values at submit time and acc
       "admin"
     );
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const submittedInvalidSelect = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentResult.assignment.id,
       source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentResult.assignment.id),
       submitted_by_user_id: assignee.id,
@@ -3073,7 +3078,8 @@ test("assignment submission rejects invalid select values at submit time and acc
           "taxonomy.setting_type": { checked: true, value: "outdoor" },
         },
       },
-    }), /requested_check_validation_failed|required_evidence_missing|malformed/i);
+    });
+    assert.equal(submittedInvalidSelect.field_return_payload_json.requested_check_returns["cta_contact.primary_cta"].value, "email");
 
     const invalidSelectSubmission = insertLegacyAssignmentSubmission(ctx, {
       assignmentId: assignmentResult.assignment.id,
@@ -3899,7 +3905,7 @@ test("assignment acceptance enforces required completeness, allows optional unan
       handoff.id
     );
 
-    assert.throws(() => ctx.repo.addAssignmentSubmission({
+    const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
       source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
       submitted_by_user_id: assignee.id,
@@ -3911,7 +3917,8 @@ test("assignment acceptance enforces required completeness, allows optional unan
           "taxonomy.waterfront": null,
         },
       },
-    }), /requested_check_validation_failed|required_unanswered/i);
+    });
+    assert.equal(submission.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, false);
 
     insertLegacyAssignmentSubmission(ctx, {
       assignmentId,

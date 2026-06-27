@@ -1404,8 +1404,10 @@ function parseStrictFiniteNumericInput(rawValue) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function validateRequestedCheckReturnsForFinalSubmission(requestedCheckReturns = {}, schemaMap = null, fieldName = "field_return_payload_json.requested_check_returns") {
+function validateRequestedCheckReturnsForFinalSubmission(requestedCheckReturns = {}, schemaMap = null, fieldName = "field_return_payload_json.requested_check_returns", options = {}) {
   if (!(schemaMap instanceof Map) || !schemaMap.size) return;
+  const mode = String(options?.mode || "submission").trim().toLowerCase() || "submission";
+  if (mode !== "acceptance") return;
   const errors = [];
 
   for (const [returnKey, schema] of schemaMap.entries()) {
@@ -1679,16 +1681,33 @@ function buildAcceptedAssignmentValidationSummary({
       blockers.push({ code: "malformed_requested_check_return", return_key: returnKey, status, message: `${returnKey} is malformed` });
       continue;
     }
-    if (status === "unanswered" && schema.required === true) {
-      blockers.push({ code: "required_requested_check_unanswered", return_key: returnKey, status, message: `${returnKey} is unanswered but required` });
-      continue;
-    }
-    if (status === "unanswered" && schema.activation_mode === "agent_triggered") {
-      warnings.push({ code: "optional_requested_check_unanswered", return_key: returnKey, status, message: `${returnKey} is unanswered but optional` });
+    if (status === "unanswered") {
+      warnings.push({
+        code: schema.required === true ? "required_requested_check_unanswered" : "optional_requested_check_unanswered",
+        return_key: returnKey,
+        status,
+        message: `${returnKey} is unanswered`,
+      });
       continue;
     }
     if (status === "not_found") {
       warnings.push({ code: "requested_check_not_found", return_key: returnKey, status, message: `${returnKey} was checked but no usable value was found` });
+    }
+  }
+
+  const statusByKey = new Map(statuses.map((entry) => [entry.return_key, entry.status]));
+  const primaryCtaRow = requestedReturns["cta_contact.primary_cta"];
+  const primaryCtaStatus = statusByKey.get("cta_contact.primary_cta") || null;
+  const primaryCtaValue = typeof primaryCtaRow?.value === "string" ? String(primaryCtaRow.value || "").trim().toLowerCase() : "";
+  if (primaryCtaStatus === "reported" && primaryCtaValue === "line") {
+    const lineUrlStatus = statusByKey.get("cta_contact.line_url") || null;
+    if (lineUrlStatus !== "reported") {
+      blockers.push({
+        code: "primary_cta_requires_reported_target",
+        return_key: "cta_contact.primary_cta",
+        status: primaryCtaStatus,
+        message: "cta_contact.primary_cta=line requires a reported cta_contact.line_url",
+      });
     }
   }
 

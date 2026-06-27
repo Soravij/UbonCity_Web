@@ -6722,9 +6722,8 @@ function renderAssignmentSubmissionForm(assignment = null) {
     : null;
   const requestedCheckGroups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackageState);
   const handoffLoadState = assignmentId > 0 ? state.assignments.handoffSourceLoaded?.[assignmentId] : null;
-  const existingDraft = assignmentId > 0 ? state.assignments.requestedCheckReturnDrafts?.[assignmentId] || null : null;
   const normalizedDraft = requestedCheckGroups.length
-    ? normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackageState)
+    ? getAssignmentRequestedCheckReturnDraftPrefill(assignment, handoffPackageState)
     : null;
   const requestedCheckSectionHtml = requestedCheckGroups.length
     ? buildAssignmentRequestedCheckReturnSectionHtml(assignment, handoffPackageState, normalizedDraft)
@@ -7406,17 +7405,59 @@ function normalizeAssignmentRequestedCheckReturnDraft(draft = null, handoffPacka
   return { requested_check_returns: requestedCheckReturns };
 }
 
-function buildAssignmentRequestedCheckReturnPayloadFromDraft(draft = null) {
-  const normalized = normalizeAssignmentRequestedCheckReturnDraft(draft, null);
-  const requested_check_returns = {};
-  Object.entries(normalized.requested_check_returns || {}).forEach(([returnKey, row]) => {
-    requested_check_returns[returnKey] = {
-      checked: row.checked === true,
+function getAssignmentRequestedCheckReturnDraftPrefill(assignment = null, handoffPackage = null) {
+  const assignmentId = Number(assignment?.id || state.assignments.selectedId || 0) || 0;
+  if (!assignmentId) return null;
+  const existingDraft = state.assignments.requestedCheckReturnDrafts?.[assignmentId] || null;
+  if (existingDraft) return normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackage);
+  const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
+  const latestReturns = latestSubmission?.field_return_payload_json?.requested_check_returns;
+  if (latestReturns && typeof latestReturns === "object" && !Array.isArray(latestReturns)) {
+    return normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: latestReturns }, handoffPackage);
+  }
+  return normalizeAssignmentRequestedCheckReturnDraft(null, handoffPackage);
+}
+
+function isAssignmentRequestedCheckTaxonomyBooleanRow(row = {}) {
+  const groupKey = String(row?.group_key || "").trim().toLowerCase();
+  const answerType = String(row?.answer_type || "").trim().toLowerCase();
+  return groupKey === "taxonomy" && (answerType === "boolean" || answerType === "boolean_with_conditions");
+}
+
+function buildAssignmentRequestedCheckReturnSubmissionRow(row = {}) {
+  const checked = row?.checked === true;
+  if (checked) {
+    return {
+      checked: true,
       value: row.value == null ? null : row.value,
       condition_note: String(row.condition_note || "").trim() || null,
       evidence: String(row.evidence || "").trim() || null,
       note: String(row.note || "").trim() || null,
     };
+  }
+  if (isAssignmentRequestedCheckTaxonomyBooleanRow(row)) {
+    return {
+      checked: true,
+      value: false,
+      condition_note: String(row.condition_note || "").trim() || null,
+      evidence: null,
+      note: String(row.note || "").trim() || null,
+    };
+  }
+  return {
+    checked: true,
+    value: null,
+    condition_note: String(row.condition_note || "").trim() || null,
+    evidence: null,
+    note: String(row.note || "").trim() || null,
+  };
+}
+
+function buildAssignmentRequestedCheckReturnPayloadFromDraft(draft = null) {
+  const normalized = normalizeAssignmentRequestedCheckReturnDraft(draft, null);
+  const requested_check_returns = {};
+  Object.entries(normalized.requested_check_returns || {}).forEach(([returnKey, row]) => {
+    requested_check_returns[returnKey] = buildAssignmentRequestedCheckReturnSubmissionRow(row);
   });
   return Object.keys(requested_check_returns).length ? { requested_check_returns } : null;
 }

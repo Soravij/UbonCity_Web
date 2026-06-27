@@ -196,6 +196,11 @@ function createRequestedCheckRenderHarness(state) {
       }),
       getAssignmentRequestedCheckGroupsFromHandoffPackage,
       normalizeAssignmentRequestedCheckReturnDraft,
+      getAssignmentRequestedCheckReturnDraftPrefill: loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
+        state,
+        getLatestAssignmentSubmissionRow: () => null,
+        normalizeAssignmentRequestedCheckReturnDraft,
+      }),
       isEditorUser: () => false,
       loadAssignmentRequestedCheckHandoffSource: async () => null,
       setAssignmentDraftSaveStatus: () => {},
@@ -309,8 +314,13 @@ const buildAssignmentRequestedCheckReturnDraftFromHandoffPackage = loadNamedFunc
 const normalizeAssignmentRequestedCheckReturnDraft = loadNamedFunction(appJs, "normalizeAssignmentRequestedCheckReturnDraft", {
   buildAssignmentRequestedCheckReturnDraftFromHandoffPackage,
 });
+const isAssignmentRequestedCheckTaxonomyBooleanRow = loadNamedFunction(appJs, "isAssignmentRequestedCheckTaxonomyBooleanRow");
+const buildAssignmentRequestedCheckReturnSubmissionRow = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnSubmissionRow", {
+  isAssignmentRequestedCheckTaxonomyBooleanRow,
+});
 const buildAssignmentRequestedCheckReturnPayloadFromDraft = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnPayloadFromDraft", {
   normalizeAssignmentRequestedCheckReturnDraft,
+  buildAssignmentRequestedCheckReturnSubmissionRow,
 });
 const buildAssignmentRequestedCheckReturnValueInputHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnValueInputHtml", {
   escapeHtml,
@@ -1637,8 +1647,8 @@ test("requested-check payload builder keeps field_return_payload_json separate a
         note: "Checked by eye",
       },
       "taxonomy.tags": {
-        checked: false,
-        value: ["cafe", "family"],
+        checked: true,
+        value: null,
         condition_note: null,
         evidence: null,
         note: null,
@@ -1646,6 +1656,58 @@ test("requested-check payload builder keeps field_return_payload_json separate a
     },
   });
   assert.equal(Object.prototype.hasOwnProperty.call(payload.requested_check_returns["cta_contact.phone"], "answer_type"), false);
+});
+
+test("requested-check payload builder normalizes untouched CTA rows to not_found instead of reporting AI suggestion", () => {
+  const payload = buildAssignmentRequestedCheckReturnPayloadFromDraft({
+    requested_check_returns: {
+      "cta_contact.phone": {
+        checked: false,
+        value: "0812345678",
+        suggested_value: "0812345678",
+        answer_type: "phone",
+        group_key: "cta_contact",
+      },
+    },
+  });
+
+  assert.deepEqual(payload, {
+    requested_check_returns: {
+      "cta_contact.phone": {
+        checked: true,
+        value: null,
+        condition_note: null,
+        evidence: null,
+        note: null,
+      },
+    },
+  });
+});
+
+test("requested-check payload builder normalizes unchecked taxonomy booleans to reported false", () => {
+  const payload = buildAssignmentRequestedCheckReturnPayloadFromDraft({
+    requested_check_returns: {
+      "taxonomy.parking": {
+        checked: false,
+        value: true,
+        suggested_value: true,
+        answer_type: "boolean_with_conditions",
+        group_key: "taxonomy",
+      },
+    },
+  });
+
+  assert.deepEqual(payload, {
+    requested_check_returns: {
+      "taxonomy.parking": {
+        checked: true,
+        value: false,
+        condition_note: null,
+        evidence: null,
+        note: null,
+      },
+    },
+  });
 });
 
 test("requested-check return normalization infers runtime types from payload shape", () => {
@@ -1900,7 +1962,7 @@ const validateRequestedCheckReturnsForFinalSubmission = loadNamedFunction(reposi
   hasRequestedCheckEvidence,
 });
 
-test("validator rejects required unchecked row with stable error code", () => {
+test("validator allows required unchecked row during submission mode", () => {
   const schemaMap = new Map();
   schemaMap.set("taxonomy.parking", {
     return_key: "taxonomy.parking",
@@ -1911,24 +1973,9 @@ test("validator rejects required unchecked row with stable error code", () => {
     answer_type: "boolean",
   });
 
-  let caught = null;
-  try {
+  assert.doesNotThrow(() => {
     validateRequestedCheckReturnsForFinalSubmission({}, schemaMap);
-  } catch (err) {
-    caught = err;
-  }
-
-  assert.ok(caught, "validator should throw");
-  assert.equal(caught.code, "REQUESTED_CHECK_VALIDATION_FAILED");
-  assert.equal(caught.message, "requested_check_validation_failed");
-  assert.ok(Array.isArray(caught.validation_errors));
-  assert.equal(caught.validation_errors.length, 1);
-  assert.equal(caught.validation_errors[0].return_key, "taxonomy.parking");
-  assert.equal(caught.validation_errors[0].group_key, "taxonomy");
-  assert.equal(caught.validation_errors[0].check_key, "parking");
-  assert.equal(caught.validation_errors[0].code, "required_unanswered");
-  assert.equal(caught.validation_errors[0].status, "unanswered");
-  assert.ok(caught.validation_errors[0].message);
+  });
 });
 
 test("validator allows optional unchecked row", () => {
@@ -1970,7 +2017,7 @@ test("validator allows checked blank with evidence_required as not_found", () =>
   });
 });
 
-test("validator rejects valid reported value missing required evidence", () => {
+test("validator allows valid reported value missing required evidence during submission mode", () => {
   const schemaMap = new Map();
   schemaMap.set("cta_contact.phone", {
     return_key: "cta_contact.phone",
@@ -1982,8 +2029,7 @@ test("validator rejects valid reported value missing required evidence", () => {
     answer_type: "phone",
   });
 
-  let caught = null;
-  try {
+  assert.doesNotThrow(() => {
     validateRequestedCheckReturnsForFinalSubmission({
       "cta_contact.phone": {
         checked: true,
@@ -1991,14 +2037,7 @@ test("validator rejects valid reported value missing required evidence", () => {
         evidence: "",
       },
     }, schemaMap);
-  } catch (err) {
-    caught = err;
-  }
-
-  assert.ok(caught, "should reject");
-  assert.equal(caught.validation_errors.length, 1);
-  assert.equal(caught.validation_errors[0].code, "required_evidence_missing");
-  assert.equal(caught.validation_errors[0].return_key, "cta_contact.phone");
+  });
 });
 
 test("validator allows valid reported value with evidence", () => {
@@ -2024,7 +2063,7 @@ test("validator allows valid reported value with evidence", () => {
   });
 });
 
-test("validator rejects non-empty malformed multi_select value", () => {
+test("validator allows non-empty malformed multi_select value during submission mode", () => {
   const schemaMap = new Map();
   schemaMap.set("taxonomy.tags", {
     return_key: "taxonomy.tags",
@@ -2036,24 +2075,17 @@ test("validator rejects non-empty malformed multi_select value", () => {
     allowed_values: ["cafe", "restaurant"],
   });
 
-  let caught = null;
-  try {
+  assert.doesNotThrow(() => {
     validateRequestedCheckReturnsForFinalSubmission({
       "taxonomy.tags": {
         checked: true,
         value: "cafe",
       },
     }, schemaMap);
-  } catch (err) {
-    caught = err;
-  }
-
-  assert.ok(caught, "should reject non-empty malformed");
-  assert.equal(caught.validation_errors.length, 1);
-  assert.equal(caught.validation_errors[0].code, "malformed_requested_check_return");
+  });
 });
 
-test("validator bundles multiple errors in one throw", () => {
+test("validator still bundles semantic errors in acceptance mode", () => {
   const schemaMap = new Map();
   schemaMap.set("taxonomy.parking", {
     return_key: "taxonomy.parking",
@@ -2081,7 +2113,7 @@ test("validator bundles multiple errors in one throw", () => {
         value: "0804415224",
         evidence: "",
       },
-    }, schemaMap);
+    }, schemaMap, "field_return_payload_json.requested_check_returns", { mode: "acceptance" });
   } catch (err) {
     caught = err;
   }
