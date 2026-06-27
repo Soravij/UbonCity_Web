@@ -57,6 +57,87 @@ function loadNamedAsyncFunction(sourceText, functionName, dependencies = {}) {
   return AsyncFunction(...dependencyNames, `${source}; return ${functionName};`)(...dependencyValues);
 }
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function createAssignmentAutosaveHarness({
+  currentRevisionRound = 1,
+  apiImpl = async () => ({ draft: null }),
+} = {}) {
+  const state = {
+    assignments: {
+      selectedId: 12,
+      serverSubmissionDraftPayloads: {},
+      serverSubmissionDraftLoaded: {},
+      serverSubmissionDraftSaveTimers: {},
+      contextFieldPack: null,
+    },
+  };
+  const currentAssignment = { id: 12, revision_round: currentRevisionRound, state: "in_progress" };
+  const currentAssignmentRef = { current: currentAssignment };
+  const apiCalls = [];
+  const statusCalls = [];
+  const pendingTimers = new Map();
+  let nextTimerId = 1;
+  const fakeWindow = {
+    setTimeout(callback) {
+      const timerId = nextTimerId;
+      nextTimerId += 1;
+      pendingTimers.set(timerId, callback);
+      return timerId;
+    },
+    clearTimeout(timerId) {
+      pendingTimers.delete(timerId);
+    },
+  };
+  const getDraftKey = (assignmentId, assignment) => `${assignmentId}:${Number(assignment?.revision_round || 0) || 0}`;
+  const saveAssignmentSubmissionServerDraft = await loadNamedAsyncFunction(appJs, "saveAssignmentSubmissionServerDraft", {
+    state,
+    isEditorUser: () => false,
+    getAssignmentById: () => currentAssignmentRef.current,
+    setAssignmentDraftSaveStatus: (text, isError = false) => {
+      statusCalls.push({ text: String(text || ""), isError: isError === true });
+    },
+    api: async (url, options) => {
+      apiCalls.push({ url, options });
+      return apiImpl(url, options);
+    },
+    normalizeAssignmentSubmissionPayload: (payload) => payload,
+    getAssignmentSubmissionDraftKey: getDraftKey,
+  });
+  const clearServerDraftSaveTimer = loadNamedFunction(appJs, "clearServerDraftSaveTimer", {
+    state,
+    window: fakeWindow,
+  });
+  const scheduleSaveAssignmentSubmissionServerDraft = loadNamedFunction(appJs, "scheduleSaveAssignmentSubmissionServerDraft", {
+    state,
+    isEditorUser: () => false,
+    clearServerDraftSaveTimer,
+    saveAssignmentSubmissionServerDraft,
+    window: fakeWindow,
+    getAssignmentSubmissionDraftKey: getDraftKey,
+  });
+
+  return {
+    state,
+    currentAssignmentRef,
+    apiCalls,
+    statusCalls,
+    pendingTimers,
+    fakeWindow,
+    saveAssignmentSubmissionServerDraft,
+    scheduleSaveAssignmentSubmissionServerDraft,
+    getDraftKey,
+  };
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -2738,6 +2819,107 @@ test("requested-check lifecycle dirty and cleanup are isolated per revision draf
   assert.equal(state.assignments.requestedCheckReturnDraftDirty["12:2"], false);
   assert.equal(state.assignments.submissionDrafts["12:1"], undefined);
   assert.notEqual(state.assignments.submissionDrafts["12:2"], undefined);
+});
+
+test("autosave keeps revision-specific timers separate and skips stale revision PUTs", async () => {
+  const harness = await createAssignmentAutosaveHarness({
+    currentRevisionRound: 1,
+    apiImpl: async () => ({
+      draft: {
+        article_payload_json: {
+          additional_text: "saved",
+        },
+      },
+    }),
+  });
+  const {
+    state,
+    currentAssignmentRef,
+    apiCalls,
+    statusCalls,
+    pendingTimers,
+    scheduleSaveAssignmentSubmissionServerDraft,
+  } = harness;
+
+  scheduleSaveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 1" } }, currentAssignmentRef.current);
+  const revisionOneTimerId = state.assignments.serverSubmissionDraftSaveTimers["12:1"];
+  assert.ok(revisionOneTimerId);
+
+  currentAssignmentRef.current.revision_round = 2;
+  scheduleSaveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, currentAssignmentRef.current);
+
+  assert.ok(state.assignments.serverSubmissionDraftSaveTimers["12:1"]);
+  assert.ok(state.assignments.serverSubmissionDraftSaveTimers["12:2"]);
+
+  const revisionOneTimer = pendingTimers.get(revisionOneTimerId);
+  assert.ok(revisionOneTimer);
+  revisionOneTimer();
+  await Promise.resolve();
+
+  assert.equal(apiCalls.length, 0);
+  assert.deepEqual(state.assignments.serverSubmissionDraftPayloads, {});
+  assert.deepEqual(state.assignments.serverSubmissionDraftLoaded, {});
+  assert.deepEqual(statusCalls, []);
+});
+
+test("autosave ignores a stale response when revision changes before PUT resolves", async () => {
+  const deferred = createDeferred();
+  const harness = await createAssignmentAutosaveHarness({
+    currentRevisionRound: 1,
+    apiImpl: async () => deferred.promise,
+  });
+  const {
+    state,
+    currentAssignmentRef,
+    apiCalls,
+    statusCalls,
+    saveAssignmentSubmissionServerDraft,
+  } = harness;
+
+  const savePromise = saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 1" } }, "12:1");
+  assert.equal(apiCalls.length, 1);
+
+  currentAssignmentRef.current.revision_round = 2;
+  deferred.resolve({
+    draft: {
+      article_payload_json: {
+        additional_text: "revision 1 saved",
+      },
+    },
+  });
+  await savePromise;
+
+  assert.equal(state.assignments.serverSubmissionDraftPayloads["12:1"], undefined);
+  assert.equal(state.assignments.serverSubmissionDraftPayloads["12:2"], undefined);
+  assert.equal(state.assignments.serverSubmissionDraftLoaded["12:1"], undefined);
+  assert.equal(state.assignments.serverSubmissionDraftLoaded["12:2"], undefined);
+  assert.equal(statusCalls.some((entry) => String(entry.text || "").startsWith("บันทึกล่าสุด")), false);
+});
+
+test("autosave still saves the current revision normally", async () => {
+  const harness = await createAssignmentAutosaveHarness({
+    currentRevisionRound: 2,
+    apiImpl: async () => ({
+      draft: {
+        article_payload_json: {
+          additional_text: "revision 2 saved",
+        },
+      },
+    }),
+  });
+  const {
+    state,
+    apiCalls,
+    statusCalls,
+    saveAssignmentSubmissionServerDraft,
+  } = harness;
+
+  await saveAssignmentSubmissionServerDraft(12, { article_payload_json: { additional_text: "revision 2" } }, "12:2");
+
+  assert.equal(apiCalls.length, 1);
+  assert.equal(state.assignments.serverSubmissionDraftPayloads["12:2"]?.article_payload_json?.additional_text, "revision 2 saved");
+  assert.equal(state.assignments.serverSubmissionDraftLoaded["12:2"], true);
+  assert.equal(statusCalls.at(-1)?.text.startsWith("บันทึกล่าสุด"), true);
 });
 
 // Repository final-submission validator tests

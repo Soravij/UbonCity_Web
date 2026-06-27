@@ -1188,22 +1188,27 @@ function clearAssignmentSubmissionDraft(assignmentId) {
 }
 
 function clearServerDraftSaveTimer(assignmentId) {
-  const id = Number(assignmentId || 0) || 0;
-  if (!id) return;
+  const timerKey = String(assignmentId || "").trim();
+  if (!timerKey) return;
   const timers = state.assignments.serverSubmissionDraftSaveTimers;
   if (!timers || typeof timers !== "object") return;
-  const timerId = timers[id];
+  const timerId = timers[timerKey];
   if (timerId) {
     window.clearTimeout(timerId);
-    delete timers[id];
+    delete timers[timerKey];
   }
 }
 
-async function saveAssignmentSubmissionServerDraft(assignmentId, payload) {
+async function saveAssignmentSubmissionServerDraft(assignmentId, payload, scheduledDraftKey = "") {
   const id = Number(assignmentId || 0) || 0;
   if (!id || isEditorUser()) return null;
   const assignment = getAssignmentById(id);
   if (!assignment) return null;
+  const currentDraftKey = getAssignmentSubmissionDraftKey(id, assignment);
+  const resolvedScheduledDraftKey = String(scheduledDraftKey || currentDraftKey || "").trim();
+  if (!resolvedScheduledDraftKey || resolvedScheduledDraftKey !== currentDraftKey) {
+    return null;
+  }
   const assignmentState = String(assignment?.state || "").trim().toLowerCase();
   if (!["assigned", "in_progress", "revision_requested", "resubmitted"].includes(assignmentState)) {
     return null;
@@ -1227,9 +1232,13 @@ async function saveAssignmentSubmissionServerDraft(assignmentId, payload) {
     method: "PUT",
     body: JSON.stringify(normalized),
   });
+  const latestAssignment = getAssignmentById(id);
+  const latestDraftKey = latestAssignment ? getAssignmentSubmissionDraftKey(id, latestAssignment) : "";
+  if (resolvedScheduledDraftKey !== latestDraftKey) {
+    return null;
+  }
   const serverDraft = result?.draft && typeof result.draft === "object" ? result.draft : normalized;
-  const draftKey = getAssignmentSubmissionDraftKey(id, assignment);
-  state.assignments.serverSubmissionDraftPayloads[draftKey] = {
+  state.assignments.serverSubmissionDraftPayloads[resolvedScheduledDraftKey] = {
     article_payload_json: normalizeAssignmentSubmissionPayload(
       serverDraft?.article_payload_json && typeof serverDraft.article_payload_json === "object"
         ? serverDraft.article_payload_json
@@ -1241,21 +1250,23 @@ async function saveAssignmentSubmissionServerDraft(assignmentId, payload) {
       ? serverDraft.field_return_payload_json
       : null,
   };
-  state.assignments.serverSubmissionDraftLoaded[draftKey] = true;
+  state.assignments.serverSubmissionDraftLoaded[resolvedScheduledDraftKey] = true;
   const savedAt = new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
   setAssignmentDraftSaveStatus(`บันทึกล่าสุด ${savedAt}`);
-  return state.assignments.serverSubmissionDraftPayloads[draftKey];
+  return state.assignments.serverSubmissionDraftPayloads[resolvedScheduledDraftKey];
 }
 
 function scheduleSaveAssignmentSubmissionServerDraft(assignmentId, payload, assignment = null) {
   const id = Number(assignmentId || 0) || 0;
   if (!id || isEditorUser()) return;
-  clearServerDraftSaveTimer(id);
-  state.assignments.serverSubmissionDraftSaveTimers[id] = window.setTimeout(() => {
-    saveAssignmentSubmissionServerDraft(id, payload).catch(() => {
+  const scheduledDraftKey = String(getAssignmentSubmissionDraftKey(id, assignment) || "").trim();
+  if (!scheduledDraftKey) return;
+  clearServerDraftSaveTimer(scheduledDraftKey);
+  state.assignments.serverSubmissionDraftSaveTimers[scheduledDraftKey] = window.setTimeout(() => {
+    saveAssignmentSubmissionServerDraft(id, payload, scheduledDraftKey).catch(() => {
       setAssignmentDraftSaveStatus("บันทึกไม่สำเร็จ", true);
     });
-    delete state.assignments.serverSubmissionDraftSaveTimers[id];
+    delete state.assignments.serverSubmissionDraftSaveTimers[scheduledDraftKey];
   }, 1000);
 }
 
@@ -1318,9 +1329,9 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
 async function deleteAssignmentSubmissionServerDraft(assignmentId) {
   const id = Number(assignmentId || 0) || 0;
   if (!id || isEditorUser()) return;
-  clearServerDraftSaveTimer(id);
   const assignment = getAssignmentById(id);
   const draftKey = getAssignmentSubmissionDraftKey(id, assignment);
+  clearServerDraftSaveTimer(draftKey);
   try {
     await api(`/api/assignments/${id}/draft`, { method: "DELETE" });
   } catch {
