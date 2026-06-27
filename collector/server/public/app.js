@@ -223,6 +223,8 @@ const state = {
     handoffSourceSnapshotIds: {},
     handoffSourceLoaded: {},
     requestedCheckReturnDrafts: {},
+    requestedCheckReturnDraftDirty: {},
+    requestedCheckReturnDraftSources: {},
     latestUploadedAssets: [],
     latestUploadedAssetsKey: "",
     syncedUploadAssetsByKey: {},
@@ -1174,6 +1176,15 @@ function clearAssignmentSubmissionDraft(assignmentId) {
   if (state.assignments.submissionDrafts && typeof state.assignments.submissionDrafts === "object") {
     delete state.assignments.submissionDrafts[draftKey];
   }
+  if (state.assignments.requestedCheckReturnDrafts && typeof state.assignments.requestedCheckReturnDrafts === "object") {
+    delete state.assignments.requestedCheckReturnDrafts[id];
+  }
+  if (state.assignments.requestedCheckReturnDraftDirty && typeof state.assignments.requestedCheckReturnDraftDirty === "object") {
+    delete state.assignments.requestedCheckReturnDraftDirty[id];
+  }
+  if (state.assignments.requestedCheckReturnDraftSources && typeof state.assignments.requestedCheckReturnDraftSources === "object") {
+    delete state.assignments.requestedCheckReturnDraftSources[id];
+  }
 }
 
 function clearServerDraftSaveTimer(assignmentId) {
@@ -1275,6 +1286,19 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
       }
       : null;
     state.assignments.serverSubmissionDraftLoaded[draftKey] = true;
+    const serverFieldReturnPayload = state.assignments.serverSubmissionDraftPayloads?.[draftKey]?.field_return_payload_json || null;
+    const serverReturns = serverFieldReturnPayload?.requested_check_returns;
+    if (
+      Number(state.assignments.selectedId || 0) === assignmentId
+      && hasUsableAssignmentRequestedCheckReturnRows(serverFieldReturnPayload)
+      && state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] !== true
+    ) {
+      const selectedAssignment = getAssignmentById(assignmentId) || assignment;
+      const handoffPackage = state.assignments.handoffSourcePackages?.[assignmentId] || null;
+      const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: serverReturns }, handoffPackage);
+      setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, { source: "server_draft", dirty: false });
+      renderAssignmentRequestedCheckSection(selectedAssignment, handoffPackage, normalizedDraft);
+    }
     return state.assignments.serverSubmissionDraftPayloads[draftKey];
   } catch {
     state.assignments.serverSubmissionDraftLoaded[draftKey] = false;
@@ -1318,6 +1342,44 @@ function getLatestAssignmentSubmissionRow(assignment = null) {
   const assignmentId = Number(assignment?.id || state.assignments.selectedId || 0) || 0;
   if (!assignmentId) return null;
   return state.assignments.latestSubmissionRows?.[assignmentId] || null;
+}
+
+function getAssignmentRequestedCheckReturnRows(value = null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const rows = value?.requested_check_returns;
+  if (!rows || typeof rows !== "object" || Array.isArray(rows)) return null;
+  return rows;
+}
+
+function hasUsableAssignmentRequestedCheckReturnRows(value = null) {
+  const rows = getAssignmentRequestedCheckReturnRows(value);
+  return Boolean(rows && Object.keys(rows).length);
+}
+
+function setAssignmentRequestedCheckReturnDraftState(assignmentId, draft = null, options = {}) {
+  const id = Number(assignmentId || 0) || 0;
+  if (!id) return null;
+  if (!state.assignments.requestedCheckReturnDrafts || typeof state.assignments.requestedCheckReturnDrafts !== "object") {
+    state.assignments.requestedCheckReturnDrafts = {};
+  }
+  if (!state.assignments.requestedCheckReturnDraftDirty || typeof state.assignments.requestedCheckReturnDraftDirty !== "object") {
+    state.assignments.requestedCheckReturnDraftDirty = {};
+  }
+  if (!state.assignments.requestedCheckReturnDraftSources || typeof state.assignments.requestedCheckReturnDraftSources !== "object") {
+    state.assignments.requestedCheckReturnDraftSources = {};
+  }
+  if (draft) {
+    state.assignments.requestedCheckReturnDrafts[id] = draft;
+  } else {
+    delete state.assignments.requestedCheckReturnDrafts[id];
+  }
+  if (Object.prototype.hasOwnProperty.call(options, "dirty")) {
+    state.assignments.requestedCheckReturnDraftDirty[id] = options.dirty === true;
+  }
+  if (Object.prototype.hasOwnProperty.call(options, "source")) {
+    state.assignments.requestedCheckReturnDraftSources[id] = options.source == null ? null : String(options.source || "").trim() || null;
+  }
+  return draft;
 }
 
 function normalizeAssignmentReviewAnswerItems(value) {
@@ -6774,39 +6836,7 @@ function renderAssignmentSubmissionForm(assignment = null) {
   const handoffPackageState = cachedHandoffPackage && typeof cachedHandoffPackage === "object"
     ? cachedHandoffPackage
     : null;
-  const requestedCheckGroups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackageState);
-  const handoffLoadState = assignmentId > 0 ? state.assignments.handoffSourceLoaded?.[assignmentId] : null;
-  const normalizedDraft = requestedCheckGroups.length
-    ? getAssignmentRequestedCheckReturnDraftPrefill(assignment, handoffPackageState)
-    : null;
-  const requestedCheckSectionHtml = requestedCheckGroups.length
-    ? buildAssignmentRequestedCheckReturnSectionHtml(assignment, handoffPackageState, normalizedDraft)
-    : "";
-  if (requestedChecksWrapNode) {
-    const shouldShowRequestedChecksLoading = !requestedCheckSectionHtml
-      && assignmentId > 0
-      && handoffLoadState !== true
-      && !handoffLoadState
-      && !isEditorUser();
-    requestedChecksWrapNode.classList.toggle("hidden", !requestedCheckSectionHtml && !shouldShowRequestedChecksLoading);
-  }
-  if (requestedChecksNode) {
-    if (!requestedCheckSectionHtml) {
-      if (assignmentId > 0 && handoffLoadState !== true && !handoffLoadState && !isEditorUser()) {
-        requestedChecksNode.className = "assignment-brief-empty";
-        requestedChecksNode.innerHTML = "กำลังโหลดรายการที่ขอจากชุดส่งงาน...";
-        loadAssignmentRequestedCheckHandoffSource(assignment).catch(() => {});
-      } else {
-        requestedChecksNode.className = "assignment-brief-grid";
-        requestedChecksNode.innerHTML = "";
-      }
-    } else {
-      state.assignments.requestedCheckReturnDrafts[assignmentId] = normalizedDraft;
-      requestedChecksNode.className = "assignment-brief-grid";
-      requestedChecksNode.innerHTML = requestedCheckSectionHtml;
-      requestedChecksNode.querySelectorAll("[data-requested-check-row]").forEach((rowNode) => updateAssignmentRequestedCheckReturnRowState(rowNode));
-    }
-  }
+  renderAssignmentRequestedCheckSection(assignment, handoffPackageState);
   verifiedNode.className = "assignment-brief-grid";
   verifiedNode.innerHTML = buildAssignmentSubmissionPromptInputs(
     formConfig.verifiedPrompts,
@@ -6848,6 +6878,58 @@ function renderAssignmentSubmissionForm(assignment = null) {
     renderAssignmentSubmissionGatePanel(gateState);
   }
   applyAssignmentModernClasses();
+}
+
+function renderAssignmentRequestedCheckSection(assignment = null, handoffPackage = null, draft = undefined) {
+  const requestedChecksWrapNode = qs("assignment-submission-requested-checks-wrap");
+  const requestedChecksNode = qs("assignment-submission-requested-checks-fields");
+  const assignmentId = Number(assignment?.id || state.assignments.selectedId || 0) || 0;
+  if (!requestedChecksNode) return null;
+  const requestedCheckGroups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage);
+  const handoffLoadState = assignmentId > 0 ? state.assignments.handoffSourceLoaded?.[assignmentId] : null;
+  const normalizedDraft = requestedCheckGroups.length
+    ? (draft === undefined ? getAssignmentRequestedCheckReturnDraftPrefill(assignment, handoffPackage) : normalizeAssignmentRequestedCheckReturnDraft(draft, handoffPackage))
+    : null;
+  const requestedCheckSectionHtml = requestedCheckGroups.length
+    ? buildAssignmentRequestedCheckReturnSectionHtml(assignment, handoffPackage, normalizedDraft)
+    : "";
+  if (requestedChecksWrapNode) {
+    const shouldShowRequestedChecksLoading = !requestedCheckSectionHtml
+      && assignmentId > 0
+      && handoffLoadState !== true
+      && !handoffLoadState
+      && !isEditorUser();
+    requestedChecksWrapNode.classList.toggle("hidden", !requestedCheckSectionHtml && !shouldShowRequestedChecksLoading);
+  }
+  if (!requestedCheckSectionHtml) {
+    if (assignmentId > 0 && handoffLoadState !== true && !handoffLoadState && !isEditorUser()) {
+      requestedChecksNode.className = "assignment-brief-empty";
+      requestedChecksNode.innerHTML = "กำลังโหลดรายการที่ขอจากชุดส่งงาน...";
+      loadAssignmentRequestedCheckHandoffSource(assignment).catch(() => {});
+    } else {
+      requestedChecksNode.className = "assignment-brief-grid";
+      requestedChecksNode.innerHTML = "";
+    }
+    return null;
+  }
+  const source = state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] === true
+    ? "user_edit"
+    : (
+      state.assignments.requestedCheckReturnDraftSources?.[assignmentId]
+      || (
+        hasUsableAssignmentRequestedCheckReturnRows({ requested_check_returns: normalizedDraft?.requested_check_returns })
+          ? "schema_default"
+          : null
+      )
+    );
+  setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, {
+    source,
+    dirty: state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] === true,
+  });
+  requestedChecksNode.className = "assignment-brief-grid";
+  requestedChecksNode.innerHTML = requestedCheckSectionHtml;
+  requestedChecksNode.querySelectorAll("[data-requested-check-row]").forEach((rowNode) => updateAssignmentRequestedCheckReturnRowState(rowNode));
+  return normalizedDraft;
 }
 
 function readAssignmentSubmissionPromptAnswers(groupName) {
@@ -7068,6 +7150,19 @@ async function ensureAssignmentSubmissionPrefillLoaded(assignment = null) {
     const selectedId = Number(state.assignments.selectedId || 0) || 0;
     const selectedAssignment = getAssignmentById(assignmentId);
     const selectedDraftKey = getAssignmentSubmissionDraftKey(assignmentId, selectedAssignment);
+    const serverDraftPayload = state.assignments.serverSubmissionDraftPayloads?.[selectedDraftKey]?.field_return_payload_json || null;
+    const latestFieldReturnPayload = latestSubmission?.field_return_payload_json || null;
+    if (
+      selectedId === assignmentId
+      && state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] !== true
+      && !hasUsableAssignmentRequestedCheckReturnRows(serverDraftPayload)
+      && hasUsableAssignmentRequestedCheckReturnRows(latestFieldReturnPayload)
+    ) {
+      const handoffPackage = state.assignments.handoffSourcePackages?.[assignmentId] || null;
+      const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(latestFieldReturnPayload, handoffPackage);
+      setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, { source: "latest_submission", dirty: false });
+      renderAssignmentRequestedCheckSection(getAssignmentSubmissionFormAssignment(selectedAssignment, getAssignmentPageMode()), handoffPackage, normalizedDraft);
+    }
     if (
       selectedId === assignmentId
       && !state.assignments.serverSubmissionDraftPayloads?.[selectedDraftKey]
@@ -7470,19 +7565,25 @@ function getAssignmentRequestedCheckReturnDraftPrefill(assignment = null, handof
   const assignmentId = Number(assignment?.id || state.assignments.selectedId || 0) || 0;
   if (!assignmentId) return null;
   const existingDraft = state.assignments.requestedCheckReturnDrafts?.[assignmentId] || null;
-  const existingReturns = existingDraft?.requested_check_returns;
-  if (existingReturns && typeof existingReturns === "object" && !Array.isArray(existingReturns) && Object.keys(existingReturns).length) {
+  const existingSource = state.assignments.requestedCheckReturnDraftSources?.[assignmentId] || null;
+  const existingDirty = state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] === true;
+  if (existingDirty && hasUsableAssignmentRequestedCheckReturnRows(existingDraft)) {
     return normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackage);
   }
   const draftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
-  const serverDraftReturns = state.assignments.serverSubmissionDraftPayloads?.[draftKey]?.field_return_payload_json?.requested_check_returns;
-  if (serverDraftReturns && typeof serverDraftReturns === "object" && !Array.isArray(serverDraftReturns) && Object.keys(serverDraftReturns).length) {
+  const serverDraftPayload = state.assignments.serverSubmissionDraftPayloads?.[draftKey]?.field_return_payload_json || null;
+  const serverDraftReturns = serverDraftPayload?.requested_check_returns;
+  if (hasUsableAssignmentRequestedCheckReturnRows(serverDraftPayload)) {
     return normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: serverDraftReturns }, handoffPackage);
   }
   const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
-  const latestReturns = latestSubmission?.field_return_payload_json?.requested_check_returns;
-  if (latestReturns && typeof latestReturns === "object" && !Array.isArray(latestReturns) && Object.keys(latestReturns).length) {
+  const latestPayload = latestSubmission?.field_return_payload_json || null;
+  const latestReturns = latestPayload?.requested_check_returns;
+  if (hasUsableAssignmentRequestedCheckReturnRows(latestPayload)) {
     return normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: latestReturns }, handoffPackage);
+  }
+  if (hasUsableAssignmentRequestedCheckReturnRows(existingDraft) && existingSource) {
+    return normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackage);
   }
   return normalizeAssignmentRequestedCheckReturnDraft(null, handoffPackage);
 }
@@ -7922,7 +8023,7 @@ function syncAssignmentRequestedCheckReturnDraftFromForm(assignmentId = state.as
   const currentDraft = readAssignmentRequestedCheckReturnDraftFromForm(id);
   const handoffPackage = state.assignments.handoffSourcePackages?.[id] || null;
   const normalized = normalizeAssignmentRequestedCheckReturnDraft(currentDraft, handoffPackage);
-  state.assignments.requestedCheckReturnDrafts[id] = normalized;
+  setAssignmentRequestedCheckReturnDraftState(id, normalized, { source: "user_edit", dirty: true });
   writeAssignmentSubmissionDraft(id, null, getAssignmentById(id), { includeArticle: false, includeRequestedChecks: true });
   return normalized;
 }
@@ -7930,7 +8031,9 @@ function syncAssignmentRequestedCheckReturnDraftFromForm(assignmentId = state.as
 function rerenderAssignmentRequestedCheckSurfaces(assignmentId) {
   if (Number(state.assignments.selectedId || 0) !== Number(assignmentId || 0)) return;
   renderAssignmentHandoffBrief();
-  renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId), getAssignmentPageMode()));
+  const assignment = getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId), getAssignmentPageMode());
+  const handoffPackage = state.assignments.handoffSourcePackages?.[assignmentId] || null;
+  renderAssignmentRequestedCheckSection(assignment, handoffPackage);
 }
 
 function renderAssignmentHandoffBrief() {

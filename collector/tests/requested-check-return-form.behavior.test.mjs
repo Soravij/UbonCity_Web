@@ -201,6 +201,7 @@ function createRequestedCheckRenderHarness(state) {
         getLatestAssignmentSubmissionRow: () => null,
         getAssignmentSubmissionDraftKey: () => "12:1",
         normalizeAssignmentRequestedCheckReturnDraft,
+        hasUsableAssignmentRequestedCheckReturnRows,
       }),
       isEditorUser: () => false,
       loadAssignmentRequestedCheckHandoffSource: async () => null,
@@ -210,6 +211,27 @@ function createRequestedCheckRenderHarness(state) {
       buildAssignmentSubmissionGateState: () => ({}),
       renderAssignmentSubmissionGatePanel: () => {},
       applyAssignmentModernClasses: () => {},
+      renderAssignmentRequestedCheckSection: loadNamedFunction(appJs, "renderAssignmentRequestedCheckSection", {
+        state,
+        qs: (id) => nodes.get(id) || null,
+        getAssignmentRequestedCheckGroupsFromHandoffPackage,
+        getAssignmentRequestedCheckReturnDraftPrefill: loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
+          state,
+          getLatestAssignmentSubmissionRow: () => null,
+          getAssignmentSubmissionDraftKey: () => "12:1",
+          normalizeAssignmentRequestedCheckReturnDraft,
+          hasUsableAssignmentRequestedCheckReturnRows,
+        }),
+        normalizeAssignmentRequestedCheckReturnDraft,
+        buildAssignmentRequestedCheckReturnSectionHtml,
+        setAssignmentRequestedCheckReturnDraftState: loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
+          state,
+        }),
+        hasUsableAssignmentRequestedCheckReturnRows,
+        updateAssignmentRequestedCheckReturnRowState: () => {},
+        isEditorUser: () => false,
+        loadAssignmentRequestedCheckHandoffSource: async () => null,
+      }),
       buildAssignmentRequestedCheckReturnSectionHtml,
       updateAssignmentRequestedCheckReturnRowState: () => {},
       buildAssignmentCaptureUploadCards: () => "",
@@ -316,6 +338,13 @@ const buildAssignmentRequestedCheckReturnDraftFromHandoffPackage = loadNamedFunc
 });
 const normalizeAssignmentRequestedCheckReturnDraft = loadNamedFunction(appJs, "normalizeAssignmentRequestedCheckReturnDraft", {
   buildAssignmentRequestedCheckReturnDraftFromHandoffPackage,
+});
+const getAssignmentRequestedCheckReturnRows = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnRows");
+const hasUsableAssignmentRequestedCheckReturnRows = loadNamedFunction(appJs, "hasUsableAssignmentRequestedCheckReturnRows", {
+  getAssignmentRequestedCheckReturnRows,
+});
+const setAssignmentRequestedCheckReturnDraftState = loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
+  state: { assignments: {} },
 });
 const buildAssignmentRequestedCheckReturnSubmissionRow = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnSubmissionRow", {
   isAssignmentRequestedCheckTaxonomyBooleanRow,
@@ -621,6 +650,7 @@ test("requested-check draft prefill ignores empty current draft objects and fall
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentRequestedCheckReturnDraft,
+    hasUsableAssignmentRequestedCheckReturnRows,
   });
 
   const draft = loadPrefill(assignment, handoffPackage);
@@ -654,6 +684,12 @@ test("requested-check draft prefill prefers current local draft over server draf
           },
         },
       },
+      requestedCheckReturnDraftDirty: {
+        12: true,
+      },
+      requestedCheckReturnDraftSources: {
+        12: "user_edit",
+      },
       serverSubmissionDraftPayloads: {
         "12:1": {
           field_return_payload_json: {
@@ -679,6 +715,7 @@ test("requested-check draft prefill prefers current local draft over server draf
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentRequestedCheckReturnDraft,
+    hasUsableAssignmentRequestedCheckReturnRows,
   });
 
   const draft = loadPrefill({ id: 12 }, handoffPackage);
@@ -733,10 +770,118 @@ test("requested-check draft prefill prefers current revision server draft over l
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentRequestedCheckReturnDraft,
+    hasUsableAssignmentRequestedCheckReturnRows,
   });
 
   const draft = loadPrefill({ id: 12 }, handoffPackage);
   assert.equal(draft.requested_check_returns["taxonomy.parking"].value, false);
+});
+
+test("requested-check draft prefill lets usable server draft beat non-dirty schema defaults", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          checks: [
+            { key: "parking", requested: true, answer_type: "boolean" },
+          ],
+        },
+      ],
+    },
+  };
+  const state = {
+    assignments: {
+      selectedId: 12,
+      requestedCheckReturnDrafts: {
+        12: normalizeAssignmentRequestedCheckReturnDraft(null, handoffPackage),
+      },
+      requestedCheckReturnDraftDirty: {
+        12: false,
+      },
+      requestedCheckReturnDraftSources: {
+        12: "schema_default",
+      },
+      serverSubmissionDraftPayloads: {
+        "12:1": {
+          field_return_payload_json: {
+            requested_check_returns: {
+              "taxonomy.parking": { checked: true, value: true },
+            },
+          },
+        },
+      },
+    },
+  };
+  const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
+    state,
+    getLatestAssignmentSubmissionRow: () => null,
+    getAssignmentSubmissionDraftKey: () => "12:1",
+    normalizeAssignmentRequestedCheckReturnDraft,
+    hasUsableAssignmentRequestedCheckReturnRows,
+  });
+
+  const draft = loadPrefill({ id: 12 }, handoffPackage);
+  assert.equal(draft.requested_check_returns["taxonomy.parking"].value, true);
+  assert.equal(draft.requested_check_returns["taxonomy.parking"].checked, true);
+});
+
+test("requested-check draft prefill lets latest submission beat empty server returns and schema defaults", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          checks: [
+            { key: "phone", requested: true, answer_type: "phone" },
+          ],
+        },
+      ],
+    },
+  };
+  const state = {
+    assignments: {
+      selectedId: 12,
+      requestedCheckReturnDrafts: {
+        12: normalizeAssignmentRequestedCheckReturnDraft(null, handoffPackage),
+      },
+      requestedCheckReturnDraftDirty: {
+        12: false,
+      },
+      requestedCheckReturnDraftSources: {
+        12: "schema_default",
+      },
+      serverSubmissionDraftPayloads: {
+        "12:1": {
+          field_return_payload_json: {
+            requested_check_returns: {},
+          },
+        },
+      },
+      latestSubmissionRows: {
+        12: {
+          field_return_payload_json: {
+            requested_check_returns: {
+              "cta_contact.phone": { checked: true, value: "0811111111", evidence: "latest submission" },
+            },
+          },
+        },
+      },
+    },
+  };
+  const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
+    state,
+    getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
+    getAssignmentSubmissionDraftKey: () => "12:1",
+    normalizeAssignmentRequestedCheckReturnDraft,
+    hasUsableAssignmentRequestedCheckReturnRows,
+  });
+
+  const draft = loadPrefill({ id: 12 }, handoffPackage);
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0811111111");
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].evidence, "latest submission");
 });
 
 test("requested-check section renders CTA before legacy custom groups and hides reserved taxonomy placeholder rows", () => {
@@ -1478,7 +1623,27 @@ test("requested-check empty loaded state hides the requested-check surface throu
     rerenderAssignmentRequestedCheckSurfaces: loadNamedFunction(appJs, "rerenderAssignmentRequestedCheckSurfaces", {
       state,
       renderAssignmentHandoffBrief: () => {},
-      renderAssignmentSubmissionForm: harness.renderAssignmentSubmissionForm,
+      renderAssignmentRequestedCheckSection: loadNamedFunction(appJs, "renderAssignmentRequestedCheckSection", {
+        state,
+        qs: harness.qs,
+        getAssignmentRequestedCheckGroupsFromHandoffPackage,
+        getAssignmentRequestedCheckReturnDraftPrefill: loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
+          state,
+          getLatestAssignmentSubmissionRow: () => null,
+          getAssignmentSubmissionDraftKey: () => "12:1",
+          normalizeAssignmentRequestedCheckReturnDraft,
+          hasUsableAssignmentRequestedCheckReturnRows,
+        }),
+        normalizeAssignmentRequestedCheckReturnDraft,
+        buildAssignmentRequestedCheckReturnSectionHtml,
+        setAssignmentRequestedCheckReturnDraftState: loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
+          state,
+        }),
+        hasUsableAssignmentRequestedCheckReturnRows,
+        updateAssignmentRequestedCheckReturnRowState: () => {},
+        isEditorUser: () => false,
+        loadAssignmentRequestedCheckHandoffSource: async () => null,
+      }),
       getAssignmentSubmissionFormAssignment: (value) => value,
       getAssignmentById: () => assignment,
       getAssignmentPageMode: () => "work",
@@ -1535,6 +1700,12 @@ test("requested-check form reader merges visible CTA values into the existing dr
             },
           },
         },
+      },
+      requestedCheckReturnDraftDirty: {
+        12: true,
+      },
+      requestedCheckReturnDraftSources: {
+        12: "user_edit",
       },
     },
   };
@@ -1800,6 +1971,12 @@ test("requested-check submission form render path outputs CTA before Curation an
             },
           },
         },
+      },
+      requestedCheckReturnDraftDirty: {
+        12: true,
+      },
+      requestedCheckReturnDraftSources: {
+        12: "user_edit",
       },
       handoffSourcePackages: {
         12: {
@@ -2243,8 +2420,8 @@ test("handoff source load rerenders brief and submission surfaces after async fe
   const renderAssignmentHandoffBriefSpy = () => {
     calls.push("brief");
   };
-  const renderAssignmentSubmissionFormSpy = (value) => {
-    calls.push(`submission:${value}`);
+  const renderAssignmentRequestedCheckSectionSpy = (assignment) => {
+    calls.push(`requested-check:${assignment?.id || 0}`);
   };
   const loadAssignmentRequestedCheckHandoffSource = await loadNamedAsyncFunction(appJs, "loadAssignmentRequestedCheckHandoffSource", {
     state,
@@ -2268,8 +2445,8 @@ test("handoff source load rerenders brief and submission surfaces after async fe
     rerenderAssignmentRequestedCheckSurfaces: loadNamedFunction(appJs, "rerenderAssignmentRequestedCheckSurfaces", {
       state,
       renderAssignmentHandoffBrief: renderAssignmentHandoffBriefSpy,
-      renderAssignmentSubmissionForm: renderAssignmentSubmissionFormSpy,
-      getAssignmentSubmissionFormAssignment: (assignment, mode) => `${assignment?.id || 0}:${mode}`,
+      renderAssignmentRequestedCheckSection: renderAssignmentRequestedCheckSectionSpy,
+      getAssignmentSubmissionFormAssignment: (assignment) => assignment,
       getAssignmentById: (id) => ({ id }),
       getAssignmentPageMode: () => "work",
     }),
@@ -2277,7 +2454,7 @@ test("handoff source load rerenders brief and submission surfaces after async fe
 
   const result = await loadAssignmentRequestedCheckHandoffSource({ id: 12 });
   assert.ok(result?.requested_checks);
-  assert.deepEqual(calls, ["brief", "submission:12:work"]);
+  assert.deepEqual(calls, ["brief", "requested-check:12"]);
   assert.equal(state.assignments.handoffSourceLoaded[12], true);
 });
 
@@ -2305,7 +2482,7 @@ test("edited requested-check draft survives async handoff load and rerender path
   const renderAssignmentHandoffBriefSpy = () => {
     calls.push("brief");
   };
-  const renderAssignmentSubmissionFormSpy = () => {
+  const renderAssignmentRequestedCheckSectionSpy = () => {
     const handoffPackage = state.assignments.handoffSourcePackages[12] || null;
     const currentDraft = state.assignments.requestedCheckReturnDrafts[12] || null;
     const html = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, currentDraft);
@@ -2333,8 +2510,8 @@ test("edited requested-check draft survives async handoff load and rerender path
     rerenderAssignmentRequestedCheckSurfaces: loadNamedFunction(appJs, "rerenderAssignmentRequestedCheckSurfaces", {
       state,
       renderAssignmentHandoffBrief: renderAssignmentHandoffBriefSpy,
-      renderAssignmentSubmissionForm: renderAssignmentSubmissionFormSpy,
-      getAssignmentSubmissionFormAssignment: (assignment, mode) => `${assignment?.id || 0}:${mode}`,
+      renderAssignmentRequestedCheckSection: renderAssignmentRequestedCheckSectionSpy,
+      getAssignmentSubmissionFormAssignment: (assignment) => assignment,
       getAssignmentById: (id) => ({ id }),
       getAssignmentPageMode: () => "work",
     }),
@@ -2351,6 +2528,60 @@ test("edited requested-check draft survives async handoff load and rerender path
   assert.equal(calls[1].includes('value="0812345678"'), false);
   assert.equal(state.assignments.requestedCheckReturnDrafts[12].requested_check_returns["cta_contact.phone"].value, "0999999999");
   assert.equal(state.assignments.requestedCheckReturnDrafts[12].requested_check_returns["cta_contact.phone"].note, "edited");
+});
+
+test("loadAssignmentSubmissionServerDraft rerenders requested-check surface after late usable server draft when local draft is not dirty", async () => {
+  const calls = [];
+  const state = {
+    assignments: {
+      selectedId: 12,
+      requestedCheckReturnDrafts: {
+        12: {
+          requested_check_returns: {
+            "taxonomy.parking": { checked: false, value: false },
+          },
+        },
+      },
+      requestedCheckReturnDraftDirty: {
+        12: false,
+      },
+      requestedCheckReturnDraftSources: {
+        12: "schema_default",
+      },
+      serverSubmissionDraftPayloads: {},
+      serverSubmissionDraftLoaded: {},
+      contextFieldPack: null,
+    },
+  };
+  const loadDraft = await loadNamedAsyncFunction(appJs, "loadAssignmentSubmissionServerDraft", {
+    state,
+    isEditorUser: () => false,
+    api: async () => ({
+      draft: {
+        field_return_payload_json: {
+          requested_check_returns: {
+            "taxonomy.parking": { checked: true, value: true },
+          },
+        },
+      },
+    }),
+    getAssignmentSubmissionDraftKey: () => "12:1",
+    normalizeAssignmentSubmissionPayload: (payload) => payload,
+    hasUsableAssignmentRequestedCheckReturnRows,
+    normalizeAssignmentRequestedCheckReturnDraft,
+    setAssignmentRequestedCheckReturnDraftState: loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
+      state,
+    }),
+    getAssignmentById: (id) => ({ id }),
+    renderAssignmentRequestedCheckSection: (assignment, handoffPackage, draft) => {
+      calls.push({ assignmentId: assignment?.id || 0, handoffPackage, draft });
+    },
+  });
+
+  await loadDraft({ id: 12, revision_round: 1 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].assignmentId, 12);
+  assert.equal(calls[0].draft?.requested_check_returns?.["taxonomy.parking"]?.value, true);
 });
 
 // Repository final-submission validator tests
