@@ -1152,7 +1152,7 @@ function writeAssignmentSubmissionDraft(assignmentId, payload, assignment = null
     normalized.article_payload_json = normalizeAssignmentSubmissionPayload(payload, assignment, state.assignments.contextFieldPack);
   }
   if (includeRequestedChecks) {
-    const requestedCheckDraft = state.assignments.requestedCheckReturnDrafts?.[id] || null;
+    const requestedCheckDraft = state.assignments.requestedCheckReturnDrafts?.[draftKey] || null;
     normalized.field_return_payload_json = requestedCheckDraft
       ? buildAssignmentRequestedCheckReturnPayloadFromDraft(requestedCheckDraft)
       : null;
@@ -1177,13 +1177,13 @@ function clearAssignmentSubmissionDraft(assignmentId) {
     delete state.assignments.submissionDrafts[draftKey];
   }
   if (state.assignments.requestedCheckReturnDrafts && typeof state.assignments.requestedCheckReturnDrafts === "object") {
-    delete state.assignments.requestedCheckReturnDrafts[id];
+    delete state.assignments.requestedCheckReturnDrafts[draftKey];
   }
   if (state.assignments.requestedCheckReturnDraftDirty && typeof state.assignments.requestedCheckReturnDraftDirty === "object") {
-    delete state.assignments.requestedCheckReturnDraftDirty[id];
+    delete state.assignments.requestedCheckReturnDraftDirty[draftKey];
   }
   if (state.assignments.requestedCheckReturnDraftSources && typeof state.assignments.requestedCheckReturnDraftSources === "object") {
-    delete state.assignments.requestedCheckReturnDraftSources[id];
+    delete state.assignments.requestedCheckReturnDraftSources[draftKey];
   }
 }
 
@@ -1263,17 +1263,17 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
   if (isEditorUser()) return null;
   const assignmentId = Number(assignment?.id || 0) || 0;
   if (!assignmentId) return null;
-  const draftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
-  const loadState = state.assignments.serverSubmissionDraftLoaded?.[draftKey];
+  const requestDraftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
+  const loadState = state.assignments.serverSubmissionDraftLoaded?.[requestDraftKey];
   if (loadState === true) {
-    return state.assignments.serverSubmissionDraftPayloads?.[draftKey] || null;
+    return state.assignments.serverSubmissionDraftPayloads?.[requestDraftKey] || null;
   }
   if (loadState === "loading") return null;
-  state.assignments.serverSubmissionDraftLoaded[draftKey] = "loading";
+  state.assignments.serverSubmissionDraftLoaded[requestDraftKey] = "loading";
   try {
     const result = await api(`/api/assignments/${assignmentId}/draft`);
     const draft = result?.draft && typeof result.draft === "object" ? result.draft : null;
-    state.assignments.serverSubmissionDraftPayloads[draftKey] = draft
+    state.assignments.serverSubmissionDraftPayloads[requestDraftKey] = draft
       ? {
         article_payload_json: normalizeAssignmentSubmissionPayload(
           draft?.article_payload_json && typeof draft.article_payload_json === "object" ? draft.article_payload_json : null,
@@ -1285,23 +1285,32 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
           : null,
       }
       : null;
-    state.assignments.serverSubmissionDraftLoaded[draftKey] = true;
-    const serverFieldReturnPayload = state.assignments.serverSubmissionDraftPayloads?.[draftKey]?.field_return_payload_json || null;
+    state.assignments.serverSubmissionDraftLoaded[requestDraftKey] = true;
+    const currentAssignment = getAssignmentById(assignmentId) || assignment;
+    const currentDraftKey = getAssignmentSubmissionDraftKey(assignmentId, currentAssignment);
+    const serverFieldReturnPayload = state.assignments.serverSubmissionDraftPayloads?.[requestDraftKey]?.field_return_payload_json || null;
     const serverReturns = serverFieldReturnPayload?.requested_check_returns;
     if (
+      requestDraftKey === currentDraftKey
+      &&
       Number(state.assignments.selectedId || 0) === assignmentId
       && hasUsableAssignmentRequestedCheckReturnRows(serverFieldReturnPayload)
-      && state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] !== true
+      && state.assignments.requestedCheckReturnDraftDirty?.[requestDraftKey] !== true
     ) {
-      const selectedAssignment = getAssignmentById(assignmentId) || assignment;
+      const selectedAssignment = currentAssignment;
       const handoffPackage = state.assignments.handoffSourcePackages?.[assignmentId] || null;
       const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: serverReturns }, handoffPackage);
-      setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, { source: "server_draft", dirty: false });
+      setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, {
+        assignment: selectedAssignment,
+        draftKey: requestDraftKey,
+        source: "server_draft",
+        dirty: false,
+      });
       renderAssignmentRequestedCheckSection(selectedAssignment, handoffPackage, normalizedDraft);
     }
-    return state.assignments.serverSubmissionDraftPayloads[draftKey];
+    return state.assignments.serverSubmissionDraftPayloads[requestDraftKey];
   } catch {
-    state.assignments.serverSubmissionDraftLoaded[draftKey] = false;
+    state.assignments.serverSubmissionDraftLoaded[requestDraftKey] = false;
     return null;
   }
 }
@@ -1356,9 +1365,20 @@ function hasUsableAssignmentRequestedCheckReturnRows(value = null) {
   return Boolean(rows && Object.keys(rows).length);
 }
 
+function getAssignmentRequestedCheckLifecycleDraftKey(assignmentId, assignment = null) {
+  const id = Number(assignmentId || 0) || 0;
+  if (!id) return "";
+  const resolvedAssignment = assignment && typeof assignment === "object"
+    ? assignment
+    : getAssignmentById(id);
+  return String(getAssignmentSubmissionDraftKey(id, resolvedAssignment) || "").trim();
+}
+
 function setAssignmentRequestedCheckReturnDraftState(assignmentId, draft = null, options = {}) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return null;
+  const draftKey = String(options?.draftKey || getAssignmentRequestedCheckLifecycleDraftKey(id, options?.assignment)).trim();
+  if (!draftKey) return null;
   if (!state.assignments.requestedCheckReturnDrafts || typeof state.assignments.requestedCheckReturnDrafts !== "object") {
     state.assignments.requestedCheckReturnDrafts = {};
   }
@@ -1369,15 +1389,15 @@ function setAssignmentRequestedCheckReturnDraftState(assignmentId, draft = null,
     state.assignments.requestedCheckReturnDraftSources = {};
   }
   if (draft) {
-    state.assignments.requestedCheckReturnDrafts[id] = draft;
+    state.assignments.requestedCheckReturnDrafts[draftKey] = draft;
   } else {
-    delete state.assignments.requestedCheckReturnDrafts[id];
+    delete state.assignments.requestedCheckReturnDrafts[draftKey];
   }
   if (Object.prototype.hasOwnProperty.call(options, "dirty")) {
-    state.assignments.requestedCheckReturnDraftDirty[id] = options.dirty === true;
+    state.assignments.requestedCheckReturnDraftDirty[draftKey] = options.dirty === true;
   }
   if (Object.prototype.hasOwnProperty.call(options, "source")) {
-    state.assignments.requestedCheckReturnDraftSources[id] = options.source == null ? null : String(options.source || "").trim() || null;
+    state.assignments.requestedCheckReturnDraftSources[draftKey] = options.source == null ? null : String(options.source || "").trim() || null;
   }
   return draft;
 }
@@ -6884,6 +6904,7 @@ function renderAssignmentRequestedCheckSection(assignment = null, handoffPackage
   const requestedChecksWrapNode = qs("assignment-submission-requested-checks-wrap");
   const requestedChecksNode = qs("assignment-submission-requested-checks-fields");
   const assignmentId = Number(assignment?.id || state.assignments.selectedId || 0) || 0;
+  const draftKey = getAssignmentRequestedCheckLifecycleDraftKey(assignmentId, assignment);
   if (!requestedChecksNode) return null;
   const requestedCheckGroups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage);
   const handoffLoadState = assignmentId > 0 ? state.assignments.handoffSourceLoaded?.[assignmentId] : null;
@@ -6912,10 +6933,10 @@ function renderAssignmentRequestedCheckSection(assignment = null, handoffPackage
     }
     return null;
   }
-  const source = state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] === true
+  const source = state.assignments.requestedCheckReturnDraftDirty?.[draftKey] === true
     ? "user_edit"
     : (
-      state.assignments.requestedCheckReturnDraftSources?.[assignmentId]
+      state.assignments.requestedCheckReturnDraftSources?.[draftKey]
       || (
         hasUsableAssignmentRequestedCheckReturnRows({ requested_check_returns: normalizedDraft?.requested_check_returns })
           ? "schema_default"
@@ -6923,8 +6944,10 @@ function renderAssignmentRequestedCheckSection(assignment = null, handoffPackage
       )
     );
   setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, {
+    assignment,
+    draftKey,
     source,
-    dirty: state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] === true,
+    dirty: state.assignments.requestedCheckReturnDraftDirty?.[draftKey] === true,
   });
   requestedChecksNode.className = "assignment-brief-grid";
   requestedChecksNode.innerHTML = requestedCheckSectionHtml;
@@ -7154,13 +7177,18 @@ async function ensureAssignmentSubmissionPrefillLoaded(assignment = null) {
     const latestFieldReturnPayload = latestSubmission?.field_return_payload_json || null;
     if (
       selectedId === assignmentId
-      && state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] !== true
+      && state.assignments.requestedCheckReturnDraftDirty?.[selectedDraftKey] !== true
       && !hasUsableAssignmentRequestedCheckReturnRows(serverDraftPayload)
       && hasUsableAssignmentRequestedCheckReturnRows(latestFieldReturnPayload)
     ) {
       const handoffPackage = state.assignments.handoffSourcePackages?.[assignmentId] || null;
       const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft(latestFieldReturnPayload, handoffPackage);
-      setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, { source: "latest_submission", dirty: false });
+      setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, {
+        assignment: selectedAssignment,
+        draftKey: selectedDraftKey,
+        source: "latest_submission",
+        dirty: false,
+      });
       renderAssignmentRequestedCheckSection(getAssignmentSubmissionFormAssignment(selectedAssignment, getAssignmentPageMode()), handoffPackage, normalizedDraft);
     }
     if (
@@ -7564,13 +7592,13 @@ function normalizeAssignmentRequestedCheckReturnDraft(draft = null, handoffPacka
 function getAssignmentRequestedCheckReturnDraftPrefill(assignment = null, handoffPackage = null) {
   const assignmentId = Number(assignment?.id || state.assignments.selectedId || 0) || 0;
   if (!assignmentId) return null;
-  const existingDraft = state.assignments.requestedCheckReturnDrafts?.[assignmentId] || null;
-  const existingSource = state.assignments.requestedCheckReturnDraftSources?.[assignmentId] || null;
-  const existingDirty = state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] === true;
+  const draftKey = getAssignmentRequestedCheckLifecycleDraftKey(assignmentId, assignment);
+  const existingDraft = state.assignments.requestedCheckReturnDrafts?.[draftKey] || null;
+  const existingSource = state.assignments.requestedCheckReturnDraftSources?.[draftKey] || null;
+  const existingDirty = state.assignments.requestedCheckReturnDraftDirty?.[draftKey] === true;
   if (existingDirty && hasUsableAssignmentRequestedCheckReturnRows(existingDraft)) {
     return normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackage);
   }
-  const draftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
   const serverDraftPayload = state.assignments.serverSubmissionDraftPayloads?.[draftKey]?.field_return_payload_json || null;
   const serverDraftReturns = serverDraftPayload?.requested_check_returns;
   if (hasUsableAssignmentRequestedCheckReturnRows(serverDraftPayload)) {
@@ -7950,7 +7978,8 @@ function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
   if (!id) return null;
   const formNode = qs("assignment-submission-requested-checks-fields");
   if (!formNode) return null;
-  const existingRows = state.assignments.requestedCheckReturnDrafts?.[id]?.requested_check_returns;
+  const draftKey = getAssignmentRequestedCheckLifecycleDraftKey(id);
+  const existingRows = state.assignments.requestedCheckReturnDrafts?.[draftKey]?.requested_check_returns;
   const requested_check_returns = existingRows && typeof existingRows === "object"
     ? JSON.parse(JSON.stringify(existingRows))
     : {};
@@ -8020,11 +8049,12 @@ function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
 function syncAssignmentRequestedCheckReturnDraftFromForm(assignmentId = state.assignments.selectedId) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return null;
+  const assignment = getAssignmentById(id);
   const currentDraft = readAssignmentRequestedCheckReturnDraftFromForm(id);
   const handoffPackage = state.assignments.handoffSourcePackages?.[id] || null;
   const normalized = normalizeAssignmentRequestedCheckReturnDraft(currentDraft, handoffPackage);
-  setAssignmentRequestedCheckReturnDraftState(id, normalized, { source: "user_edit", dirty: true });
-  writeAssignmentSubmissionDraft(id, null, getAssignmentById(id), { includeArticle: false, includeRequestedChecks: true });
+  setAssignmentRequestedCheckReturnDraftState(id, normalized, { assignment, source: "user_edit", dirty: true });
+  writeAssignmentSubmissionDraft(id, null, assignment, { includeArticle: false, includeRequestedChecks: true });
   return normalized;
 }
 
