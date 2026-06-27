@@ -1130,19 +1130,36 @@ function readAssignmentSubmissionDraft(assignmentId, assignment = null, fieldPac
   if (!draftKey) return null;
   const draftFromState = state.assignments.submissionDrafts?.[draftKey];
   if (draftFromState) {
-    return normalizeAssignmentSubmissionPayload(draftFromState, assignment, fieldPack);
+    const payload = draftFromState?.article_payload_json && typeof draftFromState.article_payload_json === "object"
+      ? draftFromState.article_payload_json
+      : draftFromState;
+    return normalizeAssignmentSubmissionPayload(payload, assignment, fieldPack);
   }
   return null;
 }
 
-function writeAssignmentSubmissionDraft(assignmentId, payload, assignment = null) {
+function writeAssignmentSubmissionDraft(assignmentId, payload, assignment = null, options = {}) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return;
   const draftKey = getAssignmentSubmissionDraftKey(id, assignment);
   if (!draftKey) return;
-  const normalized = normalizeAssignmentSubmissionPayload(payload, assignment, state.assignments.contextFieldPack);
+  const normalized = {};
+  const includeArticle = options?.includeArticle !== false;
+  const includeRequestedChecks = options?.includeRequestedChecks === true;
+  if (includeArticle) {
+    normalized.article_payload_json = normalizeAssignmentSubmissionPayload(payload, assignment, state.assignments.contextFieldPack);
+  }
+  if (includeRequestedChecks) {
+    const requestedCheckDraft = state.assignments.requestedCheckReturnDrafts?.[id] || null;
+    normalized.field_return_payload_json = requestedCheckDraft
+      ? buildAssignmentRequestedCheckReturnPayloadFromDraft(requestedCheckDraft)
+      : null;
+  }
+  const currentDraft = state.assignments.submissionDrafts?.[draftKey] && typeof state.assignments.submissionDrafts[draftKey] === "object"
+    ? state.assignments.submissionDrafts[draftKey]
+    : {};
   state.assignments.submissionDrafts[draftKey] = normalized;
-  scheduleSaveAssignmentSubmissionServerDraft(id, normalized, assignment);
+  scheduleSaveAssignmentSubmissionServerDraft(id, { ...currentDraft, ...normalized }, assignment);
 }
 
 function clearAssignmentSubmissionDraft(assignmentId) {
@@ -1177,14 +1194,38 @@ async function saveAssignmentSubmissionServerDraft(assignmentId, payload) {
     return null;
   }
   setAssignmentDraftSaveStatus("กำลังบันทึก...");
-  const normalized = normalizeAssignmentSubmissionPayload(payload, assignment, state.assignments.contextFieldPack);
+  const hasArticlePayload = Object.prototype.hasOwnProperty.call(payload || {}, "article_payload_json") || !payload || !Object.prototype.hasOwnProperty.call(payload, "field_return_payload_json");
+  const hasFieldReturnPayload = Object.prototype.hasOwnProperty.call(payload || {}, "field_return_payload_json");
+  const articlePayload = payload?.article_payload_json && typeof payload.article_payload_json === "object"
+    ? payload.article_payload_json
+    : payload;
+  const normalized = {};
+  if (hasArticlePayload) {
+    normalized.article_payload_json = normalizeAssignmentSubmissionPayload(articlePayload, assignment, state.assignments.contextFieldPack);
+  }
+  if (hasFieldReturnPayload) {
+    normalized.field_return_payload_json = payload?.field_return_payload_json && typeof payload.field_return_payload_json === "object"
+      ? payload.field_return_payload_json
+      : null;
+  }
   const result = await api(`/api/assignments/${id}/draft`, {
     method: "PUT",
-    body: JSON.stringify({ article_payload_json: normalized }),
+    body: JSON.stringify(normalized),
   });
-  const serverPayload = result?.draft?.article_payload_json || normalized;
+  const serverDraft = result?.draft && typeof result.draft === "object" ? result.draft : normalized;
   const draftKey = getAssignmentSubmissionDraftKey(id, assignment);
-  state.assignments.serverSubmissionDraftPayloads[draftKey] = normalizeAssignmentSubmissionPayload(serverPayload, assignment, state.assignments.contextFieldPack);
+  state.assignments.serverSubmissionDraftPayloads[draftKey] = {
+    article_payload_json: normalizeAssignmentSubmissionPayload(
+      serverDraft?.article_payload_json && typeof serverDraft.article_payload_json === "object"
+        ? serverDraft.article_payload_json
+        : null,
+      assignment,
+      state.assignments.contextFieldPack
+    ),
+    field_return_payload_json: serverDraft?.field_return_payload_json && typeof serverDraft.field_return_payload_json === "object"
+      ? serverDraft.field_return_payload_json
+      : null,
+  };
   state.assignments.serverSubmissionDraftLoaded[draftKey] = true;
   const savedAt = new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
   setAssignmentDraftSaveStatus(`บันทึกล่าสุด ${savedAt}`);
@@ -1216,9 +1257,18 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
   state.assignments.serverSubmissionDraftLoaded[draftKey] = "loading";
   try {
     const result = await api(`/api/assignments/${assignmentId}/draft`);
-    const payload = result?.draft?.article_payload_json || null;
-    state.assignments.serverSubmissionDraftPayloads[draftKey] = payload
-      ? normalizeAssignmentSubmissionPayload(payload, assignment, state.assignments.contextFieldPack)
+    const draft = result?.draft && typeof result.draft === "object" ? result.draft : null;
+    state.assignments.serverSubmissionDraftPayloads[draftKey] = draft
+      ? {
+        article_payload_json: normalizeAssignmentSubmissionPayload(
+          draft?.article_payload_json && typeof draft.article_payload_json === "object" ? draft.article_payload_json : null,
+          assignment,
+          state.assignments.contextFieldPack
+        ),
+        field_return_payload_json: draft?.field_return_payload_json && typeof draft.field_return_payload_json === "object"
+          ? draft.field_return_payload_json
+          : null,
+      }
       : null;
     state.assignments.serverSubmissionDraftLoaded[draftKey] = true;
     return state.assignments.serverSubmissionDraftPayloads[draftKey];
@@ -1252,7 +1302,7 @@ function getAssignmentSubmissionPrefillPayload(assignment, fieldPack = null) {
   const draftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
   const serverDraft = state.assignments.serverSubmissionDraftPayloads?.[draftKey] || null;
   if (serverDraft) {
-    return normalizeAssignmentSubmissionPayload(serverDraft, assignment, fieldPack);
+    return normalizeAssignmentSubmissionPayload(serverDraft.article_payload_json || null, assignment, fieldPack);
   }
   const draft = readAssignmentSubmissionDraft(assignmentId, assignment, fieldPack);
   if (draft) return draft;
@@ -6988,7 +7038,7 @@ function syncAssignmentSubmissionDraftFromForm(assignmentId = state.assignments.
   if (!id) return null;
   const assignment = getAssignmentById(id);
   const payload = buildAssignmentSubmissionArticlePayload();
-  writeAssignmentSubmissionDraft(id, payload, assignment);
+  writeAssignmentSubmissionDraft(id, payload, assignment, { includeArticle: true, includeRequestedChecks: false });
   return payload;
 }
 
@@ -7409,10 +7459,18 @@ function getAssignmentRequestedCheckReturnDraftPrefill(assignment = null, handof
   const assignmentId = Number(assignment?.id || state.assignments.selectedId || 0) || 0;
   if (!assignmentId) return null;
   const existingDraft = state.assignments.requestedCheckReturnDrafts?.[assignmentId] || null;
-  if (existingDraft) return normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackage);
+  const existingReturns = existingDraft?.requested_check_returns;
+  if (existingReturns && typeof existingReturns === "object" && !Array.isArray(existingReturns) && Object.keys(existingReturns).length) {
+    return normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackage);
+  }
+  const draftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
+  const serverDraftReturns = state.assignments.serverSubmissionDraftPayloads?.[draftKey]?.field_return_payload_json?.requested_check_returns;
+  if (serverDraftReturns && typeof serverDraftReturns === "object" && !Array.isArray(serverDraftReturns) && Object.keys(serverDraftReturns).length) {
+    return normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: serverDraftReturns }, handoffPackage);
+  }
   const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
   const latestReturns = latestSubmission?.field_return_payload_json?.requested_check_returns;
-  if (latestReturns && typeof latestReturns === "object" && !Array.isArray(latestReturns)) {
+  if (latestReturns && typeof latestReturns === "object" && !Array.isArray(latestReturns) && Object.keys(latestReturns).length) {
     return normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: latestReturns }, handoffPackage);
   }
   return normalizeAssignmentRequestedCheckReturnDraft(null, handoffPackage);
@@ -7464,10 +7522,12 @@ function buildAssignmentRequestedCheckReturnPayloadFromDraft(draft = null) {
 
 function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
   const answerType = String(row?.answer_type || "text").trim().toLowerCase() || "text";
+  const groupKey = String(row?.group_key || "").trim().toLowerCase();
   const checked = row?.checked === true;
   const disabledAttr = checked ? "" : "disabled";
   const allowedValues = Array.isArray(row?.allowed_values) ? row.allowed_values.map((value) => String(value || "").trim()).filter(Boolean) : [];
   const unitOptions = Array.isArray(row?.unit_options) ? row.unit_options.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  if (groupKey === "taxonomy" && (answerType === "boolean" || answerType === "boolean_with_conditions")) return "";
   if (answerType === "boolean" || answerType === "boolean_with_conditions") {
     const currentValue = row?.value === true ? "true" : (row?.value === false ? "false" : "");
     return `
@@ -7561,9 +7621,17 @@ function buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row) {
 }
 
 function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
-  const checked = row.checked === true;
-  const usesSuggestedValue = hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
-    && areAssignmentRequestedCheckValuesEqual(row.value, check.suggested_value, check.answer_type);
+  const isTaxonomyBoolean = isAssignmentRequestedCheckTaxonomyBooleanRow({
+    group_key: check?.group_key,
+    answer_type: check?.answer_type,
+  });
+  const checked = isTaxonomyBoolean ? row?.value === true : row.checked === true;
+  const usesSuggestedValue = isTaxonomyBoolean
+    ? hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
+    : (
+      hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
+      && areAssignmentRequestedCheckValuesEqual(row.value, check.suggested_value, check.answer_type)
+    );
   const showConditionNote = options?.showConditionNote === true;
   const showEvidence = check?.evidence_required === true;
   const rowModifierClass = String(options?.rowModifierClass || "").trim();
@@ -7598,7 +7666,8 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
         </div>
         <div class="assignment-capture-actions requested-check-row-status">${usesSuggestedValue ? `<span class="workflow-badge workflow-badge-generated">AI แนะนำ</span>` : ""}</div>
         <div class="requested-check-row-value">
-          ${buildAssignmentRequestedCheckReturnValueInputHtml(row)}
+          ${buildAssignmentRequestedCheckReturnValueInputHtml({ ...row, answer_type: check?.answer_type, group_key: check?.group_key })}
+          ${isTaxonomyBoolean ? '<div class="assignment-brief-text">ไม่เลือก = ไม่มี</div>' : ""}
         </div>
       </div>
       ${secondaryFields.length ? `<div class="requested-check-row-secondary">${secondaryFields.join("")}</div>` : ""}
@@ -7780,9 +7849,12 @@ function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
       ? requested_check_returns[returnKey]
       : {};
     const answerType = String(rowNode.getAttribute("data-requested-check-answer-type") || "text").trim().toLowerCase() || "text";
+    const groupKey = String(rowNode.getAttribute("data-requested-check-group-key") || "").trim().toLowerCase();
     const checked = rowNode.querySelector("[data-requested-check-field='checked']")?.checked === true;
     let value = null;
-    if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+    if (groupKey === "taxonomy" && (answerType === "boolean" || answerType === "boolean_with_conditions")) {
+      value = checked;
+    } else if (answerType === "boolean" || answerType === "boolean_with_conditions") {
       const rawValue = String(rowNode.querySelector("[data-requested-check-field='value']")?.value || "").trim().toLowerCase();
       if (rawValue === "true") value = true;
       else if (rawValue === "false") value = false;
@@ -7840,6 +7912,7 @@ function syncAssignmentRequestedCheckReturnDraftFromForm(assignmentId = state.as
   const handoffPackage = state.assignments.handoffSourcePackages?.[id] || null;
   const normalized = normalizeAssignmentRequestedCheckReturnDraft(currentDraft, handoffPackage);
   state.assignments.requestedCheckReturnDrafts[id] = normalized;
+  writeAssignmentSubmissionDraft(id, null, getAssignmentById(id), { includeArticle: false, includeRequestedChecks: true });
   return normalized;
 }
 

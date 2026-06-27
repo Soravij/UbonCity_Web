@@ -10518,14 +10518,25 @@ app.put("/api/assignments/:id/draft", requireRole("owner", "admin", "editor", "f
   try {
     const expiresAt = deriveAssignmentDraftExpiryIso(assignment);
     const currentRound = resolveAssignmentCurrentRound(assignment);
-    const normalizedDraftPayload = normalizeAssignmentDraftArticlePayload(req.body?.article_payload_json || null, assignment);
-    const draft = repo.upsertAssignmentSubmissionDraft({
+    const hasArticlePayload = Object.prototype.hasOwnProperty.call(req.body || {}, "article_payload_json");
+    const hasFieldReturnPayload = Object.prototype.hasOwnProperty.call(req.body || {}, "field_return_payload_json");
+    const normalizedDraftPayload = hasArticlePayload
+      ? normalizeAssignmentDraftArticlePayload(req.body?.article_payload_json || null, assignment)
+      : undefined;
+    const normalizedFieldReturnPayload = hasFieldReturnPayload
+      ? (req.body?.field_return_payload_json == null
+        ? null
+        : repo.normalizeFieldReturnPayloadJson(req.body.field_return_payload_json, "field_return_payload_json"))
+      : undefined;
+    const draftPayload = {
       assignment_id: assignmentId,
       user_id: actorId,
       revision_round: currentRound,
-      article_payload_json: normalizedDraftPayload,
       expires_at: expiresAt,
-    });
+    };
+    if (hasArticlePayload) draftPayload.article_payload_json = normalizedDraftPayload;
+    if (hasFieldReturnPayload) draftPayload.field_return_payload_json = normalizedFieldReturnPayload;
+    const draft = repo.upsertAssignmentSubmissionDraft(draftPayload);
     res.json({ ok: true, draft, revision_round: currentRound });
   } catch (err) {
     res.status(400).json({ error: String(err?.message || "Cannot save assignment draft") });

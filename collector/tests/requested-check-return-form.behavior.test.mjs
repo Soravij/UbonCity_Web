@@ -199,6 +199,7 @@ function createRequestedCheckRenderHarness(state) {
       getAssignmentRequestedCheckReturnDraftPrefill: loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
         state,
         getLatestAssignmentSubmissionRow: () => null,
+        getAssignmentSubmissionDraftKey: () => "12:1",
         normalizeAssignmentRequestedCheckReturnDraft,
       }),
       isEditorUser: () => false,
@@ -333,6 +334,7 @@ const buildAssignmentRequestedCheckReturnRowHtml = loadNamedFunction(appJs, "bui
   areAssignmentRequestedCheckValuesEqual,
   buildAssignmentRequestedCheckReturnValueInputHtml,
   buildAssignmentRequestedCheckReturnSecondaryFieldsHtml,
+  isAssignmentRequestedCheckTaxonomyBooleanRow,
   escapeHtml,
 });
 const buildAssignmentRequestedCheckReturnSectionHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnSectionHtml", {
@@ -545,6 +547,169 @@ test("requested-check draft prefills CTA values for new handoffs with checked fa
   assert.equal(draft.requested_check_returns["cta_contact.facebook_url"].checked, false);
   assert.equal(draft.requested_check_returns["cta_contact.facebook_url"].value, "https://www.facebook.com/hippieroaster/?locale=th_TH");
   assert.equal(Object.prototype.hasOwnProperty.call(draft.requested_check_returns, "cta_contact.primary_cta"), false);
+});
+test("requested-check draft prefill ignores empty current draft objects and falls back to latest submission values", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          checks: [
+            { key: "phone", requested: true, answer_type: "phone" },
+          ],
+        },
+        {
+          group_key: "taxonomy",
+          checks: [
+            { key: "parking", requested: true, answer_type: "boolean" },
+          ],
+        },
+      ],
+    },
+  };
+  const state = {
+    assignments: {
+      selectedId: 12,
+      requestedCheckReturnDrafts: {
+        12: {
+          requested_check_returns: {},
+        },
+      },
+      latestSubmissionRows: {
+        12: {
+          field_return_payload_json: {
+            requested_check_returns: {
+              "cta_contact.phone": { checked: true, value: "0811111111", evidence: "signage" },
+              "taxonomy.parking": { checked: true, value: false },
+            },
+          },
+        },
+      },
+    },
+  };
+  const assignment = { id: 12 };
+  const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
+    state,
+    getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
+    getAssignmentSubmissionDraftKey: () => "12:1",
+    normalizeAssignmentRequestedCheckReturnDraft,
+  });
+
+  const draft = loadPrefill(assignment, handoffPackage);
+
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0811111111");
+  assert.equal(draft.requested_check_returns["taxonomy.parking"].value, false);
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, true);
+});
+
+test("requested-check draft prefill prefers current local draft over server draft and latest submission", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          checks: [
+            { key: "phone", requested: true, answer_type: "phone" },
+          ],
+        },
+      ],
+    },
+  };
+  const state = {
+    assignments: {
+      selectedId: 12,
+      requestedCheckReturnDrafts: {
+        12: {
+          requested_check_returns: {
+            "cta_contact.phone": { checked: true, value: "0999999999", evidence: "local edit" },
+          },
+        },
+      },
+      serverSubmissionDraftPayloads: {
+        "12:1": {
+          field_return_payload_json: {
+            requested_check_returns: {
+              "cta_contact.phone": { checked: true, value: "0888888888", evidence: "server draft" },
+            },
+          },
+        },
+      },
+      latestSubmissionRows: {
+        12: {
+          field_return_payload_json: {
+            requested_check_returns: {
+              "cta_contact.phone": { checked: true, value: "0811111111", evidence: "latest submission" },
+            },
+          },
+        },
+      },
+    },
+  };
+  const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
+    state,
+    getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
+    getAssignmentSubmissionDraftKey: () => "12:1",
+    normalizeAssignmentRequestedCheckReturnDraft,
+  });
+
+  const draft = loadPrefill({ id: 12 }, handoffPackage);
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0999999999");
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].evidence, "local edit");
+});
+
+test("requested-check draft prefill prefers current revision server draft over latest submission when local draft is empty", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          checks: [
+            { key: "parking", requested: true, answer_type: "boolean" },
+          ],
+        },
+      ],
+    },
+  };
+  const state = {
+    assignments: {
+      selectedId: 12,
+      requestedCheckReturnDrafts: {
+        12: {
+          requested_check_returns: {},
+        },
+      },
+      serverSubmissionDraftPayloads: {
+        "12:1": {
+          field_return_payload_json: {
+            requested_check_returns: {
+              "taxonomy.parking": { checked: true, value: false },
+            },
+          },
+        },
+      },
+      latestSubmissionRows: {
+        12: {
+          field_return_payload_json: {
+            requested_check_returns: {
+              "taxonomy.parking": { checked: true, value: true },
+            },
+          },
+        },
+      },
+    },
+  };
+  const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
+    state,
+    getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
+    getAssignmentSubmissionDraftKey: () => "12:1",
+    normalizeAssignmentRequestedCheckReturnDraft,
+  });
+
+  const draft = loadPrefill({ id: 12 }, handoffPackage);
+  assert.equal(draft.requested_check_returns["taxonomy.parking"].value, false);
 });
 
 test("requested-check section renders CTA before legacy custom groups and hides reserved taxonomy placeholder rows", () => {
@@ -964,7 +1129,87 @@ test("requested-check section renders condition input on visible taxonomy rows a
       },
     },
   });
-  assert.equal(divergedHtml.includes("AI แนะนำ"), false);
+  assert.equal(divergedHtml.includes("AI แนะนำ"), true);
+});
+
+test("taxonomy boolean row renders as a single checkbox control with helper text instead of a second value selector", () => {
+  const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(
+    {
+      return_key: "taxonomy.parking",
+      group_key: "taxonomy",
+      check_key: "parking",
+      label: "Parking",
+      answer_type: "boolean",
+      suggested_value: true,
+      evidence_required: false,
+    },
+    {
+      checked: true,
+      value: true,
+      condition_note: "",
+      evidence: "",
+    },
+    {
+      showConditionNote: true,
+      rowModifierClass: "requested-check-curation-row",
+    }
+  );
+
+  assert.equal((rowHtml.match(/type="checkbox"/g) || []).length, 1);
+  assert.equal(rowHtml.includes('data-requested-check-field="value"'), false);
+  assert.equal(rowHtml.includes("ไม่เลือก = ไม่มี"), true);
+  assert.equal(rowHtml.includes("AI แนะนำ"), true);
+});
+
+test("non-taxonomy boolean rows keep the original true-false value control", () => {
+  const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(
+    {
+      return_key: "custom.pet_friendly",
+      group_key: "custom",
+      check_key: "pet_friendly",
+      label: "Pet friendly",
+      answer_type: "boolean",
+      suggested_value: true,
+      evidence_required: false,
+    },
+    {
+      checked: true,
+      value: false,
+      condition_note: "",
+      evidence: "",
+    },
+    {}
+  );
+
+  assert.equal((rowHtml.match(/type="checkbox"/g) || []).length, 1);
+  assert.equal(rowHtml.includes('data-requested-check-field="value"'), true);
+  assert.equal(rowHtml.includes("ไม่เลือก = ไม่มี"), false);
+  assert.equal(rowHtml.includes("AI แนะนำ"), false);
+});
+
+test("taxonomy boolean suggestion false does not auto-confirm or remove the AI badge", () => {
+  const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(
+    {
+      return_key: "taxonomy.pet_friendly",
+      group_key: "taxonomy",
+      check_key: "pet_friendly",
+      label: "Pet friendly",
+      answer_type: "boolean",
+      suggested_value: false,
+      evidence_required: false,
+    },
+    {
+      checked: false,
+      value: false,
+      condition_note: "",
+      evidence: "",
+    },
+    {}
+  );
+
+  assert.equal(rowHtml.includes("AI แนะนำ"), true);
+  assert.match(rowHtml, /type="checkbox"/);
+  assert.doesNotMatch(rowHtml, /type="checkbox"\s+checked\b/);
 });
 
 test("requested-check normalize keeps edited prefilled values through rerender merges", () => {

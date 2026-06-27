@@ -1988,6 +1988,7 @@ function normalizeAssignmentSubmissionDraftRow(row) {
   return {
     ...row,
     article_payload_json: parseJson(row.article_payload_json, null),
+    field_return_payload_json: normalizeFieldReturnPayloadJson(row.field_return_payload_json),
   };
 }
 
@@ -3798,6 +3799,7 @@ function ensureAssignmentSubmissionDraftTableSupport(db) {
       revision_round INTEGER NOT NULL DEFAULT 1,
       content_item_id INTEGER NOT NULL,
       article_payload_json TEXT,
+      field_return_payload_json TEXT,
       expires_at TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -3820,6 +3822,7 @@ function ensureAssignmentSubmissionDraftTableSupport(db) {
         revision_round INTEGER NOT NULL DEFAULT 1,
         content_item_id INTEGER NOT NULL,
         article_payload_json TEXT,
+        field_return_payload_json TEXT,
         expires_at TEXT NOT NULL,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -3831,7 +3834,7 @@ function ensureAssignmentSubmissionDraftTableSupport(db) {
     `);
     db.exec(`
       INSERT INTO content_assignment_submission_drafts (
-        id, assignment_id, user_id, revision_round, content_item_id, article_payload_json, expires_at, created_at, updated_at
+        id, assignment_id, user_id, revision_round, content_item_id, article_payload_json, field_return_payload_json, expires_at, created_at, updated_at
       )
       SELECT
         d.id,
@@ -3840,6 +3843,7 @@ function ensureAssignmentSubmissionDraftTableSupport(db) {
         0 AS revision_round,
         d.content_item_id,
         d.article_payload_json,
+        NULL AS field_return_payload_json,
         d.expires_at,
         d.created_at,
         d.updated_at
@@ -3847,6 +3851,10 @@ function ensureAssignmentSubmissionDraftTableSupport(db) {
     `);
     db.exec("DROP TABLE content_assignment_submission_drafts_legacy_round;");
     db.exec("PRAGMA foreign_keys = ON;");
+  }
+  const finalCols = db.prepare("PRAGMA table_info(content_assignment_submission_drafts)").all();
+  if (Array.isArray(finalCols) && !finalCols.some((row) => String(row?.name || "").trim() === "field_return_payload_json")) {
+    db.exec("ALTER TABLE content_assignment_submission_drafts ADD COLUMN field_return_payload_json TEXT;");
   }
   db.exec("CREATE INDEX IF NOT EXISTS idx_assignment_submission_drafts_expiry ON content_assignment_submission_drafts(expires_at, updated_at DESC);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_assignment_submission_drafts_assignment ON content_assignment_submission_drafts(assignment_id, user_id, revision_round, updated_at DESC);");
@@ -5033,10 +5041,11 @@ export function createRepository(db) {
   `);
   const upsertAssignmentSubmissionDraftStmt = db.prepare(`
     INSERT INTO content_assignment_submission_drafts (
-      assignment_id, user_id, revision_round, content_item_id, article_payload_json, expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?)
+      assignment_id, user_id, revision_round, content_item_id, article_payload_json, field_return_payload_json, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(assignment_id, user_id, revision_round) DO UPDATE SET
       article_payload_json=excluded.article_payload_json,
+      field_return_payload_json=excluded.field_return_payload_json,
       content_item_id=excluded.content_item_id,
       expires_at=excluded.expires_at,
       updated_at=CURRENT_TIMESTAMP
@@ -6896,7 +6905,20 @@ function normalizeStateValue(value, stateGroup) {
     const revisionRound = Math.max(1, Number(payload.revision_round || assignment.revision_round + 1 || 1) || 1);
     const contentItemId = Number(assignment.content_item_id || 0) || 0;
     if (!contentItemId) throw new Error("assignment content_item_id is invalid");
-    const articlePayload = payload.article_payload_json == null ? null : parseJsonInputStrict(payload.article_payload_json, "article_payload_json", "object");
+    const existingDraft = normalizeAssignmentSubmissionDraftRow(getAssignmentSubmissionDraftStmt.get(assignmentId, userId, revisionRound));
+    const hasArticlePayload = Object.prototype.hasOwnProperty.call(payload, "article_payload_json");
+    const hasFieldReturnPayload = Object.prototype.hasOwnProperty.call(payload, "field_return_payload_json");
+    const articlePayload = hasArticlePayload
+      ? (payload.article_payload_json == null ? null : parseJsonInputStrict(payload.article_payload_json, "article_payload_json", "object"))
+      : existingDraft?.article_payload_json || null;
+    const fieldReturnPayload = hasFieldReturnPayload
+      ? (payload.field_return_payload_json == null
+        ? null
+        : normalizeFieldReturnPayloadJson(
+          parseJsonInputStrict(payload.field_return_payload_json, "field_return_payload_json", "object"),
+          "field_return_payload_json"
+        ))
+      : existingDraft?.field_return_payload_json || null;
     const expiresAt = toNullableDateIso(expiresAtRaw, "expires_at");
     if (!expiresAt) throw new Error("expires_at is required");
     upsertAssignmentSubmissionDraftStmt.run(
@@ -6905,6 +6927,7 @@ function normalizeStateValue(value, stateGroup) {
       revisionRound,
       contentItemId,
       articlePayload ? JSON.stringify(articlePayload) : null,
+      fieldReturnPayload ? JSON.stringify(fieldReturnPayload) : null,
       expiresAt
     );
     return normalizeAssignmentSubmissionDraftRow(getAssignmentSubmissionDraftStmt.get(assignmentId, userId, revisionRound));
@@ -6977,6 +7000,7 @@ function normalizeStateValue(value, stateGroup) {
         revision_round: revisionRound,
         content_item_id: Number(assignment.content_item_id || 0) || 0,
         article_payload_json: fallbackPayload,
+        field_return_payload_json: latestSubmission.field_return_payload_json || null,
         expires_at: null,
         created_at: null,
         updated_at: null,
@@ -13285,6 +13309,7 @@ function normalizeStateValue(value, stateGroup) {
     upsertAssignmentSubmissionDraft,
     getAssignmentSubmissionDraft,
     getAssignmentSubmissionDraftPrefill,
+    normalizeFieldReturnPayloadJson,
     deleteAssignmentSubmissionDraft,
     deleteAssignmentSubmissionDraftsByAssignment,
     purgeExpiredAssignmentSubmissionDrafts,

@@ -2734,6 +2734,302 @@ test("resubmitted assignment creates a new row and retains prior complete field 
   }
 });
 
+test("assignment submission draft persists requested-check returns with explicit false and not_found values", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Draft Requested Check Persistence");
+    const assignee = ctx.createUser("draft-requested-check-persistence");
+    ctx.createReadinessBrief(item.id, "draft-requested-check-persistence");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            checks: [
+              { key: "phone", requested: true, answer_type: "phone" },
+            ],
+          },
+          {
+            group_key: "taxonomy",
+            checks: [
+              { key: "parking", requested: true, answer_type: "boolean" },
+            ],
+          },
+        ],
+      },
+    });
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const revisionRound = Number(assignmentResult.assignment.revision_round || 0) + 1;
+
+    const saved = ctx.repo.upsertAssignmentSubmissionDraft({
+      assignment_id: assignmentId,
+      user_id: assignee.id,
+      revision_round: revisionRound,
+      article_payload_json: { additional_text: "saved draft" },
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: null, condition_note: "", evidence: "", note: "" },
+          "taxonomy.parking": { checked: true, value: false, condition_note: "", evidence: "", note: "" },
+        },
+      },
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+
+    assert.equal(saved.article_payload_json.additional_text, "saved draft");
+    assert.equal(saved.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, null);
+    assert.equal(saved.field_return_payload_json.requested_check_returns["taxonomy.parking"].value, false);
+
+    const loaded = ctx.repo.getAssignmentSubmissionDraft(assignmentId, assignee.id, {
+      revision_round: revisionRound,
+      now: "2098-01-01T00:00:00.000Z",
+    });
+    assert.equal(loaded.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, null);
+    assert.equal(loaded.field_return_payload_json.requested_check_returns["taxonomy.parking"].value, false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission draft prefill falls back to latest submission field returns when current revision has no requested-check draft", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Draft Requested Check Fallback");
+    const assignee = ctx.createUser("draft-requested-check-fallback");
+    ctx.createReadinessBrief(item.id, "draft-requested-check-fallback");
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            checks: [
+              { key: "phone", requested: true, answer_type: "phone" },
+            ],
+          },
+          {
+            group_key: "taxonomy",
+            checks: [
+              { key: "parking", requested: true, answer_type: "boolean" },
+            ],
+          },
+        ],
+      },
+    });
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const handoffSnapshotId = currentHandoffSnapshotId(ctx, assignmentId);
+    const firstSubmission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: handoffSnapshotId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      article_payload_json: { additional_text: "first revision" },
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: "0811111111", evidence: "signage" },
+          "taxonomy.parking": { checked: true, value: false },
+        },
+      },
+    });
+    ctx.repo.updateAssignmentState(
+      assignmentId,
+      "submitted",
+      "submitter@local",
+      { actor_role: "user", reason_code: "submission_created" }
+    );
+    ctx.repo.updateAssignmentState(
+      assignmentId,
+      "revision_requested",
+      "reviewer@local",
+      { actor_role: "user", reason_code: "needs_revision" }
+    );
+    const assignment = ctx.repo.getAssignmentById(assignmentId);
+    const prefill = ctx.repo.getAssignmentSubmissionDraftPrefill(assignmentId, assignee.id, {
+      revision_round: Number(assignment.revision_round || 0) + 1,
+      now: "2098-01-01T00:00:00.000Z",
+    });
+
+    assert.equal(prefill.source, "latest_submission_fallback");
+    assert.equal(prefill.draft.article_payload_json.additional_text, "first revision");
+    assert.equal(prefill.draft.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0811111111");
+    assert.equal(prefill.draft.field_return_payload_json.requested_check_returns["taxonomy.parking"].value, false);
+    assert.equal(firstSubmission.field_return_payload_json.requested_check_returns["taxonomy.parking"].value, false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission draft updates preserve omitted sections and keep explicit false and null values", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Draft Partial Preserve");
+    const assignee = ctx.createUser("draft-partial-preserve");
+    ctx.createReadinessBrief(item.id, "draft-partial-preserve");
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const revisionRound = Number(assignmentResult.assignment.revision_round || 0) + 1;
+
+    const saved = ctx.repo.upsertAssignmentSubmissionDraft({
+      assignment_id: assignmentId,
+      user_id: assignee.id,
+      revision_round: revisionRound,
+      article_payload_json: { additional_text: "first article" },
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: null, evidence: "" },
+          "taxonomy.parking": { checked: true, value: false },
+        },
+      },
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    assert.equal(saved.article_payload_json.additional_text, "first article");
+    assert.equal(saved.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, null);
+    assert.equal(saved.field_return_payload_json.requested_check_returns["taxonomy.parking"].value, false);
+
+    const articleOnly = ctx.repo.upsertAssignmentSubmissionDraft({
+      assignment_id: assignmentId,
+      user_id: assignee.id,
+      revision_round: revisionRound,
+      article_payload_json: { additional_text: "article only update" },
+      expires_at: "2099-01-02T00:00:00.000Z",
+    });
+    assert.equal(articleOnly.article_payload_json.additional_text, "article only update");
+    assert.equal(articleOnly.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, null);
+    assert.equal(articleOnly.field_return_payload_json.requested_check_returns["taxonomy.parking"].value, false);
+
+    const fieldReturnOnly = ctx.repo.upsertAssignmentSubmissionDraft({
+      assignment_id: assignmentId,
+      user_id: assignee.id,
+      revision_round: revisionRound,
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: "0812345678", evidence: "storefront sign" },
+          "taxonomy.parking": { checked: true, value: false },
+        },
+      },
+      expires_at: "2099-01-03T00:00:00.000Z",
+    });
+    assert.equal(fieldReturnOnly.article_payload_json.additional_text, "article only update");
+    assert.equal(fieldReturnOnly.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0812345678");
+    assert.equal(fieldReturnOnly.field_return_payload_json.requested_check_returns["taxonomy.parking"].value, false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission draft migration backfills requested-check column idempotently after legacy rebuild", () => {
+  const ctx = createTestContext();
+  try {
+    ctx.db.exec("PRAGMA foreign_keys = OFF;");
+    ctx.db.exec("DROP INDEX IF EXISTS idx_assignment_submission_drafts_expiry;");
+    ctx.db.exec("DROP INDEX IF EXISTS idx_assignment_submission_drafts_assignment;");
+    ctx.db.exec("ALTER TABLE content_assignment_submission_drafts RENAME TO content_assignment_submission_drafts_modern;");
+    ctx.db.exec(`
+      CREATE TABLE content_assignment_submission_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assignment_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        content_item_id INTEGER NOT NULL,
+        article_payload_json TEXT,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(assignment_id, user_id),
+        FOREIGN KEY(assignment_id) REFERENCES content_assignments(id) ON DELETE CASCADE,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE
+      );
+    `);
+    ctx.db.exec(`
+      INSERT INTO content_assignment_submission_drafts (
+        id, assignment_id, user_id, content_item_id, article_payload_json, expires_at, created_at, updated_at
+      )
+      SELECT id, assignment_id, user_id, content_item_id, article_payload_json, expires_at, created_at, updated_at
+      FROM content_assignment_submission_drafts_modern;
+    `);
+    ctx.db.exec("DROP TABLE content_assignment_submission_drafts_modern;");
+    ctx.db.exec("PRAGMA foreign_keys = ON;");
+
+    createRepository(ctx.db);
+    createRepository(ctx.db);
+
+    const columns = ctx.db.prepare("PRAGMA table_info(content_assignment_submission_drafts)").all();
+    assert.equal(columns.filter((column) => String(column?.name || "").trim() === "revision_round").length, 1);
+    assert.equal(columns.filter((column) => String(column?.name || "").trim() === "field_return_payload_json").length, 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission draft migration adds requested-check column once when revision_round already exists", () => {
+  const ctx = createTestContext();
+  try {
+    ctx.db.exec("PRAGMA foreign_keys = OFF;");
+    ctx.db.exec("DROP INDEX IF EXISTS idx_assignment_submission_drafts_expiry;");
+    ctx.db.exec("DROP INDEX IF EXISTS idx_assignment_submission_drafts_assignment;");
+    ctx.db.exec("ALTER TABLE content_assignment_submission_drafts RENAME TO content_assignment_submission_drafts_with_round;");
+    ctx.db.exec(`
+      CREATE TABLE content_assignment_submission_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assignment_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        revision_round INTEGER NOT NULL DEFAULT 1,
+        content_item_id INTEGER NOT NULL,
+        article_payload_json TEXT,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(assignment_id, user_id, revision_round),
+        FOREIGN KEY(assignment_id) REFERENCES content_assignments(id) ON DELETE CASCADE,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE
+      );
+    `);
+    ctx.db.exec(`
+      INSERT INTO content_assignment_submission_drafts (
+        id, assignment_id, user_id, revision_round, content_item_id, article_payload_json, expires_at, created_at, updated_at
+      )
+      SELECT id, assignment_id, user_id, revision_round, content_item_id, article_payload_json, expires_at, created_at, updated_at
+      FROM content_assignment_submission_drafts_with_round;
+    `);
+    ctx.db.exec("DROP TABLE content_assignment_submission_drafts_with_round;");
+    ctx.db.exec("PRAGMA foreign_keys = ON;");
+
+    createRepository(ctx.db);
+    createRepository(ctx.db);
+
+    const columns = ctx.db.prepare("PRAGMA table_info(content_assignment_submission_drafts)").all();
+    assert.equal(columns.filter((column) => String(column?.name || "").trim() === "revision_round").length, 1);
+    assert.equal(columns.filter((column) => String(column?.name || "").trim() === "field_return_payload_json").length, 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("assignment submission allows missing requested return entries from the immutable handoff snapshot", () => {
   const ctx = createTestContext();
   try {
