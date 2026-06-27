@@ -47,6 +47,143 @@ return findMissingCapturePrompts;`
   },
 });
 
+test("submission required-fields check allows blank capture answers when exact image and video slots are present", () => {
+  const assignment = {
+    assignment_kind: "field",
+    fieldPack: {
+      checklists: [
+        { checklist_type: "must_verify_fact", item_text: "Confirm opening hours" },
+        { checklist_type: "must_ask_question", item_text: "Ask for parking details" },
+        { checklist_type: "must_capture", item_text: "Storefront hero", capture_type: "photo", item_order: 0 },
+        { checklist_type: "must_capture", item_text: "Walkthrough clip", capture_type: "video", item_order: 1 },
+      ],
+    },
+  };
+  const storefrontSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Storefront hero", 0, "image", "photo");
+  const walkthroughSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Walkthrough clip", 1, "video", "video");
+
+  assert.doesNotThrow(() => enforceAssignmentSubmissionRequiredFieldsForBackendTest(
+    assignment,
+    {
+      verified_answers: [{ prompt: "Confirm opening hours", answer: "Open daily 09:00-18:00" }],
+      question_answers: [{ prompt: "Ask for parking details", answer: "Two shared parking bays" }],
+      capture_answers: [
+        { prompt: "Storefront hero", answer: "" },
+        { prompt: "Walkthrough clip", answer: "" },
+      ],
+      additional_text: "All required files synced",
+    },
+    24,
+    2,
+    {
+      assets: [
+        {
+          id: 101,
+          file_name: `${storefrontSlotKey}__storefront.jpg`,
+          mime_type: "image/jpeg",
+          slotKey: storefrontSlotKey,
+          mediaType: "image",
+        },
+        {
+          id: 102,
+          file_name: `${walkthroughSlotKey}__walkthrough.mp4`,
+          mime_type: "video/mp4",
+          slotKey: walkthroughSlotKey,
+          mediaType: "video",
+        },
+      ],
+    }
+  ));
+});
+
+test("submission required-fields check still rejects missing verified or question text answers", () => {
+  const assignment = {
+    assignment_kind: "field",
+    fieldPack: {
+      checklists: [
+        { checklist_type: "must_verify_fact", item_text: "Confirm opening hours" },
+        { checklist_type: "must_ask_question", item_text: "Ask for parking details" },
+        { checklist_type: "must_capture", item_text: "Walkthrough clip", capture_type: "video", item_order: 0 },
+      ],
+    },
+  };
+  const walkthroughSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Walkthrough clip", 0, "video", "video");
+
+  assert.throws(
+    () => enforceAssignmentSubmissionRequiredFieldsForBackendTest(
+      assignment,
+      {
+        verified_answers: [{ prompt: "Confirm opening hours", answer: "" }],
+        question_answers: [{ prompt: "Ask for parking details", answer: "" }],
+        capture_answers: [{ prompt: "Walkthrough clip", answer: "" }],
+        additional_text: "Has synced media only",
+      },
+      24,
+      2,
+      {
+        assets: [
+          {
+            id: 102,
+            file_name: `${walkthroughSlotKey}__walkthrough.mp4`,
+            mime_type: "video/mp4",
+            slotKey: walkthroughSlotKey,
+            mediaType: "video",
+          },
+        ],
+      }
+    ),
+    /สิ่งที่ต้องยืนยัน|คำตอบจากหน้างาน/
+  );
+});
+
+test("frontend capture validation rejects image uploaded into a video slot", () => {
+  const captureItems = [
+    { item_text: "Walkthrough clip", item_order: 0, capture_type: "video" },
+  ];
+  const normalized = normalizeAssignmentCaptureUploadItemsForTest(captureItems);
+  const videoSlot = normalized[0];
+  const assignment = {
+    image_reset_required: 0,
+    video_reset_required: 1,
+  };
+
+  const missing = validateAssignmentCaptureRequirementsFromAssetsForTest(assignment, captureItems, [
+    {
+      file_name: `${videoSlot.uploadKey}__wrong-type.jpg`,
+      mime_type: "image/jpeg",
+    },
+  ]);
+
+  assert.deepEqual(missing, ["วิดีโอหัวข้อ 1: Walkthrough clip"]);
+});
+
+const enforceAssignmentSubmissionRequiredFieldsForBackendTest = new Function(
+  "repo",
+  `${extractNamedFunctionSource(serverIndexJs, "uniqueAssignmentPromptStrings")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(serverIndexJs, "buildAssignmentCaptureSlotKey")}
+${extractNamedFunctionSource(serverIndexJs, "getFieldPackPromptGroups")}
+${extractNamedFunctionSource(serverIndexJs, "getStructuredFieldPackCaptureItems")}
+${extractNamedFunctionSource(serverIndexJs, "findMissingPromptAnswers")}
+${extractNamedFunctionSource(serverIndexJs, "toCaptureShotSlug")}
+${extractNamedFunctionSource(serverIndexJs, "parseCaptureShotSlugFromFileName")}
+${extractNamedFunctionSource(serverIndexJs, "getAssignmentCaptureAssetSlotTypeKey")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentMediaPayloadAssets")}
+${extractNamedFunctionSource(serverIndexJs, "findMissingCapturePrompts")}
+function resolveAssignmentSubmissionPromptContext(assignment = null) {
+  return {
+    brief: assignment?.brief_json || null,
+    fieldPack: assignment?.fieldPack || null,
+  };
+}
+${extractNamedFunctionSource(serverIndexJs, "enforceAssignmentSubmissionRequiredFields")}
+return enforceAssignmentSubmissionRequiredFields;`
+)({
+  listAssignmentRoundAssetsByType() {
+    return [];
+  },
+});
+
 const normalizeAssignmentCaptureUploadItemsForTest = new Function(
   `${extractNamedFunctionSource(appJs, "toCaptureSlug")}
 ${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureMediaType")}

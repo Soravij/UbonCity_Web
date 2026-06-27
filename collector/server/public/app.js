@@ -6158,9 +6158,12 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
   const currentRound = getAssignmentCurrentRound(assignment);
   const normalizedItems = normalizeAssignmentCaptureUploadItems(captureItems);
   if (!normalizedItems.length) return { complete: false, assets: [], missing: [], syncSignature: "" };
-  const expectedBySlotKey = new Map();
+  const expectedBySlotTypeKey = new Map();
   normalizedItems.forEach((item) => {
-    expectedBySlotKey.set(String(item?.slotKey || item?.uploadKey || "").trim(), item);
+    const slotKey = String(item?.slotKey || item?.uploadKey || "").trim();
+    const mediaType = normalizeAssignmentCaptureMediaType(item?.mediaType);
+    if (!slotKey || !mediaType) return;
+    expectedBySlotTypeKey.set(`${slotKey}|${mediaType}`, item);
   });
   const nowMs = Date.now();
   const rows = Array.isArray(state.assignments.assetLookup) ? state.assignments.assetLookup : [];
@@ -6169,8 +6172,7 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     if (Number(row?.assignment_round || 0) !== currentRound) return false;
     if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") return false;
     const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(row);
-    const slotKey = slotTypeKey ? slotTypeKey.split("|")[0] : "";
-    return expectedBySlotKey.has(slotKey);
+    return expectedBySlotTypeKey.has(slotTypeKey);
   }).map((row) => ({
     id: Number(row?.id || 0) || null,
     file_name: String(row?.file_name || "").trim() || null,
@@ -6235,17 +6237,16 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
 
   const requireImages = Boolean(assignment?.image_reset_required);
   const requireVideos = Boolean(assignment?.video_reset_required);
-  const countsBySlotKey = new Map();
+  const countsBySlotTypeKey = new Map();
   effectiveRows.forEach((row) => {
     const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(row);
-    const slotKey = slotTypeKey ? slotTypeKey.split("|")[0] : "";
-    if (!slotKey) return;
-    countsBySlotKey.set(slotKey, (Number(countsBySlotKey.get(slotKey) || 0) || 0) + 1);
+    if (!slotTypeKey) return;
+    countsBySlotTypeKey.set(slotTypeKey, (Number(countsBySlotTypeKey.get(slotTypeKey) || 0) || 0) + 1);
   });
 
   const missing = [];
-  for (const [slotKey, entry] of expectedBySlotKey.entries()) {
-    const count = Number(countsBySlotKey.get(slotKey) || 0) || 0;
+  for (const [slotTypeKey, entry] of expectedBySlotTypeKey.entries()) {
+    const count = Number(countsBySlotTypeKey.get(slotTypeKey) || 0) || 0;
     if (entry.mediaType === "image" && requireImages && count < 1) missing.push(`รูปหัวข้อ ${entry.displayIndex}: ${entry.prompt}`);
     if (entry.mediaType === "video" && requireVideos && count < 1) missing.push(`วิดีโอหัวข้อ ${entry.displayIndex}: ${entry.prompt}`);
   }
@@ -6263,9 +6264,14 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
 }
 
 function getAssignmentAssetSlotTypeKeyFromAsset(asset) {
+  const explicitSlotKey = String(asset?.slotKey || asset?.slot_key || "").trim().toLowerCase();
+  const explicitMediaType = normalizeAssignmentCaptureMediaType(
+    asset?.mediaType || asset?.media_type || asset?.assignment_media_type
+  );
+  if (explicitSlotKey && explicitMediaType) return `${explicitSlotKey}|${explicitMediaType}`;
   const fileName = String(asset?.file_name || "").trim();
   const slug = fileName.includes("__") ? fileName.split("__")[0] : "";
-  const persistedMediaType = normalizeAssignmentCaptureMediaType(asset?.assignment_media_type);
+  const persistedMediaType = explicitMediaType || normalizeAssignmentCaptureMediaType(asset?.assignment_media_type);
   const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
   const mediaType = persistedMediaType || (mimeType.startsWith("image/") ? "image" : mimeType.startsWith("video/") ? "video" : "");
   if (!slug || !mediaType) return "";
@@ -6288,21 +6294,23 @@ function validateAssignmentCaptureRequirementsFromAssets(assignment, captureItem
   const requireImages = Boolean(assignment?.image_reset_required);
   const requireVideos = Boolean(assignment?.video_reset_required);
   if (!normalizedItems.length || (!requireImages && !requireVideos)) return [];
-  const expectedBySlug = new Map();
+  const expectedBySlotTypeKey = new Map();
   normalizedItems.forEach((item) => {
-    expectedBySlug.set(String(item?.slotKey || item?.uploadKey || "").trim(), item);
+    const slotKey = String(item?.slotKey || item?.uploadKey || "").trim();
+    const mediaType = normalizeAssignmentCaptureMediaType(item?.mediaType);
+    if (!slotKey || !mediaType) return;
+    expectedBySlotTypeKey.set(`${slotKey}|${mediaType}`, item);
   });
-  const countsBySlug = new Map();
+  const countsBySlotTypeKey = new Map();
   (Array.isArray(assets) ? assets : []).forEach((asset) => {
     const key = getAssignmentAssetSlotTypeKeyFromAsset(asset);
     if (!key) return;
-    const [slug] = key.split("|");
-    if (!expectedBySlug.has(slug)) return;
-    countsBySlug.set(slug, (Number(countsBySlug.get(slug) || 0) || 0) + 1);
+    if (!expectedBySlotTypeKey.has(key)) return;
+    countsBySlotTypeKey.set(key, (Number(countsBySlotTypeKey.get(key) || 0) || 0) + 1);
   });
   const missing = [];
-  for (const [slug, entry] of expectedBySlug.entries()) {
-    const count = Number(countsBySlug.get(slug) || 0) || 0;
+  for (const [key, entry] of expectedBySlotTypeKey.entries()) {
+    const count = Number(countsBySlotTypeKey.get(key) || 0) || 0;
     if (entry.mediaType === "image" && requireImages && count < 1) missing.push(`รูปหัวข้อ ${entry.displayIndex}: ${entry.prompt}`);
     if (entry.mediaType === "video" && requireVideos && count < 1) missing.push(`วิดีโอหัวข้อ ${entry.displayIndex}: ${entry.prompt}`);
   }
