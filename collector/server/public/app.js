@@ -7748,6 +7748,8 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
   const showEvidence = check?.evidence_required === true;
   const rowModifierClass = String(options?.rowModifierClass || "").trim();
   const extraClass = rowModifierClass ? ` ${rowModifierClass}` : "";
+  const isCurationRow = rowModifierClass.includes("requested-check-curation-row");
+  const aiBadgeHtml = usesSuggestedValue ? `<span class="workflow-badge workflow-badge-generated">AI แนะนำ</span>` : "";
   const conditionValue = String(row?.condition_note || "");
   const evidenceValue = String(row?.evidence || "");
   const secondaryFields = [];
@@ -7775,8 +7777,9 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
         </label>
         <div class="assignment-capture-title requested-check-row-label">
           <strong>${escapeHtml(check.label || check.check_key)}</strong>
+          ${isCurationRow ? aiBadgeHtml : ""}
         </div>
-        <div class="assignment-capture-actions requested-check-row-status">${usesSuggestedValue ? `<span class="workflow-badge workflow-badge-generated">AI แนะนำ</span>` : ""}</div>
+        ${isCurationRow ? "" : `<div class="assignment-capture-actions requested-check-row-status">${aiBadgeHtml}</div>`}
         <div class="requested-check-row-value">
           ${buildAssignmentRequestedCheckReturnValueInputHtml({ ...row, answer_type: check?.answer_type, group_key: check?.group_key })}
         </div>

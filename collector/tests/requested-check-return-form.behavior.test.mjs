@@ -2879,3 +2879,37 @@ test("api helper preserves fallback error message for non-JSON", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("curation row keeps value on the first line and condition input only in the secondary block", () => {
+  const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(
+    {
+      return_key: "taxonomy.parking",
+      group_key: "taxonomy",
+      check_key: "parking",
+      label: "Parking",
+      answer_type: "text",
+      suggested_value: "street parking",
+      evidence_required: false,
+    },
+    {
+      checked: true,
+      value: "street parking",
+      condition_note: "after 18:00",
+      evidence: "",
+    },
+    {
+      showConditionNote: true,
+      rowModifierClass: "requested-check-curation-row",
+    }
+  );
+
+  const mainBlockMatch = rowHtml.match(
+    /<div class="assignment-capture-row requested-check-row-main">([\s\S]*?)<\/div>\s*<div class="requested-check-row-secondary">/
+  );
+
+  assert.ok(mainBlockMatch, "expected a main curation row block before the secondary block");
+  assert.match(mainBlockMatch[1], /data-requested-check-field="value"/);
+  assert.doesNotMatch(mainBlockMatch[1], /data-requested-check-field="condition_note"/);
+  assert.match(rowHtml, /requested-check-row-secondary[\s\S]*data-requested-check-field="condition_note"/);
+  assert.doesNotMatch(rowHtml, /assignment-capture-actions requested-check-row-status"><\/div>/);
+});

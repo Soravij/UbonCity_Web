@@ -1793,7 +1793,7 @@ button.fail {
 }
 
 .requested-check-curation-section {
-  gap: 6px;
+  gap: 4px;
 }
 
 .requested-check-curation-section > .requested-check-curation-row {
@@ -1801,35 +1801,40 @@ button.fail {
 }
 
 .requested-check-curation-section .requested-check-curation-row {
-  padding: 8px 10px;
-  border-radius: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
 }
 
 .requested-check-curation-section .requested-check-curation-row .requested-check-row-main {
-  grid-template-columns: 20px 150px 76px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 20px 140px minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
 }
 
 .requested-check-curation-section .requested-check-curation-row .requested-check-row-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
 .requested-check-curation-section .requested-check-curation-row .requested-check-row-value {
-  gap: 4px;
+  gap: 0;
 }
 
 .requested-check-curation-section .requested-check-curation-row .requested-check-row-secondary {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 6px;
-  margin-top: 6px;
-  margin-left: calc(20px + 150px + 76px + 16px);
+  gap: 4px;
+  margin-top: 4px;
+  margin-left: calc(20px + 140px + 6px);
   min-width: 0;
 }
 
 .requested-check-curation-section .requested-check-curation-row .requested-check-row-secondary-field {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -1850,14 +1855,14 @@ button.fail {
 }
 
 .requested-check-curation-section .requested-check-curation-more {
-  margin: 2px 0 0;
+  margin: 0;
   border: 0;
   padding: 0;
 }
 
 .requested-check-curation-section .requested-check-curation-more-summary {
   cursor: pointer;
-  padding: 6px 8px;
+  padding: 4px 6px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--card) 42%, transparent);
   font-size: 0.88rem;
@@ -1868,8 +1873,8 @@ button.fail {
 .requested-check-curation-section .requested-check-curation-more-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
+  gap: 3px;
+  margin-top: 3px;
 }
 
 @media (max-width: 900px) {
@@ -1878,7 +1883,7 @@ button.fail {
   }
 
   .requested-check-curation-section .requested-check-curation-row .requested-check-row-main {
-    grid-template-columns: 20px minmax(0, 1fr) 76px;
+    grid-template-columns: 20px minmax(0, 1fr);
   }
 
   #assignment-submission-requested-checks-fields .requested-check-row-value {
