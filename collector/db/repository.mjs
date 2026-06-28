@@ -1668,7 +1668,18 @@ function buildAcceptedAssignmentValidationSummary({
     const row = Object.prototype.hasOwnProperty.call(requestedReturns, returnKey)
       ? requestedReturns[returnKey]
       : null;
-    const status = inferRequestedCheckReturnStatus(row, schema);
+    const answerType = normalizeRequestedCheckAnswerType(schema?.answer_type || row?.answer_type);
+    let status = inferRequestedCheckReturnStatus(row, schema);
+    if (
+      status === "not_found"
+      && row?.checked === true
+      && ["boolean", "boolean_with_conditions"].includes(answerType)
+      && row?.value != null
+      && typeof row.value !== "boolean"
+      && hasMeaningfulRequestedCheckValue(row.value)
+    ) {
+      status = "malformed";
+    }
     statuses.push({
       return_key: returnKey,
       group_key: schema.group_key,
@@ -1678,7 +1689,19 @@ function buildAcceptedAssignmentValidationSummary({
       status,
     });
     if (status === "malformed") {
-      blockers.push({ code: "malformed_requested_check_return", return_key: returnKey, status, message: `${returnKey} is malformed` });
+      const complete = isRequestedCheckAnswerComplete(row, schema);
+      if (complete && schema?.evidence_required === true && !hasRequestedCheckEvidence(row)) {
+        blockers.push({
+          code: "required_evidence_missing",
+          return_key: returnKey,
+          group_key: schema.group_key,
+          check_key: schema.check_key,
+          status,
+          message: `${returnKey} has valid answer but is missing required evidence`,
+        });
+      } else {
+        blockers.push({ code: "malformed_requested_check_return", return_key: returnKey, status, message: `${returnKey} is malformed` });
+      }
       continue;
     }
     if (status === "unanswered") {

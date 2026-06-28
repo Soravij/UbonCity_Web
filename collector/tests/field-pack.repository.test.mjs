@@ -4261,6 +4261,144 @@ test("assignment acceptance enforces required completeness, allows optional unan
   }
 });
 
+test("assignment acceptance classifies missing required evidence separately from malformed requested check rows", () => {
+  const ctx = createTestContext();
+  try {
+    function seedAcceptanceSubmission({
+      itemTitle,
+      assigneeSlug,
+      overrides,
+    }) {
+      const item = ctx.createItem(itemTitle);
+      ctx.db.prepare("UPDATE content_items SET category='cafe' WHERE id=?").run(item.id);
+      const assignee = ctx.createUser(assigneeSlug);
+      ctx.createReadinessBrief(item.id, assigneeSlug);
+      ctx.repo.createFieldPack({
+        content_item_id: item.id,
+        status: "ready_for_field",
+        editor_summary: "ready",
+        requested_checks_json: { version: 1, groups: [] },
+      });
+      const assignment = ctx.repo.createAssignmentFromReadiness(
+        item.id,
+        { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+        assignee.id,
+        "tester@local",
+        "admin"
+      ).assignment;
+      const assignmentId = Number(assignment.id || 0);
+      const handoff = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
+      const requestedCheckReturns = {
+        ...buildRequestedReturnsFromHandoff(handoff.handoff_package_json),
+        ...overrides,
+      };
+      ctx.repo.addAssignmentSubmission({
+        assignment_id: assignmentId,
+        source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
+        submitted_by_user_id: assignee.id,
+        submission_state: "submitted",
+        field_return_payload_json: {
+          requested_check_returns: requestedCheckReturns,
+        },
+      });
+      ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", {
+        actor_role: "user",
+        reason_code: "submission_created",
+      });
+      return assignmentId;
+    }
+
+    const phoneMissingEvidenceAssignmentId = seedAcceptanceSubmission({
+      itemTitle: "Acceptance Evidence Phone",
+      assigneeSlug: "acceptance-evidence-phone",
+      overrides: {
+        "cta_contact.phone": {
+          checked: true,
+          value: "0804415224",
+        },
+      },
+    });
+    assert.throws(() => {
+      ctx.repo.updateAssignmentState(phoneMissingEvidenceAssignmentId, "accepted", "reviewer@local", {
+        actor_role: "admin",
+        reason_code: "assignment_submission_accepted",
+      });
+    }, /cta_contact\.phone has valid answer but is missing required evidence/);
+
+    const booleanMissingEvidenceAssignmentId = seedAcceptanceSubmission({
+      itemTitle: "Acceptance Evidence Boolean",
+      assigneeSlug: "acceptance-evidence-boolean",
+      overrides: {
+        "taxonomy.pet_friendly": {
+          checked: true,
+          value: false,
+        },
+      },
+    });
+    assert.throws(() => {
+      ctx.repo.updateAssignmentState(booleanMissingEvidenceAssignmentId, "accepted", "reviewer@local", {
+        actor_role: "admin",
+        reason_code: "assignment_submission_accepted",
+      });
+    }, /taxonomy\.pet_friendly has valid answer but is missing required evidence/);
+
+    const phoneWithEvidenceAssignmentId = seedAcceptanceSubmission({
+      itemTitle: "Acceptance Evidence Present",
+      assigneeSlug: "acceptance-evidence-present",
+      overrides: {
+        "cta_contact.phone": {
+          checked: true,
+          value: "0804415224",
+          evidence: "storefront sign",
+        },
+      },
+    });
+    assert.doesNotThrow(() => {
+      ctx.repo.updateAssignmentState(phoneWithEvidenceAssignmentId, "accepted", "reviewer@local", {
+        actor_role: "admin",
+        reason_code: "assignment_submission_accepted",
+      });
+    });
+
+    const malformedPhoneAssignmentId = seedAcceptanceSubmission({
+      itemTitle: "Acceptance Malformed Phone",
+      assigneeSlug: "acceptance-malformed-phone",
+      overrides: {
+        "cta_contact.phone": {
+          checked: true,
+          value: { number: "0804415224", unit: null },
+        },
+      },
+    });
+    assert.throws(() => {
+      ctx.repo.updateAssignmentState(malformedPhoneAssignmentId, "accepted", "reviewer@local", {
+        actor_role: "admin",
+        reason_code: "assignment_submission_accepted",
+      });
+    }, /cta_contact\.phone is malformed/);
+
+    const malformedBooleanAssignmentId = seedAcceptanceSubmission({
+      itemTitle: "Acceptance Malformed Boolean",
+      assigneeSlug: "acceptance-malformed-boolean",
+      overrides: {
+        "taxonomy.pet_friendly": {
+          checked: true,
+          value: "false",
+          evidence: "pet signage",
+        },
+      },
+    });
+    assert.throws(() => {
+      ctx.repo.updateAssignmentState(malformedBooleanAssignmentId, "accepted", "reviewer@local", {
+        actor_role: "admin",
+        reason_code: "assignment_submission_accepted",
+      });
+    }, /taxonomy\.pet_friendly is malformed/);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("text-like deliverables update the latest submission row instead of creating duplicate rows on resubmit", () => {
   const ctx = createTestContext();
   try {
