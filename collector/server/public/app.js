@@ -3598,6 +3598,195 @@ function getAssignmentReviewTextDeliverables() {
   return rows;
 }
 
+function getAssignmentReviewRequestedCheckFallbackLabel(returnKey) {
+  const key = String(returnKey || "").trim().toLowerCase();
+  if (!key) return "";
+  const parts = key.split(".");
+  return String(parts[parts.length - 1] || "")
+    .replace(/_/g, " ")
+    .trim() || key;
+}
+
+function getAssignmentReviewRequestedCheckSafeUrl(value) {
+  const rawUrl = String(value == null ? "" : value).trim();
+  if (!rawUrl) return "";
+  try {
+    const baseOrigin = typeof window !== "undefined" && window?.location?.origin
+      ? window.location.origin
+      : "http://localhost";
+    const parsed = new URL(rawUrl, baseOrigin);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function formatAssignmentReviewRequestedCheckValueHtml(row = {}, check = null) {
+  const answerType = String(check?.answer_type || row?.answer_type || "").trim().toLowerCase() || "text";
+  const checked = row?.checked === true;
+  if (!checked) {
+    return '<span class="muted">ไม่ได้รายงาน</span>';
+  }
+  if (row?.found === false) {
+    return '<span class="muted">ไม่พบ</span>';
+  }
+
+  const value = row?.value;
+  if (answerType === "boolean" || answerType === "boolean_with_conditions") {
+    if (value === true) return "<span>มี</span>";
+    if (value === false) return "<span>ไม่มี</span>";
+    return '<span class="muted">ไม่ได้รายงาน</span>';
+  }
+
+  if (answerType === "number_with_unit") {
+    const numberValue = value && typeof value === "object" && !Array.isArray(value)
+      ? value.number
+      : value;
+    const unitValue = value && typeof value === "object" && !Array.isArray(value)
+      ? value.unit
+      : "";
+    const numberText = numberValue == null ? "" : String(numberValue).trim();
+    const unitText = String(unitValue == null ? "" : unitValue).trim();
+    const combined = [numberText, unitText].filter(Boolean).join(" ");
+    return combined ? `<span>${escapeHtml(combined)}</span>` : '<span class="muted">ไม่ได้รายงาน</span>';
+  }
+
+  if (answerType === "multi_select") {
+    const items = Array.isArray(value)
+      ? value.map((entry) => String(entry || "").trim()).filter(Boolean)
+      : [];
+    return items.length
+      ? `<span>${items.map((item) => escapeHtml(item)).join(", ")}</span>`
+      : '<span class="muted">ไม่ได้รายงาน</span>';
+  }
+
+  const text = answerType === "url" || answerType === "phone"
+    ? String(value == null ? "" : value).trim()
+    : formatRequestedCheckSuggestedValue(value, answerType).trim();
+  if (!text) return '<span class="muted">ไม่ได้รายงาน</span>';
+  const safeUrl = answerType === "url" ? getAssignmentReviewRequestedCheckSafeUrl(text) : "";
+  if (safeUrl) {
+    return `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
+  }
+  return `<span>${escapeHtml(text)}</span>`;
+}
+
+function buildAssignmentReviewRequestedCheckRowHtml(check = {}, row = {}) {
+  const label = String(check?.label || row?.label || getAssignmentReviewRequestedCheckFallbackLabel(check?.return_key || row?.return_key || "")).trim();
+  const conditionNote = String(row?.condition_note || "").trim();
+  const note = String(row?.note || "").trim();
+  const valueHtml = formatAssignmentReviewRequestedCheckValueHtml(row, check);
+  const metaItems = [];
+  if (conditionNote) metaItems.push(`เงื่อนไข: ${escapeHtml(conditionNote)}`);
+  if (note) metaItems.push(`หมายเหตุ: ${escapeHtml(note)}`);
+  return `
+    <div class="assignment-review-answer-item" data-requested-check-return-key="${escapeHtml(String(check?.return_key || row?.return_key || ""))}">
+      <div class="assignment-review-answer-prompt">${escapeHtml(label || "-")}</div>
+      <div class="assignment-review-answer-text">${valueHtml}</div>
+      ${metaItems.length ? `<div class="assignment-review-answer-meta">${metaItems.join(" · ")}</div>` : ""}
+    </div>
+  `;
+}
+
+function buildAssignmentReviewRequestedCheckRowsForGroup(groupKey, requestedCheckReturns = {}, handoffGroup = null) {
+  const normalizedGroupKey = String(groupKey || "").trim().toLowerCase();
+  const rows = [];
+  const groupChecks = Array.isArray(handoffGroup?.checks) ? handoffGroup.checks : [];
+  if (groupChecks.length) {
+    if (normalizedGroupKey === "taxonomy") {
+      const primaryRows = [];
+      const additionalRows = [];
+      groupChecks.forEach((check) => {
+        const returnKey = String(check?.return_key || "").trim().toLowerCase();
+        if (!returnKey) return;
+        const row = requestedCheckReturns?.[returnKey];
+        if (!row) return;
+        if (!isAssignmentCurationRenderableCheck(check)) return;
+        const placement = resolveAssignmentCurationCheckPlacement(check, row);
+        if (placement === "hidden") return;
+        const entry = { check, row };
+        if (placement === "primary") primaryRows.push(entry);
+        else additionalRows.push(entry);
+      });
+      return [...primaryRows, ...additionalRows];
+    }
+
+    groupChecks.forEach((check) => {
+      const returnKey = String(check?.return_key || "").trim().toLowerCase();
+      if (!returnKey) return;
+      const row = requestedCheckReturns?.[returnKey];
+      if (!row) return;
+      rows.push({ check, row });
+    });
+    return rows;
+  }
+
+  Object.entries(requestedCheckReturns || {}).forEach(([rawKey, row]) => {
+    const returnKey = String(rawKey || "").trim().toLowerCase();
+    if (!returnKey.startsWith(`${normalizedGroupKey}.`)) return;
+    if (!row || typeof row !== "object" || Array.isArray(row)) return;
+    const checkKey = returnKey.slice(normalizedGroupKey.length + 1).trim().toLowerCase();
+    if (!checkKey) return;
+    if (normalizedGroupKey === "taxonomy" && !isAssignmentCurationRenderableCheck({ group_key: "taxonomy", check_key: checkKey })) {
+      return;
+    }
+    rows.push({
+      check: {
+        group_key: normalizedGroupKey,
+        group_label: normalizedGroupKey === "cta_contact" ? "CTA/ติดต่อ" : "Curation",
+        check_key: checkKey,
+        return_key: returnKey,
+        label: getAssignmentReviewRequestedCheckFallbackLabel(returnKey),
+        answer_type: String(row?.answer_type || "text").trim().toLowerCase() || "text",
+      },
+      row,
+    });
+  });
+  return rows;
+}
+
+function buildAssignmentReviewRequestedCheckCardsHtml(assignment = null) {
+  const assignmentId = Number(assignment?.id || 0) || 0;
+  if (!assignmentId) return "";
+  const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
+  const requestedCheckReturns = latestSubmission?.field_return_payload_json?.requested_check_returns;
+  if (!requestedCheckReturns || typeof requestedCheckReturns !== "object" || Array.isArray(requestedCheckReturns)) {
+    return "";
+  }
+
+  const handoffPackage = state.assignments.handoffSourcePackages?.[assignmentId] || null;
+  const handoffGroups = getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage);
+  const handoffGroupMap = new Map(handoffGroups.map((group) => [group.group_key, group]));
+  const cards = [];
+
+  const ctaRows = buildAssignmentReviewRequestedCheckRowsForGroup("cta_contact", requestedCheckReturns, handoffGroupMap.get("cta_contact") || null);
+  if (ctaRows.length) {
+    const ctaLabel = String(handoffGroupMap.get("cta_contact")?.group_label || "CTA/ติดต่อ").trim() || "CTA/ติดต่อ";
+    cards.push(`
+      <div class="assignment-review-submission-section full-span assignment-review-requested-check-card" data-review-requested-check-group="cta_contact">
+        <div class="assignment-brief-label">${escapeHtml(ctaLabel)}</div>
+        <div class="assignment-review-answer-block">
+          ${ctaRows.map(({ check, row }) => buildAssignmentReviewRequestedCheckRowHtml(check, row)).join("")}
+        </div>
+      </div>
+    `);
+  }
+
+  const taxonomyRows = buildAssignmentReviewRequestedCheckRowsForGroup("taxonomy", requestedCheckReturns, handoffGroupMap.get("taxonomy") || null);
+  if (taxonomyRows.length) {
+    cards.push(`
+      <div class="assignment-review-submission-section full-span assignment-review-requested-check-card" data-review-requested-check-group="taxonomy">
+        <div class="assignment-brief-label">Curation</div>
+        <div class="assignment-review-answer-block">
+          ${taxonomyRows.map(({ check, row }) => buildAssignmentReviewRequestedCheckRowHtml(check, row)).join("")}
+        </div>
+      </div>
+    `);
+  }
+
+  return cards.join("");
+}
+
 function hideAssignmentReviewHoverPreview() {
   const preview = qs("assignment-review-hover-preview");
   const image = qs("assignment-review-hover-preview-image");
@@ -3627,15 +3816,18 @@ function showAssignmentReviewHoverPreview(url, event) {
 
 function renderAssignmentReviewSubmissionContent(assignment) {
   const card = qs("assignment-review-submission-card");
+  const contentNode = qs("assignment-review-submission-content");
   const textNode = qs("assignment-review-submission-text");
   const photosNode = qs("assignment-review-submission-photos");
   const videosNode = qs("assignment-review-submission-videos");
   const pageMode = getAssignmentPageMode();
-  if (!card || !textNode || !photosNode || !videosNode) return;
+  if (!card || !contentNode || !textNode || !photosNode || !videosNode) return;
 
   const shouldShow = pageMode === "review" && Boolean(assignment);
   card.classList.toggle("hidden", !shouldShow);
   if (!shouldShow) {
+    const requestedCheckCardsNode = contentNode.querySelector ? contentNode.querySelector("#assignment-review-requested-check-cards") : null;
+    if (requestedCheckCardsNode) requestedCheckCardsNode.remove();
     textNode.className = "assignment-brief-empty";
     textNode.innerHTML = "เลือกงานมอบหมายเพื่อดูข้อความที่ผู้ลงงานส่งกลับ";
     photosNode.className = "assignment-brief-empty";
@@ -3644,6 +3836,11 @@ function renderAssignmentReviewSubmissionContent(assignment) {
     videosNode.innerHTML = "ยังไม่มีวิดีโอที่ส่งกลับล่าสุด";
     hideAssignmentReviewHoverPreview();
     return;
+  }
+
+  const existingRequestedCheckCardsNode = contentNode.querySelector ? contentNode.querySelector("#assignment-review-requested-check-cards") : null;
+  if (existingRequestedCheckCardsNode) {
+    existingRequestedCheckCardsNode.remove();
   }
 
   const sections = buildAssignmentReviewTextSections(assignment);
@@ -3686,6 +3883,15 @@ function renderAssignmentReviewSubmissionContent(assignment) {
       ` : ""}
     </div>
   `;
+
+  const requestedCheckCardsHtml = buildAssignmentReviewRequestedCheckCardsHtml(assignment);
+  if (requestedCheckCardsHtml) {
+    contentNode.insertAdjacentHTML("beforeend", `
+      <div id="assignment-review-requested-check-cards" class="assignment-review-requested-checks">
+        ${requestedCheckCardsHtml}
+      </div>
+    `);
+  }
 
   const photoItems = getAssignmentReviewMediaItems(assignment, "photos");
   photosNode.className = "assignment-review-submission-section";

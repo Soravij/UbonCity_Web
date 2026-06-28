@@ -76,7 +76,10 @@ function createMockDomNode(initial = {}) {
     placeholder: "",
     href: "",
     disabled: false,
+    querySelector: () => null,
     querySelectorAll: () => [],
+    insertAdjacentHTML: () => {},
+    remove: () => {},
     setAttribute(name, value) {
       attributes.set(String(name), String(value));
     },
@@ -376,6 +379,36 @@ const buildAssignmentRequestedCheckReturnSectionHtml = loadNamedFunction(appJs, 
   hasAssignmentRequestedCheckMeaningfulValue,
   escapeHtml,
 });
+const getAssignmentReviewRequestedCheckSafeUrl = loadNamedFunction(appJs, "getAssignmentReviewRequestedCheckSafeUrl", {
+  window: { location: { origin: "http://localhost" } },
+});
+const formatAssignmentReviewRequestedCheckValueHtml = loadNamedFunction(appJs, "formatAssignmentReviewRequestedCheckValueHtml", {
+  formatRequestedCheckSuggestedValue,
+  escapeHtml,
+  getAssignmentReviewRequestedCheckSafeUrl,
+});
+const buildAssignmentReviewRequestedCheckRowHtml = loadNamedFunction(appJs, "buildAssignmentReviewRequestedCheckRowHtml", {
+  getAssignmentReviewRequestedCheckFallbackLabel: (returnKey) => String(returnKey || "").trim().toLowerCase().split(".").pop().replace(/_/g, " ").trim() || String(returnKey || "").trim().toLowerCase(),
+  formatAssignmentReviewRequestedCheckValueHtml,
+  escapeHtml,
+});
+const buildAssignmentReviewRequestedCheckRowsForGroup = loadNamedFunction(appJs, "buildAssignmentReviewRequestedCheckRowsForGroup", {
+  isAssignmentCurationRenderableCheck,
+  resolveAssignmentCurationCheckPlacement,
+  getAssignmentReviewRequestedCheckFallbackLabel: (returnKey) => String(returnKey || "").trim().toLowerCase().split(".").pop().replace(/_/g, " ").trim() || String(returnKey || "").trim().toLowerCase(),
+});
+const buildAssignmentReviewRequestedCheckCardsHtml = loadNamedFunction(appJs, "buildAssignmentReviewRequestedCheckCardsHtml", {
+  state: { assignments: {} },
+  getLatestAssignmentSubmissionRow: () => null,
+  getAssignmentRequestedCheckGroupsFromHandoffPackage,
+  buildAssignmentReviewRequestedCheckRowsForGroup,
+  buildAssignmentReviewRequestedCheckRowHtml,
+  isAssignmentCurationRenderableCheck,
+  resolveAssignmentCurationCheckPlacement,
+  escapeHtml,
+  formatRequestedCheckSuggestedValue,
+  window: { location: { origin: "http://localhost" } },
+});
 const updateAssignmentRequestedCheckReturnRowState = loadNamedFunction(appJs, "updateAssignmentRequestedCheckReturnRowState");
 const readAssignmentRequestedCheckReturnDraftFromForm = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm");
 
@@ -421,6 +454,230 @@ const normalizeRequestedCheckReturns = loadNamedFunction(repositoryJs, "normaliz
   normalizeRequestedCheckReturnKey,
   normalizeRequestedCheckReturnEntry,
   parseJson,
+});
+
+function createReviewContentNode() {
+  return createMockDomNode({
+    innerHTML: "",
+    querySelector(selector) {
+      if (selector !== "#assignment-review-requested-check-cards") return null;
+      if (!String(this.innerHTML || "").includes('id="assignment-review-requested-check-cards"')) return null;
+      return {
+        remove: () => {
+          this.innerHTML = String(this.innerHTML || "").replace(/\s*<div id="assignment-review-requested-check-cards"[\s\S]*$/, "");
+        },
+      };
+    },
+    insertAdjacentHTML(position, html) {
+      if (String(position || "").toLowerCase() !== "beforeend") return;
+      this.innerHTML += String(html || "");
+    },
+  });
+}
+
+function createReviewHarness(overrides = {}) {
+  const assignmentId = Number(overrides.assignmentId || 24);
+  const latestSubmissionRow = overrides.latestSubmissionRow || {
+    id: 12,
+    field_return_payload_json: {
+      requested_check_returns: {
+        "cta_contact.phone": {
+          checked: true,
+          found: true,
+          value: "0812345678",
+          answer_type: "phone",
+        },
+        "cta_contact.website_url": {
+          checked: true,
+          found: false,
+          value: "https://example.com",
+          answer_type: "url",
+        },
+        "taxonomy.parking": {
+          checked: true,
+          found: true,
+          value: false,
+          answer_type: "boolean",
+        },
+        "taxonomy.pet_friendly": {
+          checked: true,
+          found: true,
+          value: true,
+          answer_type: "boolean",
+        },
+        "taxonomy.average_price_per_person": {
+          checked: true,
+          found: true,
+          value: { number: 0, unit: "บาท" },
+          answer_type: "number_with_unit",
+          condition_note: "ฟรี",
+        },
+      },
+    },
+  };
+  const handoffPackage = overrides.handoffPackage || {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "cta_contact",
+          group_label: "CTA/ติดต่อ",
+          checks: [
+            { key: "phone", requested: true, label: "Phone", answer_type: "phone" },
+            { key: "website_url", requested: true, label: "Website", answer_type: "url" },
+          ],
+        },
+        {
+          group_key: "taxonomy",
+          group_label: "Curation",
+          checks: [
+            { key: "parking", requested: true, label: "Parking", answer_type: "boolean" },
+            { key: "pet_friendly", requested: true, label: "Pet Friendly", answer_type: "boolean" },
+            { key: "average_price_per_person", requested: true, label: "Average Price", answer_type: "number_with_unit" },
+            { key: "category", requested: true, label: "Category", answer_type: "select" },
+          ],
+        },
+      ],
+    },
+  };
+  const contentNode = createReviewContentNode();
+  const nodes = new Map([
+    ["assignment-review-submission-card", createMockDomNode({ className: "assignment-brief-card" })],
+    ["assignment-review-submission-content", contentNode],
+    ["assignment-review-submission-text", createMockDomNode({ className: "assignment-brief-empty" })],
+    ["assignment-review-submission-photos", createMockDomNode({ className: "assignment-brief-empty" })],
+    ["assignment-review-submission-videos", createMockDomNode({ className: "assignment-brief-empty" })],
+    ["assignment-review-hover-preview", createMockDomNode({ className: "asset-hover-preview hidden" })],
+    ["assignment-review-hover-preview-image", createMockDomNode()],
+    ["assignment-review-summary-card", createMockDomNode({ className: "assignment-brief-card" })],
+    ["assignment-review-summary-content", createMockDomNode()],
+    ["assignment-review-summary-brief-link-wrap", createMockDomNode()],
+    ["assignment-review-summary-brief-link", createMockDomNode()],
+  ]);
+  const state = {
+    assignments: {
+      selectedId: assignmentId,
+      latestSubmissionRows: { [assignmentId]: latestSubmissionRow },
+      latestSubmissionArticlePayloads: {},
+      latestSubmissionLoaded: { [assignmentId]: true },
+      deliverablesBundle: null,
+      handoffSourcePackages: { [assignmentId]: handoffPackage },
+      requestedCheckReturnDrafts: {
+        [assignmentId]: {
+          requested_check_returns: {
+            "cta_contact.phone": { checked: false, found: false, value: "ignored-draft" },
+          },
+        },
+      },
+      requestedCheckReturnDraftDirty: { [assignmentId]: true },
+      requestedCheckReturnDraftSources: { [assignmentId]: "user_edit" },
+      reviewSelectedVideoKey: "",
+    },
+  };
+  const windowMock = { location: { origin: "http://localhost" } };
+  const getLatestAssignmentSubmissionRow = overrides.getLatestAssignmentSubmissionRow || ((assignment = null) => {
+    const id = Number(assignment?.id || assignmentId || 0) || 0;
+    return state.assignments.latestSubmissionRows?.[id] || null;
+  });
+  const buildAssignmentReviewRequestedCheckCardsHtmlFn = loadNamedFunction(appJs, "buildAssignmentReviewRequestedCheckCardsHtml", {
+    state,
+    getLatestAssignmentSubmissionRow,
+    getAssignmentRequestedCheckGroupsFromHandoffPackage,
+    buildAssignmentReviewRequestedCheckRowsForGroup,
+    buildAssignmentReviewRequestedCheckRowHtml,
+    isAssignmentCurationRenderableCheck,
+    resolveAssignmentCurationCheckPlacement,
+    escapeHtml,
+    formatRequestedCheckSuggestedValue,
+    window: windowMock,
+  });
+  const renderAssignmentReviewSubmissionContent = loadNamedFunction(appJs, "renderAssignmentReviewSubmissionContent", {
+    state,
+    qs: (id) => nodes.get(id) || null,
+    getAssignmentPageMode: () => "review",
+    getLatestAssignmentSubmissionRow,
+    buildAssignmentReviewTextSections: () => [],
+    getAssignmentReviewTextDeliverables: () => [],
+    getAssignmentReviewMediaItems: () => [],
+    hideAssignmentReviewHoverPreview: () => {},
+    showAssignmentReviewHoverPreview: () => {},
+    positionAssignmentReviewHoverPreview: () => {},
+    buildAssignmentReviewRequestedCheckCardsHtml: buildAssignmentReviewRequestedCheckCardsHtmlFn,
+    escapeHtml,
+  });
+  return {
+    assignment: { id: assignmentId, state: "submitted" },
+    state,
+    nodes,
+    contentNode,
+    windowMock,
+    getLatestAssignmentSubmissionRow,
+    buildAssignmentReviewRequestedCheckCardsHtml: buildAssignmentReviewRequestedCheckCardsHtmlFn,
+    renderAssignmentReviewSubmissionContent,
+  };
+}
+
+test("review requested-check cards use latest submission payload and render CTA/Curation read-only", () => {
+  const harness = createReviewHarness();
+  const html = harness.buildAssignmentReviewRequestedCheckCardsHtml(harness.assignment);
+
+  assert.match(html, /data-review-requested-check-group="cta_contact"/);
+  assert.match(html, /data-review-requested-check-group="taxonomy"/);
+  assert.match(html, /CTA\/ติดต่อ/);
+  assert.match(html, /Curation/);
+  assert.match(html, /0812345678/);
+  assert.match(html, /ไม่พบ/);
+  assert.match(html, /ไม่มี/);
+  assert.match(html, /มี/);
+  assert.match(html, /0 บาท/);
+  assert.doesNotMatch(html, /ignored-draft/);
+  assert.doesNotMatch(html, /Category/);
+});
+
+test("review renderer mounts requested-check cards once and does not call editable requested-check renderer", () => {
+  const harness = createReviewHarness();
+  let editableCalls = 0;
+  const renderAssignmentReviewSubmissionContent = loadNamedFunction(appJs, "renderAssignmentReviewSubmissionContent", {
+    state: harness.state,
+    qs: (id) => harness.nodes.get(id) || null,
+    getAssignmentPageMode: () => "review",
+    getLatestAssignmentSubmissionRow: harness.getLatestAssignmentSubmissionRow,
+    buildAssignmentReviewTextSections: () => [],
+    getAssignmentReviewTextDeliverables: () => [],
+    getAssignmentReviewMediaItems: () => [],
+    hideAssignmentReviewHoverPreview: () => {},
+    showAssignmentReviewHoverPreview: () => {},
+    positionAssignmentReviewHoverPreview: () => {},
+    buildAssignmentReviewRequestedCheckCardsHtml: harness.buildAssignmentReviewRequestedCheckCardsHtml,
+    buildAssignmentReviewRequestedCheckRowsForGroup,
+    renderAssignmentRequestedCheckSection: () => {
+      editableCalls += 1;
+    },
+    escapeHtml,
+  });
+
+  renderAssignmentReviewSubmissionContent(harness.assignment);
+  renderAssignmentReviewSubmissionContent(harness.assignment);
+
+  assert.equal(editableCalls, 0);
+  assert.match(harness.contentNode.innerHTML, /assignment-review-requested-check-cards/);
+  assert.equal((harness.contentNode.innerHTML.match(/assignment-review-requested-check-cards/g) || []).length, 1);
+});
+
+test("review requested-check cards stay empty when latest submission has no requested returns", () => {
+  const harness = createReviewHarness({
+    latestSubmissionRow: {
+      id: 12,
+      field_return_payload_json: {
+        requested_check_returns: {},
+      },
+    },
+  });
+  const html = harness.buildAssignmentReviewRequestedCheckCardsHtml(harness.assignment);
+
+  assert.equal(html, "");
+  harness.renderAssignmentReviewSubmissionContent(harness.assignment);
+  assert.doesNotMatch(harness.contentNode.innerHTML, /assignment-review-requested-check-cards/);
 });
 
 test("requested-check section uses namespaced keys and hides reserved taxonomy metadata rows", () => {
