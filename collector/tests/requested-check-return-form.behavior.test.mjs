@@ -2165,6 +2165,10 @@ test("requested-check mobile CSS keeps one-column CTA rows with stacked secondar
   assert.match(stylesCss, /\.requested-check-curation-more-list/);
   assert.match(stylesCss, /\.requested-check-curation-section\s*\{/);
   assert.match(stylesCss, /\.requested-check-curation-section\s+\.requested-check-curation-row\s+\.requested-check-row-main\s*\{/);
+  assert.match(stylesCss, /#assignment-submission-requested-checks-fields\s+\.requested-check-curation-section\s+\.requested-check-curation-row\s+\.requested-check-row-main\s*\{[\s\S]*?grid-template-columns:\s*20px 140px minmax\(0,\s*1fr\) minmax\(180px,\s*1fr\);/);
+  assert.match(stylesCss, /#assignment-submission-requested-checks-fields\s+\.requested-check-curation-section\s+\.requested-check-curation-row\s+\.requested-check-row-condition\s*\{/);
+  assert.match(stylesCss, /@media \(max-width: 900px\) \{[\s\S]*?#assignment-submission-requested-checks-fields\s+\.requested-check-curation-section\s+\.requested-check-curation-row\s+\.requested-check-row-main\s*\{[\s\S]*?grid-template-columns:\s*20px minmax\(0,\s*1fr\);/);
+  assert.match(stylesCss, /@media \(max-width: 900px\) \{[\s\S]*?#assignment-submission-requested-checks-fields\s+\.requested-check-curation-section\s+\.requested-check-curation-row\s+\.requested-check-row-condition\s*\{[\s\S]*?grid-column:\s*2 \/ -1;/);
   assert.match(
     stylesCss,
     /#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-row-value textarea\s*\{[\s\S]*?min-height:\s*32px;[\s\S]*?height:\s*32px;/
@@ -2880,7 +2884,7 @@ test("api helper preserves fallback error message for non-JSON", async () => {
   }
 });
 
-test("curation row keeps value on the first line and condition input only in the secondary block", () => {
+test("curation row keeps value and condition input in the main row without an empty secondary block", () => {
   const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(
     {
       return_key: "taxonomy.parking",
@@ -2903,13 +2907,64 @@ test("curation row keeps value on the first line and condition input only in the
     }
   );
 
-  const mainBlockMatch = rowHtml.match(
-    /<div class="assignment-capture-row requested-check-row-main">([\s\S]*?)<\/div>\s*<div class="requested-check-row-secondary">/
+  assert.match(rowHtml, /requested-check-row-main[\s\S]*data-requested-check-field="value"[\s\S]*data-requested-check-field="condition_note"/);
+  assert.match(rowHtml, /class="requested-check-row-condition"/);
+  assert.doesNotMatch(rowHtml, /requested-check-row-secondary[\s\S]*data-requested-check-field="condition_note"/);
+  assert.doesNotMatch(rowHtml, /<div class="requested-check-row-secondary">\s*<\/div>/);
+  assert.doesNotMatch(rowHtml, /assignment-capture-actions requested-check-row-status"><\/div>/);
+});
+
+test("curation boolean row uses checklist layout with only label and condition input in the main row", () => {
+  const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(
+    {
+      return_key: "taxonomy.air_conditioning",
+      group_key: "taxonomy",
+      check_key: "air_conditioning",
+      label: "Air conditioning",
+      answer_type: "boolean",
+      suggested_value: true,
+      evidence_required: false,
+    },
+    {
+      checked: false,
+      value: false,
+      condition_note: "",
+      evidence: "",
+    },
+    {
+      showConditionNote: true,
+      rowModifierClass: "requested-check-curation-row",
+    }
   );
 
-  assert.ok(mainBlockMatch, "expected a main curation row block before the secondary block");
-  assert.match(mainBlockMatch[1], /data-requested-check-field="value"/);
-  assert.doesNotMatch(mainBlockMatch[1], /data-requested-check-field="condition_note"/);
-  assert.match(rowHtml, /requested-check-row-secondary[\s\S]*data-requested-check-field="condition_note"/);
-  assert.doesNotMatch(rowHtml, /assignment-capture-actions requested-check-row-status"><\/div>/);
+  assert.match(rowHtml, /requested-check-row-main[\s\S]*data-requested-check-field="condition_note"/);
+  assert.doesNotMatch(rowHtml, /requested-check-row-main[\s\S]*data-requested-check-field="value"[\s\S]*data-requested-check-field="condition_note"/);
+  assert.doesNotMatch(rowHtml, /requested-check-row-secondary/);
+});
+
+test("CTA row keeps condition input outside the main row structure", () => {
+  const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(
+    {
+      return_key: "cta_contact.phone",
+      group_key: "cta_contact",
+      check_key: "phone",
+      label: "Phone",
+      answer_type: "text",
+      suggested_value: "found",
+      evidence_required: true,
+    },
+    {
+      checked: true,
+      value: "found",
+      condition_note: "front desk",
+      evidence: "menu photo",
+    },
+    {
+      showConditionNote: false,
+    }
+  );
+
+  assert.match(rowHtml, /assignment-capture-actions requested-check-row-status/);
+  assert.match(rowHtml, /requested-check-row-secondary[\s\S]*data-requested-check-field="evidence"/);
+  assert.doesNotMatch(rowHtml, /class="requested-check-row-condition"/);
 });

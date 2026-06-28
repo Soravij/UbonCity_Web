@@ -7753,7 +7753,10 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
   const conditionValue = String(row?.condition_note || "");
   const evidenceValue = String(row?.evidence || "");
   const secondaryFields = [];
-  if (showConditionNote) {
+  const curationConditionFieldHtml = showConditionNote && isCurationRow
+    ? `<input class="requested-check-row-condition" type="text" data-requested-check-field="condition_note" value="${escapeHtml(conditionValue)}" placeholder="เงื่อนไข/รายละเอียดเพิ่มเติม" ${checked ? "" : "disabled"} />`
+    : "";
+  if (showConditionNote && !isCurationRow) {
     secondaryFields.push(`
       <label class="requested-check-row-secondary-field">
         <span class="requested-check-row-secondary-label">เงื่อนไข/รายละเอียดเพิ่มเติม</span>
@@ -7780,9 +7783,12 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
           ${isCurationRow ? aiBadgeHtml : ""}
         </div>
         ${isCurationRow ? "" : `<div class="assignment-capture-actions requested-check-row-status">${aiBadgeHtml}</div>`}
-        <div class="requested-check-row-value">
+        ${isTaxonomyBoolean && isCurationRow
+          ? ""
+          : `<div class="requested-check-row-value">
           ${buildAssignmentRequestedCheckReturnValueInputHtml({ ...row, answer_type: check?.answer_type, group_key: check?.group_key })}
-        </div>
+        </div>`}
+        ${curationConditionFieldHtml}
       </div>
       ${secondaryFields.length ? `<div class="requested-check-row-secondary">${secondaryFields.join("")}</div>` : ""}
     </div>
