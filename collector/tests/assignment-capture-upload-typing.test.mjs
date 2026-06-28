@@ -499,6 +499,32 @@ test("server validation media helper filters retained assets only for reset medi
   assert.deepEqual(videoReset.assets.map((asset) => asset.id), [201]);
 });
 
+test("normalizeAssignmentMediaPayloadAssets preserves size bytes and stable urls", () => {
+  const normalizeMediaPayloadAssets = new Function(
+    `${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentMediaPayloadAssets")}
+return normalizeAssignmentMediaPayloadAssets;`
+  )();
+
+  const [asset] = normalizeMediaPayloadAssets({
+    assets: [
+      {
+        id: 301,
+        file_name: "walkthrough.mp4",
+        mime_type: "video/mp4",
+        size_bytes: "12345",
+        public_url: " /media/Walkthrough.mp4 ",
+        source_url: " https://cdn.example.com/Walkthrough.mp4 ",
+        mediaType: "video",
+      },
+    ],
+  });
+
+  assert.equal(asset.size_bytes, 12345);
+  assert.equal(asset.public_url, "/media/Walkthrough.mp4");
+  assert.equal(asset.source_url, "https://cdn.example.com/Walkthrough.mp4");
+});
+
 test("submission required-fields check accepts retained latest submission media for revision without new uploads", () => {
   const assignment = {
     state: "revision_requested",
@@ -623,6 +649,85 @@ test("reset shot validation blocks only the reset media type when retained lates
       ],
     }
   ));
+});
+
+test("video reset rejects incoming video larger than 20GB", () => {
+  const run = enforceResetPerShotRequirementsForBackendTest({
+    listAssignmentRoundAssetsByType() {
+      return [];
+    },
+    getAssignmentSubmissionById() {
+      return {
+        id: 12,
+        media_payload_json: { assets: [] },
+      };
+    },
+  });
+
+  assert.throws(
+    () => run(
+      {
+        state: "revision_requested",
+        latest_submission_id: 12,
+        image_reset_required: 0,
+        video_reset_required: 1,
+        brief_json: { shot_list_suggestions: ["Storefront hero"] },
+      },
+      24,
+      3,
+      {
+        assets: [
+          {
+            id: 401,
+            file_name: "shot-1-storefront-hero__too-large.mp4",
+            mime_type: "video/mp4",
+            size_bytes: (20 * 1024 * 1024 * 1024) + 1,
+          },
+        ],
+      }
+    ),
+    /larger than 20GB/
+  );
+});
+
+test("server validation media helper keeps both assets when filenames match but urls differ", () => {
+  const resolveValidationMedia = resolveAssignmentSubmissionValidationMediaPayloadForBackendTest({
+    getAssignmentSubmissionById() {
+      return null;
+    },
+  });
+
+  const result = resolveValidationMedia(
+    { state: "revision_requested", latest_submission_id: null, image_reset_required: 0, video_reset_required: 0 },
+    {
+      assets: [
+        { file_name: "same-name.jpg", mime_type: "image/jpeg", public_url: "/media/a.jpg" },
+        { file_name: "same-name.jpg", mime_type: "image/jpeg", public_url: "/media/b.jpg" },
+      ],
+    }
+  );
+
+  assert.equal(result.assets.length, 2);
+});
+
+test("server validation media helper dedupes assets when stable url matches without ids", () => {
+  const resolveValidationMedia = resolveAssignmentSubmissionValidationMediaPayloadForBackendTest({
+    getAssignmentSubmissionById() {
+      return null;
+    },
+  });
+
+  const result = resolveValidationMedia(
+    { state: "revision_requested", latest_submission_id: null, image_reset_required: 0, video_reset_required: 0 },
+    {
+      assets: [
+        { file_name: "same-name-a.jpg", mime_type: "image/jpeg", public_url: "/media/shared.jpg" },
+        { file_name: "same-name-b.jpg", mime_type: "image/jpeg", public_url: "/media/shared.jpg" },
+      ],
+    }
+  );
+
+  assert.equal(result.assets.length, 1);
 });
 
 test("persisted slot metadata beats non-canonical filename and missing metadata does not guess slot", () => {

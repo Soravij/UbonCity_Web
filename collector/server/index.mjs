@@ -3204,6 +3204,9 @@ function normalizeAssignmentMediaPayloadAssets(mediaPayload) {
     id: Number(asset?.id || 0) || null,
     file_name: String(asset?.file_name || "").trim() || null,
     mime_type: String(asset?.mime_type || "").trim().toLowerCase() || null,
+    size_bytes: Math.max(0, Number(asset?.size_bytes || 0) || 0),
+    public_url: String(asset?.public_url || "").trim() || null,
+    source_url: String(asset?.source_url || "").trim() || null,
     slotKey: String(asset?.slotKey || asset?.slot_key || asset?.assignment_slot_key || "").trim().toLowerCase() || null,
     mediaType: normalizeAssignmentCaptureMediaType(asset?.mediaType || asset?.media_type || asset?.assignment_media_type) || null,
     capture_type: String(asset?.capture_type || "").trim().toLowerCase() || null,
@@ -3242,11 +3245,8 @@ function resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayl
   const buildIdentityKey = (asset) => {
     const assetId = Number(asset?.id || 0) || 0;
     if (assetId > 0) return `id:${assetId}`;
-    const slotTypeKey = getAssignmentCaptureAssetSlotTypeKey(asset);
     const publicUrl = String(asset?.public_url || asset?.source_url || "").trim().toLowerCase();
     const fileName = String(asset?.file_name || "").trim().toLowerCase();
-    if (slotTypeKey && publicUrl) return `slot:${slotTypeKey}|url:${publicUrl}`;
-    if (slotTypeKey && fileName) return `slot:${slotTypeKey}|file:${fileName}`;
     if (publicUrl) return `url:${publicUrl}`;
     return fileName ? `file:${fileName}` : "";
   };
