@@ -6443,7 +6443,7 @@ function buildAssignmentCaptureItemLookup(captureItems = []) {
   return lookup;
 }
 
-function composeAssignmentSubmissionEffectiveAssets(assignmentId, captureItems = [], options = {}) {
+function resolveAssignmentSubmissionEffectiveMedia(assignmentId, captureItems = [], options = {}) {
   const id = Number(assignmentId || 0) || 0;
   const assignment = getAssignmentById(id);
   const uploadQueue = Array.isArray(options.uploadQueue)
@@ -6453,11 +6453,108 @@ function composeAssignmentSubmissionEffectiveAssets(assignmentId, captureItems =
   const syncKey = getAssignmentCaptureSyncKey(id, captureItems);
   const strict = options?.strict === true;
   const serverSynced = getAssignmentServerSyncedAssetsForCaptureItems(id, captureItems);
-  if (!hasLocalQueue) {
-    const mergedAssets = Array.isArray(serverSynced.assets) ? serverSynced.assets : [];
+  const bundle = Number(state.assignments.deliverablesBundle?.assignment_id || 0) === id
+    ? state.assignments.deliverablesBundle
+    : null;
+  const latestSubmission = assignment ? getLatestAssignmentSubmissionRow(assignment) : null;
+  const requireImages = Boolean(assignment?.image_reset_required);
+  const requireVideos = Boolean(assignment?.video_reset_required);
+  const identityForAsset = (asset) => {
+    const assetId = Number(asset?.id || 0) || 0;
+    if (assetId > 0) return `id:${assetId}`;
+    const stableUrl = String(asset?.public_url || asset?.source_url || asset?.storage_path || "").trim().toLowerCase();
+    if (stableUrl) return `url:${stableUrl}`;
+    const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+    const fileName = String(asset?.file_name || "").trim().toLowerCase();
+    if (slotTypeKey && fileName) return `slot:${slotTypeKey}|file:${fileName}`;
+    if (slotTypeKey) return `slot:${slotTypeKey}`;
+    return fileName ? `file:${fileName}` : "";
+  };
+  const pushUnique = (target, seenKeys, asset) => {
+    if (!asset || typeof asset !== "object") return;
+    const key = identityForAsset(asset);
+    if (key && seenKeys.has(key)) return;
+    if (key) seenKeys.add(key);
+    target.push(asset);
+  };
+  const normalizeResolvedAsset = (asset, fallbackMediaType = "") => {
+    if (!asset || typeof asset !== "object") return null;
     return {
-      assets: mergedAssets,
-      missing: validateAssignmentCaptureRequirementsFromAssets(assignment, captureItems, mergedAssets),
+      id: Number(asset?.id || 0) || null,
+      file_name: String(asset?.file_name || "").trim() || null,
+      mime_type: String(asset?.mime_type || "").trim().toLowerCase() || null,
+      public_url: String(asset?.public_url || asset?.source_url || "").trim() || null,
+      storage_path: String(asset?.storage_path || "").trim() || null,
+      assignment_id: Number(asset?.assignment_id || 0) || null,
+      assignment_round: Number(asset?.assignment_round || 0) || null,
+      assignment_media_type: normalizeAssignmentCaptureMediaType(
+        asset?.assignment_media_type || asset?.mediaType || asset?.media_type || fallbackMediaType
+      ) || null,
+      assignment_slot_key: String(asset?.assignment_slot_key || asset?.slotKey || asset?.slot_key || "").trim().toLowerCase() || null,
+      assignment_surface: String(asset?.assignment_surface || "").trim() || null,
+      assignment_sync_batch_id: String(asset?.assignment_sync_batch_id || "").trim() || null,
+      created_at: String(asset?.created_at || "").trim() || null,
+    };
+  };
+  const retainedAssets = [];
+  const retainedSeenKeys = new Set();
+  const appendRetainedFromBundle = (deliverableType, mediaType) => {
+    const rows = Array.isArray(bundle?.deliverables_by_type?.[deliverableType])
+      ? bundle.deliverables_by_type[deliverableType]
+      : [];
+    if (mediaType === "image" && requireImages) return rows.length > 0;
+    if (mediaType === "video" && requireVideos) return rows.length > 0;
+    rows.forEach((row, index) => {
+      const linkedAsset = findAssignmentAssetById(row?.source_asset_id);
+      if (linkedAsset) {
+        pushUnique(retainedAssets, retainedSeenKeys, normalizeResolvedAsset(linkedAsset, mediaType));
+        return;
+      }
+      const sourceUrl = String(row?.source_url || "").trim();
+      if (!sourceUrl) return;
+      pushUnique(retainedAssets, retainedSeenKeys, normalizeResolvedAsset({
+        id: null,
+        file_name: String(row?.title || "").trim() || `${deliverableType}-${index + 1}`,
+        mime_type: mediaType === "video" ? "video/mp4" : "image/jpeg",
+        public_url: sourceUrl,
+        assignment_id: id,
+        assignment_round: Number(assignment?.revision_round || 0) || null,
+        assignment_media_type: mediaType,
+        created_at: row?.created_at || row?.updated_at || null,
+      }, mediaType));
+    });
+    return rows.length > 0;
+  };
+  const appendRetainedFromPayloadFallback = (mediaType) => {
+    if (mediaType === "image" && requireImages) return;
+    if (mediaType === "video" && requireVideos) return;
+    const payloadAssets = Array.isArray(latestSubmission?.media_payload_json?.assets)
+      ? latestSubmission.media_payload_json.assets
+      : [];
+    payloadAssets
+      .filter((asset) => {
+        const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
+        return mediaType === "video" ? mimeType.startsWith("video/") : mimeType.startsWith("image/");
+      })
+      .forEach((asset) => {
+        pushUnique(retainedAssets, retainedSeenKeys, normalizeResolvedAsset(asset, mediaType));
+      });
+  };
+  const hasBundlePhotos = appendRetainedFromBundle("photos", "image");
+  const hasBundleVideos = appendRetainedFromBundle("videos", "video");
+  if (!hasBundlePhotos) appendRetainedFromPayloadFallback("image");
+  if (!hasBundleVideos) appendRetainedFromPayloadFallback("video");
+
+  if (!hasLocalQueue) {
+    const effectiveAssets = [];
+    const effectiveSeenKeys = new Set();
+    (Array.isArray(serverSynced.assets) ? serverSynced.assets : []).forEach((asset) => pushUnique(effectiveAssets, effectiveSeenKeys, asset));
+    retainedAssets.forEach((asset) => pushUnique(effectiveAssets, effectiveSeenKeys, asset));
+    return {
+      assets: effectiveAssets,
+      payloadAssets: [],
+      retainedAssets,
+      missing: validateAssignmentCaptureRequirementsFromAssets(assignment, captureItems, effectiveAssets),
       hasLocalQueue,
       syncKey,
       serverSynced,
@@ -6471,6 +6568,8 @@ function composeAssignmentSubmissionEffectiveAssets(assignmentId, captureItems =
     }
     return {
       assets: [],
+      payloadAssets: [],
+      retainedAssets,
       missing: [],
       hasLocalQueue,
       syncKey,
@@ -6490,6 +6589,8 @@ function composeAssignmentSubmissionEffectiveAssets(assignmentId, captureItems =
     }
     return {
       assets: [],
+      payloadAssets: [],
+      retainedAssets,
       missing: [],
       hasLocalQueue,
       syncKey,
@@ -6521,24 +6622,41 @@ function composeAssignmentSubmissionEffectiveAssets(assignmentId, captureItems =
     if (!serverByKey.has(key)) serverByKey.set(key, []);
     serverByKey.get(key).push(asset);
   });
-  const mergedAssets = [];
+  const effectiveAssets = [];
+  const payloadAssets = [];
+  const effectiveSeenKeys = new Set();
+  const payloadSeenKeys = new Set();
   for (const key of touchedKeys) {
     const rows = localByKey.get(key) || [];
-    mergedAssets.push(...rows);
+    rows.forEach((asset) => {
+      pushUnique(effectiveAssets, effectiveSeenKeys, asset);
+      pushUnique(payloadAssets, payloadSeenKeys, asset);
+    });
   }
   for (const [key, rows] of serverByKey.entries()) {
     if (touchedKeys.has(key)) continue;
-    mergedAssets.push(...rows);
+    rows.forEach((asset) => pushUnique(effectiveAssets, effectiveSeenKeys, asset));
   }
+  retainedAssets.forEach((asset) => {
+    const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+    if (slotTypeKey && (touchedKeys.has(slotTypeKey) || serverByKey.has(slotTypeKey))) return;
+    pushUnique(effectiveAssets, effectiveSeenKeys, asset);
+  });
 
   return {
-    assets: mergedAssets,
-    missing: validateAssignmentCaptureRequirementsFromAssets(assignment, captureItems, mergedAssets),
+    assets: effectiveAssets,
+    payloadAssets,
+    retainedAssets,
+    missing: validateAssignmentCaptureRequirementsFromAssets(assignment, captureItems, effectiveAssets),
     hasLocalQueue,
     syncKey,
     serverSynced,
     touchedKeys,
   };
+}
+
+function composeAssignmentSubmissionEffectiveAssets(assignmentId, captureItems = [], options = {}) {
+  return resolveAssignmentSubmissionEffectiveMedia(assignmentId, captureItems, options);
 }
 
 function applyAssignmentServerSyncedAssets(assignmentId, captureItems = [], options = {}) {
@@ -6704,6 +6822,11 @@ function renderAssignmentSubmissionFileList() {
   const composed = composeAssignmentSubmissionEffectiveAssets(assignmentId, formConfig.captureItems, { uploadQueue, strict: false });
   const uploadedAssets = Array.isArray(composed?.assets) ? composed.assets : [];
   const isSynced = isAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems);
+  const retainedOnly = !hasLocalQueue
+    && Array.isArray(composed?.retainedAssets)
+    && composed.retainedAssets.length > 0
+    && Array.isArray(composed?.payloadAssets)
+    && composed.payloadAssets.length === 0;
   if (isSynced && uploadedAssets.length) {
     node.className = "assignment-brief-list-wrap";
     node.innerHTML = `
@@ -6722,7 +6845,7 @@ function renderAssignmentSubmissionFileList() {
     if (uploadedAssets.length) {
       node.className = "assignment-brief-list-wrap";
       node.innerHTML = `
-        <div class="assignment-brief-meta" style="margin-bottom:8px;">${isSynced ? `มีไฟล์ที่ซิงก์แล้วบน server รอส่งงานกลับ | ซิงก์แล้ว ${uploadedAssets.length} ไฟล์` : `อัปโหลดเข้าระบบแล้ว ${uploadedAssets.length} ไฟล์`}</div>
+        <div class="assignment-brief-meta" style="margin-bottom:8px;">${retainedOnly ? `มีไฟล์เดิมจากรอบล่าสุดพร้อมส่งงานกลับ ${uploadedAssets.length} ไฟล์` : (isSynced ? `มีไฟล์ที่ซิงก์แล้วบน server รอส่งงานกลับ | ซิงก์แล้ว ${uploadedAssets.length} ไฟล์` : `อัปโหลดเข้าระบบแล้ว ${uploadedAssets.length} ไฟล์`)}</div>
         <ul class="assignment-brief-list">
           ${uploadedAssets.map((asset) => {
             const label = escapeHtml(`${String(asset?.file_name || "").trim() || `asset-${Number(asset?.id || 0)}`} | ${String(asset?.mime_type || "").trim() || "unknown"}`);
@@ -9629,7 +9752,7 @@ async function createAssignmentSubmission() {
   }
   const composed = gateState.composed || composeAssignmentSubmissionEffectiveAssets(assignmentId, formConfig.captureItems, { uploadQueue, strict: true });
   const syncKey = String(composed?.syncKey || getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems));
-  const uploadedAssets = Array.isArray(gateState.effectiveAssets) ? gateState.effectiveAssets : [];
+  const uploadedAssets = Array.isArray(composed?.payloadAssets) ? composed.payloadAssets : [];
 
   if (uploadedAssets.length) {
     body.media_payload_json = buildAssignmentSubmissionMediaPayload(uploadedAssets, formConfig.captureItems);

@@ -1,0 +1,509 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+
+const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
+const appJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.js"), "utf8");
+
+function extractNamedFunctionSource(source, name) {
+  const escapedName = String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`(^|\\n)(async\\s+)?function ${escapedName}\\s*\\(`, "m").exec(source);
+  const start = match ? match.index + match[1].length : -1;
+  assert.notEqual(start, -1, `${name} should exist`);
+  const paramsStart = source.indexOf("(", start);
+  assert.notEqual(paramsStart, -1, `${name} should have params`);
+  let paramsDepth = 0;
+  let bodyStart = -1;
+  let inString = false;
+  let stringChar = "";
+  let escapeNext = false;
+  for (let index = paramsStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+      if (char === "\\") {
+        escapeNext = true;
+        continue;
+      }
+      if (char === stringChar) {
+        inString = false;
+        stringChar = "";
+      }
+      continue;
+    }
+    if (char === "'" || char === "\"" || char === "`") {
+      inString = true;
+      stringChar = char;
+      continue;
+    }
+    if (char === "(") paramsDepth += 1;
+    if (char === ")") {
+      paramsDepth -= 1;
+      if (paramsDepth === 0) {
+        bodyStart = source.indexOf("{", index);
+        break;
+      }
+    }
+  }
+  assert.notEqual(bodyStart, -1, `${name} should have a body`);
+  let depth = 0;
+  inString = false;
+  stringChar = "";
+  escapeNext = false;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+      if (char === "\\") {
+        escapeNext = true;
+        continue;
+      }
+      if (char === stringChar) {
+        inString = false;
+        stringChar = "";
+      }
+      continue;
+    }
+    if (char === "'" || char === "\"" || char === "`") {
+      inString = true;
+      stringChar = char;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  throw new Error(`Could not extract function ${name}`);
+}
+
+function loadNamedFunction(sourceText, functionName, dependencies = {}) {
+  const source = extractNamedFunctionSource(sourceText, functionName);
+  const dependencyNames = Object.keys(dependencies);
+  const dependencyValues = Object.values(dependencies);
+  return Function(...dependencyNames, `${source}; return ${functionName};`)(...dependencyValues);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+const buildAssignmentCaptureSlotKeyForTest = new Function(
+  `${extractNamedFunctionSource(appJs, "toCaptureSlug")}
+${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(appJs, "buildAssignmentCaptureSlotKey")}
+return buildAssignmentCaptureSlotKey;`
+)();
+
+function buildAsset({ id, assignmentId = 24, round = 3, mediaType, slotKey, fileName, url }) {
+  return {
+    id,
+    file_name: fileName,
+    mime_type: mediaType === "video" ? "video/mp4" : "image/jpeg",
+    public_url: url || `/media/${fileName}`,
+    assignment_id: assignmentId,
+    assignment_round: round,
+    assignment_surface: "assignment_work",
+    assignment_media_type: mediaType,
+    assignment_slot_key: slotKey,
+    created_at: "2026-06-28T10:00:00Z",
+  };
+}
+
+function createFixture(overrides = {}) {
+  const assignmentId = Number(overrides.assignment?.id || 24);
+  const revisionRound = Number(overrides.assignment?.revision_round || 3);
+  const captureItems = overrides.captureItems || [
+    { item_text: "Storefront hero", item_order: 0, capture_type: "photo" },
+    { item_text: "Walkthrough clip", item_order: 1, capture_type: "video" },
+  ];
+  const photoSlotKey = buildAssignmentCaptureSlotKeyForTest("Storefront hero", 0, "image", "photo");
+  const videoSlotKey = buildAssignmentCaptureSlotKeyForTest("Walkthrough clip", 1, "video", "video");
+  const defaultAssets = [
+    buildAsset({ id: 101, assignmentId, round: revisionRound, mediaType: "image", slotKey: photoSlotKey, fileName: "retained-photo.jpg" }),
+    buildAsset({ id: 201, assignmentId, round: revisionRound, mediaType: "video", slotKey: videoSlotKey, fileName: "retained-video.mp4" }),
+  ];
+  const assetLookup = overrides.assetLookup || defaultAssets;
+  const deliverablesByType = overrides.deliverablesByType || {
+    photos: [{ id: 1, deliverable_type: "photos", source_asset_id: 101, status: "submitted" }],
+    videos: [{ id: 2, deliverable_type: "videos", source_asset_id: 201, status: "submitted" }],
+  };
+  const latestSubmissionRow = {
+    id: Number(overrides.latestSubmission?.id || 12) || 12,
+    media_payload_json: {
+      assets: Array.from({ length: 39 }, (_, index) => ({
+        id: 500 + index,
+        file_name: `accumulated-${index + 1}.jpg`,
+        public_url: `/media/accumulated-${index + 1}.jpg`,
+        mime_type: "image/jpeg",
+      })),
+    },
+    ...overrides.latestSubmission,
+  };
+  const state = {
+    assignments: {
+      selectedId: assignmentId,
+      deliverablesBundle: {
+        assignment_id: assignmentId,
+        latest_submission_id: latestSubmissionRow.id,
+        deliverables_by_type: deliverablesByType,
+        ...(overrides.bundle || {}),
+      },
+      latestSubmissionRows: {
+        [assignmentId]: latestSubmissionRow,
+      },
+      assetLookup,
+      assets: assetLookup,
+      latestUploadedAssets: overrides.latestUploadedAssets || [],
+      latestUploadedAssetsKey: overrides.latestUploadedAssetsKey || "",
+      syncedUploadAssetsByKey: overrides.syncedUploadAssetsByKey || {},
+      contextFieldPack: null,
+      handoffSourceSnapshotIds: { [assignmentId]: 88 },
+      latestSubmissionArticlePayloads: {},
+      latestSubmissionLoaded: {},
+    },
+  };
+  return {
+    state,
+    assignment: {
+      id: assignmentId,
+      state: "revision_requested",
+      revision_round: revisionRound,
+      latest_submission_id: latestSubmissionRow.id,
+      image_reset_required: 0,
+      video_reset_required: 0,
+      ...overrides.assignment,
+    },
+    captureItems,
+    photoSlotKey,
+    videoSlotKey,
+  };
+}
+
+function createRuntimeFixture() {
+  const photoRows = [];
+  const photoAssets = [];
+  for (let index = 0; index < 12; index += 1) {
+    const slotKey = buildAssignmentCaptureSlotKeyForTest(`Photo shot ${index + 1}`, index, "image", "photo");
+    const assetId = 1000 + index;
+    photoRows.push({ id: assetId, deliverable_type: "photos", source_asset_id: assetId, status: "submitted" });
+    photoAssets.push(buildAsset({
+      id: assetId,
+      mediaType: "image",
+      slotKey,
+      fileName: `photo-shot-${index + 1}.jpg`,
+    }));
+  }
+  const videoSlotKey = buildAssignmentCaptureSlotKeyForTest("Walkthrough clip", 12, "video", "video");
+  const videoAsset = buildAsset({
+    id: 2001,
+    mediaType: "video",
+    slotKey: videoSlotKey,
+    fileName: "walkthrough.mp4",
+  });
+  return createFixture({
+    captureItems: [
+      ...Array.from({ length: 12 }, (_, index) => ({ item_text: `Photo shot ${index + 1}`, item_order: index, capture_type: "photo" })),
+      { item_text: "Walkthrough clip", item_order: 12, capture_type: "video" },
+    ],
+    assetLookup: [...photoAssets, videoAsset],
+    deliverablesByType: {
+      photos: photoRows,
+      videos: [{ id: 2001, deliverable_type: "videos", source_asset_id: 2001, status: "submitted" }],
+    },
+  });
+}
+
+function loadHarness(fixture, overrides = {}) {
+  const state = fixture.state;
+  const fileListNode = overrides.fileListNode || { innerHTML: "", textContent: "", className: "" };
+  const requests = [];
+  const getAssignmentById = overrides.getAssignmentById || (() => fixture.assignment);
+  const getAssignmentSubmissionFormConfig = overrides.getAssignmentSubmissionFormConfig || (() => ({ captureItems: fixture.captureItems }));
+  const buildAssignmentCaptureFileUploadQueue = overrides.buildAssignmentCaptureFileUploadQueue || (() => []);
+  const getAssignmentCaptureSyncKey = overrides.getAssignmentCaptureSyncKey || (() => `${fixture.assignment.id}::sig`);
+  const isAssignmentCaptureUploadsSynced = overrides.isAssignmentCaptureUploadsSynced || (() => false);
+  const getSyncedUploadAssetsForKey = overrides.getSyncedUploadAssetsForKey || (() => []);
+  const getAssignmentCurrentRound = overrides.getAssignmentCurrentRound || (() => fixture.assignment.revision_round || 1);
+  const buildAssignmentServerAssetSyncSignature = overrides.buildAssignmentServerAssetSyncSignature || (() => "sig");
+  const getAssignmentSubmissionMissingTextPrompts = overrides.getAssignmentSubmissionMissingTextPrompts || (() => []);
+  const buildAssignmentSubmissionArticlePayload = overrides.buildAssignmentSubmissionArticlePayload || (() => ({ verified_answers: [], question_answers: [], additional_text: "ready" }));
+  const getAssignmentCaptureUploadBucket = overrides.getAssignmentCaptureUploadBucket || (() => ({}));
+
+  const normalizeAssignmentCaptureMediaType = loadNamedFunction(appJs, "normalizeAssignmentCaptureMediaType");
+  const toCaptureSlug = loadNamedFunction(appJs, "toCaptureSlug");
+  const buildAssignmentCaptureSlotKey = loadNamedFunction(appJs, "buildAssignmentCaptureSlotKey", {
+    toCaptureSlug,
+    normalizeAssignmentCaptureMediaType,
+  });
+  const isVideoCapturePrompt = loadNamedFunction(appJs, "isVideoCapturePrompt");
+  const normalizeAssignmentCaptureUploadItems = loadNamedFunction(appJs, "normalizeAssignmentCaptureUploadItems", {
+    toCaptureSlug,
+    normalizeAssignmentCaptureMediaType,
+    buildAssignmentCaptureSlotKey,
+    isVideoCapturePrompt,
+  });
+  const getAssignmentAssetSlotTypeKeyFromAsset = loadNamedFunction(appJs, "getAssignmentAssetSlotTypeKeyFromAsset", {
+    normalizeAssignmentCaptureMediaType,
+    buildAssignmentCaptureSlotKey,
+  });
+  const validateAssignmentCaptureRequirementsFromAssets = loadNamedFunction(appJs, "validateAssignmentCaptureRequirementsFromAssets", {
+    normalizeAssignmentCaptureMediaType,
+    buildAssignmentCaptureSlotKey,
+    getAssignmentAssetSlotTypeKeyFromAsset,
+    toCaptureSlug,
+    isVideoCapturePrompt,
+    normalizeAssignmentCaptureUploadItems,
+  });
+  const getAssignmentTouchedSlotTypeKeysFromQueue = loadNamedFunction(appJs, "getAssignmentTouchedSlotTypeKeysFromQueue");
+  const getAssignmentServerSyncedAssetsForCaptureItems = loadNamedFunction(appJs, "getAssignmentServerSyncedAssetsForCaptureItems", {
+    state,
+    getAssignmentById,
+    getAssignmentCurrentRound,
+    buildAssignmentServerAssetSyncSignature,
+    ASSIGNMENT_WORK_SYNC_EXPIRY_MS: 24 * 60 * 60 * 1000,
+    ASSIGNMENT_CAPTURE_MAX_IMAGES_PER_SLOT: 5,
+    ASSIGNMENT_CAPTURE_MAX_VIDEOS_PER_SLOT: 2,
+    normalizeAssignmentCaptureUploadItems,
+    normalizeAssignmentCaptureMediaType,
+    getAssignmentAssetSlotTypeKeyFromAsset,
+  });
+  const findAssignmentAssetById = loadNamedFunction(appJs, "findAssignmentAssetById", { state });
+  const getLatestAssignmentSubmissionRow = loadNamedFunction(appJs, "getLatestAssignmentSubmissionRow", { state });
+  const resolveAssignmentSubmissionEffectiveMedia = loadNamedFunction(appJs, "resolveAssignmentSubmissionEffectiveMedia", {
+    state,
+    getAssignmentById,
+    buildAssignmentCaptureFileUploadQueue,
+    getAssignmentCaptureSyncKey,
+    getAssignmentServerSyncedAssetsForCaptureItems,
+    getLatestAssignmentSubmissionRow,
+    findAssignmentAssetById,
+    normalizeAssignmentCaptureMediaType,
+    getAssignmentAssetSlotTypeKeyFromAsset,
+    validateAssignmentCaptureRequirementsFromAssets,
+    isAssignmentCaptureUploadsSynced,
+    getSyncedUploadAssetsForKey,
+    getAssignmentTouchedSlotTypeKeysFromQueue,
+  });
+  const composeAssignmentSubmissionEffectiveAssets = loadNamedFunction(appJs, "composeAssignmentSubmissionEffectiveAssets", {
+    resolveAssignmentSubmissionEffectiveMedia,
+  });
+  const renderAssignmentSubmissionFileList = loadNamedFunction(appJs, "renderAssignmentSubmissionFileList", {
+    qs: (id) => (id === "assignment-submission-file-list" ? fileListNode : null),
+    state,
+    getAssignmentById,
+    getAssignmentSubmissionFormConfig,
+    getAssignmentCaptureUploadBucket,
+    buildAssignmentCaptureFileUploadQueue,
+    composeAssignmentSubmissionEffectiveAssets,
+    isAssignmentCaptureUploadsSynced,
+    escapeHtml,
+  });
+  const buildAssignmentSubmissionGateState = loadNamedFunction(appJs, "buildAssignmentSubmissionGateState", {
+    getAssignmentById,
+    buildAssignmentSubmissionArticlePayload,
+    buildAssignmentCaptureFileUploadQueue,
+    isAssignmentCaptureUploadsSynced,
+    composeAssignmentSubmissionEffectiveAssets,
+    getAssignmentServerSyncedAssetsForCaptureItems,
+    getAssignmentSubmissionMissingTextPrompts,
+  });
+  const createAssignmentSubmission = loadNamedFunction(appJs, "createAssignmentSubmission", {
+    isEditorUser: () => false,
+    ensureSelectedAssignmentId: () => fixture.assignment.id,
+    getAssignmentById,
+    getAssignmentSubmissionFormConfig,
+    state,
+    buildAssignmentSubmissionArticlePayload,
+    buildAssignmentRequestedCheckReturnPayloadFromDraft: () => null,
+    syncAssignmentRequestedCheckReturnDraftFromForm: () => ({}),
+    writeAssignmentSubmissionDraft: () => {},
+    assertAssignmentCaptureUploadsComplete: () => {},
+    buildAssignmentCaptureFileUploadQueue,
+    buildAssignmentSubmissionGateState,
+    renderAssignmentSubmissionGatePanel: () => {},
+    focusFirstAssignmentSubmissionGateIssue: () => {},
+    composeAssignmentSubmissionEffectiveAssets,
+    getAssignmentCaptureSyncKey,
+    buildAssignmentSubmissionMediaPayload: (assets) => ({ assets }),
+    api: async (url, options = {}) => {
+      requests.push({ url, options });
+      return { submission: { id: 12 } };
+    },
+    qs: () => null,
+    createAssignmentSubmissionDeliverablesForUploads: async () => {},
+    clearAssignmentSubmissionDraft: () => {},
+    deleteAssignmentSubmissionServerDraft: async () => {},
+    setLatestUploadedAssetsForSyncKey: () => {},
+    setStatus: () => {},
+    refreshAssignments: async () => {},
+    loadAssignmentDeliverablesBundle: async () => {},
+    loadAssignmentAssets: async () => {},
+    clearAssignmentCaptureUploads: () => {},
+    renderAssignmentSubmissionFileList,
+    renderAssignmentSubmissionForm: () => {},
+    canPatchAssignmentState: () => false,
+    window: { location: { search: "", pathname: "/", assign() {} } },
+    URLSearchParams,
+  });
+
+  return {
+    fileListNode,
+    requests,
+    resolveAssignmentSubmissionEffectiveMedia,
+    composeAssignmentSubmissionEffectiveAssets,
+    renderAssignmentSubmissionFileList,
+    buildAssignmentSubmissionGateState,
+    createAssignmentSubmission,
+  };
+}
+
+test("revision without reset accepts retained latest-submission media", () => {
+  const fixture = createFixture();
+  const harness = loadHarness(fixture);
+
+  const gateState = harness.buildAssignmentSubmissionGateState(fixture.assignment.id, { captureItems: fixture.captureItems }, {
+    articlePayload: { additional_text: "ready" },
+    uploadQueue: [],
+  });
+
+  assert.equal(gateState.canSubmit, true);
+  assert.deepEqual(gateState.effectiveAssets.map((asset) => asset.id), [101, 201]);
+  assert.equal(gateState.checklist.find((item) => item.key === "required_media")?.status, true);
+});
+
+test("initial submit without retained or current media still blocks", () => {
+  const fixture = createFixture({
+    assignment: { id: 30, state: "assigned", latest_submission_id: null },
+    bundle: { latest_submission_id: null },
+    latestSubmission: { id: null, media_payload_json: { assets: [] } },
+    deliverablesByType: { photos: [], videos: [] },
+    assetLookup: [],
+  });
+  const harness = loadHarness(fixture);
+
+  const gateState = harness.buildAssignmentSubmissionGateState(30, { captureItems: fixture.captureItems }, {
+    articlePayload: { additional_text: "ready" },
+    uploadQueue: [],
+  });
+
+  assert.equal(gateState.canSubmit, false);
+  assert.match(String(gateState.blockingReasons[0] || ""), /อัปโหลด|ซิงก์ไฟล์/);
+});
+
+test("image reset excludes retained images but keeps retained videos", () => {
+  const fixture = createFixture({
+    assignment: { image_reset_required: 1, video_reset_required: 0 },
+  });
+  const harness = loadHarness(fixture);
+
+  const result = harness.composeAssignmentSubmissionEffectiveAssets(fixture.assignment.id, fixture.captureItems, {
+    uploadQueue: [],
+    strict: false,
+  });
+
+  assert.deepEqual(result.assets.map((asset) => asset.id), [201]);
+});
+
+test("video reset excludes retained videos but keeps retained images", () => {
+  const fixture = createFixture({
+    assignment: { image_reset_required: 0, video_reset_required: 1 },
+  });
+  const harness = loadHarness(fixture);
+
+  const result = harness.composeAssignmentSubmissionEffectiveAssets(fixture.assignment.id, fixture.captureItems, {
+    uploadQueue: [],
+    strict: false,
+  });
+
+  assert.deepEqual(result.assets.map((asset) => asset.id), [101]);
+});
+
+test("current synced uploads merge with retained media and dedupe by asset identity", () => {
+  const fixture = createFixture();
+  const syncedPhoto = { ...fixture.state.assignments.assetLookup[0] };
+  fixture.state.assignments.syncedUploadAssetsByKey = {
+    "24::sig-local": [syncedPhoto],
+  };
+  const harness = loadHarness(fixture, {
+    getAssignmentCaptureSyncKey: () => "24::sig-local",
+    buildAssignmentCaptureFileUploadQueue: () => [{ slug: fixture.photoSlotKey, file: { type: "image/jpeg" } }],
+    isAssignmentCaptureUploadsSynced: () => true,
+    getSyncedUploadAssetsForKey: () => [syncedPhoto],
+  });
+
+  const result = harness.composeAssignmentSubmissionEffectiveAssets(24, fixture.captureItems, {
+    uploadQueue: [{ slug: fixture.photoSlotKey, file: { type: "image/jpeg" } }],
+    strict: false,
+  });
+
+  assert.deepEqual(result.payloadAssets.map((asset) => asset.id), [101]);
+  assert.deepEqual(result.assets.map((asset) => asset.id), [101, 201]);
+});
+
+test("latest deliverables bundle wins over accumulated media payload fallback", () => {
+  const fixture = createRuntimeFixture();
+  const harness = loadHarness(fixture);
+
+  const result = harness.resolveAssignmentSubmissionEffectiveMedia(24, fixture.captureItems, {
+    uploadQueue: [],
+    strict: false,
+  });
+
+  assert.equal(result.retainedAssets.length, 13);
+  assert.equal(result.assets.length, 13);
+  assert.equal(result.assets.some((asset) => Number(asset.id) === 500), false);
+});
+
+test("missing required shot still blocks even when many synced media items exist", () => {
+  const fixture = createRuntimeFixture();
+  fixture.assignment.image_reset_required = 1;
+  fixture.assignment.video_reset_required = 1;
+  const syncedPhotoAssets = fixture.state.assignments.assetLookup.filter((asset) => asset.assignment_media_type === "image");
+  const uploadQueue = syncedPhotoAssets.map((asset) => ({
+    slug: asset.assignment_slot_key,
+    file: { type: "image/jpeg" },
+  }));
+  const harness = loadHarness(fixture, {
+    buildAssignmentCaptureFileUploadQueue: () => uploadQueue,
+    isAssignmentCaptureUploadsSynced: () => true,
+    getSyncedUploadAssetsForKey: () => syncedPhotoAssets,
+  });
+
+  const gateState = harness.buildAssignmentSubmissionGateState(24, { captureItems: fixture.captureItems }, {
+    articlePayload: { additional_text: "ready" },
+    uploadQueue,
+  });
+
+  assert.equal(gateState.canSubmit, false);
+  assert.ok(gateState.missingMedia.length > 0);
+  assert.ok(gateState.missingMedia.some((label) => /Walkthrough clip/.test(label)));
+});
+
+test("retained media appears in summary but is omitted from submit payload without new uploads", async () => {
+  const fixture = createFixture();
+  const harness = loadHarness(fixture);
+
+  harness.renderAssignmentSubmissionFileList();
+  await harness.createAssignmentSubmission();
+
+  assert.match(harness.fileListNode.innerHTML, /retained-photo\.jpg/);
+  assert.match(harness.fileListNode.innerHTML, /retained-video\.mp4/);
+  const submitRequest = harness.requests.find((entry) => entry.url === "/api/assignments/24/submissions");
+  assert.ok(submitRequest, "submit request should exist");
+  const payload = JSON.parse(String(submitRequest.options.body || "{}"));
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "media_payload_json"), false);
+});
