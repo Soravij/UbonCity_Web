@@ -45,7 +45,18 @@ return findMissingCapturePrompts;`
   listAssignmentRoundAssetsByType() {
     return [];
   },
+  getAssignmentSubmissionById() {
+    return null;
+  },
 });
+
+const resolveAssignmentSubmissionValidationMediaPayloadForBackendTest = new Function(
+  "repo",
+  `${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentMediaPayloadAssets")}
+${extractNamedFunctionSource(serverIndexJs, "resolveAssignmentSubmissionValidationMediaPayload")}
+return resolveAssignmentSubmissionValidationMediaPayload;`
+);
 
 test("submission required-fields check allows blank capture answers when exact image and video slots are present", () => {
   const assignment = {
@@ -170,6 +181,7 @@ ${extractNamedFunctionSource(serverIndexJs, "parseCaptureShotSlugFromFileName")}
 ${extractNamedFunctionSource(serverIndexJs, "getAssignmentCaptureAssetSlotTypeKey")}
 ${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentMediaPayloadAssets")}
 ${extractNamedFunctionSource(serverIndexJs, "findMissingCapturePrompts")}
+${extractNamedFunctionSource(serverIndexJs, "resolveAssignmentSubmissionValidationMediaPayload")}
 function resolveAssignmentSubmissionPromptContext(assignment = null) {
   return {
     brief: assignment?.brief_json || null,
@@ -182,7 +194,23 @@ return enforceAssignmentSubmissionRequiredFields;`
   listAssignmentRoundAssetsByType() {
     return [];
   },
+  getAssignmentSubmissionById() {
+    return null;
+  },
 });
+
+const enforceResetPerShotRequirementsForBackendTest = new Function(
+  "repo",
+  `const ASSIGNMENT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024 * 1024;
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentMediaPayloadAssets")}
+${extractNamedFunctionSource(serverIndexJs, "resolveAssignmentSubmissionValidationMediaPayload")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentShotPromptList")}
+${extractNamedFunctionSource(serverIndexJs, "toCaptureShotSlug")}
+${extractNamedFunctionSource(serverIndexJs, "parseCaptureShotSlugFromFileName")}
+${extractNamedFunctionSource(serverIndexJs, "enforceResetPerShotRequirements")}
+return enforceResetPerShotRequirements;`
+);
 
 const normalizeAssignmentCaptureUploadItemsForTest = new Function(
   `${extractNamedFunctionSource(appJs, "toCaptureSlug")}
@@ -418,6 +446,183 @@ test("server-synced asset reload keeps video asset matched by persisted slot met
   assert.equal(payload.assets.length, 1);
   assert.equal(payload.assets[0].slotKey, slotKey);
   assert.equal(payload.assets[0].mediaType, "video");
+});
+
+test("server validation media helper reuses retained latest submission media when reset is off", () => {
+  const resolveValidationMedia = resolveAssignmentSubmissionValidationMediaPayloadForBackendTest({
+    getAssignmentSubmissionById() {
+      return {
+        id: 12,
+        media_payload_json: {
+          assets: [
+            { id: 201, file_name: "retained-photo.jpg", mime_type: "image/jpeg", public_url: "/media/retained-photo.jpg" },
+            { id: 202, file_name: "retained-video.mp4", mime_type: "video/mp4", public_url: "/media/retained-video.mp4" },
+          ],
+        },
+      };
+    },
+  });
+
+  const result = resolveValidationMedia(
+    { state: "revision_requested", latest_submission_id: 12, image_reset_required: 0, video_reset_required: 0 },
+    null
+  );
+
+  assert.deepEqual(result.assets.map((asset) => asset.id), [201, 202]);
+});
+
+test("server validation media helper filters retained assets only for reset media types", () => {
+  const resolveValidationMedia = resolveAssignmentSubmissionValidationMediaPayloadForBackendTest({
+    getAssignmentSubmissionById() {
+      return {
+        id: 12,
+        media_payload_json: {
+          assets: [
+            { id: 201, file_name: "retained-photo.jpg", mime_type: "image/jpeg", public_url: "/media/retained-photo.jpg" },
+            { id: 202, file_name: "retained-video.mp4", mime_type: "video/mp4", public_url: "/media/retained-video.mp4" },
+          ],
+        },
+      };
+    },
+  });
+
+  const imageReset = resolveValidationMedia(
+    { state: "revision_requested", latest_submission_id: 12, image_reset_required: 1, video_reset_required: 0 },
+    null
+  );
+  assert.deepEqual(imageReset.assets.map((asset) => asset.id), [202]);
+
+  const videoReset = resolveValidationMedia(
+    { state: "revision_requested", latest_submission_id: 12, image_reset_required: 0, video_reset_required: 1 },
+    null
+  );
+  assert.deepEqual(videoReset.assets.map((asset) => asset.id), [201]);
+});
+
+test("submission required-fields check accepts retained latest submission media for revision without new uploads", () => {
+  const assignment = {
+    state: "revision_requested",
+    latest_submission_id: 12,
+    assignment_kind: "field",
+    image_reset_required: 0,
+    video_reset_required: 0,
+    fieldPack: {
+      checklists: [
+        { checklist_type: "must_verify_fact", item_text: "Confirm opening hours" },
+        { checklist_type: "must_ask_question", item_text: "Ask for parking details" },
+        { checklist_type: "must_capture", item_text: "Storefront hero", capture_type: "photo", item_order: 0 },
+        { checklist_type: "must_capture", item_text: "Walkthrough clip", capture_type: "video", item_order: 1 },
+      ],
+    },
+  };
+  const storefrontSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Storefront hero", 0, "image", "photo");
+  const walkthroughSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Walkthrough clip", 1, "video", "video");
+  const run = new Function(
+    "repo",
+    `${extractNamedFunctionSource(serverIndexJs, "uniqueAssignmentPromptStrings")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(serverIndexJs, "buildAssignmentCaptureSlotKey")}
+${extractNamedFunctionSource(serverIndexJs, "getFieldPackPromptGroups")}
+${extractNamedFunctionSource(serverIndexJs, "getStructuredFieldPackCaptureItems")}
+${extractNamedFunctionSource(serverIndexJs, "findMissingPromptAnswers")}
+${extractNamedFunctionSource(serverIndexJs, "toCaptureShotSlug")}
+${extractNamedFunctionSource(serverIndexJs, "parseCaptureShotSlugFromFileName")}
+${extractNamedFunctionSource(serverIndexJs, "getAssignmentCaptureAssetSlotTypeKey")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentMediaPayloadAssets")}
+${extractNamedFunctionSource(serverIndexJs, "findMissingCapturePrompts")}
+${extractNamedFunctionSource(serverIndexJs, "resolveAssignmentSubmissionValidationMediaPayload")}
+function resolveAssignmentSubmissionPromptContext(assignment = null) {
+  return {
+    brief: assignment?.brief_json || null,
+    fieldPack: assignment?.fieldPack || null,
+  };
+}
+${extractNamedFunctionSource(serverIndexJs, "enforceAssignmentSubmissionRequiredFields")}
+return enforceAssignmentSubmissionRequiredFields;`
+  )({
+    listAssignmentRoundAssetsByType() {
+      return [];
+    },
+    getAssignmentSubmissionById() {
+      return {
+        id: 12,
+        media_payload_json: {
+          assets: [
+            { id: 101, file_name: `${storefrontSlotKey}__storefront.jpg`, mime_type: "image/jpeg", slotKey: storefrontSlotKey, mediaType: "image" },
+            { id: 102, file_name: `${walkthroughSlotKey}__walkthrough.mp4`, mime_type: "video/mp4", slotKey: walkthroughSlotKey, mediaType: "video" },
+          ],
+        },
+      };
+    },
+  });
+
+  assert.doesNotThrow(() => run(
+    assignment,
+    {
+      verified_answers: [{ prompt: "Confirm opening hours", answer: "Open daily 09:00-18:00" }],
+      question_answers: [{ prompt: "Ask for parking details", answer: "Two shared parking bays" }],
+      capture_answers: [
+        { prompt: "Storefront hero", answer: "" },
+        { prompt: "Walkthrough clip", answer: "" },
+      ],
+      additional_text: "Retained media should satisfy backend validation",
+    },
+    24,
+    3,
+    null
+  ));
+});
+
+test("reset shot validation blocks only the reset media type when retained latest submission assets lack replacement", () => {
+  const run = enforceResetPerShotRequirementsForBackendTest({
+    listAssignmentRoundAssetsByType() {
+      return [];
+    },
+    getAssignmentSubmissionById() {
+      return {
+        id: 12,
+        media_payload_json: {
+          assets: [
+            { id: 201, file_name: "shot-1-storefront-hero__retained-photo.jpg", mime_type: "image/jpeg" },
+            { id: 202, file_name: "shot-1-storefront-hero__retained-video.mp4", mime_type: "video/mp4" },
+          ],
+        },
+      };
+    },
+  });
+
+  assert.throws(
+    () => run(
+      {
+        state: "revision_requested",
+        latest_submission_id: 12,
+        image_reset_required: 1,
+        video_reset_required: 0,
+        brief_json: { shot_list_suggestions: ["Storefront hero"] },
+      },
+      24,
+      3,
+      null
+    ),
+    /image reset: missing image/
+  );
+
+  assert.doesNotThrow(() => run(
+    {
+      state: "revision_requested",
+      latest_submission_id: 12,
+      image_reset_required: 0,
+      video_reset_required: 1,
+      brief_json: { shot_list_suggestions: ["Storefront hero"] },
+    },
+    24,
+    3,
+    {
+      assets: [
+        { id: 302, file_name: "shot-1-storefront-hero__fresh-video.mp4", mime_type: "video/mp4" },
+      ],
+    }
+  ));
 });
 
 test("persisted slot metadata beats non-canonical filename and missing metadata does not guess slot", () => {

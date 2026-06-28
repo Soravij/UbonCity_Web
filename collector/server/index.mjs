@@ -3211,11 +3211,67 @@ function normalizeAssignmentMediaPayloadAssets(mediaPayload) {
   })).filter((asset) => asset.id || asset.file_name || asset.slotKey);
 }
 
+function resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayload = null) {
+  const incomingAssets = normalizeAssignmentMediaPayloadAssets(mediaPayload);
+  const submissionState = String(assignment?.state || "").trim().toLowerCase();
+  const latestSubmissionId = Number(assignment?.latest_submission_id || 0) || 0;
+  const latestSubmission = latestSubmissionId > 0
+    ? repo.getAssignmentSubmissionById(latestSubmissionId)
+    : null;
+  const retainedAssets = normalizeAssignmentMediaPayloadAssets(latestSubmission?.media_payload_json);
+  const blockRetainedImages = Number(assignment?.image_reset_required ? 1 : 0) === 1;
+  const blockRetainedVideos = Number(assignment?.video_reset_required ? 1 : 0) === 1;
+  const inferMediaType = (asset) => {
+    const explicit = normalizeAssignmentCaptureMediaType(asset?.mediaType || asset?.media_type || asset?.assignment_media_type);
+    if (explicit) return explicit;
+    const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
+    if (mimeType.startsWith("image/")) return "image";
+    if (mimeType.startsWith("video/")) return "video";
+    return "";
+  };
+  const filteredRetainedAssets = submissionState === "revision_requested"
+    ? retainedAssets.filter((asset) => {
+      const mediaType = inferMediaType(asset);
+      if (mediaType === "image" && blockRetainedImages) return false;
+      if (mediaType === "video" && blockRetainedVideos) return false;
+      return true;
+    })
+    : [];
+  const effectiveAssets = [];
+  const seen = new Set();
+  const buildIdentityKey = (asset) => {
+    const assetId = Number(asset?.id || 0) || 0;
+    if (assetId > 0) return `id:${assetId}`;
+    const slotTypeKey = getAssignmentCaptureAssetSlotTypeKey(asset);
+    const publicUrl = String(asset?.public_url || asset?.source_url || "").trim().toLowerCase();
+    const fileName = String(asset?.file_name || "").trim().toLowerCase();
+    if (slotTypeKey && publicUrl) return `slot:${slotTypeKey}|url:${publicUrl}`;
+    if (slotTypeKey && fileName) return `slot:${slotTypeKey}|file:${fileName}`;
+    if (publicUrl) return `url:${publicUrl}`;
+    return fileName ? `file:${fileName}` : "";
+  };
+  const pushUnique = (asset) => {
+    if (!asset || typeof asset !== "object") return;
+    const key = buildIdentityKey(asset);
+    if (key && seen.has(key)) return;
+    if (key) seen.add(key);
+    effectiveAssets.push(asset);
+  };
+  filteredRetainedAssets.forEach(pushUnique);
+  incomingAssets.forEach(pushUnique);
+  return {
+    assets: effectiveAssets,
+    mediaPayload: effectiveAssets.length ? { assets: effectiveAssets } : null,
+    incomingAssets,
+    retainedAssets: filteredRetainedAssets,
+  };
+}
+
 function findMissingCapturePrompts(expectedPrompts = [], assignmentId = 0, currentRound = 1, options) {
   const config = options && typeof options === "object" ? options : {};
   const structuredItems = Array.isArray(config?.structuredItems) ? config.structuredItems : [];
+  const payloadAssets = normalizeAssignmentMediaPayloadAssets(config?.mediaPayload);
   if (structuredItems.length) {
-    const payloadAssets = normalizeAssignmentMediaPayloadAssets(config?.mediaPayload);
     const sourceAssets = payloadAssets.length
       ? payloadAssets
       : [
@@ -3234,10 +3290,14 @@ function findMissingCapturePrompts(expectedPrompts = [], assignmentId = 0, curre
 
   const prompts = uniqueAssignmentPromptStrings(expectedPrompts);
   if (!prompts.length || !(Number(assignmentId || 0) > 0)) return [];
-  const imageAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image");
-  const videoAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "video");
+  const sourceAssets = payloadAssets.length
+    ? payloadAssets
+    : [
+      ...(Array.isArray(repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image")) ? repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image") : []),
+      ...(Array.isArray(repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "video")) ? repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "video") : []),
+    ];
   const uploadedShotSlugs = new Set();
-  for (const asset of [...(Array.isArray(imageAssets) ? imageAssets : []), ...(Array.isArray(videoAssets) ? videoAssets : [])]) {
+  for (const asset of sourceAssets) {
     const shotSlug = parseCaptureShotSlugFromFileName(asset?.file_name);
     if (shotSlug) uploadedShotSlugs.add(shotSlug);
   }
@@ -3259,11 +3319,12 @@ function enforceAssignmentSubmissionRequiredFields(assignment, articlePayload, a
   } else {
     const groups = fieldPack ? getFieldPackPromptGroups(fieldPack) : getAssignmentBriefPromptGroups(brief);
     const structuredCaptureItems = fieldPack ? getStructuredFieldPackCaptureItems(fieldPack) : [];
+    const effectiveValidationMedia = resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayload);
     missing.push(...findMissingPromptAnswers(groups.mustVerify, payload.verified_answers).map((prompt) => `สิ่งที่ต้องยืนยัน: ${prompt}`));
     missing.push(...findMissingPromptAnswers(groups.mustAsk, payload.question_answers).map((prompt) => `คำตอบจากหน้างาน: ${prompt}`));
     missing.push(...findMissingCapturePrompts(groups.mustCapture, assignmentId, currentRound, {
       structuredItems: structuredCaptureItems,
-      mediaPayload,
+      mediaPayload: effectiveValidationMedia.mediaPayload,
     }).map((prompt) => `สิ่งที่ต้องถ่าย: ${prompt}`));
   }
 
@@ -3325,7 +3386,7 @@ function parseCaptureShotSlugFromFileName(fileName) {
   return slug;
 }
 
-function enforceResetPerShotRequirements(assignment, assignmentId, currentRound) {
+function enforceResetPerShotRequirements(assignment, assignmentId, currentRound, mediaPayload = null) {
   const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
   const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
   if (!imageResetRequired && !videoResetRequired) return;
@@ -3337,11 +3398,20 @@ function enforceResetPerShotRequirements(assignment, assignmentId, currentRound)
     slug: toCaptureShotSlug(prompt, index),
     label: `${index + 1}. ${String(prompt || "").trim()}`,
   }));
+  const effectiveValidationMedia = resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayload);
   const imageAssets = imageResetRequired
-    ? repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image")
+    ? effectiveValidationMedia.assets.filter((asset) => {
+      const explicit = normalizeAssignmentCaptureMediaType(asset?.mediaType || asset?.media_type || asset?.assignment_media_type);
+      if (explicit) return explicit === "image";
+      return String(asset?.mime_type || "").trim().toLowerCase().startsWith("image/");
+    })
     : [];
   const videoAssets = videoResetRequired
-    ? repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "video")
+    ? effectiveValidationMedia.assets.filter((asset) => {
+      const explicit = normalizeAssignmentCaptureMediaType(asset?.mediaType || asset?.media_type || asset?.assignment_media_type);
+      if (explicit) return explicit === "video";
+      return String(asset?.mime_type || "").trim().toLowerCase().startsWith("video/");
+    })
     : [];
   const imageByShot = new Map();
   const videoByShot = new Map();
@@ -10877,11 +10947,14 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
       assignmentRound: currentRound,
       maxAgeMs: ASSIGNMENT_WORK_SYNC_EXPIRY_MS,
     });
+    const mediaPayload = req.body?.media_payload_json && typeof req.body.media_payload_json === "object"
+      ? req.body.media_payload_json
+      : null;
+    const effectiveValidationMedia = resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayload);
     if (["owner", "admin", "user", "freelance"].includes(role)) {
-      const currentRoundImageAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image");
-      const currentRoundVideoAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "video");
-      const currentRoundDeliverablesCount = (Array.isArray(currentRoundImageAssets) ? currentRoundImageAssets.length : 0)
-        + (Array.isArray(currentRoundVideoAssets) ? currentRoundVideoAssets.length : 0);
+      const currentRoundDeliverablesCount = Array.isArray(effectiveValidationMedia.assets)
+        ? effectiveValidationMedia.assets.length
+        : 0;
       if (currentRoundDeliverablesCount < 1) {
         res.status(409).json({
           error: "บล็อกการส่งงาน: ต้องแนบผลงานอย่างน้อย 1 รายการก่อนส่ง",
@@ -10892,11 +10965,8 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
     const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
     const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
     const normalizedArticlePayload = normalizeAssignmentDraftArticlePayload(req.body?.article_payload_json || null, assignment);
-    const mediaPayload = req.body?.media_payload_json && typeof req.body.media_payload_json === "object"
-      ? req.body.media_payload_json
-      : null;
     enforceAssignmentSubmissionRequiredFields(assignment, normalizedArticlePayload, assignmentId, currentRound, mediaPayload);
-    enforceResetPerShotRequirements(assignment, assignmentId, currentRound);
+    enforceResetPerShotRequirements(assignment, assignmentId, currentRound, mediaPayload);
     const assignmentAction = normalizedSubmissionState === "resubmitted" ? "resubmit" : "submit";
     const reasonCode = String(req.body?.reason_code || "").trim().toLowerCase()
       || ASSIGNMENT_REASON_CODE_DEFAULTS[assignmentAction];
