@@ -7779,7 +7779,6 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
         <div class="assignment-capture-actions requested-check-row-status">${usesSuggestedValue ? `<span class="workflow-badge workflow-badge-generated">AI แนะนำ</span>` : ""}</div>
         <div class="requested-check-row-value">
           ${buildAssignmentRequestedCheckReturnValueInputHtml({ ...row, answer_type: check?.answer_type, group_key: check?.group_key })}
-          ${isTaxonomyBoolean ? '<div class="assignment-brief-text">ไม่เลือก = ไม่มี</div>' : ""}
         </div>
       </div>
       ${secondaryFields.length ? `<div class="requested-check-row-secondary">${secondaryFields.join("")}</div>` : ""}
@@ -8265,6 +8264,40 @@ function formatAssignmentDeliverableStatusChip(type, status) {
   return `<span class="${className}">${escapeHtml(label)}</span>`;
 }
 
+function summarizeAssignmentDeliverableList(type, list = []) {
+  const normalizedType = String(type || "").trim().toLowerCase();
+  const rows = Array.isArray(list) ? list : [];
+  const count = rows.length;
+  if (!count) return "";
+
+  if (normalizedType === "photos" || normalizedType === "videos") {
+    return `${getAssignmentDeliverableLabel(normalizedType)} ${count} รายการ`;
+  }
+
+  if (count === 1) {
+    return formatAssignmentDeliverableSummaryValue(rows[0]);
+  }
+
+  return `${getAssignmentDeliverableLabel(normalizedType)} ${count} รายการ`;
+}
+
+function formatAssignmentDeliverableRowMeta(type, list = []) {
+  const normalizedType = String(type || "").trim().toLowerCase();
+  const rows = Array.isArray(list) ? list : [];
+  if (!rows.length) return "";
+  const latestUpdatedAt = rows
+    .map((row) => String(row?.updated_at || row?.created_at || "").trim())
+    .find(Boolean);
+  const statuses = Array.from(new Set(rows.map((row) => String(row?.status || "").trim()).filter(Boolean)));
+  const parts = [`${rows.length} รายการ`];
+  if (statuses.length === 1) parts.push(`status=${statuses[0]}`);
+  if (latestUpdatedAt) parts.push(`อัปเดตล่าสุด ${latestUpdatedAt}`);
+  if (rows.length > 1 && (normalizedType === "photos" || normalizedType === "videos")) {
+    parts.push("แสดงครบทุกไฟล์ใน review panel");
+  }
+  return parts.join(" | ");
+}
+
 function renderAssignmentDeliverablesSummary(bundle = null, assignment = null) {
   const node = qs("assignment-deliverables-summary");
   const metaNode = qs("assignment-deliverables-meta");
@@ -8295,6 +8328,7 @@ function renderAssignmentDeliverablesSummary(bundle = null, assignment = null) {
 
   const expected = Array.isArray(bundle.expected_deliverables) ? bundle.expected_deliverables : [];
   const available = Array.isArray(bundle.available_deliverable_types) ? bundle.available_deliverable_types : [];
+  const fulfilledExpected = expected.filter((type) => available.includes(type));
   const missing = Array.isArray(bundle.missing_deliverable_types) ? bundle.missing_deliverable_types : [];
   const latestSubmissionId = Number(bundle.latest_submission_id || assignment.latest_submission_id || 0) || null;
   const deliverablesByType = bundle.deliverables_by_type && typeof bundle.deliverables_by_type === "object"
@@ -8302,26 +8336,22 @@ function renderAssignmentDeliverablesSummary(bundle = null, assignment = null) {
     : {};
   if (createBtn) createBtn.disabled = !latestSubmissionId;
   metaNode.textContent = latestSubmissionId
-    ? `รอบส่งล่าสุด #${latestSubmissionId} | คาดหวัง ${expected.length} | มีแล้ว ${available.length} | ขาด ${missing.length}`
+    ? `รอบส่งล่าสุด #${latestSubmissionId} | ครบแล้ว ${fulfilledExpected.length} จาก ${expected.length} ประเภท${missing.length > 0 ? ` | ยังขาด ${missing.length} ประเภท` : ""}`
     : "ยังไม่มีรอบส่งล่าสุด";
 
   const rows = [];
-  for (const type of expected) {
+  for (const type of available) {
     const list = Array.isArray(deliverablesByType[type]) ? deliverablesByType[type] : [];
-    const latestRow = list[0] || null;
+    if (!list.length) continue;
     rows.push(`
       <div class="assignment-deliverable-row">
         <div class="assignment-deliverable-row-head">
-          ${formatAssignmentDeliverableStatusChip(type, list.length > 0 ? "ready" : "missing")}
-          <span class="assignment-deliverable-row-status">${list.length > 0 ? "มีแล้วในรอบล่าสุด" : "ยังขาดในรอบล่าสุด"}</span>
+          ${formatAssignmentDeliverableStatusChip(type, "ready")}
+          <span class="assignment-deliverable-row-status">มีข้อมูลจริงในรอบส่งล่าสุด</span>
         </div>
         <div class="assignment-deliverable-row-body">
-          ${latestRow
-            ? `
-              <div>${formatAssignmentDeliverableSummaryValue(latestRow)}</div>
-              <div class="assignment-brief-meta">status=${escapeHtml(latestRow.status || "-")}${latestRow.source_url ? ` | <a href="${escapeHtml(latestRow.source_url)}" target="_blank" rel="noopener noreferrer">เปิดลิงก์</a>` : ""}${latestRow.source_asset_id ? ` | asset #${escapeHtml(latestRow.source_asset_id)}` : ""}</div>
-            `
-            : '<div class="muted">ยังไม่มี deliverable ประเภทนี้ในรอบส่งล่าสุด</div>'}
+          <div>${summarizeAssignmentDeliverableList(type, list)}</div>
+          <div class="assignment-brief-meta">${escapeHtml(formatAssignmentDeliverableRowMeta(type, list))}</div>
         </div>
       </div>
     `);
@@ -8335,16 +8365,16 @@ function renderAssignmentDeliverablesSummary(bundle = null, assignment = null) {
         ${formatAssignmentBriefExpectedDeliverables(expected)}
       </div>
       <div>
-        <div class="assignment-brief-label">มีแล้วในรอบล่าสุด</div>
-        ${formatAssignmentBriefExpectedDeliverables(available)}
+        <div class="assignment-brief-label">ครบแล้ว ${fulfilledExpected.length} จาก ${expected.length} ประเภท</div>
+        ${formatAssignmentBriefExpectedDeliverables(fulfilledExpected)}
       </div>
       <div>
-        <div class="assignment-brief-label">ยังขาดในรอบล่าสุด</div>
+        <div class="assignment-brief-label">ยังขาด ${missing.length} ประเภท</div>
         ${formatAssignmentBriefExpectedDeliverables(missing)}
       </div>
     </div>
     <div class="assignment-deliverables-rows">
-      ${rows.length ? rows.join("") : '<div class="muted">ยังไม่มี expected deliverables ให้ติดตาม</div>'}
+      ${rows.length ? rows.join("") : '<div class="muted">ยังไม่มี deliverable ที่มีข้อมูลจริงในรอบส่งล่าสุด</div>'}
     </div>
   `;
   renderAssignmentDeliverableTypeOptions(bundle, assignment);
@@ -9208,7 +9238,7 @@ async function loadAssignmentDeliverablesBundle({ showStatus = true } = {}) {
   if (showStatus) {
     const bundle = state.assignments.deliverablesBundle;
     const missingCount = Number(bundle?.missing_deliverable_types?.length || 0);
-    setStatus("assignment-status", `โหลดข้อมูลงานส่งของงาน #${assignmentId} แล้ว${missingCount > 0 ? ` | ยังขาด ${missingCount}` : ""}`);
+    setStatus("assignment-status", `โหลดข้อมูลงานส่งของงาน #${assignmentId} แล้ว${missingCount > 0 ? ` | ยังขาด ${missingCount} ประเภท` : ""}`);
   }
   return state.assignments.deliverablesBundle;
 }

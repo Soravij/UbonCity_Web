@@ -1304,7 +1304,7 @@ test("requested-check section renders condition input on visible taxonomy rows a
   assert.equal(divergedHtml.includes("AI แนะนำ"), true);
 });
 
-test("taxonomy boolean row renders as a single checkbox control with helper text instead of a second value selector", () => {
+test("taxonomy boolean row renders as a single checkbox without a second value selector or helper text", () => {
   const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(
     {
       return_key: "taxonomy.parking",
@@ -1329,7 +1329,7 @@ test("taxonomy boolean row renders as a single checkbox control with helper text
 
   assert.equal((rowHtml.match(/type="checkbox"/g) || []).length, 1);
   assert.equal(rowHtml.includes('data-requested-check-field="value"'), false);
-  assert.equal(rowHtml.includes("ไม่เลือก = ไม่มี"), true);
+  assert.doesNotMatch(rowHtml, /assignment-brief-text/);
   assert.equal(rowHtml.includes("AI แนะนำ"), true);
   assert.doesNotMatch(rowHtml, /type="checkbox"\s+checked\b/);
 });
@@ -2163,6 +2163,8 @@ test("requested-check mobile CSS keeps one-column CTA rows with stacked secondar
   assert.match(stylesCss, /\.requested-check-curation-more/);
   assert.match(stylesCss, /\.requested-check-curation-more-summary/);
   assert.match(stylesCss, /\.requested-check-curation-more-list/);
+  assert.match(stylesCss, /\.requested-check-curation-section\s*\{/);
+  assert.match(stylesCss, /\.requested-check-curation-section\s+\.requested-check-curation-row\s+\.requested-check-row-main\s*\{/);
   assert.match(
     stylesCss,
     /#assignment-submission-requested-checks-fields[\s\S]*?\.requested-check-row-value textarea\s*\{[\s\S]*?min-height:\s*32px;[\s\S]*?height:\s*32px;/

@@ -3207,7 +3207,7 @@ test("step 1 handoff view keeps only the six agreed pre-submit blocks and redire
     'setStatus("assignment-status", `โหลดงาน #${targetAssignmentId} แล้ว`);',
     'throw new Error("กรุณาเลือกงานก่อน");',
     'setStatus("assignment-status", `โหลดรายการรอบส่งงานของงาน #${assignmentId} แล้ว`);',
-    'setStatus("assignment-status", `โหลดข้อมูลงานส่งของงาน #${assignmentId} แล้ว${missingCount > 0 ? ` | ยังขาด ${missingCount}` : ""}`);',
+    'setStatus("assignment-status", `โหลดข้อมูลงานส่งของงาน #${assignmentId} แล้ว${missingCount > 0 ? ` | ยังขาด ${missingCount} ประเภท` : ""}`);',
     'setStatus("assignment-status", `โหลดประวัติการเปลี่ยนแปลงของงาน #${assignmentId} แล้ว`);',
     'throw new Error("role นี้ไม่มีสิทธิ์เปลี่ยนสถานะงานนี้");',
     'setStatus("assignment-status", `อัปเดตงาน #${assignmentId} เป็น ${result?.assignment?.state || "-"}`);',
