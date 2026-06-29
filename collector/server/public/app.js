@@ -6333,6 +6333,14 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
   if (!normalizedItems.length) {
     return '<div class="assignment-brief-empty">ไม่มีหัวข้อที่ต้องถ่ายในงานนี้</div>';
   }
+  const serverSynced = getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, capturePrompts);
+  const serverAssetsBySlotTypeKey = new Map();
+  (Array.isArray(serverSynced?.assets) ? serverSynced.assets : []).forEach((asset) => {
+    const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+    if (!slotTypeKey) return;
+    if (!serverAssetsBySlotTypeKey.has(slotTypeKey)) serverAssetsBySlotTypeKey.set(slotTypeKey, []);
+    serverAssetsBySlotTypeKey.get(slotTypeKey).push(asset);
+  });
   const renderPromptCards = (items, mode, sectionTitle, emptyText) => {
     const rows = Array.isArray(items) ? items : [];
     const cards = rows.map((item) => {
@@ -6343,12 +6351,28 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
       const acceptedPrefix = mode === "video" ? "video/" : "image/";
       const acceptedLabel = mode === "video" ? "วิดีโอ" : "รูป";
       const selectedFiles = files.filter((file) => String(file?.type || "").trim().toLowerCase().startsWith(acceptedPrefix));
-      const countLabel = `${selectedFiles.length} ${acceptedLabel}`;
-      const fileRows = selectedFiles.length
-        ? `<ul class="assignment-brief-list">${selectedFiles.map((file, fileIndex) => {
+      const slotTypeKey = `${uploadKey}|${mode}`;
+      const serverFiles = serverAssetsBySlotTypeKey.get(slotTypeKey) || [];
+      const countParts = [];
+      if (selectedFiles.length) countParts.push(`${selectedFiles.length} ${acceptedLabel} ใน browser`);
+      if (serverFiles.length) countParts.push(`${serverFiles.length} ${acceptedLabel} บน server`);
+      if (!countParts.length) countParts.push(`0 ${acceptedLabel}`);
+      const countLabel = countParts.join(" | ");
+      const localFileRows = selectedFiles.length
+        ? `<div class="assignment-brief-meta" style="margin-bottom:8px;">ไฟล์ใหม่ใน browser</div><ul class="assignment-brief-list">${selectedFiles.map((file, fileIndex) => {
             const sourceIndex = files.indexOf(file);
             return `<li>${escapeHtml(`${sanitizeUploadFileName(file.name, "upload")} | ${String(file.type || "").trim() || "unknown"}`)} <button type="button" class="step-sub" data-capture-remove-file data-capture-upload-key="${escapeHtml(uploadKey)}" data-capture-file-index="${sourceIndex >= 0 ? sourceIndex : fileIndex}">ลบ</button></li>`;
           }).join("")}</ul>`
+        : "";
+      const serverFileRows = serverFiles.length
+        ? `<div class="assignment-brief-meta" style="margin-bottom:8px;">ไฟล์ที่ซิงก์แล้วบน server</div><ul class="assignment-brief-list">${serverFiles.map((asset) => {
+            const label = escapeHtml(`${String(asset?.file_name || "").trim() || `asset-${Number(asset?.id || 0)}`} | ${String(asset?.mime_type || "").trim() || "unknown"}`);
+            const publicUrl = String(asset?.public_url || "").trim();
+            return `<li>${publicUrl ? `<a href="${escapeHtml(publicUrl)}" target="_blank" rel="noopener noreferrer">${label}</a>` : label}</li>`;
+          }).join("")}</ul>`
+        : "";
+      const fileRows = localFileRows || serverFileRows
+        ? `<div class="assignment-brief-list-wrap assignment-capture-files">${localFileRows}${localFileRows && serverFileRows ? '<div class="assignment-brief-meta" style="margin:8px 0;">ไฟล์ใหม่ใน browser จะถูกใช้แทนไฟล์บน server สำหรับช่องนี้หลังซิงก์</div>' : ""}${serverFileRows}</div>`
         : "";
       return `
         <div class="assignment-brief-section full-span assignment-capture-card" data-capture-upload-key="${escapeHtml(uploadKey)}" data-capture-prompt="${escapeHtml(prompt)}" data-capture-media-type="${escapeHtml(mode)}">
@@ -6362,7 +6386,7 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
               <span class="assignment-capture-count-badge">${escapeHtml(countLabel)}</span>
             </div>
           </div>
-          ${fileRows ? `<div class="assignment-brief-list-wrap assignment-capture-files">${fileRows}</div>` : ""}
+          ${fileRows}
         </div>
       `;
     }).join("");
@@ -6774,6 +6798,51 @@ function buildAssignmentCaptureItemLookup(captureItems = []) {
   return lookup;
 }
 
+function getAssignmentSubmissionAssetIdentityKey(asset = null) {
+  if (!asset || typeof asset !== "object") return "";
+  const assetId = Number(asset?.id || 0) || 0;
+  if (assetId > 0) return `id:${assetId}`;
+  const stableUrl = String(asset?.public_url || asset?.source_url || "").trim().toLowerCase();
+  if (stableUrl) return `url:${stableUrl}`;
+  const storagePath = String(asset?.storage_path || "").trim().toLowerCase();
+  if (storagePath) return `path:${storagePath}`;
+  const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+  const assignmentId = Number(asset?.assignment_id || 0) || 0;
+  const assignmentRound = Number(asset?.assignment_round || 0) || 0;
+  const assignmentSurface = String(asset?.assignment_surface || "").trim().toLowerCase();
+  const syncBatchId = String(asset?.assignment_sync_batch_id || "").trim().toLowerCase();
+  const fileName = String(asset?.file_name || "").trim().toLowerCase();
+  const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
+  if (slotTypeKey || assignmentId || assignmentRound || assignmentSurface || syncBatchId) {
+    return [
+      `assignment:${assignmentId || "-"}`,
+      `round:${assignmentRound || "-"}`,
+      `surface:${assignmentSurface || "-"}`,
+      `slot:${slotTypeKey || "-"}`,
+      `batch:${syncBatchId || "-"}`,
+      `file:${fileName || "-"}`,
+      `mime:${mimeType || "-"}`,
+    ].join("|");
+  }
+  if (fileName || mimeType) return `file:${fileName || "-"}|mime:${mimeType || "-"}`;
+  return "";
+}
+
+function mergeAssignmentSubmissionMediaAssets(...assetSets) {
+  const merged = [];
+  const seen = new Set();
+  assetSets.forEach((assetSet) => {
+    (Array.isArray(assetSet) ? assetSet : []).forEach((asset) => {
+      if (!asset || typeof asset !== "object") return;
+      const key = getAssignmentSubmissionAssetIdentityKey(asset);
+      if (key && seen.has(key)) return;
+      if (key) seen.add(key);
+      merged.push(asset);
+    });
+  });
+  return merged;
+}
+
 function resolveAssignmentSubmissionEffectiveMedia(assignmentId, captureItems = [], options = {}) {
   const id = Number(assignmentId || 0) || 0;
   const assignment = getAssignmentById(id);
@@ -6790,20 +6859,9 @@ function resolveAssignmentSubmissionEffectiveMedia(assignmentId, captureItems = 
   const latestSubmission = assignment ? getLatestAssignmentSubmissionRow(assignment) : null;
   const requireImages = Boolean(assignment?.image_reset_required);
   const requireVideos = Boolean(assignment?.video_reset_required);
-  const identityForAsset = (asset) => {
-    const assetId = Number(asset?.id || 0) || 0;
-    if (assetId > 0) return `id:${assetId}`;
-    const stableUrl = String(asset?.public_url || asset?.source_url || asset?.storage_path || "").trim().toLowerCase();
-    if (stableUrl) return `url:${stableUrl}`;
-    const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
-    const fileName = String(asset?.file_name || "").trim().toLowerCase();
-    if (slotTypeKey && fileName) return `slot:${slotTypeKey}|file:${fileName}`;
-    if (slotTypeKey) return `slot:${slotTypeKey}`;
-    return fileName ? `file:${fileName}` : "";
-  };
   const pushUnique = (target, seenKeys, asset) => {
     if (!asset || typeof asset !== "object") return;
-    const key = identityForAsset(asset);
+    const key = getAssignmentSubmissionAssetIdentityKey(asset);
     if (key && seenKeys.has(key)) return;
     if (key) seenKeys.add(key);
     target.push(asset);
@@ -10022,6 +10080,7 @@ function buildAssignmentSubmissionMediaPayload(uploadedAssets = [], captureItems
       file_name: String(asset?.file_name || "").trim() || null,
       mime_type: String(asset?.mime_type || "").trim() || null,
       public_url: String(asset?.public_url || "").trim() || null,
+      storage_path: String(asset?.storage_path || "").trim() || null,
       slotKey: (() => {
         const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
         return slotTypeKey ? slotTypeKey.split("|")[0] : null;
@@ -10030,6 +10089,12 @@ function buildAssignmentSubmissionMediaPayload(uploadedAssets = [], captureItems
         const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
         return slotTypeKey ? slotTypeKey.split("|")[1] : normalizeAssignmentCaptureMediaType(asset?.assignment_media_type) || null;
       })(),
+      assignment_id: Number(asset?.assignment_id || 0) || null,
+      assignment_round: Number(asset?.assignment_round || 0) || null,
+      assignment_surface: String(asset?.assignment_surface || "").trim() || null,
+      assignment_slot_key: String(asset?.assignment_slot_key || asset?.slotKey || asset?.slot_key || "").trim().toLowerCase() || null,
+      assignment_media_type: normalizeAssignmentCaptureMediaType(asset?.assignment_media_type || asset?.mediaType || asset?.media_type) || null,
+      assignment_sync_batch_id: String(asset?.assignment_sync_batch_id || "").trim() || null,
       capture_type: (() => {
         const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
         const slotKey = slotTypeKey ? slotTypeKey.split("|")[0] : "";
@@ -10101,9 +10166,13 @@ async function createAssignmentSubmission() {
   const composed = gateState.composed || composeAssignmentSubmissionEffectiveAssets(assignmentId, formConfig.captureItems, { uploadQueue, strict: true });
   const syncKey = String(composed?.syncKey || getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems));
   const uploadedAssets = Array.isArray(composed?.payloadAssets) ? composed.payloadAssets : [];
+  const serverSyncedAssets = Array.isArray(gateState?.serverSynced?.assets) ? gateState.serverSynced.assets : [];
+  const submissionMediaAssets = Array.isArray(composed?.assets) && composed.assets.length
+    ? composed.assets
+    : mergeAssignmentSubmissionMediaAssets(uploadedAssets, serverSyncedAssets);
 
-  if (uploadedAssets.length) {
-    body.media_payload_json = buildAssignmentSubmissionMediaPayload(uploadedAssets, formConfig.captureItems);
+  if (submissionMediaAssets.length) {
+    body.media_payload_json = buildAssignmentSubmissionMediaPayload(submissionMediaAssets, formConfig.captureItems);
   }
 
   const result = await api(`/api/assignments/${assignmentId}/submissions`, {
@@ -10115,8 +10184,8 @@ async function createAssignmentSubmission() {
   if (submitButton) submitButton.disabled = true;
   if (syncButton) syncButton.disabled = true;
   const submissionId = Number(result?.submission?.id || 0) || 0;
-  if (submissionId > 0 && uploadedAssets.length) {
-    await createAssignmentSubmissionDeliverablesForUploads(assignmentId, submissionId, uploadedAssets).catch(() => {});
+  if (submissionId > 0 && submissionMediaAssets.length) {
+    await createAssignmentSubmissionDeliverablesForUploads(assignmentId, submissionId, submissionMediaAssets).catch(() => {});
   }
   clearAssignmentSubmissionDraft(assignmentId);
   await deleteAssignmentSubmissionServerDraft(assignmentId).catch(() => {});
