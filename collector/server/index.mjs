@@ -7149,6 +7149,12 @@ const uploadRateLimit = createRateLimiter({
   keyBy: "user",
   message: "Upload rate limit exceeded",
 });
+const assignmentUploadRateLimit = createRateLimiter({
+  windowMs: 30 * 60 * 1000,
+  max: 60,
+  keyBy: "user",
+  message: "Assignment upload rate limit exceeded",
+});
 const assignmentChunkUploadRateLimit = createRateLimiter({
   windowMs: 12 * 60 * 60 * 1000,
   max: 2500,
@@ -14754,7 +14760,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   });
 });
 
-app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "editor", "user", "freelance"), uploadRateLimit, assignmentUpload.array("file", 20), async (req, res) => {
+app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "editor", "user", "freelance"), assignmentUploadRateLimit, assignmentUpload.array("file", 20), async (req, res) => {
   const assignmentId = Number(req.params.id || 0);
   if (!assignmentId) {
     res.status(400).json({ error: "Invalid assignment id" });
