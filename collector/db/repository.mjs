@@ -5118,6 +5118,10 @@ export function createRepository(db) {
     DELETE FROM content_assignment_submission_drafts
     WHERE assignment_id=? AND revision_round=?
   `);
+  const deleteAssignmentSubmissionDraftsByAssignmentStmt = db.prepare(`
+    DELETE FROM content_assignment_submission_drafts
+    WHERE assignment_id=?
+  `);
   const deleteExpiredAssignmentSubmissionDraftsStmt = db.prepare(`
     DELETE FROM content_assignment_submission_drafts
     WHERE expires_at < ?
@@ -5852,8 +5856,18 @@ function isAssignmentSubmissionDraftEditableState(state) {
   return EDITABLE_ASSIGNMENT_SUBMISSION_DRAFT_STATES.has(normalizeStateValue(state, "assignment"));
 }
 
+function isAssignmentSubmissionDraftFrozenState(state) {
+  const normalized = normalizeStateValue(state, "assignment");
+  return normalized === "submitted" || normalized === "resubmitted";
+}
+
 function shouldUseLatestSavedAssignmentSubmissionDraftFallback(state) {
   return normalizeStateValue(state, "assignment") === "revision_requested";
+}
+
+function shouldPurgeAssignmentSubmissionDraftsForState(state) {
+  const normalized = normalizeStateValue(state, "assignment");
+  return normalized === "accepted" || normalized === "closed";
 }
 
 function createAssignmentSubmissionDraftStateError(state) {
@@ -6706,6 +6720,9 @@ function createAssignmentSubmissionDraftStateError(state) {
         }
       );
     }
+    if (shouldPurgeAssignmentSubmissionDraftsForState(normalizedState)) {
+      deleteAllAssignmentSubmissionDraftsByAssignment(id);
+    }
     const updated = resolveAcceptedBindingStatusForAssignmentRow(getAssignmentByIdStmt.get(id));
     if (acceptanceValidation) {
       return {
@@ -7053,6 +7070,13 @@ function createAssignmentSubmissionDraftStateError(state) {
     const round = Math.max(1, Number(revisionRound || 0) || 0);
     if (!id || !round) return 0;
     const result = deleteAssignmentSubmissionDraftsByAssignmentRoundStmt.run(id, round);
+    return Number(result?.changes || 0) || 0;
+  }
+
+  function deleteAllAssignmentSubmissionDraftsByAssignment(assignmentId) {
+    const id = Number(assignmentId || 0) || 0;
+    if (!id) return 0;
+    const result = deleteAssignmentSubmissionDraftsByAssignmentStmt.run(id);
     return Number(result?.changes || 0) || 0;
   }
 
@@ -13413,12 +13437,15 @@ function createAssignmentSubmissionDraftStateError(state) {
     getAssignmentSubmissionById,
     listAssignmentSubmissions,
     isAssignmentSubmissionDraftEditableState,
+    isAssignmentSubmissionDraftFrozenState,
     upsertAssignmentSubmissionDraft,
     getAssignmentSubmissionDraft,
     getAssignmentSubmissionDraftPrefill,
     normalizeFieldReturnPayloadJson,
     deleteAssignmentSubmissionDraft,
     deleteAssignmentSubmissionDraftsByAssignment,
+    deleteAllAssignmentSubmissionDraftsByAssignment,
+    shouldPurgeAssignmentSubmissionDraftsForState,
     purgeExpiredAssignmentSubmissionDrafts,
     listAssignmentRoundAssetsByType,
     deleteAssignmentRoundAssetsByType,

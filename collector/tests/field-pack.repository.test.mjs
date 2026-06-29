@@ -3308,6 +3308,90 @@ test("assignment submission draft save is rejected in non-editable workflow stat
   }
 });
 
+test("assignment submission draft stays frozen after submit and seeds the next revision prefill", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Draft Frozen After Submit");
+    const assignee = ctx.createUser("draft-frozen-after-submit");
+    ctx.createReadinessBrief(item.id, "draft-frozen-after-submit");
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const firstRound = Number(assignmentResult.assignment.revision_round || 0) + 1;
+    const handoffSnapshotId = currentHandoffSnapshotId(ctx, assignmentId);
+
+    ctx.repo.upsertAssignmentSubmissionDraft({
+      assignment_id: assignmentId,
+      user_id: assignee.id,
+      revision_round: firstRound,
+      article_payload_json: {
+        verified_answers: [{ prompt: "Verify phone", answer: "draft verify" }],
+        capture_answers: [{ prompt: "Storefront shot", answer: "draft capture" }],
+        question_answers: [{ prompt: "Ask owner", answer: "" }],
+        additional_text: "draft note",
+      },
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: false, value: "0800000000", condition_note: "" },
+          "taxonomy.pet_friendly": { checked: false, value: false, condition_note: "" },
+        },
+      },
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+
+    ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: handoffSnapshotId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      article_payload_json: {
+        verified_answers: [],
+        capture_answers: [],
+        question_answers: [],
+        additional_text: "immutable submitted note",
+      },
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: true, value: null },
+          "taxonomy.pet_friendly": { checked: true, value: false },
+        },
+      },
+    });
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", {
+      actor_role: "user",
+      reason_code: "submission_created",
+    });
+
+    ctx.repo.updateAssignmentState(assignmentId, "revision_requested", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "needs_revision",
+    });
+
+    const assignment = ctx.repo.getAssignmentById(assignmentId);
+    const secondRound = Number(assignment.revision_round || 0) + 1;
+    const prefill = ctx.repo.getAssignmentSubmissionDraftPrefill(assignmentId, assignee.id, {
+      revision_round: secondRound,
+      now: "2098-01-01T00:00:00.000Z",
+    });
+
+    assert.equal(prefill.source, "latest_saved_draft_fallback");
+    assert.equal(prefill.draft.article_payload_json.verified_answers[0]?.answer, "draft verify");
+    assert.equal(prefill.draft.article_payload_json.capture_answers[0]?.answer, "draft capture");
+    assert.equal(prefill.draft.article_payload_json.question_answers[0]?.answer, "");
+    assert.equal(prefill.draft.article_payload_json.additional_text, "draft note");
+    assert.equal(prefill.draft.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, false);
+    assert.equal(prefill.draft.field_return_payload_json.requested_check_returns["taxonomy.pet_friendly"].checked, false);
+    assert.equal(prefill.draft.field_return_payload_json.requested_check_returns["taxonomy.pet_friendly"].value, false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("assignment submission draft rejects old and future round writes in non-editable states and never returns non-editable drafts for any round", () => {
   const ctx = createTestContext();
   try {
@@ -3355,6 +3439,79 @@ test("assignment submission draft rejects old and future round writes in non-edi
         null
       );
     }
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission drafts are purged when assignment reaches accepted or closed", () => {
+  const ctx = createTestContext();
+  try {
+    function seedDraftForTerminalState(seed) {
+      const item = ctx.createItem(`Draft Terminal Cleanup ${seed}`);
+      const assignee = ctx.createUser(`draft-terminal-cleanup-${seed}`);
+      ctx.createReadinessBrief(item.id, `draft-terminal-cleanup-${seed}`);
+      const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+        item.id,
+        { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+        assignee.id,
+        "tester@local",
+        "admin"
+      );
+      const assignmentId = Number(assignmentResult.assignment.id || 0);
+      const firstRound = Number(assignmentResult.assignment.revision_round || 0) + 1;
+      const handoffSnapshotId = currentHandoffSnapshotId(ctx, assignmentId);
+      ctx.repo.upsertAssignmentSubmissionDraft({
+        assignment_id: assignmentId,
+        user_id: assignee.id,
+        revision_round: firstRound,
+        article_payload_json: { additional_text: `draft-${seed}` },
+        field_return_payload_json: {
+          requested_check_returns: {
+            "cta_contact.phone": { checked: false, value: "0800000000" },
+          },
+        },
+        expires_at: "2099-01-01T00:00:00.000Z",
+      });
+      ctx.repo.addAssignmentSubmission({
+        assignment_id: assignmentId,
+        source_handoff_snapshot_id: handoffSnapshotId,
+        submitted_by_user_id: assignee.id,
+        submission_state: "submitted",
+        article_payload_json: { additional_text: `immutable-${seed}` },
+      });
+      ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", {
+        actor_role: "user",
+        reason_code: "submission_created",
+      });
+      return { assignmentId, assignee, firstRound };
+    }
+
+    const acceptedCase = seedDraftForTerminalState("accepted");
+    ctx.repo.updateAssignmentState(acceptedCase.assignmentId, "accepted", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_submission_accepted",
+    });
+    assert.equal(
+      ctx.repo.getAssignmentSubmissionDraftPrefill(acceptedCase.assignmentId, acceptedCase.assignee.id, {
+        revision_round: acceptedCase.firstRound,
+        now: "2098-01-01T00:00:00.000Z",
+      }).draft,
+      null
+    );
+
+    const closedCase = seedDraftForTerminalState("closed");
+    ctx.repo.updateAssignmentState(closedCase.assignmentId, "closed", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "assignment_closed",
+    });
+    assert.equal(
+      ctx.repo.getAssignmentSubmissionDraftPrefill(closedCase.assignmentId, closedCase.assignee.id, {
+        revision_round: closedCase.firstRound,
+        now: "2098-01-01T00:00:00.000Z",
+      }).draft,
+      null
+    );
   } finally {
     ctx.cleanup();
   }

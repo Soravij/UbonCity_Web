@@ -601,6 +601,7 @@ test("submit success cancels pending server draft autosave and flips local state
   const timeoutCalls = [];
   const apiCalls = [];
   const clearedTimers = [];
+  const deleteCalls = [];
   const locationAssignments = [];
   const windowStub = {
     clearTimeout(timerId) {
@@ -658,7 +659,9 @@ test("submit success cancels pending server draft autosave and flips local state
     qs: () => null,
     createAssignmentSubmissionDeliverablesForUploads: async () => {},
     clearAssignmentSubmissionDraft: () => {},
-    deleteAssignmentSubmissionServerDraft: async () => {},
+    deleteAssignmentSubmissionServerDraft: async (assignmentId) => {
+      deleteCalls.push(assignmentId);
+    },
     setLatestUploadedAssetsForSyncKey: () => {},
     setStatus: () => {},
     refreshAssignments: async () => {},
@@ -673,6 +676,7 @@ test("submit success cancels pending server draft autosave and flips local state
 
   assert.deepEqual(timeoutCalls, ["writeDraft", "clear:25", "clear:25"]);
   assert.deepEqual(clearedTimers, [321]);
+  assert.deepEqual(deleteCalls, []);
   assert.equal(state.assignments.serverSubmissionDraftSaveTimers[25], undefined);
   assert.equal(assignment.state, "submitted");
   assert.deepEqual(apiCalls.map((call) => call.url), ["/api/assignments/25/submissions"]);

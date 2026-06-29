@@ -10788,11 +10788,16 @@ app.delete("/api/assignments/:id/draft", requireRole("owner", "admin", "editor",
     return;
   }
   try {
+    assertAssignmentSubmissionDraftEditable(assignment);
     const currentRound = resolveAssignmentCurrentRound(assignment);
     const deleted = repo.deleteAssignmentSubmissionDraft(assignmentId, actorId, currentRound);
     res.json({ ok: true, deleted, revision_round: currentRound });
   } catch (err) {
-    res.status(400).json({ error: String(err?.message || "Cannot delete assignment draft") });
+    const status = Number(err?.status || 0) || (String(err?.code || "").trim().toLowerCase() === "assignment_submission_draft_not_editable" ? 409 : 400);
+    res.status(status).json({
+      error: String(err?.message || "Cannot delete assignment draft"),
+      code: String(err?.code || "").trim().toLowerCase() || undefined,
+    });
   }
 });
 
@@ -11049,7 +11054,6 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
         video_reset_reason: null,
       });
     }
-    repo.deleteAssignmentSubmissionDraft(assignmentId, Number(req.authUser?.id || 0) || 0, currentRound);
     repo.logAudit(actorEmail(req), `assignment.submission.${assignmentAction}`, "content_item", String(assignment.content_item_id), {
       assignment_id: assignmentId,
       submission_id: submission?.id || null,

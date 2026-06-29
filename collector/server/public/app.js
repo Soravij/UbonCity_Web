@@ -10263,7 +10263,6 @@ async function createAssignmentSubmission() {
       await createAssignmentSubmissionDeliverablesForUploads(assignmentId, submissionId, submissionMediaAssets).catch(() => {});
     }
     clearAssignmentSubmissionDraft(assignmentId);
-    await deleteAssignmentSubmissionServerDraft(assignmentId).catch(() => {});
     state.assignments.latestSubmissionArticlePayloads[assignmentId] = articlePayload;
     state.assignments.latestSubmissionLoaded[assignmentId] = true;
     setLatestUploadedAssetsForSyncKey(syncKey, uploadedAssets);
