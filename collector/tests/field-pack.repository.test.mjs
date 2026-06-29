@@ -2941,6 +2941,47 @@ test("assignment submission draft updates preserve omitted sections and keep exp
   }
 });
 
+test("assignment submission draft save and load are allowed only in editable workflow states", () => {
+  const ctx = createTestContext();
+  try {
+    for (const assignmentState of ["assigned", "in_progress"]) {
+      const item = ctx.createItem(`Draft Editable State ${assignmentState}`);
+      const assignee = ctx.createUser(`draft-editable-${assignmentState}`);
+      ctx.createReadinessBrief(item.id, `draft-editable-${assignmentState}`);
+      const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+        item.id,
+        { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+        assignee.id,
+        "tester@local",
+        "admin"
+      );
+      const assignmentId = Number(assignmentResult.assignment.id || 0);
+      if (assignmentState !== "assigned") {
+        ctx.repo.updateAssignmentState(assignmentId, assignmentState, "tester@local", {
+          actor_role: "user",
+          reason_code: "test_transition",
+        });
+      }
+      const revisionRound = Number(ctx.repo.getAssignmentById(assignmentId)?.revision_round || 0) + 1;
+      const saved = ctx.repo.upsertAssignmentSubmissionDraft({
+        assignment_id: assignmentId,
+        user_id: assignee.id,
+        revision_round: revisionRound,
+        article_payload_json: { additional_text: assignmentState },
+        expires_at: "2099-01-01T00:00:00.000Z",
+      });
+      const loaded = ctx.repo.getAssignmentSubmissionDraft(assignmentId, assignee.id, {
+        revision_round: revisionRound,
+        now: "2098-01-01T00:00:00.000Z",
+      });
+      assert.equal(saved.article_payload_json.additional_text, assignmentState);
+      assert.equal(loaded.article_payload_json.additional_text, assignmentState);
+    }
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("assignment submission draft prefill prefers latest saved draft across revisions over latest submission fallback", () => {
   const ctx = createTestContext();
   try {
@@ -3049,6 +3090,218 @@ test("assignment submission draft prefill prefers latest saved draft across revi
     assert.equal(prefill.draft.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, false);
     assert.equal(prefill.draft.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0800000000");
     assert.equal(prefill.draft.field_return_payload_json.requested_check_returns["taxonomy.pet_friendly"].checked, false);
+    assert.equal(prefill.draft.field_return_payload_json.requested_check_returns["taxonomy.pet_friendly"].value, false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission draft prefill does not return stale current-round draft in non-editable states", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Draft Non Editable Prefill");
+    const assignee = ctx.createUser("draft-non-editable-prefill");
+    ctx.createReadinessBrief(item.id, "draft-non-editable-prefill");
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const revisionRound = Number(assignmentResult.assignment.revision_round || 0) + 1;
+    const handoffSnapshotId = currentHandoffSnapshotId(ctx, assignmentId);
+
+    ctx.repo.upsertAssignmentSubmissionDraft({
+      assignment_id: assignmentId,
+      user_id: assignee.id,
+      revision_round: revisionRound,
+      article_payload_json: { additional_text: "stale current draft" },
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: false, value: "0800000000" },
+        },
+      },
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+
+    ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: handoffSnapshotId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      article_payload_json: { additional_text: "immutable latest submission" },
+    });
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", {
+      actor_role: "user",
+      reason_code: "submission_created",
+    });
+
+    const prefill = ctx.repo.getAssignmentSubmissionDraftPrefill(assignmentId, assignee.id, {
+      revision_round: revisionRound,
+      now: "2098-01-01T00:00:00.000Z",
+    });
+    const loadedCurrentRoundDraft = ctx.repo.getAssignmentSubmissionDraft(assignmentId, assignee.id, {
+      revision_round: revisionRound,
+      now: "2098-01-01T00:00:00.000Z",
+    });
+
+    assert.equal(prefill.source, "none");
+    assert.equal(prefill.draft, null);
+    assert.equal(loadedCurrentRoundDraft, null);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("assignment submission draft save is rejected in non-editable workflow states and does not pollute later revision fallback", () => {
+  const ctx = createTestContext();
+  try {
+    function createBlockedStateAssignment(seed) {
+      const item = ctx.createItem(`Draft Rejected After Submit ${seed}`);
+      const assignee = ctx.createUser(`draft-rejected-after-submit-${seed}`);
+      ctx.createReadinessBrief(item.id, `draft-rejected-after-submit-${seed}`);
+      const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+        item.id,
+        { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+        assignee.id,
+        "tester@local",
+        "admin"
+      );
+      const assignmentId = Number(assignmentResult.assignment.id || 0);
+      const handoffSnapshotId = currentHandoffSnapshotId(ctx, assignmentId);
+      const firstRound = Number(assignmentResult.assignment.revision_round || 0) + 1;
+      ctx.repo.upsertAssignmentSubmissionDraft({
+        assignment_id: assignmentId,
+        user_id: assignee.id,
+        revision_round: firstRound,
+        article_payload_json: { additional_text: "saved before submit" },
+        field_return_payload_json: {
+          requested_check_returns: {
+            "cta_contact.phone": { checked: false, value: "0811111111" },
+            "taxonomy.pet_friendly": { checked: false, value: false },
+          },
+        },
+        expires_at: "2099-01-01T00:00:00.000Z",
+      });
+      ctx.repo.addAssignmentSubmission({
+        assignment_id: assignmentId,
+        source_handoff_snapshot_id: handoffSnapshotId,
+        submitted_by_user_id: assignee.id,
+        submission_state: "submitted",
+        article_payload_json: { additional_text: "submitted immutable" },
+      });
+      ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", {
+        actor_role: "user",
+        reason_code: "submission_created",
+      });
+      return { assignmentId, assignee, firstRound };
+    }
+
+    for (const blockedState of ["submitted", "resubmitted", "accepted", "closed"]) {
+      const { assignmentId, assignee, firstRound } = createBlockedStateAssignment(blockedState);
+      if (blockedState === "resubmitted") {
+        ctx.repo.updateAssignmentState(assignmentId, "revision_requested", "reviewer@local", {
+          actor_role: "admin",
+          reason_code: "needs_revision",
+        });
+        ctx.repo.addAssignmentSubmission({
+          assignment_id: assignmentId,
+          source_handoff_snapshot_id: currentHandoffSnapshotId(ctx, assignmentId),
+          submitted_by_user_id: assignee.id,
+          submission_state: "resubmitted",
+          article_payload_json: { additional_text: "resubmitted immutable" },
+        });
+        ctx.repo.updateAssignmentState(assignmentId, "resubmitted", "submitter@local", {
+          actor_role: "user",
+          reason_code: "assignment_submission_resubmitted",
+        });
+      } else if (blockedState === "accepted" || blockedState === "closed") {
+        ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+          actor_role: "admin",
+          reason_code: "assignment_accepted",
+        });
+        if (blockedState === "closed") {
+          ctx.repo.updateAssignmentState(assignmentId, "closed", "reviewer@local", {
+            actor_role: "admin",
+            reason_code: "test_transition",
+          });
+        }
+      }
+      assert.throws(
+        () => ctx.repo.upsertAssignmentSubmissionDraft({
+          assignment_id: assignmentId,
+          user_id: assignee.id,
+          revision_round: Number(ctx.repo.getAssignmentById(assignmentId)?.revision_round || 0) + 1,
+          article_payload_json: { additional_text: `blocked-${blockedState}` },
+          expires_at: "2099-01-02T00:00:00.000Z",
+        }),
+        /draft is not editable/i
+      );
+    }
+
+    const item = ctx.createItem("Draft Fallback After Reject");
+    const assignee = ctx.createUser("draft-fallback-after-reject");
+    ctx.createReadinessBrief(item.id, "draft-fallback-after-reject");
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const handoffSnapshotId = currentHandoffSnapshotId(ctx, assignmentId);
+    const firstRound = Number(assignmentResult.assignment.revision_round || 0) + 1;
+    ctx.repo.upsertAssignmentSubmissionDraft({
+      assignment_id: assignmentId,
+      user_id: assignee.id,
+      revision_round: firstRound,
+      article_payload_json: { additional_text: "saved before submit" },
+      field_return_payload_json: {
+        requested_check_returns: {
+          "cta_contact.phone": { checked: false, value: "0811111111" },
+          "taxonomy.pet_friendly": { checked: false, value: false },
+        },
+      },
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      source_handoff_snapshot_id: handoffSnapshotId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      article_payload_json: { additional_text: "submitted immutable" },
+    });
+    ctx.repo.updateAssignmentState(assignmentId, "submitted", "submitter@local", {
+      actor_role: "user",
+      reason_code: "submission_created",
+    });
+    assert.throws(
+      () => ctx.repo.upsertAssignmentSubmissionDraft({
+        assignment_id: assignmentId,
+        user_id: assignee.id,
+        revision_round: firstRound,
+        article_payload_json: { additional_text: "blocked-after-submit" },
+        expires_at: "2099-01-02T00:00:00.000Z",
+      }),
+      /draft is not editable/i
+    );
+    ctx.repo.updateAssignmentState(assignmentId, "revision_requested", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "needs_revision",
+    });
+    const reopened = ctx.repo.getAssignmentById(assignmentId);
+    const secondRound = Number(reopened.revision_round || 0) + 1;
+    const prefill = ctx.repo.getAssignmentSubmissionDraftPrefill(assignmentId, assignee.id, {
+      revision_round: secondRound,
+      now: "2098-01-01T00:00:00.000Z",
+    });
+
+    assert.equal(prefill.source, "latest_saved_draft_fallback");
+    assert.equal(prefill.draft.article_payload_json.additional_text, "saved before submit");
+    assert.equal(prefill.draft.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, false);
     assert.equal(prefill.draft.field_return_payload_json.requested_check_returns["taxonomy.pet_friendly"].value, false);
   } finally {
     ctx.cleanup();

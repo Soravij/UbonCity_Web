@@ -2617,6 +2617,17 @@ function hasAssignmentDraftAccess(req, assignment) {
   return actorId === assigneeUserId;
 }
 
+function assertAssignmentSubmissionDraftEditable(assignment) {
+  if (repo.isAssignmentSubmissionDraftEditableState(String(assignment?.state || "").trim().toLowerCase())) {
+    return;
+  }
+  const state = String(assignment?.state || "").trim().toLowerCase() || "unknown";
+  const err = new Error(`assignment submission draft is not editable in state ${state}`);
+  err.code = "assignment_submission_draft_not_editable";
+  err.status = 409;
+  throw err;
+}
+
 await fs.mkdir(dirs.rawDir, { recursive: true });
 await fs.mkdir(dirs.stagingDir, { recursive: true });
 await fs.mkdir(dirs.exportDir, { recursive: true });
@@ -10722,6 +10733,7 @@ app.put("/api/assignments/:id/draft", requireRole("owner", "admin", "editor", "f
     return;
   }
   try {
+    assertAssignmentSubmissionDraftEditable(assignment);
     const expiresAt = deriveAssignmentDraftExpiryIso(assignment);
     const currentRound = resolveAssignmentCurrentRound(assignment);
     const hasArticlePayload = Object.prototype.hasOwnProperty.call(req.body || {}, "article_payload_json");
@@ -10747,7 +10759,11 @@ app.put("/api/assignments/:id/draft", requireRole("owner", "admin", "editor", "f
     const draft = repo.upsertAssignmentSubmissionDraft(draftPayload);
     res.json({ ok: true, draft, revision_round: currentRound });
   } catch (err) {
-    res.status(400).json({ error: String(err?.message || "Cannot save assignment draft") });
+    const status = Number(err?.status || 0) || (String(err?.code || "").trim().toLowerCase() === "assignment_submission_draft_not_editable" ? 409 : 400);
+    res.status(status).json({
+      error: String(err?.message || "Cannot save assignment draft"),
+      code: String(err?.code || "").trim().toLowerCase() || undefined,
+    });
   }
 });
 

@@ -1127,6 +1127,11 @@ function normalizeAssignmentSubmissionPayload(value, assignment = null, fieldPac
     : normalizeAssignmentSubmissionFieldPayload(value, fieldPack);
 }
 
+function isAssignmentSubmissionDraftEditableState(state) {
+  const normalized = String(state || "").trim().toLowerCase();
+  return normalized === "assigned" || normalized === "in_progress" || normalized === "revision_requested";
+}
+
 function readAssignmentSubmissionDraft(assignmentId, assignment = null, fieldPack = null) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return null;
@@ -1145,6 +1150,10 @@ function readAssignmentSubmissionDraft(assignmentId, assignment = null, fieldPac
 function writeAssignmentSubmissionDraft(assignmentId, payload, assignment = null, options = {}) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return;
+  if (!isAssignmentSubmissionDraftEditableState(assignment?.state || getAssignmentById(id)?.state)) {
+    clearServerDraftSaveTimer(id);
+    return;
+  }
   const draftKey = getAssignmentSubmissionDraftKey(id, assignment);
   if (!draftKey) return;
   const normalized = {};
@@ -1167,7 +1176,9 @@ function writeAssignmentSubmissionDraft(assignmentId, payload, assignment = null
     ...normalized,
   };
   state.assignments.submissionDrafts[draftKey] = mergedDraft;
-  scheduleSaveAssignmentSubmissionServerDraft(id, mergedDraft, assignment);
+  if (options?.persistServer !== false) {
+    scheduleSaveAssignmentSubmissionServerDraft(id, mergedDraft, assignment);
+  }
 }
 
 function clearAssignmentSubmissionDraft(assignmentId) {
@@ -1206,8 +1217,7 @@ async function saveAssignmentSubmissionServerDraft(assignmentId, payload) {
   if (!id || isEditorUser()) return null;
   const assignment = getAssignmentById(id);
   if (!assignment) return null;
-  const assignmentState = String(assignment?.state || "").trim().toLowerCase();
-  if (!["assigned", "in_progress", "revision_requested", "resubmitted"].includes(assignmentState)) {
+  if (!isAssignmentSubmissionDraftEditableState(assignment?.state)) {
     return null;
   }
   setAssignmentDraftSaveStatus("กำลังบันทึก...");
@@ -1252,6 +1262,10 @@ async function saveAssignmentSubmissionServerDraft(assignmentId, payload) {
 function scheduleSaveAssignmentSubmissionServerDraft(assignmentId, payload, assignment = null) {
   const id = Number(assignmentId || 0) || 0;
   if (!id || isEditorUser()) return;
+  if (!isAssignmentSubmissionDraftEditableState(assignment?.state || getAssignmentById(id)?.state)) {
+    clearServerDraftSaveTimer(id);
+    return;
+  }
   clearServerDraftSaveTimer(id);
   state.assignments.serverSubmissionDraftSaveTimers[id] = window.setTimeout(() => {
     saveAssignmentSubmissionServerDraft(id, payload).catch(() => {
@@ -1266,6 +1280,12 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
   const assignmentId = Number(assignment?.id || 0) || 0;
   if (!assignmentId) return null;
   const draftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
+  if (!isAssignmentSubmissionDraftEditableState(assignment?.state)) {
+    clearServerDraftSaveTimer(assignmentId);
+    state.assignments.serverSubmissionDraftPayloads[draftKey] = null;
+    state.assignments.serverSubmissionDraftLoaded[draftKey] = true;
+    return null;
+  }
   const loadState = state.assignments.serverSubmissionDraftLoaded?.[draftKey];
   if (loadState === true) {
     return state.assignments.serverSubmissionDraftPayloads?.[draftKey] || null;
@@ -1352,6 +1372,10 @@ function getAssignmentSubmissionPrefillPayload(assignment, fieldPack = null) {
   const assignmentId = Number(assignment?.id || 0) || 0;
   if (!assignmentId) {
     return normalizeAssignmentSubmissionPayload(null, assignment, fieldPack);
+  }
+  if (!isAssignmentSubmissionDraftEditableState(assignment?.state)) {
+    const latestPayload = state.assignments.latestSubmissionArticlePayloads?.[assignmentId] || null;
+    return normalizeAssignmentSubmissionPayload(latestPayload, assignment, fieldPack);
   }
   const draftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
   const serverDraft = state.assignments.serverSubmissionDraftPayloads?.[draftKey] || null;
@@ -10145,7 +10169,8 @@ async function createAssignmentSubmission() {
   if (!sourceHandoffSnapshotId) {
     throw new Error("ไม่พบ handoff snapshot ที่ใช้เปิดฟอร์มนี้ กรุณาโหลด assignment ใหม่ก่อนส่งงาน");
   }
-  writeAssignmentSubmissionDraft(assignmentId, articlePayload, assignment);
+  writeAssignmentSubmissionDraft(assignmentId, articlePayload, assignment, { persistServer: false });
+  clearServerDraftSaveTimer(assignmentId);
   body.article_payload_json = articlePayload;
   body.source_handoff_snapshot_id = sourceHandoffSnapshotId;
   if (requestedCheckReturnPayload) {
@@ -10179,6 +10204,8 @@ async function createAssignmentSubmission() {
     method: "POST",
     body: JSON.stringify(body),
   });
+  assignment.state = String(result?.assignment?.state || (action === "resubmit" ? "resubmitted" : "submitted")).trim().toLowerCase() || assignment.state;
+  clearServerDraftSaveTimer(assignmentId);
   const submitButton = qs("btn-assignment-submit");
   const syncButton = qs("btn-assignment-sync-upload");
   if (submitButton) submitButton.disabled = true;

@@ -66,6 +66,8 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+const isAssignmentSubmissionDraftEditableState = loadNamedFunction(appJs, "isAssignmentSubmissionDraftEditableState");
+
 function createMockDomNode(initial = {}) {
   const classSet = new Set();
   const attributes = new Map();
@@ -1956,6 +1958,8 @@ test("writeAssignmentSubmissionDraft merges local article and requested-check se
   const scheduledPayloads = [];
   const writeDraft = loadNamedFunction(appJs, "writeAssignmentSubmissionDraft", {
     state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentById: () => ({ id: 12, state: "assigned" }),
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentSubmissionPayload: (payload) => payload,
     normalizeAssignmentRequestedCheckReturnDraft,
@@ -2022,6 +2026,8 @@ test("writeAssignmentSubmissionDraft preserves requested-check section during ar
   const scheduledPayloads = [];
   const writeDraft = loadNamedFunction(appJs, "writeAssignmentSubmissionDraft", {
     state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentById: () => ({ id: 12, state: "assigned" }),
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentSubmissionPayload: (payload) => payload,
     buildAssignmentRequestedCheckReturnPayloadFromDraft,
@@ -2081,6 +2087,8 @@ test("writeAssignmentSubmissionDraft preserves explicit CTA and taxonomy uncheck
   const scheduledPayloads = [];
   const writeDraft = loadNamedFunction(appJs, "writeAssignmentSubmissionDraft", {
     state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentById: () => ({ id: 12, state: "assigned" }),
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentSubmissionPayload: (payload) => payload,
     normalizeAssignmentRequestedCheckReturnDraft,
@@ -3150,6 +3158,8 @@ test("loadAssignmentSubmissionServerDraft rerenders requested-check surface afte
   const loadDraft = await loadNamedAsyncFunction(appJs, "loadAssignmentSubmissionServerDraft", {
     state,
     isEditorUser: () => false,
+    isAssignmentSubmissionDraftEditableState,
+    clearServerDraftSaveTimer: () => {},
     api: async () => ({
       draft: {
         field_return_payload_json: {
@@ -3180,7 +3190,7 @@ test("loadAssignmentSubmissionServerDraft rerenders requested-check surface afte
     },
   });
 
-  await loadDraft({ id: 12, revision_round: 1 });
+  await loadDraft({ id: 12, state: "assigned", revision_round: 1 });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].assignmentId, 12);
   assert.equal(calls[0].draft?.requested_check_returns?.["taxonomy.parking"]?.value, true);

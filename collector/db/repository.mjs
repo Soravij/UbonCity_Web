@@ -288,6 +288,7 @@ const PRODUCTION_STATES = new Set([
 const PUBLICATION_STATES = new Set(["draft", "approved", "published", "unpublished", "archived", "deleted"]);
 const ASSIGNMENT_STATES = new Set(["assigned", "in_progress", "submitted", "revision_requested", "resubmitted", "accepted", "closed"]);
 const ASSIGNMENT_SUBMISSION_STATES = new Set(["submitted", "resubmitted"]);
+const EDITABLE_ASSIGNMENT_SUBMISSION_DRAFT_STATES = new Set(["assigned", "in_progress", "revision_requested"]);
 const ASSIGNMENT_DELIVERABLE_TYPES = new Set(["photos", "videos", "raw_notes", "caption_draft", "script_draft", "article_draft"]);
 const ASSIGNMENT_DELIVERABLE_STATUSES = new Set(["draft", "submitted", "reviewed", "accepted", "rejected"]);
 const ASSIGNMENT_FULFILLED_DELIVERABLE_STATUSES = new Set(["submitted", "reviewed", "accepted"]);
@@ -5839,13 +5840,29 @@ export function createRepository(db) {
   }
 
 function normalizeStateValue(value, stateGroup) {
-    const normalized = String(value || "").trim().toLowerCase();
-    if (!normalized) return "";
-    if (stateGroup === "production") return PRODUCTION_STATES.has(normalized) ? normalized : "";
-    if (stateGroup === "publication") return PUBLICATION_STATES.has(normalized) ? normalized : "";
-    if (stateGroup === "assignment") return ASSIGNMENT_STATES.has(normalized) ? normalized : "";
-    return "";
-  }
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (stateGroup === "production") return PRODUCTION_STATES.has(normalized) ? normalized : "";
+  if (stateGroup === "publication") return PUBLICATION_STATES.has(normalized) ? normalized : "";
+  if (stateGroup === "assignment") return ASSIGNMENT_STATES.has(normalized) ? normalized : "";
+  return "";
+}
+
+function isAssignmentSubmissionDraftEditableState(state) {
+  return EDITABLE_ASSIGNMENT_SUBMISSION_DRAFT_STATES.has(normalizeStateValue(state, "assignment"));
+}
+
+function shouldUseLatestSavedAssignmentSubmissionDraftFallback(state) {
+  return normalizeStateValue(state, "assignment") === "revision_requested";
+}
+
+function createAssignmentSubmissionDraftStateError(state) {
+  const normalizedState = normalizeStateValue(state, "assignment") || "unknown";
+  const err = new Error(`assignment submission draft is not editable in state ${normalizedState}`);
+  err.code = "assignment_submission_draft_not_editable";
+  err.status = 409;
+  return err;
+}
 
   function canTransition(stateGroup, fromState, toState) {
     if (!STATE_GROUPS.has(stateGroup)) return false;
@@ -6965,6 +6982,10 @@ function normalizeStateValue(value, stateGroup) {
     const assignment = normalizeAssignmentRow(getAssignmentByIdStmt.get(assignmentId));
     if (!assignment) throw new Error("assignment not found");
     const revisionRound = Math.max(1, Number(payload.revision_round || assignment.revision_round + 1 || 1) || 1);
+    const currentRevisionRound = Math.max(1, Number(assignment.revision_round || 0) + 1 || 1);
+    if (revisionRound === currentRevisionRound && !isAssignmentSubmissionDraftEditableState(assignment.state)) {
+      throw createAssignmentSubmissionDraftStateError(assignment.state);
+    }
     const contentItemId = Number(assignment.content_item_id || 0) || 0;
     if (!contentItemId) throw new Error("assignment content_item_id is invalid");
     const existingDraft = normalizeAssignmentSubmissionDraftRow(getAssignmentSubmissionDraftStmt.get(assignmentId, userId, revisionRound));
@@ -7005,6 +7026,10 @@ function normalizeStateValue(value, stateGroup) {
     const assignment = normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
     if (!assignment) return null;
     const revisionRound = Math.max(1, Number(options.revision_round || assignment.revision_round + 1 || 1) || 1);
+    const currentRevisionRound = Math.max(1, Number(assignment.revision_round || 0) + 1 || 1);
+    if (revisionRound === currentRevisionRound && !isAssignmentSubmissionDraftEditableState(assignment.state)) {
+      return null;
+    }
     const row = normalizeAssignmentSubmissionDraftRow(getAssignmentSubmissionDraftStmt.get(id, actorId, revisionRound));
     if (!row) return null;
     const expiresAt = String(row.expires_at || "").trim();
@@ -7040,9 +7065,15 @@ function normalizeStateValue(value, stateGroup) {
     const nowIso = toNullableDateIso(options.now, "now") || new Date().toISOString();
     const assignment = normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
     if (!assignment) return { draft: null, source: "none" };
+    const assignmentState = String(assignment.state || "").trim().toLowerCase();
     const revisionRound = Math.max(1, Number(options.revision_round || assignment.revision_round + 1 || 1) || 1);
-    const draft = getAssignmentSubmissionDraft(id, actorId, { now: nowIso, revision_round: revisionRound });
-    if (draft) return { draft, source: "draft" };
+    if (isAssignmentSubmissionDraftEditableState(assignmentState)) {
+      const draft = getAssignmentSubmissionDraft(id, actorId, { now: nowIso, revision_round: revisionRound });
+      if (draft) return { draft, source: "draft" };
+    }
+    if (!shouldUseLatestSavedAssignmentSubmissionDraftFallback(assignmentState)) {
+      return { draft: null, source: "none" };
+    }
     const latestSavedDraft = normalizeAssignmentSubmissionDraftRow(
       getLatestAssignmentSubmissionDraftBeforeRoundStmt.get(id, actorId, revisionRound)
     );
@@ -7059,8 +7090,6 @@ function normalizeStateValue(value, stateGroup) {
         source: "latest_saved_draft_fallback",
       };
     }
-    const assignmentState = String(assignment.state || "").trim().toLowerCase();
-    if (assignmentState !== "revision_requested") return { draft: null, source: "none" };
     const latestSubmission = normalizeAssignmentSubmissionRow(
       getAssignmentSubmissionByIdStmt.get(Number(assignment.latest_submission_id || 0) || 0)
     );
@@ -13385,6 +13414,7 @@ function normalizeStateValue(value, stateGroup) {
     setAssignmentLatestSubmission,
     getAssignmentSubmissionById,
     listAssignmentSubmissions,
+    isAssignmentSubmissionDraftEditableState,
     upsertAssignmentSubmissionDraft,
     getAssignmentSubmissionDraft,
     getAssignmentSubmissionDraftPrefill,

@@ -8,9 +8,11 @@ const appJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.
 const indexJs = fs.readFileSync(path.join(collectorRoot, "server", "index.mjs"), "utf8");
 
 function extractFunctionSource(source, functionName) {
-  const asyncMarker = `async function ${functionName}`;
-  const marker = `function ${functionName}`;
-  const start = source.indexOf(asyncMarker) >= 0 ? source.indexOf(asyncMarker) : source.indexOf(marker);
+  const asyncPattern = new RegExp(`async function ${functionName}\\s*\\(`);
+  const pattern = new RegExp(`function ${functionName}\\s*\\(`);
+  const asyncMatch = asyncPattern.exec(source);
+  const match = asyncMatch || pattern.exec(source);
+  const start = match ? match.index : -1;
   assert.notEqual(start, -1, `${functionName} should exist`);
   const paramsStart = source.indexOf("(", start);
   assert.notEqual(paramsStart, -1, `${functionName} should have params`);
@@ -121,6 +123,7 @@ const normalizeAssignmentSubmissionPayload = loadNamedFunction(appJs, "normalize
   normalizeAssignmentSubmissionEditorialPayload: () => ({ direction_answers: [], source_answers: [], additional_text: "" }),
   normalizeAssignmentSubmissionFieldPayload,
 });
+const isAssignmentSubmissionDraftEditableState = loadNamedFunction(appJs, "isAssignmentSubmissionDraftEditableState");
 const getAssignmentSubmissionDraftKey = loadNamedFunction(appJs, "getAssignmentSubmissionDraftKey", {
   getAssignmentCurrentRound: () => 1,
 });
@@ -209,6 +212,7 @@ function createRenderHarness(state, assignment, handoffPackage) {
   });
   const getAssignmentSubmissionPrefillPayload = loadNamedFunction(appJs, "getAssignmentSubmissionPrefillPayload", {
     state,
+    isAssignmentSubmissionDraftEditableState,
     getAssignmentSubmissionDraftKey,
     normalizeAssignmentSubmissionPayload,
     readAssignmentSubmissionDraft: loadNamedFunction(appJs, "readAssignmentSubmissionDraft", {
@@ -319,6 +323,7 @@ test("server draft text and requested checks restore after refresh bootstrap", a
   const loadDraft = await loadNamedAsyncFunction(appJs, "loadAssignmentSubmissionServerDraft", {
     state,
     isEditorUser: () => false,
+    isAssignmentSubmissionDraftEditableState,
     api: async () => ({
       draft: {
         article_payload_json: {
@@ -369,6 +374,7 @@ test("repeated refresh bootstrap does not replace restored draft with empty valu
   const assignment = { id: 25, state: "assigned", revision_round: 0, content_item_id: 501 };
   const getPrefill = loadNamedFunction(appJs, "getAssignmentSubmissionPrefillPayload", {
     state,
+    isAssignmentSubmissionDraftEditableState,
     getAssignmentSubmissionDraftKey,
     normalizeAssignmentSubmissionPayload,
     readAssignmentSubmissionDraft: loadNamedFunction(appJs, "readAssignmentSubmissionDraft", {
@@ -380,6 +386,7 @@ test("repeated refresh bootstrap does not replace restored draft with empty valu
   const loadDraft = await loadNamedAsyncFunction(appJs, "loadAssignmentSubmissionServerDraft", {
     state,
     isEditorUser: () => false,
+    isAssignmentSubmissionDraftEditableState,
     api: async () => ({
       draft: {
         article_payload_json: {
@@ -414,6 +421,50 @@ test("repeated refresh bootstrap does not replace restored draft with empty valu
   assert.equal(afterFirstRefresh.additional_text, "keep me");
   assert.equal(afterSecondRefresh.additional_text, "keep me");
   assert.equal(afterSecondRefresh.verified_answers[0]?.answer, "cached");
+});
+
+test("non-editable assignment states ignore server draft cache and prefer latest immutable submission", () => {
+  const state = createAssignmentState();
+  const assignment = { id: 25, state: "submitted", revision_round: 0, content_item_id: 501 };
+  state.assignments.serverSubmissionDraftPayloads["25:1"] = {
+    article_payload_json: {
+      verified_answers: [{ prompt: "Verify phone", answer: "stale draft" }],
+      capture_answers: [],
+      question_answers: [],
+      additional_text: "stale server draft",
+    },
+  };
+  state.assignments.submissionDrafts["25:1"] = {
+    article_payload_json: {
+      verified_answers: [{ prompt: "Verify phone", answer: "local stale draft" }],
+      capture_answers: [],
+      question_answers: [],
+      additional_text: "local stale draft",
+    },
+  };
+  state.assignments.latestSubmissionArticlePayloads[25] = {
+    verified_answers: [{ prompt: "Verify phone", answer: "immutable latest submission" }],
+    capture_answers: [],
+    question_answers: [],
+    additional_text: "immutable latest submission",
+  };
+
+  const getPrefill = loadNamedFunction(appJs, "getAssignmentSubmissionPrefillPayload", {
+    state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentSubmissionDraftKey,
+    normalizeAssignmentSubmissionPayload,
+    readAssignmentSubmissionDraft: loadNamedFunction(appJs, "readAssignmentSubmissionDraft", {
+      state,
+      getAssignmentSubmissionDraftKey,
+      normalizeAssignmentSubmissionPayload,
+    }),
+  });
+
+  const prefill = getPrefill(assignment, null);
+
+  assert.equal(prefill.additional_text, "immutable latest submission");
+  assert.equal(prefill.verified_answers[0]?.answer, "immutable latest submission");
 });
 
 test("revision 2 reload preserves latest saved draft text and explicit CTA false instead of latest submission fallback", async () => {
@@ -451,6 +502,7 @@ test("revision 2 reload preserves latest saved draft text and explicit CTA false
   const loadDraft = await loadNamedAsyncFunction(appJs, "loadAssignmentSubmissionServerDraft", {
     state,
     isEditorUser: () => false,
+    isAssignmentSubmissionDraftEditableState,
     api: async () => ({
       draft: {
         article_payload_json: {
@@ -490,6 +542,7 @@ test("revision 2 reload preserves latest saved draft text and explicit CTA false
 
   const getPrefill = loadNamedFunction(appJs, "getAssignmentSubmissionPrefillPayload", {
     state,
+    isAssignmentSubmissionDraftEditableState,
     getAssignmentSubmissionDraftKey: () => "25:2",
     normalizeAssignmentSubmissionPayload,
     readAssignmentSubmissionDraft: loadNamedFunction(appJs, "readAssignmentSubmissionDraft", {
@@ -517,6 +570,90 @@ test("revision 2 reload preserves latest saved draft text and explicit CTA false
   assert.equal(requestedPrefill.requested_check_returns["cta_contact.phone"].value, "0800000000");
   assert.equal(requestedPrefill.requested_check_returns["taxonomy.pet_friendly"].checked, false);
   assert.equal(requestedPrefill.requested_check_returns["taxonomy.pet_friendly"].value, false);
+});
+
+test("submit success cancels pending server draft autosave and flips local state to non-editable immediately", async () => {
+  const state = createAssignmentState();
+  state.assignments.selectedId = 25;
+  state.assignments.serverSubmissionDraftSaveTimers = { 25: 321 };
+  state.assignments.handoffSourceSnapshotIds = { 25: 77 };
+  const assignment = { id: 25, state: "assigned", revision_round: 0, content_item_id: 501 };
+  const timeoutCalls = [];
+  const apiCalls = [];
+  const clearedTimers = [];
+  const locationAssignments = [];
+  const windowStub = {
+    clearTimeout(timerId) {
+      clearedTimers.push(timerId);
+    },
+    location: {
+      pathname: "/collector",
+      search: "",
+      assign(url) {
+        locationAssignments.push(url);
+      },
+    },
+  };
+  const createSubmission = loadNamedFunction(appJs, "createAssignmentSubmission", {
+    state,
+    window: windowStub,
+    URLSearchParams,
+    isEditorUser: () => false,
+    ensureSelectedAssignmentId: () => 25,
+    getAssignmentById: () => assignment,
+    getAssignmentSubmissionFormConfig: () => ({ captureItems: [] }),
+    buildAssignmentSubmissionArticlePayload: () => ({ additional_text: "draft body", verified_answers: [], capture_answers: [], question_answers: [] }),
+    syncAssignmentRequestedCheckReturnDraftFromForm: () => null,
+    buildAssignmentRequestedCheckReturnPayloadFromDraft: () => null,
+    writeAssignmentSubmissionDraft: (_assignmentId, _payload) => {
+      timeoutCalls.push("writeDraft");
+    },
+    clearServerDraftSaveTimer: (assignmentId) => {
+      timeoutCalls.push(`clear:${assignmentId}`);
+      const timerId = state.assignments.serverSubmissionDraftSaveTimers[assignmentId];
+      if (timerId) {
+        windowStub.clearTimeout(timerId);
+        delete state.assignments.serverSubmissionDraftSaveTimers[assignmentId];
+      }
+    },
+    assertAssignmentCaptureUploadsComplete: () => {},
+    buildAssignmentCaptureFileUploadQueue: () => [],
+    buildAssignmentSubmissionGateState: () => ({ canSubmit: true, blockingReasons: [], serverSynced: { assets: [] }, composed: { assets: [], payloadAssets: [], syncKey: "sync-key" } }),
+    renderAssignmentSubmissionGatePanel: () => {},
+    focusFirstAssignmentSubmissionGateIssue: () => {},
+    composeAssignmentSubmissionEffectiveAssets: () => ({ assets: [], payloadAssets: [], syncKey: "sync-key" }),
+    getAssignmentCaptureSyncKey: () => "sync-key",
+    mergeAssignmentSubmissionMediaAssets: () => [],
+    buildAssignmentSubmissionMediaPayload: () => null,
+    api: async (url, options = {}) => {
+      apiCalls.push({ url, method: options.method || "GET" });
+      if (url === "/api/assignments/25/submissions") {
+        return { submission: { id: 99 }, assignment: { id: 25, state: "submitted" } };
+      }
+      return { ok: true, deleted: 1 };
+    },
+    qs: () => null,
+    createAssignmentSubmissionDeliverablesForUploads: async () => {},
+    clearAssignmentSubmissionDraft: () => {},
+    deleteAssignmentSubmissionServerDraft: async () => {},
+    setLatestUploadedAssetsForSyncKey: () => {},
+    setStatus: () => {},
+    refreshAssignments: async () => {},
+    loadAssignmentDeliverablesBundle: async () => {},
+    loadAssignmentAssets: async () => {},
+    clearAssignmentCaptureUploads: () => {},
+    renderAssignmentSubmissionFileList: () => {},
+    canPatchAssignmentState: () => true,
+  });
+
+  await createSubmission();
+
+  assert.deepEqual(timeoutCalls, ["writeDraft", "clear:25", "clear:25"]);
+  assert.deepEqual(clearedTimers, [321]);
+  assert.equal(state.assignments.serverSubmissionDraftSaveTimers[25], undefined);
+  assert.equal(assignment.state, "submitted");
+  assert.deepEqual(apiCalls.map((call) => call.url), ["/api/assignments/25/submissions"]);
+  assert.equal(locationAssignments.length, 1);
 });
 
 test("server-synced uploaded assets rehydrate after refresh without duplicating local unsynced files", () => {
