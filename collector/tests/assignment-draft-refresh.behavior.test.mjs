@@ -124,6 +124,12 @@ const normalizeAssignmentSubmissionPayload = loadNamedFunction(appJs, "normalize
   normalizeAssignmentSubmissionFieldPayload,
 });
 const isAssignmentSubmissionDraftEditableState = loadNamedFunction(appJs, "isAssignmentSubmissionDraftEditableState");
+const getAssignmentCurrentRound = loadNamedFunction(appJs, "getAssignmentCurrentRound");
+const getAssignmentRequestedCheckDraftRound = loadNamedFunction(appJs, "getAssignmentRequestedCheckDraftRound", {
+  state: { assignments: { requestedCheckReturnDraftRounds: {} } },
+  getAssignmentCurrentRound,
+  getAssignmentById: () => null,
+});
 const getAssignmentSubmissionDraftKey = loadNamedFunction(appJs, "getAssignmentSubmissionDraftKey", {
   getAssignmentCurrentRound: () => 1,
 });
@@ -139,7 +145,11 @@ const getAssignmentRequestedCheckReturnRows = loadNamedFunction(appJs, "getAssig
 const hasUsableAssignmentRequestedCheckReturnRows = loadNamedFunction(appJs, "hasUsableAssignmentRequestedCheckReturnRows", {
   getAssignmentRequestedCheckReturnRows,
 });
-const setAssignmentRequestedCheckReturnDraftStateFactory = (state) => loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", { state });
+const setAssignmentRequestedCheckReturnDraftStateFactory = (state) => loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
+  state,
+  getAssignmentCurrentRound,
+  getAssignmentById: (id) => ({ id, state: "assigned", revision_round: 0 }),
+});
 const cloneAssignmentRequestedCheckValue = loadNamedFunction(appJs, "cloneAssignmentRequestedCheckValue");
 const isAssignmentRequestedCheckTaxonomyBooleanRow = loadNamedFunction(appJs, "isAssignmentRequestedCheckTaxonomyBooleanRow");
 const getAssignmentRequestedCheckDefaultValue = loadNamedFunction(appJs, "getAssignmentRequestedCheckDefaultValue");
@@ -185,6 +195,9 @@ function createRenderHarness(state, assignment, handoffPackage) {
   const getAssignmentRequestedCheckGroupsFromHandoffPackage = (pkg) => Array.isArray(pkg?.requested_check_groups) ? pkg.requested_check_groups : [];
   const getAssignmentRequestedCheckReturnDraftPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
     state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentCurrentRound,
+    getAssignmentRequestedCheckDraftRound: (assignmentId, assignmentArg = null) => Number(state.assignments.requestedCheckReturnDraftRounds?.[assignmentId] || getAssignmentCurrentRound(assignmentArg) || 0) || 0,
     getLatestAssignmentSubmissionRow: (currentAssignment) => state.assignments.latestSubmissionRows?.[Number(currentAssignment?.id || 0)] || null,
     getAssignmentSubmissionDraftKey,
     normalizeAssignmentRequestedCheckReturnDraft,
@@ -298,6 +311,7 @@ function createAssignmentState() {
 test("server draft text and requested checks restore after refresh bootstrap", async () => {
   const state = createAssignmentState();
   const assignment = { id: 25, state: "assigned", revision_round: 0, content_item_id: 501 };
+  state.assignments.selectedId = assignment.id;
   const handoffPackage = {
     requested_check_groups: [
       {
@@ -314,6 +328,9 @@ test("server draft text and requested checks restore after refresh bootstrap", a
   const renderCalls = [];
   const getRequestedCheckPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
     state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentCurrentRound,
+    getAssignmentRequestedCheckDraftRound: () => 1,
     getLatestAssignmentSubmissionRow: (currentAssignment) => state.assignments.latestSubmissionRows?.[Number(currentAssignment?.id || 0)] || null,
     getAssignmentSubmissionDraftKey,
     normalizeAssignmentRequestedCheckReturnDraft,
@@ -553,6 +570,9 @@ test("revision 2 reload preserves latest saved draft text and explicit CTA false
   });
   const getRequestedCheckPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
     state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentCurrentRound,
+    getAssignmentRequestedCheckDraftRound: () => 2,
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[25],
     getAssignmentSubmissionDraftKey: () => "25:2",
     normalizeAssignmentRequestedCheckReturnDraft,
@@ -599,6 +619,7 @@ test("submit success cancels pending server draft autosave and flips local state
     window: windowStub,
     URLSearchParams,
     isEditorUser: () => false,
+    isAssignmentSubmissionDraftEditableState,
     ensureSelectedAssignmentId: () => 25,
     getAssignmentById: () => assignment,
     getAssignmentSubmissionFormConfig: () => ({ captureItems: [] }),
@@ -608,6 +629,8 @@ test("submit success cancels pending server draft autosave and flips local state
     writeAssignmentSubmissionDraft: (_assignmentId, _payload) => {
       timeoutCalls.push("writeDraft");
     },
+    buildAssignmentSubmissionServerDraftPayload: (articlePayload, fieldReturnPayload) => ({ article_payload_json: articlePayload, field_return_payload_json: fieldReturnPayload }),
+    persistAssignmentSubmissionFailureDraft: async () => null,
     clearServerDraftSaveTimer: (assignmentId) => {
       timeoutCalls.push(`clear:${assignmentId}`);
       const timerId = state.assignments.serverSubmissionDraftSaveTimers[assignmentId];
@@ -654,6 +677,155 @@ test("submit success cancels pending server draft autosave and flips local state
   assert.equal(assignment.state, "submitted");
   assert.deepEqual(apiCalls.map((call) => call.url), ["/api/assignments/25/submissions"]);
   assert.equal(locationAssignments.length, 1);
+});
+
+test("submit gate failure persists latest article and requested-check draft back to server while assignment stays editable", async () => {
+  const state = createAssignmentState();
+  state.assignments.selectedId = 25;
+  state.assignments.handoffSourceSnapshotIds = { 25: 77 };
+  state.assignments.serverSubmissionDraftSaveTimers = { 25: 654 };
+  const assignment = { id: 25, state: "assigned", revision_round: 0, content_item_id: 501 };
+  const persistedPayloads = [];
+  const clearCalls = [];
+  const createSubmission = loadNamedFunction(appJs, "createAssignmentSubmission", {
+    state,
+    window: {
+      clearTimeout() {},
+      location: { pathname: "/collector", search: "", assign() {} },
+    },
+    URLSearchParams,
+    isEditorUser: () => false,
+    isAssignmentSubmissionDraftEditableState,
+    ensureSelectedAssignmentId: () => 25,
+    getAssignmentById: () => assignment,
+    getAssignmentSubmissionFormConfig: () => ({ captureItems: [] }),
+    buildAssignmentSubmissionArticlePayload: () => ({
+      verified_answers: [{ prompt: "Verify", answer: "draft verify" }],
+      capture_answers: [],
+      question_answers: [],
+      additional_text: "draft article",
+    }),
+    syncAssignmentRequestedCheckReturnDraftFromForm: () => ({
+      requested_check_returns: {
+        "cta_contact.phone": { checked: false, value: "0800000000", answer_type: "text" },
+        "taxonomy.pet_friendly": { checked: false, value: false, answer_type: "boolean" },
+      },
+    }),
+    buildAssignmentRequestedCheckReturnPayloadFromDraft: (draft) => draft,
+    buildAssignmentSubmissionServerDraftPayload: (articlePayload, fieldReturnPayload) => ({ article_payload_json: articlePayload, field_return_payload_json: fieldReturnPayload }),
+    writeAssignmentSubmissionDraft: () => {},
+    clearServerDraftSaveTimer: (assignmentId) => {
+      clearCalls.push(assignmentId);
+      delete state.assignments.serverSubmissionDraftSaveTimers[assignmentId];
+    },
+    persistAssignmentSubmissionFailureDraft: async (_assignmentId, _assignment, payload) => {
+      persistedPayloads.push(JSON.parse(JSON.stringify(payload)));
+    },
+    assertAssignmentCaptureUploadsComplete: () => {},
+    buildAssignmentCaptureFileUploadQueue: () => [],
+    buildAssignmentSubmissionGateState: () => ({ canSubmit: false, blockingReasons: ["gate fail"], serverSynced: { assets: [] }, composed: { assets: [], payloadAssets: [], syncKey: "sync-key" } }),
+    renderAssignmentSubmissionGatePanel: () => {},
+    focusFirstAssignmentSubmissionGateIssue: () => {},
+    composeAssignmentSubmissionEffectiveAssets: () => ({ assets: [], payloadAssets: [], syncKey: "sync-key" }),
+    getAssignmentCaptureSyncKey: () => "sync-key",
+    mergeAssignmentSubmissionMediaAssets: () => [],
+    buildAssignmentSubmissionMediaPayload: () => null,
+    api: async () => {
+      throw new Error("submission API should not be called when gate fails");
+    },
+    qs: () => null,
+    createAssignmentSubmissionDeliverablesForUploads: async () => {},
+    clearAssignmentSubmissionDraft: () => {},
+    deleteAssignmentSubmissionServerDraft: async () => {},
+    setLatestUploadedAssetsForSyncKey: () => {},
+    setStatus: () => {},
+    refreshAssignments: async () => {},
+    loadAssignmentDeliverablesBundle: async () => {},
+    loadAssignmentAssets: async () => {},
+    clearAssignmentCaptureUploads: () => {},
+    renderAssignmentSubmissionFileList: () => {},
+    canPatchAssignmentState: () => false,
+  });
+
+  await assert.rejects(() => createSubmission(), /gate fail/);
+  assert.deepEqual(clearCalls, [25]);
+  assert.equal(persistedPayloads.length, 1);
+  assert.equal(persistedPayloads[0].article_payload_json.additional_text, "draft article");
+  assert.equal(persistedPayloads[0].field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, false);
+  assert.equal(persistedPayloads[0].field_return_payload_json.requested_check_returns["taxonomy.pet_friendly"].value, false);
+  assert.equal(assignment.state, "assigned");
+});
+
+test("submit POST failure persists latest requested-check false values back to server while assignment stays editable", async () => {
+  const state = createAssignmentState();
+  state.assignments.selectedId = 25;
+  state.assignments.handoffSourceSnapshotIds = { 25: 77 };
+  const assignment = { id: 25, state: "revision_requested", revision_round: 1, content_item_id: 501 };
+  const persistedPayloads = [];
+  const createSubmission = loadNamedFunction(appJs, "createAssignmentSubmission", {
+    state,
+    window: {
+      clearTimeout() {},
+      location: { pathname: "/collector", search: "", assign() {} },
+    },
+    URLSearchParams,
+    isEditorUser: () => false,
+    isAssignmentSubmissionDraftEditableState,
+    ensureSelectedAssignmentId: () => 25,
+    getAssignmentById: () => assignment,
+    getAssignmentSubmissionFormConfig: () => ({ captureItems: [] }),
+    buildAssignmentSubmissionArticlePayload: () => ({
+      verified_answers: [],
+      capture_answers: [],
+      question_answers: [],
+      additional_text: "revision draft",
+    }),
+    syncAssignmentRequestedCheckReturnDraftFromForm: () => ({
+      requested_check_returns: {
+        "cta_contact.phone": { checked: false, value: "0811111111", answer_type: "text" },
+        "taxonomy.pet_friendly": { checked: false, value: false, answer_type: "boolean" },
+      },
+    }),
+    buildAssignmentRequestedCheckReturnPayloadFromDraft: (draft) => draft,
+    buildAssignmentSubmissionServerDraftPayload: (articlePayload, fieldReturnPayload) => ({ article_payload_json: articlePayload, field_return_payload_json: fieldReturnPayload }),
+    writeAssignmentSubmissionDraft: () => {},
+    clearServerDraftSaveTimer: () => {},
+    persistAssignmentSubmissionFailureDraft: async (_assignmentId, _assignment, payload) => {
+      persistedPayloads.push(JSON.parse(JSON.stringify(payload)));
+    },
+    assertAssignmentCaptureUploadsComplete: () => {},
+    buildAssignmentCaptureFileUploadQueue: () => [],
+    buildAssignmentSubmissionGateState: () => ({ canSubmit: true, blockingReasons: [], serverSynced: { assets: [] }, composed: { assets: [], payloadAssets: [], syncKey: "sync-key" } }),
+    renderAssignmentSubmissionGatePanel: () => {},
+    focusFirstAssignmentSubmissionGateIssue: () => {},
+    composeAssignmentSubmissionEffectiveAssets: () => ({ assets: [], payloadAssets: [], syncKey: "sync-key" }),
+    getAssignmentCaptureSyncKey: () => "sync-key",
+    mergeAssignmentSubmissionMediaAssets: () => [],
+    buildAssignmentSubmissionMediaPayload: () => null,
+    api: async (url) => {
+      if (url === "/api/assignments/25/submissions") throw new Error("network fail");
+      return { ok: true };
+    },
+    qs: () => null,
+    createAssignmentSubmissionDeliverablesForUploads: async () => {},
+    clearAssignmentSubmissionDraft: () => {},
+    deleteAssignmentSubmissionServerDraft: async () => {},
+    setLatestUploadedAssetsForSyncKey: () => {},
+    setStatus: () => {},
+    refreshAssignments: async () => {},
+    loadAssignmentDeliverablesBundle: async () => {},
+    loadAssignmentAssets: async () => {},
+    clearAssignmentCaptureUploads: () => {},
+    renderAssignmentSubmissionFileList: () => {},
+    canPatchAssignmentState: () => false,
+  });
+
+  await assert.rejects(() => createSubmission(), /network fail/);
+  assert.equal(persistedPayloads.length, 1);
+  assert.equal(persistedPayloads[0].field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, false);
+  assert.equal(persistedPayloads[0].field_return_payload_json.requested_check_returns["taxonomy.pet_friendly"].checked, false);
+  assert.equal(persistedPayloads[0].field_return_payload_json.requested_check_returns["taxonomy.pet_friendly"].value, false);
+  assert.equal(assignment.state, "revision_requested");
 });
 
 test("server-synced uploaded assets rehydrate after refresh without duplicating local unsynced files", () => {

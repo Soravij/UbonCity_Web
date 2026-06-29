@@ -67,6 +67,7 @@ function escapeHtml(value) {
 }
 
 const isAssignmentSubmissionDraftEditableState = loadNamedFunction(appJs, "isAssignmentSubmissionDraftEditableState");
+const getAssignmentCurrentRound = loadNamedFunction(appJs, "getAssignmentCurrentRound");
 
 function createMockDomNode(initial = {}) {
   const classSet = new Set();
@@ -203,6 +204,9 @@ function createRequestedCheckRenderHarness(state) {
       normalizeAssignmentRequestedCheckReturnDraft,
       getAssignmentRequestedCheckReturnDraftPrefill: loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
         state,
+        isAssignmentSubmissionDraftEditableState,
+        getAssignmentCurrentRound,
+        getAssignmentRequestedCheckDraftRound: () => 1,
         getLatestAssignmentSubmissionRow: () => null,
         getAssignmentSubmissionDraftKey: () => "12:1",
         normalizeAssignmentRequestedCheckReturnDraft,
@@ -222,6 +226,9 @@ function createRequestedCheckRenderHarness(state) {
         getAssignmentRequestedCheckGroupsFromHandoffPackage,
         getAssignmentRequestedCheckReturnDraftPrefill: loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
           state,
+          isAssignmentSubmissionDraftEditableState,
+          getAssignmentCurrentRound,
+          getAssignmentRequestedCheckDraftRound: () => 1,
           getLatestAssignmentSubmissionRow: () => null,
           getAssignmentSubmissionDraftKey: () => "12:1",
           normalizeAssignmentRequestedCheckReturnDraft,
@@ -231,6 +238,8 @@ function createRequestedCheckRenderHarness(state) {
         buildAssignmentRequestedCheckReturnSectionHtml,
         setAssignmentRequestedCheckReturnDraftState: loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
           state,
+          getAssignmentCurrentRound,
+          getAssignmentById: () => ({ id: 12, state: "assigned", revision_round: 0 }),
         }),
         hasUsableAssignmentRequestedCheckReturnRows,
         updateAssignmentRequestedCheckReturnRowState: () => {},
@@ -350,6 +359,8 @@ const hasUsableAssignmentRequestedCheckReturnRows = loadNamedFunction(appJs, "ha
 });
 const setAssignmentRequestedCheckReturnDraftState = loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
   state: { assignments: {} },
+  getAssignmentCurrentRound,
+  getAssignmentById: () => ({ id: 0, state: "assigned", revision_round: 0 }),
 });
 const buildAssignmentRequestedCheckReturnSubmissionRow = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnSubmissionRow", {
   isAssignmentRequestedCheckTaxonomyBooleanRow,
@@ -1175,6 +1186,9 @@ test("requested-check draft prefill ignores empty current draft objects and fall
   const assignment = { id: 12 };
   const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
     state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentCurrentRound,
+    getAssignmentRequestedCheckDraftRound: () => 1,
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentRequestedCheckReturnDraft,
@@ -1240,13 +1254,16 @@ test("requested-check draft prefill prefers current local draft over server draf
   };
   const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
     state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentCurrentRound,
+    getAssignmentRequestedCheckDraftRound: () => 1,
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentRequestedCheckReturnDraft,
     hasUsableAssignmentRequestedCheckReturnRows,
   });
 
-  const draft = loadPrefill({ id: 12 }, handoffPackage);
+  const draft = loadPrefill({ id: 12, state: "assigned", revision_round: 0, content_item_id: 501 }, handoffPackage);
   assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0999999999");
   assert.equal(draft.requested_check_returns["cta_contact.phone"].evidence, "local edit");
 });
@@ -1295,13 +1312,16 @@ test("requested-check draft prefill prefers current revision server draft over l
   };
   const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
     state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentCurrentRound,
+    getAssignmentRequestedCheckDraftRound: () => 1,
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentRequestedCheckReturnDraft,
     hasUsableAssignmentRequestedCheckReturnRows,
   });
 
-  const draft = loadPrefill({ id: 12 }, handoffPackage);
+  const draft = loadPrefill({ id: 12, state: "assigned", revision_round: 0, content_item_id: 501 }, handoffPackage);
   assert.equal(draft.requested_check_returns["taxonomy.parking"].value, false);
 });
 
@@ -1344,13 +1364,16 @@ test("requested-check draft prefill lets usable server draft beat non-dirty sche
   };
   const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
     state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentCurrentRound,
+    getAssignmentRequestedCheckDraftRound: () => 1,
     getLatestAssignmentSubmissionRow: () => null,
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentRequestedCheckReturnDraft,
     hasUsableAssignmentRequestedCheckReturnRows,
   });
 
-  const draft = loadPrefill({ id: 12 }, handoffPackage);
+  const draft = loadPrefill({ id: 12, state: "assigned", revision_round: 0, content_item_id: 501 }, handoffPackage);
   assert.equal(draft.requested_check_returns["taxonomy.parking"].value, true);
   assert.equal(draft.requested_check_returns["taxonomy.parking"].checked, true);
 });
@@ -1401,6 +1424,9 @@ test("requested-check draft prefill lets latest submission beat empty server ret
   };
   const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
     state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentCurrentRound,
+    getAssignmentRequestedCheckDraftRound: () => 1,
     getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentRequestedCheckReturnDraft,
@@ -2199,6 +2225,8 @@ test("requested-check empty loaded state hides the requested-check surface throu
   };
   const assignment = {
     id: 12,
+    state: "assigned",
+    revision_round: 0,
     content_item_id: 27,
     brief_json: { title: "Brief" },
   };
@@ -2225,6 +2253,9 @@ test("requested-check empty loaded state hides the requested-check surface throu
         getAssignmentRequestedCheckGroupsFromHandoffPackage,
         getAssignmentRequestedCheckReturnDraftPrefill: loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
           state,
+          isAssignmentSubmissionDraftEditableState,
+          getAssignmentCurrentRound,
+          getAssignmentRequestedCheckDraftRound: () => 1,
           getLatestAssignmentSubmissionRow: () => null,
           getAssignmentSubmissionDraftKey: () => "12:1",
           normalizeAssignmentRequestedCheckReturnDraft,
@@ -2234,6 +2265,8 @@ test("requested-check empty loaded state hides the requested-check surface throu
         buildAssignmentRequestedCheckReturnSectionHtml,
         setAssignmentRequestedCheckReturnDraftState: loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
           state,
+          getAssignmentCurrentRound,
+          getAssignmentById: () => ({ id: assignmentId, state: "assigned", revision_round: 0 }),
         }),
         hasUsableAssignmentRequestedCheckReturnRows,
         updateAssignmentRequestedCheckReturnRowState: () => {},
@@ -2607,6 +2640,8 @@ test("requested-check submission form render path outputs CTA before Curation an
   };
   const assignment = {
     id: 12,
+    state: "assigned",
+    revision_round: 0,
     content_item_id: 27,
     brief_json: { title: "Brief" },
   };
@@ -3180,6 +3215,8 @@ test("loadAssignmentSubmissionServerDraft rerenders requested-check surface afte
     normalizeAssignmentRequestedCheckReturnDraft,
     setAssignmentRequestedCheckReturnDraftState: loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
       state,
+      getAssignmentCurrentRound,
+      getAssignmentById: (id) => ({ id, state: "assigned", revision_round: 0 }),
     }),
     getAssignmentById: (id) => ({ id }),
     renderAssignmentSubmissionForm: () => {},
@@ -3194,6 +3231,109 @@ test("loadAssignmentSubmissionServerDraft rerenders requested-check surface afte
   assert.equal(calls.length, 1);
   assert.equal(calls[0].assignmentId, 12);
   assert.equal(calls[0].draft?.requested_check_returns?.["taxonomy.parking"]?.value, true);
+});
+
+test("requested-check prefill ignores local and server draft caches in non-editable states", () => {
+  const state = {
+    assignments: {
+      selectedId: 12,
+      requestedCheckReturnDrafts: {
+        12: {
+          requested_check_returns: {
+            "cta_contact.phone": { checked: false, value: "local-stale" },
+          },
+        },
+      },
+      requestedCheckReturnDraftDirty: {
+        12: true,
+      },
+      requestedCheckReturnDraftSources: {
+        12: "user_edit",
+      },
+      serverSubmissionDraftPayloads: {
+        "12:1": {
+          field_return_payload_json: {
+            requested_check_returns: {
+              "cta_contact.phone": { checked: false, value: "server-stale" },
+            },
+          },
+        },
+      },
+      latestSubmissionRows: {
+        12: {
+          field_return_payload_json: {
+            requested_check_returns: {
+              "cta_contact.phone": { checked: true, value: "immutable-latest" },
+            },
+          },
+        },
+      },
+    },
+  };
+  const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
+    state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentCurrentRound,
+    getAssignmentRequestedCheckDraftRound: () => 1,
+    getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
+    getAssignmentSubmissionDraftKey: () => "12:1",
+    normalizeAssignmentRequestedCheckReturnDraft,
+    hasUsableAssignmentRequestedCheckReturnRows,
+  });
+
+  const prefill = loadPrefill({ id: 12, state: "submitted", revision_round: 0 }, null);
+
+  assert.equal(prefill.requested_check_returns["cta_contact.phone"].checked, true);
+  assert.equal(prefill.requested_check_returns["cta_contact.phone"].value, "immutable-latest");
+});
+
+test("requested-check prefill ignores dirty local draft from previous revision round", () => {
+  const state = {
+    assignments: {
+      selectedId: 12,
+      requestedCheckReturnDrafts: {
+        12: {
+          requested_check_returns: {
+            "taxonomy.pet_friendly": { checked: true, value: true },
+          },
+        },
+      },
+      requestedCheckReturnDraftDirty: {
+        12: true,
+      },
+      requestedCheckReturnDraftSources: {
+        12: "user_edit",
+      },
+      requestedCheckReturnDraftRounds: {
+        12: 1,
+      },
+      latestSubmissionRows: {
+        12: {
+          field_return_payload_json: {
+            requested_check_returns: {
+              "taxonomy.pet_friendly": { checked: false, value: false },
+            },
+          },
+        },
+      },
+      serverSubmissionDraftPayloads: {},
+    },
+  };
+  const loadPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
+    state,
+    isAssignmentSubmissionDraftEditableState,
+    getAssignmentCurrentRound,
+    getAssignmentRequestedCheckDraftRound: (assignmentId, assignmentArg = null) => Number(state.assignments.requestedCheckReturnDraftRounds?.[assignmentId] || getAssignmentCurrentRound(assignmentArg) || 0) || 0,
+    getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[12],
+    getAssignmentSubmissionDraftKey: () => "12:2",
+    normalizeAssignmentRequestedCheckReturnDraft,
+    hasUsableAssignmentRequestedCheckReturnRows,
+  });
+
+  const prefill = loadPrefill({ id: 12, state: "revision_requested", revision_round: 1 }, null);
+
+  assert.equal(prefill.requested_check_returns["taxonomy.pet_friendly"].checked, false);
+  assert.equal(prefill.requested_check_returns["taxonomy.pet_friendly"].value, false);
 });
 
 // Repository final-submission validator tests

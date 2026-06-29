@@ -3308,6 +3308,58 @@ test("assignment submission draft save is rejected in non-editable workflow stat
   }
 });
 
+test("assignment submission draft rejects old and future round writes in non-editable states and never returns non-editable drafts for any round", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Draft All Round Reject");
+    const assignee = ctx.createUser("draft-all-round-reject");
+    ctx.createReadinessBrief(item.id, "draft-all-round-reject");
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const currentRound = Number(assignmentResult.assignment.revision_round || 0) + 1;
+
+    ctx.repo.upsertAssignmentSubmissionDraft({
+      assignment_id: assignmentId,
+      user_id: assignee.id,
+      revision_round: currentRound,
+      article_payload_json: { additional_text: "saved while editable" },
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
+    ctx.repo.updateAssignmentState(assignmentId, "closed", "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "test_transition",
+    });
+
+    for (const revisionRound of [currentRound - 1, currentRound, currentRound + 2]) {
+      assert.throws(
+        () => ctx.repo.upsertAssignmentSubmissionDraft({
+          assignment_id: assignmentId,
+          user_id: assignee.id,
+          revision_round: revisionRound,
+          article_payload_json: { additional_text: `blocked-round-${revisionRound}` },
+          expires_at: "2099-01-02T00:00:00.000Z",
+        }),
+        /draft is not editable/i
+      );
+      assert.equal(
+        ctx.repo.getAssignmentSubmissionDraft(assignmentId, assignee.id, {
+          revision_round: revisionRound,
+          now: "2098-01-01T00:00:00.000Z",
+        }),
+        null
+      );
+    }
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("listAssignmentRoundAssetsByType preserves assignment slot metadata for assignment-work validation", () => {
   const ctx = createTestContext();
   try {

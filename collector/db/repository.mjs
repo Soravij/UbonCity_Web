@@ -6982,8 +6982,7 @@ function createAssignmentSubmissionDraftStateError(state) {
     const assignment = normalizeAssignmentRow(getAssignmentByIdStmt.get(assignmentId));
     if (!assignment) throw new Error("assignment not found");
     const revisionRound = Math.max(1, Number(payload.revision_round || assignment.revision_round + 1 || 1) || 1);
-    const currentRevisionRound = Math.max(1, Number(assignment.revision_round || 0) + 1 || 1);
-    if (revisionRound === currentRevisionRound && !isAssignmentSubmissionDraftEditableState(assignment.state)) {
+    if (!isAssignmentSubmissionDraftEditableState(assignment.state)) {
       throw createAssignmentSubmissionDraftStateError(assignment.state);
     }
     const contentItemId = Number(assignment.content_item_id || 0) || 0;
@@ -7026,8 +7025,7 @@ function createAssignmentSubmissionDraftStateError(state) {
     const assignment = normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
     if (!assignment) return null;
     const revisionRound = Math.max(1, Number(options.revision_round || assignment.revision_round + 1 || 1) || 1);
-    const currentRevisionRound = Math.max(1, Number(assignment.revision_round || 0) + 1 || 1);
-    if (revisionRound === currentRevisionRound && !isAssignmentSubmissionDraftEditableState(assignment.state)) {
+    if (!isAssignmentSubmissionDraftEditableState(assignment.state)) {
       return null;
     }
     const row = normalizeAssignmentSubmissionDraftRow(getAssignmentSubmissionDraftStmt.get(id, actorId, revisionRound));

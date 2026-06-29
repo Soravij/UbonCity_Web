@@ -227,6 +227,7 @@ const state = {
     requestedCheckReturnDrafts: {},
     requestedCheckReturnDraftDirty: {},
     requestedCheckReturnDraftSources: {},
+    requestedCheckReturnDraftRounds: {},
     latestUploadedAssets: [],
     latestUploadedAssetsKey: "",
     syncedUploadAssetsByKey: {},
@@ -1132,6 +1133,23 @@ function isAssignmentSubmissionDraftEditableState(state) {
   return normalized === "assigned" || normalized === "in_progress" || normalized === "revision_requested";
 }
 
+function buildAssignmentSubmissionServerDraftPayload(articlePayload, fieldReturnPayload, assignment = null) {
+  const payload = {
+    article_payload_json: normalizeAssignmentSubmissionPayload(articlePayload, assignment, state.assignments.contextFieldPack),
+  };
+  if (fieldReturnPayload && typeof fieldReturnPayload === "object") {
+    payload.field_return_payload_json = fieldReturnPayload;
+  }
+  return payload;
+}
+
+async function persistAssignmentSubmissionFailureDraft(assignmentId, assignment, payload) {
+  if (!isAssignmentSubmissionDraftEditableState(assignment?.state || getAssignmentById(assignmentId)?.state)) {
+    return null;
+  }
+  return saveAssignmentSubmissionServerDraft(assignmentId, payload);
+}
+
 function readAssignmentSubmissionDraft(assignmentId, assignment = null, fieldPack = null) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return null;
@@ -1197,6 +1215,9 @@ function clearAssignmentSubmissionDraft(assignmentId) {
   }
   if (state.assignments.requestedCheckReturnDraftSources && typeof state.assignments.requestedCheckReturnDraftSources === "object") {
     delete state.assignments.requestedCheckReturnDraftSources[id];
+  }
+  if (state.assignments.requestedCheckReturnDraftRounds && typeof state.assignments.requestedCheckReturnDraftRounds === "object") {
+    delete state.assignments.requestedCheckReturnDraftRounds[id];
   }
 }
 
@@ -1394,6 +1415,14 @@ function getLatestAssignmentSubmissionRow(assignment = null) {
   return state.assignments.latestSubmissionRows?.[assignmentId] || null;
 }
 
+function getAssignmentRequestedCheckDraftRound(assignmentId, assignment = null) {
+  const id = Number(assignmentId || 0) || 0;
+  if (!id) return 0;
+  const explicitRound = Number(state.assignments.requestedCheckReturnDraftRounds?.[id] || 0) || 0;
+  if (explicitRound > 0) return explicitRound;
+  return Math.max(1, Number(getAssignmentCurrentRound(assignment || getAssignmentById(id)) || 1) || 1);
+}
+
 function getAssignmentRequestedCheckReturnRows(value = null) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const rows = value?.requested_check_returns;
@@ -1418,6 +1447,9 @@ function setAssignmentRequestedCheckReturnDraftState(assignmentId, draft = null,
   if (!state.assignments.requestedCheckReturnDraftSources || typeof state.assignments.requestedCheckReturnDraftSources !== "object") {
     state.assignments.requestedCheckReturnDraftSources = {};
   }
+  if (!state.assignments.requestedCheckReturnDraftRounds || typeof state.assignments.requestedCheckReturnDraftRounds !== "object") {
+    state.assignments.requestedCheckReturnDraftRounds = {};
+  }
   if (draft) {
     state.assignments.requestedCheckReturnDrafts[id] = draft;
   } else {
@@ -1429,6 +1461,10 @@ function setAssignmentRequestedCheckReturnDraftState(assignmentId, draft = null,
   if (Object.prototype.hasOwnProperty.call(options, "source")) {
     state.assignments.requestedCheckReturnDraftSources[id] = options.source == null ? null : String(options.source || "").trim() || null;
   }
+  state.assignments.requestedCheckReturnDraftRounds[id] = Math.max(
+    1,
+    Number(options.round || getAssignmentCurrentRound(getAssignmentById(id)) || 1) || 1
+  );
   return draft;
 }
 
@@ -8101,10 +8137,22 @@ function normalizeAssignmentRequestedCheckReturnDraft(draft = null, handoffPacka
 function getAssignmentRequestedCheckReturnDraftPrefill(assignment = null, handoffPackage = null) {
   const assignmentId = Number(assignment?.id || state.assignments.selectedId || 0) || 0;
   if (!assignmentId) return null;
+  const assignmentState = String(assignment?.state || "").trim().toLowerCase();
+  const currentRound = Math.max(1, Number(getAssignmentCurrentRound(assignment) || 1) || 1);
   const existingDraft = state.assignments.requestedCheckReturnDrafts?.[assignmentId] || null;
   const existingSource = state.assignments.requestedCheckReturnDraftSources?.[assignmentId] || null;
   const existingDirty = state.assignments.requestedCheckReturnDraftDirty?.[assignmentId] === true;
-  if (existingDirty && hasUsableAssignmentRequestedCheckReturnRows(existingDraft)) {
+  const existingDraftMatchesRound = getAssignmentRequestedCheckDraftRound(assignmentId, assignment) === currentRound;
+  const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
+  const latestPayload = latestSubmission?.field_return_payload_json || null;
+  const latestReturns = latestPayload?.requested_check_returns;
+  if (!isAssignmentSubmissionDraftEditableState(assignmentState)) {
+    if (hasUsableAssignmentRequestedCheckReturnRows(latestPayload)) {
+      return normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: latestReturns }, handoffPackage);
+    }
+    return normalizeAssignmentRequestedCheckReturnDraft(null, handoffPackage);
+  }
+  if (existingDraftMatchesRound && existingDirty && hasUsableAssignmentRequestedCheckReturnRows(existingDraft)) {
     return normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackage);
   }
   const draftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
@@ -8113,13 +8161,10 @@ function getAssignmentRequestedCheckReturnDraftPrefill(assignment = null, handof
   if (hasUsableAssignmentRequestedCheckReturnRows(serverDraftPayload)) {
     return normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: serverDraftReturns }, handoffPackage);
   }
-  const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
-  const latestPayload = latestSubmission?.field_return_payload_json || null;
-  const latestReturns = latestPayload?.requested_check_returns;
   if (hasUsableAssignmentRequestedCheckReturnRows(latestPayload)) {
     return normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: latestReturns }, handoffPackage);
   }
-  if (hasUsableAssignmentRequestedCheckReturnRows(existingDraft) && existingSource) {
+  if (existingDraftMatchesRound && hasUsableAssignmentRequestedCheckReturnRows(existingDraft) && existingSource) {
     return normalizeAssignmentRequestedCheckReturnDraft(existingDraft, handoffPackage);
   }
   return normalizeAssignmentRequestedCheckReturnDraft(null, handoffPackage);
@@ -10161,85 +10206,98 @@ async function createAssignmentSubmission() {
   const assignmentState = String(assignment?.state || "").trim().toLowerCase();
   const action = assignmentState === "revision_requested" ? "resubmit" : "submit";
   const body = { action };
-  const articlePayload = buildAssignmentSubmissionArticlePayload();
-  const requestedCheckReturnPayload = buildAssignmentRequestedCheckReturnPayloadFromDraft(
-    syncAssignmentRequestedCheckReturnDraftFromForm(assignmentId)
-  );
-  const sourceHandoffSnapshotId = Number(state.assignments.handoffSourceSnapshotIds?.[assignmentId] || 0) || 0;
-  if (!sourceHandoffSnapshotId) {
-    throw new Error("ไม่พบ handoff snapshot ที่ใช้เปิดฟอร์มนี้ กรุณาโหลด assignment ใหม่ก่อนส่งงาน");
-  }
-  writeAssignmentSubmissionDraft(assignmentId, articlePayload, assignment, { persistServer: false });
-  clearServerDraftSaveTimer(assignmentId);
-  body.article_payload_json = articlePayload;
-  body.source_handoff_snapshot_id = sourceHandoffSnapshotId;
-  if (requestedCheckReturnPayload) {
-    body.field_return_payload_json = requestedCheckReturnPayload;
-  }
+  let articlePayload = null;
+  let requestedCheckReturnPayload = null;
+  try {
+    articlePayload = buildAssignmentSubmissionArticlePayload();
+    requestedCheckReturnPayload = buildAssignmentRequestedCheckReturnPayloadFromDraft(
+      syncAssignmentRequestedCheckReturnDraftFromForm(assignmentId)
+    );
+    const sourceHandoffSnapshotId = Number(state.assignments.handoffSourceSnapshotIds?.[assignmentId] || 0) || 0;
+    if (!sourceHandoffSnapshotId) {
+      throw new Error("ไม่พบ handoff snapshot ที่ใช้เปิดฟอร์มนี้ กรุณาโหลด assignment ใหม่ก่อนส่งงาน");
+    }
+    writeAssignmentSubmissionDraft(assignmentId, articlePayload, assignment, { persistServer: false });
+    clearServerDraftSaveTimer(assignmentId);
+    body.article_payload_json = articlePayload;
+    body.source_handoff_snapshot_id = sourceHandoffSnapshotId;
+    if (requestedCheckReturnPayload) {
+      body.field_return_payload_json = requestedCheckReturnPayload;
+    }
 
-  assertAssignmentCaptureUploadsComplete(assignmentId, formConfig.captureItems);
-  const uploadQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
-  const gateState = buildAssignmentSubmissionGateState(assignmentId, formConfig, {
-    articlePayload,
-    uploadQueue,
-  });
-  renderAssignmentSubmissionGatePanel(gateState);
-  if (!gateState.canSubmit) {
-    focusFirstAssignmentSubmissionGateIssue(gateState);
-    throw new Error(String(gateState.blockingReasons[0] || "ยังส่งงานไม่ได้"));
-  }
-  const composed = gateState.composed || composeAssignmentSubmissionEffectiveAssets(assignmentId, formConfig.captureItems, { uploadQueue, strict: true });
-  const syncKey = String(composed?.syncKey || getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems));
-  const uploadedAssets = Array.isArray(composed?.payloadAssets) ? composed.payloadAssets : [];
-  const serverSyncedAssets = Array.isArray(gateState?.serverSynced?.assets) ? gateState.serverSynced.assets : [];
-  const submissionMediaAssets = Array.isArray(composed?.assets) && composed.assets.length
-    ? composed.assets
-    : mergeAssignmentSubmissionMediaAssets(uploadedAssets, serverSyncedAssets);
+    assertAssignmentCaptureUploadsComplete(assignmentId, formConfig.captureItems);
+    const uploadQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
+    const gateState = buildAssignmentSubmissionGateState(assignmentId, formConfig, {
+      articlePayload,
+      uploadQueue,
+    });
+    renderAssignmentSubmissionGatePanel(gateState);
+    if (!gateState.canSubmit) {
+      focusFirstAssignmentSubmissionGateIssue(gateState);
+      throw new Error(String(gateState.blockingReasons[0] || "ยังส่งงานไม่ได้"));
+    }
+    const composed = gateState.composed || composeAssignmentSubmissionEffectiveAssets(assignmentId, formConfig.captureItems, { uploadQueue, strict: true });
+    const syncKey = String(composed?.syncKey || getAssignmentCaptureSyncKey(assignmentId, formConfig.captureItems));
+    const uploadedAssets = Array.isArray(composed?.payloadAssets) ? composed.payloadAssets : [];
+    const serverSyncedAssets = Array.isArray(gateState?.serverSynced?.assets) ? gateState.serverSynced.assets : [];
+    const submissionMediaAssets = Array.isArray(composed?.assets) && composed.assets.length
+      ? composed.assets
+      : mergeAssignmentSubmissionMediaAssets(uploadedAssets, serverSyncedAssets);
 
-  if (submissionMediaAssets.length) {
-    body.media_payload_json = buildAssignmentSubmissionMediaPayload(submissionMediaAssets, formConfig.captureItems);
-  }
+    if (submissionMediaAssets.length) {
+      body.media_payload_json = buildAssignmentSubmissionMediaPayload(submissionMediaAssets, formConfig.captureItems);
+    }
 
-  const result = await api(`/api/assignments/${assignmentId}/submissions`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-  assignment.state = String(result?.assignment?.state || (action === "resubmit" ? "resubmitted" : "submitted")).trim().toLowerCase() || assignment.state;
-  clearServerDraftSaveTimer(assignmentId);
-  const submitButton = qs("btn-assignment-submit");
-  const syncButton = qs("btn-assignment-sync-upload");
-  if (submitButton) submitButton.disabled = true;
-  if (syncButton) syncButton.disabled = true;
-  const submissionId = Number(result?.submission?.id || 0) || 0;
-  if (submissionId > 0 && submissionMediaAssets.length) {
-    await createAssignmentSubmissionDeliverablesForUploads(assignmentId, submissionId, submissionMediaAssets).catch(() => {});
-  }
-  clearAssignmentSubmissionDraft(assignmentId);
-  await deleteAssignmentSubmissionServerDraft(assignmentId).catch(() => {});
-  state.assignments.latestSubmissionArticlePayloads[assignmentId] = articlePayload;
-  state.assignments.latestSubmissionLoaded[assignmentId] = true;
-  setLatestUploadedAssetsForSyncKey(syncKey, uploadedAssets);
-  setStatus(
-    "assignment-status",
-    uploadedAssets.length
-      ? `ส่งรอบงาน #${submissionId || "-"} กลับเข้าระบบสำเร็จ | อัปโหลด ${uploadedAssets.length} ไฟล์แล้ว`
-      : `ส่งรอบงาน #${submissionId || "-"} กลับเข้าระบบสำเร็จ`
-  );
-  await refreshAssignments({ showStatus: false, preserveSelection: true }).catch(() => {});
-  if (Number(state.assignments.selectedId || 0) === assignmentId) {
-    await loadAssignmentDeliverablesBundle({ showStatus: false }).catch(() => {});
-    await loadAssignmentAssets({ showStatus: false }).catch(() => {});
-  }
-  clearAssignmentCaptureUploads(assignmentId);
-  renderAssignmentSubmissionFileList();
-  if (canPatchAssignmentState()) {
-    const params = new URLSearchParams(window.location.search);
-    params.set("tab", "review");
-    params.set("assignment_id", String(assignmentId));
-    params.set("item_id", String(Number(assignment?.content_item_id || state.assignments.contextItemId || 0) || 0));
-    const query = params.toString();
-    window.location.assign(`${window.location.pathname}${query ? `?${query}` : ""}`);
-    return;
+    const result = await api(`/api/assignments/${assignmentId}/submissions`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    assignment.state = String(result?.assignment?.state || (action === "resubmit" ? "resubmitted" : "submitted")).trim().toLowerCase() || assignment.state;
+    clearServerDraftSaveTimer(assignmentId);
+    const submitButton = qs("btn-assignment-submit");
+    const syncButton = qs("btn-assignment-sync-upload");
+    if (submitButton) submitButton.disabled = true;
+    if (syncButton) syncButton.disabled = true;
+    const submissionId = Number(result?.submission?.id || 0) || 0;
+    if (submissionId > 0 && submissionMediaAssets.length) {
+      await createAssignmentSubmissionDeliverablesForUploads(assignmentId, submissionId, submissionMediaAssets).catch(() => {});
+    }
+    clearAssignmentSubmissionDraft(assignmentId);
+    await deleteAssignmentSubmissionServerDraft(assignmentId).catch(() => {});
+    state.assignments.latestSubmissionArticlePayloads[assignmentId] = articlePayload;
+    state.assignments.latestSubmissionLoaded[assignmentId] = true;
+    setLatestUploadedAssetsForSyncKey(syncKey, uploadedAssets);
+    setStatus(
+      "assignment-status",
+      uploadedAssets.length
+        ? `ส่งรอบงาน #${submissionId || "-"} กลับเข้าระบบสำเร็จ | อัปโหลด ${uploadedAssets.length} ไฟล์แล้ว`
+        : `ส่งรอบงาน #${submissionId || "-"} กลับเข้าระบบสำเร็จ`
+    );
+    await refreshAssignments({ showStatus: false, preserveSelection: true }).catch(() => {});
+    if (Number(state.assignments.selectedId || 0) === assignmentId) {
+      await loadAssignmentDeliverablesBundle({ showStatus: false }).catch(() => {});
+      await loadAssignmentAssets({ showStatus: false }).catch(() => {});
+    }
+    clearAssignmentCaptureUploads(assignmentId);
+    renderAssignmentSubmissionFileList();
+    if (canPatchAssignmentState()) {
+      const params = new URLSearchParams(window.location.search);
+      params.set("tab", "review");
+      params.set("assignment_id", String(assignmentId));
+      params.set("item_id", String(Number(assignment?.content_item_id || state.assignments.contextItemId || 0) || 0));
+      const query = params.toString();
+      window.location.assign(`${window.location.pathname}${query ? `?${query}` : ""}`);
+      return;
+    }
+  } catch (error) {
+    if (articlePayload && isAssignmentSubmissionDraftEditableState(assignment?.state)) {
+      await persistAssignmentSubmissionFailureDraft(
+        assignmentId,
+        assignment,
+        buildAssignmentSubmissionServerDraftPayload(articlePayload, requestedCheckReturnPayload, assignment)
+      ).catch(() => {});
+    }
+    throw error;
   }
 }
 
