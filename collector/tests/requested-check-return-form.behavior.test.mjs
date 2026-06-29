@@ -793,6 +793,34 @@ test("loadAssignmentDeliverablesBundle keeps latest-bundle media when all-delive
       selectedId: 24,
       deliverablesBundle: null,
       deliverableRowsByAssignment: {},
+      latestSubmissionRows: {
+        24: {
+          id: 12,
+          media_payload_json: {
+            assets: Array.from({ length: 39 }, (_, index) => ({
+              id: 700 + index,
+              mime_type: "image/jpeg",
+              public_url: `https://cdn.example.com/payload-${index + 1}.jpg`,
+              file_name: `payload-${index + 1}.jpg`,
+            })),
+          },
+        },
+      },
+      submissionRowsByAssignment: {
+        24: [
+          {
+            id: 12,
+            media_payload_json: {
+              assets: Array.from({ length: 39 }, (_, index) => ({
+                id: 700 + index,
+                mime_type: "image/jpeg",
+                public_url: `https://cdn.example.com/payload-${index + 1}.jpg`,
+                file_name: `payload-${index + 1}.jpg`,
+              })),
+            },
+          },
+        ],
+      },
     },
   };
   const assignment = { id: 24, latest_submission_id: 12 };
@@ -800,15 +828,13 @@ test("loadAssignmentDeliverablesBundle keeps latest-bundle media when all-delive
     assignment_id: 24,
     latest_submission_id: 12,
     deliverables_by_type: {
-      photos: [
-        {
-          id: 201,
-          submission_id: 12,
-          deliverable_type: "photos",
-          source_url: "https://cdn.example.com/latest-bundle.jpg",
-          title: "latest bundle",
-        },
-      ],
+      photos: Array.from({ length: 14 }, (_, index) => ({
+        id: 201 + index,
+        submission_id: 12,
+        deliverable_type: "photos",
+        source_url: `https://cdn.example.com/latest-bundle-${index + 1}.jpg`,
+        title: `latest bundle ${index + 1}`,
+      })),
     },
     missing_deliverable_types: [],
   };
@@ -842,6 +868,10 @@ test("loadAssignmentDeliverablesBundle keeps latest-bundle media when all-delive
   });
 
   const result = await loadAssignmentDeliverablesBundle({ showStatus: false });
+  const getAssignmentReviewMediaItems = loadAssignmentReviewMediaItemsHarness(state, {
+    getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[24],
+  });
+  const photoItems = getAssignmentReviewMediaItems(assignment, "photos");
 
   assert.equal(result, latestBundle);
   assert.deepEqual(calls, [
@@ -850,6 +880,9 @@ test("loadAssignmentDeliverablesBundle keeps latest-bundle media when all-delive
   ]);
   assert.equal(state.assignments.deliverablesBundle, latestBundle);
   assert.deepEqual(state.assignments.deliverableRowsByAssignment[24], []);
+  assert.equal(photoItems.length, 14);
+  assert.equal(photoItems[0].url, "https://cdn.example.com/latest-bundle-1.jpg");
+  assert.equal(photoItems.some((item) => item.url === "https://cdn.example.com/payload-1.jpg"), false);
   assert.equal(renderStates.some((entry) => entry.kind === "review-content" && entry.selectedBundle === latestBundle), true);
 });
 
