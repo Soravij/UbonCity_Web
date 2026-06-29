@@ -2941,6 +2941,43 @@ test("assignment submission draft updates preserve omitted sections and keep exp
   }
 });
 
+test("listAssignmentRoundAssetsByType preserves assignment slot metadata for assignment-work validation", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Assignment Slot Metadata");
+    const assignee = ctx.createUser("assignment-slot-meta");
+    const assignmentInsert = ctx.db.prepare(`
+      INSERT INTO content_assignments (
+        assignment_uid, content_item_id, assignment_kind, assignee_user_id, assigned_by_user_id, state, revision_round
+      ) VALUES (?, ?, 'field', ?, ?, 'in_progress', 2)
+    `).run(`assignment-slot-meta-${Date.now()}`, item.id, assignee.id, assignee.id);
+    const assignmentId = Number(assignmentInsert.lastInsertRowid || 0) || 0;
+    const assetInsert = ctx.db.prepare(`
+      INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
+      VALUES (?, 'local', ?, ?, 'image/jpeg', 123, ?)
+    `).run(
+      `asset-slot-meta-${Date.now()}`,
+      "uploads/assignment-slot.jpg",
+      "assignment-slot.jpg",
+      "checksum-slot-meta"
+    );
+    const assetId = Number(assetInsert.lastInsertRowid || 0) || 0;
+    ctx.db.prepare(`
+      INSERT INTO content_assets (
+        content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order,
+        assignment_id, assignment_round, assignment_media_type, assignment_slot_key, assignment_surface, assignment_sync_batch_id
+      ) VALUES (?, ?, 'unused', 0, 0, 'unused', 0, ?, 2, 'image', ?, 'assignment_work', 'batch-slot-meta')
+    `).run(item.id, assetId, assignmentId, "shot-1-storefront-hero");
+
+    const rows = ctx.repo.listAssignmentRoundAssetsByType(assignmentId, 2, "image");
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].assignment_slot_key, "shot-1-storefront-hero");
+    assert.equal(rows[0].assignment_media_type, "image");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("assignment submission draft migration backfills requested-check column idempotently after legacy rebuild", () => {
   const ctx = createTestContext();
   try {

@@ -391,6 +391,13 @@ test("submission media payload keeps synced video asset metadata from upload res
         file_name: "upload.mp4",
         mime_type: "video/mp4",
         public_url: null,
+        storage_path: null,
+        assignment_id: null,
+        assignment_round: 2,
+        assignment_surface: "assignment_work",
+        assignment_slot_key: slotKey,
+        assignment_media_type: "video",
+        assignment_sync_batch_id: "batch-video-1",
         slotKey,
         mediaType: "video",
         capture_type: "video",
@@ -398,6 +405,92 @@ test("submission media payload keeps synced video asset metadata from upload res
       },
     ],
   });
+});
+
+test("backend capture validation accepts mixed server and local slot payload and rejects wrong round surface slot and media type boundaries", () => {
+  const captureItems = [
+    { item_text: "Storefront hero", item_order: 0, capture_type: "photo" },
+    { item_text: "Walkthrough clip", item_order: 1, capture_type: "video" },
+  ];
+  const photoSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Storefront hero", 0, "image", "photo");
+  const videoSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Walkthrough clip", 1, "video", "video");
+  const validServerAsset = {
+    id: 701,
+    file_name: "retained-photo.jpg",
+    mime_type: "image/jpeg",
+    public_url: "/media/retained-photo.jpg",
+    assignment_id: 24,
+    assignment_round: 2,
+    assignment_surface: "assignment_work",
+    assignment_media_type: "image",
+    assignment_slot_key: photoSlotKey,
+    assignment_sync_batch_id: "batch-server-photo",
+  };
+  const validLocalAsset = {
+    id: 702,
+    file_name: "new-walkthrough.mp4",
+    mime_type: "video/mp4",
+    public_url: "/media/new-walkthrough.mp4",
+    assignment_id: 24,
+    assignment_round: 2,
+    assignment_surface: "assignment_work",
+    assignment_media_type: "video",
+    assignment_slot_key: videoSlotKey,
+    assignment_sync_batch_id: "batch-local-video",
+  };
+  const payload = buildAssignmentSubmissionMediaPayloadForTest([
+    validServerAsset,
+    validLocalAsset,
+    { ...validLocalAsset },
+  ], captureItems);
+  assert.equal(payload.assets.length, 3);
+
+  const assignment = {
+    assignment_kind: "field",
+    fieldPack: {
+      checklists: [
+        { checklist_type: "must_capture", item_text: "Storefront hero", capture_type: "photo", item_order: 0 },
+        { checklist_type: "must_capture", item_text: "Walkthrough clip", capture_type: "video", item_order: 1 },
+      ],
+    },
+  };
+  assert.doesNotThrow(() => enforceAssignmentSubmissionRequiredFieldsForBackendTest(
+    assignment,
+    {
+      verified_answers: [],
+      question_answers: [],
+      capture_answers: [],
+      additional_text: "ready",
+    },
+    24,
+    2,
+    payload
+  ));
+
+  const run = getAssignmentServerSyncedAssetsForCaptureItemsForTest({
+    assignments: {
+      assetLookup: [
+        validServerAsset,
+        { ...validServerAsset, id: 703, assignment_round: 1 },
+        { ...validServerAsset, id: 704, assignment_surface: "article_workspace" },
+        { ...validServerAsset, id: 705, assignment_slot_key: "shot-99-wrong-slot" },
+        { ...validServerAsset, id: 706, assignment_media_type: "video", mime_type: "video/mp4" },
+      ],
+    },
+  }, {
+    getAssignmentById() {
+      return { id: 24, image_reset_required: 1, video_reset_required: 1 };
+    },
+    getAssignmentCurrentRound() {
+      return 2;
+    },
+    buildAssignmentServerAssetSyncSignature() {
+      return "sig-boundaries";
+    },
+  });
+  const result = run(24, captureItems);
+  assert.deepEqual(result.assets.map((asset) => Number(asset.id || 0)), [701]);
+  assert.deepEqual(result.missing, ["วิดีโอหัวข้อ 2: Walkthrough clip"]);
 });
 
 test("server-synced asset reload keeps video asset matched by persisted slot metadata", () => {

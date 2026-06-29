@@ -101,12 +101,21 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-const buildAssignmentCaptureSlotKeyForTest = new Function(
+const buildAssignmentCaptureSlotKeyFactory = new Function(
   `${extractNamedFunctionSource(appJs, "toCaptureSlug")}
 ${extractNamedFunctionSource(appJs, "normalizeAssignmentCaptureMediaType")}
 ${extractNamedFunctionSource(appJs, "buildAssignmentCaptureSlotKey")}
 return buildAssignmentCaptureSlotKey;`
 )();
+
+function buildAssignmentCaptureSlotKeyForTest(prompt, itemOrder, mediaType, captureType) {
+  return buildAssignmentCaptureSlotKeyFactory({
+    prompt,
+    itemOrder,
+    mediaType,
+    captureType,
+  });
+}
 
 function buildAsset({ id, assignmentId = 24, round = 3, mediaType, slotKey, fileName, url }) {
   return {
@@ -119,7 +128,7 @@ function buildAsset({ id, assignmentId = 24, round = 3, mediaType, slotKey, file
     assignment_surface: "assignment_work",
     assignment_media_type: mediaType,
     assignment_slot_key: slotKey,
-    created_at: "2026-06-28T10:00:00Z",
+    created_at: new Date().toISOString(),
   };
 }
 
@@ -269,6 +278,11 @@ function loadHarness(fixture, overrides = {}) {
     normalizeAssignmentCaptureUploadItems,
   });
   const getAssignmentTouchedSlotTypeKeysFromQueue = loadNamedFunction(appJs, "getAssignmentTouchedSlotTypeKeysFromQueue");
+  const buildAssignmentCaptureItemLookup = loadNamedFunction(appJs, "buildAssignmentCaptureItemLookup", {
+    buildAssignmentCaptureSlotKey,
+    normalizeAssignmentCaptureMediaType,
+    normalizeAssignmentCaptureUploadItems,
+  });
   const getAssignmentServerSyncedAssetsForCaptureItems = loadNamedFunction(appJs, "getAssignmentServerSyncedAssetsForCaptureItems", {
     state,
     getAssignmentById,
@@ -280,6 +294,10 @@ function loadHarness(fixture, overrides = {}) {
     normalizeAssignmentCaptureUploadItems,
     normalizeAssignmentCaptureMediaType,
     getAssignmentAssetSlotTypeKeyFromAsset,
+  });
+  const getAssignmentSubmissionAssetIdentityKey = loadNamedFunction(appJs, "getAssignmentSubmissionAssetIdentityKey");
+  const mergeAssignmentSubmissionMediaAssets = loadNamedFunction(appJs, "mergeAssignmentSubmissionMediaAssets", {
+    getAssignmentSubmissionAssetIdentityKey,
   });
   const findAssignmentAssetById = loadNamedFunction(appJs, "findAssignmentAssetById", { state });
   const getLatestAssignmentSubmissionRow = loadNamedFunction(appJs, "getLatestAssignmentSubmissionRow", { state });
@@ -297,9 +315,15 @@ function loadHarness(fixture, overrides = {}) {
     isAssignmentCaptureUploadsSynced,
     getSyncedUploadAssetsForKey,
     getAssignmentTouchedSlotTypeKeysFromQueue,
+    getAssignmentSubmissionAssetIdentityKey,
   });
   const composeAssignmentSubmissionEffectiveAssets = loadNamedFunction(appJs, "composeAssignmentSubmissionEffectiveAssets", {
     resolveAssignmentSubmissionEffectiveMedia,
+  });
+  const buildAssignmentSubmissionMediaPayload = loadNamedFunction(appJs, "buildAssignmentSubmissionMediaPayload", {
+    buildAssignmentCaptureItemLookup,
+    getAssignmentAssetSlotTypeKeyFromAsset,
+    normalizeAssignmentCaptureMediaType,
   });
   const renderAssignmentSubmissionFileList = loadNamedFunction(appJs, "renderAssignmentSubmissionFileList", {
     qs: (id) => (id === "assignment-submission-file-list" ? fileListNode : null),
@@ -338,7 +362,8 @@ function loadHarness(fixture, overrides = {}) {
     focusFirstAssignmentSubmissionGateIssue: () => {},
     composeAssignmentSubmissionEffectiveAssets,
     getAssignmentCaptureSyncKey,
-    buildAssignmentSubmissionMediaPayload: (assets) => ({ assets }),
+    buildAssignmentSubmissionMediaPayload,
+    mergeAssignmentSubmissionMediaAssets,
     api: async (url, options = {}) => {
       requests.push({ url, options });
       return { submission: { id: 12 } };
@@ -407,6 +432,10 @@ test("initial submit without retained or current media still blocks", () => {
 test("image reset excludes retained images but keeps retained videos", () => {
   const fixture = createFixture({
     assignment: { image_reset_required: 1, video_reset_required: 0 },
+    assetLookup: [
+      buildAsset({ id: 101, round: 2, mediaType: "image", slotKey: buildAssignmentCaptureSlotKeyForTest("Storefront hero", 0, "image", "photo"), fileName: "retained-photo.jpg" }),
+      buildAsset({ id: 201, round: 2, mediaType: "video", slotKey: buildAssignmentCaptureSlotKeyForTest("Walkthrough clip", 1, "video", "video"), fileName: "retained-video.mp4" }),
+    ],
   });
   const harness = loadHarness(fixture);
 
@@ -421,6 +450,10 @@ test("image reset excludes retained images but keeps retained videos", () => {
 test("video reset excludes retained videos but keeps retained images", () => {
   const fixture = createFixture({
     assignment: { image_reset_required: 0, video_reset_required: 1 },
+    assetLookup: [
+      buildAsset({ id: 101, round: 2, mediaType: "image", slotKey: buildAssignmentCaptureSlotKeyForTest("Storefront hero", 0, "image", "photo"), fileName: "retained-photo.jpg" }),
+      buildAsset({ id: 201, round: 2, mediaType: "video", slotKey: buildAssignmentCaptureSlotKeyForTest("Walkthrough clip", 1, "video", "video"), fileName: "retained-video.mp4" }),
+    ],
   });
   const harness = loadHarness(fixture);
 
@@ -470,6 +503,8 @@ test("latest deliverables bundle wins over accumulated media payload fallback", 
 
 test("missing required shot still blocks even when many synced media items exist", () => {
   const fixture = createRuntimeFixture();
+  fixture.state.assignments.assetLookup = fixture.state.assignments.assetLookup.filter((asset) => asset.assignment_media_type === "image");
+  fixture.state.assignments.assets = fixture.state.assignments.assetLookup;
   fixture.assignment.image_reset_required = 1;
   fixture.assignment.video_reset_required = 1;
   const syncedPhotoAssets = fixture.state.assignments.assetLookup.filter((asset) => asset.assignment_media_type === "image");
@@ -505,5 +540,179 @@ test("retained media appears in summary but is omitted from submit payload witho
   const submitRequest = harness.requests.find((entry) => entry.url === "/api/assignments/24/submissions");
   assert.ok(submitRequest, "submit request should exist");
   const payload = JSON.parse(String(submitRequest.options.body || "{}"));
-  assert.equal(Object.prototype.hasOwnProperty.call(payload, "media_payload_json"), false);
+  assert.deepEqual(
+    (Array.isArray(payload?.media_payload_json?.assets) ? payload.media_payload_json.assets : []).map((asset) => Number(asset?.id || 0)),
+    [101, 201]
+  );
+});
+
+test("mixed current-round server assets and local synced uploads are submitted together without duplicates", async () => {
+  const fixture = createFixture();
+  const localVideo = {
+    id: 301,
+    file_name: "new-walkthrough.mp4",
+    mime_type: "video/mp4",
+    public_url: "/media/new-walkthrough.mp4",
+    assignment_id: fixture.assignment.id,
+    assignment_round: fixture.assignment.revision_round,
+    assignment_surface: "assignment_work",
+    assignment_media_type: "video",
+    assignment_slot_key: fixture.videoSlotKey,
+    assignment_sync_batch_id: "batch-new-video",
+    created_at: new Date().toISOString(),
+  };
+  const queue = [{ slug: fixture.videoSlotKey, file: { type: "video/mp4" } }];
+  const harness = loadHarness(fixture, {
+    buildAssignmentCaptureFileUploadQueue: () => queue,
+    isAssignmentCaptureUploadsSynced: () => true,
+    getSyncedUploadAssetsForKey: () => [localVideo],
+  });
+
+  const gateState = harness.buildAssignmentSubmissionGateState(fixture.assignment.id, { captureItems: fixture.captureItems }, {
+    articlePayload: { additional_text: "ready" },
+    uploadQueue: queue,
+  });
+  assert.equal(gateState.canSubmit, true);
+
+  await harness.createAssignmentSubmission();
+  const submitRequest = harness.requests.find((entry) => entry.url === "/api/assignments/24/submissions");
+  assert.ok(submitRequest, "submit request should exist");
+  const payload = JSON.parse(String(submitRequest.options.body || "{}"));
+  assert.deepEqual(
+    (Array.isArray(payload?.media_payload_json?.assets) ? payload.media_payload_json.assets : []).map((asset) => Number(asset?.id || 0)).sort((a, b) => a - b),
+    [101, 301]
+  );
+  assert.equal(
+    Array.isArray(payload?.media_payload_json?.assets)
+      ? payload.media_payload_json.assets.some((asset) => String(asset?.slotKey || "") === fixture.photoSlotKey && String(asset?.mediaType || "") === "image")
+      : false,
+    true
+  );
+  assert.equal(
+    Array.isArray(payload?.media_payload_json?.assets)
+      ? payload.media_payload_json.assets.some((asset) => String(asset?.slotKey || "") === fixture.videoSlotKey && String(asset?.mediaType || "") === "video")
+      : false,
+    true
+  );
+});
+
+test("submit asset merge deduplicates identical persisted assets across local and server sets", async () => {
+  const fixture = createFixture();
+  const duplicatedServerAsset = { ...fixture.state.assignments.assetLookup[0] };
+  const queue = [{ slug: fixture.photoSlotKey, file: { type: "image/jpeg" } }];
+  const harness = loadHarness(fixture, {
+    buildAssignmentCaptureFileUploadQueue: () => queue,
+    isAssignmentCaptureUploadsSynced: () => true,
+    getSyncedUploadAssetsForKey: () => [duplicatedServerAsset],
+  });
+
+  await harness.createAssignmentSubmission();
+  const submitRequest = harness.requests.find((entry) => entry.url === "/api/assignments/24/submissions");
+  const payload = JSON.parse(String(submitRequest.options.body || "{}"));
+  const assets = Array.isArray(payload?.media_payload_json?.assets) ? payload.media_payload_json.assets : [];
+  assert.equal(assets.filter((asset) => Number(asset?.id || 0) === 101).length, 1);
+  assert.equal(
+    assets.some((asset) => Number(asset?.id || 0) === 101 && String(asset?.slotKey || "") === fixture.photoSlotKey && String(asset?.mediaType || "") === "image"),
+    true
+  );
+});
+
+test("capture upload cards show server-synced slot counts after refresh without local files", () => {
+  const fixture = createFixture();
+  const normalizeAssignmentCaptureMediaType = loadNamedFunction(appJs, "normalizeAssignmentCaptureMediaType");
+  const toCaptureSlug = loadNamedFunction(appJs, "toCaptureSlug");
+  const buildAssignmentCaptureSlotKey = loadNamedFunction(appJs, "buildAssignmentCaptureSlotKey", {
+    toCaptureSlug,
+    normalizeAssignmentCaptureMediaType,
+  });
+  const isVideoCapturePrompt = loadNamedFunction(appJs, "isVideoCapturePrompt");
+  const normalizeAssignmentCaptureUploadItems = loadNamedFunction(appJs, "normalizeAssignmentCaptureUploadItems", {
+    toCaptureSlug,
+    normalizeAssignmentCaptureMediaType,
+    buildAssignmentCaptureSlotKey,
+    isVideoCapturePrompt,
+  });
+  const getAssignmentAssetSlotTypeKeyFromAsset = loadNamedFunction(appJs, "getAssignmentAssetSlotTypeKeyFromAsset", {
+    normalizeAssignmentCaptureMediaType,
+    buildAssignmentCaptureSlotKey,
+  });
+  const getAssignmentServerSyncedAssetsForCaptureItems = loadNamedFunction(appJs, "getAssignmentServerSyncedAssetsForCaptureItems", {
+    state: fixture.state,
+    getAssignmentById: () => fixture.assignment,
+    getAssignmentCurrentRound: () => fixture.assignment.revision_round,
+    buildAssignmentServerAssetSyncSignature: () => "server:24",
+    ASSIGNMENT_WORK_SYNC_EXPIRY_MS: 24 * 60 * 60 * 1000,
+    ASSIGNMENT_CAPTURE_MAX_IMAGES_PER_SLOT: 5,
+    ASSIGNMENT_CAPTURE_MAX_VIDEOS_PER_SLOT: 2,
+    normalizeAssignmentCaptureUploadItems,
+    normalizeAssignmentCaptureMediaType,
+    getAssignmentAssetSlotTypeKeyFromAsset,
+  });
+  const buildAssignmentCaptureUploadCards = loadNamedFunction(appJs, "buildAssignmentCaptureUploadCards", {
+    normalizeAssignmentCaptureUploadItems,
+    listAssignmentCaptureFiles: () => [],
+    isAssignmentCaptureLoading: () => false,
+    sanitizeUploadFileName: (value) => String(value || "").trim(),
+    escapeHtml,
+    getAssignmentServerSyncedAssetsForCaptureItems,
+    getAssignmentAssetSlotTypeKeyFromAsset,
+  });
+
+  const html = buildAssignmentCaptureUploadCards(fixture.assignment.id, fixture.captureItems);
+  assert.match(html, /1 รูป บน server/);
+  assert.match(html, /1 วิดีโอ บน server/);
+  assert.doesNotMatch(html, />0 รูป</);
+  assert.doesNotMatch(html, />0 วิดีโอ</);
+});
+
+test("slot card shows local files and server-synced files together for the same slot", () => {
+  const fixture = createFixture();
+  const normalizeAssignmentCaptureMediaType = loadNamedFunction(appJs, "normalizeAssignmentCaptureMediaType");
+  const toCaptureSlug = loadNamedFunction(appJs, "toCaptureSlug");
+  const buildAssignmentCaptureSlotKey = loadNamedFunction(appJs, "buildAssignmentCaptureSlotKey", {
+    toCaptureSlug,
+    normalizeAssignmentCaptureMediaType,
+  });
+  const isVideoCapturePrompt = loadNamedFunction(appJs, "isVideoCapturePrompt");
+  const normalizeAssignmentCaptureUploadItems = loadNamedFunction(appJs, "normalizeAssignmentCaptureUploadItems", {
+    toCaptureSlug,
+    normalizeAssignmentCaptureMediaType,
+    buildAssignmentCaptureSlotKey,
+    isVideoCapturePrompt,
+  });
+  const getAssignmentAssetSlotTypeKeyFromAsset = loadNamedFunction(appJs, "getAssignmentAssetSlotTypeKeyFromAsset", {
+    normalizeAssignmentCaptureMediaType,
+    buildAssignmentCaptureSlotKey,
+  });
+  const getAssignmentServerSyncedAssetsForCaptureItems = loadNamedFunction(appJs, "getAssignmentServerSyncedAssetsForCaptureItems", {
+    state: fixture.state,
+    getAssignmentById: () => fixture.assignment,
+    getAssignmentCurrentRound: () => fixture.assignment.revision_round,
+    buildAssignmentServerAssetSyncSignature: () => "server:24",
+    ASSIGNMENT_WORK_SYNC_EXPIRY_MS: 24 * 60 * 60 * 1000,
+    ASSIGNMENT_CAPTURE_MAX_IMAGES_PER_SLOT: 5,
+    ASSIGNMENT_CAPTURE_MAX_VIDEOS_PER_SLOT: 2,
+    normalizeAssignmentCaptureUploadItems,
+    normalizeAssignmentCaptureMediaType,
+    getAssignmentAssetSlotTypeKeyFromAsset,
+  });
+  const buildAssignmentCaptureUploadCards = loadNamedFunction(appJs, "buildAssignmentCaptureUploadCards", {
+    normalizeAssignmentCaptureUploadItems,
+    listAssignmentCaptureFiles: (_assignmentId, slug) => (
+      slug === fixture.photoSlotKey
+        ? [{ name: "browser-photo.jpg", type: "image/jpeg" }]
+        : []
+    ),
+    isAssignmentCaptureLoading: () => false,
+    sanitizeUploadFileName: (value) => String(value || "").trim(),
+    escapeHtml,
+    getAssignmentServerSyncedAssetsForCaptureItems,
+    getAssignmentAssetSlotTypeKeyFromAsset,
+  });
+
+  const html = buildAssignmentCaptureUploadCards(fixture.assignment.id, fixture.captureItems);
+  assert.match(html, /1 รูป ใน browser/);
+  assert.match(html, /browser-photo\.jpg/);
+  assert.match(html, /retained-photo\.jpg/);
+  assert.match(html, /ไฟล์ใหม่ใน browser จะถูกใช้แทนไฟล์บน server สำหรับช่องนี้หลังซิงก์/);
 });
