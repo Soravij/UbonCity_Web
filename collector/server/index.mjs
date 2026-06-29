@@ -137,7 +137,7 @@ function resolveCollectorAssetVersionForFile(filePath) {
   try {
     const stats = fsSync.statSync(filePath);
     const mtimeMs = Number(stats.mtimeMs || 0);
-    if (mtimeMs > 0) return String(Math.floor(mtimeMs));
+    if (mtimeMs > 0) return String(Math.trunc(mtimeMs));
   } catch {}
   return collectorServerBootVersion;
 }
@@ -164,6 +164,23 @@ function resolveCollectorHtmlFilePath(requestPath) {
 function renderCollectorHtmlFile(filePath) {
   const htmlTemplate = fsSync.readFileSync(filePath, "utf8");
   return rewriteCollectorHtmlAssetUrls(htmlTemplate, filePath);
+}
+
+function isSafeCollectorCssRequestPath(rawPath) {
+  return typeof rawPath === "string" && /^\/[A-Za-z0-9._/-]+\.css$/i.test(rawPath);
+}
+
+function resolveCollectorCssFilePath(requestPath) {
+  if (!isSafeCollectorCssRequestPath(requestPath)) return null;
+  const relativePath = requestPath.slice(1);
+  const fullPath = path.resolve(collectorPublicDir, relativePath);
+  const normalizedPublicDir = path.resolve(collectorPublicDir) + path.sep;
+  if (!fullPath.startsWith(normalizedPublicDir)) return null;
+  return fullPath;
+}
+
+function setCollectorFrontendAssetRevalidateHeaders(res) {
+  res.setHeader("Cache-Control", "no-cache, must-revalidate");
 }
 
 function isSafeCollectorJsRequestPath(rawPath) {
@@ -2624,8 +2641,18 @@ app.use((req, res, next) => {
 });
 app.use((req, res, next) => {
   if (req.method !== "GET" && req.method !== "HEAD") return next();
+  const fullPath = resolveCollectorCssFilePath(req.path || "");
+  if (!fullPath || !fsSync.existsSync(fullPath)) return next();
+  setCollectorFrontendAssetRevalidateHeaders(res);
+  res.type("text/css; charset=utf-8");
+  if (req.method === "HEAD") return res.status(200).end();
+  res.send(fsSync.readFileSync(fullPath, "utf8"));
+});
+app.use((req, res, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD") return next();
   const fullPath = resolveCollectorJsFilePath(req.path || "");
   if (!fullPath || !fsSync.existsSync(fullPath)) return next();
+  setCollectorFrontendAssetRevalidateHeaders(res);
   res.type("application/javascript; charset=utf-8");
   if (req.method === "HEAD") return res.status(200).end();
   const jsSource = fsSync.readFileSync(fullPath, "utf8");

@@ -5,6 +5,7 @@ import test from "node:test";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const appJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.js"), "utf8");
+const indexJs = fs.readFileSync(path.join(collectorRoot, "server", "index.mjs"), "utf8");
 
 function extractFunctionSource(source, functionName) {
   const asyncMarker = `async function ${functionName}`;
@@ -475,4 +476,93 @@ test("local unsynced files are shown as browser-only and not persisted", () => {
   assert.match(fileListNode.innerHTML, /browser/i);
   assert.match(fileListNode.innerHTML, /refresh/i);
   assert.doesNotMatch(fileListNode.innerHTML, /อัปโหลดเข้าระบบแล้ว/);
+});
+
+test("collector asset version uses millisecond precision and frontend JS/CSS routes revalidate on normal F5", () => {
+  const resolveCollectorAssetVersionForFile = loadNamedFunction(indexJs, "resolveCollectorAssetVersionForFile", {
+    collectorAssetVersionOverride: "",
+    fsSync: {
+      statSync() {
+        return { mtimeMs: 1712345678123.987 };
+      },
+    },
+    collectorServerBootVersion: "boot-version",
+  });
+  const setCollectorFrontendAssetRevalidateHeaders = loadNamedFunction(indexJs, "setCollectorFrontendAssetRevalidateHeaders");
+  const headers = {};
+  setCollectorFrontendAssetRevalidateHeaders({
+    setHeader(name, value) {
+      headers[name] = value;
+    },
+  });
+
+  assert.equal(resolveCollectorAssetVersionForFile("D:/UbonCity_Web/collector/server/public/app.js"), "1712345678123");
+  assert.equal(headers["Cache-Control"], "no-cache, must-revalidate");
+  assert.match(indexJs, /resolveCollectorCssFilePath/);
+  assert.match(indexJs, /resolveCollectorJsFilePath/);
+});
+
+test("late field-pack load triggers asset reconciliation only for the currently selected assignment item", async () => {
+  const state = createAssignmentState();
+  state.assignments.selectedId = 25;
+  const selectedAssignment = { id: 25, content_item_id: 501 };
+  const loadCalls = [];
+  const loadAssignmentContextFieldPackStatus = await loadNamedAsyncFunction(appJs, "loadAssignmentContextFieldPackStatus", {
+    state,
+    parsePositiveInt: (value, fallback = 0) => Number(value || fallback) || 0,
+    api: async () => ({ field_pack: { status: "active", checklists: [] } }),
+    renderAssignmentHandoffBrief: () => {},
+    renderAssignmentSubmissionForm: () => {},
+    getAssignmentSubmissionFormAssignment: (assignment) => assignment,
+    getAssignmentById: (id) => (Number(id) === 25 ? selectedAssignment : { id, content_item_id: 999 }),
+    loadAssignmentAssets: async (...args) => {
+      loadCalls.push(args);
+      return [];
+    },
+  });
+
+  await loadAssignmentContextFieldPackStatus(501);
+  assert.equal(loadCalls.length, 1);
+
+  state.assignments.selectedId = 26;
+  await loadAssignmentContextFieldPackStatus(501);
+  assert.equal(loadCalls.length, 1);
+});
+
+test("server-synced asset reconciliation is stable across repeated refresh passes", () => {
+  const state = createAssignmentState();
+  state.assignments.assetLookup = [
+    {
+      id: 901,
+      file_name: "photo-1.jpg",
+      mime_type: "image/jpeg",
+      public_url: "/media/photo-1.jpg",
+      assignment_id: 25,
+      assignment_round: 1,
+      assignment_surface: "assignment_work",
+      assignment_media_type: "image",
+      assignment_slot_key: "shot-1-photo--image",
+      assignment_sync_batch_id: "batch-1",
+      created_at: new Date().toISOString(),
+    },
+  ];
+  const setLatestUploadedAssetsForSyncKey = loadNamedFunction(appJs, "setLatestUploadedAssetsForSyncKey", { state });
+  const applyServerSynced = loadNamedFunction(appJs, "applyAssignmentServerSyncedAssets", {
+    getAssignmentServerSyncedAssetsForCaptureItems: () => ({
+      complete: true,
+      assets: state.assignments.assetLookup,
+      missing: [],
+      syncSignature: "server:25:901",
+    }),
+    buildAssignmentCaptureFileUploadQueue: () => [],
+    getAssignmentCaptureSyncStateBucket: () => (state.assignments.captureUploadSyncState[25] ||= {}),
+    getAssignmentCaptureSyncKey: () => "25::server:25:901",
+    setLatestUploadedAssetsForSyncKey,
+    setStatus: () => {},
+  });
+
+  const first = applyServerSynced(25, [], { showStatus: false });
+  const second = applyServerSynced(25, [], { showStatus: false });
+  assert.deepEqual(first.assets, second.assets);
+  assert.deepEqual(state.assignments.latestUploadedAssets, first.assets);
 });

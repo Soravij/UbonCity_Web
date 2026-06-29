@@ -1156,7 +1156,7 @@ function writeAssignmentSubmissionDraft(assignmentId, payload, assignment = null
   if (includeRequestedChecks) {
     const requestedCheckDraft = state.assignments.requestedCheckReturnDrafts?.[id] || null;
     normalized.field_return_payload_json = requestedCheckDraft
-      ? buildAssignmentRequestedCheckReturnPayloadFromDraft(requestedCheckDraft)
+      ? normalizeAssignmentRequestedCheckReturnDraft(requestedCheckDraft, state.assignments.handoffSourcePackages?.[id] || null)
       : null;
   }
   const currentDraft = state.assignments.submissionDrafts?.[draftKey] && typeof state.assignments.submissionDrafts[draftKey] === "object"
@@ -3277,8 +3277,14 @@ async function loadAssignmentContextFieldPackStatus(itemId) {
     state.assignments.contextFieldPack = null;
     state.assignments.contextFieldPackLoadFailed = true;
   }
+  const selectedAssignmentId = Number(state.assignments.selectedId || 0) || 0;
+  const selectedAssignment = getAssignmentById(selectedAssignmentId);
+  const selectedItemId = Number(selectedAssignment?.content_item_id || 0) || 0;
   renderAssignmentHandoffBrief();
-  renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(state.assignments.selectedId)));
+  renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(selectedAssignment));
+  if (selectedAssignmentId > 0 && selectedItemId === targetItemId) {
+    loadAssignmentAssets({ showStatus: false }).catch(() => {});
+  }
   return state.assignments.contextFieldPackStatus;
 }
 

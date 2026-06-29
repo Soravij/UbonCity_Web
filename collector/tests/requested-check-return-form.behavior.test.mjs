@@ -1958,7 +1958,7 @@ test("writeAssignmentSubmissionDraft merges local article and requested-check se
     state,
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentSubmissionPayload: (payload) => payload,
-    buildAssignmentRequestedCheckReturnPayloadFromDraft,
+    normalizeAssignmentRequestedCheckReturnDraft,
     scheduleSaveAssignmentSubmissionServerDraft: (id, payload) => {
       scheduledPayloads.push({ id, payload });
     },
@@ -1976,11 +1976,21 @@ test("writeAssignmentSubmissionDraft merges local article and requested-check se
     field_return_payload_json: {
       requested_check_returns: {
         "taxonomy.parking": {
-          checked: true,
+          checked: false,
           value: false,
-          condition_note: null,
-          evidence: null,
-          note: null,
+          condition_note: "",
+          evidence: "",
+          note: "",
+          group_key: "taxonomy",
+          answer_type: "boolean",
+          allowed_values: null,
+          unit_options: null,
+          activation_mode: null,
+          required: false,
+          evidence_required: false,
+          condition_prompt: null,
+          suggested_value: null,
+          source: null,
         },
       },
     },
@@ -2034,6 +2044,58 @@ test("writeAssignmentSubmissionDraft preserves requested-check section during ar
     id: 12,
     payload: state.assignments.submissionDrafts["12:1"],
   });
+});
+
+test("writeAssignmentSubmissionDraft preserves explicit CTA and taxonomy unchecked states in server draft payload", () => {
+  const state = {
+    assignments: {
+      contextFieldPack: null,
+      submissionDrafts: {},
+      requestedCheckReturnDrafts: {
+        12: {
+          requested_check_returns: {
+            "cta_contact.phone": {
+              checked: false,
+              value: "0812345678",
+              group_key: "cta_contact",
+              answer_type: "phone",
+              condition_note: "",
+              evidence: "",
+              note: "",
+            },
+            "taxonomy.pet_friendly": {
+              checked: false,
+              value: false,
+              group_key: "taxonomy",
+              answer_type: "boolean",
+              condition_note: "",
+              evidence: "",
+              note: "",
+            },
+          },
+        },
+      },
+      handoffSourcePackages: {},
+    },
+  };
+  const scheduledPayloads = [];
+  const writeDraft = loadNamedFunction(appJs, "writeAssignmentSubmissionDraft", {
+    state,
+    getAssignmentSubmissionDraftKey: () => "12:1",
+    normalizeAssignmentSubmissionPayload: (payload) => payload,
+    normalizeAssignmentRequestedCheckReturnDraft,
+    scheduleSaveAssignmentSubmissionServerDraft: (id, payload) => {
+      scheduledPayloads.push({ id, payload: JSON.parse(JSON.stringify(payload)) });
+    },
+  });
+
+  writeDraft(12, null, { id: 12 }, { includeArticle: false, includeRequestedChecks: true });
+
+  assert.equal(scheduledPayloads.length, 1);
+  assert.equal(scheduledPayloads[0].payload.field_return_payload_json.requested_check_returns["cta_contact.phone"].checked, false);
+  assert.equal(scheduledPayloads[0].payload.field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0812345678");
+  assert.equal(scheduledPayloads[0].payload.field_return_payload_json.requested_check_returns["taxonomy.pet_friendly"].checked, false);
+  assert.equal(scheduledPayloads[0].payload.field_return_payload_json.requested_check_returns["taxonomy.pet_friendly"].value, false);
 });
 
 test("requested-check normalize keeps edited prefilled values through rerender merges", () => {
