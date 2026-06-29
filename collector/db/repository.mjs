@@ -1541,9 +1541,10 @@ function inferRequestedCheckAnswerTypeFromReturnRow(row) {
   return "text";
 }
 
-function normalizeRequestedCheckReturnEntry(rawValue, fieldName, schema = null) {
+function normalizeRequestedCheckReturnEntry(rawValue, fieldName, schema = null, options = {}) {
   const row = rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) ? rawValue : {};
   const checked = Boolean(row.checked);
+  const preserveUncheckedValues = options?.preserveUncheckedValues === true;
   const answerType = schema?.answer_type
     ? normalizeRequestedCheckAnswerType(schema.answer_type)
     : inferRequestedCheckAnswerTypeFromReturnRow(row);
@@ -1551,9 +1552,10 @@ function normalizeRequestedCheckReturnEntry(rawValue, fieldName, schema = null) 
   const evidenceText = row.evidence == null ? null : String(row.evidence || "").trim() || null;
   const note = row.note == null ? null : String(row.note || "").trim() || null;
   const conditionNote = row.condition_note == null ? null : String(row.condition_note || "").trim() || null;
+  const normalizedValue = normalizeRequestedCheckReturnValue(row.value, answerType, `${fieldName}.value`, { schema, checked });
   const value = checked
-    ? normalizeRequestedCheckReturnValue(row.value, answerType, `${fieldName}.value`, { schema, checked })
-    : (answerType === "multi_select" ? null : null);
+    ? normalizedValue
+    : (preserveUncheckedValues ? normalizedValue : null);
   const hasEvidence = evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url) || Boolean(evidenceText);
   const hasCondition = Boolean(conditionNote);
   const hasNote = Boolean(note);
@@ -1565,7 +1567,7 @@ function normalizeRequestedCheckReturnEntry(rawValue, fieldName, schema = null) 
     checked,
     found,
     answer_type: answerType,
-    value: checked ? value : null,
+    value,
     condition_note: checked ? conditionNote : null,
     evidence: checked ? evidenceText : null,
     note,
@@ -1574,7 +1576,7 @@ function normalizeRequestedCheckReturnEntry(rawValue, fieldName, schema = null) 
   };
 }
 
-function normalizeRequestedCheckReturns(value, fieldName = "field_return_payload_json.requested_check_returns", schemaMap = null) {
+function normalizeRequestedCheckReturns(value, fieldName = "field_return_payload_json.requested_check_returns", schemaMap = null, options = {}) {
   const parsed = value && typeof value === "object" && !Array.isArray(value)
     ? value
     : parseJson(value, null);
@@ -1586,10 +1588,12 @@ function normalizeRequestedCheckReturns(value, fieldName = "field_return_payload
     if (hasSchema && !schemaMap.has(normalizedKey)) {
       throw new Error(`${fieldName}.${normalizedKey} is not present in immutable handoff snapshot`);
     }
+    const schema = hasSchema ? schemaMap.get(normalizedKey) || null : null;
     acc[normalizedKey] = normalizeRequestedCheckReturnEntry(
       row,
       `${fieldName}.${normalizedKey}`,
-      hasSchema ? schemaMap.get(normalizedKey) || null : null
+      schema,
+      options
     );
     return acc;
   }, {});
@@ -1771,6 +1775,7 @@ function normalizeFieldReturnPayloadJson(value, fieldName = "field_return_payloa
   const base = defaultFieldReturnPayload();
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
   const schemaMap = options?.requestedCheckSchemaMap instanceof Map ? options.requestedCheckSchemaMap : null;
+  const preserveUncheckedValues = options?.preserveUncheckedValues === true;
   const checklistResultsRaw = Array.isArray(parsed.checklist_results) ? parsed.checklist_results : [];
   const checklistResults = checklistResultsRaw
     .map((row, index) => {
@@ -1797,7 +1802,12 @@ function normalizeFieldReturnPayloadJson(value, fieldName = "field_return_payloa
     checklist_results: checklistResults,
     cta_return: normalizeFieldReturnCtaJson(parsed.cta_return, `${fieldName}.cta_return`),
     taxonomy_return: normalizeFieldReturnTaxonomyJson(parsed.taxonomy_return, `${fieldName}.taxonomy_return`),
-    requested_check_returns: normalizeRequestedCheckReturns(parsed.requested_check_returns, `${fieldName}.requested_check_returns`, schemaMap),
+    requested_check_returns: normalizeRequestedCheckReturns(
+      parsed.requested_check_returns,
+      `${fieldName}.requested_check_returns`,
+      schemaMap,
+      { preserveUncheckedValues }
+    ),
     note: parsed.note == null ? null : String(parsed.note || "").trim() || null,
   };
 }
@@ -2025,7 +2035,9 @@ function normalizeAssignmentSubmissionDraftRow(row) {
   return {
     ...row,
     article_payload_json: parseJson(row.article_payload_json, null),
-    field_return_payload_json: normalizeFieldReturnPayloadJson(row.field_return_payload_json),
+    field_return_payload_json: normalizeFieldReturnPayloadJson(row.field_return_payload_json, "field_return_payload_json", {
+      preserveUncheckedValues: true,
+    }),
   };
 }
 
@@ -5079,6 +5091,13 @@ export function createRepository(db) {
     WHERE assignment_id=? AND user_id=? AND revision_round=?
     LIMIT 1
   `);
+  const getLatestAssignmentSubmissionDraftBeforeRoundStmt = db.prepare(`
+    SELECT *
+    FROM content_assignment_submission_drafts
+    WHERE assignment_id=? AND user_id=? AND revision_round < ?
+    ORDER BY revision_round DESC, updated_at DESC, id DESC
+    LIMIT 1
+  `);
   const upsertAssignmentSubmissionDraftStmt = db.prepare(`
     INSERT INTO content_assignment_submission_drafts (
       assignment_id, user_id, revision_round, content_item_id, article_payload_json, field_return_payload_json, expires_at
@@ -6959,7 +6978,8 @@ function normalizeStateValue(value, stateGroup) {
         ? null
         : normalizeFieldReturnPayloadJson(
           parseJsonInputStrict(payload.field_return_payload_json, "field_return_payload_json", "object"),
-          "field_return_payload_json"
+          "field_return_payload_json",
+          { preserveUncheckedValues: true }
         ))
       : existingDraft?.field_return_payload_json || null;
     const expiresAt = toNullableDateIso(expiresAtRaw, "expires_at");
@@ -7023,6 +7043,22 @@ function normalizeStateValue(value, stateGroup) {
     const revisionRound = Math.max(1, Number(options.revision_round || assignment.revision_round + 1 || 1) || 1);
     const draft = getAssignmentSubmissionDraft(id, actorId, { now: nowIso, revision_round: revisionRound });
     if (draft) return { draft, source: "draft" };
+    const latestSavedDraft = normalizeAssignmentSubmissionDraftRow(
+      getLatestAssignmentSubmissionDraftBeforeRoundStmt.get(id, actorId, revisionRound)
+    );
+    if (latestSavedDraft) {
+      return {
+        draft: {
+          ...latestSavedDraft,
+          id: null,
+          revision_round: revisionRound,
+          expires_at: null,
+          created_at: null,
+          updated_at: null,
+        },
+        source: "latest_saved_draft_fallback",
+      };
+    }
     const assignmentState = String(assignment.state || "").trim().toLowerCase();
     if (assignmentState !== "revision_requested") return { draft: null, source: "none" };
     const latestSubmission = normalizeAssignmentSubmissionRow(

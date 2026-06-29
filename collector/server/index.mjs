@@ -10732,7 +10732,9 @@ app.put("/api/assignments/:id/draft", requireRole("owner", "admin", "editor", "f
     const normalizedFieldReturnPayload = hasFieldReturnPayload
       ? (req.body?.field_return_payload_json == null
         ? null
-        : repo.normalizeFieldReturnPayloadJson(req.body.field_return_payload_json, "field_return_payload_json"))
+        : repo.normalizeFieldReturnPayloadJson(req.body.field_return_payload_json, "field_return_payload_json", {
+          preserveUncheckedValues: true,
+        }))
       : undefined;
     const draftPayload = {
       assignment_id: assignmentId,

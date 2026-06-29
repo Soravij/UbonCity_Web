@@ -416,6 +416,109 @@ test("repeated refresh bootstrap does not replace restored draft with empty valu
   assert.equal(afterSecondRefresh.verified_answers[0]?.answer, "cached");
 });
 
+test("revision 2 reload preserves latest saved draft text and explicit CTA false instead of latest submission fallback", async () => {
+  const state = createAssignmentState();
+  const assignment = { id: 25, state: "revision_requested", revision_round: 1, content_item_id: 501 };
+  const handoffPackage = {
+    requested_check_groups: [
+      {
+        group_key: "cta_contact",
+        checks: [{ return_key: "cta_contact.phone", check_key: "phone", group_key: "cta_contact", answer_type: "text", label: "Phone" }],
+      },
+      {
+        group_key: "taxonomy",
+        checks: [{ return_key: "taxonomy.pet_friendly", check_key: "pet_friendly", group_key: "taxonomy", answer_type: "boolean", label: "Pet friendly" }],
+      },
+    ],
+  };
+  state.assignments.handoffSourcePackages[25] = handoffPackage;
+  state.assignments.latestSubmissionRows[25] = {
+    id: 991,
+    article_payload_json: {
+      verified_answers: [],
+      capture_answers: [],
+      question_answers: [],
+      additional_text: "submitted note only",
+    },
+    field_return_payload_json: {
+      requested_check_returns: {
+        "cta_contact.phone": { checked: true, value: null, answer_type: "text", condition_note: "" },
+        "taxonomy.pet_friendly": { checked: true, value: false, answer_type: "boolean", condition_note: "" },
+      },
+    },
+  };
+
+  const loadDraft = await loadNamedAsyncFunction(appJs, "loadAssignmentSubmissionServerDraft", {
+    state,
+    isEditorUser: () => false,
+    api: async () => ({
+      draft: {
+        article_payload_json: {
+          verified_answers: [{ prompt: "Verify phone", answer: "draft verify" }],
+          capture_answers: [{ prompt: "Storefront shot", answer: "draft capture" }],
+          question_answers: [{ prompt: "Ask owner", answer: "draft ask" }],
+          additional_text: "draft note",
+        },
+        field_return_payload_json: {
+          requested_check_returns: {
+            "cta_contact.phone": { checked: false, value: "0800000000", answer_type: "text", condition_note: "" },
+            "taxonomy.pet_friendly": { checked: false, value: false, answer_type: "boolean", condition_note: "" },
+          },
+        },
+      },
+      source: "latest_saved_draft_fallback",
+      revision_round: 2,
+    }),
+    getAssignmentSubmissionDraftKey: () => "25:2",
+    normalizeAssignmentSubmissionPayload,
+    readAssignmentSubmissionDraft: loadNamedFunction(appJs, "readAssignmentSubmissionDraft", {
+      state,
+      getAssignmentSubmissionDraftKey: () => "25:2",
+      normalizeAssignmentSubmissionPayload,
+    }),
+    hasUsableAssignmentRequestedCheckReturnRows,
+    normalizeAssignmentRequestedCheckReturnDraft,
+    setAssignmentRequestedCheckReturnDraftState: setAssignmentRequestedCheckReturnDraftStateFactory(state),
+    getAssignmentById: () => assignment,
+    renderAssignmentSubmissionForm: () => {},
+    getAssignmentSubmissionFormAssignment: (currentAssignment) => currentAssignment,
+    getAssignmentPageMode: () => "work",
+    renderAssignmentRequestedCheckSection: () => {},
+  });
+
+  await loadDraft(assignment);
+
+  const getPrefill = loadNamedFunction(appJs, "getAssignmentSubmissionPrefillPayload", {
+    state,
+    getAssignmentSubmissionDraftKey: () => "25:2",
+    normalizeAssignmentSubmissionPayload,
+    readAssignmentSubmissionDraft: loadNamedFunction(appJs, "readAssignmentSubmissionDraft", {
+      state,
+      getAssignmentSubmissionDraftKey: () => "25:2",
+      normalizeAssignmentSubmissionPayload,
+    }),
+  });
+  const getRequestedCheckPrefill = loadNamedFunction(appJs, "getAssignmentRequestedCheckReturnDraftPrefill", {
+    state,
+    getLatestAssignmentSubmissionRow: () => state.assignments.latestSubmissionRows[25],
+    getAssignmentSubmissionDraftKey: () => "25:2",
+    normalizeAssignmentRequestedCheckReturnDraft,
+    hasUsableAssignmentRequestedCheckReturnRows,
+  });
+
+  const articlePrefill = getPrefill(assignment, null);
+  const requestedPrefill = getRequestedCheckPrefill(assignment, handoffPackage);
+
+  assert.equal(articlePrefill.verified_answers[0]?.answer, "draft verify");
+  assert.equal(articlePrefill.capture_answers[0]?.answer, "draft capture");
+  assert.equal(articlePrefill.question_answers[0]?.answer, "draft ask");
+  assert.equal(articlePrefill.additional_text, "draft note");
+  assert.equal(requestedPrefill.requested_check_returns["cta_contact.phone"].checked, false);
+  assert.equal(requestedPrefill.requested_check_returns["cta_contact.phone"].value, "0800000000");
+  assert.equal(requestedPrefill.requested_check_returns["taxonomy.pet_friendly"].checked, false);
+  assert.equal(requestedPrefill.requested_check_returns["taxonomy.pet_friendly"].value, false);
+});
+
 test("server-synced uploaded assets rehydrate after refresh without duplicating local unsynced files", () => {
   const state = createAssignmentState();
   state.assignments.assetLookup = [
