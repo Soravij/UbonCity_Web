@@ -617,6 +617,242 @@ function createReviewHarness(overrides = {}) {
   };
 }
 
+function loadAssignmentReviewMediaBundleSelector() {
+  return loadNamedFunction(appJs, "selectAssignmentReviewMediaBundle");
+}
+
+function loadAssignmentReviewMediaItemsHarness(state, overrides = {}) {
+  const selector = loadAssignmentReviewMediaBundleSelector();
+  return loadNamedFunction(appJs, "getAssignmentReviewMediaItems", {
+    state,
+    getLatestAssignmentSubmissionRow: overrides.getLatestAssignmentSubmissionRow || ((assignment = null) => {
+      const id = Number(assignment?.id || 0) || 0;
+      return state.assignments.latestSubmissionRows?.[id] || null;
+    }),
+    selectAssignmentReviewMediaBundle: selector,
+    resolveAssignmentReviewMediaUrl: overrides.resolveAssignmentReviewMediaUrl || ((row) => String(row?.public_url || row?.source_url || "").trim()),
+    summarizeAssignmentReviewMediaLabel: overrides.summarizeAssignmentReviewMediaLabel || ((row, fallbackPrefix) => String(row?.title || "").trim() || fallbackPrefix),
+    getAssignmentDeliverableLabel: overrides.getAssignmentDeliverableLabel || ((type) => type),
+  });
+}
+
+test("review media selector uses latest submission deliverables when present", () => {
+  const selectAssignmentReviewMediaBundle = loadAssignmentReviewMediaBundleSelector();
+  const result = selectAssignmentReviewMediaBundle(
+    [
+      { id: 12, media_payload_json: { assets: [{ id: 991, mime_type: "image/jpeg", public_url: "https://cdn.example.com/payload-latest.jpg" }] } },
+      { id: 11, media_payload_json: { assets: [{ id: 881, mime_type: "image/jpeg", public_url: "https://cdn.example.com/payload-prev.jpg" }] } },
+    ],
+    [
+      { id: 201, submission_id: 12, deliverable_type: "photos", source_url: "https://cdn.example.com/latest-1.jpg", title: "latest 1" },
+      { id: 101, submission_id: 11, deliverable_type: "photos", source_url: "https://cdn.example.com/prev-1.jpg", title: "prev 1" },
+    ],
+    "photos"
+  );
+
+  assert.equal(result.source_submission_id, 12);
+  assert.equal(result.source_type, "deliverables");
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].url, "https://cdn.example.com/latest-1.jpg");
+});
+
+test("review media selector falls back to newest previous deliverable bundle and never concatenates history", () => {
+  const selectAssignmentReviewMediaBundle = loadAssignmentReviewMediaBundleSelector();
+  const previousRows = Array.from({ length: 14 }, (_, index) => ({
+    id: 100 + index,
+    submission_id: 11,
+    deliverable_type: "photos",
+    source_url: `https://cdn.example.com/prev-${index + 1}.jpg`,
+    title: `prev ${index + 1}`,
+  }));
+  const accumulatedPayload = Array.from({ length: 39 }, (_, index) => ({
+    id: 500 + index,
+    mime_type: "image/jpeg",
+    public_url: `https://cdn.example.com/payload-${index + 1}.jpg`,
+  }));
+  const result = selectAssignmentReviewMediaBundle(
+    [
+      { id: 12, media_payload_json: { assets: accumulatedPayload } },
+      { id: 11, media_payload_json: { assets: [] } },
+    ],
+    previousRows,
+    "photos"
+  );
+
+  assert.equal(result.source_submission_id, 11);
+  assert.equal(result.source_type, "deliverables");
+  assert.equal(result.items.length, 14);
+  assert.equal(result.items[0].url, "https://cdn.example.com/prev-1.jpg");
+  assert.equal(result.items.some((item) => item.url === "https://cdn.example.com/payload-1.jpg"), false);
+});
+
+test("review media selector ignores text deliverables, uses newest valid previous bundle only, and falls back to one payload bundle", () => {
+  const selectAssignmentReviewMediaBundle = loadAssignmentReviewMediaBundleSelector();
+  const resultWithPrevious = selectAssignmentReviewMediaBundle(
+    [
+      { id: 14, media_payload_json: { assets: [] } },
+      { id: 13, media_payload_json: { assets: [] } },
+      { id: 12, media_payload_json: { assets: [] } },
+    ],
+    [
+      { id: 301, submission_id: 13, deliverable_type: "caption_draft", source_url: "https://cdn.example.com/text.txt", title: "ignore text" },
+      { id: 201, submission_id: 12, deliverable_type: "photos", source_url: "https://cdn.example.com/older-valid.jpg", title: "older valid" },
+      { id: 211, submission_id: 13, deliverable_type: "photos", source_url: "https://cdn.example.com/newer-valid.jpg", title: "newer valid" },
+    ],
+    "photos"
+  );
+
+  assert.equal(resultWithPrevious.source_submission_id, 13);
+  assert.equal(resultWithPrevious.items.length, 1);
+  assert.equal(resultWithPrevious.items[0].url, "https://cdn.example.com/newer-valid.jpg");
+
+  const payloadFallback = selectAssignmentReviewMediaBundle(
+    [
+      { id: 15, media_payload_json: { assets: [{ id: 901, mime_type: "text/plain", public_url: "https://cdn.example.com/readme.txt" }] } },
+      { id: 14, media_payload_json: { assets: [{ id: 902, mime_type: "image/jpeg", public_url: "https://cdn.example.com/fallback.jpg", file_name: "fallback.jpg" }] } },
+      { id: 13, media_payload_json: { assets: [{ id: 903, mime_type: "image/jpeg", public_url: "https://cdn.example.com/older-fallback.jpg", file_name: "older-fallback.jpg" }] } },
+    ],
+    [],
+    "photos"
+  );
+
+  assert.equal(payloadFallback.source_submission_id, 14);
+  assert.equal(payloadFallback.source_type, "payload");
+  assert.equal(payloadFallback.items.length, 1);
+  assert.equal(payloadFallback.items[0].url, "https://cdn.example.com/fallback.jpg");
+});
+
+test("review media items keep CTA and taxonomy on latest submission while gallery uses selected previous media bundle", () => {
+  const state = {
+    assignments: {
+      deliverablesBundle: {
+        assignment_id: 24,
+        latest_submission_id: 12,
+        deliverables_by_type: {},
+      },
+      latestSubmissionRows: {
+        24: {
+          id: 12,
+          field_return_payload_json: {
+            requested_check_returns: {
+              "cta_contact.phone": { checked: true, found: true, value: "0812345678", answer_type: "phone" },
+            },
+          },
+          media_payload_json: {
+            assets: Array.from({ length: 39 }, (_, index) => ({
+              id: 700 + index,
+              mime_type: "image/jpeg",
+              public_url: `https://cdn.example.com/payload-${index + 1}.jpg`,
+            })),
+          },
+        },
+      },
+      submissionRowsByAssignment: {
+        24: [
+          {
+            id: 12,
+            field_return_payload_json: {
+              requested_check_returns: {
+                "cta_contact.phone": { checked: true, found: true, value: "0812345678", answer_type: "phone" },
+              },
+            },
+            media_payload_json: {
+              assets: Array.from({ length: 39 }, (_, index) => ({
+                id: 700 + index,
+                mime_type: "image/jpeg",
+                public_url: `https://cdn.example.com/payload-${index + 1}.jpg`,
+              })),
+            },
+          },
+          { id: 11, media_payload_json: { assets: [] } },
+        ],
+      },
+      deliverableRowsByAssignment: {
+        24: Array.from({ length: 14 }, (_, index) => ({
+          id: 400 + index,
+          submission_id: 11,
+          deliverable_type: "photos",
+          source_url: `https://cdn.example.com/prev-${index + 1}.jpg`,
+          title: `prev ${index + 1}`,
+        })),
+      },
+    },
+  };
+  const getAssignmentReviewMediaItems = loadAssignmentReviewMediaItemsHarness(state);
+  const photoItems = getAssignmentReviewMediaItems({ id: 24, latest_submission_id: 12 }, "photos");
+
+  assert.equal(photoItems.length, 14);
+  assert.equal(photoItems[0].url, "https://cdn.example.com/prev-1.jpg");
+  assert.equal(photoItems.some((item) => item.url === "https://cdn.example.com/payload-1.jpg"), false);
+  assert.equal(state.assignments.latestSubmissionRows[24].field_return_payload_json.requested_check_returns["cta_contact.phone"].value, "0812345678");
+});
+
+test("loadAssignmentDeliverablesBundle keeps latest-bundle media when all-deliverables history request fails", async () => {
+  const state = {
+    assignments: {
+      selectedId: 24,
+      deliverablesBundle: null,
+      deliverableRowsByAssignment: {},
+    },
+  };
+  const assignment = { id: 24, latest_submission_id: 12 };
+  const latestBundle = {
+    assignment_id: 24,
+    latest_submission_id: 12,
+    deliverables_by_type: {
+      photos: [
+        {
+          id: 201,
+          submission_id: 12,
+          deliverable_type: "photos",
+          source_url: "https://cdn.example.com/latest-bundle.jpg",
+          title: "latest bundle",
+        },
+      ],
+    },
+    missing_deliverable_types: [],
+  };
+  const calls = [];
+  const renderStates = [];
+  const loadAssignmentDeliverablesBundle = await loadNamedAsyncFunction(appJs, "loadAssignmentDeliverablesBundle", {
+    state,
+    isEditorUser: () => false,
+    ensureSelectedAssignmentId: () => 24,
+    api: async (path) => {
+      calls.push(path);
+      if (path === "/api/assignments/24/deliverables/latest-bundle") {
+        return { bundle: latestBundle };
+      }
+      if (path === "/api/assignments/24/deliverables") {
+        throw new Error("history endpoint failed");
+      }
+      throw new Error(`unexpected path ${path}`);
+    },
+    getAssignmentById: () => assignment,
+    renderAssignmentDeliverablesSummary: (bundle) => {
+      renderStates.push({ kind: "summary", photoCount: Array.isArray(bundle?.deliverables_by_type?.photos) ? bundle.deliverables_by_type.photos.length : 0 });
+    },
+    renderAssignmentReviewSummary: () => {
+      renderStates.push({ kind: "review-summary" });
+    },
+    renderAssignmentReviewSubmissionContent: () => {
+      renderStates.push({ kind: "review-content", selectedBundle: state.assignments.deliverablesBundle });
+    },
+    setStatus: () => {},
+  });
+
+  const result = await loadAssignmentDeliverablesBundle({ showStatus: false });
+
+  assert.equal(result, latestBundle);
+  assert.deepEqual(calls, [
+    "/api/assignments/24/deliverables/latest-bundle",
+    "/api/assignments/24/deliverables",
+  ]);
+  assert.equal(state.assignments.deliverablesBundle, latestBundle);
+  assert.deepEqual(state.assignments.deliverableRowsByAssignment[24], []);
+  assert.equal(renderStates.some((entry) => entry.kind === "review-content" && entry.selectedBundle === latestBundle), true);
+});
+
 test("review requested-check cards use latest submission payload and render CTA/Curation read-only", () => {
   const harness = createReviewHarness();
   const html = harness.buildAssignmentReviewRequestedCheckCardsHtml(harness.assignment);

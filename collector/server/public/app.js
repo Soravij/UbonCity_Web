@@ -213,6 +213,8 @@ const state = {
     expectedDeliverablesTouched: false,
     deliverablesBundle: null,
     submissionDrafts: {},
+    submissionRowsByAssignment: {},
+    deliverableRowsByAssignment: {},
     latestSubmissionArticlePayloads: {},
     latestSubmissionRows: {},
     latestSubmissionLoaded: {},
@@ -3540,11 +3542,105 @@ function summarizeAssignmentReviewMediaLabel(item, fallbackPrefix) {
   return fallbackPrefix;
 }
 
+function selectAssignmentReviewMediaBundle(submissions = [], deliverables = [], deliverableType = "") {
+  const normalizedType = String(deliverableType || "").trim().toLowerCase();
+  if (normalizedType !== "photos" && normalizedType !== "videos") {
+    return { items: [], source_submission_id: null, source_type: null };
+  }
+  const normalizedSubmissions = (Array.isArray(submissions) ? submissions : [])
+    .filter((row) => row && typeof row === "object")
+    .slice()
+    .sort((left, right) => {
+      const rightCreatedAt = Date.parse(String(right?.created_at || right?.submitted_at || ""));
+      const leftCreatedAt = Date.parse(String(left?.created_at || left?.submitted_at || ""));
+      if (Number.isFinite(rightCreatedAt) && Number.isFinite(leftCreatedAt) && rightCreatedAt !== leftCreatedAt) {
+        return rightCreatedAt - leftCreatedAt;
+      }
+      return (Number(right?.id || 0) || 0) - (Number(left?.id || 0) || 0);
+    });
+  const orderedSubmissionIds = normalizedSubmissions
+    .map((row) => Number(row?.id || 0) || 0)
+    .filter((id, index, rows) => id > 0 && rows.indexOf(id) === index);
+  const allowedDeliverableType = normalizedType;
+  const deliverablesBySubmissionId = new Map();
+  (Array.isArray(deliverables) ? deliverables : []).forEach((row) => {
+    const submissionId = Number(row?.submission_id || 0) || 0;
+    const rowType = String(row?.deliverable_type || "").trim().toLowerCase();
+    if (!submissionId || rowType !== allowedDeliverableType) return;
+    if (!deliverablesBySubmissionId.has(submissionId)) deliverablesBySubmissionId.set(submissionId, []);
+    deliverablesBySubmissionId.get(submissionId).push(row);
+  });
+  for (const submissionId of orderedSubmissionIds) {
+    const rows = (deliverablesBySubmissionId.get(submissionId) || []).filter((row) => {
+      const url = String(row?.public_url || row?.source_url || "").trim();
+      const sourceAssetId = Number(row?.source_asset_id || 0) || 0;
+      return Boolean(url) || sourceAssetId > 0;
+    });
+    if (!rows.length) continue;
+    return {
+      items: rows.map((row) => ({
+        ...row,
+        url: String(row?.public_url || row?.source_url || "").trim(),
+      })),
+      source_submission_id: submissionId,
+      source_type: "deliverables",
+    };
+  }
+
+  const mimePrefix = normalizedType === "videos" ? "video/" : "image/";
+  for (const submission of normalizedSubmissions) {
+    const submissionId = Number(submission?.id || 0) || 0;
+    const payloadAssets = Array.isArray(submission?.media_payload_json?.assets)
+      ? submission.media_payload_json.assets.filter((asset) => String(asset?.mime_type || "").trim().toLowerCase().startsWith(mimePrefix))
+      : [];
+    if (!payloadAssets.length) continue;
+    return {
+      items: payloadAssets.map((asset) => ({
+        ...asset,
+        url: String(asset?.public_url || asset?.source_url || "").trim(),
+      })),
+      source_submission_id: submissionId || null,
+      source_type: "payload",
+    };
+  }
+
+  return { items: [], source_submission_id: null, source_type: null };
+}
+
 function getAssignmentReviewMediaItems(assignment, deliverableType) {
   const bundle = state.assignments.deliverablesBundle && typeof state.assignments.deliverablesBundle === "object"
     ? state.assignments.deliverablesBundle
     : null;
+  const assignmentId = Number(assignment?.id || 0) || 0;
   const type = String(deliverableType || "").trim().toLowerCase();
+  const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
+  const submissions = Array.isArray(state.assignments.submissionRowsByAssignment?.[assignmentId])
+    ? state.assignments.submissionRowsByAssignment[assignmentId]
+    : (latestSubmission ? [latestSubmission] : []);
+  const deliverableRows = Array.isArray(state.assignments.deliverableRowsByAssignment?.[assignmentId])
+    ? state.assignments.deliverableRowsByAssignment[assignmentId]
+    : [];
+  const selectedBundle = selectAssignmentReviewMediaBundle(submissions, deliverableRows, type);
+  if (selectedBundle.source_type === "deliverables" && selectedBundle.items.length) {
+    return selectedBundle.items
+      .map((row, index) => ({
+        key: `deliverable-${type}-${Number(row?.id || 0) || index}`,
+        url: resolveAssignmentReviewMediaUrl(row),
+        label: summarizeAssignmentReviewMediaLabel(row, `${getAssignmentDeliverableLabel(type)} ${index + 1}`),
+        meta: row?.created_at || row?.updated_at || "",
+      }))
+      .filter((row) => row.url);
+  }
+  if (selectedBundle.source_type === "payload" && selectedBundle.items.length) {
+    return selectedBundle.items
+      .map((asset, index) => ({
+        key: `payload-${type}-${Number(asset?.id || 0) || index}`,
+        url: String(asset?.public_url || "").trim(),
+        label: String(asset?.file_name || "").trim() || `${getAssignmentDeliverableLabel(type)} ${index + 1}`,
+        meta: String(asset?.mime_type || "").trim(),
+      }))
+      .filter((row) => row.url);
+  }
   const fromBundle = Array.isArray(bundle?.deliverables_by_type?.[type])
     ? bundle.deliverables_by_type[type]
       .map((row, index) => ({
@@ -3557,7 +3653,6 @@ function getAssignmentReviewMediaItems(assignment, deliverableType) {
     : [];
   if (fromBundle.length) return fromBundle;
 
-  const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
   const payloadAssets = Array.isArray(latestSubmission?.media_payload_json?.assets)
     ? latestSubmission.media_payload_json.assets
     : [];
@@ -7469,6 +7564,7 @@ async function ensureAssignmentSubmissionPrefillLoaded(assignment = null) {
   try {
     const result = await api(`/api/assignments/${assignmentId}/submissions`);
     const submissions = Array.isArray(result?.submissions) ? result.submissions : [];
+    state.assignments.submissionRowsByAssignment[assignmentId] = submissions;
     const latestSubmissionId = Number(assignment?.latest_submission_id || 0) || 0;
     const latestSubmission = latestSubmissionId > 0
       ? submissions.find((row) => Number(row?.id || 0) === latestSubmissionId) || submissions[0] || null
@@ -9555,6 +9651,7 @@ async function loadAssignmentSubmissions() {
   const assignmentId = ensureSelectedAssignmentId();
   const result = await api(`/api/assignments/${assignmentId}/submissions`);
   const submissions = Array.isArray(result?.submissions) ? result.submissions : [];
+  state.assignments.submissionRowsByAssignment[assignmentId] = submissions;
   const assignment = getAssignmentById(assignmentId);
   const latestSubmissionId = Number(assignment?.latest_submission_id || 0) || 0;
   const latestSubmission = latestSubmissionId > 0
@@ -9574,11 +9671,17 @@ async function loadAssignmentDeliverablesBundle({ showStatus = true } = {}) {
     throw new Error("editor cannot load assignment deliverables from this surface");
   }
   const assignmentId = ensureSelectedAssignmentId();
-  const result = await api(`/api/assignments/${assignmentId}/deliverables/latest-bundle`);
+  const [result, deliverablesResult] = await Promise.all([
+    api(`/api/assignments/${assignmentId}/deliverables/latest-bundle`),
+    api(`/api/assignments/${assignmentId}/deliverables`).catch(() => ({ deliverables: [] })),
+  ]);
   if (Number(state.assignments.selectedId || 0) !== assignmentId) {
     return result?.bundle || null;
   }
   state.assignments.deliverablesBundle = result?.bundle || null;
+  state.assignments.deliverableRowsByAssignment[assignmentId] = Array.isArray(deliverablesResult?.deliverables)
+    ? deliverablesResult.deliverables
+    : [];
   renderAssignmentDeliverablesSummary(state.assignments.deliverablesBundle, getAssignmentById(assignmentId));
   renderAssignmentReviewSummary(getAssignmentById(assignmentId));
   renderAssignmentReviewSubmissionContent(getAssignmentById(assignmentId));
