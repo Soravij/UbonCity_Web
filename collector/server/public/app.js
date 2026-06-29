@@ -1271,6 +1271,9 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
     return state.assignments.serverSubmissionDraftPayloads?.[draftKey] || null;
   }
   if (loadState === "loading") return null;
+  const hadLocalDraftBeforeLoad = Boolean(
+    readAssignmentSubmissionDraft(assignmentId, assignment, state.assignments.contextFieldPack)
+  );
   state.assignments.serverSubmissionDraftLoaded[draftKey] = "loading";
   try {
     const result = await api(`/api/assignments/${assignmentId}/draft`);
@@ -1287,6 +1290,20 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
           : null,
       }
       : null;
+    const hydratedServerDraft = state.assignments.serverSubmissionDraftPayloads[draftKey];
+    if (
+      hydratedServerDraft
+      && !hadLocalDraftBeforeLoad
+      && (!state.assignments.submissionDrafts?.[draftKey] || typeof state.assignments.submissionDrafts[draftKey] !== "object")
+    ) {
+      if (!state.assignments.submissionDrafts || typeof state.assignments.submissionDrafts !== "object") {
+        state.assignments.submissionDrafts = {};
+      }
+      state.assignments.submissionDrafts[draftKey] = {
+        article_payload_json: hydratedServerDraft.article_payload_json || null,
+        field_return_payload_json: hydratedServerDraft.field_return_payload_json || null,
+      };
+    }
     state.assignments.serverSubmissionDraftLoaded[draftKey] = true;
     const serverFieldReturnPayload = state.assignments.serverSubmissionDraftPayloads?.[draftKey]?.field_return_payload_json || null;
     const serverReturns = serverFieldReturnPayload?.requested_check_returns;
@@ -1300,6 +1317,13 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
       const normalizedDraft = normalizeAssignmentRequestedCheckReturnDraft({ requested_check_returns: serverReturns }, handoffPackage);
       setAssignmentRequestedCheckReturnDraftState(assignmentId, normalizedDraft, { source: "server_draft", dirty: false });
       renderAssignmentRequestedCheckSection(selectedAssignment, handoffPackage, normalizedDraft);
+    }
+    if (
+      Number(state.assignments.selectedId || 0) === assignmentId
+      && !hadLocalDraftBeforeLoad
+      && hydratedServerDraft?.article_payload_json
+    ) {
+      renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId) || assignment, getAssignmentPageMode()));
     }
     return state.assignments.serverSubmissionDraftPayloads[draftKey];
   } catch {
@@ -7163,7 +7187,7 @@ function renderAssignmentSubmissionFileList() {
   }
   node.className = "assignment-brief-list-wrap";
   node.innerHTML = `
-    <div class="assignment-brief-meta" style="margin-bottom:8px;">${isSynced ? "สถานะ: ไฟล์ซิงก์แล้ว รอส่งงานกลับ (ขั้นที่ 2)" : (hasLocalQueue ? "มีไฟล์ที่เลือกใหม่ ต้องทำขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์ก่อนส่งงานกลับ" : "สถานะ: ยังไม่ซิงก์ไฟล์ (ต้องทำขั้นที่ 1 ก่อนส่งงานกลับ)")}</div>
+    <div class="assignment-brief-meta" style="margin-bottom:8px;">${isSynced ? "สถานะ: ไฟล์ซิงก์แล้ว รอส่งงานกลับ (ขั้นที่ 2)" : (hasLocalQueue ? "มีไฟล์ที่เลือกใหม่ใน browser เท่านั้น ยังไม่ถูกบันทึกถาวร และจะหายเมื่อ refresh ถ้ายังไม่ทำขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์ก่อนส่งงานกลับ" : "สถานะ: ยังไม่ซิงก์ไฟล์ (ต้องทำขั้นที่ 1 ก่อนส่งงานกลับ)")}</div>
     <ul class="assignment-brief-list">${files.map((file) => `<li>${escapeHtml(`${String(file.name || "").trim() || "file"} | ${String(file.type || "").trim() || "unknown"}`)}</li>`).join("")}</ul>
   `;
 }

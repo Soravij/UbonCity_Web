@@ -3099,12 +3099,20 @@ test("loadAssignmentSubmissionServerDraft rerenders requested-check surface afte
     }),
     getAssignmentSubmissionDraftKey: () => "12:1",
     normalizeAssignmentSubmissionPayload: (payload) => payload,
+    readAssignmentSubmissionDraft: loadNamedFunction(appJs, "readAssignmentSubmissionDraft", {
+      state,
+      getAssignmentSubmissionDraftKey: () => "12:1",
+      normalizeAssignmentSubmissionPayload: (payload) => payload,
+    }),
     hasUsableAssignmentRequestedCheckReturnRows,
     normalizeAssignmentRequestedCheckReturnDraft,
     setAssignmentRequestedCheckReturnDraftState: loadNamedFunction(appJs, "setAssignmentRequestedCheckReturnDraftState", {
       state,
     }),
     getAssignmentById: (id) => ({ id }),
+    renderAssignmentSubmissionForm: () => {},
+    getAssignmentSubmissionFormAssignment: (assignment) => assignment,
+    getAssignmentPageMode: () => "work",
     renderAssignmentRequestedCheckSection: (assignment, handoffPackage, draft) => {
       calls.push({ assignmentId: assignment?.id || 0, handoffPackage, draft });
     },
