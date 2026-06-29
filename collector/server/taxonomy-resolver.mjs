@@ -34,9 +34,15 @@ function isPlaceItem(item = {}) {
   return normalizeKey(item?.type) === "place";
 }
 
+function normalizeActiveRequestedCheckEvidenceRequired(groupKey = "", value = false) {
+  const normalizedGroupKey = normalizeKey(groupKey);
+  if (normalizedGroupKey === "cta_contact" || normalizedGroupKey === "taxonomy") return false;
+  return value === true;
+}
+
 function defaultCtaTemplateChecks() {
   return [
-    { key: "phone", label: "Phone", instruction: "Confirm the real phone number people can use now.", answer_type: "phone", condition_prompt: null, evidence_required: true, required: true, activation_mode: "required", allowed_values: null, unit_options: null },
+    { key: "phone", label: "Phone", instruction: "Confirm the real phone number people can use now.", answer_type: "phone", condition_prompt: null, evidence_required: false, required: true, activation_mode: "required", allowed_values: null, unit_options: null },
     { key: "line_url", label: "LINE URL", instruction: "Confirm the working LINE URL if available.", answer_type: "url", condition_prompt: null, evidence_required: false, required: true, activation_mode: "required", allowed_values: null, unit_options: null },
     { key: "facebook_url", label: "Facebook URL", instruction: "Confirm the correct Facebook page URL if available.", answer_type: "url", condition_prompt: null, evidence_required: false, required: true, activation_mode: "required", allowed_values: null, unit_options: null },
     { key: "website_url", label: "Website URL", instruction: "Confirm the main website URL if available.", answer_type: "url", condition_prompt: null, evidence_required: false, required: true, activation_mode: "required", allowed_values: null, unit_options: null },
@@ -129,7 +135,7 @@ function buildCatalogCheck(entry, savedCheck = {}, aiTaxonomy = {}) {
     item_types: cloneValue(entry.item_types),
     condition_prompt: entry.condition_prompt || null,
     condition_note: conditionNote,
-    evidence_required: entry.evidence_required === true,
+    evidence_required: normalizeActiveRequestedCheckEvidenceRequired("taxonomy", entry.evidence_required),
     allowed_values: Array.isArray(entry.allowed_values) ? cloneValue(entry.allowed_values) : null,
     unit_options: Array.isArray(entry.unit_options) ? cloneValue(entry.unit_options) : null,
     downstream_consumers: cloneValue(entry.downstream_consumers),
@@ -201,7 +207,7 @@ function buildResolvedCtaGroup(existingGroup = null, item = {}, aiCtaContact = {
         activation_mode: check.activation_mode,
         required: true,
         condition_prompt: check.condition_prompt,
-        evidence_required: check.evidence_required === true,
+        evidence_required: normalizeActiveRequestedCheckEvidenceRequired("cta_contact", check.evidence_required),
         allowed_values: Array.isArray(check.allowed_values) ? cloneValue(check.allowed_values) : null,
         unit_options: Array.isArray(check.unit_options) ? cloneValue(check.unit_options) : null,
         suggested_value: suggestedValue,

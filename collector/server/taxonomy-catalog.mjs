@@ -74,14 +74,6 @@ const BOOLEAN_WITH_CONDITIONS_KEYS = new Set([
   "pet_transport_allowed",
 ]);
 
-const EVIDENCE_REQUIRED_KEYS = new Set([
-  "pet_friendly",
-  "wheelchair_accessible",
-  "swimming_allowed",
-  "age_restriction",
-  "religious_dress_code",
-]);
-
 const TAXONOMY_DEFINITIONS = Object.freeze({
   waterfront: {
     label: "ติดริมน้ำ",
@@ -491,7 +483,7 @@ function buildBaseCatalogDefinition(taxonomyKey) {
     categories,
     item_types: Object.freeze(["place"]),
     condition_prompt: definition.condition_prompt,
-    evidence_required: EVIDENCE_REQUIRED_KEYS.has(taxonomyKey),
+    evidence_required: false,
     required: false,
     activation_mode: "agent_triggered",
     allowed_values: Array.isArray(definition.allowed_values) ? Object.freeze([...definition.allowed_values]) : null,

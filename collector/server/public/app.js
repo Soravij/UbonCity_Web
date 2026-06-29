@@ -7923,6 +7923,12 @@ function isAssignmentRequestedCheckTaxonomyBooleanRow(row = {}) {
   return groupKey === "taxonomy" && (answerType === "boolean" || answerType === "boolean_with_conditions");
 }
 
+function isActiveAssignmentRequestedCheckEvidenceRequired(check = {}) {
+  const groupKey = String(check?.group_key || "").trim().toLowerCase();
+  if (groupKey === "cta_contact" || groupKey === "taxonomy") return false;
+  return check?.evidence_required === true;
+}
+
 function buildAssignmentRequestedCheckReturnSubmissionRow(row = {}) {
   const checked = row?.checked === true;
   if (checked) {
@@ -8066,15 +8072,18 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
     group_key: check?.group_key,
     answer_type: check?.answer_type,
   });
+  const normalizedGroupKey = String(check?.group_key || "").trim().toLowerCase();
   const checked = isTaxonomyBoolean ? row?.value === true : row.checked === true;
   const usesSuggestedValue = isTaxonomyBoolean
     ? hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
     : (
       hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
       && areAssignmentRequestedCheckValuesEqual(row.value, check.suggested_value, check.answer_type)
-    );
+  );
   const showConditionNote = options?.showConditionNote === true;
-  const showEvidence = check?.evidence_required === true;
+  const showEvidence = check?.evidence_required === true
+    && normalizedGroupKey !== "cta_contact"
+    && normalizedGroupKey !== "taxonomy";
   const rowModifierClass = String(options?.rowModifierClass || "").trim();
   const extraClass = rowModifierClass ? ` ${rowModifierClass}` : "";
   const isCurationRow = rowModifierClass.includes("requested-check-curation-row");

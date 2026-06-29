@@ -755,8 +755,8 @@ test("requested-check section uses namespaced keys and hides reserved taxonomy m
   assert.equal((sectionHtml.match(/class="assignment-capture-row requested-check-row-main"/g) || []).length, 2);
   assert.equal((sectionHtml.match(/class="assignment-capture-title requested-check-row-label"/g) || []).length, 2);
   assert.equal((sectionHtml.match(/class="assignment-capture-actions requested-check-row-status"/g) || []).length, 2);
-  assert.equal((sectionHtml.match(/class="requested-check-row-secondary"/g) || []).length, 1);
-  assert.match(sectionHtml, /หลักฐาน \(จำเป็น\)/);
+  assert.equal((sectionHtml.match(/class="requested-check-row-secondary"/g) || []).length, 0);
+  assert.doesNotMatch(sectionHtml, /หลักฐาน \(จำเป็น\)/);
   assert.equal((sectionHtml.match(/class="requested-check-cta-list"/g) || []).length, 0);
   assert.equal((sectionHtml.match(/class="requested-check-cta-card"/g) || []).length, 0);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.category"'), false);
@@ -1177,7 +1177,7 @@ test("requested-check section renders CTA before legacy custom groups and hides 
   assert.ok(ctaIndex >= 0);
   assert.ok(customIndex > ctaIndex);
   assert.equal(sectionHtml.includes('data-requested-check-group="taxonomy"'), false);
-  assert.equal(sectionHtml.includes('data-requested-check-field="evidence"'), true);
+  assert.equal(sectionHtml.includes('data-requested-check-field="evidence"'), false);
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.category"'), false);
   assert.match(sectionHtml, /<div class="assignment-brief-label">CTA\/ติดต่อ<\/div>/);
   assert.doesNotMatch(sectionHtml, /<div class="assignment-brief-label">Curation<\/div>/);
@@ -2137,7 +2137,7 @@ test("requested-check row state toggles structured multi_select children without
   assert.equal(valueMultiA.checked, true);
 });
 
-test("requested-check row html renders evidence-required CTA controls in the visible secondary surface", () => {
+test("requested-check row html does not render evidence controls for active CTA rows", () => {
   const html = buildAssignmentRequestedCheckReturnRowHtml(
     {
       return_key: "cta_contact.phone",
@@ -2158,9 +2158,9 @@ test("requested-check row html renders evidence-required CTA controls in the vis
     }
   );
 
-  assert.match(html, /class="requested-check-row-secondary"/);
-  assert.match(html, /หลักฐาน \(จำเป็น\)/);
-  assert.match(html, /data-requested-check-field="evidence"/);
+  assert.doesNotMatch(html, /class="requested-check-row-secondary"/);
+  assert.doesNotMatch(html, /evidence/);
+  assert.doesNotMatch(html, /data-requested-check-field="evidence"/);
   assert.doesNotMatch(html, /found|verified/);
 });
 
@@ -2977,7 +2977,7 @@ test("validator allows non-empty malformed multi_select value during submission 
   });
 });
 
-test("validator still bundles semantic errors in acceptance mode", () => {
+test("validator does not classify CTA or taxonomy evidence as required in acceptance mode", () => {
   const schemaMap = new Map();
   schemaMap.set("taxonomy.parking", {
     return_key: "taxonomy.parking",
@@ -3012,10 +3012,41 @@ test("validator still bundles semantic errors in acceptance mode", () => {
 
   assert.ok(caught, "should bundle errors");
   assert.ok(Array.isArray(caught.validation_errors));
-  assert.ok(caught.validation_errors.length >= 2, "should have at least 2 errors");
+  assert.ok(caught.validation_errors.length >= 1, "should have at least 1 error");
   const codes = caught.validation_errors.map((e) => e.code);
   assert.ok(codes.includes("required_unanswered"), "should include required_unanswered");
-  assert.ok(codes.includes("required_evidence_missing"), "should include required_evidence_missing");
+  assert.ok(!codes.includes("required_evidence_missing"), "should not include required_evidence_missing for CTA/taxonomy");
+});
+
+test("validator still requires evidence for unrelated groups in acceptance mode", () => {
+  const schemaMap = new Map();
+  schemaMap.set("custom.proof", {
+    return_key: "custom.proof",
+    group_key: "custom",
+    check_key: "proof",
+    required: true,
+    requested: true,
+    evidence_required: true,
+    answer_type: "text",
+  });
+
+  let caught = null;
+  try {
+    validateRequestedCheckReturnsForFinalSubmission({
+      "custom.proof": {
+        checked: true,
+        value: "verified",
+        evidence: "",
+      },
+    }, schemaMap, "field_return_payload_json.requested_check_returns", { mode: "acceptance" });
+  } catch (err) {
+    caught = err;
+  }
+
+  assert.ok(caught, "should bundle errors");
+  assert.ok(Array.isArray(caught.validation_errors));
+  assert.equal(caught.validation_errors.length, 1);
+  assert.equal(caught.validation_errors[0]?.code, "required_evidence_missing");
 });
 
 // API route response helper test
@@ -3222,6 +3253,6 @@ test("CTA row keeps condition input outside the main row structure", () => {
   );
 
   assert.match(rowHtml, /assignment-capture-actions requested-check-row-status/);
-  assert.match(rowHtml, /requested-check-row-secondary[\s\S]*data-requested-check-field="evidence"/);
+  assert.doesNotMatch(rowHtml, /requested-check-row-secondary[\s\S]*data-requested-check-field="evidence"/);
   assert.doesNotMatch(rowHtml, /class="requested-check-row-condition"/);
 });

@@ -101,6 +101,36 @@ test("every catalog key exposes Thai metadata, explicit categories, and answer c
   assert.deepEqual(getTaxonomyBaseDefinition("typical_duration")?.unit_options, ["minutes", "hours"]);
 });
 
+test("taxonomy catalog no longer requires evidence for any active taxonomy key", () => {
+  const formerEvidenceKeys = [
+    "pet_friendly",
+    "wheelchair_accessible",
+    "swimming_allowed",
+    "age_restriction",
+    "religious_dress_code",
+  ];
+
+  for (const category of SUPPORTED_TAXONOMY_CATEGORIES) {
+    for (const entry of getTaxonomyCatalogEntriesForCategory(category, "place")) {
+      assert.equal(entry.evidence_required, false);
+    }
+  }
+
+  for (const key of formerEvidenceKeys) {
+    assert.equal(getTaxonomyBaseDefinition(key)?.evidence_required, false);
+  }
+});
+
+test("resolver CTA phone schema no longer marks evidence as required", () => {
+  const result = resolveRequestedChecksWithCatalog({
+    requestedChecks: { version: 1, groups: [] },
+    item: createPlaceItem({ category: "cafes" }),
+  });
+
+  const ctaGroup = findGroup(result, "cta_contact");
+  assert.equal(findCheck(ctaGroup, "phone")?.evidence_required, false);
+});
+
 test("events return no place taxonomy", () => {
   assert.deepEqual(getTaxonomyCatalogEntriesForItem({ type: "event", category: "restaurants" }), []);
 });

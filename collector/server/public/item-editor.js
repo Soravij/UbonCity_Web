@@ -2542,7 +2542,7 @@ const REQUESTED_CHECK_GROUP_TEMPLATES = [
     group_key: "cta_contact",
     group_label: "CTA/ติดต่อ",
     checks: [
-      { key: "phone", label: "เบอร์โทร", answer_type: "phone", instruction: "ขอเบอร์ที่ติดต่อได้จริง", condition_prompt: "", evidence_required: true },
+      { key: "phone", label: "เบอร์โทร", answer_type: "phone", instruction: "ขอเบอร์ที่ติดต่อได้จริง", condition_prompt: "", evidence_required: false },
       { key: "line_url", label: "ลิงก์ LINE", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์ที่ใช้ได้จริง", condition_prompt: "", evidence_required: false },
       { key: "facebook_url", label: "ลิงก์ Facebook", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์เพจที่ถูกต้อง", condition_prompt: "", evidence_required: false },
       { key: "website_url", label: "ลิงก์เว็บไซต์", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์เว็บไซต์หลัก", condition_prompt: "", evidence_required: false },
@@ -2694,7 +2694,7 @@ function buildResolvedTaxonomyRequestedChecks(fieldPack = {}) {
       condition_prompt: check.condition_prompt == null
         ? (savedCheck.condition_prompt ?? null)
         : String(check.condition_prompt || "").trim() || null,
-      evidence_required: check.evidence_required === true || savedCheck.evidence_required === true,
+      evidence_required: false,
       source: hasAiSuggestedValue
         ? sourceMeta
         : (check.source || savedCheck.source || null),
@@ -2785,7 +2785,9 @@ function mergeRequestedChecksForSave(uiState = {}, existingState = {}) {
             condition_prompt: uiCheck.condition_prompt == null
               ? (existingCheck.condition_prompt ?? null)
               : String(uiCheck.condition_prompt || "").trim() || null,
-            evidence_required: uiCheck.evidence_required === true,
+            evidence_required: (groupKey === "cta_contact" || groupKey === "taxonomy")
+              ? false
+              : uiCheck.evidence_required === true,
             source: Object.prototype.hasOwnProperty.call(existingCheck, "source")
               ? existingCheck.source
               : null,
@@ -2851,7 +2853,7 @@ function buildRequestedChecksEditorState(fieldPack = {}) {
           condition_prompt: savedCheck.condition_prompt == null
             ? (String(check.condition_prompt || "").trim() || null)
             : String(savedCheck.condition_prompt || "").trim() || null,
-          evidence_required: savedCheck.evidence_required === true || check.evidence_required === true,
+          evidence_required: false,
           source: hasRequestedCheckMeaningfulValue(aiSuggestedValue)
             ? sourceMeta
             : (savedCheck.source || null),
@@ -2906,7 +2908,8 @@ function getRequestedChecksEditorBaselineState(fieldPack = {}) {
     || buildRequestedChecksEditorState(fieldPack);
 }
 
-function getRequestedCheckEditableSnapshot(check = {}) {
+function getRequestedCheckEditableSnapshot(groupKey = "", check = {}) {
+  const normalizedGroupKey = String(groupKey || "").trim().toLowerCase();
   return {
     key: String(check?.key || "").trim().toLowerCase(),
     requested: check?.requested === true,
@@ -2914,13 +2917,15 @@ function getRequestedCheckEditableSnapshot(check = {}) {
     instruction: String(check?.instruction || "").trim(),
     answer_type: String(check?.answer_type || "text").trim() || "text",
     condition_prompt: check?.condition_prompt == null ? null : String(check.condition_prompt || "").trim() || null,
-    evidence_required: check?.evidence_required === true,
+    evidence_required: (normalizedGroupKey === "cta_contact" || normalizedGroupKey === "taxonomy")
+      ? false
+      : check?.evidence_required === true,
   };
 }
 
-function areRequestedCheckEditableSnapshotsEqual(left = {}, right = {}) {
-  const leftSnapshot = getRequestedCheckEditableSnapshot(left);
-  const rightSnapshot = getRequestedCheckEditableSnapshot(right);
+function areRequestedCheckEditableSnapshotsEqual(groupKey = "", left = {}, right = {}) {
+  const leftSnapshot = getRequestedCheckEditableSnapshot(groupKey, left);
+  const rightSnapshot = getRequestedCheckEditableSnapshot(groupKey, right);
   return Object.keys(leftSnapshot).every((key) => leftSnapshot[key] === rightSnapshot[key]);
 }
 
@@ -2930,19 +2935,24 @@ function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}
     if (autoCheck?.required === true || autoCheck?.activation_mode === "required") return true;
     return groupKey === "cta_contact" && autoCheck?.requested === true;
   };
-  const toEditableSnapshot = (check = {}) => ({
-    key: String(check?.key || "").trim().toLowerCase(),
-    requested: check?.requested === true,
-    requested_decision: String(check?.requested_decision || "").trim().toLowerCase() || "",
-    label: String(check?.label || "").trim(),
-    instruction: String(check?.instruction || "").trim(),
-    answer_type: String(check?.answer_type || "text").trim() || "text",
-    condition_prompt: check?.condition_prompt == null ? null : String(check.condition_prompt || "").trim() || null,
-    evidence_required: check?.evidence_required === true,
-  });
-  const areEditableSnapshotsEqual = (left = {}, right = {}) => {
-    const leftSnapshot = toEditableSnapshot(left);
-    const rightSnapshot = toEditableSnapshot(right);
+  const toEditableSnapshot = (groupKey = "", check = {}) => {
+    const normalizedGroupKey = String(groupKey || "").trim().toLowerCase();
+    return {
+      key: String(check?.key || "").trim().toLowerCase(),
+      requested: check?.requested === true,
+      requested_decision: String(check?.requested_decision || "").trim().toLowerCase() || "",
+      label: String(check?.label || "").trim(),
+      instruction: String(check?.instruction || "").trim(),
+      answer_type: String(check?.answer_type || "text").trim() || "text",
+      condition_prompt: check?.condition_prompt == null ? null : String(check.condition_prompt || "").trim() || null,
+      evidence_required: (normalizedGroupKey === "cta_contact" || normalizedGroupKey === "taxonomy")
+        ? false
+        : check?.evidence_required === true,
+    };
+  };
+  const areEditableSnapshotsEqual = (groupKey = "", left = {}, right = {}) => {
+    const leftSnapshot = toEditableSnapshot(groupKey, left);
+    const rightSnapshot = toEditableSnapshot(groupKey, right);
     return Object.keys(leftSnapshot).every((key) => leftSnapshot[key] === rightSnapshot[key]);
   };
   const manualGroups = new Map(
@@ -2984,7 +2994,7 @@ function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}
       const manualCheck = manualChecksByKey.get(checkKey);
       if (!manualCheck) return autoCheck;
       const baselineCheck = baselineChecksByKey.get(checkKey) || {};
-      if (areEditableSnapshotsEqual(manualCheck, baselineCheck)) return autoCheck;
+      if (areEditableSnapshotsEqual(groupKey, manualCheck, baselineCheck)) return autoCheck;
       const explicitDecision = String(manualCheck?.requested_decision || "").trim().toLowerCase();
       const normalizedDecision = explicitDecision === "selected" || explicitDecision === "rejected"
         ? explicitDecision
@@ -3005,7 +3015,7 @@ function mergeRequestedChecksAutoAndManualState(autoState = {}, manualState = {}
         condition_prompt: manualCheck.condition_prompt == null
           ? (autoCheck.condition_prompt ?? null)
           : String(manualCheck.condition_prompt || "").trim() || null,
-        evidence_required: manualCheck.evidence_required === true,
+        evidence_required: false,
       };
     });
     return {
@@ -3066,7 +3076,9 @@ function buildRequestedChecksAutoSaveState(fieldPack = {}, item = state.item) {
               answer_type: String(check.answer_type || "text").trim() || "text",
               suggested_value: hasRequestedCheckMeaningfulValue(suggestedValue) ? suggestedValue : null,
               condition_prompt: String(check.condition_prompt || "").trim() || null,
-              evidence_required: check.evidence_required === true,
+              evidence_required: (template.group_key === "cta_contact" || template.group_key === "taxonomy")
+                ? false
+                : check.evidence_required === true,
               source: hasRequestedCheckMeaningfulValue(suggestedValue) ? sourceMeta : null,
             };
           })

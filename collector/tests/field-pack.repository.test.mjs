@@ -4261,13 +4261,14 @@ test("assignment acceptance enforces required completeness, allows optional unan
   }
 });
 
-test("assignment acceptance classifies missing required evidence separately from malformed requested check rows", () => {
+test("assignment acceptance ignores legacy CTA and taxonomy evidence requirements but still blocks malformed rows", () => {
   const ctx = createTestContext();
   try {
     function seedAcceptanceSubmission({
       itemTitle,
       assigneeSlug,
       overrides,
+      mutateHandoff,
     }) {
       const item = ctx.createItem(itemTitle);
       ctx.db.prepare("UPDATE content_items SET category='cafe' WHERE id=?").run(item.id);
@@ -4288,8 +4289,15 @@ test("assignment acceptance classifies missing required evidence separately from
       ).assignment;
       const assignmentId = Number(assignment.id || 0);
       const handoff = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
+      if (typeof mutateHandoff === "function") {
+        const nextPackage = JSON.parse(JSON.stringify(handoff.handoff_package_json || {}));
+        mutateHandoff(nextPackage);
+        ctx.db.prepare("UPDATE content_assignment_handoff_snapshots SET handoff_package_json=? WHERE id=?")
+          .run(JSON.stringify(nextPackage), handoff.id);
+      }
+      const currentHandoff = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
       const requestedCheckReturns = {
-        ...buildRequestedReturnsFromHandoff(handoff.handoff_package_json),
+        ...buildRequestedReturnsFromHandoff(currentHandoff.handoff_package_json),
         ...overrides,
       };
       ctx.repo.addAssignmentSubmission({
@@ -4308,53 +4316,67 @@ test("assignment acceptance classifies missing required evidence separately from
       return assignmentId;
     }
 
-    const phoneMissingEvidenceAssignmentId = seedAcceptanceSubmission({
-      itemTitle: "Acceptance Evidence Phone",
-      assigneeSlug: "acceptance-evidence-phone",
+    const phoneLegacyEvidenceAssignmentId = seedAcceptanceSubmission({
+      itemTitle: "Acceptance Legacy CTA Evidence",
+      assigneeSlug: "acceptance-legacy-cta-evidence",
       overrides: {
         "cta_contact.phone": {
           checked: true,
           value: "0804415224",
         },
       },
+      mutateHandoff(nextPackage) {
+        const ctaGroup = nextPackage?.requested_checks?.groups?.find((group) => group.group_key === "cta_contact");
+        const phoneCheck = ctaGroup?.checks?.find((check) => check.key === "phone");
+        if (phoneCheck) phoneCheck.evidence_required = true;
+      },
     });
-    assert.throws(() => {
-      ctx.repo.updateAssignmentState(phoneMissingEvidenceAssignmentId, "accepted", "reviewer@local", {
+    assert.doesNotThrow(() => {
+      ctx.repo.updateAssignmentState(phoneLegacyEvidenceAssignmentId, "accepted", "reviewer@local", {
         actor_role: "admin",
         reason_code: "assignment_submission_accepted",
       });
-    }, /cta_contact\.phone has valid answer but is missing required evidence/);
+    });
 
-    const booleanMissingEvidenceAssignmentId = seedAcceptanceSubmission({
-      itemTitle: "Acceptance Evidence Boolean",
-      assigneeSlug: "acceptance-evidence-boolean",
+    const falseLegacyEvidenceAssignmentId = seedAcceptanceSubmission({
+      itemTitle: "Acceptance Legacy Taxonomy False",
+      assigneeSlug: "acceptance-legacy-taxonomy-false",
       overrides: {
         "taxonomy.pet_friendly": {
           checked: true,
           value: false,
         },
       },
-    });
-    assert.throws(() => {
-      ctx.repo.updateAssignmentState(booleanMissingEvidenceAssignmentId, "accepted", "reviewer@local", {
-        actor_role: "admin",
-        reason_code: "assignment_submission_accepted",
-      });
-    }, /taxonomy\.pet_friendly has valid answer but is missing required evidence/);
-
-    const phoneWithEvidenceAssignmentId = seedAcceptanceSubmission({
-      itemTitle: "Acceptance Evidence Present",
-      assigneeSlug: "acceptance-evidence-present",
-      overrides: {
-        "cta_contact.phone": {
-          checked: true,
-          value: "0804415224",
-          evidence: "storefront sign",
-        },
+      mutateHandoff(nextPackage) {
+        const taxonomyGroup = nextPackage?.requested_checks?.groups?.find((group) => group.group_key === "taxonomy");
+        const petFriendly = taxonomyGroup?.checks?.find((check) => check.key === "pet_friendly");
+        if (petFriendly) petFriendly.evidence_required = true;
       },
     });
     assert.doesNotThrow(() => {
-      ctx.repo.updateAssignmentState(phoneWithEvidenceAssignmentId, "accepted", "reviewer@local", {
+      ctx.repo.updateAssignmentState(falseLegacyEvidenceAssignmentId, "accepted", "reviewer@local", {
+        actor_role: "admin",
+        reason_code: "assignment_submission_accepted",
+      });
+    });
+
+    const trueLegacyEvidenceAssignmentId = seedAcceptanceSubmission({
+      itemTitle: "Acceptance Legacy Taxonomy True",
+      assigneeSlug: "acceptance-legacy-taxonomy-true",
+      overrides: {
+        "taxonomy.pet_friendly": {
+          checked: true,
+          value: true,
+        },
+      },
+      mutateHandoff(nextPackage) {
+        const taxonomyGroup = nextPackage?.requested_checks?.groups?.find((group) => group.group_key === "taxonomy");
+        const petFriendly = taxonomyGroup?.checks?.find((check) => check.key === "pet_friendly");
+        if (petFriendly) petFriendly.evidence_required = true;
+      },
+    });
+    assert.doesNotThrow(() => {
+      ctx.repo.updateAssignmentState(trueLegacyEvidenceAssignmentId, "accepted", "reviewer@local", {
         actor_role: "admin",
         reason_code: "assignment_submission_accepted",
       });
@@ -4394,6 +4416,44 @@ test("assignment acceptance classifies missing required evidence separately from
         reason_code: "assignment_submission_accepted",
       });
     }, /taxonomy\.pet_friendly is malformed/);
+
+    const unrelatedEvidenceAssignmentId = seedAcceptanceSubmission({
+      itemTitle: "Acceptance Custom Evidence Required",
+      assigneeSlug: "acceptance-custom-evidence-required",
+      overrides: {
+        "custom.proof": {
+          checked: true,
+          value: "verified",
+        },
+      },
+      mutateHandoff(nextPackage) {
+        const groups = Array.isArray(nextPackage?.requested_checks?.groups) ? nextPackage.requested_checks.groups : [];
+        groups.push({
+          group_key: "custom",
+          group_label: "Custom",
+          checks: [
+            {
+              key: "proof",
+              requested: true,
+              requested_decision: null,
+              label: "Proof",
+              instruction: "Attach proof",
+              answer_type: "text",
+              condition_prompt: null,
+              evidence_required: true,
+              required: true,
+              activation_mode: "required",
+            },
+          ],
+        });
+      },
+    });
+    assert.throws(() => {
+      ctx.repo.updateAssignmentState(unrelatedEvidenceAssignmentId, "accepted", "reviewer@local", {
+        actor_role: "admin",
+        reason_code: "assignment_submission_accepted",
+      });
+    }, /custom\.proof has valid answer but is missing required evidence/);
   } finally {
     ctx.cleanup();
   }

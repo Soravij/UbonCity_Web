@@ -2755,7 +2755,7 @@ test("buildFieldPackApiPayload overlays explicitly edited live CTA checks while 
   assert.equal(phoneCheck?.label, "Edited phone");
   assert.equal(phoneCheck?.instruction, "updated instruction");
   assert.equal(phoneCheck?.condition_prompt, "edited condition");
-  assert.equal(phoneCheck?.evidence_required, true);
+  assert.equal(phoneCheck?.evidence_required, false);
   assert.equal(phoneCheck?.suggested_value, "0812345678");
   assert.equal(lineUrlCheck?.requested, true);
   assert.equal(lineUrlCheck?.suggested_value, "https://line.me/example");

@@ -1340,6 +1340,12 @@ function hasRequestedCheckEvidence(row = {}) {
     || Boolean(String(row?.evidence_source_url || "").trim());
 }
 
+function isRequestedCheckEvidenceRequired(schema = null) {
+  const groupKey = String(schema?.group_key || "").trim().toLowerCase();
+  if (groupKey === "cta_contact" || groupKey === "taxonomy") return false;
+  return schema?.evidence_required === true;
+}
+
 function hasMeaningfulRequestedCheckValue(value) {
   if (value === false) return true;
   if (value === 0) return true;
@@ -1376,9 +1382,13 @@ function inferRequestedCheckReturnStatus(row = {}, schema = null) {
   const hasEvidence = hasRequestedCheckEvidence(row);
   const hasCondition = Boolean(String(row?.condition_note || "").trim());
   const hasNote = Boolean(String(row?.note || "").trim());
+  const evidenceRequired = typeof isRequestedCheckEvidenceRequired === "function"
+    ? isRequestedCheckEvidenceRequired(schema)
+    : (schema?.evidence_required === true
+      && !["cta_contact", "taxonomy"].includes(String(schema?.group_key || "").trim().toLowerCase()));
 
   if (complete) {
-    if (schema?.evidence_required === true && !hasEvidence) return "malformed";
+    if (evidenceRequired && !hasEvidence) return "malformed";
     return "reported";
   }
 
@@ -1419,7 +1429,11 @@ function validateRequestedCheckReturnsForFinalSubmission(requestedCheckReturns =
 
     if (status === "malformed") {
       const complete = isRequestedCheckAnswerComplete(row, schema);
-      if (complete && schema?.evidence_required === true) {
+      const evidenceRequired = typeof isRequestedCheckEvidenceRequired === "function"
+        ? isRequestedCheckEvidenceRequired(schema)
+        : (schema?.evidence_required === true
+          && !["cta_contact", "taxonomy"].includes(String(schema?.group_key || "").trim().toLowerCase()));
+      if (complete && evidenceRequired) {
         errors.push({
           return_key: returnKey,
           group_key: schema.group_key,
@@ -1690,7 +1704,7 @@ function buildAcceptedAssignmentValidationSummary({
     });
     if (status === "malformed") {
       const complete = isRequestedCheckAnswerComplete(row, schema);
-      if (complete && schema?.evidence_required === true && !hasRequestedCheckEvidence(row)) {
+      if (complete && isRequestedCheckEvidenceRequired(schema) && !hasRequestedCheckEvidence(row)) {
         blockers.push({
           code: "required_evidence_missing",
           return_key: returnKey,
