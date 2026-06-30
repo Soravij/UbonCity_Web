@@ -5061,6 +5061,11 @@ export function createRepository(db) {
     FROM content_assets
     WHERE asset_id=?
   `);
+  const countAssetDeliverableRefsStmt = db.prepare(`
+    SELECT COUNT(*) AS c
+    FROM content_assignment_submission_deliverables
+    WHERE source_asset_id=?
+  `);
   const deleteAssetByIdStmt = db.prepare(`
     DELETE FROM assets
     WHERE id=?
@@ -6863,7 +6868,8 @@ function createAssignmentSubmissionDraftStateError(state) {
       }
       if (row.asset_id) {
         const links = Number(countAssetLinksStmt.get(row.asset_id)?.c || 0) || 0;
-        if (!links) {
+        const deliverableRefs = Number(countAssetDeliverableRefsStmt.get(row.asset_id)?.c || 0) || 0;
+        if (!links && !deliverableRefs) {
           const assetResult = deleteAssetByIdStmt.run(row.asset_id);
           const deleted = Number(assetResult?.changes || 0) || 0;
           removedAssets += deleted;

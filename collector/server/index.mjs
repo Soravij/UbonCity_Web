@@ -5732,6 +5732,10 @@ function listDraftAssignmentWorkAssetRows(options = {}) {
   const assignmentId = Number(options.assignmentId || 0) || 0;
   const assignmentRound = Number(options.assignmentRound || 0) || 0;
   const contentItemId = Number(options.contentItemId || 0) || 0;
+  const assignmentSlotKey = sanitizeAssignmentCaptureSlotKey(options.assignmentSlotKey);
+  const assignmentMediaType = normalizeAssignmentCaptureMediaType(options.assignmentMediaType);
+  const assignmentSyncBatchId = sanitizeAssignmentSyncBatchId(options.assignmentSyncBatchId);
+  const excludeAssignmentSyncBatchId = sanitizeAssignmentSyncBatchId(options.excludeAssignmentSyncBatchId);
   const clauses = ["COALESCE(ca.assignment_surface, '')='assignment_work'"];
   const params = [];
   if (assignmentId > 0) {
@@ -5746,6 +5750,22 @@ function listDraftAssignmentWorkAssetRows(options = {}) {
     clauses.push("ca.content_item_id=?");
     params.push(contentItemId);
   }
+  if (assignmentSlotKey) {
+    clauses.push("COALESCE(ca.assignment_slot_key, '')=?");
+    params.push(assignmentSlotKey);
+  }
+  if (assignmentMediaType) {
+    clauses.push("COALESCE(ca.assignment_media_type, '')=?");
+    params.push(assignmentMediaType);
+  }
+  if (assignmentSyncBatchId) {
+    clauses.push("COALESCE(ca.assignment_sync_batch_id, '')=?");
+    params.push(assignmentSyncBatchId);
+  }
+  if (excludeAssignmentSyncBatchId) {
+    clauses.push("COALESCE(ca.assignment_sync_batch_id, '')<>?");
+    params.push(excludeAssignmentSyncBatchId);
+  }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = db.prepare(`
     SELECT
@@ -5753,6 +5773,8 @@ function listDraftAssignmentWorkAssetRows(options = {}) {
       ca.assignment_id,
       ca.assignment_round,
       ca.assignment_media_type,
+      ca.assignment_slot_key,
+      ca.assignment_sync_batch_id,
       ca.content_item_id,
       a.id AS asset_id,
       a.storage_disk,
@@ -5811,6 +5833,32 @@ function removeAssignmentWorkRowsByAssetIds(assetIds = []) {
     }
   }
   return { removed_links: removedLinks, removed_assets: removedAssets, deleted_files: deletedFiles };
+}
+
+function cleanupSupersededAssignmentWorkAssetSlot(options = {}) {
+  const assignmentId = Number(options.assignmentId || 0) || 0;
+  const assignmentRound = Number(options.assignmentRound || 0) || 0;
+  const assignmentSlotKey = sanitizeAssignmentCaptureSlotKey(options.assignmentSlotKey);
+  const assignmentMediaType = normalizeAssignmentCaptureMediaType(options.assignmentMediaType);
+  const assignmentSyncBatchId = sanitizeAssignmentSyncBatchId(options.assignmentSyncBatchId);
+  const keepAssetIds = new Set(
+    (Array.isArray(options.keepAssetIds) ? options.keepAssetIds : [])
+      .map((value) => Number(value || 0))
+      .filter((value) => value > 0)
+  );
+  if (!assignmentId || !assignmentRound || !assignmentSlotKey || !assignmentMediaType || !assignmentSyncBatchId) {
+    return { removed_links: 0, removed_assets: 0, deleted_files: [] };
+  }
+  const supersededAssetIds = listDraftAssignmentWorkAssetRows({
+    assignmentId,
+    assignmentRound,
+    assignmentSlotKey,
+    assignmentMediaType,
+    excludeAssignmentSyncBatchId: assignmentSyncBatchId,
+  })
+    .map((row) => Number(row?.asset_id || 0) || 0)
+    .filter((assetId) => assetId > 0 && !keepAssetIds.has(assetId));
+  return removeAssignmentWorkRowsByAssetIds(supersededAssetIds);
 }
 
 function cleanupExpiredAssignmentWorkDraftAssets(options = {}) {
@@ -14389,6 +14437,14 @@ app.post("/api/assets/upload", requireRole("owner", "admin", "editor", "user"), 
   }
 
   const first = uploaded[0] || null;
+  const replacementCleanup = cleanupSupersededAssignmentWorkAssetSlot({
+    assignmentId,
+    assignmentRound,
+    assignmentSlotKey: persistedSlotKey || null,
+    assignmentMediaType: mediaType,
+    assignmentSyncBatchId: syncBatchId,
+    keepAssetIds: [assetId],
+  });
   res.status(201).json({
     id: first?.id || null,
     asset_uid: first?.asset_uid || null,
@@ -14800,12 +14856,21 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
     assignment_sync_batch_id: syncBatchId,
     role: assetRole,
   };
+  const replacementCleanup = cleanupSupersededAssignmentWorkAssetSlot({
+    assignmentId,
+    assignmentRound,
+    assignmentSlotKey: persistedSlotKey || null,
+    assignmentMediaType: mediaType,
+    assignmentSyncBatchId: syncBatchId,
+    keepAssetIds: [assetId],
+  });
   res.status(201).json({
     id: uploadedAsset.id,
     asset_uid: uploadedAsset.asset_uid,
     storage_path: uploadedAsset.storage_path,
     public_url: uploadedAsset.public_url,
     uploaded: [uploadedAsset],
+    replacement_cleanup: replacementCleanup,
   });
 });
 
@@ -14922,6 +14987,14 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
       assignment_surface: "assignment_work",
       assignment_sync_batch_id: syncBatchId,
       role: assetRole,
+    });
+    cleanupSupersededAssignmentWorkAssetSlot({
+      assignmentId,
+      assignmentRound,
+      assignmentSlotKey: requestedSlotKey || null,
+      assignmentMediaType: mediaType,
+      assignmentSyncBatchId: syncBatchId,
+      keepAssetIds: [assetId],
     });
   }
 
