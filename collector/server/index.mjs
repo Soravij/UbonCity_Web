@@ -14437,14 +14437,6 @@ app.post("/api/assets/upload", requireRole("owner", "admin", "editor", "user"), 
   }
 
   const first = uploaded[0] || null;
-  const replacementCleanup = cleanupSupersededAssignmentWorkAssetSlot({
-    assignmentId,
-    assignmentRound,
-    assignmentSlotKey: persistedSlotKey || null,
-    assignmentMediaType: mediaType,
-    assignmentSyncBatchId: syncBatchId,
-    keepAssetIds: [assetId],
-  });
   res.status(201).json({
     id: first?.id || null,
     asset_uid: first?.asset_uid || null,

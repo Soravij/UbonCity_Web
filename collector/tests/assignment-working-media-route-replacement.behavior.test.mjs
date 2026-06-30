@@ -58,6 +58,12 @@ function extractRouteBody(source, routeMarker, nextMarker) {
   return routeSource.slice(bodyStart + 1, bodyEnd).trim();
 }
 
+const genericAssetUploadRouteBody = extractRouteBody(
+  serverIndexJs,
+  'app.post("/api/assets/upload"',
+  'app.post("/api/assignments/:id/assets/uploads/start"'
+);
+
 const nonChunkUploadRouteBody = extractRouteBody(
   serverIndexJs,
   'app.post("/api/assignments/:id/assets/upload"',
@@ -85,8 +91,10 @@ const buildHandlers = new Function(
   parseAssetPathForUrl,
   actorEmail,
   ensureAssignmentUploadAccess,
+  ensureComposerMediaEditAccess,
   hasAssignmentSubmissionAccess,
   actorPolicyRole,
+  cleanupSpy,
 } = deps;
 const ASSIGNMENT_CHUNK_SIZE_BYTES = 20 * 1024 * 1024;
 const ASSIGNMENT_CHUNK_MAX_BYTES = 30 * 1024 * 1024;
@@ -115,6 +123,14 @@ ${extractNamedFunctionSource(serverIndexJs, "isSupportedMediaSignature")}
 ${extractFunctionSlice(serverIndexJs, "listDraftAssignmentWorkAssetRows", "removeAssignmentWorkRowsByAssetIds")}
 ${extractFunctionSlice(serverIndexJs, "removeAssignmentWorkRowsByAssetIds", "cleanupSupersededAssignmentWorkAssetSlot")}
 ${extractFunctionSlice(serverIndexJs, "cleanupSupersededAssignmentWorkAssetSlot", "cleanupExpiredAssignmentWorkDraftAssets")}
+const __cleanupImpl = cleanupSupersededAssignmentWorkAssetSlot;
+cleanupSupersededAssignmentWorkAssetSlot = function cleanupSupersededAssignmentWorkAssetSlotSpy(options = {}) {
+  if (Array.isArray(cleanupSpy)) cleanupSpy.push(options);
+  return __cleanupImpl(options);
+};
+const genericAssetUploadHandler = async function(req, res) {
+${genericAssetUploadRouteBody}
+};
 const nonChunkUploadHandler = async function(req, res) {
 ${nonChunkUploadRouteBody}
 };
@@ -122,6 +138,7 @@ const chunkFinalizeHandler = async function(req, res) {
 ${chunkFinalizeRouteBody}
 };
 return {
+  genericAssetUploadHandler,
   nonChunkUploadHandler,
   chunkFinalizeHandler,
   writeAssignmentUploadManifest,
@@ -151,6 +168,7 @@ function createTestContext() {
   const repo = createRepository(db);
   const mediaDir = path.join(tempDir, "media");
   fs.mkdirSync(mediaDir, { recursive: true });
+  const cleanupSpy = [];
 
   function cleanup() {
     try {
@@ -303,8 +321,10 @@ function createTestContext() {
       }
       return assignment;
     },
+    ensureComposerMediaEditAccess: () => true,
     hasAssignmentSubmissionAccess: () => true,
     actorPolicyRole: () => "user",
+    cleanupSpy,
   });
 
   return {
@@ -313,6 +333,7 @@ function createTestContext() {
     mediaDir,
     tempDir,
     cleanup,
+    cleanupSpy,
     createItem,
     createAssignment,
     createSubmission,
@@ -339,6 +360,38 @@ function createAuthReq(assignmentId, actorUserId, extra = {}) {
     files: extra.files || [],
   };
 }
+
+test("generic asset upload success path creates asset and link without touching assignment cleanup", async () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Generic upload regression");
+    const uploadTempPath = ctx.createUploadTempFile("generic-photo.jpg", jpegBytes());
+    const req = {
+      body: { content_item_id: item.id, role: "gallery" },
+      authUser: { id: 1, email: "owner@local.test", role: "owner" },
+      files: [{
+        path: uploadTempPath,
+        originalname: "generic-photo.jpg",
+        mimetype: "image/jpeg",
+        size: fs.statSync(uploadTempPath).size,
+      }],
+    };
+    const res = createResponseRecorder();
+
+    await ctx.handlers.genericAssetUploadHandler(req, res);
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(Array.isArray(res.payload?.uploaded), true);
+    assert.equal(res.payload.uploaded.length, 1);
+    const assetId = Number(res.payload.uploaded[0]?.id || 0);
+    assert.ok(assetId > 0);
+    assert.equal(Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM assets WHERE id=?").get(assetId)?.c || 0), 1);
+    assert.equal(Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assets WHERE asset_id=?").get(assetId)?.c || 0), 1);
+    assert.equal(ctx.cleanupSpy.length, 0);
+  } finally {
+    ctx.cleanup();
+  }
+});
 
 test("non-chunk assignment upload route replaces only the old unsubmitted working media in the same assignment round slot and type", async () => {
   const ctx = createTestContext();
@@ -413,6 +466,7 @@ test("non-chunk assignment upload route replaces only the old unsubmitted workin
     assert.equal(fs.existsSync(otherSlot.absolutePath), true);
     assert.equal(fs.existsSync(otherType.absolutePath), true);
     assert.equal(fs.existsSync(otherAssignmentAsset.absolutePath), true);
+    assert.equal(ctx.cleanupSpy.length > 0, true);
   } finally {
     ctx.cleanup();
   }
@@ -561,6 +615,7 @@ test("chunk finalize route replaces only the old unsubmitted working media after
     assert.equal(Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM assets WHERE id=?").get(otherRound.assetId)?.c || 0), 1);
     assert.equal(fs.existsSync(otherRound.absolutePath), true);
     assert.equal(fs.existsSync(otherImage.absolutePath), true);
+    assert.equal(ctx.cleanupSpy.length > 0, true);
   } finally {
     ctx.cleanup();
   }
