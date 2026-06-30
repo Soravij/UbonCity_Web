@@ -592,6 +592,121 @@ test("revision 2 reload preserves latest saved draft text and explicit CTA false
   assert.equal(requestedPrefill.requested_check_returns["taxonomy.pet_friendly"].value, false);
 });
 
+test("server draft cache stays raw until field pack loads and rerender restores prompt answers", async () => {
+  const makeSubmissionNormalizer = () => {
+    const normalizeAssignmentSubmissionPromptAnswersReal = loadNamedFunction(appJs, "normalizeAssignmentSubmissionPromptAnswers");
+    const getFieldPackPromptGroups = (fieldPack = null) => {
+      const checklists = Array.isArray(fieldPack?.checklists) ? fieldPack.checklists : [];
+      return {
+        mustVerify: checklists
+          .filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_verify_fact")
+          .map((row) => String(row?.item_text || "").trim())
+          .filter(Boolean),
+        mustCapture: checklists
+          .filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_capture")
+          .map((row) => String(row?.item_text || "").trim())
+          .filter(Boolean),
+        mustAsk: checklists
+          .filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_ask_question")
+          .map((row) => String(row?.item_text || "").trim())
+          .filter(Boolean),
+      };
+    };
+    const normalizeAssignmentSubmissionFieldPayloadReal = loadNamedFunction(appJs, "normalizeAssignmentSubmissionFieldPayload", {
+      parseJsonSafe: (value, fallback = {}) => (value && typeof value === "object" ? value : fallback),
+      getFieldPackPromptGroups,
+      normalizeAssignmentSubmissionPromptAnswers: normalizeAssignmentSubmissionPromptAnswersReal,
+    });
+    return loadNamedFunction(appJs, "normalizeAssignmentSubmissionPayload", {
+      getAssignmentSubmissionKind: () => "field",
+      normalizeAssignmentSubmissionEditorialPayload: () => ({ verified_answers: [], capture_answers: [], question_answers: [], additional_text: "" }),
+      normalizeAssignmentSubmissionFieldPayload: normalizeAssignmentSubmissionFieldPayloadReal,
+    });
+  };
+
+  for (const scenario of [
+    { assignment: { id: 25, state: "assigned", revision_round: 0, content_item_id: 501 }, draftKey: "25:1" },
+    { assignment: { id: 25, state: "revision_requested", revision_round: 1, content_item_id: 501 }, draftKey: "25:2" },
+  ]) {
+    const state = createAssignmentState();
+    state.assignments.selectedId = 25;
+    state.assignments.contextFieldPack = null;
+    state.assignments.contextFieldPackStatus = "";
+    const normalizeAssignmentSubmissionPayloadReal = makeSubmissionNormalizer();
+    const serverDraftResponse = {
+      draft: {
+        article_payload_json: {
+          verified_answers: [{ prompt: "Verify phone", answer: "draft verify" }],
+          capture_answers: [{ prompt: "Storefront shot", answer: "draft capture" }],
+          question_answers: [{ prompt: "Ask owner", answer: "draft ask" }],
+          additional_text: "draft note",
+        },
+        field_return_payload_json: {
+          requested_check_returns: {
+            "cta_contact.phone": { checked: false, value: "0800000000", answer_type: "text", condition_note: "" },
+            "taxonomy.pet_friendly": { checked: false, value: false, answer_type: "boolean", condition_note: "" },
+          },
+        },
+      },
+      source: "latest_saved_draft_fallback",
+      revision_round: Number(scenario.assignment.revision_round || 0) + 1,
+    };
+
+    const loadDraft = await loadNamedAsyncFunction(appJs, "loadAssignmentSubmissionServerDraft", {
+      state,
+      isEditorUser: () => false,
+      isAssignmentSubmissionDraftEditableState,
+      api: async () => serverDraftResponse,
+      getAssignmentSubmissionDraftKey: () => scenario.draftKey,
+      normalizeAssignmentSubmissionPayload: normalizeAssignmentSubmissionPayloadReal,
+      readAssignmentSubmissionDraft: () => null,
+      hasUsableAssignmentRequestedCheckReturnRows,
+      normalizeAssignmentRequestedCheckReturnDraft,
+      setAssignmentRequestedCheckReturnDraftState: setAssignmentRequestedCheckReturnDraftStateFactory(state),
+      getAssignmentById: () => scenario.assignment,
+      renderAssignmentSubmissionForm: () => {},
+      getAssignmentSubmissionFormAssignment: (currentAssignment) => currentAssignment,
+      getAssignmentPageMode: () => "work",
+      renderAssignmentRequestedCheckSection: () => {},
+    });
+
+    await loadDraft(scenario.assignment);
+
+    const cachedDraft = state.assignments.serverSubmissionDraftPayloads[scenario.draftKey];
+    assert.equal(cachedDraft.article_payload_json.verified_answers[0]?.answer, "draft verify");
+    assert.equal(cachedDraft.article_payload_json.capture_answers[0]?.answer, "draft capture");
+    assert.equal(cachedDraft.article_payload_json.question_answers[0]?.answer, "draft ask");
+    assert.equal(cachedDraft.article_payload_json.additional_text, "draft note");
+
+    const getPrefill = loadNamedFunction(appJs, "getAssignmentSubmissionPrefillPayload", {
+      state,
+      isAssignmentSubmissionDraftEditableState,
+      getAssignmentSubmissionDraftKey: () => scenario.draftKey,
+      normalizeAssignmentSubmissionPayload: normalizeAssignmentSubmissionPayloadReal,
+      readAssignmentSubmissionDraft: () => null,
+    });
+
+    const prefillBeforeFieldPack = getPrefill(scenario.assignment, null);
+    assert.equal(prefillBeforeFieldPack.verified_answers[0]?.answer, "draft verify");
+    assert.equal(prefillBeforeFieldPack.capture_answers[0]?.answer, "draft capture");
+    assert.equal(prefillBeforeFieldPack.question_answers[0]?.answer, "draft ask");
+    assert.equal(prefillBeforeFieldPack.additional_text, "draft note");
+
+    state.assignments.contextFieldPack = {
+      checklists: [
+        { checklist_type: "must_verify_fact", item_text: "Verify phone" },
+        { checklist_type: "must_capture", item_text: "Storefront shot" },
+        { checklist_type: "must_ask_question", item_text: "Ask owner" },
+      ],
+    };
+    const prefillAfterFieldPack = getPrefill(scenario.assignment, state.assignments.contextFieldPack);
+    assert.equal(prefillAfterFieldPack.verified_answers[0]?.answer, "draft verify");
+    assert.equal(prefillAfterFieldPack.capture_answers[0]?.answer, "draft capture");
+    assert.equal(prefillAfterFieldPack.question_answers[0]?.answer, "draft ask");
+    assert.equal(prefillAfterFieldPack.additional_text, "draft note");
+  }
+});
+
 test("submit success cancels pending server draft autosave and flips local state to non-editable immediately", async () => {
   const state = createAssignmentState();
   state.assignments.selectedId = 25;

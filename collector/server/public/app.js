@@ -1263,13 +1263,10 @@ async function saveAssignmentSubmissionServerDraft(assignmentId, payload) {
   const serverDraft = result?.draft && typeof result.draft === "object" ? result.draft : normalized;
   const draftKey = getAssignmentSubmissionDraftKey(id, assignment);
   state.assignments.serverSubmissionDraftPayloads[draftKey] = {
-    article_payload_json: normalizeAssignmentSubmissionPayload(
-      serverDraft?.article_payload_json && typeof serverDraft.article_payload_json === "object"
-        ? serverDraft.article_payload_json
-        : null,
-      assignment,
-      state.assignments.contextFieldPack
-    ),
+    ...serverDraft,
+    article_payload_json: serverDraft?.article_payload_json && typeof serverDraft.article_payload_json === "object"
+      ? serverDraft.article_payload_json
+      : null,
     field_return_payload_json: serverDraft?.field_return_payload_json && typeof serverDraft.field_return_payload_json === "object"
       ? serverDraft.field_return_payload_json
       : null,
@@ -1321,11 +1318,10 @@ async function loadAssignmentSubmissionServerDraft(assignment) {
     const draft = result?.draft && typeof result.draft === "object" ? result.draft : null;
     state.assignments.serverSubmissionDraftPayloads[draftKey] = draft
       ? {
-        article_payload_json: normalizeAssignmentSubmissionPayload(
-          draft?.article_payload_json && typeof draft.article_payload_json === "object" ? draft.article_payload_json : null,
-          assignment,
-          state.assignments.contextFieldPack
-        ),
+        ...draft,
+        article_payload_json: draft?.article_payload_json && typeof draft.article_payload_json === "object"
+          ? draft.article_payload_json
+          : null,
         field_return_payload_json: draft?.field_return_payload_json && typeof draft.field_return_payload_json === "object"
           ? draft.field_return_payload_json
           : null,
@@ -1401,7 +1397,12 @@ function getAssignmentSubmissionPrefillPayload(assignment, fieldPack = null) {
   const draftKey = getAssignmentSubmissionDraftKey(assignmentId, assignment);
   const serverDraft = state.assignments.serverSubmissionDraftPayloads?.[draftKey] || null;
   if (serverDraft) {
-    return normalizeAssignmentSubmissionPayload(serverDraft.article_payload_json || null, assignment, fieldPack);
+    const rawArticlePayload = serverDraft.article_payload_json && typeof serverDraft.article_payload_json === "object"
+      ? serverDraft.article_payload_json
+      : null;
+    return fieldPack && typeof fieldPack === "object"
+      ? normalizeAssignmentSubmissionPayload(rawArticlePayload, assignment, fieldPack)
+      : (rawArticlePayload || normalizeAssignmentSubmissionPayload(null, assignment, fieldPack));
   }
   const draft = readAssignmentSubmissionDraft(assignmentId, assignment, fieldPack);
   if (draft) return draft;
