@@ -77,6 +77,7 @@ function loadNamedAsyncFunction(sourceText, functionName, dependencies = {}) {
 }
 
 function createMockDomNode(initial = {}) {
+  const listeners = new Map();
   return {
     innerHTML: "",
     textContent: "",
@@ -90,6 +91,17 @@ function createMockDomNode(initial = {}) {
       remove() {},
       toggle() {},
       contains() { return false; },
+    },
+    addEventListener(type, handler) {
+      const key = String(type || "");
+      if (!listeners.has(key)) listeners.set(key, []);
+      listeners.get(key).push(handler);
+    },
+    emit(type, event = {}) {
+      const key = String(type || "");
+      for (const handler of listeners.get(key) || []) {
+        handler({ currentTarget: this, target: this, preventDefault() {}, ...event });
+      }
     },
     setAttribute() {},
     removeAttribute() {},
@@ -982,6 +994,96 @@ test("server-synced uploaded assets rehydrate after refresh without duplicating 
   assert.equal(result.assets.length, 1);
   assert.equal(state.assignments.latestUploadedAssets.length, 1);
   assert.equal(state.assignments.latestUploadedAssetsKey, "25::server:25:901");
+});
+
+test("submission text input handlers refresh gate and lower media summary from the same readiness state", () => {
+  const assignment = { id: 25, state: "assigned", revision_round: 0, content_item_id: 501 };
+  const verifiedNode = createMockDomNode({ value: "" });
+  const questionNode = createMockDomNode({ value: "" });
+  const additionalNode = createMockDomNode({ value: "" });
+  const captureNode = createMockDomNode();
+  const expectedNode = createMockDomNode();
+  const requestedChecksNode = createMockDomNode();
+  const briefLinkNode = createMockDomNode();
+  const nodes = new Map([
+    ["assignment-submission-verified-fields", verifiedNode],
+    ["assignment-submission-question-fields", questionNode],
+    ["assignment-submission-additional-text", additionalNode],
+    ["assignment-submission-capture-guide", captureNode],
+    ["assignment-expected-deliverables", expectedNode],
+    ["assignment-submission-requested-checks-fields", requestedChecksNode],
+    ["assignment-submission-brief-link", briefLinkNode],
+  ]);
+  const gateCalls = [];
+  const summaryCalls = [];
+  let nextGateStateId = 0;
+  const sharedState = { assignments: { selectedId: assignment.id, deliverablesBundle: { latest_submission_id: null }, contextFieldPack: { id: 1 } } };
+  const getAssignmentSubmissionFormConfig = () => ({ captureItems: [] });
+  const buildAssignmentSubmissionGateState = () => ({
+    id: ++nextGateStateId,
+    canSubmit: Boolean(String(verifiedNode.value || "").trim() && String(questionNode.value || "").trim() && String(additionalNode.value || "").trim()),
+    blockingReasons: [],
+    warnings: [],
+    effectiveAssets: [],
+    composed: { retainedAssets: [] },
+  });
+  const renderAssignmentSubmissionGatePanel = (gateState) => { gateCalls.push(gateState); };
+  const renderAssignmentDeliverablesSummary = (bundle, assignmentArg, gateState) => { summaryCalls.push({ bundle, assignment: assignmentArg, gateState }); };
+  const refreshAssignmentSubmissionReadinessSurfaces = loadNamedFunction(appJs, "refreshAssignmentSubmissionReadinessSurfaces", {
+    state: sharedState,
+    getAssignmentById: () => assignment,
+    getAssignmentSubmissionFormConfig,
+    buildAssignmentCaptureFileUploadQueue: () => [],
+    buildAssignmentSubmissionGateState,
+    renderAssignmentSubmissionGatePanel,
+    renderAssignmentDeliverablesSummary,
+  });
+  const wireAssignments = loadNamedFunction(appJs, "wireAssignments", {
+    qs: (id) => nodes.get(id) || null,
+    state: sharedState,
+    syncAssignmentSubmissionDraftFromForm: () => {},
+    syncAssignmentRequestedCheckReturnDraftFromForm: () => {},
+    getAssignmentById: () => assignment,
+    getAssignmentSubmissionFormConfig,
+    buildAssignmentSubmissionGateState,
+    renderAssignmentSubmissionGatePanel,
+    renderAssignmentDeliverablesSummary,
+    refreshAssignmentSubmissionReadinessSurfaces,
+    markAssignmentExpectedDeliverablesTouched: () => {},
+    renderAssignmentDeliverableAssetPreview: () => {},
+    setAssignmentCaptureLoading: () => {},
+    renderAssignmentSubmissionForm: () => {},
+    appendAssignmentCaptureFiles: () => {},
+    window: { setTimeout() {} },
+    removeAssignmentCaptureFile: () => {},
+    getAssignmentSubmissionFormAssignment: (row) => row,
+    updateAssignmentRequestedCheckReturnRowState: () => {},
+    document: { querySelector: () => null },
+    withButtonLoading: async () => {},
+    executeReferenceCleanup: async () => ({ cleaned: {} }),
+    setStatus: () => {},
+    refreshAssignments: async () => {},
+    syncAssignmentReviewResetReasonUI: () => {},
+  });
+
+  wireAssignments();
+
+  verifiedNode.emit("input");
+  assert.equal(gateCalls.at(-1)?.canSubmit, false);
+  assert.equal(summaryCalls.at(-1)?.gateState, gateCalls.at(-1));
+  assert.equal(summaryCalls.at(-1)?.assignment, assignment);
+
+  verifiedNode.value = "verified";
+  questionNode.value = "question";
+  additionalNode.value = "additional";
+  additionalNode.emit("input");
+  assert.equal(gateCalls.at(-1)?.canSubmit, true);
+  assert.equal(summaryCalls.at(-1)?.gateState, gateCalls.at(-1));
+
+  additionalNode.value = "";
+  additionalNode.emit("input");
+  assert.equal(gateCalls.at(-1)?.canSubmit, false);
+  assert.equal(summaryCalls.at(-1)?.gateState, gateCalls.at(-1));
 });
 
 test("local unsynced files are reflected through the lower deliverables summary card", () => {

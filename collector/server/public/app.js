@@ -7581,6 +7581,22 @@ function buildAssignmentSubmissionGateState(assignmentId, formConfig, options = 
   };
 }
 
+function refreshAssignmentSubmissionReadinessSurfaces(assignmentId = null) {
+  const resolvedAssignmentId = Number(assignmentId || state.assignments.selectedId || 0) || 0;
+  const assignment = getAssignmentById(resolvedAssignmentId);
+  if (!assignment) {
+    renderAssignmentSubmissionGatePanel(null);
+    renderAssignmentDeliverablesSummary(state.assignments.deliverablesBundle, null, null);
+    return null;
+  }
+  const formConfig = getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack);
+  const uploadQueue = buildAssignmentCaptureFileUploadQueue(resolvedAssignmentId, formConfig?.captureItems);
+  const gateState = buildAssignmentSubmissionGateState(resolvedAssignmentId, formConfig, { uploadQueue });
+  renderAssignmentSubmissionGatePanel(gateState);
+  renderAssignmentDeliverablesSummary(state.assignments.deliverablesBundle, assignment, gateState);
+  return gateState;
+}
+
 function renderAssignmentSubmissionGatePanel(gateState) {
   const node = qs("assignment-submit-callout");
   if (!node) return;
@@ -8899,7 +8915,7 @@ function buildAssignmentDeliverableMediaRowsFromSubmission(assignment = null, ty
     .filter((row) => row.url);
 }
 
-function buildAssignmentDeliverablesCardState(bundle = null, assignment = null) {
+function buildAssignmentDeliverablesCardState(bundle = null, assignment = null, precomputedGateState = null) {
   const latestSubmissionId = Number(bundle?.latest_submission_id || assignment?.latest_submission_id || 0) || null;
   const fieldPack = state.assignments.contextFieldPack && typeof state.assignments.contextFieldPack === "object" ? state.assignments.contextFieldPack : null;
   const editableAssignment = getAssignmentSubmissionFormAssignment(assignment, getAssignmentPageMode());
@@ -8908,7 +8924,9 @@ function buildAssignmentDeliverablesCardState(bundle = null, assignment = null) 
   if (editableAssignment && formConfig) {
     const assignmentId = Number(editableAssignment.id || 0) || 0;
     const uploadQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
-    const gateState = buildAssignmentSubmissionGateState(assignmentId, formConfig, { uploadQueue });
+    const gateState = precomputedGateState && typeof precomputedGateState === "object"
+      ? precomputedGateState
+      : buildAssignmentSubmissionGateState(assignmentId, formConfig, { uploadQueue });
     const effectiveAssets = Array.isArray(gateState?.effectiveAssets) ? gateState.effectiveAssets : [];
     const retainedAssets = Array.isArray(gateState?.composed?.retainedAssets) ? gateState.composed.retainedAssets : [];
     const rowsByType = {
@@ -8984,7 +9002,7 @@ function renderAssignmentDeliverableMediaCard(type, rows = [], options = {}) {
     + '</div></div>';
 }
 
-function renderAssignmentDeliverablesSummary(bundle = null, assignment = null) {
+function renderAssignmentDeliverablesSummary(bundle = null, assignment = null, precomputedGateState = null) {
   const node = qs("assignment-deliverables-summary");
   const metaNode = qs("assignment-deliverables-meta");
   const createBtn = qs("btn-assignment-create-deliverable");
@@ -8997,7 +9015,7 @@ function renderAssignmentDeliverablesSummary(bundle = null, assignment = null) {
     renderAssignmentDeliverableTypeOptions(null, null);
     return;
   }
-  const cardState = buildAssignmentDeliverablesCardState(bundle, assignment);
+  const cardState = buildAssignmentDeliverablesCardState(bundle, assignment, precomputedGateState);
   if (createBtn) createBtn.disabled = !cardState.latestSubmissionId;
   metaNode.textContent = cardState.sourceLabel + ' | ภาพถ่าย ' + cardState.rowsByType.photos.length + ' รายการ | วิดีโอ ' + cardState.rowsByType.videos.length + ' รายการ';
   node.className = "assignment-deliverables-summary";
@@ -11334,18 +11352,15 @@ function wireAssignments() {
   });
   qs("assignment-submission-verified-fields")?.addEventListener("input", () => {
     syncAssignmentSubmissionDraftFromForm();
-    const assignment = getAssignmentById(state.assignments.selectedId);
-    renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(state.assignments.selectedId, getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack)));
+    refreshAssignmentSubmissionReadinessSurfaces();
   });
   qs("assignment-submission-capture-guide")?.addEventListener("input", () => {
     syncAssignmentSubmissionDraftFromForm();
-    const assignment = getAssignmentById(state.assignments.selectedId);
-    renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(state.assignments.selectedId, getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack)));
+    refreshAssignmentSubmissionReadinessSurfaces();
   });
   qs("assignment-submission-question-fields")?.addEventListener("input", () => {
     syncAssignmentSubmissionDraftFromForm();
-    const assignment = getAssignmentById(state.assignments.selectedId);
-    renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(state.assignments.selectedId, getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack)));
+    refreshAssignmentSubmissionReadinessSurfaces();
   });
   qs("assignment-submission-requested-checks-fields")?.addEventListener("input", (event) => {
     const target = event.target?.closest?.("[data-requested-check-row]") || null;
@@ -11383,8 +11398,7 @@ function wireAssignments() {
   });
   qs("assignment-submission-additional-text")?.addEventListener("input", () => {
     syncAssignmentSubmissionDraftFromForm();
-    const assignment = getAssignmentById(state.assignments.selectedId);
-    renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(state.assignments.selectedId, getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack)));
+    refreshAssignmentSubmissionReadinessSurfaces();
   });
   qs("assignment-submission-brief-link")?.addEventListener("click", (event) => {
     if (event.currentTarget?.classList.contains("disabled")) {
