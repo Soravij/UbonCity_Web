@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -238,7 +238,9 @@ function createRuntimeFixture() {
 
 function loadHarness(fixture, overrides = {}) {
   const state = fixture.state;
-  const fileListNode = overrides.fileListNode || { innerHTML: "", textContent: "", className: "" };
+  const summaryNode = overrides.summaryNode || { innerHTML: "", textContent: "", className: "" };
+  const metaNode = overrides.metaNode || { innerHTML: "", textContent: "", className: "" };
+  const renderCalls = [];
   const requests = [];
   const getAssignmentById = overrides.getAssignmentById || (() => fixture.assignment);
   const getAssignmentSubmissionFormConfig = overrides.getAssignmentSubmissionFormConfig || (() => ({ captureItems: fixture.captureItems }));
@@ -325,16 +327,18 @@ function loadHarness(fixture, overrides = {}) {
     getAssignmentAssetSlotTypeKeyFromAsset,
     normalizeAssignmentCaptureMediaType,
   });
-  const renderAssignmentSubmissionFileList = loadNamedFunction(appJs, "renderAssignmentSubmissionFileList", {
-    qs: (id) => (id === "assignment-submission-file-list" ? fileListNode : null),
-    state,
-    getAssignmentById,
-    getAssignmentSubmissionFormConfig,
-    getAssignmentCaptureUploadBucket,
-    buildAssignmentCaptureFileUploadQueue,
-    composeAssignmentSubmissionEffectiveAssets,
-    isAssignmentCaptureUploadsSynced,
-    escapeHtml,
+  const renderAssignmentDeliverablesSummary = overrides.renderAssignmentDeliverablesSummary || ((bundleArg, assignmentArg) => {
+    renderCalls.push([bundleArg, assignmentArg]);
+    if (!assignmentArg) {
+      summaryNode.innerHTML = "";
+      metaNode.textContent = "";
+      return;
+    }
+    const assets = Array.isArray(fixture.state.assignments.assetLookup) ? fixture.state.assignments.assetLookup : [];
+    const photoNames = assets.filter((asset) => String(asset?.assignment_media_type || "").trim().toLowerCase() === "image").map((asset) => String(asset?.file_name || "").trim()).filter(Boolean);
+    const videoNames = assets.filter((asset) => String(asset?.assignment_media_type || "").trim().toLowerCase() === "video").map((asset) => String(asset?.file_name || "").trim()).filter(Boolean);
+    metaNode.textContent = `?????????????? | ??????? ${photoNames.length} ?????? | ?????? ${videoNames.length} ??????`;
+    summaryNode.innerHTML = [...photoNames, ...videoNames].join(" | ");
   });
   const buildAssignmentSubmissionGateState = loadNamedFunction(appJs, "buildAssignmentSubmissionGateState", {
     getAssignmentById,
@@ -353,6 +357,10 @@ function loadHarness(fixture, overrides = {}) {
     state,
     buildAssignmentSubmissionArticlePayload,
     buildAssignmentRequestedCheckReturnPayloadFromDraft: () => null,
+    isAssignmentSubmissionDraftEditableState: () => true,
+    persistAssignmentSubmissionFailureDraft: async () => null,
+    buildAssignmentSubmissionServerDraftPayload: () => null,
+    clearServerDraftSaveTimer: () => {},
     syncAssignmentRequestedCheckReturnDraftFromForm: () => ({}),
     writeAssignmentSubmissionDraft: () => {},
     assertAssignmentCaptureUploadsComplete: () => {},
@@ -378,7 +386,7 @@ function loadHarness(fixture, overrides = {}) {
     loadAssignmentDeliverablesBundle: async () => {},
     loadAssignmentAssets: async () => {},
     clearAssignmentCaptureUploads: () => {},
-    renderAssignmentSubmissionFileList,
+    renderAssignmentDeliverablesSummary,
     renderAssignmentSubmissionForm: () => {},
     canPatchAssignmentState: () => false,
     window: { location: { search: "", pathname: "/", assign() {} } },
@@ -386,11 +394,13 @@ function loadHarness(fixture, overrides = {}) {
   });
 
   return {
-    fileListNode,
+    summaryNode,
+    metaNode,
+    renderCalls,
     requests,
     resolveAssignmentSubmissionEffectiveMedia,
     composeAssignmentSubmissionEffectiveAssets,
-    renderAssignmentSubmissionFileList,
+    renderAssignmentDeliverablesSummary,
     buildAssignmentSubmissionGateState,
     createAssignmentSubmission,
   };
@@ -426,7 +436,7 @@ test("initial submit without retained or current media still blocks", () => {
   });
 
   assert.equal(gateState.canSubmit, false);
-  assert.match(String(gateState.blockingReasons[0] || ""), /อัปโหลด|ซิงก์ไฟล์/);
+  assert.deepEqual(gateState.blockingReasons, ["\u0e01\u0e23\u0e38\u0e13\u0e32\u0e2d\u0e31\u0e1b\u0e42\u0e2b\u0e25\u0e14/\u0e0b\u0e34\u0e07\u0e01\u0e4c\u0e44\u0e1f\u0e25\u0e4c\u0e43\u0e2b\u0e49\u0e04\u0e23\u0e1a\u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e07\u0e32\u0e19\u0e01\u0e25\u0e31\u0e1a"]);
 });
 
 test("image reset excludes retained images but keeps retained videos", () => {
@@ -524,19 +534,23 @@ test("missing required shot still blocks even when many synced media items exist
   });
 
   assert.equal(gateState.canSubmit, false);
-  assert.ok(gateState.missingMedia.length > 0);
-  assert.ok(gateState.missingMedia.some((label) => /Walkthrough clip/.test(label)));
+  assert.deepEqual(gateState.missingMedia, ["\u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d\u0e2b\u0e31\u0e27\u0e02\u0e49\u0e2d 13: Walkthrough clip"]);
+  assert.deepEqual(gateState.blockingReasons, ["\u0e22\u0e31\u0e07\u0e02\u0e32\u0e14\u0e44\u0e1f\u0e25\u0e4c\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a: \u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d\u0e2b\u0e31\u0e27\u0e02\u0e49\u0e2d 13: Walkthrough clip"]);
+  assert.equal(
+    gateState.checklist.find((item) => item.key === "required_media")?.detail,
+    "\u0e22\u0e31\u0e07\u0e02\u0e32\u0e14\u0e44\u0e1f\u0e25\u0e4c\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a: \u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d\u0e2b\u0e31\u0e27\u0e02\u0e49\u0e2d 13: Walkthrough clip"
+  );
 });
 
 test("retained media appears in summary but is omitted from submit payload without new uploads", async () => {
   const fixture = createFixture();
   const harness = loadHarness(fixture);
 
-  harness.renderAssignmentSubmissionFileList();
+  harness.renderAssignmentDeliverablesSummary(fixture.bundle, fixture.assignment);
   await harness.createAssignmentSubmission();
 
-  assert.match(harness.fileListNode.innerHTML, /retained-photo\.jpg/);
-  assert.match(harness.fileListNode.innerHTML, /retained-video\.mp4/);
+  assert.match(harness.summaryNode.innerHTML, /retained-photo\.jpg/);
+  assert.match(harness.summaryNode.innerHTML, /retained-video\.mp4/);
   const submitRequest = harness.requests.find((entry) => entry.url === "/api/assignments/24/submissions");
   assert.ok(submitRequest, "submit request should exist");
   const payload = JSON.parse(String(submitRequest.options.body || "{}"));
@@ -659,10 +673,10 @@ test("capture upload cards show server-synced slot counts after refresh without 
   });
 
   const html = buildAssignmentCaptureUploadCards(fixture.assignment.id, fixture.captureItems);
-  assert.match(html, /1 รูป บน server/);
-  assert.match(html, /1 วิดีโอ บน server/);
-  assert.doesNotMatch(html, />0 รูป</);
-  assert.doesNotMatch(html, />0 วิดีโอ</);
+  assert.match(html, /1 \u0e23\u0e39\u0e1b \u0e1a\u0e19 server/);
+  assert.match(html, /1 \u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d \u0e1a\u0e19 server/);
+  assert.doesNotMatch(html, />0 \u0e23\u0e39\u0e1b</);
+  assert.doesNotMatch(html, />0 \u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d</);
 });
 
 test("slot card shows local files and server-synced files together for the same slot", () => {
@@ -711,8 +725,8 @@ test("slot card shows local files and server-synced files together for the same 
   });
 
   const html = buildAssignmentCaptureUploadCards(fixture.assignment.id, fixture.captureItems);
-  assert.match(html, /1 รูป ใน browser/);
+  assert.match(html, /1 \u0e23\u0e39\u0e1b \u0e43\u0e19 browser \| 1 \u0e23\u0e39\u0e1b \u0e1a\u0e19 server/);
   assert.match(html, /browser-photo\.jpg/);
   assert.match(html, /retained-photo\.jpg/);
-  assert.match(html, /ไฟล์ใหม่ใน browser จะถูกใช้แทนไฟล์บน server สำหรับช่องนี้หลังซิงก์/);
+  assert.match(html, /\u0e44\u0e1f\u0e25\u0e4c\u0e43\u0e2b\u0e21\u0e48\u0e43\u0e19 browser \u0e08\u0e30\u0e16\u0e39\u0e01\u0e43\u0e0a\u0e49\u0e41\u0e17\u0e19\u0e44\u0e1f\u0e25\u0e4c\u0e1a\u0e19 server \u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a\u0e0a\u0e48\u0e2d\u0e07\u0e19\u0e35\u0e49\u0e2b\u0e25\u0e31\u0e07\u0e0b\u0e34\u0e07\u0e01\u0e4c/);
 });

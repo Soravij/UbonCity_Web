@@ -176,7 +176,6 @@ function createRenderHarness(state, assignment, handoffPackage) {
     "assignment-submission-requested-checks-fields",
     "assignment-submission-capture-label",
     "assignment-submission-additional-label",
-    "assignment-submission-files-label",
     "assignment-submission-verified-fields",
     "assignment-submission-question-fields",
     "assignment-submission-capture-guide",
@@ -187,7 +186,8 @@ function createRenderHarness(state, assignment, handoffPackage) {
     "btn-assignment-sync-upload",
     "btn-assignment-submit",
     "assignment-submission-context",
-    "assignment-submission-file-list",
+    "assignment-deliverables-meta",
+    "assignment-deliverables-summary",
     "assignment-draft-save-status",
   ].forEach((id) => nodes.set(id, createMockDomNode()));
 
@@ -266,7 +266,7 @@ function createRenderHarness(state, assignment, handoffPackage) {
     loadAssignmentRequestedCheckHandoffSource: async () => null,
     setAssignmentDraftSaveStatus: () => {},
     clearAssignmentCaptureUploads: () => {},
-    renderAssignmentSubmissionFileList: () => {},
+    renderAssignmentDeliverablesSummary: () => {},
     buildAssignmentSubmissionGateState: () => ({ canSubmit: false, checklist: [], blockingReasons: [], warnings: [] }),
     renderAssignmentSubmissionGatePanel: () => {},
     applyAssignmentModernClasses: () => {},
@@ -783,7 +783,7 @@ test("submit success cancels pending server draft autosave and flips local state
     loadAssignmentDeliverablesBundle: async () => {},
     loadAssignmentAssets: async () => {},
     clearAssignmentCaptureUploads: () => {},
-    renderAssignmentSubmissionFileList: () => {},
+    renderAssignmentDeliverablesSummary: () => {},
     canPatchAssignmentState: () => true,
   });
 
@@ -862,7 +862,7 @@ test("submit gate failure persists latest article and requested-check draft back
     loadAssignmentDeliverablesBundle: async () => {},
     loadAssignmentAssets: async () => {},
     clearAssignmentCaptureUploads: () => {},
-    renderAssignmentSubmissionFileList: () => {},
+    renderAssignmentDeliverablesSummary: () => {},
     canPatchAssignmentState: () => false,
   });
 
@@ -935,7 +935,7 @@ test("submit POST failure persists latest requested-check false values back to s
     loadAssignmentDeliverablesBundle: async () => {},
     loadAssignmentAssets: async () => {},
     clearAssignmentCaptureUploads: () => {},
-    renderAssignmentSubmissionFileList: () => {},
+    renderAssignmentDeliverablesSummary: () => {},
     canPatchAssignmentState: () => false,
   });
 
@@ -984,29 +984,47 @@ test("server-synced uploaded assets rehydrate after refresh without duplicating 
   assert.equal(state.assignments.latestUploadedAssetsKey, "25::server:25:901");
 });
 
-test("local unsynced files are shown as browser-only and not persisted", () => {
+test("local unsynced files are reflected through the lower deliverables summary card", () => {
   const state = createAssignmentState();
   const assignment = { id: 25, state: "assigned", revision_round: 0, content_item_id: 501 };
-  const localFile = new File([new Uint8Array([1, 2, 3])], "fresh.jpg", { type: "image/jpeg" });
-  state.assignments.captureUploadDrafts[25] = { shot1: [localFile] };
-  const fileListNode = createMockDomNode();
+  const summaryNode = createMockDomNode();
+  const metaNode = createMockDomNode();
 
-  const renderFileList = loadNamedFunction(appJs, "renderAssignmentSubmissionFileList", {
+  const renderSummary = loadNamedFunction(appJs, "renderAssignmentDeliverablesSummary", {
     state,
-    qs: (id) => (id === "assignment-submission-file-list" ? fileListNode : null),
-    getAssignmentById: () => assignment,
-    getAssignmentSubmissionFormConfig: () => ({ captureItems: [] }),
-    getAssignmentCaptureUploadBucket: () => state.assignments.captureUploadDrafts[25],
-    buildAssignmentCaptureFileUploadQueue: () => [{ slug: "shot1", file: localFile }],
-    composeAssignmentSubmissionEffectiveAssets: () => ({ assets: [], retainedAssets: [], payloadAssets: [], missing: [] }),
-    isAssignmentCaptureUploadsSynced: () => false,
+    qs: (id) => {
+      if (id === "assignment-deliverables-summary") return summaryNode;
+      if (id === "assignment-deliverables-meta") return metaNode;
+      if (id === "btn-assignment-create-deliverable") return createMockDomNode();
+      return null;
+    },
     escapeHtml,
+    buildAssignmentDeliverablesCardState: () => ({
+      latestSubmissionId: null,
+      expectedTypes: ["photos"],
+      fulfilledTypes: [],
+      missingTypes: ["photos"],
+      rowsByType: { photos: [], videos: [] },
+      gateState: {
+        canSubmit: false,
+        blockingReasons: ["\u0e01\u0e23\u0e38\u0e13\u0e32\u0e2d\u0e31\u0e1b\u0e42\u0e2b\u0e25\u0e14/\u0e0b\u0e34\u0e07\u0e01\u0e4c\u0e44\u0e1f\u0e25\u0e4c\u0e43\u0e2b\u0e49\u0e04\u0e23\u0e1a\u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e07\u0e32\u0e19\u0e01\u0e25\u0e31\u0e1a"],
+      },
+      warningText: "\u0e01\u0e23\u0e38\u0e13\u0e32\u0e2d\u0e31\u0e1b\u0e42\u0e2b\u0e25\u0e14/\u0e0b\u0e34\u0e07\u0e01\u0e4c\u0e44\u0e1f\u0e25\u0e4c\u0e43\u0e2b\u0e49\u0e04\u0e23\u0e1a\u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e07\u0e32\u0e19\u0e01\u0e25\u0e31\u0e1a",
+      statusLabel: "\u0e22\u0e31\u0e07\u0e2a\u0e48\u0e07\u0e07\u0e32\u0e19\u0e44\u0e21\u0e48\u0e44\u0e14\u0e49",
+      sourceLabel: "\u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e07\u0e32\u0e19\u0e01\u0e25\u0e31\u0e1a",
+    }),
+    formatAssignmentBriefExpectedDeliverables: (types = []) => String(types.join("|")),
+    renderAssignmentDeliverableMediaCard: (type, rows = [], options = {}) => '<div>' + type + ':' + rows.length + ':' + String(options.statusLabel || '') + '</div>',
+    renderAssignmentDeliverableTypeOptions: () => {},
   });
 
-  renderFileList();
-  assert.match(fileListNode.innerHTML, /browser/i);
-  assert.match(fileListNode.innerHTML, /refresh/i);
-  assert.doesNotMatch(fileListNode.innerHTML, /อัปโหลดเข้าระบบแล้ว/);
+  renderSummary(null, assignment);
+  assert.match(summaryNode.innerHTML, /photos:0/);
+  assert.ok(summaryNode.innerHTML.includes("videos:0:"));
+  assert.ok(summaryNode.innerHTML.includes("photos:0:"));
+  assert.ok(summaryNode.innerHTML.includes("\u0e04\u0e23\u0e1a\u0e41\u0e25\u0e49\u0e27 0 \u0e08\u0e32\u0e01 1 \u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17"));
+  assert.ok(summaryNode.innerHTML.includes("\u0e22\u0e31\u0e07\u0e02\u0e32\u0e14 1 \u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17"));
+  assert.equal(metaNode.textContent, "\u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e07\u0e32\u0e19\u0e01\u0e25\u0e31\u0e1a | \u0e20\u0e32\u0e1e\u0e16\u0e48\u0e32\u0e22 0 \u0e23\u0e32\u0e22\u0e01\u0e32\u0e23 | \u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d 0 \u0e23\u0e32\u0e22\u0e01\u0e32\u0e23");
 });
 
 test("collector asset version uses millisecond precision and frontend JS/CSS routes revalidate on normal F5", () => {

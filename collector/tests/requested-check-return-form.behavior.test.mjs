@@ -145,7 +145,6 @@ function createRequestedCheckRenderHarness(state) {
     "assignment-submission-requested-checks-fields",
     "assignment-submission-capture-label",
     "assignment-submission-additional-label",
-    "assignment-submission-files-label",
     "assignment-submission-verified-fields",
     "assignment-submission-question-fields",
     "assignment-submission-capture-guide",
@@ -156,7 +155,8 @@ function createRequestedCheckRenderHarness(state) {
     "btn-assignment-sync-upload",
     "btn-assignment-submit",
     "assignment-submission-context",
-    "assignment-submission-file-list",
+    "assignment-deliverables-meta",
+    "assignment-deliverables-summary",
   ];
   ids.forEach((id) => nodes.set(id, createMockDomNode()));
   nodes.get("assignment-submission-requested-checks-wrap").className = "assignment-brief-section";
@@ -164,7 +164,7 @@ function createRequestedCheckRenderHarness(state) {
   nodes.get("assignment-submission-verified-fields").className = "assignment-brief-grid";
   nodes.get("assignment-submission-question-fields").className = "assignment-brief-grid";
   nodes.get("assignment-submission-capture-guide").className = "assignment-brief-grid";
-  nodes.get("assignment-submission-file-list").className = "assignment-brief-grid";
+  nodes.get("assignment-deliverables-summary").className = "assignment-brief-grid";
   return {
     nodes,
     qs: (id) => nodes.get(id) || null,
@@ -216,7 +216,7 @@ function createRequestedCheckRenderHarness(state) {
       loadAssignmentRequestedCheckHandoffSource: async () => null,
       setAssignmentDraftSaveStatus: () => {},
       clearAssignmentCaptureUploads: () => {},
-      renderAssignmentSubmissionFileList: () => {},
+      renderAssignmentDeliverablesSummary: () => {},
       buildAssignmentSubmissionGateState: () => ({}),
       renderAssignmentSubmissionGatePanel: () => {},
       applyAssignmentModernClasses: () => {},

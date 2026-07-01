@@ -2469,11 +2469,14 @@ test("assignment route aliases expose separate handoff, work, and review views o
     '<button id="btn-assignments-load" class="primary step-main">1.1 โหลดงานในกระบวนการนี้</button>',
     'id="assignment-list-panel"',
     'id="assignment-submission-form"',
-    'id="assignment-submission-files"',
+    'id="assignment-deliverables-meta"',
+    'id="assignment-deliverables-summary"',
   ];
   for (const snippet of requiredIndexSnippets) {
     assert.equal(indexHtml.includes(snippet), true, `assignment route alias HTML should exist: ${snippet}`);
   }
+  assert.equal(indexHtml.includes('id="assignment-submission-file-list"'), false, "top submission file summary block should be removed from index HTML");
+  assert.equal(indexHtml.includes('id="assignment-submission-files-label"'), false, "top submission file summary label should be removed from index HTML");
 
   const requiredAppSnippets = [
     "function getDefaultAssignmentPageMode()",
@@ -2520,6 +2523,18 @@ test("assignment route aliases expose separate handoff, work, and review views o
   for (const snippet of requiredAppSnippets) {
     assert.equal(appJs.includes(snippet), true, `assignment route alias app snippet should exist: ${snippet}`);
   }
+});
+
+test("assignment media summary keeps only the lower deliverables card", () => {
+  assert.equal(indexHtml.includes('id="assignment-deliverables-meta"'), true);
+  assert.equal(indexHtml.includes('id="assignment-deliverables-summary"'), true);
+  assert.equal(indexHtml.includes('id="assignment-submission-files"'), false);
+  assert.equal(indexHtml.includes('id="assignment-submission-file-list"'), false);
+  assert.equal(indexHtml.includes('id="assignment-submission-files-label"'), false);
+  assert.equal(appJs.includes("renderAssignmentSubmissionFileList"), false);
+  assert.equal(appJs.includes('assignment-submission-file-list'), false);
+  assert.equal(appJs.includes('assignment-submission-files-label'), false);
+  assert.equal(appJs.includes('assignment-submission-files'), false);
 });
 
 test("content preparation process ends at review/edit and hands off into process 2", () => {
@@ -3002,7 +3017,8 @@ test("work lane keeps only contributor-facing scope", () => {
     'id="assignment-submission-question-fields"',
     'id="assignment-submission-capture-guide"',
     'id="assignment-submission-additional-text"',
-    'id="assignment-submission-files"',
+    'id="assignment-deliverables-meta"',
+    'id="assignment-deliverables-summary"',
     '<button id="btn-assignment-submit" class="step-main">ส่งงานกลับ</button>',
   ];
   for (const snippet of requiredIndexSnippets) {
