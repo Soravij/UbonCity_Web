@@ -8,10 +8,24 @@ const appJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.
 const serverIndexJs = fs.readFileSync(path.join(collectorRoot, "server", "index.mjs"), "utf8");
 
 function extractNamedFunctionSource(source, name) {
-  const marker = `function ${name}`;
+  const marker = `function ${name}(`;
   const start = source.indexOf(marker);
   assert.notEqual(start, -1, `${name} should exist`);
-  const bodyStart = source.indexOf("{", start);
+  const paramsStart = source.indexOf("(", start);
+  assert.notEqual(paramsStart, -1, `${name} should have params`);
+  let paramsDepth = 0;
+  let bodyStart = -1;
+  for (let index = paramsStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "(") paramsDepth += 1;
+    if (char === ")") {
+      paramsDepth -= 1;
+      if (paramsDepth === 0) {
+        bodyStart = source.indexOf("{", index);
+        break;
+      }
+    }
+  }
   assert.notEqual(bodyStart, -1, `${name} should have a body`);
   let depth = 0;
   for (let index = bodyStart; index < source.length; index += 1) {
@@ -143,7 +157,7 @@ test("submission required-fields check still rejects missing verified or questio
         ],
       }
     ),
-    /สิ่งที่ต้องยืนยัน|คำตอบจากหน้างาน/
+    /à¸ªà¸´à¹ˆà¸‡à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸¢à¸·à¸™à¸¢à¸±à¸™|à¸„à¸³à¸•à¸­à¸šà¸ˆà¸²à¸à¸«à¸™à¹‰à¸²à¸‡à¸²à¸™/
   );
 });
 
@@ -165,7 +179,7 @@ test("frontend capture validation rejects image uploaded into a video slot", () 
     },
   ]);
 
-  assert.deepEqual(missing, ["วิดีโอหัวข้อ 1: Walkthrough clip"]);
+  assert.deepEqual(missing, ["à¸§à¸´à¸”à¸µà¹‚à¸­à¸«à¸±à¸§à¸‚à¹‰à¸­ 1: Walkthrough clip"]);
 });
 
 const enforceAssignmentSubmissionRequiredFieldsForBackendTest = new Function(
@@ -272,9 +286,9 @@ return (assignmentId, captureItems) => getAssignmentServerSyncedAssetsForCapture
 
 test("normalizeAssignmentCaptureUploadItems preserves capture_type and splits both into two slot keys", () => {
   const normalized = normalizeAssignmentCaptureUploadItemsForTest([
-    { item_text: "หน้าร้าน", item_order: 0, capture_type: "photo" },
+    { item_text: "à¸«à¸™à¹‰à¸²à¸£à¹‰à¸²à¸™", item_order: 0, capture_type: "photo" },
     { item_text: "Tracking shot", item_order: 1, capture_type: "video" },
-    { item_text: "บรรยากาศรวม", item_order: 2, capture_type: "both" },
+    { item_text: "à¸šà¸£à¸£à¸¢à¸²à¸à¸²à¸¨à¸£à¸§à¸¡", item_order: 2, capture_type: "both" },
   ]);
 
   assert.equal(normalized.length, 4);
@@ -288,7 +302,7 @@ test("normalizeAssignmentCaptureUploadItems preserves capture_type and splits bo
     })),
     [
       {
-        prompt: "หน้าร้าน",
+        prompt: "à¸«à¸™à¹‰à¸²à¸£à¹‰à¸²à¸™",
         captureType: "photo",
         mediaType: "image",
         displayIndex: 1,
@@ -300,13 +314,13 @@ test("normalizeAssignmentCaptureUploadItems preserves capture_type and splits bo
         displayIndex: 2,
       },
       {
-        prompt: "บรรยากาศรวม",
+        prompt: "à¸šà¸£à¸£à¸¢à¸²à¸à¸²à¸¨à¸£à¸§à¸¡",
         captureType: "both",
         mediaType: "image",
         displayIndex: 3,
       },
       {
-        prompt: "บรรยากาศรวม",
+        prompt: "à¸šà¸£à¸£à¸¢à¸²à¸à¸²à¸¨à¸£à¸§à¸¡",
         captureType: "both",
         mediaType: "video",
         displayIndex: 3,
@@ -322,7 +336,7 @@ test("normalizeAssignmentCaptureUploadItems preserves capture_type and splits bo
 
 test("validateAssignmentCaptureRequirementsFromAssets tracks image/video slots separately for capture_type both", () => {
   const captureItems = [
-    { item_text: "บรรยากาศรวม", item_order: 0, capture_type: "both" },
+    { item_text: "à¸šà¸£à¸£à¸¢à¸²à¸à¸²à¸¨à¸£à¸§à¸¡", item_order: 0, capture_type: "both" },
   ];
   const normalized = normalizeAssignmentCaptureUploadItemsForTest(captureItems);
   const imageSlot = normalized.find((row) => row.mediaType === "image");
@@ -339,7 +353,7 @@ test("validateAssignmentCaptureRequirementsFromAssets tracks image/video slots s
     },
   ];
   const imageOnlyMissing = validateAssignmentCaptureRequirementsFromAssetsForTest(assignment, captureItems, imageOnlyAssets);
-  assert.deepEqual(imageOnlyMissing, ["วิดีโอหัวข้อ 1: บรรยากาศรวม"]);
+  assert.deepEqual(imageOnlyMissing, ["à¸§à¸´à¸”à¸µà¹‚à¸­à¸«à¸±à¸§à¸‚à¹‰à¸­ 1: à¸šà¸£à¸£à¸¢à¸²à¸à¸²à¸¨à¸£à¸§à¸¡"]);
 
   const bothAssets = [
     {
@@ -490,7 +504,7 @@ test("backend capture validation accepts mixed server and local slot payload and
   });
   const result = run(24, captureItems);
   assert.deepEqual(result.assets.map((asset) => Number(asset.id || 0)), [701]);
-  assert.deepEqual(result.missing, ["วิดีโอหัวข้อ 2: Walkthrough clip"]);
+  assert.deepEqual(result.missing, ["à¸§à¸´à¸”à¸µà¹‚à¸­à¸«à¸±à¸§à¸‚à¹‰à¸­ 2: Walkthrough clip"]);
 });
 
 test("server-synced asset reload keeps video asset matched by persisted slot metadata", () => {
@@ -892,16 +906,16 @@ test("persisted slot metadata beats non-canonical filename and missing metadata 
 });
 
 test("backend capture validation accepts structured video payload assets by canonical slot key", () => {
-  const trackingSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Tracking shot เดินเข้าหน้าร้าน", 12, "video", "video");
-  const pushInSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Push-in shot ไปที่ Barista", 13, "video", "video");
+  const trackingSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Tracking shot à¹€à¸”à¸´à¸™à¹€à¸‚à¹‰à¸²à¸«à¸™à¹‰à¸²à¸£à¹‰à¸²à¸™", 12, "video", "video");
+  const pushInSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Push-in shot à¹„à¸›à¸—à¸µà¹ˆ Barista", 13, "video", "video");
   const missing = findMissingCapturePromptsForBackendTest(
-    ["Tracking shot เดินเข้าหน้าร้าน", "Push-in shot ไปที่ Barista"],
+    ["Tracking shot à¹€à¸”à¸´à¸™à¹€à¸‚à¹‰à¸²à¸«à¸™à¹‰à¸²à¸£à¹‰à¸²à¸™", "Push-in shot à¹„à¸›à¸—à¸µà¹ˆ Barista"],
     99,
     1,
     {
       structuredItems: [
-        { prompt: "Tracking shot เดินเข้าหน้าร้าน", slotKey: trackingSlotKey, mediaType: "video" },
-        { prompt: "Push-in shot ไปที่ Barista", slotKey: pushInSlotKey, mediaType: "video" },
+        { prompt: "Tracking shot à¹€à¸”à¸´à¸™à¹€à¸‚à¹‰à¸²à¸«à¸™à¹‰à¸²à¸£à¹‰à¸²à¸™", slotKey: trackingSlotKey, mediaType: "video" },
+        { prompt: "Push-in shot à¹„à¸›à¸—à¸µà¹ˆ Barista", slotKey: pushInSlotKey, mediaType: "video" },
       ],
       mediaPayload: {
         assets: [
@@ -912,7 +926,7 @@ test("backend capture validation accepts structured video payload assets by cano
             slotKey: trackingSlotKey,
             mediaType: "video",
             capture_type: "video",
-            prompt: "Tracking shot เดินเข้าหน้าร้าน",
+            prompt: "Tracking shot à¹€à¸”à¸´à¸™à¹€à¸‚à¹‰à¸²à¸«à¸™à¹‰à¸²à¸£à¹‰à¸²à¸™",
           },
           {
             id: 2,
@@ -921,7 +935,7 @@ test("backend capture validation accepts structured video payload assets by cano
             slotKey: pushInSlotKey,
             mediaType: "video",
             capture_type: "video",
-            prompt: "Push-in shot ไปที่ Barista",
+            prompt: "Push-in shot à¹„à¸›à¸—à¸µà¹ˆ Barista",
           },
         ],
       },
@@ -931,16 +945,16 @@ test("backend capture validation accepts structured video payload assets by cano
 });
 
 test("backend capture validation reports only the missing structured video slot", () => {
-  const trackingSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Tracking shot เดินเข้าหน้าร้าน", 12, "video", "video");
-  const pushInSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Push-in shot ไปที่ Barista", 13, "video", "video");
+  const trackingSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Tracking shot à¹€à¸”à¸´à¸™à¹€à¸‚à¹‰à¸²à¸«à¸™à¹‰à¸²à¸£à¹‰à¸²à¸™", 12, "video", "video");
+  const pushInSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Push-in shot à¹„à¸›à¸—à¸µà¹ˆ Barista", 13, "video", "video");
   const missing = findMissingCapturePromptsForBackendTest(
-    ["Tracking shot เดินเข้าหน้าร้าน", "Push-in shot ไปที่ Barista"],
+    ["Tracking shot à¹€à¸”à¸´à¸™à¹€à¸‚à¹‰à¸²à¸«à¸™à¹‰à¸²à¸£à¹‰à¸²à¸™", "Push-in shot à¹„à¸›à¸—à¸µà¹ˆ Barista"],
     99,
     1,
     {
       structuredItems: [
-        { prompt: "Tracking shot เดินเข้าหน้าร้าน", slotKey: trackingSlotKey, mediaType: "video" },
-        { prompt: "Push-in shot ไปที่ Barista", slotKey: pushInSlotKey, mediaType: "video" },
+        { prompt: "Tracking shot à¹€à¸”à¸´à¸™à¹€à¸‚à¹‰à¸²à¸«à¸™à¹‰à¸²à¸£à¹‰à¸²à¸™", slotKey: trackingSlotKey, mediaType: "video" },
+        { prompt: "Push-in shot à¹„à¸›à¸—à¸µà¹ˆ Barista", slotKey: pushInSlotKey, mediaType: "video" },
       ],
       mediaPayload: {
         assets: [
@@ -951,18 +965,19 @@ test("backend capture validation reports only the missing structured video slot"
             slotKey: trackingSlotKey,
             mediaType: "video",
             capture_type: "video",
-            prompt: "Tracking shot เดินเข้าหน้าร้าน",
+            prompt: "Tracking shot à¹€à¸”à¸´à¸™à¹€à¸‚à¹‰à¸²à¸«à¸™à¹‰à¸²à¸£à¹‰à¸²à¸™",
           },
         ],
       },
     }
   );
-  assert.deepEqual(missing, ["Push-in shot ไปที่ Barista"]);
+  assert.deepEqual(missing, ["Push-in shot à¹„à¸›à¸—à¸µà¹ˆ Barista"]);
 });
 
 
 test("capture topic readiness counts fulfilled and missing topics by slot key and media type", () => {
   const evaluateReadiness = new Function(
+    "repo",
     `function resolveAssignmentSubmissionPromptContext(assignment = null) {
       return {
         brief: assignment?.brief_json || null,
@@ -979,9 +994,13 @@ ${extractNamedFunctionSource(serverIndexJs, "parseCaptureShotSlugFromFileName")}
 ${extractNamedFunctionSource(serverIndexJs, "getAssignmentCaptureAssetSlotTypeKey")}
 ${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentMediaPayloadAssets")}
 ${extractNamedFunctionSource(serverIndexJs, "resolveAssignmentSubmissionValidationMediaPayload")}
+${extractNamedFunctionSource(serverIndexJs, "resolveSelectedAssignmentMediaAssetIds")}
+${extractNamedFunctionSource(serverIndexJs, "resolveCurrentRoundEligibleAssignmentMediaAssets")}
+${extractNamedFunctionSource(serverIndexJs, "evaluateAssignmentCaptureTopicReadinessFromAssets")}
 ${extractNamedFunctionSource(serverIndexJs, "evaluateAssignmentCaptureTopicReadiness")}
+const ASSIGNMENT_WORK_SYNC_EXPIRY_MS = 24 * 60 * 60 * 1000;
 return evaluateAssignmentCaptureTopicReadiness;`
-  )();
+  )({});
 
   const assignment = {
     state: "in_progress",

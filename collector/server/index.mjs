@@ -75,28 +75,28 @@ import { buildReviewIngestContentPayload, resolveReviewIngestPayloadSourceContex
 
 const ARTICLE_AGENT_KEY = "article_agent";
 const DEFAULT_ARTICLE_AGENT_PROFILE = [
-  "คุณคือ Article Agent สำหรับ UbonCity มีหน้าที่ร่างบทความท่องเที่ยวจากข้อมูลที่มีอยู่ เช่น field pack, Q&A, media, handoff, และข้อมูลสถานที่หรืออีเวนต์",
+  "à¸„à¸¸à¸“à¸„à¸·à¸­ Article Agent à¸ªà¸³à¸«à¸£à¸±à¸š UbonCity à¸¡à¸µà¸«à¸™à¹‰à¸²à¸—à¸µà¹ˆà¸£à¹ˆà¸²à¸‡à¸šà¸—à¸„à¸§à¸²à¸¡à¸—à¹ˆà¸­à¸‡à¹€à¸—à¸µà¹ˆà¸¢à¸§à¸ˆà¸²à¸à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸—à¸µà¹ˆà¸¡à¸µà¸­à¸¢à¸¹à¹ˆ à¹€à¸Šà¹ˆà¸™ field pack, Q&A, media, handoff, à¹à¸¥à¸°à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸ªà¸–à¸²à¸™à¸—à¸µà¹ˆà¸«à¸£à¸·à¸­à¸­à¸µà¹€à¸§à¸™à¸•à¹Œ",
   "",
-  "เขียนภาษาไทยให้อ่านง่าย เป็นธรรมชาติ ไม่ขายของ ไม่เขียนเหมือนโฆษณา และเหมาะกับนักท่องเที่ยวจริง",
+  "à¹€à¸‚à¸µà¸¢à¸™à¸ à¸²à¸©à¸²à¹„à¸—à¸¢à¹ƒà¸«à¹‰à¸­à¹ˆà¸²à¸™à¸‡à¹ˆà¸²à¸¢ à¹€à¸›à¹‡à¸™à¸˜à¸£à¸£à¸¡à¸Šà¸²à¸•à¸´ à¹„à¸¡à¹ˆà¸‚à¸²à¸¢à¸‚à¸­à¸‡ à¹„à¸¡à¹ˆà¹€à¸‚à¸µà¸¢à¸™à¹€à¸«à¸¡à¸·à¸­à¸™à¹‚à¸†à¸©à¸“à¸² à¹à¸¥à¸°à¹€à¸«à¸¡à¸²à¸°à¸à¸±à¸šà¸™à¸±à¸à¸—à¹ˆà¸­à¸‡à¹€à¸—à¸µà¹ˆà¸¢à¸§à¸ˆà¸£à¸´à¸‡",
   "",
-  "ใช้เฉพาะข้อมูลที่มีหลักฐานหรือได้รับการยืนยันแล้ว ถ้าข้อมูลไม่ชัวร์ให้เขียนอย่างระมัดระวังหรือเว้นไว้ให้ editor ตรวจ ไม่แต่งข้อเท็จจริงเพิ่มเอง",
+  "à¹ƒà¸Šà¹‰à¹€à¸‰à¸žà¸²à¸°à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸—à¸µà¹ˆà¸¡à¸µà¸«à¸¥à¸±à¸à¸à¸²à¸™à¸«à¸£à¸·à¸­à¹„à¸”à¹‰à¸£à¸±à¸šà¸à¸²à¸£à¸¢à¸·à¸™à¸¢à¸±à¸™à¹à¸¥à¹‰à¸§ à¸–à¹‰à¸²à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¹„à¸¡à¹ˆà¸Šà¸±à¸§à¸£à¹Œà¹ƒà¸«à¹‰à¹€à¸‚à¸µà¸¢à¸™à¸­à¸¢à¹ˆà¸²à¸‡à¸£à¸°à¸¡à¸±à¸”à¸£à¸°à¸§à¸±à¸‡à¸«à¸£à¸·à¸­à¹€à¸§à¹‰à¸™à¹„à¸§à¹‰à¹ƒà¸«à¹‰ editor à¸•à¸£à¸§à¸ˆ à¹„à¸¡à¹ˆà¹à¸•à¹ˆà¸‡à¸‚à¹‰à¸­à¹€à¸—à¹‡à¸ˆà¸ˆà¸£à¸´à¸‡à¹€à¸žà¸´à¹ˆà¸¡à¹€à¸­à¸‡",
   "",
-  "เน้นโครงเรื่องที่ช่วยให้คนอ่านตัดสินใจได้ว่า ที่นี่เหมาะกับใคร ไปทำอะไรได้ จุดเด่นจริงคืออะไร และควรรู้อะไรก่อนไป",
+  "à¹€à¸™à¹‰à¸™à¹‚à¸„à¸£à¸‡à¹€à¸£à¸·à¹ˆà¸­à¸‡à¸—à¸µà¹ˆà¸Šà¹ˆà¸§à¸¢à¹ƒà¸«à¹‰à¸„à¸™à¸­à¹ˆà¸²à¸™à¸•à¸±à¸”à¸ªà¸´à¸™à¹ƒà¸ˆà¹„à¸”à¹‰à¸§à¹ˆà¸² à¸—à¸µà¹ˆà¸™à¸µà¹ˆà¹€à¸«à¸¡à¸²à¸°à¸à¸±à¸šà¹ƒà¸„à¸£ à¹„à¸›à¸—à¸³à¸­à¸°à¹„à¸£à¹„à¸”à¹‰ à¸ˆà¸¸à¸”à¹€à¸”à¹ˆà¸™à¸ˆà¸£à¸´à¸‡à¸„à¸·à¸­à¸­à¸°à¹„à¸£ à¹à¸¥à¸°à¸„à¸§à¸£à¸£à¸¹à¹‰à¸­à¸°à¹„à¸£à¸à¹ˆà¸­à¸™à¹„à¸›",
 ].join("\n");
 
 const SEO_AGENT_KEY = "seo_agent";
 const DEFAULT_SEO_AGENT_PROFILE = [
-  "คุณคือ SEO Agent สำหรับ UbonCity มีหน้าที่สร้างหรือปรับ metadata จากบทความที่ editor แก้แล้วใน Article Workspace",
+  "à¸„à¸¸à¸“à¸„à¸·à¸­ SEO Agent à¸ªà¸³à¸«à¸£à¸±à¸š UbonCity à¸¡à¸µà¸«à¸™à¹‰à¸²à¸—à¸µà¹ˆà¸ªà¸£à¹‰à¸²à¸‡à¸«à¸£à¸·à¸­à¸›à¸£à¸±à¸š metadata à¸ˆà¸²à¸à¸šà¸—à¸„à¸§à¸²à¸¡à¸—à¸µà¹ˆ editor à¹à¸à¹‰à¹à¸¥à¹‰à¸§à¹ƒà¸™ Article Workspace",
   "",
-  "เขียนเพื่อคนอ่านจริงก่อน search engine ไม่ยัด keyword ไม่ทำให้เหมือนโฆษณา และไม่แต่งข้อเท็จจริงเพิ่ม",
+  "à¹€à¸‚à¸µà¸¢à¸™à¹€à¸žà¸·à¹ˆà¸­à¸„à¸™à¸­à¹ˆà¸²à¸™à¸ˆà¸£à¸´à¸‡à¸à¹ˆà¸­à¸™ search engine à¹„à¸¡à¹ˆà¸¢à¸±à¸” keyword à¹„à¸¡à¹ˆà¸—à¸³à¹ƒà¸«à¹‰à¹€à¸«à¸¡à¸·à¸­à¸™à¹‚à¸†à¸©à¸“à¸² à¹à¸¥à¸°à¹„à¸¡à¹ˆà¹à¸•à¹ˆà¸‡à¸‚à¹‰à¸­à¹€à¸—à¹‡à¸ˆà¸ˆà¸£à¸´à¸‡à¹€à¸žà¸´à¹ˆà¸¡",
   "",
-  "meta title ต้องชัด อ่านรู้เรื่อง เป็นธรรมชาติ และควรยาวประมาณ 45-65 ตัวอักษรถ้าเป็นไปได้",
+  "meta title à¸•à¹‰à¸­à¸‡à¸Šà¸±à¸” à¸­à¹ˆà¸²à¸™à¸£à¸¹à¹‰à¹€à¸£à¸·à¹ˆà¸­à¸‡ à¹€à¸›à¹‡à¸™à¸˜à¸£à¸£à¸¡à¸Šà¸²à¸•à¸´ à¹à¸¥à¸°à¸„à¸§à¸£à¸¢à¸²à¸§à¸›à¸£à¸°à¸¡à¸²à¸“ 45-65 à¸•à¸±à¸§à¸­à¸±à¸à¸©à¸£à¸–à¹‰à¸²à¹€à¸›à¹‡à¸™à¹„à¸›à¹„à¸”à¹‰",
   "",
-  "meta description ต้องสรุปว่าบทความหรือสถานที่นี้มีประโยชน์กับผู้อ่านอย่างไร และช่วยให้เขาตัดสินใจอะไรได้ ควรยาวประมาณ 120-155 ตัวอักษรถ้าเป็นไปได้",
+  "meta description à¸•à¹‰à¸­à¸‡à¸ªà¸£à¸¸à¸›à¸§à¹ˆà¸²à¸šà¸—à¸„à¸§à¸²à¸¡à¸«à¸£à¸·à¸­à¸ªà¸–à¸²à¸™à¸—à¸µà¹ˆà¸™à¸µà¹‰à¸¡à¸µà¸›à¸£à¸°à¹‚à¸¢à¸Šà¸™à¹Œà¸à¸±à¸šà¸œà¸¹à¹‰à¸­à¹ˆà¸²à¸™à¸­à¸¢à¹ˆà¸²à¸‡à¹„à¸£ à¹à¸¥à¸°à¸Šà¹ˆà¸§à¸¢à¹ƒà¸«à¹‰à¹€à¸‚à¸²à¸•à¸±à¸”à¸ªà¸´à¸™à¹ƒà¸ˆà¸­à¸°à¹„à¸£à¹„à¸”à¹‰ à¸„à¸§à¸£à¸¢à¸²à¸§à¸›à¸£à¸°à¸¡à¸²à¸“ 120-155 à¸•à¸±à¸§à¸­à¸±à¸à¸©à¸£à¸–à¹‰à¸²à¹€à¸›à¹‡à¸™à¹„à¸›à¹„à¸”à¹‰",
   "",
-  "ถ้าข้อมูลในบทความไม่พอหรือยังไม่ชัวร์ ห้ามนำไปใช้เป็น metadata แบบฟันธง",
+  "à¸–à¹‰à¸²à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¹ƒà¸™à¸šà¸—à¸„à¸§à¸²à¸¡à¹„à¸¡à¹ˆà¸žà¸­à¸«à¸£à¸·à¸­à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸Šà¸±à¸§à¸£à¹Œ à¸«à¹‰à¸²à¸¡à¸™à¸³à¹„à¸›à¹ƒà¸Šà¹‰à¹€à¸›à¹‡à¸™ metadata à¹à¸šà¸šà¸Ÿà¸±à¸™à¸˜à¸‡",
   "",
-  "SEO Agent เป็น suggestion-only: เติมข้อเสนอในช่อง metadata เพื่อให้คนตรวจและกด save เอง ไม่ auto-save ไม่ auto-publish",
+  "SEO Agent à¹€à¸›à¹‡à¸™ suggestion-only: à¹€à¸•à¸´à¸¡à¸‚à¹‰à¸­à¹€à¸ªà¸™à¸­à¹ƒà¸™à¸Šà¹ˆà¸­à¸‡ metadata à¹€à¸žà¸·à¹ˆà¸­à¹ƒà¸«à¹‰à¸„à¸™à¸•à¸£à¸§à¸ˆà¹à¸¥à¸°à¸à¸” save à¹€à¸­à¸‡ à¹„à¸¡à¹ˆ auto-save à¹„à¸¡à¹ˆ auto-publish",
 ].join("\n");
 
 const app = express();
@@ -1234,8 +1234,8 @@ function scorePlaceInterestingness(item = {}, sourceRecords = []) {
     }
   }
 
-  if (hasInstitutional) sourceLabels.push("เว็บหน่วยงาน");
-  else if (hasOfficial) sourceLabels.push("เว็บไซต์ทางการ");
+  if (hasInstitutional) sourceLabels.push("à¹€à¸§à¹‡à¸šà¸«à¸™à¹ˆà¸§à¸¢à¸‡à¸²à¸™");
+  else if (hasOfficial) sourceLabels.push("à¹€à¸§à¹‡à¸šà¹„à¸‹à¸•à¹Œà¸—à¸²à¸‡à¸à¸²à¸£");
   if (hasGoogle) sourceLabels.push("Google Maps");
   if (hasWongnai) sourceLabels.push("Wongnai");
   if (!sourceLabels.length && Array.isArray(sourceRecords) && sourceRecords.length > 0) {
@@ -1245,14 +1245,14 @@ function scorePlaceInterestingness(item = {}, sourceRecords = []) {
   const corroborationCount = [hasGoogle, hasWongnai, hasOfficial || hasInstitutional].filter(Boolean).length;
   if (corroborationCount >= 3) {
     score += 4;
-    reasons.push("หลายแหล่งยืนยันตรงกัน");
+    reasons.push("à¸«à¸¥à¸²à¸¢à¹à¸«à¸¥à¹ˆà¸‡à¸¢à¸·à¸™à¸¢à¸±à¸™à¸•à¸£à¸‡à¸à¸±à¸™");
   } else if (corroborationCount >= 2) {
     score += 2;
-    reasons.push("มีหลายแหล่งข้อมูลรองรับ");
+    reasons.push("à¸¡à¸µà¸«à¸¥à¸²à¸¢à¹à¸«à¸¥à¹ˆà¸‡à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸£à¸­à¸‡à¸£à¸±à¸š");
   }
   if (hasGoogle && hasWongnai) {
     score += 2;
-    reasons.push("มีทั้งกระแสและข้อมูลสถานที่");
+    reasons.push("à¸¡à¸µà¸—à¸±à¹‰à¸‡à¸à¸£à¸°à¹à¸ªà¹à¸¥à¸°à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸ªà¸–à¸²à¸™à¸—à¸µà¹ˆ");
   }
 
   if (googleUserRatingCount != null) {
@@ -1260,54 +1260,54 @@ function scorePlaceInterestingness(item = {}, sourceRecords = []) {
     else if (googleUserRatingCount >= 150) score += 3;
     else if (googleUserRatingCount >= 40) score += 2;
     else if (googleUserRatingCount >= 10) score += 1;
-    if (googleUserRatingCount >= 40) reasons.push("Google คนให้คะแนนค่อนข้างมาก");
+    if (googleUserRatingCount >= 40) reasons.push("Google à¸„à¸™à¹ƒà¸«à¹‰à¸„à¸°à¹à¸™à¸™à¸„à¹ˆà¸­à¸™à¸‚à¹‰à¸²à¸‡à¸¡à¸²à¸");
   }
   if (googleRating != null && googleRating >= 4.4) {
     score += 1;
-    reasons.push("Google rating ค่อนข้างดี");
+    reasons.push("Google rating à¸„à¹ˆà¸­à¸™à¸‚à¹‰à¸²à¸‡à¸”à¸µ");
   }
   if (googleHasPhotos) score += 1;
   if (googleHasReviewText) score += 1;
 
   if (wongnaiSignals >= 3) {
     score += 3;
-    reasons.push("Wongnai ให้ข้อมูลร้านค่อนข้างแน่น");
+    reasons.push("Wongnai à¹ƒà¸«à¹‰à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸£à¹‰à¸²à¸™à¸„à¹ˆà¸­à¸™à¸‚à¹‰à¸²à¸‡à¹à¸™à¹ˆà¸™");
   } else if (wongnaiSignals >= 1) {
     score += 1;
-    reasons.push("มีข้อมูลเชิงร้านจาก Wongnai");
+    reasons.push("à¸¡à¸µà¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¹€à¸Šà¸´à¸‡à¸£à¹‰à¸²à¸™à¸ˆà¸²à¸ Wongnai");
   }
 
   if (hasInstitutional) {
     score += 1;
-    reasons.push("มีเว็บหน่วยงานอ้างอิง");
+    reasons.push("à¸¡à¸µà¹€à¸§à¹‡à¸šà¸«à¸™à¹ˆà¸§à¸¢à¸‡à¸²à¸™à¸­à¹‰à¸²à¸‡à¸­à¸´à¸‡");
   } else if (hasOfficial) {
     score += 1;
-    reasons.push("มีเว็บไซต์ทางการรองรับ");
+    reasons.push("à¸¡à¸µà¹€à¸§à¹‡à¸šà¹„à¸‹à¸•à¹Œà¸—à¸²à¸‡à¸à¸²à¸£à¸£à¸­à¸‡à¸£à¸±à¸š");
   }
 
   const richnessCount = [hasArticle, hasAddress, hasHours, hasPhone, hasImage].filter(Boolean).length;
   if (richnessCount >= 4) {
     score += 2;
-    reasons.push("ข้อมูลพร้อมทำต่อ");
+    reasons.push("à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸žà¸£à¹‰à¸­à¸¡à¸—à¸³à¸•à¹ˆà¸­");
   } else if (richnessCount >= 2) {
     score += 1;
-    reasons.push("ข้อมูลพอทำต่อ");
+    reasons.push("à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸žà¸­à¸—à¸³à¸•à¹ˆà¸­");
   }
 
-  let label = "ข้อมูลยังบาง";
+  let label = "à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸¢à¸±à¸‡à¸šà¸²à¸‡";
   let rank = 0;
   if (score >= 10) {
-    label = "น่าทำก่อน";
+    label = "à¸™à¹ˆà¸²à¸—à¸³à¸à¹ˆà¸­à¸™";
     rank = 3;
   } else if (score >= 6) {
-    label = "มีศักยภาพ";
+    label = "à¸¡à¸µà¸¨à¸±à¸à¸¢à¸ à¸²à¸ž";
     rank = 2;
   } else if (score >= 3) {
-    label = "ต้องตรวจเอง";
+    label = "à¸•à¹‰à¸­à¸‡à¸•à¸£à¸§à¸ˆà¹€à¸­à¸‡";
     rank = 1;
   }
 
-  if (!reasons.length) reasons.push("ข้อมูลยังบาง");
+  if (!reasons.length) reasons.push("à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸¢à¸±à¸‡à¸šà¸²à¸‡");
 
   return {
     score,
@@ -1630,164 +1630,164 @@ function getMergeBlockersForItem(itemId) {
   const checks = [
     {
       key: "assignments",
-      label: "มี assignment งานอยู่",
+      label: "à¸¡à¸µ assignment à¸‡à¸²à¸™à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_assignments WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "published_articles",
-      label: "เผยแพร่ขึ้นเว็บแล้ว",
+      label: "à¹€à¸œà¸¢à¹à¸žà¸£à¹ˆà¸‚à¸¶à¹‰à¸™à¹€à¸§à¹‡à¸šà¹à¸¥à¹‰à¸§",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM published_articles WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "translations",
-      label: "มีงานแปลที่ผูกอยู่",
+      label: "à¸¡à¸µà¸‡à¸²à¸™à¹à¸›à¸¥à¸—à¸µà¹ˆà¸œà¸¹à¸à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_translations WHERE source_content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "drafts",
-      label: "มี AI draft ค้างอยู่",
+      label: "à¸¡à¸µ AI draft à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_drafts WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "review_reports",
-      label: "มี review report ค้างอยู่",
+      label: "à¸¡à¸µ review report à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM review_reports WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "staging_items",
-      label: "มีข้อมูล staging/export ค้างอยู่",
+      label: "à¸¡à¸µà¸‚à¹‰à¸­à¸¡à¸¹à¸¥ staging/export à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM staging_items WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "content_versions",
-      label: "มีประวัติเวอร์ชันคอนเทนต์อยู่",
+      label: "à¸¡à¸µà¸›à¸£à¸°à¸§à¸±à¸•à¸´à¹€à¸§à¸­à¸£à¹Œà¸Šà¸±à¸™à¸„à¸­à¸™à¹€à¸—à¸™à¸•à¹Œà¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_versions WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "source_records",
-      label: "มีแหล่งข้อมูลต้นทางผูกอยู่",
+      label: "à¸¡à¸µà¹à¸«à¸¥à¹ˆà¸‡à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸•à¹‰à¸™à¸—à¸²à¸‡à¸œà¸¹à¸à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM source_records WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "reviews_raw",
-      label: "มีรีวิวดิบค้างอยู่",
+      label: "à¸¡à¸µà¸£à¸µà¸§à¸´à¸§à¸”à¸´à¸šà¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM reviews_raw WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "quality_checks",
-      label: "มีผลตรวจคุณภาพค้างอยู่",
+      label: "à¸¡à¸µà¸œà¸¥à¸•à¸£à¸§à¸ˆà¸„à¸¸à¸“à¸ à¸²à¸žà¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM quality_checks WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "content_assets",
-      label: "มีไฟล์หรือรูปที่ผูกกับรายการนี้",
+      label: "à¸¡à¸µà¹„à¸Ÿà¸¥à¹Œà¸«à¸£à¸·à¸­à¸£à¸¹à¸›à¸—à¸µà¹ˆà¸œà¸¹à¸à¸à¸±à¸šà¸£à¸²à¸¢à¸à¸²à¸£à¸™à¸µà¹‰",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_assets WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "evidence_blocks",
-      label: "มี evidence block ค้างอยู่",
+      label: "à¸¡à¸µ evidence block à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM evidence_blocks WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "approved_context_blocks",
-      label: "มี approved context ค้างอยู่",
+      label: "à¸¡à¸µ approved context à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM approved_context_blocks WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "draft_input_snapshots",
-      label: "มี draft input snapshot ค้างอยู่",
+      label: "à¸¡à¸µ draft input snapshot à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM draft_input_snapshots WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "field_packs",
-      label: "มี field pack ค้างอยู่",
+      label: "à¸¡à¸µ field pack à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM field_packs WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "content_workflow_models",
-      label: "มี workflow model ผูกอยู่",
+      label: "à¸¡à¸µ workflow model à¸œà¸¹à¸à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_workflow_models WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "content_workflow_transitions",
-      label: "มีประวัติ workflow transition อยู่",
+      label: "à¸¡à¸µà¸›à¸£à¸°à¸§à¸±à¸•à¸´ workflow transition à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_workflow_transitions WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "content_readiness_briefs",
-      label: "มี readiness brief ค้างอยู่",
+      label: "à¸¡à¸µ readiness brief à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_readiness_briefs WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "content_execution_controls",
-      label: "มี execution controls ค้างอยู่",
+      label: "à¸¡à¸µ execution controls à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_execution_controls WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "content_execution_channels",
-      label: "มี execution channels ค้างอยู่",
+      label: "à¸¡à¸µ execution channels à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_execution_channels WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "search_enrichment_records",
-      label: "มีข้อมูล search enrichment ค้างอยู่",
+      label: "à¸¡à¸µà¸‚à¹‰à¸­à¸¡à¸¹à¸¥ search enrichment à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM search_enrichment_records WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "place_intelligence_scores",
-      label: "มีคะแนน place intelligence ค้างอยู่",
+      label: "à¸¡à¸µà¸„à¸°à¹à¸™à¸™ place intelligence à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM place_intelligence_scores WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "social_signal_sources",
-      label: "มีข้อมูล social signal ค้างอยู่",
+      label: "à¸¡à¸µà¸‚à¹‰à¸­à¸¡à¸¹à¸¥ social signal à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM social_signal_sources WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "social_momentum_snapshots",
-      label: "มี social momentum snapshot ค้างอยู่",
+      label: "à¸¡à¸µ social momentum snapshot à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM social_momentum_snapshots WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "content_direction_reports",
-      label: "มี content direction report ค้างอยู่",
+      label: "à¸¡à¸µ content direction report à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_direction_reports WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "review_actions",
-      label: "มีประวัติ action จาก review อยู่",
+      label: "à¸¡à¸µà¸›à¸£à¸°à¸§à¸±à¸•à¸´ action à¸ˆà¸²à¸ review à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM review_actions WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "content_intelligence_models",
-      label: "มี intelligence model ค้างอยู่",
+      label: "à¸¡à¸µ intelligence model à¸„à¹‰à¸²à¸‡à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_intelligence_models WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "content_assignment_submissions",
-      label: "มีงานส่งกลับจาก assignment อยู่",
+      label: "à¸¡à¸µà¸‡à¸²à¸™à¸ªà¹ˆà¸‡à¸à¸¥à¸±à¸šà¸ˆà¸²à¸ assignment à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_assignment_submissions WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "content_assignment_submission_deliverables",
-      label: "มีไฟล์หรือข้อมูลส่งงานจาก assignment อยู่",
+      label: "à¸¡à¸µà¹„à¸Ÿà¸¥à¹Œà¸«à¸£à¸·à¸­à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸ªà¹ˆà¸‡à¸‡à¸²à¸™à¸ˆà¸²à¸ assignment à¸­à¸¢à¸¹à¹ˆ",
       count: Number(
         db.prepare("SELECT COUNT(*) AS c FROM content_assignment_submission_deliverables WHERE content_item_id=?").get(itemId)?.c || 0
       ),
     },
     {
       key: "content_assignment_handoff_snapshots",
-      label: "มี snapshot การส่งงานอยู่",
+      label: "à¸¡à¸µ snapshot à¸à¸²à¸£à¸ªà¹ˆà¸‡à¸‡à¸²à¸™à¸­à¸¢à¸¹à¹ˆ",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "internal_link_sources",
-      label: "มี internal link suggestion ต้นทาง",
+      label: "à¸¡à¸µ internal link suggestion à¸•à¹‰à¸™à¸—à¸²à¸‡",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM internal_link_suggestions WHERE content_item_id=?").get(itemId)?.c || 0),
     },
     {
       key: "internal_link_targets",
-      label: "มี internal link suggestion ปลายทาง",
+      label: "à¸¡à¸µ internal link suggestion à¸›à¸¥à¸²à¸¢à¸—à¸²à¸‡",
       count: Number(db.prepare("SELECT COUNT(*) AS c FROM internal_link_suggestions WHERE target_content_item_id=?").get(itemId)?.c || 0),
     },
   ];
@@ -2851,14 +2851,14 @@ function validateAssignmentCreateFieldPackPrerequisites(assignmentKind, currentF
   if (!currentFieldPack || !Number(currentFieldPack?.id || 0)) {
     return {
       ok: false,
-      error: 'item is not ready_for_assignment; brief is missing (complete step "จัด brief" first)',
+      error: 'item is not ready_for_assignment; brief is missing (complete step "à¸ˆà¸±à¸” brief" first)',
     };
   }
   const fieldPackStatus = String(currentFieldPack?.status || "").trim().toLowerCase();
   if (fieldPackStatus !== "ready_for_field") {
     return {
       ok: false,
-      error: 'item is not ready_for_assignment; complete step "พร้อมส่งเข้า handoff" (stored field pack status must be "ready_for_field")',
+      error: 'item is not ready_for_assignment; complete step "à¸žà¸£à¹‰à¸­à¸¡à¸ªà¹ˆà¸‡à¹€à¸‚à¹‰à¸² handoff" (stored field pack status must be "ready_for_field")',
     };
   }
   return { ok: true, error: null };
@@ -3166,10 +3166,10 @@ function getEditorialPromptGroups(fieldPack = null, brief = null) {
   const fallbackGroups = getAssignmentBriefPromptGroups(brief);
   const { mustVerify, mustAsk } = fieldPack ? getFieldPackPromptGroups(fieldPack) : fallbackGroups;
   const directionPrompts = [
-    summary ? `สรุปแกนเรื่องจากต้นทาง: ${summary}` : "",
-    socialHook ? `Hook ที่ควรรักษา: ${socialHook}` : "",
-    socialCaptionAngle ? `แนว Caption/Copy ที่ควรรักษา: ${socialCaptionAngle}` : "",
-    ...socialOnCameraPoints.map((value) => `ประเด็นที่ต้องเล่า: ${value}`),
+    summary ? `à¸ªà¸£à¸¸à¸›à¹à¸à¸™à¹€à¸£à¸·à¹ˆà¸­à¸‡à¸ˆà¸²à¸à¸•à¹‰à¸™à¸—à¸²à¸‡: ${summary}` : "",
+    socialHook ? `Hook à¸—à¸µà¹ˆà¸„à¸§à¸£à¸£à¸±à¸à¸©à¸²: ${socialHook}` : "",
+    socialCaptionAngle ? `à¹à¸™à¸§ Caption/Copy à¸—à¸µà¹ˆà¸„à¸§à¸£à¸£à¸±à¸à¸©à¸²: ${socialCaptionAngle}` : "",
+    ...socialOnCameraPoints.map((value) => `à¸›à¸£à¸°à¹€à¸”à¹‡à¸™à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¹€à¸¥à¹ˆà¸²: ${value}`),
   ];
   const sourcePrompts = [
     ...mustVerify,
@@ -3177,8 +3177,8 @@ function getEditorialPromptGroups(fieldPack = null, brief = null) {
   ];
   const unique = (items) => uniqueAssignmentPromptStrings(items);
   return {
-    directionPrompts: unique(directionPrompts).length ? unique(directionPrompts) : ["สรุปมุมเล่าและโทนของงานเรียบเรียงที่ต้องรักษา"],
-    sourcePrompts: unique(sourcePrompts).length ? unique(sourcePrompts) : ["ระบุข้อมูลหรือข้อเท็จจริงที่ต้องอ้างอิงให้ครบก่อนเรียบเรียง"],
+    directionPrompts: unique(directionPrompts).length ? unique(directionPrompts) : ["à¸ªà¸£à¸¸à¸›à¸¡à¸¸à¸¡à¹€à¸¥à¹ˆà¸²à¹à¸¥à¸°à¹‚à¸—à¸™à¸‚à¸­à¸‡à¸‡à¸²à¸™à¹€à¸£à¸µà¸¢à¸šà¹€à¸£à¸µà¸¢à¸‡à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸£à¸±à¸à¸©à¸²"],
+    sourcePrompts: unique(sourcePrompts).length ? unique(sourcePrompts) : ["à¸£à¸°à¸šà¸¸à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸«à¸£à¸·à¸­à¸‚à¹‰à¸­à¹€à¸—à¹‡à¸ˆà¸ˆà¸£à¸´à¸‡à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸­à¹‰à¸²à¸‡à¸­à¸´à¸‡à¹ƒà¸«à¹‰à¸„à¸£à¸šà¸à¹ˆà¸­à¸™à¹€à¸£à¸µà¸¢à¸šà¹€à¸£à¸µà¸¢à¸‡"],
   };
 }
 
@@ -3319,29 +3319,140 @@ function findMissingCapturePrompts(expectedPrompts = [], assignmentId = 0, curre
   return prompts.filter((prompt, index) => !uploadedShotSlugs.has(toCaptureShotSlug(prompt, index)));
 }
 
-function evaluateAssignmentCaptureTopicReadiness(assignment, assignmentId, currentRound, mediaPayload = null) {
+function resolveSelectedAssignmentMediaAssetIds(mediaPayload = null) {
+  const source = mediaPayload && typeof mediaPayload === "object" ? mediaPayload : null;
+  const assets = Array.isArray(source?.assets) ? source.assets : [];
+  return Array.from(new Set(
+    assets.map((asset) => Number(asset?.id || 0) || 0).filter((id) => id > 0)
+  ));
+}
+
+function resolveCurrentRoundEligibleAssignmentMediaAssets(assignment, assignmentId, currentRound, mediaPayload = null, options = {}) {
+  const selectedAssetIds = Array.isArray(options?.selectedAssetIds)
+    ? Array.from(new Set(options.selectedAssetIds.map((value) => Number(value || 0) || 0).filter((value) => value > 0)))
+    : resolveSelectedAssignmentMediaAssetIds(mediaPayload);
+  const fallbackAssets = normalizeAssignmentMediaPayloadAssets(mediaPayload);
+  if (typeof repo?.listAssignmentWorkAssetRows !== "function") {
+    return {
+      assets: fallbackAssets,
+      selected_asset_ids: selectedAssetIds,
+      invalid_selections: [],
+      authoritative: false,
+    };
+  }
+  const id = Number(assignmentId || 0) || 0;
+  const round = Number(currentRound || 0) || 0;
+  const nowMs = Date.now();
+  const allRows = id > 0 ? repo.listAssignmentWorkAssetRows(id) : [];
+  const invalidSelections = [];
+  if (!selectedAssetIds.length) {
+    return {
+      assets: [],
+      selected_asset_ids: [],
+      invalid_selections: invalidSelections,
+      authoritative: true,
+    };
+  }
+  const currentRoundRows = allRows.filter((row) => Number(row?.assignment_round || 0) === round);
+  const latestAssetIdBySlotTypeKey = new Map();
+  for (const row of currentRoundRows) {
+    const slotKey = String(row?.assignment_slot_key || "").trim().toLowerCase();
+    const mediaType = normalizeAssignmentCaptureMediaType(row?.assignment_media_type);
+    const assetId = Number(row?.asset_id || 0) || 0;
+    if (!slotKey || !mediaType || !assetId) continue;
+    const key = `${slotKey}|${mediaType}`;
+    const existing = Number(latestAssetIdBySlotTypeKey.get(key) || 0) || 0;
+    if (assetId > existing) latestAssetIdBySlotTypeKey.set(key, assetId);
+  }
+  const rowByAssetId = new Map();
+  for (const row of allRows) {
+    const assetId = Number(row?.asset_id || 0) || 0;
+    if (!assetId || rowByAssetId.has(assetId)) continue;
+    rowByAssetId.set(assetId, row);
+  }
+  const assets = [];
+  for (const assetId of selectedAssetIds) {
+    const row = rowByAssetId.get(assetId) || null;
+    if (!row) {
+      invalidSelections.push({ asset_id: assetId, code: "asset_not_found" });
+      continue;
+    }
+    const rowRound = Number(row?.assignment_round || 0) || 0;
+    const slotKey = String(row?.assignment_slot_key || "").trim().toLowerCase();
+    const mediaType = normalizeAssignmentCaptureMediaType(row?.assignment_media_type);
+    const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+    const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
+    const storagePath = String(row?.storage_path || "").trim();
+    const createdAtMs = parseIsoMs(row?.created_at);
+    const latestForSlotType = Number(latestAssetIdBySlotTypeKey.get(`${slotKey}|${mediaType}`) || 0) || 0;
+    let invalidCode = "";
+    if (Number(row?.assignment_id || 0) !== id) invalidCode = "assignment_mismatch";
+    else if (rowRound !== round) invalidCode = "round_mismatch";
+    else if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") invalidCode = "surface_mismatch";
+    else if (!slotKey) invalidCode = "slot_missing";
+    else if (!mediaType) invalidCode = "media_type_missing";
+    else if ((mediaType === "image" && !mimeType.startsWith("image/")) || (mediaType === "video" && !mimeType.startsWith("video/"))) invalidCode = "mime_type_mismatch";
+    else if (!String(row?.file_name || "").trim() || !storageDisk || !storagePath) invalidCode = "storage_reference_missing";
+    else if (createdAtMs <= 0 || (nowMs - createdAtMs) >= ASSIGNMENT_WORK_SYNC_EXPIRY_MS) invalidCode = "asset_expired";
+    else if (latestForSlotType > 0 && latestForSlotType !== assetId) invalidCode = "asset_superseded";
+    if (invalidCode) {
+      invalidSelections.push({ asset_id: assetId, code: invalidCode, slot_key: slotKey || null, media_type: mediaType || null });
+      continue;
+    }
+    assets.push({
+      id: assetId,
+      file_name: String(row?.file_name || "").trim() || null,
+      mime_type: mimeType || null,
+      size_bytes: Number(row?.size_bytes || 0) || 0,
+      storage_path: storagePath || null,
+      assignment_id: id,
+      assignment_round: rowRound,
+      assignment_surface: "assignment_work",
+      assignment_slot_key: slotKey,
+      assignment_media_type: mediaType,
+      assignment_sync_batch_id: String(row?.assignment_sync_batch_id || "").trim() || null,
+      slotKey,
+      mediaType,
+    });
+  }
+  return {
+    assets,
+    selected_asset_ids: selectedAssetIds,
+    invalid_selections: invalidSelections,
+    authoritative: true,
+  };
+}
+
+function evaluateAssignmentCaptureTopicReadinessFromAssets(assignment, assignmentId, currentRound, sourceAssets = [], diagnostics = {}) {
   const id = Number(assignmentId || 0) || 0;
   const round = Number(currentRound || 0) || 0;
   const context = resolveAssignmentSubmissionPromptContext(assignment);
   const fieldPack = context?.fieldPack && typeof context.fieldPack === "object" ? context.fieldPack : null;
   const structuredCaptureItems = fieldPack ? getStructuredFieldPackCaptureItems(fieldPack) : [];
+  const rawMustCaptureCount = Array.isArray(fieldPack?.checklists)
+    ? fieldPack.checklists.filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_capture").length
+    : 0;
   if (!structuredCaptureItems.length) {
+    const kind = String(assignment?.assignment_kind || "").trim().toLowerCase() || "field";
+    const normalizationFailed = kind === "field" && rawMustCaptureCount > 0;
     return {
       requirements: [],
       fulfilled_requirement_ids: [],
       missing_requirements: [],
       counts: { required_topics: 0, fulfilled_topics: 0, missing_topics: 0 },
-      can_submit: true,
+      can_submit: !normalizationFailed,
+      assignment_id: id || null,
+      assignment_round: round || null,
+      diagnostic_error: normalizationFailed ? "capture_requirements_normalization_failed" : null,
+      invalid_selections: Array.isArray(diagnostics?.invalid_selections) ? diagnostics.invalid_selections : [],
     };
   }
-  const effectiveValidationMedia = resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayload);
-  const sourceAssets = Array.isArray(effectiveValidationMedia?.assets) ? effectiveValidationMedia.assets : [];
   const countsBySlotTypeKey = new Map();
-  sourceAssets.forEach((asset) => {
+  for (const asset of Array.isArray(sourceAssets) ? sourceAssets : []) {
     const key = getAssignmentCaptureAssetSlotTypeKey(asset);
-    if (!key) return;
+    if (!key) continue;
     countsBySlotTypeKey.set(key, (Number(countsBySlotTypeKey.get(key) || 0) || 0) + 1);
-  });
+  }
   const requirements = structuredCaptureItems.map((item) => {
     const slotKey = String(item?.slotKey || "").trim().toLowerCase();
     const mediaType = normalizeAssignmentCaptureMediaType(item?.mediaType);
@@ -3360,6 +3471,7 @@ function evaluateAssignmentCaptureTopicReadiness(assignment, assignmentId, curre
   });
   const fulfilledRequirementIds = requirements.filter((row) => row.status === "fulfilled").map((row) => row.requirement_id);
   const missingRequirements = requirements.filter((row) => row.status === "missing");
+  const invalidSelections = Array.isArray(diagnostics?.invalid_selections) ? diagnostics.invalid_selections : [];
   return {
     requirements,
     fulfilled_requirement_ids: fulfilledRequirementIds,
@@ -3369,10 +3481,49 @@ function evaluateAssignmentCaptureTopicReadiness(assignment, assignmentId, curre
       fulfilled_topics: fulfilledRequirementIds.length,
       missing_topics: missingRequirements.length,
     },
-    can_submit: missingRequirements.length === 0,
+    can_submit: missingRequirements.length === 0 && invalidSelections.length === 0,
     assignment_id: id || null,
     assignment_round: round || null,
+    invalid_selections: invalidSelections,
+    diagnostic_error: diagnostics?.diagnostic_error || null,
   };
+}
+
+function evaluateAssignmentCaptureTopicReadiness(assignment, assignmentId, currentRound, mediaPayload = null) {
+  const resolved = resolveCurrentRoundEligibleAssignmentMediaAssets(assignment, assignmentId, currentRound, mediaPayload);
+  return evaluateAssignmentCaptureTopicReadinessFromAssets(
+    assignment,
+    assignmentId,
+    currentRound,
+    resolved.assets,
+    { invalid_selections: resolved.invalid_selections }
+  );
+}
+
+function evaluateLatestAssignmentSubmissionCaptureTopicReadiness(assignment, assignmentId, currentRound) {
+  const latestSubmissionId = Number(assignment?.latest_submission_id || 0) || 0;
+  const latestDeliverables = latestSubmissionId > 0
+    ? repo.listAssignmentSubmissionDeliverablesBySubmission(assignmentId, latestSubmissionId)
+    : [];
+  const selectedAssetIds = Array.from(new Set(
+    latestDeliverables
+      .map((row) => Number(row?.source_asset_id || 0) || 0)
+      .filter((value) => value > 0)
+  ));
+  const resolved = resolveCurrentRoundEligibleAssignmentMediaAssets(
+    assignment,
+    assignmentId,
+    currentRound,
+    null,
+    { selectedAssetIds }
+  );
+  return evaluateAssignmentCaptureTopicReadinessFromAssets(
+    assignment,
+    assignmentId,
+    currentRound,
+    resolved.assets,
+    { invalid_selections: resolved.invalid_selections }
+  );
 }
 
 function enforceAssignmentSubmissionRequiredFields(assignment, articlePayload, assignmentId, currentRound, mediaPayload = null) {
@@ -3385,27 +3536,27 @@ function enforceAssignmentSubmissionRequiredFields(assignment, articlePayload, a
 
   if (kind === "editorial") {
     const groups = getEditorialPromptGroups(fieldPack, brief);
-    missing.push(...findMissingPromptAnswers(groups.directionPrompts, payload.direction_answers).map((prompt) => `แนวสื่อสารหลัก: ${prompt}`));
-    missing.push(...findMissingPromptAnswers(groups.sourcePrompts, payload.source_answers).map((prompt) => `ข้อมูล/มุมที่ต้องใช้: ${prompt}`));
+    missing.push(...findMissingPromptAnswers(groups.directionPrompts, payload.direction_answers).map((prompt) => `à¹à¸™à¸§à¸ªà¸·à¹ˆà¸­à¸ªà¸²à¸£à¸«à¸¥à¸±à¸: ${prompt}`));
+    missing.push(...findMissingPromptAnswers(groups.sourcePrompts, payload.source_answers).map((prompt) => `à¸‚à¹‰à¸­à¸¡à¸¹à¸¥/à¸¡à¸¸à¸¡à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¹ƒà¸Šà¹‰: ${prompt}`));
   } else {
     const groups = fieldPack ? getFieldPackPromptGroups(fieldPack) : getAssignmentBriefPromptGroups(brief);
     const structuredCaptureItems = fieldPack ? getStructuredFieldPackCaptureItems(fieldPack) : [];
     const effectiveValidationMedia = resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayload);
-    missing.push(...findMissingPromptAnswers(groups.mustVerify, payload.verified_answers).map((prompt) => `สิ่งที่ต้องยืนยัน: ${prompt}`));
-    missing.push(...findMissingPromptAnswers(groups.mustAsk, payload.question_answers).map((prompt) => `คำตอบจากหน้างาน: ${prompt}`));
+    missing.push(...findMissingPromptAnswers(groups.mustVerify, payload.verified_answers).map((prompt) => `à¸ªà¸´à¹ˆà¸‡à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸¢à¸·à¸™à¸¢à¸±à¸™: ${prompt}`));
+    missing.push(...findMissingPromptAnswers(groups.mustAsk, payload.question_answers).map((prompt) => `à¸„à¸³à¸•à¸­à¸šà¸ˆà¸²à¸à¸«à¸™à¹‰à¸²à¸‡à¸²à¸™: ${prompt}`));
     missing.push(...findMissingCapturePrompts(groups.mustCapture, assignmentId, currentRound, {
       structuredItems: structuredCaptureItems,
       mediaPayload: effectiveValidationMedia.mediaPayload,
-    }).map((prompt) => `สิ่งที่ต้องถ่าย: ${prompt}`));
+    }).map((prompt) => `à¸ªà¸´à¹ˆà¸‡à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸–à¹ˆà¸²à¸¢: ${prompt}`));
   }
 
   if (!String(payload.additional_text || "").trim()) {
-    missing.push("ข้อความเพิ่มเติม");
+    missing.push("à¸‚à¹‰à¸­à¸„à¸§à¸²à¸¡à¹€à¸žà¸´à¹ˆà¸¡à¹€à¸•à¸´à¸¡");
   }
   if (missing.length) {
     const preview = missing.slice(0, 8).join(" | ");
-    const remain = missing.length > 8 ? ` | และอีก ${missing.length - 8} รายการ` : "";
-    throw new Error(`บล็อกการส่งงาน: ต้องกรอกข้อมูลให้ครบทุกช่องก่อนส่ง (${preview}${remain})`);
+    const remain = missing.length > 8 ? ` | à¹à¸¥à¸°à¸­à¸µà¸ ${missing.length - 8} à¸£à¸²à¸¢à¸à¸²à¸£` : "";
+    throw new Error(`à¸šà¸¥à¹‡à¸­à¸à¸à¸²à¸£à¸ªà¹ˆà¸‡à¸‡à¸²à¸™: à¸•à¹‰à¸­à¸‡à¸à¸£à¸­à¸à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¹ƒà¸«à¹‰à¸„à¸£à¸šà¸—à¸¸à¸à¸Šà¹ˆà¸­à¸‡à¸à¹ˆà¸­à¸™à¸ªà¹ˆà¸‡ (${preview}${remain})`);
   }
 }
 
@@ -3978,7 +4129,7 @@ function getPrepClaimHolderLabel(item) {
 function ensurePrepItemEditAccess(req, res, item) {
   const role = actorPolicyRole(req);
   if (!canClaimPrepItemRole(role)) {
-    res.status(403).json({ error: "role นี้ไม่ได้อยู่ในขั้นเตรียมข้อมูล" });
+    res.status(403).json({ error: "role à¸™à¸µà¹‰à¹„à¸¡à¹ˆà¹„à¸”à¹‰à¸­à¸¢à¸¹à¹ˆà¹ƒà¸™à¸‚à¸±à¹‰à¸™à¹€à¸•à¸£à¸µà¸¢à¸¡à¸‚à¹‰à¸­à¸¡à¸¹à¸¥" });
     return false;
   }
   const actorId = Number(req.authUser?.id || 0) || 0;
@@ -3986,7 +4137,7 @@ function ensurePrepItemEditAccess(req, res, item) {
   const claimedByUserId = Number(decoratedItem?.claimed_by_user_id || 0) || 0;
   if (!claimedByUserId) {
     res.status(409).json({
-      error: "ต้องรับงานนี้ก่อนจึงจะแก้รายการได้",
+      error: "à¸•à¹‰à¸­à¸‡à¸£à¸±à¸šà¸‡à¸²à¸™à¸™à¸µà¹‰à¸à¹ˆà¸­à¸™à¸ˆà¸¶à¸‡à¸ˆà¸°à¹à¸à¹‰à¸£à¸²à¸¢à¸à¸²à¸£à¹„à¸”à¹‰",
       item: decoratedItem,
     });
     return false;
@@ -3995,8 +4146,8 @@ function ensurePrepItemEditAccess(req, res, item) {
     const holderLabel = getPrepClaimHolderLabel(decoratedItem);
     res.status(409).json({
       error: holderLabel
-        ? `รายการนี้ถูกรับงานโดย ${holderLabel} อยู่`
-        : "รายการนี้มีผู้รับงานอยู่แล้ว",
+        ? `à¸£à¸²à¸¢à¸à¸²à¸£à¸™à¸µà¹‰à¸–à¸¹à¸à¸£à¸±à¸šà¸‡à¸²à¸™à¹‚à¸”à¸¢ ${holderLabel} à¸­à¸¢à¸¹à¹ˆ`
+        : "à¸£à¸²à¸¢à¸à¸²à¸£à¸™à¸µà¹‰à¸¡à¸µà¸œà¸¹à¹‰à¸£à¸±à¸šà¸‡à¸²à¸™à¸­à¸¢à¸¹à¹ˆà¹à¸¥à¹‰à¸§",
       item: decoratedItem,
     });
     return false;
@@ -4042,7 +4193,7 @@ function ensureItemMutationAccess(req, res, item, options = {}) {
   if ((role === "editor" || role === "freelance") && options.allowAssignedSelf === true && hasEditorialAssignmentEditAccess(req, item)) {
     return true;
   }
-  res.status(403).json({ error: "role นี้ไม่มีสิทธิ์แก้บทความในขั้นนี้" });
+  res.status(403).json({ error: "role à¸™à¸µà¹‰à¹„à¸¡à¹ˆà¸¡à¸µà¸ªà¸´à¸—à¸˜à¸´à¹Œà¹à¸à¹‰à¸šà¸—à¸„à¸§à¸²à¸¡à¹ƒà¸™à¸‚à¸±à¹‰à¸™à¸™à¸µà¹‰" });
   return false;
 }
 
@@ -4058,10 +4209,10 @@ function ensureArticleComposerEditAccess(req, res, item) {
     return true;
   }
   if (role === "editor") {
-    res.status(403).json({ error: "editor ต้องมี editorial assignment ที่ยัง active จึงจะแก้บทความได้" });
+    res.status(403).json({ error: "editor à¸•à¹‰à¸­à¸‡à¸¡à¸µ editorial assignment à¸—à¸µà¹ˆà¸¢à¸±à¸‡ active à¸ˆà¸¶à¸‡à¸ˆà¸°à¹à¸à¹‰à¸šà¸—à¸„à¸§à¸²à¸¡à¹„à¸”à¹‰" });
     return false;
   }
-  res.status(403).json({ error: "role นี้ไม่มีสิทธิ์แก้บทความในขั้นนี้" });
+  res.status(403).json({ error: "role à¸™à¸µà¹‰à¹„à¸¡à¹ˆà¸¡à¸µà¸ªà¸´à¸—à¸˜à¸´à¹Œà¹à¸à¹‰à¸šà¸—à¸„à¸§à¸²à¸¡à¹ƒà¸™à¸‚à¸±à¹‰à¸™à¸™à¸µà¹‰" });
   return false;
 }
 
@@ -4074,7 +4225,7 @@ function ensureArticleProcessTransitionAccess(req, res, item, nextStatus) {
     return true;
   }
   if (role !== "editor") {
-    res.status(403).json({ error: "role นี้ไม่มีสิทธิ์เปลี่ยน article process ในขั้นนี้" });
+    res.status(403).json({ error: "role à¸™à¸µà¹‰à¹„à¸¡à¹ˆà¸¡à¸µà¸ªà¸´à¸—à¸˜à¸´à¹Œà¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™ article process à¹ƒà¸™à¸‚à¸±à¹‰à¸™à¸™à¸µà¹‰" });
     return false;
   }
   if (nextStatus === "ready_for_review") {
@@ -4082,7 +4233,7 @@ function ensureArticleProcessTransitionAccess(req, res, item, nextStatus) {
     if (hasEditorialAssignmentAccess(req, item, allowedStates)) {
       return true;
     }
-    res.status(403).json({ error: "editor ต้อง submit หรือ resubmit assignment ของตัวเองก่อนส่งบทความเข้าตรวจ" });
+    res.status(403).json({ error: "editor à¸•à¹‰à¸­à¸‡ submit à¸«à¸£à¸·à¸­ resubmit assignment à¸‚à¸­à¸‡à¸•à¸±à¸§à¹€à¸­à¸‡à¸à¹ˆà¸­à¸™à¸ªà¹ˆà¸‡à¸šà¸—à¸„à¸§à¸²à¸¡à¹€à¸‚à¹‰à¸²à¸•à¸£à¸§à¸ˆ" });
     return false;
   }
   return ensureArticleComposerEditAccess(req, res, item);
@@ -4413,7 +4564,7 @@ function canReadArticleProcess(req, item) {
 
 function ensureArticleProcessReadAccess(req, res, item) {
   if (canReadArticleProcess(req, item)) return true;
-  res.status(403).json({ error: "role นี้ไม่มีสิทธิ์ดู article process ของรายการนี้" });
+  res.status(403).json({ error: "role à¸™à¸µà¹‰à¹„à¸¡à¹ˆà¸¡à¸µà¸ªà¸´à¸—à¸˜à¸´à¹Œà¸”à¸¹ article process à¸‚à¸­à¸‡à¸£à¸²à¸¢à¸à¸²à¸£à¸™à¸µà¹‰" });
   return false;
 }
 
@@ -8134,18 +8285,18 @@ app.post("/api/items/bulk-category", requireRole("admin", "owner"), (req, res) =
   const ids = toUniquePositiveIds(req.body?.ids);
   const category = String(req.body?.category || "").trim().toLowerCase();
   if (!ids.length) {
-    res.status(400).json({ error: "ต้องเลือกรายการอย่างน้อย 1 รายการ" });
+    res.status(400).json({ error: "à¸•à¹‰à¸­à¸‡à¹€à¸¥à¸·à¸­à¸à¸£à¸²à¸¢à¸à¸²à¸£à¸­à¸¢à¹ˆà¸²à¸‡à¸™à¹‰à¸­à¸¢ 1 à¸£à¸²à¸¢à¸à¸²à¸£" });
     return;
   }
   if (!CONTENT_ITEM_CATEGORIES.has(category)) {
-    res.status(400).json({ error: "หมวดหมู่ไม่ถูกต้อง" });
+    res.status(400).json({ error: "à¸«à¸¡à¸§à¸”à¸«à¸¡à¸¹à¹ˆà¹„à¸¡à¹ˆà¸–à¸¹à¸à¸•à¹‰à¸­à¸‡" });
     return;
   }
 
   const rows = ids.map((id) => repo.getItem(id));
   const missing = ids.filter((id, index) => !rows[index]);
   if (missing.length) {
-    res.status(404).json({ error: `ไม่พบรายการ: ${missing.join(", ")}` });
+    res.status(404).json({ error: `à¹„à¸¡à¹ˆà¸žà¸šà¸£à¸²à¸¢à¸à¸²à¸£: ${missing.join(", ")}` });
     return;
   }
 
@@ -8602,8 +8753,8 @@ app.post("/api/items/:id/claim", requireRole("owner", "admin", "user"), (req, re
     const holderLabel = getPrepClaimHolderLabel(decoratedCurrent);
     res.status(409).json({
       error: holderLabel
-        ? `รายการนี้ถูกรับงานโดย ${holderLabel} อยู่`
-        : "รายการนี้มีผู้รับงานอยู่แล้ว",
+        ? `à¸£à¸²à¸¢à¸à¸²à¸£à¸™à¸µà¹‰à¸–à¸¹à¸à¸£à¸±à¸šà¸‡à¸²à¸™à¹‚à¸”à¸¢ ${holderLabel} à¸­à¸¢à¸¹à¹ˆ`
+        : "à¸£à¸²à¸¢à¸à¸²à¸£à¸™à¸µà¹‰à¸¡à¸µà¸œà¸¹à¹‰à¸£à¸±à¸šà¸‡à¸²à¸™à¸­à¸¢à¸¹à¹ˆà¹à¸¥à¹‰à¸§",
       item: decoratedCurrent,
     });
     return;
@@ -8640,15 +8791,15 @@ app.post("/api/items/:id/release", requireRole("admin", "user"), (req, res) => {
   const decoratedCurrent = attachItemScopeMetadata(req.authUser, attachSingleItemClaimUser(current));
   const claimedByUserId = Number(decoratedCurrent?.claimed_by_user_id || 0) || 0;
   if (!claimedByUserId) {
-    res.status(409).json({ error: "รายการนี้ยังไม่มีผู้รับงาน", item: decoratedCurrent });
+    res.status(409).json({ error: "à¸£à¸²à¸¢à¸à¸²à¸£à¸™à¸µà¹‰à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸¡à¸µà¸œà¸¹à¹‰à¸£à¸±à¸šà¸‡à¸²à¸™", item: decoratedCurrent });
     return;
   }
   if (claimedByUserId !== actorId) {
     const holderLabel = getPrepClaimHolderLabel(decoratedCurrent);
     res.status(409).json({
       error: holderLabel
-        ? `รายการนี้อยู่ในการดูแลของ ${holderLabel}`
-        : "รายการนี้อยู่ในการดูแลของผู้ใช้อื่น",
+        ? `à¸£à¸²à¸¢à¸à¸²à¸£à¸™à¸µà¹‰à¸­à¸¢à¸¹à¹ˆà¹ƒà¸™à¸à¸²à¸£à¸”à¸¹à¹à¸¥à¸‚à¸­à¸‡ ${holderLabel}`
+        : "à¸£à¸²à¸¢à¸à¸²à¸£à¸™à¸µà¹‰à¸­à¸¢à¸¹à¹ˆà¹ƒà¸™à¸à¸²à¸£à¸”à¸¹à¹à¸¥à¸‚à¸­à¸‡à¸œà¸¹à¹‰à¹ƒà¸Šà¹‰à¸­à¸·à¹ˆà¸™",
       item: decoratedCurrent,
     });
     return;
@@ -8688,7 +8839,7 @@ app.post("/api/items/:id/takeover", requireRole("admin"), (req, res) => {
   const actorRole = actorPolicyRole(req);
   const claimedByUserId = Number(decoratedCurrent?.claimed_by_user_id || 0) || 0;
   if (!claimedByUserId) {
-    res.status(409).json({ error: "รายการนี้ยังไม่มีผู้รับงาน ให้ใช้การรับงานแทน takeover" });
+    res.status(409).json({ error: "à¸£à¸²à¸¢à¸à¸²à¸£à¸™à¸µà¹‰à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸¡à¸µà¸œà¸¹à¹‰à¸£à¸±à¸šà¸‡à¸²à¸™ à¹ƒà¸«à¹‰à¹ƒà¸Šà¹‰à¸à¸²à¸£à¸£à¸±à¸šà¸‡à¸²à¸™à¹à¸—à¸™ takeover" });
     return;
   }
   if (Number(decoratedCurrent?.claimed_by_user_id || 0) === actorId) {
@@ -8699,8 +8850,8 @@ app.post("/api/items/:id/takeover", requireRole("admin"), (req, res) => {
   if (!canTakeOverPrepClaim(actorRole, claimantRole) || !canTakeOverItemByManagementLine(req.authUser, decoratedCurrent)) {
     res.status(403).json({
       error: claimantRole === "owner"
-        ? "admin ไม่สามารถ takeover งานที่ owner ถืออยู่"
-        : "takeover ต้องมีลำดับสิทธิ์สูงกว่าผู้ถือรายการปัจจุบัน",
+        ? "admin à¹„à¸¡à¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸– takeover à¸‡à¸²à¸™à¸—à¸µà¹ˆ owner à¸–à¸·à¸­à¸­à¸¢à¸¹à¹ˆ"
+        : "takeover à¸•à¹‰à¸­à¸‡à¸¡à¸µà¸¥à¸³à¸”à¸±à¸šà¸ªà¸´à¸—à¸˜à¸´à¹Œà¸ªà¸¹à¸‡à¸à¸§à¹ˆà¸²à¸œà¸¹à¹‰à¸–à¸·à¸­à¸£à¸²à¸¢à¸à¸²à¸£à¸›à¸±à¸ˆà¸ˆà¸¸à¸šà¸±à¸™",
     });
     return;
   }
@@ -9104,7 +9255,7 @@ app.post("/api/items/:id/article-process/transition", requireRole("owner", "admi
     return;
   }
   if (!canTransitionArticleProcessByRole(req, nextStatus)) {
-    res.status(403).json({ error: "role นี้ไม่มีสิทธิ์เปลี่ยน article process ไปสถานะนี้" });
+    res.status(403).json({ error: "role à¸™à¸µà¹‰à¹„à¸¡à¹ˆà¸¡à¸µà¸ªà¸´à¸—à¸˜à¸´à¹Œà¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™ article process à¹„à¸›à¸ªà¸–à¸²à¸™à¸°à¸™à¸µà¹‰" });
     return;
   }
   if (!ensureArticleProcessTransitionAccess(req, res, item, nextStatus)) {
@@ -9150,7 +9301,7 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
     return;
   }
   if (!canTransitionArticleProcessByRole(req, "ready_for_review")) {
-    res.status(403).json({ error: "role นี้ไม่มีสิทธิ์ส่งบทความเข้าตรวจ" });
+    res.status(403).json({ error: "role à¸™à¸µà¹‰à¹„à¸¡à¹ˆà¸¡à¸µà¸ªà¸´à¸—à¸˜à¸´à¹Œà¸ªà¹ˆà¸‡à¸šà¸—à¸„à¸§à¸²à¸¡à¹€à¸‚à¹‰à¸²à¸•à¸£à¸§à¸ˆ" });
     return;
   }
   if (!ensureArticleProcessTransitionAccess(req, res, item, "ready_for_review")) {
@@ -9278,7 +9429,7 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
         article_draft_deliverable_id: draftDeliverable?.id || null,
       });
     } else if (role === "editor") {
-      res.status(403).json({ error: "editor ต้องมี editorial assignment ที่พร้อม submit หรือ resubmit ก่อนส่งบทความเข้าตรวจ" });
+      res.status(403).json({ error: "editor à¸•à¹‰à¸­à¸‡à¸¡à¸µ editorial assignment à¸—à¸µà¹ˆà¸žà¸£à¹‰à¸­à¸¡ submit à¸«à¸£à¸·à¸­ resubmit à¸à¹ˆà¸­à¸™à¸ªà¹ˆà¸‡à¸šà¸—à¸„à¸§à¸²à¸¡à¹€à¸‚à¹‰à¸²à¸•à¸£à¸§à¸ˆ" });
       return;
     }
 
@@ -10205,7 +10356,7 @@ app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "a
     return;
   }
   if (!canManageArticleEditorialAssignments(req)) {
-    res.status(403).json({ error: "role นี้ไม่มีสิทธิ์มอบหมายงานเขียนบทความ" });
+    res.status(403).json({ error: "role à¸™à¸µà¹‰à¹„à¸¡à¹ˆà¸¡à¸µà¸ªà¸´à¸—à¸˜à¸´à¹Œà¸¡à¸­à¸šà¸«à¸¡à¸²à¸¢à¸‡à¸²à¸™à¹€à¸‚à¸µà¸¢à¸™à¸šà¸—à¸„à¸§à¸²à¸¡" });
     return;
   }
 
@@ -10927,18 +11078,15 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
       return;
     }
     if (!isRevisionRequest && nextState === "accepted" && String(currentAssignment.assignment_kind || "").trim().toLowerCase() === "field") {
-      const latestSubmissionId = Number(currentAssignment.latest_submission_id || 0) || 0;
-      const latestSubmission = latestSubmissionId > 0 ? repo.getAssignmentSubmissionById(latestSubmissionId) : null;
-      const captureReadiness = evaluateAssignmentCaptureTopicReadiness(
+      const captureReadiness = evaluateLatestAssignmentSubmissionCaptureTopicReadiness(
         currentAssignment,
         assignmentId,
-        resolveAssignmentCurrentRound(currentAssignment),
-        latestSubmission?.media_payload_json || null
+        resolveAssignmentCurrentRound(currentAssignment)
       );
       if (!captureReadiness.can_submit) {
         return res.status(409).json({
           error: "assignment_capture_requirements_incomplete",
-          message: "???????????????",
+          message: "Assignment capture requirements are incomplete.",
           missing_requirements: captureReadiness.missing_requirements,
         });
       }
@@ -11035,7 +11183,7 @@ function buildSubmissionErrorResponse(err) {
       status: 409,
       body: {
         error: "assignment_capture_requirements_incomplete",
-        message: "???????????????????",
+        message: "Assignment capture requirements are incomplete.",
         missing_requirements: err.missing_requirements,
       },
     };
@@ -11045,7 +11193,7 @@ function buildSubmissionErrorResponse(err) {
       status: 400,
       body: {
         error: "requested_check_validation_failed",
-        message: "???????????????????????????????",
+        message: "Requested check return validation failed.",
         validation_errors: err.validation_errors,
       },
     };
@@ -11129,6 +11277,7 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
 
     }
 
+    const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
     const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
     const normalizedArticlePayload = normalizeAssignmentDraftArticlePayload(req.body?.article_payload_json || null, assignment);
     enforceAssignmentSubmissionRequiredFields(assignment, normalizedArticlePayload, assignmentId, currentRound, mediaPayload);
@@ -12981,14 +13130,14 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
   const readiness = buildExportReadiness(id);
   if (!readiness?.source_ready) {
     res.status(409).json({
-      error: "ข้อมูลต้นทางยังไม่พร้อมสำหรับส่งออก",
+      error: "à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸•à¹‰à¸™à¸—à¸²à¸‡à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸žà¸£à¹‰à¸­à¸¡à¸ªà¸³à¸«à¸£à¸±à¸šà¸ªà¹ˆà¸‡à¸­à¸­à¸",
       readiness,
     });
     return;
   }
   if (!readiness?.editorial_ready && !readiness?.field_flow_ready) {
     res.status(409).json({
-      error: "ข้อมูลยังไม่ผ่าน publish gate สำหรับส่งออก",
+      error: "à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸œà¹ˆà¸²à¸™ publish gate à¸ªà¸³à¸«à¸£à¸±à¸šà¸ªà¹ˆà¸‡à¸­à¸­à¸",
       readiness,
     });
     return;
@@ -12996,7 +13145,7 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
   const translationRecheckGate = getRequiredTranslationRecheckBlockers(id, readiness);
   if (translationRecheckGate.blocking) {
     res.status(409).json({
-      error: "คำแปลยังไม่ผ่าน translation recheck สำหรับส่งออก",
+      error: "à¸„à¸³à¹à¸›à¸¥à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸œà¹ˆà¸²à¸™ translation recheck à¸ªà¸³à¸«à¸£à¸±à¸šà¸ªà¹ˆà¸‡à¸­à¸­à¸",
       reason: `Blocked locales: ${translationRecheckGate.blocking_langs.join(", ")}`,
       locales: translationRecheckGate.blocking_langs,
       translation_recheck_gate: translationRecheckGate,
@@ -13023,7 +13172,7 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
       actor_role: actorPolicyRole(req),
       aiConfig,
       skipTranslationStage: true,
-      approval_notes: "อนุมัติจากขั้นตอนส่งออกไปเว็บไซต์หลัก",
+      approval_notes: "à¸­à¸™à¸¸à¸¡à¸±à¸•à¸´à¸ˆà¸²à¸à¸‚à¸±à¹‰à¸™à¸•à¸­à¸™à¸ªà¹ˆà¸‡à¸­à¸­à¸à¹„à¸›à¹€à¸§à¹‡à¸šà¹„à¸‹à¸•à¹Œà¸«à¸¥à¸±à¸",
     });
 
     let backendSync = null;
@@ -13183,14 +13332,14 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
     const readiness = buildExportReadiness(id);
     if (!readiness?.source_ready) {
       res.status(409).json({
-        error: "ข้อมูลต้นทางยังไม่พร้อมสำหรับส่งเข้า admin review",
+        error: "à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸•à¹‰à¸™à¸—à¸²à¸‡à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸žà¸£à¹‰à¸­à¸¡à¸ªà¸³à¸«à¸£à¸±à¸šà¸ªà¹ˆà¸‡à¹€à¸‚à¹‰à¸² admin review",
         readiness,
       });
       return;
     }
     if (!readiness?.editorial_ready && !readiness?.field_flow_ready) {
       res.status(409).json({
-        error: "ข้อมูลยังไม่ผ่าน publish gate สำหรับส่งเข้า admin review",
+        error: "à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸œà¹ˆà¸²à¸™ publish gate à¸ªà¸³à¸«à¸£à¸±à¸šà¸ªà¹ˆà¸‡à¹€à¸‚à¹‰à¸² admin review",
         readiness,
       });
       return;
@@ -13198,7 +13347,7 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
     const translationRecheckGate = getRequiredTranslationRecheckBlockers(id, readiness);
     if (translationRecheckGate.blocking) {
       res.status(409).json({
-        error: "คำแปลยังไม่ผ่าน translation recheck สำหรับส่งเข้า admin review",
+        error: "à¸„à¸³à¹à¸›à¸¥à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸œà¹ˆà¸²à¸™ translation recheck à¸ªà¸³à¸«à¸£à¸±à¸šà¸ªà¹ˆà¸‡à¹€à¸‚à¹‰à¸² admin review",
         reason: `Blocked locales: ${translationRecheckGate.blocking_langs.join(", ")}`,
         locales: translationRecheckGate.blocking_langs,
         translation_recheck_gate: translationRecheckGate,
@@ -15187,105 +15336,3 @@ if (String(process.env.COLLECTOR_DISABLE_LISTEN || "").trim() !== "1") {
     console.log(`Collector app running on http://${bindHost}:${port}`);
   });
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -5052,6 +5052,29 @@ export function createRepository(db) {
       AND COALESCE(ca.assignment_surface, '')='assignment_work'
     ORDER BY ca.id ASC
   `);
+  const listAssignmentWorkAssetsByAssignmentStmt = db.prepare(`
+    SELECT
+      ca.id AS content_asset_id,
+      ca.asset_id,
+      ca.content_item_id,
+      ca.assignment_id,
+      ca.assignment_round,
+      ca.assignment_media_type,
+      ca.assignment_slot_key,
+      ca.assignment_surface,
+      ca.assignment_sync_batch_id,
+      a.file_name,
+      a.storage_disk,
+      a.storage_path,
+      a.mime_type,
+      a.size_bytes,
+      a.created_at
+    FROM content_assets ca
+    JOIN assets a ON a.id = ca.asset_id
+    WHERE ca.assignment_id=?
+      AND COALESCE(ca.assignment_surface, '')='assignment_work'
+    ORDER BY ca.id ASC
+  `);
   const deleteContentAssetByIdStmt = db.prepare(`
     DELETE FROM content_assets
     WHERE id=?
@@ -6789,6 +6812,28 @@ function createAssignmentSubmissionDraftStateError(state) {
       storage_path: String(row.storage_path || "").trim() || null,
       mime_type: String(row.mime_type || "").trim().toLowerCase() || null,
       size_bytes: Number(row.size_bytes || 0) || 0,
+    }));
+  }
+
+  function listAssignmentWorkAssetRows(assignmentId) {
+    const id = Number(assignmentId || 0) || 0;
+    if (!id) return [];
+    return listAssignmentWorkAssetsByAssignmentStmt.all(id).map((row) => ({
+      content_asset_id: Number(row.content_asset_id || 0) || 0,
+      asset_id: Number(row.asset_id || 0) || 0,
+      content_item_id: Number(row.content_item_id || 0) || 0,
+      assignment_id: Number(row.assignment_id || 0) || 0,
+      assignment_round: Number(row.assignment_round || 0) || 0,
+      assignment_media_type: String(row.assignment_media_type || "").trim().toLowerCase() || null,
+      assignment_slot_key: String(row.assignment_slot_key || "").trim().toLowerCase() || null,
+      assignment_surface: String(row.assignment_surface || "").trim().toLowerCase() || null,
+      assignment_sync_batch_id: String(row.assignment_sync_batch_id || "").trim() || null,
+      file_name: String(row.file_name || "").trim() || null,
+      storage_disk: String(row.storage_disk || "").trim().toLowerCase() || null,
+      storage_path: String(row.storage_path || "").trim() || null,
+      mime_type: String(row.mime_type || "").trim().toLowerCase() || null,
+      size_bytes: Number(row.size_bytes || 0) || 0,
+      created_at: String(row.created_at || "").trim() || null,
     }));
   }
 
@@ -13452,6 +13497,7 @@ function createAssignmentSubmissionDraftStateError(state) {
     shouldPurgeAssignmentSubmissionDraftsForState,
     purgeExpiredAssignmentSubmissionDrafts,
     listAssignmentRoundAssetsByType,
+    listAssignmentWorkAssetRows,
     deleteAssignmentRoundAssetsByType,
     createAssignmentSubmissionDeliverable,
     listAssignmentSubmissionDeliverablesBySubmission,
