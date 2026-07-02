@@ -6947,10 +6947,8 @@ function createAssignmentSubmissionDraftStateError(state) {
         ? latestSubmission.article_payload_json
         : mergeAssignmentSubmissionObjectPayload(latestSubmission.article_payload_json, articlePayload))
       : articlePayload;
-    const nextMediaPayload = submissionState === "resubmitted" && latestSubmission
-      ? (mediaPayload == null
-        ? latestSubmission.media_payload_json
-        : mergeAssignmentSubmissionMediaPayload(latestSubmission.media_payload_json, mediaPayload))
+    const nextMediaPayload = submissionState === "resubmitted"
+      ? mediaPayload
       : mediaPayload;
     const nextFieldReturnPayload = submissionState === "resubmitted" && latestSubmission
       ? (incomingFieldReturnPayload == null

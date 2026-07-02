@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -155,7 +155,7 @@ function buildHarness({ bundle, assignment, latestSubmission, assets = [], edita
   const normalizeAssignmentCaptureMediaType = loadNamedFunction(appJs, "normalizeAssignmentCaptureMediaType");
   const normalizeAssignmentCaptureUploadItems = loadNamedFunction(appJs, "normalizeAssignmentCaptureUploadItems", {
     normalizeAssignmentCaptureMediaType,
-    buildAssignmentCaptureSlotKey: (...parts) => parts.join("::"),
+    buildAssignmentCaptureSlotKey: (input) => { const source = input && typeof input === "object" ? input : {}; const prompt = String(source.prompt || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); const itemOrder = Number(source.itemOrder || 0) || 0; const mediaType = String(source.mediaType || "").trim().toLowerCase(); const captureType = String(source.captureType || "").trim().toLowerCase(); const baseKey = `shot-${itemOrder + 1}-${prompt || `capture-${itemOrder + 1}`}`.slice(0, 48); return captureType === "both" && mediaType ? `${baseKey}--${mediaType}` : baseKey; },
   });
   const getAssignmentAssetSlotTypeKeyFromAsset = loadNamedFunction(appJs, "getAssignmentAssetSlotTypeKeyFromAsset", {
     normalizeAssignmentCaptureMediaType,
@@ -199,17 +199,25 @@ function buildHarness({ bundle, assignment, latestSubmission, assets = [], edita
     getAssignmentDeliverableLabel,
     resolveAssignmentReviewMediaUrl,
     getLatestAssignmentSubmissionRow,
+    normalizeAssignmentCaptureMediaType,
+  });
+  const buildAssignmentCaptureTopicReadiness = loadNamedFunction(appJs, "buildAssignmentCaptureTopicReadiness", {
+    normalizeAssignmentCaptureUploadItems,
+    normalizeAssignmentCaptureMediaType,
+    getAssignmentAssetSlotTypeKeyFromAsset,
+    ASSIGNMENT_WORK_SYNC_EXPIRY_MS: 24 * 60 * 60 * 1000,
   });
   const buildAssignmentDeliverablesCardState = loadNamedFunction(appJs, "buildAssignmentDeliverablesCardState", {
     state,
     getAssignmentPageMode: () => "work",
     getAssignmentSubmissionFormAssignment: (row) => (editable ? row : null),
-    getAssignmentSubmissionFormConfig: () => ({ captureItems: [{ capture_type: "photo", mediaType: "image" }, { capture_type: "video", mediaType: "video" }] }),
+    getAssignmentSubmissionFormConfig: () => ({ captureItems: [{ item_text: "Photo topic", prompt: "Photo topic", capture_type: "photo", mediaType: "image" }, { item_text: "Video topic", prompt: "Video topic", capture_type: "video", mediaType: "video" }] }),
     buildAssignmentCaptureFileUploadQueue: () => [],
-    buildAssignmentSubmissionGateState: () => gateState || { canSubmit: true, blockingReasons: [], warnings: [], effectiveAssets: [], composed: { retainedAssets: [] } },
+    buildAssignmentSubmissionGateState: () => gateState || { canSubmit: true, blockingReasons: [], warnings: [], effectiveAssets: [], composed: { retainedAssets: [] }, topicReadiness: { counts: { requiredTopics: 0, fulfilledTopics: 0, missingTopics: 0, photos: 0, videos: 0 }, requirements: [] } },
     getAssignmentDeliverablesExpectedMediaTypes,
     buildAssignmentDeliverableMediaRowsFromAssets,
     buildAssignmentDeliverableMediaRowsFromSubmission,
+    buildAssignmentCaptureTopicReadiness,
   });
   const renderAssignmentDeliverableMediaCard = loadNamedFunction(appJs, "renderAssignmentDeliverableMediaCard", {
     escapeHtml,
@@ -224,6 +232,7 @@ function buildHarness({ bundle, assignment, latestSubmission, assets = [], edita
     formatAssignmentBriefExpectedDeliverables,
     renderAssignmentDeliverableMediaCard,
     renderAssignmentDeliverableTypeOptions,
+    formatAssignmentDeliverableStatusChip,
   });
 
   return {
@@ -238,9 +247,9 @@ function buildHarness({ bundle, assignment, latestSubmission, assets = [], edita
 
 const assignmentBase = { id: 44, latest_submission_id: 12, state: "submitted" };
 const assetLookup = [
-  { id: 101, file_name: "photo-1.jpg", public_url: "/media/photo-1.jpg", mime_type: "image/jpeg", assignment_slot_key: "slot-photo-1" },
-  { id: 102, file_name: "photo-2.jpg", public_url: "/media/photo-2.jpg", mime_type: "image/jpeg", assignment_slot_key: "slot-photo-2" },
-  { id: 201, file_name: "video-1.mp4", public_url: "/media/video-1.mp4", mime_type: "video/mp4", assignment_slot_key: "slot-video-1" },
+  { id: 101, file_name: "photo-1.jpg", public_url: "/media/photo-1.jpg", mime_type: "image/jpeg", assignment_slot_key: "shot-1-photo-topic", assignment_media_type: "image" },
+  { id: 102, file_name: "photo-2.jpg", public_url: "/media/photo-2.jpg", mime_type: "image/jpeg", assignment_slot_key: "shot-1-photo-topic", assignment_media_type: "image" },
+  { id: 201, file_name: "video-1.mp4", public_url: "/media/video-1.mp4", mime_type: "video/mp4", assignment_slot_key: "shot-2-video-topic", assignment_media_type: "video" },
 ];
 
 function createBundle() {
@@ -298,13 +307,13 @@ test("latest-submission media summary keeps photos and videos separated with col
 
   harness.renderAssignmentDeliverablesSummary(bundle, assignmentBase);
 
-  assert.match(harness.metaNode.textContent, /ภาพถ่าย 2 รายการ/);
-  assert.match(harness.metaNode.textContent, /วิดีโอ 1 รายการ/);
-  assert.match(harness.summaryNode.innerHTML, /รายการไฟล์/);
+  assert.match(harness.metaNode.textContent, /Photos 2 items/);
+  assert.match(harness.metaNode.textContent, /Videos 1 items/);
+  assert.match(harness.summaryNode.innerHTML, /File list/);
   assert.match(harness.summaryNode.innerHTML, /photo-1\.jpg/);
   assert.match(harness.summaryNode.innerHTML, /video-1\.mp4/);
-  assert.match(harness.summaryNode.innerHTML, /slot-photo-1/);
-  assert.match(harness.summaryNode.innerHTML, /slot-video-1/);
+  assert.match(harness.summaryNode.innerHTML, /shot-1-photo-topic/);
+  assert.match(harness.summaryNode.innerHTML, /shot-2-video-topic/);
   assert.doesNotMatch(harness.summaryNode.innerHTML, /keep outside media card/);
 });
 
@@ -322,11 +331,11 @@ test("fulfilled and missing counts only use expected media types even when unexp
 
   harness.renderAssignmentDeliverablesSummary(bundle, assignmentBase);
 
-  assert.match(harness.summaryNode.innerHTML, /\u0e04\u0e23\u0e1a\u0e41\u0e25\u0e49\u0e27 2 \u0e08\u0e32\u0e01 2 \u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17/);
-  assert.match(harness.summaryNode.innerHTML, /\u0e22\u0e31\u0e07\u0e02\u0e32\u0e14 0 \u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17/);
-  assert.doesNotMatch(harness.summaryNode.innerHTML, /\u0e04\u0e23\u0e1a\u0e41\u0e25\u0e49\u0e27 3 \u0e08\u0e32\u0e01 2 \u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17/);
-  assert.match(harness.summaryNode.innerHTML, /assignment-brief-chip">photos<\/span>/);
-  assert.match(harness.summaryNode.innerHTML, /assignment-brief-chip">videos<\/span>/);
+  assert.match(harness.summaryNode.innerHTML, /Done 2 of 2 topics/);
+  assert.match(harness.summaryNode.innerHTML, /Missing 0 topics/);
+  assert.doesNotMatch(harness.summaryNode.innerHTML, /Done 3 of 2 topics/);
+  assert.match(harness.summaryNode.innerHTML, /Image topic: Photo topic/);
+  assert.match(harness.summaryNode.innerHTML, /Video topic: Video topic/);
   assert.doesNotMatch(harness.summaryNode.innerHTML, /caption_draft/);
 });
 
@@ -341,8 +350,8 @@ test("text deliverable media cards do not show media review-panel helper text", 
     {
       expectedTypes: ["raw_notes"],
       fulfilledTypes: ["raw_notes"],
-      sourceLabel: "รอบส่งล่าสุด #12",
-      statusLabel: "ข้อมูลจริงจากรอบส่งล่าสุด",
+      sourceLabel: "latest submission #12",
+      statusLabel: "latest submission data",
     }
   );
 
@@ -354,10 +363,41 @@ test("text deliverable media cards do not show media review-panel helper text", 
 test("editable media summary uses effective media and duplicates readiness warning inside type cards", () => {
   const gateState = {
     canSubmit: false,
-    blockingReasons: ["กรุณาอัปโหลด/ซิงก์ไฟล์ให้ครบก่อนส่งงานกลับ"],
+    blockingReasons: ["upload and sync all required files before submission"],
     warnings: [],
-    effectiveAssets: [assetLookup[0]],
+    effectiveAssets: [
+      { ...assetLookup[0], assignment_media_type: "image", created_at: "2026-06-28T10:00:00Z" },
+    ],
     composed: { retainedAssets: [] },
+    topicReadiness: {
+      counts: { requiredTopics: 2, fulfilledTopics: 1, missingTopics: 1, photos: 1, videos: 0 },
+      blockingReasons: ["Missing required video topic: Video topic"],
+      missingRequirements: [{ slotKey: "shot-2-video-topic", mediaType: "video", prompt: "Video topic", status: "missing", eligibleAssets: [], eligibleCount: 0, minFiles: 1 }],
+      requirements: [
+        {
+          requirementId: "shot-1-photo-topic|image",
+          slotKey: "shot-1-photo-topic",
+          mediaType: "image",
+          prompt: "Photo topic",
+          required: true,
+          minFiles: 1,
+          eligibleAssets: [{ ...assetLookup[0], assignment_media_type: "image", created_at: "2026-06-28T10:00:00Z" }],
+          eligibleCount: 1,
+          status: "fulfilled",
+        },
+        {
+          requirementId: "shot-2-video-topic|video",
+          slotKey: "shot-2-video-topic",
+          mediaType: "video",
+          prompt: "Video topic",
+          required: true,
+          minFiles: 1,
+          eligibleAssets: [],
+          eligibleCount: 0,
+          status: "missing",
+        },
+      ],
+    },
   };
   const harness = buildHarness({
     bundle: createBundle(),
@@ -370,10 +410,12 @@ test("editable media summary uses effective media and duplicates readiness warni
 
   harness.renderAssignmentDeliverablesSummary(createBundle(), { ...assignmentBase, state: "assigned", latest_submission_id: null });
 
-  assert.match(harness.summaryNode.innerHTML, /ก่อนส่งงานกลับ/);
-  assert.match(harness.summaryNode.innerHTML, /กรุณาอัปโหลด\/ซิงก์ไฟล์ให้ครบก่อนส่งงานกลับ/);
-  assert.match(harness.summaryNode.innerHTML, /ภาพถ่าย 1 รายการ/);
-  assert.match(harness.summaryNode.innerHTML, /วิดีโอ 0 รายการ/);
+  assert.match(harness.summaryNode.innerHTML, /upload and sync all required files before submission/);
+  assert.match(harness.summaryNode.innerHTML, /Photos 1 items/);
+  assert.match(harness.summaryNode.innerHTML, /Videos 0 items/);
+  assert.match(harness.summaryNode.innerHTML, /Done 1 of 2 topics/);
+  assert.match(harness.summaryNode.innerHTML, /Missing 1 topics/);
+  assert.match(harness.summaryNode.innerHTML, /photo-1\.jpg/);
 });
 
 test("missing resolvable video stays unready in the media summary", () => {
@@ -394,8 +436,8 @@ test("missing resolvable video stays unready in the media summary", () => {
 
   harness.renderAssignmentDeliverablesSummary(bundle, assignmentBase);
 
-  assert.match(harness.summaryNode.innerHTML, /วิดีโอ 0 รายการ/);
-  assert.match(harness.summaryNode.innerHTML, /ยังไม่พบไฟล์วิดีโอจริงที่พร้อมใช้สำหรับประเภทนี้/);
+  assert.match(harness.summaryNode.innerHTML, /Videos 0 items/);
+  assert.match(harness.summaryNode.innerHTML, /Video topic: Video topic/);
 });
 
 test("review media helper still returns every actual file for asset-backed deliverables", () => {

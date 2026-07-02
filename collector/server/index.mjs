@@ -3254,30 +3254,7 @@ function normalizeAssignmentMediaPayloadAssets(mediaPayload) {
 
 function resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayload = null) {
   const incomingAssets = normalizeAssignmentMediaPayloadAssets(mediaPayload);
-  const submissionState = String(assignment?.state || "").trim().toLowerCase();
-  const latestSubmissionId = Number(assignment?.latest_submission_id || 0) || 0;
-  const latestSubmission = latestSubmissionId > 0
-    ? repo.getAssignmentSubmissionById(latestSubmissionId)
-    : null;
-  const retainedAssets = normalizeAssignmentMediaPayloadAssets(latestSubmission?.media_payload_json);
-  const blockRetainedImages = Number(assignment?.image_reset_required ? 1 : 0) === 1;
-  const blockRetainedVideos = Number(assignment?.video_reset_required ? 1 : 0) === 1;
-  const inferMediaType = (asset) => {
-    const explicit = normalizeAssignmentCaptureMediaType(asset?.mediaType || asset?.media_type || asset?.assignment_media_type);
-    if (explicit) return explicit;
-    const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
-    if (mimeType.startsWith("image/")) return "image";
-    if (mimeType.startsWith("video/")) return "video";
-    return "";
-  };
-  const filteredRetainedAssets = submissionState === "revision_requested"
-    ? retainedAssets.filter((asset) => {
-      const mediaType = inferMediaType(asset);
-      if (mediaType === "image" && blockRetainedImages) return false;
-      if (mediaType === "video" && blockRetainedVideos) return false;
-      return true;
-    })
-    : [];
+  const filteredRetainedAssets = [];
   const effectiveAssets = [];
   const seen = new Set();
   const buildIdentityKey = (asset) => {
@@ -3340,6 +3317,62 @@ function findMissingCapturePrompts(expectedPrompts = [], assignmentId = 0, curre
     if (shotSlug) uploadedShotSlugs.add(shotSlug);
   }
   return prompts.filter((prompt, index) => !uploadedShotSlugs.has(toCaptureShotSlug(prompt, index)));
+}
+
+function evaluateAssignmentCaptureTopicReadiness(assignment, assignmentId, currentRound, mediaPayload = null) {
+  const id = Number(assignmentId || 0) || 0;
+  const round = Number(currentRound || 0) || 0;
+  const context = resolveAssignmentSubmissionPromptContext(assignment);
+  const fieldPack = context?.fieldPack && typeof context.fieldPack === "object" ? context.fieldPack : null;
+  const structuredCaptureItems = fieldPack ? getStructuredFieldPackCaptureItems(fieldPack) : [];
+  if (!structuredCaptureItems.length) {
+    return {
+      requirements: [],
+      fulfilled_requirement_ids: [],
+      missing_requirements: [],
+      counts: { required_topics: 0, fulfilled_topics: 0, missing_topics: 0 },
+      can_submit: true,
+    };
+  }
+  const effectiveValidationMedia = resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayload);
+  const sourceAssets = Array.isArray(effectiveValidationMedia?.assets) ? effectiveValidationMedia.assets : [];
+  const countsBySlotTypeKey = new Map();
+  sourceAssets.forEach((asset) => {
+    const key = getAssignmentCaptureAssetSlotTypeKey(asset);
+    if (!key) return;
+    countsBySlotTypeKey.set(key, (Number(countsBySlotTypeKey.get(key) || 0) || 0) + 1);
+  });
+  const requirements = structuredCaptureItems.map((item) => {
+    const slotKey = String(item?.slotKey || "").trim().toLowerCase();
+    const mediaType = normalizeAssignmentCaptureMediaType(item?.mediaType);
+    const requirementId = `${slotKey}|${mediaType}`;
+    const eligibleCount = Number(countsBySlotTypeKey.get(requirementId) || 0) || 0;
+    return {
+      requirement_id: requirementId,
+      slot_key: slotKey,
+      media_type: mediaType,
+      prompt: String(item?.prompt || "").trim(),
+      required: true,
+      min_files: 1,
+      eligible_asset_count: eligibleCount,
+      status: eligibleCount >= 1 ? "fulfilled" : "missing",
+    };
+  });
+  const fulfilledRequirementIds = requirements.filter((row) => row.status === "fulfilled").map((row) => row.requirement_id);
+  const missingRequirements = requirements.filter((row) => row.status === "missing");
+  return {
+    requirements,
+    fulfilled_requirement_ids: fulfilledRequirementIds,
+    missing_requirements: missingRequirements,
+    counts: {
+      required_topics: requirements.length,
+      fulfilled_topics: fulfilledRequirementIds.length,
+      missing_topics: missingRequirements.length,
+    },
+    can_submit: missingRequirements.length === 0,
+    assignment_id: id || null,
+    assignment_round: round || null,
+  };
 }
 
 function enforceAssignmentSubmissionRequiredFields(assignment, articlePayload, assignmentId, currentRound, mediaPayload = null) {
@@ -10893,6 +10926,23 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
       res.status(400).json({ error: "video_reset_reason is required when video_reset_required=true" });
       return;
     }
+    if (!isRevisionRequest && nextState === "accepted" && String(currentAssignment.assignment_kind || "").trim().toLowerCase() === "field") {
+      const latestSubmissionId = Number(currentAssignment.latest_submission_id || 0) || 0;
+      const latestSubmission = latestSubmissionId > 0 ? repo.getAssignmentSubmissionById(latestSubmissionId) : null;
+      const captureReadiness = evaluateAssignmentCaptureTopicReadiness(
+        currentAssignment,
+        assignmentId,
+        resolveAssignmentCurrentRound(currentAssignment),
+        latestSubmission?.media_payload_json || null
+      );
+      if (!captureReadiness.can_submit) {
+        return res.status(409).json({
+          error: "assignment_capture_requirements_incomplete",
+          message: "???????????????",
+          missing_requirements: captureReadiness.missing_requirements,
+        });
+      }
+    }
     const revisionResult = isRevisionRequest
       ? repo.requestAssignmentRevisionWithReset(assignmentId, actorEmail(req), {
         contributor_note: req.body?.contributor_note,
@@ -10980,12 +11030,22 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
 });
 
 function buildSubmissionErrorResponse(err) {
+  if (err && err.code === "ASSIGNMENT_CAPTURE_REQUIREMENTS_INCOMPLETE" && Array.isArray(err.missing_requirements)) {
+    return {
+      status: 409,
+      body: {
+        error: "assignment_capture_requirements_incomplete",
+        message: "???????????????????",
+        missing_requirements: err.missing_requirements,
+      },
+    };
+  }
   if (err && err.code === "REQUESTED_CHECK_VALIDATION_FAILED" && Array.isArray(err.validation_errors) && err.validation_errors.length) {
     return {
       status: 400,
       body: {
         error: "requested_check_validation_failed",
-        message: "กรุณาตรวจสอบข้อมูลที่ต้องยืนยัน",
+        message: "???????????????????????????????",
         validation_errors: err.validation_errors,
       },
     };
@@ -11055,18 +11115,20 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
       ? req.body.media_payload_json
       : null;
     const effectiveValidationMedia = resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayload);
-    if (["owner", "admin", "user", "freelance"].includes(role)) {
-      const currentRoundDeliverablesCount = Array.isArray(effectiveValidationMedia.assets)
-        ? effectiveValidationMedia.assets.length
-        : 0;
-      if (currentRoundDeliverablesCount < 1) {
-        res.status(409).json({
-          error: "บล็อกการส่งงาน: ต้องแนบผลงานอย่างน้อย 1 รายการก่อนส่ง",
-        });
-        return;
-      }
+    const captureReadiness = evaluateAssignmentCaptureTopicReadiness(assignment, assignmentId, currentRound, mediaPayload);
+
+    if (!captureReadiness.can_submit) {
+
+      const error = new Error("assignment capture requirements incomplete");
+
+      error.code = "ASSIGNMENT_CAPTURE_REQUIREMENTS_INCOMPLETE";
+
+      error.missing_requirements = captureReadiness.missing_requirements;
+
+      throw error;
+
     }
-    const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
+
     const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
     const normalizedArticlePayload = normalizeAssignmentDraftArticlePayload(req.body?.article_payload_json || null, assignment);
     enforceAssignmentSubmissionRequiredFields(assignment, normalizedArticlePayload, assignmentId, currentRound, mediaPayload);

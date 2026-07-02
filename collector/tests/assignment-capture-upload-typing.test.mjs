@@ -541,7 +541,7 @@ test("server-synced asset reload keeps video asset matched by persisted slot met
   assert.equal(payload.assets[0].mediaType, "video");
 });
 
-test("server validation media helper reuses retained latest submission media when reset is off", () => {
+test("server validation media helper ignores retained latest submission media during revision_requested even when reset is off", () => {
   const resolveValidationMedia = resolveAssignmentSubmissionValidationMediaPayloadForBackendTest({
     getAssignmentSubmissionById() {
       return {
@@ -561,10 +561,11 @@ test("server validation media helper reuses retained latest submission media whe
     null
   );
 
-  assert.deepEqual(result.assets.map((asset) => asset.id), [201, 202]);
+  assert.deepEqual(result.assets.map((asset) => asset.id), []);
+  assert.deepEqual(result.retainedAssets, []);
 });
 
-test("server validation media helper filters retained assets only for reset media types", () => {
+test("server validation media helper ignores retained assets for all reset configurations during revision_requested", () => {
   const resolveValidationMedia = resolveAssignmentSubmissionValidationMediaPayloadForBackendTest({
     getAssignmentSubmissionById() {
       return {
@@ -583,13 +584,15 @@ test("server validation media helper filters retained assets only for reset medi
     { state: "revision_requested", latest_submission_id: 12, image_reset_required: 1, video_reset_required: 0 },
     null
   );
-  assert.deepEqual(imageReset.assets.map((asset) => asset.id), [202]);
+  assert.deepEqual(imageReset.assets.map((asset) => asset.id), []);
+  assert.deepEqual(imageReset.retainedAssets, []);
 
   const videoReset = resolveValidationMedia(
     { state: "revision_requested", latest_submission_id: 12, image_reset_required: 0, video_reset_required: 1 },
     null
   );
-  assert.deepEqual(videoReset.assets.map((asset) => asset.id), [201]);
+  assert.deepEqual(videoReset.assets.map((asset) => asset.id), []);
+  assert.deepEqual(videoReset.retainedAssets, []);
 });
 
 test("normalizeAssignmentMediaPayloadAssets preserves size bytes and stable urls", () => {
@@ -618,7 +621,7 @@ return normalizeAssignmentMediaPayloadAssets;`
   assert.equal(asset.source_url, "https://cdn.example.com/Walkthrough.mp4");
 });
 
-test("submission required-fields check accepts retained latest submission media for revision without new uploads", () => {
+test("submission required-fields check blocks revision without current-round replacement media", () => {
   const assignment = {
     state: "revision_requested",
     latest_submission_id: 12,
@@ -675,7 +678,7 @@ return enforceAssignmentSubmissionRequiredFields;`
     },
   });
 
-  assert.doesNotThrow(() => run(
+  assert.throws(() => run(
     assignment,
     {
       verified_answers: [{ prompt: "Confirm opening hours", answer: "Open daily 09:00-18:00" }],
@@ -684,12 +687,12 @@ return enforceAssignmentSubmissionRequiredFields;`
         { prompt: "Storefront hero", answer: "" },
         { prompt: "Walkthrough clip", answer: "" },
       ],
-      additional_text: "Retained media should satisfy backend validation",
+      additional_text: "Retained media should not satisfy backend validation",
     },
     24,
     3,
     null
-  ));
+  ), /Storefront hero|Walkthrough clip/);
 });
 
 test("reset shot validation blocks only the reset media type when retained latest submission assets lack replacement", () => {
@@ -823,6 +826,49 @@ test("server validation media helper dedupes assets when stable url matches with
   assert.equal(result.assets.length, 1);
 });
 
+test("server validation media helper ignores retained submission media during revision_requested", () => {
+  const resolveValidationMedia = resolveAssignmentSubmissionValidationMediaPayloadForBackendTest({
+    getAssignmentSubmissionById() {
+      return {
+        media_payload_json: {
+          assets: [
+            {
+              id: 77,
+              file_name: "old-round.mp4",
+              mime_type: "video/mp4",
+              public_url: "/media/old-round.mp4",
+              slotKey: "shot-2-walkthrough",
+              mediaType: "video",
+            },
+          ],
+        },
+      };
+    },
+  });
+
+  const result = resolveValidationMedia(
+    { state: "revision_requested", latest_submission_id: 55, image_reset_required: 0, video_reset_required: 0 },
+    {
+      assets: [
+        {
+          id: 88,
+          file_name: "new-round.jpg",
+          mime_type: "image/jpeg",
+          public_url: "/media/new-round.jpg",
+          slotKey: "shot-1-storefront",
+          mediaType: "image",
+        },
+      ],
+    }
+  );
+
+  assert.deepEqual(result.retainedAssets, []);
+  assert.deepEqual(
+    result.assets.map((asset) => Number(asset?.id || 0)),
+    [88]
+  );
+});
+
 test("persisted slot metadata beats non-canonical filename and missing metadata does not guess slot", () => {
   const slotKey = "shot-5-walkthrough-clip";
 
@@ -912,4 +958,76 @@ test("backend capture validation reports only the missing structured video slot"
     }
   );
   assert.deepEqual(missing, ["Push-in shot ไปที่ Barista"]);
+});
+
+
+test("capture topic readiness counts fulfilled and missing topics by slot key and media type", () => {
+  const evaluateReadiness = new Function(
+    `function resolveAssignmentSubmissionPromptContext(assignment = null) {
+      return {
+        brief: assignment?.brief_json || null,
+        fieldPack: assignment?.fieldPack || null,
+      };
+    }
+${extractNamedFunctionSource(serverIndexJs, "uniqueAssignmentPromptStrings")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentCaptureMediaType")}
+${extractNamedFunctionSource(serverIndexJs, "buildAssignmentCaptureSlotKey")}
+${extractNamedFunctionSource(serverIndexJs, "getFieldPackPromptGroups")}
+${extractNamedFunctionSource(serverIndexJs, "getStructuredFieldPackCaptureItems")}
+${extractNamedFunctionSource(serverIndexJs, "toCaptureShotSlug")}
+${extractNamedFunctionSource(serverIndexJs, "parseCaptureShotSlugFromFileName")}
+${extractNamedFunctionSource(serverIndexJs, "getAssignmentCaptureAssetSlotTypeKey")}
+${extractNamedFunctionSource(serverIndexJs, "normalizeAssignmentMediaPayloadAssets")}
+${extractNamedFunctionSource(serverIndexJs, "resolveAssignmentSubmissionValidationMediaPayload")}
+${extractNamedFunctionSource(serverIndexJs, "evaluateAssignmentCaptureTopicReadiness")}
+return evaluateAssignmentCaptureTopicReadiness;`
+  )();
+
+  const assignment = {
+    state: "in_progress",
+    fieldPack: {
+      checklists: [
+        { checklist_type: "must_capture", item_text: "Storefront hero", capture_type: "photo", item_order: 0 },
+        { checklist_type: "must_capture", item_text: "Walkthrough clip", capture_type: "video", item_order: 1 },
+      ],
+    },
+  };
+  const storefrontSlotKey = buildAssignmentCaptureSlotKeyForBackendTest("Storefront hero", 0, "image", "photo");
+  const result = evaluateReadiness(assignment, 24, 3, {
+    assets: Array.from({ length: 100 }, (_value, index) => ({
+      id: index + 1,
+      file_name: `${storefrontSlotKey}__${index + 1}.jpg`,
+      mime_type: "image/jpeg",
+      slotKey: storefrontSlotKey,
+      mediaType: "image",
+    })),
+  });
+
+  assert.equal(result.counts.required_topics, 2);
+  assert.equal(result.counts.fulfilled_topics, 1);
+  assert.equal(result.counts.missing_topics, 1);
+  assert.equal(result.can_submit, false);
+  assert.deepEqual(result.fulfilled_requirement_ids, [`${storefrontSlotKey}|image`]);
+  assert.deepEqual(
+    result.missing_requirements.map((row) => ({ slot_key: row.slot_key, media_type: row.media_type, prompt: row.prompt })),
+    [{ slot_key: "shot-2-walkthrough-clip", media_type: "video", prompt: "Walkthrough clip" }]
+  );
+});
+
+test("submission error helper maps incomplete capture requirements to structured 409 response", () => {
+  const buildResponse = new Function(
+    `${extractNamedFunctionSource(serverIndexJs, "buildSubmissionErrorResponse")}
+return buildSubmissionErrorResponse;`
+  )();
+
+  const err = new Error("assignment capture requirements incomplete");
+  err.code = "ASSIGNMENT_CAPTURE_REQUIREMENTS_INCOMPLETE";
+  err.missing_requirements = [
+    { requirement_id: "shot-2-walkthrough-clip|video", slot_key: "shot-2-walkthrough-clip", media_type: "video", prompt: "Walkthrough clip" },
+  ];
+
+  const result = buildResponse(err);
+  assert.equal(result.status, 409);
+  assert.equal(result.body.error, "assignment_capture_requirements_incomplete");
+  assert.deepEqual(result.body.missing_requirements, err.missing_requirements);
 });

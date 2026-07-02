@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -280,6 +280,12 @@ function loadHarness(fixture, overrides = {}) {
     normalizeAssignmentCaptureUploadItems,
   });
   const getAssignmentTouchedSlotTypeKeysFromQueue = loadNamedFunction(appJs, "getAssignmentTouchedSlotTypeKeysFromQueue");
+  const buildAssignmentCaptureTopicReadiness = loadNamedFunction(appJs, "buildAssignmentCaptureTopicReadiness", {
+    normalizeAssignmentCaptureUploadItems,
+    normalizeAssignmentCaptureMediaType,
+    getAssignmentAssetSlotTypeKeyFromAsset,
+    ASSIGNMENT_WORK_SYNC_EXPIRY_MS: 24 * 60 * 60 * 1000,
+  });
   const buildAssignmentCaptureItemLookup = loadNamedFunction(appJs, "buildAssignmentCaptureItemLookup", {
     buildAssignmentCaptureSlotKey,
     normalizeAssignmentCaptureMediaType,
@@ -348,6 +354,7 @@ function loadHarness(fixture, overrides = {}) {
     composeAssignmentSubmissionEffectiveAssets,
     getAssignmentServerSyncedAssetsForCaptureItems,
     getAssignmentSubmissionMissingTextPrompts,
+    buildAssignmentCaptureTopicReadiness,
   });
   const createAssignmentSubmission = loadNamedFunction(appJs, "createAssignmentSubmission", {
     isEditorUser: () => false,
@@ -406,8 +413,8 @@ function loadHarness(fixture, overrides = {}) {
   };
 }
 
-test("revision without reset accepts retained latest-submission media", () => {
-  const fixture = createFixture();
+test("revision without reset blocks when there is no current-round media", () => {
+  const fixture = createFixture({ assetLookup: [], deliverablesByType: { photos: [], videos: [] }, latestSubmission: { media_payload_json: { assets: [] } } });
   const harness = loadHarness(fixture);
 
   const gateState = harness.buildAssignmentSubmissionGateState(fixture.assignment.id, { captureItems: fixture.captureItems }, {
@@ -415,9 +422,9 @@ test("revision without reset accepts retained latest-submission media", () => {
     uploadQueue: [],
   });
 
-  assert.equal(gateState.canSubmit, true);
-  assert.deepEqual(gateState.effectiveAssets.map((asset) => asset.id), [101, 201]);
-  assert.equal(gateState.checklist.find((item) => item.key === "required_media")?.status, true);
+  assert.equal(gateState.canSubmit, false);
+  assert.deepEqual(gateState.effectiveAssets.map((asset) => asset.id), []);
+  assert.equal(gateState.checklist.find((item) => item.key === "required_media")?.status, false);
 });
 
 test("initial submit without retained or current media still blocks", () => {
@@ -436,7 +443,7 @@ test("initial submit without retained or current media still blocks", () => {
   });
 
   assert.equal(gateState.canSubmit, false);
-  assert.deepEqual(gateState.blockingReasons, ["\u0e01\u0e23\u0e38\u0e13\u0e32\u0e2d\u0e31\u0e1b\u0e42\u0e2b\u0e25\u0e14/\u0e0b\u0e34\u0e07\u0e01\u0e4c\u0e44\u0e1f\u0e25\u0e4c\u0e43\u0e2b\u0e49\u0e04\u0e23\u0e1a\u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e07\u0e32\u0e19\u0e01\u0e25\u0e31\u0e1a"]);
+  assert.deepEqual(gateState.blockingReasons, ["Missing required image topic: Storefront hero", "Missing required video topic: Walkthrough clip"]);
 });
 
 test("image reset excludes retained images but keeps retained videos", () => {
@@ -454,7 +461,7 @@ test("image reset excludes retained images but keeps retained videos", () => {
     strict: false,
   });
 
-  assert.deepEqual(result.assets.map((asset) => asset.id), [201]);
+  assert.deepEqual(result.assets.map((asset) => asset.id), []);
 });
 
 test("video reset excludes retained videos but keeps retained images", () => {
@@ -472,7 +479,7 @@ test("video reset excludes retained videos but keeps retained images", () => {
     strict: false,
   });
 
-  assert.deepEqual(result.assets.map((asset) => asset.id), [101]);
+  assert.deepEqual(result.assets.map((asset) => asset.id), []);
 });
 
 test("current synced uploads merge with retained media and dedupe by asset identity", () => {
@@ -506,7 +513,7 @@ test("latest deliverables bundle wins over accumulated media payload fallback", 
     strict: false,
   });
 
-  assert.equal(result.retainedAssets.length, 13);
+  assert.equal(result.retainedAssets.length, 0);
   assert.equal(result.assets.length, 13);
   assert.equal(result.assets.some((asset) => Number(asset.id) === 500), false);
 });
@@ -534,15 +541,15 @@ test("missing required shot still blocks even when many synced media items exist
   });
 
   assert.equal(gateState.canSubmit, false);
-  assert.deepEqual(gateState.missingMedia, ["\u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d\u0e2b\u0e31\u0e27\u0e02\u0e49\u0e2d 13: Walkthrough clip"]);
-  assert.deepEqual(gateState.blockingReasons, ["\u0e22\u0e31\u0e07\u0e02\u0e32\u0e14\u0e44\u0e1f\u0e25\u0e4c\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a: \u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d\u0e2b\u0e31\u0e27\u0e02\u0e49\u0e2d 13: Walkthrough clip"]);
+  assert.deepEqual(gateState.missingMedia, ["Walkthrough clip"]);
+  assert.deepEqual(gateState.blockingReasons, ["Missing required video topic: Walkthrough clip"]);
   assert.equal(
     gateState.checklist.find((item) => item.key === "required_media")?.detail,
-    "\u0e22\u0e31\u0e07\u0e02\u0e32\u0e14\u0e44\u0e1f\u0e25\u0e4c\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a: \u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d\u0e2b\u0e31\u0e27\u0e02\u0e49\u0e2d 13: Walkthrough clip"
+    "Missing required video topic: Walkthrough clip"
   );
 });
 
-test("retained media appears in summary but is omitted from submit payload without new uploads", async () => {
+test("current-round synced media appears in summary and submit payload without retained fallback", async () => {
   const fixture = createFixture();
   const harness = loadHarness(fixture);
 

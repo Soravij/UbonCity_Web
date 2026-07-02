@@ -156,6 +156,67 @@ test("assignment submission mapping keeps field_return_payload_json separate fro
   assert.equal(Object.prototype.hasOwnProperty.call(payload.media_payload_json, "field_return_payload_json"), false);
 });
 
+test("resubmitted assignment replaces media payload instead of merging previous submission media", () => {
+  const ctx = createRepoContext();
+  try {
+    const item = ctx.createItem("Assignment Media Replace");
+    const assignee = ctx.createUser("field-media-replace");
+    ctx.db.prepare(`
+      INSERT INTO content_readiness_briefs (
+        content_item_id, readiness_json, brief_json, reasons_json, blockers_json, missing_requirements_json, computed_by
+      ) VALUES (?, ?, ?, '[]', '[]', '[]', 'tester@local')
+    `).run(
+      item.id,
+      JSON.stringify({ ready_for_content: true, ready_for_publish: false, blockers: [], missing_requirements: [] }),
+      JSON.stringify({ brief_summary: "ready" })
+    );
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      field_pack_checklists: [{ checklist_type: "must_verify_fact", item_text: "verify phone" }],
+    });
+    const assignment = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    ).assignment;
+
+    const firstSubmission = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+      assignmentId: assignment.id,
+      sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
+      submittedByUserId: assignee.id,
+      submissionState: "submitted",
+      articlePayloadJson: { body: "draft body" },
+      mediaPayloadJson: { assets: [{ id: 88, file_name: "old.jpg", mime_type: "image/jpeg" }] },
+      fieldReturnPayloadJson: null,
+    }));
+    assert.deepEqual(firstSubmission.media_payload_json, {
+      assets: [{ id: 88, file_name: "old.jpg", mime_type: "image/jpeg" }],
+    });
+
+    ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "user", reason_code: "test" });
+    ctx.repo.updateAssignmentState(assignment.id, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "test" });
+
+    const resubmitted = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+      assignmentId: assignment.id,
+      sourceHandoffSnapshotId: currentHandoffSnapshotId(ctx, assignment.id),
+      submittedByUserId: assignee.id,
+      submissionState: "resubmitted",
+      articlePayloadJson: { body: "draft body revised" },
+      mediaPayloadJson: { assets: [{ id: 99, file_name: "new.mp4", mime_type: "video/mp4" }] },
+      fieldReturnPayloadJson: null,
+    }));
+
+    assert.deepEqual(resubmitted.media_payload_json, {
+      assets: [{ id: 99, file_name: "new.mp4", mime_type: "video/mp4" }],
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("assignment submission repository path rejects missing requested returns and accepts complete immutable-snapshot returns with structured validation errors", () => {
   const ctx = createRepoContext();
   try {

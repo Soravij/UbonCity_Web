@@ -6850,6 +6850,66 @@ function validateAssignmentCaptureRequirementsFromAssets(assignment, captureItem
   return missing;
 }
 
+
+
+function buildAssignmentCaptureTopicReadiness(captureItems = [], assets = [], options = {}) {
+  const normalizedItems = normalizeAssignmentCaptureUploadItems(captureItems);
+  const minFiles = Math.max(1, Number(options?.minFiles || 1) || 1);
+  const nowMs = Number(options?.nowMs || Date.now()) || Date.now();
+  const maxAgeMs = Number(options?.maxAgeMs || ASSIGNMENT_WORK_SYNC_EXPIRY_MS) || ASSIGNMENT_WORK_SYNC_EXPIRY_MS;
+  const eligibleAssets = (Array.isArray(assets) ? assets : []).filter((asset) => {
+    if (!asset || typeof asset !== "object") return false;
+    const createdAt = Date.parse(String(asset?.created_at || ""));
+    if (Number.isFinite(createdAt) && createdAt > 0 && (nowMs - createdAt) >= maxAgeMs) return false;
+    return true;
+  });
+  const assetsByKey = new Map();
+  eligibleAssets.forEach((asset) => {
+    const key = getAssignmentAssetSlotTypeKeyFromAsset(asset);
+    if (!key) return;
+    if (!assetsByKey.has(key)) assetsByKey.set(key, []);
+    assetsByKey.get(key).push(asset);
+  });
+  const requirements = normalizedItems.map((item) => {
+    const slotKey = String(item?.slotKey || item?.uploadKey || "").trim().toLowerCase();
+    const mediaType = normalizeAssignmentCaptureMediaType(item?.mediaType);
+    const requirementId = `${slotKey}|${mediaType}`;
+    const nextMinFiles = Math.max(1, Number(item?.minFiles || item?.min_files || minFiles) || minFiles);
+    const eligibleForRequirement = assetsByKey.get(requirementId) || [];
+    return {
+      requirementId,
+      slotKey,
+      mediaType,
+      prompt: String(item?.prompt || item?.item_text || "").trim(),
+      required: item?.required !== false,
+      minFiles: nextMinFiles,
+      eligibleAssets: eligibleForRequirement,
+      eligibleCount: eligibleForRequirement.length,
+      status: eligibleForRequirement.length >= nextMinFiles ? "fulfilled" : "missing",
+    };
+  });
+  const fulfilledRequirements = requirements.filter((item) => item.status === "fulfilled");
+  const missingRequirements = requirements.filter((item) => item.required !== false && item.status !== "fulfilled");
+  const photoCount = eligibleAssets.filter((asset) => normalizeAssignmentCaptureMediaType(asset?.assignment_media_type || asset?.mediaType || asset?.media_type) === "image").length;
+  const videoCount = eligibleAssets.filter((asset) => normalizeAssignmentCaptureMediaType(asset?.assignment_media_type || asset?.mediaType || asset?.media_type) === "video").length;
+  const blockingReasons = missingRequirements.map((item) => `Missing required ${item.mediaType === "video" ? "video" : "image"} topic: ${item.prompt || item.slotKey || "-"}`);
+  return {
+    requirements,
+    fulfilledRequirements,
+    missingRequirements,
+    eligibleAssets,
+    counts: {
+      requiredTopics: requirements.length,
+      fulfilledTopics: fulfilledRequirements.length,
+      missingTopics: missingRequirements.length,
+      photos: photoCount,
+      videos: videoCount,
+    },
+    mediaReady: missingRequirements.length === 0 && requirements.length > 0,
+    blockingReasons,
+  };
+}
+
 function buildAssignmentCaptureItemLookup(captureItems = []) {
   const lookup = new Map();
   normalizeAssignmentCaptureUploadItems(captureItems).forEach((item) => {
@@ -6904,9 +6964,9 @@ function mergeAssignmentSubmissionMediaAssets(...assetSets) {
   return merged;
 }
 
+
 function resolveAssignmentSubmissionEffectiveMedia(assignmentId, captureItems = [], options = {}) {
   const id = Number(assignmentId || 0) || 0;
-  const assignment = getAssignmentById(id);
   const uploadQueue = Array.isArray(options.uploadQueue)
     ? options.uploadQueue
     : buildAssignmentCaptureFileUploadQueue(id, captureItems);
@@ -6914,97 +6974,14 @@ function resolveAssignmentSubmissionEffectiveMedia(assignmentId, captureItems = 
   const syncKey = getAssignmentCaptureSyncKey(id, captureItems);
   const strict = options?.strict === true;
   const serverSynced = getAssignmentServerSyncedAssetsForCaptureItems(id, captureItems);
-  const bundle = Number(state.assignments.deliverablesBundle?.assignment_id || 0) === id
-    ? state.assignments.deliverablesBundle
-    : null;
-  const latestSubmission = assignment ? getLatestAssignmentSubmissionRow(assignment) : null;
-  const requireImages = Boolean(assignment?.image_reset_required);
-  const requireVideos = Boolean(assignment?.video_reset_required);
-  const pushUnique = (target, seenKeys, asset) => {
-    if (!asset || typeof asset !== "object") return;
-    const key = getAssignmentSubmissionAssetIdentityKey(asset);
-    if (key && seenKeys.has(key)) return;
-    if (key) seenKeys.add(key);
-    target.push(asset);
-  };
-  const normalizeResolvedAsset = (asset, fallbackMediaType = "") => {
-    if (!asset || typeof asset !== "object") return null;
-    return {
-      id: Number(asset?.id || 0) || null,
-      file_name: String(asset?.file_name || "").trim() || null,
-      mime_type: String(asset?.mime_type || "").trim().toLowerCase() || null,
-      public_url: String(asset?.public_url || asset?.source_url || "").trim() || null,
-      storage_path: String(asset?.storage_path || "").trim() || null,
-      assignment_id: Number(asset?.assignment_id || 0) || null,
-      assignment_round: Number(asset?.assignment_round || 0) || null,
-      assignment_media_type: normalizeAssignmentCaptureMediaType(
-        asset?.assignment_media_type || asset?.mediaType || asset?.media_type || fallbackMediaType
-      ) || null,
-      assignment_slot_key: String(asset?.assignment_slot_key || asset?.slotKey || asset?.slot_key || "").trim().toLowerCase() || null,
-      assignment_surface: String(asset?.assignment_surface || "").trim() || null,
-      assignment_sync_batch_id: String(asset?.assignment_sync_batch_id || "").trim() || null,
-      created_at: String(asset?.created_at || "").trim() || null,
-    };
-  };
-  const retainedAssets = [];
-  const retainedSeenKeys = new Set();
-  const appendRetainedFromBundle = (deliverableType, mediaType) => {
-    const rows = Array.isArray(bundle?.deliverables_by_type?.[deliverableType])
-      ? bundle.deliverables_by_type[deliverableType]
-      : [];
-    if (mediaType === "image" && requireImages) return rows.length > 0;
-    if (mediaType === "video" && requireVideos) return rows.length > 0;
-    rows.forEach((row, index) => {
-      const linkedAsset = findAssignmentAssetById(row?.source_asset_id);
-      if (linkedAsset) {
-        pushUnique(retainedAssets, retainedSeenKeys, normalizeResolvedAsset(linkedAsset, mediaType));
-        return;
-      }
-      const sourceUrl = String(row?.source_url || "").trim();
-      if (!sourceUrl) return;
-      pushUnique(retainedAssets, retainedSeenKeys, normalizeResolvedAsset({
-        id: null,
-        file_name: String(row?.title || "").trim() || `${deliverableType}-${index + 1}`,
-        mime_type: mediaType === "video" ? "video/mp4" : "image/jpeg",
-        public_url: sourceUrl,
-        assignment_id: id,
-        assignment_round: Number(assignment?.revision_round || 0) || null,
-        assignment_media_type: mediaType,
-        created_at: row?.created_at || row?.updated_at || null,
-      }, mediaType));
-    });
-    return rows.length > 0;
-  };
-  const appendRetainedFromPayloadFallback = (mediaType) => {
-    if (mediaType === "image" && requireImages) return;
-    if (mediaType === "video" && requireVideos) return;
-    const payloadAssets = Array.isArray(latestSubmission?.media_payload_json?.assets)
-      ? latestSubmission.media_payload_json.assets
-      : [];
-    payloadAssets
-      .filter((asset) => {
-        const mimeType = String(asset?.mime_type || "").trim().toLowerCase();
-        return mediaType === "video" ? mimeType.startsWith("video/") : mimeType.startsWith("image/");
-      })
-      .forEach((asset) => {
-        pushUnique(retainedAssets, retainedSeenKeys, normalizeResolvedAsset(asset, mediaType));
-      });
-  };
-  const hasBundlePhotos = appendRetainedFromBundle("photos", "image");
-  const hasBundleVideos = appendRetainedFromBundle("videos", "video");
-  if (!hasBundlePhotos) appendRetainedFromPayloadFallback("image");
-  if (!hasBundleVideos) appendRetainedFromPayloadFallback("video");
 
   if (!hasLocalQueue) {
-    const effectiveAssets = [];
-    const effectiveSeenKeys = new Set();
-    (Array.isArray(serverSynced.assets) ? serverSynced.assets : []).forEach((asset) => pushUnique(effectiveAssets, effectiveSeenKeys, asset));
-    retainedAssets.forEach((asset) => pushUnique(effectiveAssets, effectiveSeenKeys, asset));
+    const effectiveAssets = Array.isArray(serverSynced.assets) ? serverSynced.assets : [];
     return {
       assets: effectiveAssets,
       payloadAssets: [],
-      retainedAssets,
-      missing: validateAssignmentCaptureRequirementsFromAssets(assignment, captureItems, effectiveAssets),
+      retainedAssets: [],
+      missing: validateAssignmentCaptureRequirementsFromAssets(getAssignmentById(id), captureItems, effectiveAssets),
       hasLocalQueue,
       syncKey,
       serverSynced,
@@ -7014,18 +6991,18 @@ function resolveAssignmentSubmissionEffectiveMedia(assignmentId, captureItems = 
 
   if (!isAssignmentCaptureUploadsSynced(id, captureItems)) {
     if (strict) {
-      throw new Error("ต้องทำขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์ชุดที่เลือกในเครื่องให้ครบก่อนทำขั้นที่ 2: ส่งงานกลับ");
+      throw new Error("????????????? 1: ???????/???????????????????????????????????????????????? 2: ??????????");
     }
     return {
       assets: [],
       payloadAssets: [],
-      retainedAssets,
+      retainedAssets: [],
       missing: [],
       hasLocalQueue,
       syncKey,
       serverSynced,
       touchedKeys: getAssignmentTouchedSlotTypeKeysFromQueue(uploadQueue),
-      blockedMessage: "ต้องทำขั้นที่ 1: อัปโหลด/ซิงก์ไฟล์ชุดที่เลือกในเครื่องให้ครบก่อนทำขั้นที่ 2: ส่งงานกลับ",
+      blockedMessage: "????????????? 1: ???????/???????????????????????????????????????????????? 2: ??????????",
     };
   }
 
@@ -7035,18 +7012,18 @@ function resolveAssignmentSubmissionEffectiveMedia(assignmentId, captureItems = 
   const localSyncedAssets = cachedSyncedAssets.length ? cachedSyncedAssets : (latestKey === syncKey ? latestAssets : []);
   if (!localSyncedAssets.length) {
     if (strict) {
-      throw new Error("พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง");
+      throw new Error("???????????????????? ??????????????????????????????????? ??????????????/?????????????????");
     }
     return {
       assets: [],
       payloadAssets: [],
-      retainedAssets,
+      retainedAssets: [],
       missing: [],
       hasLocalQueue,
       syncKey,
       serverSynced,
       touchedKeys: getAssignmentTouchedSlotTypeKeysFromQueue(uploadQueue),
-      blockedMessage: "พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง",
+      blockedMessage: "???????????????????? ??????????????????????????????????? ??????????????/?????????????????",
     };
   }
 
@@ -7061,7 +7038,7 @@ function resolveAssignmentSubmissionEffectiveMedia(assignmentId, captureItems = 
   for (const key of touchedKeys) {
     if (localByKey.has(key)) continue;
     if (strict) {
-      throw new Error("พบสถานะซิงก์ไฟล์เดิม แต่ไม่พบรายการไฟล์ที่ซิงก์ในหน้านี้ กรุณากดอัปโหลด/ซิงก์ไฟล์อีกครั้ง");
+      throw new Error("???????????????????? ??????????????????????????????????? ??????????????/?????????????????");
     }
   }
 
@@ -7076,6 +7053,13 @@ function resolveAssignmentSubmissionEffectiveMedia(assignmentId, captureItems = 
   const payloadAssets = [];
   const effectiveSeenKeys = new Set();
   const payloadSeenKeys = new Set();
+  const pushUnique = (target, seenKeys, asset) => {
+    if (!asset || typeof asset !== "object") return;
+    const key = getAssignmentSubmissionAssetIdentityKey(asset);
+    if (key && seenKeys.has(key)) return;
+    if (key) seenKeys.add(key);
+    target.push(asset);
+  };
   for (const key of touchedKeys) {
     const rows = localByKey.get(key) || [];
     rows.forEach((asset) => {
@@ -7087,17 +7071,12 @@ function resolveAssignmentSubmissionEffectiveMedia(assignmentId, captureItems = 
     if (touchedKeys.has(key)) continue;
     rows.forEach((asset) => pushUnique(effectiveAssets, effectiveSeenKeys, asset));
   }
-  retainedAssets.forEach((asset) => {
-    const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(asset);
-    if (slotTypeKey && (touchedKeys.has(slotTypeKey) || serverByKey.has(slotTypeKey))) return;
-    pushUnique(effectiveAssets, effectiveSeenKeys, asset);
-  });
 
   return {
     assets: effectiveAssets,
     payloadAssets,
-    retainedAssets,
-    missing: validateAssignmentCaptureRequirementsFromAssets(assignment, captureItems, effectiveAssets),
+    retainedAssets: [],
+    missing: validateAssignmentCaptureRequirementsFromAssets(getAssignmentById(id), captureItems, effectiveAssets),
     hasLocalQueue,
     syncKey,
     serverSynced,
@@ -7485,6 +7464,7 @@ function getAssignmentSubmissionMissingTextPrompts(formConfig, articlePayload = 
   return missing;
 }
 
+
 function buildAssignmentSubmissionGateState(assignmentId, formConfig, options = {}) {
   const id = Number(assignmentId || 0) || 0;
   const assignment = getAssignmentById(id);
@@ -7503,67 +7483,66 @@ function buildAssignmentSubmissionGateState(assignmentId, formConfig, options = 
   const effectiveAssets = Array.isArray(composed?.assets) ? composed.assets : [];
   const serverSynced = composed?.serverSynced || getAssignmentServerSyncedAssetsForCaptureItems(id, formConfig.captureItems);
   const missingTextPrompts = getAssignmentSubmissionMissingTextPrompts(formConfig, articlePayload);
-  const missingMedia = Array.isArray(composed?.missing) ? composed.missing : [];
+  const topicReadiness = buildAssignmentCaptureTopicReadiness(formConfig.captureItems, effectiveAssets);
   const expiredBlocking = Number(serverSynced?.expired_count || 0) > 0 && Number(serverSynced?.assets?.length || 0) === 0;
-  const hasEffectiveMedia = effectiveAssets.length > 0;
   const blockingReasons = [];
   if (missingTextPrompts.length) {
     blockingReasons.push(
-      missingTextPrompts.length === 1 && missingTextPrompts[0] === "ข้อความเพิ่มเติม"
-        ? "กรุณากรอกข้อความเพิ่มเติม"
-        : "กรุณากรอกข้อมูลที่จำเป็นให้ครบ"
+      missingTextPrompts.length === 1 && missingTextPrompts[0] === "????????????????"
+        ? "?????????????????????????"
+        : "??????????????????????????????"
     );
   }
   if (composed?.blockedMessage) {
     blockingReasons.push(String(composed.blockedMessage));
   }
   if (!localSynced) {
-    blockingReasons.push("มีไฟล์ที่เลือกใหม่ แต่ยังไม่ได้ซิงก์");
+    blockingReasons.push("?????????????????? ?????????????????");
   }
   if (expiredBlocking) {
-    blockingReasons.push("ไฟล์ที่ซิงก์ไว้หมดอายุแล้ว กรุณาอัปโหลด/ซิงก์ไฟล์ใหม่อีกครั้ง");
+    blockingReasons.push("?????????????????????????? ????????????/?????????????????????");
   }
-  if (missingMedia.length) {
-    blockingReasons.push(`ยังขาดไฟล์สำหรับ: ${missingMedia.join(" | ")}`);
-  } else if (!hasEffectiveMedia) {
-    blockingReasons.push("กรุณาอัปโหลด/ซิงก์ไฟล์ให้ครบก่อนส่งงานกลับ");
+  if (topicReadiness.missingRequirements.length) {
+    blockingReasons.push(...topicReadiness.blockingReasons);
   }
   const warnings = [];
   if (Number(serverSynced?.expired_count || 0) > 0 && Number(serverSynced?.assets?.length || 0) > 0) {
-    warnings.push("มีไฟล์เก่าที่หมดอายุแล้วบางส่วน ระบบจะใช้เฉพาะไฟล์ที่ยังพร้อมส่ง");
+    warnings.push("??????????????????????????????? ????????????????????????????????");
   }
   const checklist = [
     {
       key: "required_text",
-      label: "ข้อมูลที่จำเป็นครบ",
+      label: "??????????????????",
       status: missingTextPrompts.length === 0,
       detail: missingTextPrompts.length
-        ? `ยังขาด: ${missingTextPrompts.join(" | ")}`
-        : "พร้อมใช้งาน",
+        ? `??????: ${missingTextPrompts.join(" | ")}`
+        : "???????????",
     },
     {
       key: "required_media",
-      label: "ไฟล์/ช็อตที่จำเป็นครบ",
-      status: missingMedia.length === 0 && hasEffectiveMedia,
-      detail: missingMedia.length ? `ยังขาดไฟล์สำหรับ: ${missingMedia.join(" | ")}` : (hasEffectiveMedia ? `พร้อม ${effectiveAssets.length} ไฟล์` : "กรุณาอัปโหลด/ซิงก์ไฟล์ให้ครบก่อนส่งงานกลับ"),
+      label: "????????????????????",
+      status: topicReadiness.mediaReady,
+      detail: topicReadiness.missingRequirements.length
+        ? topicReadiness.blockingReasons.join(" | ")
+        : `??? ${topicReadiness.counts.fulfilledTopics} ??? ${topicReadiness.counts.requiredTopics} ??????`,
     },
     {
       key: "sync_current",
-      label: "ไฟล์ซิงก์เป็นชุดล่าสุด",
+      label: "??????????????????????",
       status: !composed?.blockedMessage,
-      detail: composed?.blockedMessage || "พร้อมใช้งาน",
+      detail: composed?.blockedMessage || "???????????",
     },
     {
       key: "not_expired",
-      label: "ไฟล์ซิงก์ยังไม่หมดอายุ",
+      label: "??????????????????????",
       status: !expiredBlocking,
-      detail: expiredBlocking ? "ไฟล์ที่ซิงก์ไว้หมดอายุแล้ว กรุณาอัปโหลด/ซิงก์ไฟล์ใหม่อีกครั้ง" : "พร้อมใช้งาน",
+      detail: expiredBlocking ? "?????????????????????????? ????????????/?????????????????????" : "???????????",
     },
     {
       key: "no_pending_local",
-      label: "ไม่มีไฟล์ใหม่ค้างรอซิงก์",
+      label: "????????????????????????",
       status: !hasLocalQueue || localSynced,
-      detail: !hasLocalQueue || localSynced ? "พร้อมใช้งาน" : "มีไฟล์ที่เลือกใหม่ แต่ยังไม่ได้ซิงก์",
+      detail: !hasLocalQueue || localSynced ? "???????????" : "?????????????????? ?????????????????",
     },
   ];
   return {
@@ -7573,11 +7552,12 @@ function buildAssignmentSubmissionGateState(assignmentId, formConfig, options = 
     checklist,
     effectiveAssets,
     missingTextPrompts,
-    missingMedia,
+    missingMedia: topicReadiness.missingRequirements.map((item) => item.prompt),
     articlePayload,
     uploadQueue,
     composed,
     serverSynced,
+    topicReadiness,
   };
 }
 
@@ -8882,44 +8862,33 @@ function buildAssignmentDeliverableMediaRowsFromAssets(type, assets = [], retain
     });
 }
 
+
 function buildAssignmentDeliverableMediaRowsFromSubmission(assignment = null, type, bundle = null) {
   const normalizedType = String(type || "").trim().toLowerCase();
   const rows = Array.isArray(bundle?.deliverables_by_type?.[normalizedType]) ? bundle.deliverables_by_type[normalizedType] : [];
-  const mappedRows = rows.map((row, index) => {
+  return rows.map((row, index) => {
     const asset = findAssignmentAssetById(row?.source_asset_id) || null;
     return {
       key: "deliverable-" + normalizedType + "-" + (Number(row?.id || 0) || index),
       label: summarizeAssignmentReviewMediaLabel(row, getAssignmentDeliverableLabel(normalizedType) + " " + (index + 1)),
       url: resolveAssignmentReviewMediaUrl(row),
-      slot: String(asset?.assignment_slot_key || row?.assignment_slot_key || "").trim() || "-",
+      slot: String(asset?.assignment_slot_key || row?.assignment_slot_key || row?.payload_json?.assignment_slot_key || "").trim() || "-",
       mime: String(asset?.mime_type || row?.mime_type || "").trim() || "-",
+      mediaType: normalizeAssignmentCaptureMediaType(asset?.assignment_media_type || row?.assignment_media_type || row?.payload_json?.assignment_media_type) || (normalizedType === "videos" ? "video" : "image"),
       status: String(row?.status || assignment?.state || "submitted").trim() || "submitted",
       updated_at: String(row?.updated_at || row?.created_at || "").trim(),
+      source_asset_id: row?.source_asset_id == null ? null : Number(row.source_asset_id || 0) || null,
+      payload_json: row?.payload_json || null,
     };
   }).filter((row) => row.url);
-  if (mappedRows.length) return mappedRows;
-  const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
-  const mimePrefix = normalizedType === "videos" ? "video/" : "image/";
-  const payloadAssets = Array.isArray(latestSubmission?.media_payload_json?.assets) ? latestSubmission.media_payload_json.assets : [];
-  return payloadAssets
-    .filter((asset) => String(asset?.mime_type || "").trim().toLowerCase().startsWith(mimePrefix))
-    .map((asset, index) => ({
-      key: "payload-" + normalizedType + "-" + (Number(asset?.id || 0) || index),
-      label: String(asset?.file_name || "").trim() || (getAssignmentDeliverableLabel(normalizedType) + " " + (index + 1)),
-      url: String(asset?.public_url || asset?.source_url || "").trim(),
-      slot: String(asset?.assignment_slot_key || "").trim() || "-",
-      mime: String(asset?.mime_type || "").trim() || "-",
-      status: String(assignment?.state || "submitted").trim() || "submitted",
-      updated_at: String(asset?.updated_at || asset?.created_at || latestSubmission?.created_at || "").trim(),
-    }))
-    .filter((row) => row.url);
 }
+
 
 function buildAssignmentDeliverablesCardState(bundle = null, assignment = null, precomputedGateState = null) {
   const latestSubmissionId = Number(bundle?.latest_submission_id || assignment?.latest_submission_id || 0) || null;
   const fieldPack = state.assignments.contextFieldPack && typeof state.assignments.contextFieldPack === "object" ? state.assignments.contextFieldPack : null;
   const editableAssignment = getAssignmentSubmissionFormAssignment(assignment, getAssignmentPageMode());
-  const formConfig = editableAssignment ? getAssignmentSubmissionFormConfig(editableAssignment, fieldPack) : null;
+  const formConfig = assignment ? getAssignmentSubmissionFormConfig(assignment, fieldPack) : null;
   const expectedTypes = getAssignmentDeliverablesExpectedMediaTypes(bundle, formConfig?.captureItems || []);
   if (editableAssignment && formConfig) {
     const assignmentId = Number(editableAssignment.id || 0) || 0;
@@ -8927,40 +8896,60 @@ function buildAssignmentDeliverablesCardState(bundle = null, assignment = null, 
     const gateState = precomputedGateState && typeof precomputedGateState === "object"
       ? precomputedGateState
       : buildAssignmentSubmissionGateState(assignmentId, formConfig, { uploadQueue });
-    const effectiveAssets = Array.isArray(gateState?.effectiveAssets) ? gateState.effectiveAssets : [];
-    const retainedAssets = Array.isArray(gateState?.composed?.retainedAssets) ? gateState.composed.retainedAssets : [];
-    const rowsByType = {
-      photos: buildAssignmentDeliverableMediaRowsFromAssets("photos", effectiveAssets, retainedAssets),
-      videos: buildAssignmentDeliverableMediaRowsFromAssets("videos", effectiveAssets, retainedAssets),
-    };
-    const fulfilledTypes = expectedTypes.filter((type) => (rowsByType[type] || []).length > 0);
+    const topicReadiness = gateState?.topicReadiness || buildAssignmentCaptureTopicReadiness(formConfig.captureItems, gateState?.effectiveAssets || []);
     return {
       latestSubmissionId,
       expectedTypes,
-      fulfilledTypes,
-      missingTypes: expectedTypes.filter((type) => !fulfilledTypes.includes(type)),
-      rowsByType,
+      fulfilledTypes: [],
+      missingTypes: [],
+      rowsByType: { photos: [], videos: [] },
       gateState,
       warningText: Array.from(new Set([...(gateState?.blockingReasons || []), ...(gateState?.warnings || [])])).join(" | "),
-      statusLabel: gateState?.canSubmit ? "พร้อมส่งงานกลับ" : "ยังส่งงานไม่ได้",
-      sourceLabel: "ก่อนส่งงานกลับ",
+      statusLabel: gateState?.canSubmit ? "???????????????" : "???????????????",
+      sourceLabel: "??????????????",
+      topicReadiness,
     };
   }
   const rowsByType = {
     photos: buildAssignmentDeliverableMediaRowsFromSubmission(assignment, "photos", bundle),
     videos: buildAssignmentDeliverableMediaRowsFromSubmission(assignment, "videos", bundle),
   };
-  const fulfilledTypes = expectedTypes.filter((type) => (rowsByType[type] || []).length > 0);
+  const submissionAssets = [
+    ...rowsByType.photos.map((row, index) => ({
+      id: row.source_asset_id || (100000 + index),
+      file_name: row.label,
+      public_url: row.url,
+      mime_type: row.mime,
+      assignment_slot_key: row.slot !== "-" ? row.slot : "",
+      assignment_media_type: row.mediaType || "image",
+      mediaType: row.mediaType || "image",
+      slotKey: row.slot !== "-" ? row.slot : "",
+      created_at: row.updated_at || null,
+    })),
+    ...rowsByType.videos.map((row, index) => ({
+      id: row.source_asset_id || (200000 + index),
+      file_name: row.label,
+      public_url: row.url,
+      mime_type: row.mime,
+      assignment_slot_key: row.slot !== "-" ? row.slot : "",
+      assignment_media_type: row.mediaType || "video",
+      mediaType: row.mediaType || "video",
+      slotKey: row.slot !== "-" ? row.slot : "",
+      created_at: row.updated_at || null,
+    })),
+  ];
+  const topicReadiness = buildAssignmentCaptureTopicReadiness(formConfig?.captureItems || [], submissionAssets, { maxAgeMs: Number.MAX_SAFE_INTEGER });
   return {
     latestSubmissionId,
     expectedTypes,
-    fulfilledTypes,
-    missingTypes: expectedTypes.filter((type) => !fulfilledTypes.includes(type)),
+    fulfilledTypes: [],
+    missingTypes: [],
     rowsByType,
     gateState: null,
-    warningText: "",
-    statusLabel: latestSubmissionId ? "ข้อมูลจริงจากรอบส่งล่าสุด" : "ยังไม่มีรอบส่งล่าสุด",
-    sourceLabel: latestSubmissionId ? ("รอบส่งล่าสุด #" + latestSubmissionId) : "ยังไม่มีรอบส่งล่าสุด",
+    warningText: topicReadiness.missingRequirements.length ? topicReadiness.blockingReasons.join(" | ") : "",
+    statusLabel: latestSubmissionId ? "?????????????????????????" : "????????????????????",
+    sourceLabel: latestSubmissionId ? ("???????????? #" + latestSubmissionId) : "????????????????????",
+    topicReadiness,
   };
 }
 
@@ -9002,6 +8991,8 @@ function renderAssignmentDeliverableMediaCard(type, rows = [], options = {}) {
     + '</div></div>';
 }
 
+
+
 function renderAssignmentDeliverablesSummary(bundle = null, assignment = null, precomputedGateState = null) {
   const node = qs("assignment-deliverables-summary");
   const metaNode = qs("assignment-deliverables-meta");
@@ -9009,23 +9000,44 @@ function renderAssignmentDeliverablesSummary(bundle = null, assignment = null, p
   if (!node || !metaNode) return;
   if (!assignment) {
     if (createBtn) createBtn.disabled = true;
-    metaNode.textContent = "ยังไม่ได้เลือกงานในกระบวนการนี้";
+    metaNode.textContent = "???????????????????????????????";
     node.className = "assignment-deliverables-empty";
-    node.innerHTML = "ยังไม่มีข้อมูลงานส่งของงานที่เลือก";
+    node.innerHTML = "??????????????????????????????????";
     renderAssignmentDeliverableTypeOptions(null, null);
     return;
   }
   const cardState = buildAssignmentDeliverablesCardState(bundle, assignment, precomputedGateState);
+  const topicReadiness = cardState.topicReadiness || { counts: { requiredTopics: 0, fulfilledTopics: 0, missingTopics: 0, photos: 0, videos: 0 }, requirements: [] };
   if (createBtn) createBtn.disabled = !cardState.latestSubmissionId;
-  metaNode.textContent = cardState.sourceLabel + ' | ภาพถ่าย ' + cardState.rowsByType.photos.length + ' รายการ | วิดีโอ ' + cardState.rowsByType.videos.length + ' รายการ';
-  node.className = "assignment-deliverables-summary";
+  metaNode.textContent = cardState.sourceLabel + ' | Photos ' + topicReadiness.counts.photos + ' items | Videos ' + topicReadiness.counts.videos + ' items';
+  const requirementRows = (Array.isArray(topicReadiness.requirements) ? topicReadiness.requirements : []).map((item) => {
+    const files = Array.isArray(item.eligibleAssets) ? item.eligibleAssets : [];
+    const detailRows = files.map((asset, index) => (
+      '<div class="assignment-deliverable-row"><div class="assignment-deliverable-row-body"><div>'
+        + escapeHtml(String(asset?.file_name || asset?.public_url || ('asset-' + (index + 1))))
+        + '</div><div class="assignment-brief-meta">'
+        + escapeHtml('slot=' + (item.slotKey || '-') + ' | ' + (String(asset?.mime_type || '').trim() || '-'))
+        + '</div>'
+        + (String(asset?.public_url || '').trim() ? ('<div class="assignment-brief-meta"><a href="' + escapeHtml(String(asset.public_url || '').trim()) + '" target="_blank" rel="noopener noreferrer">Open file</a></div>') : '')
+        + '</div></div>'
+    )).join('');
+    const statusLabel = item.status === 'fulfilled' ? 'fulfilled' : 'missing';
+    const mediaLabel = item.mediaType === 'video' ? 'Video topic' : 'Image topic';
+    return '<div class="assignment-deliverable-row"><div class="assignment-deliverable-row-head">'
+      + formatAssignmentDeliverableStatusChip(item.mediaType === 'video' ? 'videos' : 'photos', item.status === 'fulfilled' ? 'ready' : 'missing')
+      + '<span class="assignment-deliverable-row-status">' + escapeHtml(statusLabel) + '</span></div>'
+      + '<div class="assignment-deliverable-row-body"><div>' + escapeHtml(mediaLabel + ': ' + (item.prompt || '-')) + '</div>'
+      + '<div class="assignment-brief-meta">' + escapeHtml('slot=' + (item.slotKey || '-') + ' | files ' + item.eligibleCount + ' | min ' + item.minFiles) + '</div>'
+      + (detailRows ? ('<details><summary class="assignment-brief-meta">File list</summary>' + detailRows + '</details>') : '')
+      + '</div></div>';
+  }).join('');
+  node.className = 'assignment-deliverables-summary';
   node.innerHTML = '<div class="assignment-deliverables-overview">'
-    + '<div><div class="assignment-brief-label">สถานะ</div><div class="assignment-brief-meta">' + escapeHtml(cardState.statusLabel) + '</div></div>'
-    + '<div><div class="assignment-brief-label">ครบแล้ว ' + cardState.fulfilledTypes.length + ' จาก ' + cardState.expectedTypes.length + ' ประเภท</div>' + formatAssignmentBriefExpectedDeliverables(cardState.fulfilledTypes) + '</div>'
-    + '<div><div class="assignment-brief-label">ยังขาด ' + cardState.missingTypes.length + ' ประเภท</div>' + formatAssignmentBriefExpectedDeliverables(cardState.missingTypes) + '</div>'
+    + '<div><div class="assignment-brief-label">Status</div><div class="assignment-brief-meta">' + escapeHtml(cardState.statusLabel) + '</div></div>'
+    + '<div><div class="assignment-brief-label">Done ' + topicReadiness.counts.fulfilledTopics + ' of ' + topicReadiness.counts.requiredTopics + ' topics</div><div class="assignment-brief-meta">Photos ' + topicReadiness.counts.photos + ' items | Videos ' + topicReadiness.counts.videos + ' items</div></div>'
+    + '<div><div class="assignment-brief-label">Missing ' + topicReadiness.counts.missingTopics + ' topics</div><div class="assignment-brief-meta">' + escapeHtml(cardState.warningText || 'Ready') + '</div></div>'
     + '</div><div class="assignment-deliverables-rows">'
-    + renderAssignmentDeliverableMediaCard("videos", cardState.rowsByType.videos, cardState)
-    + renderAssignmentDeliverableMediaCard("photos", cardState.rowsByType.photos, cardState)
+    + requirementRows
     + '</div>';
   renderAssignmentDeliverableTypeOptions(bundle, assignment);
 }

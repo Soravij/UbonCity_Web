@@ -1121,12 +1121,12 @@ test("local unsynced files are reflected through the lower deliverables summary 
   });
 
   renderSummary(null, assignment);
-  assert.match(summaryNode.innerHTML, /photos:0/);
-  assert.ok(summaryNode.innerHTML.includes("videos:0:"));
-  assert.ok(summaryNode.innerHTML.includes("photos:0:"));
-  assert.ok(summaryNode.innerHTML.includes("\u0e04\u0e23\u0e1a\u0e41\u0e25\u0e49\u0e27 0 \u0e08\u0e32\u0e01 1 \u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17"));
-  assert.ok(summaryNode.innerHTML.includes("\u0e22\u0e31\u0e07\u0e02\u0e32\u0e14 1 \u0e1b\u0e23\u0e30\u0e40\u0e20\u0e17"));
-  assert.equal(metaNode.textContent, "\u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e07\u0e32\u0e19\u0e01\u0e25\u0e31\u0e1a | \u0e20\u0e32\u0e1e\u0e16\u0e48\u0e32\u0e22 0 \u0e23\u0e32\u0e22\u0e01\u0e32\u0e23 | \u0e27\u0e34\u0e14\u0e35\u0e42\u0e2d 0 \u0e23\u0e32\u0e22\u0e01\u0e32\u0e23");
+  assert.match(summaryNode.innerHTML, /Photos 0 items/);
+  assert.ok(summaryNode.innerHTML.includes("Videos 0 items"));
+  assert.ok(summaryNode.innerHTML.includes("Photos 0 items"));
+  assert.ok(summaryNode.innerHTML.includes("Done 0 of 0 topics"));
+  assert.ok(summaryNode.innerHTML.includes("Missing 0 topics"));
+  assert.match(metaNode.textContent, /Photos 0 items \| Videos 0 items/);
 });
 
 test("collector asset version uses millisecond precision and frontend JS/CSS routes revalidate on normal F5", () => {
