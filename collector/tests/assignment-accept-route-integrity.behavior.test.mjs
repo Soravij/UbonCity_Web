@@ -261,23 +261,22 @@ function createContext(options = {}) {
   }
 
   const evaluateLatestAssignmentSubmissionCaptureTopicReadiness = evaluateLatestAssignmentSubmissionCaptureTopicReadinessFactory(repo);
-  const repoProxy = {
-    ...repo,
-    updateAssignmentState(...args) {
-      updateCalls.push(args);
-      if (typeof options.updateAssignmentState === "function") {
-        return options.updateAssignmentState(...args);
-      }
-      throw new Error("accept validation reached");
-    },
-    logAudit() {},
-    ensureWorkflowModel() {
-      return { production_state: "ready_for_content", publication_state: "draft" };
-    },
-    upsertWorkflowModel() {
-      return null;
-    },
+  const repoProxy = Object.create(repo);
+  repoProxy.updateAssignmentState = function updateAssignmentState(...args) {
+    updateCalls.push(args);
+    if (typeof options.updateAssignmentState === "function") {
+      return options.updateAssignmentState(...args);
+    }
+    throw new Error("accept validation reached");
   };
+  repoProxy.logAudit = function logAudit() {};
+  repoProxy.ensureWorkflowModel = function ensureWorkflowModel() {
+    return { production_state: "ready_for_content", publication_state: "draft" };
+  };
+  repoProxy.upsertWorkflowModel = function upsertWorkflowModel() {
+    return null;
+  };
+
   const patchStateHandler = patchStateHandlerFactory({
     repo: repoProxy,
     actorEmail: () => "reviewer@local",
@@ -400,8 +399,7 @@ test("accept route reaches downstream accept validation when latest deliverables
     });
     const latestSubmission = ctx.createSubmission(assignment, assignee, [photoId, videoId]);
     ctx.attachDeliverable(assignment, latestSubmission, "photos", photoId);
-    ctx.attachDeliverable(assignment, latestSubmission, "videos", videoId);
-    const req = { params: { id: String(assignment.id) }, body: { action: "accept_submission" } };
+    ctx.attachDeliverable(assignment, latestSubmission, "videos", videoId);    const req = { params: { id: String(assignment.id) }, body: { action: "accept_submission" } };
     const res = createResponseRecorder();
 
     await ctx.patchStateHandler(req, res);
