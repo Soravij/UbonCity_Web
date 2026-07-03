@@ -3292,16 +3292,6 @@ function resolveCurrentRoundEligibleAssignmentMediaAssets(assignment, assignment
     };
   }
   const currentRoundRows = allRows.filter((row) => Number(row?.assignment_round || 0) === round);
-  const latestAssetIdBySlotTypeKey = new Map();
-  for (const row of currentRoundRows) {
-    const slotKey = String(row?.assignment_slot_key || "").trim().toLowerCase();
-    const mediaType = normalizeAssignmentCaptureMediaType(row?.assignment_media_type);
-    const assetId = Number(row?.asset_id || 0) || 0;
-    if (!slotKey || !mediaType || !assetId) continue;
-    const key = `${slotKey}|${mediaType}`;
-    const existing = Number(latestAssetIdBySlotTypeKey.get(key) || 0) || 0;
-    if (assetId > existing) latestAssetIdBySlotTypeKey.set(key, assetId);
-  }
   const rowByAssetId = new Map();
   for (const row of allRows) {
     const assetId = Number(row?.asset_id || 0) || 0;
@@ -3322,7 +3312,6 @@ function resolveCurrentRoundEligibleAssignmentMediaAssets(assignment, assignment
     const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
     const storagePath = String(row?.storage_path || "").trim();
     const createdAtMs = parseIsoMs(row?.created_at);
-    const latestForSlotType = Number(latestAssetIdBySlotTypeKey.get(`${slotKey}|${mediaType}`) || 0) || 0;
     let invalidCode = "";
     if (Number(row?.assignment_id || 0) !== id) invalidCode = "assignment_mismatch";
     else if (rowRound !== round) invalidCode = "round_mismatch";
@@ -3332,7 +3321,6 @@ function resolveCurrentRoundEligibleAssignmentMediaAssets(assignment, assignment
     else if ((mediaType === "image" && !mimeType.startsWith("image/")) || (mediaType === "video" && !mimeType.startsWith("video/"))) invalidCode = "mime_type_mismatch";
     else if (!String(row?.file_name || "").trim() || !storageDisk || !storagePath) invalidCode = "storage_reference_missing";
     else if (createdAtMs <= 0 || (nowMs - createdAtMs) >= ASSIGNMENT_WORK_SYNC_EXPIRY_MS) invalidCode = "asset_expired";
-    else if (latestForSlotType > 0 && latestForSlotType !== assetId) invalidCode = "asset_superseded";
     if (invalidCode) {
       invalidSelections.push({ asset_id: assetId, code: invalidCode, slot_key: slotKey || null, media_type: mediaType || null });
       continue;

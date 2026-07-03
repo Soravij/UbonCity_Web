@@ -174,6 +174,15 @@ function createResponseRecorder() {
   };
 }
 
+function extractSubmissionSelectedAssetIds(submissionRow) {
+  const raw = submissionRow?.media_payload_json ?? submissionRow?.submission_payload_json ?? null;
+  const payload = typeof raw === "string"
+    ? (() => { try { return JSON.parse(raw); } catch { return null; } })()
+    : raw;
+  const assets = Array.isArray(payload?.assets) ? payload.assets : [];
+  return assets.map((row) => Number(row?.id || 0) || 0).filter((value) => value > 0);
+}
+
 function createContext() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-submit-route-"));
   const db = openDatabase(path.join(tempDir, "test.sqlite"), schemaPath);
@@ -439,6 +448,124 @@ test("submit route resubmit uses immutable handoff snapshot instead of later cur
     assert.equal(res.payload?.ok, true);
     assert.equal(ctx.repo.listAssignmentSubmissions(assignment.id).length, beforeCount + 1);
     assert.equal(String(ctx.repo.getAssignmentById(assignment.id)?.state || ""), "resubmitted");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("submit route accepts multiple current-round files in one slot and blocks previous-round assets", () => {
+  const ctx = createContext();
+  try {
+    const { item, assignment, assignee } = ctx.createAssignment("Submit Multi File Slot");
+    const storefront = buildAssignmentCaptureSlotKeyForTest("Storefront hero", 0, "image", "photo");
+    const walkthrough = buildAssignmentCaptureSlotKeyForTest("Walkthrough clip", 1, "video", "video");
+    const imageIds = [
+      ctx.insertWorkingAsset(item.id, { assignmentId: assignment.id, assignmentRound: 1, assignmentMediaType: "image", slotKey: storefront, syncBatchId: "slot-a-1" }),
+      ctx.insertWorkingAsset(item.id, { assignmentId: assignment.id, assignmentRound: 1, assignmentMediaType: "image", slotKey: storefront, syncBatchId: "slot-a-2" }),
+      ctx.insertWorkingAsset(item.id, { assignmentId: assignment.id, assignmentRound: 1, assignmentMediaType: "image", slotKey: storefront, syncBatchId: "slot-a-3" }),
+    ];
+    const walkthroughId = ctx.insertWorkingAsset(item.id, {
+      assignmentId: assignment.id,
+      assignmentRound: 1,
+      assignmentMediaType: "video",
+      slotKey: walkthrough,
+      syncBatchId: "slot-b-1",
+    });
+    const currentRoundResolver = resolveCurrentRoundEligibleAssignmentMediaAssetsForTest(ctx.repo);
+    const resolved = currentRoundResolver(assignment, assignment.id, 1, {
+      assets: [...imageIds, walkthroughId].map((id) => ({ id })),
+    });
+    const readiness = evaluateAssignmentCaptureTopicReadinessForTest(ctx.repo)(assignment, assignment.id, 1, {
+      assets: [...imageIds, walkthroughId].map((id) => ({ id })),
+    });
+    assert.equal(Array.isArray(resolved.invalid_selections) ? resolved.invalid_selections.length : -1, 0);
+    assert.equal(readiness.counts?.required_topics, 2);
+    assert.equal(readiness.counts?.fulfilled_topics, 2);
+    assert.equal(readiness.counts?.missing_topics, 0);
+    assert.equal(resolved.assets.filter((asset) => asset.assignment_slot_key === storefront && asset.assignment_media_type === "image").length, 3);
+    assert.equal(resolved.assets.filter((asset) => asset.assignment_slot_key === walkthrough && asset.assignment_media_type === "video").length, 1);
+    const beforeCount = ctx.repo.listAssignmentSubmissions(assignment.id).length;
+    const req = {
+      params: { id: String(assignment.id) },
+      authUser: { id: assignee.id },
+      body: {
+        action: "submit",
+        source_handoff_snapshot_id: ctx.currentHandoffSnapshotId(assignment.id),
+        article_payload_json: { additional_text: "ready" },
+        media_payload_json: { assets: [...imageIds, walkthroughId].map((id) => ({ id })) },
+      },
+    };
+    const res = createResponseRecorder();
+
+    ctx.submitHandler(req, res);
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.payload?.ok, true);
+    assert.equal(ctx.repo.listAssignmentSubmissions(assignment.id).length, beforeCount + 1);
+    const savedSubmissionId = Number(ctx.repo.getAssignmentById(assignment.id)?.latest_submission_id || 0) || 0;
+    const savedSubmission = savedSubmissionId ? ctx.repo.getAssignmentSubmissionById(savedSubmissionId) : null;
+    const selectedIds = extractSubmissionSelectedAssetIds(savedSubmission).sort((a, b) => a - b);
+    assert.deepEqual(selectedIds, [...imageIds, walkthroughId].sort((a, b) => a - b));
+
+    ctx.db.prepare("UPDATE content_assignments SET state=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run("revision_requested", assignment.id);
+    const resubmitBeforeCount = ctx.repo.listAssignmentSubmissions(assignment.id).length;
+    const resubmitReq = {
+      params: { id: String(assignment.id) },
+      authUser: { id: assignee.id },
+      body: {
+        action: "resubmit",
+        source_handoff_snapshot_id: ctx.currentHandoffSnapshotId(assignment.id),
+        article_payload_json: { additional_text: "ready" },
+        media_payload_json: { assets: [...imageIds, walkthroughId].map((id) => ({ id })) },
+      },
+    };
+    const resubmitRes = createResponseRecorder();
+
+    ctx.submitHandler(resubmitReq, resubmitRes);
+
+    assert.equal(resubmitRes.statusCode, 201);
+    assert.equal(resubmitRes.payload?.ok, true);
+    assert.equal(ctx.repo.listAssignmentSubmissions(assignment.id).length, resubmitBeforeCount + 1);
+    const resubmittedSubmissionId = Number(ctx.repo.getAssignmentById(assignment.id)?.latest_submission_id || 0) || 0;
+    const resubmittedSubmission = resubmittedSubmissionId ? ctx.repo.getAssignmentSubmissionById(resubmittedSubmissionId) : null;
+    const resubmittedSelectedIds = extractSubmissionSelectedAssetIds(resubmittedSubmission).sort((a, b) => a - b);
+    assert.deepEqual(resubmittedSelectedIds, [...imageIds, walkthroughId].sort((a, b) => a - b));
+
+    const blocked = ctx.createAssignment("Submit Previous Round Block");
+    const blockedStorefront = buildAssignmentCaptureSlotKeyForTest("Storefront hero", 0, "image", "photo");
+    const currentImage = ctx.insertWorkingAsset(blocked.item.id, {
+      assignmentId: blocked.assignment.id,
+      assignmentRound: 1,
+      assignmentMediaType: "image",
+      slotKey: blockedStorefront,
+      syncBatchId: "blocked-current",
+    });
+    const previousRelativePath = `uploads/${blocked.assignment.id}-0-${blockedStorefront}-blocked-previous.jpg`;
+    const previousImageRes = ctx.db.prepare(`
+      INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum, created_at)
+      VALUES (?, 'local', ?, ?, ?, ?, ?, ?)
+    `).run(
+      `blocked-previous-${blocked.assignment.id}`,
+      previousRelativePath,
+      path.basename(previousRelativePath),
+      "image/jpeg",
+      1234,
+      `blocked-previous-${blocked.assignment.id}`,
+      new Date().toISOString()
+    );
+    const previousImage = Number(previousImageRes.lastInsertRowid || 0) || 0;
+    ctx.db.prepare(`
+      INSERT INTO content_assets (
+        content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order,
+        assignment_id, assignment_round, assignment_media_type, assignment_slot_key, assignment_surface, assignment_sync_batch_id
+      ) VALUES (?, ?, 'unused', 0, 0, 'unused', 0, ?, ?, ?, ?, 'assignment_work', ?)
+    `).run(blocked.item.id, previousImage, blocked.assignment.id, 0, "image", blockedStorefront, "blocked-previous");
+    const blockedResolved = currentRoundResolver(blocked.assignment, blocked.assignment.id, 1, {
+      assets: [{ id: currentImage }, { id: previousImage }],
+    });
+    assert.ok(Array.isArray(blockedResolved.invalid_selections));
+    assert.ok(blockedResolved.invalid_selections.length > 0);
+    assert.equal(blockedResolved.invalid_selections.some((row) => row.code === "asset_superseded"), false);
   } finally {
     ctx.cleanup();
   }
