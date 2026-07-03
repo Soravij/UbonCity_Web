@@ -97,6 +97,18 @@ const validateAssignmentCreateFieldPackPrerequisitesForTest = new Function(
   `${extractNamedFunctionSource(indexServer, "validateAssignmentCreateFieldPackPrerequisites")}; return validateAssignmentCreateFieldPackPrerequisites;`
 )(normalizeAssignmentKindForTest);
 
+function escapeHtmlForTest(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+const renderAssignmentCaptureSyncedFileRowForTest = new Function(
+  "escapeHtml",
+  `${extractNamedFunctionSource(appJs, "renderAssignmentCaptureSyncedFileRow")}; return renderAssignmentCaptureSyncedFileRow;`
+)(escapeHtmlForTest);
 const normalizeAssignmentRowForTest = new Function(
   "parseJson",
   `${extractNamedFunctionSource(repositoryJs, "normalizeAssignmentRow")}; return normalizeAssignmentRow;`
@@ -2282,6 +2294,48 @@ test("assignment normalization keeps assignee_email as an email-only field", () 
     "staff@example.com",
     "internal assignee email should stay unchanged"
   );
+});
+
+test("assignment synced-media video preview renders a video player in file lists", () => {
+  const videoMarkup = renderAssignmentCaptureSyncedFileRowForTest({
+    file_name: "scene-cut.mp4",
+    mime_type: "video/mp4",
+    public_url: "https://cdn.example.test/media/scene-cut.mp4?token=a&x=1",
+  });
+  assert.match(videoMarkup, /<video\b/);
+  assert.match(videoMarkup, /controls/);
+  assert.match(videoMarkup, /preload="metadata"/);
+  assert.match(videoMarkup, /playsinline/);
+  assert.match(videoMarkup, /scene-cut\.mp4 \| video\/mp4/);
+  assert.match(videoMarkup, /<a href="https:\/\/cdn\.example\.test\/media\/scene-cut\.mp4\?token=a&amp;x=1"/);
+  assert.match(videoMarkup, /src="https:\/\/cdn\.example\.test\/media\/scene-cut\.mp4\?token=a&amp;x=1"/);
+  assert.equal(videoMarkup.includes("blob:"), false);
+
+  const imageMarkup = renderAssignmentCaptureSyncedFileRowForTest({
+    file_name: "cover.jpg",
+    mime_type: "image/jpeg",
+    public_url: "https://cdn.example.test/media/cover.jpg",
+  });
+  assert.equal(imageMarkup.includes("<video"), false);
+  assert.match(imageMarkup, /cover\.jpg \| image\/jpeg/);
+  assert.match(imageMarkup, /<a href="https:\/\/cdn\.example\.test\/media\/cover\.jpg"/);
+  const upperImageMarkup = renderAssignmentCaptureSyncedFileRowForTest({
+    file_name: "poster.jpg",
+    mime_type: "IMAGE/JPEG",
+    public_url: "https://cdn.example.test/media/poster.jpg",
+  });
+  assert.equal(upperImageMarkup.includes("<video"), false);
+  assert.match(upperImageMarkup, /poster\.jpg \| IMAGE\/JPEG/);
+  assert.match(upperImageMarkup, /<a href="https:\/\/cdn\.example\.test\/media\/poster\.jpg"/);
+
+  const missingUrlMarkup = renderAssignmentCaptureSyncedFileRowForTest({
+    file_name: "offline-preview.mp4",
+    mime_type: "video/mp4",
+    public_url: "",
+  });
+  assert.match(missingUrlMarkup, /offline-preview\.mp4 \| video\/mp4/);
+  assert.equal(missingUrlMarkup.includes("<video"), false);
+  assert.equal(missingUrlMarkup.includes("<a href="), false);
 });
 
 test("repository self-heals assignment-related foreign keys after legacy assignment migration", () => {

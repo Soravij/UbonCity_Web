@@ -6389,6 +6389,24 @@ function renderAssignmentSubmissionContext(assignment = null, fieldPack = null) 
   `;
 }
 
+function renderAssignmentCaptureSyncedFileRow(asset = null) {
+  const source = asset && typeof asset === "object" ? asset : {};
+  const fileName = String(source?.file_name || "").trim() || `asset-${Number(source?.id || 0) || 0}`;
+  const mimeTypeLabel = String(source?.mime_type || source?.mime || "").trim();
+  const normalizedMimeType = mimeTypeLabel.toLowerCase();
+  const label = escapeHtml(`${fileName} | ${mimeTypeLabel || "unknown"}`);
+  const publicUrl = String(source?.public_url || "").trim();
+  if (!publicUrl) return `<li>${label}</li>`;
+  const link = `<a href="${escapeHtml(publicUrl)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  const preview = normalizedMimeType.startsWith("video/")
+    ? '<div class="assignment-brief-media-preview"><video controls preload="metadata" playsinline src="' + escapeHtml(publicUrl) + '"></video></div>'
+    : "";
+  const fallbackLink = normalizedMimeType.startsWith("video/")
+    ? `<div class="assignment-brief-meta"><a href="${escapeHtml(publicUrl)}" target="_blank" rel="noopener noreferrer">เปิดไฟล์</a></div>`
+    : "";
+  return `<li>${link}${preview}${fallbackLink}</li>`;
+}
+
 function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
   const normalizedItems = normalizeAssignmentCaptureUploadItems(capturePrompts);
   if (!normalizedItems.length) {
@@ -6426,11 +6444,7 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
           }).join("")}</ul>`
         : "";
       const serverFileRows = serverFiles.length
-        ? `<div class="assignment-brief-meta" style="margin-bottom:8px;">ไฟล์ที่ซิงก์แล้วบน server</div><ul class="assignment-brief-list">${serverFiles.map((asset) => {
-            const label = escapeHtml(`${String(asset?.file_name || "").trim() || `asset-${Number(asset?.id || 0)}`} | ${String(asset?.mime_type || "").trim() || "unknown"}`);
-            const publicUrl = String(asset?.public_url || "").trim();
-            return `<li>${publicUrl ? `<a href="${escapeHtml(publicUrl)}" target="_blank" rel="noopener noreferrer">${label}</a>` : label}</li>`;
-          }).join("")}</ul>`
+        ? `<div class="assignment-brief-meta" style="margin-bottom:8px;">ไฟล์ที่ซิงก์แล้วบน server</div><ul class="assignment-brief-list">${serverFiles.map((asset) => renderAssignmentCaptureSyncedFileRow(asset)).join("")}</ul>`
         : "";
       const fileRows = localFileRows || serverFileRows
         ? `<div class="assignment-brief-list-wrap assignment-capture-files">${localFileRows}${localFileRows && serverFileRows ? '<div class="assignment-brief-meta" style="margin:8px 0;">ไฟล์ใหม่ใน browser จะถูกใช้แทนไฟล์บน server สำหรับช่องนี้หลังซิงก์</div>' : ""}${serverFileRows}</div>`
