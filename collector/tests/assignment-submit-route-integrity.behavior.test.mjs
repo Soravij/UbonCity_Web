@@ -104,10 +104,27 @@ return resolveCurrentRoundEligibleAssignmentMediaAssets;`
 const evaluateAssignmentCaptureTopicReadinessForTest = new Function(
   "repo",
   `const ASSIGNMENT_WORK_SYNC_EXPIRY_MS = 24 * 60 * 60 * 1000;
+function resolveAssignmentFieldPackFromBrief(assignment = null) {
+  const brief = assignment?.brief_json && typeof assignment.brief_json === "object" ? assignment.brief_json : null;
+  if (!brief) return null;
+  const sourceFieldPackId = Number(brief?.source?.field_pack_id || brief?.source_field_pack_id || 0) || 0;
+  if (sourceFieldPackId > 0 && typeof repo?.getFieldPackBundleById === "function") {
+    const sourceFieldPack = repo.getFieldPackBundleById(sourceFieldPackId);
+    if (sourceFieldPack && typeof sourceFieldPack === "object" && !Array.isArray(sourceFieldPack)) return sourceFieldPack;
+  }
+  const candidates = [brief.field_pack, brief.fieldPack, brief.current_field_pack, brief.currentFieldPack, brief.context_field_pack, brief.contextFieldPack];
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) return candidate;
+  }
+  return null;
+}
 function resolveAssignmentSubmissionPromptContext(assignment = null) {
+  const contentItemId = Number(assignment?.content_item_id || 0) || 0;
+  const currentFieldPack = contentItemId ? repo.getCurrentFieldPackByItem(contentItemId) : null;
+  const embeddedFieldPack = resolveAssignmentFieldPackFromBrief(assignment);
   return {
     brief: assignment?.brief_json || null,
-    fieldPack: repo.getCurrentFieldPackByItem(Number(assignment?.content_item_id || 0) || 0) || null,
+    fieldPack: embeddedFieldPack || currentFieldPack || null,
   };
 }
 ${extractNamedFunctionSource(serverIndexJs, "uniqueAssignmentPromptStrings")}
@@ -297,7 +314,6 @@ test("submit route blocks forged payload when DB resolver finds no eligible curr
     const res = createResponseRecorder();
 
     ctx.submitHandler(req, res);
-    console.error("submit forged payload response", { statusCode: res.statusCode, body: res.payload });
 
     assert.equal(res.statusCode, 409);
     assert.equal(res.payload?.error, "assignment_capture_requirements_incomplete");
@@ -348,7 +364,6 @@ test("submit route succeeds with real DB assets and clears reset policy without 
     const res = createResponseRecorder();
 
     assert.doesNotThrow(() => ctx.submitHandler(req, res));
-    console.error("submit valid assets response", { statusCode: res.statusCode, body: res.payload });
     assert.equal(res.statusCode, 201);
     assert.equal(res.payload?.ok, true);
     assert.equal(ctx.repo.listAssignmentSubmissions(assignment.id).length, beforeCount + 1);
@@ -356,6 +371,137 @@ test("submit route succeeds with real DB assets and clears reset policy without 
     const updatedAssignment = ctx.repo.getAssignmentById(assignment.id);
     assert.equal(Number(updatedAssignment?.image_reset_required || 0), 0);
     assert.equal(Number(updatedAssignment?.video_reset_required || 0), 0);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+
+test("submit route resubmit uses immutable handoff snapshot instead of later current field pack", () => {
+  const ctx = createContext();
+  try {
+    const { item, assignment, assignee } = ctx.createAssignment("Submit Snapshot Source Of Truth");
+    const currentBrief = ctx.repo.getAssignmentById(assignment.id)?.brief_json || {};
+    ctx.db.prepare("UPDATE content_assignments SET brief_json=? WHERE id=?").run(
+      JSON.stringify({
+        ...currentBrief,
+        brief_summary: "snapshot ready",
+        field_pack: {
+          checklists: [
+            { checklist_type: "must_capture", item_text: "Storefront hero", capture_type: "photo", item_order: 0 },
+            { checklist_type: "must_capture", item_text: "Walkthrough clip", capture_type: "video", item_order: 1 },
+          ],
+        },
+      }),
+      assignment.id
+    );
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      field_pack_checklists: [
+        { checklist_type: "must_capture", item_text: "Current storefront hero", capture_type: "photo", item_order: 0 },
+        { checklist_type: "must_capture", item_text: "Current walkthrough clip", capture_type: "video", item_order: 1 },
+      ],
+    });
+    ctx.db.prepare("UPDATE content_assignments SET state=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run("revision_requested", assignment.id);
+    const storefront = buildAssignmentCaptureSlotKeyForTest("Storefront hero", 0, "image", "photo");
+    const walkthrough = buildAssignmentCaptureSlotKeyForTest("Walkthrough clip", 1, "video", "video");
+    const photoId = ctx.insertWorkingAsset(item.id, {
+      assignmentId: assignment.id,
+      assignmentRound: 1,
+      assignmentMediaType: "image",
+      slotKey: storefront,
+      syncBatchId: "snapshot-photo",
+    });
+    const videoId = ctx.insertWorkingAsset(item.id, {
+      assignmentId: assignment.id,
+      assignmentRound: 1,
+      assignmentMediaType: "video",
+      slotKey: walkthrough,
+      syncBatchId: "snapshot-video",
+    });
+    const beforeCount = ctx.repo.listAssignmentSubmissions(assignment.id).length;
+    const req = {
+      params: { id: String(assignment.id) },
+      authUser: { id: assignee.id },
+      body: {
+        action: "resubmit",
+        source_handoff_snapshot_id: ctx.currentHandoffSnapshotId(assignment.id),
+        article_payload_json: { additional_text: "ready" },
+        media_payload_json: { assets: [{ id: photoId }, { id: videoId }] },
+      },
+    };
+    const res = createResponseRecorder();
+
+    ctx.submitHandler(req, res);
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.payload?.ok, true);
+    assert.equal(ctx.repo.listAssignmentSubmissions(assignment.id).length, beforeCount + 1);
+    assert.equal(String(ctx.repo.getAssignmentById(assignment.id)?.state || ""), "resubmitted");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("submit route surfaces normalization diagnostics when snapshot field pack is malformed", () => {
+  const ctx = createContext();
+  try {
+    const { item, assignment, assignee } = ctx.createAssignment("Submit Snapshot Normalization Failure");
+    ctx.db.prepare("UPDATE content_assignments SET brief_json=? WHERE id=?").run(
+      JSON.stringify({
+        brief_summary: "broken snapshot",
+        field_pack: {
+          checklists: [
+            { checklist_type: "must_capture", item_text: "", capture_type: "photo", item_order: 0 },
+          ],
+        },
+      }),
+      assignment.id
+    );
+    const storefront = buildAssignmentCaptureSlotKeyForTest("Storefront hero", 0, "image", "photo");
+    const walkthrough = buildAssignmentCaptureSlotKeyForTest("Walkthrough clip", 1, "video", "video");
+    const photoId = ctx.insertWorkingAsset(item.id, {
+      assignmentId: assignment.id,
+      assignmentRound: 1,
+      assignmentMediaType: "image",
+      slotKey: storefront,
+      syncBatchId: "normalization-photo",
+    });
+    const videoId = ctx.insertWorkingAsset(item.id, {
+      assignmentId: assignment.id,
+      assignmentRound: 1,
+      assignmentMediaType: "video",
+      slotKey: walkthrough,
+      syncBatchId: "normalization-video",
+    });
+    const beforeCount = ctx.repo.listAssignmentSubmissions(assignment.id).length;
+    const req = {
+      params: { id: String(assignment.id) },
+      authUser: { id: assignee.id },
+      body: {
+        action: "submit",
+        source_handoff_snapshot_id: ctx.currentHandoffSnapshotId(assignment.id),
+        article_payload_json: { additional_text: "ready" },
+        media_payload_json: { assets: [{ id: photoId }, { id: videoId }] },
+      },
+    };
+    const res = createResponseRecorder();
+
+    ctx.submitHandler(req, res);
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.payload?.error, "assignment_capture_requirements_incomplete");
+    assert.equal(res.payload?.diagnostic_error, "capture_requirements_normalization_failed");
+    assert.match(String(res.payload?.message || ""), /normalization/i);
+    assert.deepEqual(res.payload?.counts, {
+      required_topics: 0,
+      fulfilled_topics: 0,
+      missing_topics: 0,
+    });
+    assert.equal(Array.isArray(res.payload?.missing_requirements) ? res.payload.missing_requirements.length : -1, 0);
+    assert.ok(Array.isArray(res.payload?.invalid_selections));
+    assert.equal(ctx.repo.listAssignmentSubmissions(assignment.id).length, beforeCount);
   } finally {
     ctx.cleanup();
   }

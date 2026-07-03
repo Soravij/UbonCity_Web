@@ -3185,6 +3185,11 @@ function getEditorialPromptGroups(fieldPack = null, brief = null) {
 function resolveAssignmentFieldPackFromBrief(assignment = null) {
   const brief = assignment?.brief_json && typeof assignment.brief_json === "object" ? assignment.brief_json : null;
   if (!brief) return null;
+  const sourceFieldPackId = Number(brief?.source?.field_pack_id || brief?.source_field_pack_id || 0) || 0;
+  if (sourceFieldPackId > 0 && typeof repo?.getFieldPackBundleById === "function") {
+    const sourceFieldPack = repo.getFieldPackBundleById(sourceFieldPackId);
+    if (sourceFieldPack && typeof sourceFieldPack === "object" && !Array.isArray(sourceFieldPack)) return sourceFieldPack;
+  }
   const candidates = [
     brief.field_pack,
     brief.fieldPack,
@@ -3206,7 +3211,7 @@ function resolveAssignmentSubmissionPromptContext(assignment = null) {
   const embeddedFieldPack = resolveAssignmentFieldPackFromBrief(assignment);
   return {
     brief,
-    fieldPack: currentFieldPack || embeddedFieldPack || null,
+    fieldPack: embeddedFieldPack || currentFieldPack || null,
   };
 }
 
@@ -11169,15 +11174,18 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
       return;
     }
     if (!isRevisionRequest && nextState === "accepted" && String(currentAssignment.assignment_kind || "").trim().toLowerCase() === "field") {
-      const captureReadiness = evaluateLatestAssignmentSubmissionCaptureTopicReadiness(
+      const latestSubmissionId = Number(currentAssignment.latest_submission_id || 0) || 0;
+      const latestSubmission = latestSubmissionId > 0 ? repo.getAssignmentSubmissionById(latestSubmissionId) : null;
+      const captureReadiness = evaluateAssignmentCaptureTopicReadiness(
         currentAssignment,
         assignmentId,
-        resolveAssignmentCurrentRound(currentAssignment)
+        resolveAssignmentCurrentRound(currentAssignment),
+        latestSubmission?.media_payload_json || null
       );
       if (!captureReadiness.can_submit) {
         return res.status(409).json({
           error: "assignment_capture_requirements_incomplete",
-          message: "???????????????",
+          message: "???????????????????????????",
           missing_requirements: captureReadiness.missing_requirements,
         });
       }
@@ -11270,12 +11278,23 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
 
 function buildSubmissionErrorResponse(err) {
   if (err && err.code === "ASSIGNMENT_CAPTURE_REQUIREMENTS_INCOMPLETE" && Array.isArray(err.missing_requirements)) {
+    const diagnosticError = String(err?.diagnostic_error || "").trim();
+    const message = diagnosticError
+      ? "ตรวจสอบข้อมูลส่งงานไม่สำเร็จ: " + diagnosticError
+      : (Array.isArray(err.missing_requirements) && err.missing_requirements.length
+        ? "ยังส่งงานไม่ได้: กรุณาตรวจสอบรายการที่ยังไม่ครบ"
+        : Array.isArray(err.invalid_selections) && err.invalid_selections.length
+          ? "ยังส่งงานไม่ได้: เลือกไฟล์ไม่ถูกต้อง"
+          : "ยังส่งงานไม่ได้");
     return {
       status: 409,
       body: {
         error: "assignment_capture_requirements_incomplete",
-        message: "???????????????????",
-        missing_requirements: err.missing_requirements,
+        message,
+        missing_requirements: Array.isArray(err.missing_requirements) ? err.missing_requirements : [],
+        invalid_selections: Array.isArray(err.invalid_selections) ? err.invalid_selections : [],
+        diagnostic_error: diagnosticError || null,
+        counts: err?.counts || { required_topics: 0, fulfilled_topics: 0, missing_topics: 0 },
       },
     };
   }
@@ -11284,7 +11303,7 @@ function buildSubmissionErrorResponse(err) {
       status: 400,
       body: {
         error: "requested_check_validation_failed",
-        message: "???????????????????????????????",
+        message: String(err?.message || "?????????????????????????????"),
         validation_errors: err.validation_errors,
       },
     };
@@ -11357,15 +11376,13 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
     const captureReadiness = evaluateAssignmentCaptureTopicReadiness(assignment, assignmentId, currentRound, mediaPayload);
 
     if (!captureReadiness.can_submit) {
-
-      const error = new Error("assignment capture requirements incomplete");
-
+      const error = new Error(String(captureReadiness?.diagnostic_error || "???????????????????????????"));
       error.code = "ASSIGNMENT_CAPTURE_REQUIREMENTS_INCOMPLETE";
-
-      error.missing_requirements = captureReadiness.missing_requirements;
-
+      error.missing_requirements = Array.isArray(captureReadiness?.missing_requirements) ? captureReadiness.missing_requirements : [];
+      error.invalid_selections = Array.isArray(captureReadiness?.invalid_selections) ? captureReadiness.invalid_selections : [];
+      error.diagnostic_error = captureReadiness?.diagnostic_error || null;
+      error.counts = captureReadiness?.counts || { required_topics: 0, fulfilled_topics: 0, missing_topics: 0 };
       throw error;
-
     }
 
     const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
