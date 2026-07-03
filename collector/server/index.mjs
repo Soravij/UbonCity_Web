@@ -11174,19 +11174,20 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
       return;
     }
     if (!isRevisionRequest && nextState === "accepted" && String(currentAssignment.assignment_kind || "").trim().toLowerCase() === "field") {
-      const latestSubmissionId = Number(currentAssignment.latest_submission_id || 0) || 0;
-      const latestSubmission = latestSubmissionId > 0 ? repo.getAssignmentSubmissionById(latestSubmissionId) : null;
-      const captureReadiness = evaluateAssignmentCaptureTopicReadiness(
+      const captureReadiness = evaluateLatestAssignmentSubmissionCaptureTopicReadiness(
         currentAssignment,
         assignmentId,
-        resolveAssignmentCurrentRound(currentAssignment),
-        latestSubmission?.media_payload_json || null
+        resolveAssignmentCurrentRound(currentAssignment)
       );
       if (!captureReadiness.can_submit) {
         return res.status(409).json({
           error: "assignment_capture_requirements_incomplete",
-          message: "???????????????????????????",
-          missing_requirements: captureReadiness.missing_requirements,
+          message: "ไม่สามารถอนุมัติงานได้: กรุณาตรวจสอบข้อกำหนดการส่งล่าสุด",
+          missing_requirements: Array.isArray(captureReadiness?.missing_requirements) ? captureReadiness.missing_requirements : [],
+          invalid_selections: Array.isArray(captureReadiness?.invalid_selections) ? captureReadiness.invalid_selections : [],
+          diagnostic_error: captureReadiness?.diagnostic_error || null,
+          counts: captureReadiness?.counts || { required_topics: 0, fulfilled_topics: 0, missing_topics: 0 },
+          latest_submission_id: Number(captureReadiness?.latest_submission_id || 0) || null,
         });
       }
     }
@@ -11303,7 +11304,7 @@ function buildSubmissionErrorResponse(err) {
       status: 400,
       body: {
         error: "requested_check_validation_failed",
-        message: String(err?.message || "?????????????????????????????"),
+        message: String(err?.message || "ไม่สามารถตรวจสอบรายการที่เลือกได้"),
         validation_errors: err.validation_errors,
       },
     };
@@ -11376,7 +11377,7 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
     const captureReadiness = evaluateAssignmentCaptureTopicReadiness(assignment, assignmentId, currentRound, mediaPayload);
 
     if (!captureReadiness.can_submit) {
-      const error = new Error(String(captureReadiness?.diagnostic_error || "???????????????????????????"));
+      const error = new Error(String(captureReadiness?.diagnostic_error || "ไม่สามารถตรวจสอบเงื่อนไขการส่งงานได้"));
       error.code = "ASSIGNMENT_CAPTURE_REQUIREMENTS_INCOMPLETE";
       error.missing_requirements = Array.isArray(captureReadiness?.missing_requirements) ? captureReadiness.missing_requirements : [];
       error.invalid_selections = Array.isArray(captureReadiness?.invalid_selections) ? captureReadiness.invalid_selections : [];
