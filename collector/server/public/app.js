@@ -6726,10 +6726,21 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     expectedBySlotTypeKey.set(`${slotKey}|${mediaType}`, item);
   });
   const nowMs = Date.now();
+  const requireImages = Boolean(assignment?.image_reset_required);
+  const requireVideos = Boolean(assignment?.video_reset_required);
   const rows = Array.isArray(state.assignments.assetLookup) ? state.assignments.assetLookup : [];
   const assignmentRows = rows.filter((row) => {
     if (Number(row?.assignment_id || 0) !== id) return false;
-    if (Number(row?.assignment_round || 0) !== currentRound) return false;
+    const assetRound = Number(row?.assignment_round || 0) || 0;
+    const assetMediaType = normalizeAssignmentCaptureMediaType(row?.assignment_media_type);
+    const isCurrentRound = assetRound === currentRound;
+    const isRetainedRound = assetRound === (currentRound - 1);
+    const canRetainPreviousRound = assetMediaType === "image"
+      ? !requireImages
+      : assetMediaType === "video"
+        ? !requireVideos
+        : false;
+    if (!isCurrentRound && !(isRetainedRound && canRetainPreviousRound)) return false;
     if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") return false;
     const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(row);
     return expectedBySlotTypeKey.has(slotTypeKey);
@@ -6823,8 +6834,7 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
       selected_slot_type_keys: Array.from(new Set(effectiveRows.map((row) => getAssignmentAssetSlotTypeKeyFromAsset(row)).filter(Boolean))),
     });
   }
-  const requireImages = Boolean(assignment?.image_reset_required);
-  const requireVideos = Boolean(assignment?.video_reset_required);
+
   const countsBySlotTypeKey = new Map();
   effectiveRows.forEach((row) => {
     const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(row);
