@@ -6155,10 +6155,21 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     expectedBySlotKey.set(String(item?.slotKey || item?.uploadKey || "").trim(), item);
   });
   const nowMs = Date.now();
+  const requireImages = Boolean(assignment?.image_reset_required);
+  const requireVideos = Boolean(assignment?.video_reset_required);
   const rows = Array.isArray(state.assignments.assetLookup) ? state.assignments.assetLookup : [];
   const assignmentRows = rows.filter((row) => {
     if (Number(row?.assignment_id || 0) !== id) return false;
-    if (Number(row?.assignment_round || 0) !== currentRound) return false;
+    const assetRound = Number(row?.assignment_round || 0) || 0;
+    const assetMediaType = normalizeAssignmentCaptureMediaType(row?.assignment_media_type);
+    const isCurrentRound = assetRound === currentRound;
+    const isRetainedRound = assetRound === (currentRound - 1);
+    const canRetainPreviousRound = assetMediaType === "image"
+      ? !requireImages
+      : assetMediaType === "video"
+        ? !requireVideos
+        : false;
+    if (!isCurrentRound && !(isRetainedRound && canRetainPreviousRound)) return false;
     if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") return false;
     const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(row);
     const slotKey = slotTypeKey ? slotTypeKey.split("|")[0] : "";
