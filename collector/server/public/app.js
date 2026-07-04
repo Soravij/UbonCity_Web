@@ -6420,6 +6420,20 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
     if (!serverAssetsBySlotTypeKey.has(slotTypeKey)) serverAssetsBySlotTypeKey.set(slotTypeKey, []);
     serverAssetsBySlotTypeKey.get(slotTypeKey).push(asset);
   });
+  const assignment = getAssignmentById(assignmentId);
+  const isAssignmentMediaDebugTarget = Number(assignmentId || 0) === 25 && Number(assignment?.content_item_id || 0) === 50;
+  if (isAssignmentMediaDebugTarget) {
+    console.debug("[assignment-media-debug] capture-cards", normalizedItems.map((item) => {
+      const slotTypeKey = `${String(item?.uploadKey || "").trim()}|${String(item?.mediaType || "").trim()}`;
+      const serverFiles = serverAssetsBySlotTypeKey.get(slotTypeKey) || [];
+      return {
+        slot_type_key: slotTypeKey,
+        server_file_count: serverFiles.length,
+        server_file_ids: serverFiles.map((asset) => Number(asset?.id || 0) || 0).filter(Boolean),
+        server_file_public_urls: serverFiles.map((asset) => String(asset?.public_url || "").trim()).filter(Boolean),
+      };
+    }));
+  }
   const renderPromptCards = (items, mode, sectionTitle, emptyText) => {
     const rows = Array.isArray(items) ? items : [];
     const cards = rows.map((item) => {
@@ -6745,6 +6759,23 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     activeRows.push(row);
   });
 
+  const isAssignmentMediaDebugTarget = id === 25 && Number(assignment?.content_item_id || 0) === 50;
+  if (isAssignmentMediaDebugTarget) {
+    console.debug("[assignment-media-debug] pre-batch", {
+      assignment_id: id,
+      content_item_id: Number(assignment?.content_item_id || 0) || 0,
+      current_revision_round: currentRound,
+      eligible_asset_count: activeRows.length,
+      eligible_assets: activeRows.map((row) => ({
+        id: Number(row?.id || 0) || 0,
+        assignment_slot_key: String(row?.assignment_slot_key || row?.slotKey || row?.slot_key || "").trim().toLowerCase(),
+        assignment_media_type: normalizeAssignmentCaptureMediaType(row?.assignment_media_type) || "",
+        assignment_round: Number(row?.assignment_round || 0) || 0,
+        assignment_sync_batch_id: String(row?.assignment_sync_batch_id || "").trim() || "",
+        created_at: String(row?.created_at || "").trim() || "",
+      })),
+    });
+  }
   const groupedBySlotType = new Map();
   for (const row of activeRows) {
     const key = getAssignmentAssetSlotTypeKeyFromAsset(row);
@@ -6782,6 +6813,16 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     effectiveRows.push(...orderedRows.slice(0, maxCount));
   }
 
+  if (isAssignmentMediaDebugTarget) {
+    console.debug("[assignment-media-debug] post-batch", {
+      assignment_id: id,
+      content_item_id: Number(assignment?.content_item_id || 0) || 0,
+      selected_asset_count: effectiveRows.length,
+      selected_batch_ids: Array.from(new Set(effectiveRows.map((row) => String(row?.assignment_sync_batch_id || "").trim()).filter(Boolean))),
+      selected_asset_ids: effectiveRows.map((row) => Number(row?.id || 0) || 0).filter(Boolean),
+      selected_slot_type_keys: Array.from(new Set(effectiveRows.map((row) => getAssignmentAssetSlotTypeKeyFromAsset(row)).filter(Boolean))),
+    });
+  }
   const requireImages = Boolean(assignment?.image_reset_required);
   const requireVideos = Boolean(assignment?.video_reset_required);
   const countsBySlotTypeKey = new Map();
