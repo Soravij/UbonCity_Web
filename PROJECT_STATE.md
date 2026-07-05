@@ -5,7 +5,7 @@ Last Updated: 2026-07-05
 ## Current Branch
 
 - `main`
-- merged at `7c044a1`
+- CTA/contact baseline is present on main
 - CTA documentation baseline inherited from `1d08fb1`
 
 ## Completed Media Workflow
@@ -60,23 +60,19 @@ Locked CTA rules:
 - Work Return and human review remain the confirmation source.
 - Existing issued assignment snapshots remain immutable.
 
-## Taxonomy Status On Main
+## Taxonomy / Curation Status
 
-- CTA milestone branch `feature/taxonomy-catalog-resolver` is complete.
-- Taxonomy v1 catalog is now implemented on `feature/taxonomy-v1-catalog`.
-- Resolver activation semantics are implemented on `feature/taxonomy-v1-catalog`.
-- Field Pack Agent catalog-awareness is implemented on `feature/taxonomy-v1-catalog`.
-- Backend curated taxonomy storage/filtering is implemented and automated-test verified.
-- Homepage Signals / Content Pool taxonomy integration is implemented and automated-test verified.
-- The static taxonomy closure matrix is implemented as a completed static milestone on `feature/taxonomy-phase5a-closure-matrix`.
+- Assignment-return Curation flow and `requested_check_returns` handling are present on main.
+- Taxonomy v1 catalog/resolver, backend curated taxonomy storage/filtering, and Homepage Signals / Content Pool filtering are implemented on feature branches (`feature/taxonomy-v1-catalog`, `feature/taxonomy-phase5a-closure-matrix`, `feature/taxonomy-phase3-backend-storage`, `feature/taxonomy-phase3b-backend-filtering`, `feature/taxonomy-phase4a-content-pool-filtering`, `feature/taxonomy-phase4b-admin-content-pool-filters`).
+- The static taxonomy closure matrix is complete as a feature-branch milestone.
 - Runtime acceptance across representative fixtures remains pending.
-- The current taxonomy scaffold is now backed by a static end-to-end closure document.
+- This documentation does not claim the feature-branch taxonomy work is merged to main.
 
 ## Confirmed Direction
 
-- CTA/contact milestone is already closed.
-- Taxonomy v1 remains documented and runtime acceptance is still pending for the taxonomy matrix.
-- Real taxonomy categories for the current Taxonomy v1 branch are:
+- CTA/contact baseline is present on main.
+- Taxonomy v1 remains documented as feature-branch work and runtime acceptance is still pending.
+- Real taxonomy categories for the current Taxonomy v1 feature-branch category set are:
   - `attractions`
   - `activities`
   - `hotels`

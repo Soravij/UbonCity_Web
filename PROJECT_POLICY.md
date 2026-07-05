@@ -180,13 +180,13 @@ Placeholders:
 - Already-issued immutable snapshots containing custom checks remain readable and returnable for compatibility.
 - Do not delete legacy stored data.
 
-Current work boundaries:
-- Current project focus is CTA & Curation.
-- Media workflow is complete for current pipeline testing and must not be reopened unless a confirmed regression is found.
-- Media Library deduplication is separate follow-up work and must not be mixed with CTA / Curation changes.
+
+## 7B. Operational Rules
+
 - No merge, commit, or push without explicit approval.
 - Runtime DB/test data exists only on the Runtime machine.
 - Dev code audit must not assume Runtime records are locally available.
+- Media Library deduplication must not be mixed with CTA / Curation changes.
 
 Responsibility split:
 - `default`: category taxonomy defaults owned by the future taxonomy resolver/catalog
