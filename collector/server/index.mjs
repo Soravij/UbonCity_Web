@@ -3208,8 +3208,6 @@ function normalizeAssignmentMediaPayloadAssets(mediaPayload) {
   })).filter((asset) => asset.id || asset.file_name || asset.slotKey);
 }
 
-<<<<<<< HEAD
-=======
 function resolveSelectedAssignmentMediaAssetIds(mediaPayload = null) {
   const source = mediaPayload && typeof mediaPayload === "object" ? mediaPayload : null;
   const assets = Array.isArray(source?.assets) ? source.assets : [];
@@ -3339,8 +3337,6 @@ function resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayl
     retainedAssets: filteredRetainedAssets,
   };
 }
-
->>>>>>> f2b9472 (Allow retained media in assignment capture readiness)
 function findMissingCapturePrompts(expectedPrompts = [], assignmentId = 0, currentRound = 1, options) {
   const config = options && typeof options === "object" ? options : {};
   const structuredItems = Array.isArray(config?.structuredItems) ? config.structuredItems : [];

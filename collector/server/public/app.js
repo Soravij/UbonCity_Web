@@ -6292,8 +6292,6 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     effectiveRows.push(...orderedRows.slice(0, maxCount));
   }
 
-  const requireImages = Boolean(assignment?.image_reset_required);
-  const requireVideos = Boolean(assignment?.video_reset_required);
   const countsBySlotKey = new Map();
   effectiveRows.forEach((row) => {
     const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(row);
