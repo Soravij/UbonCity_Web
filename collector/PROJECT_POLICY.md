@@ -12,3 +12,11 @@ See [../PROJECT_POLICY.md](../PROJECT_POLICY.md) for the canonical project-wide 
 - `condition_note` remains part of the existing `requested_check_returns` contract.
 - Hidden legacy draft rows and `custom.*` rows must be preserved through draft merge and payload handling.
 - Collector must not introduce auto-save, auto-submit, or auto-publish behavior through this UI path.
+
+Current work boundaries:
+- Current project focus is CTA & Curation.
+- Media workflow is complete for current pipeline testing and must not be reopened unless a confirmed regression is found.
+- Media Library deduplication is separate follow-up work and must not be mixed with CTA / Curation changes.
+- Runtime DB/test data exists only on the Runtime machine.
+- Dev code audit must not assume Runtime records are locally available.
+- No merge, commit, or push without explicit approval.

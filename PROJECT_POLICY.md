@@ -160,6 +160,14 @@ Placeholders:
 - Any change to an issued handoff requires explicit repair or reissue behavior.
 - If a handoff snapshot contains no actual resolved taxonomy checks, the Work Return Curation section stays hidden.
 
+Current work boundaries:
+- Current project focus is CTA & Curation.
+- Media workflow is complete for current pipeline testing and must not be reopened unless a confirmed regression is found.
+- Media Library deduplication is separate follow-up work and must not be mixed with CTA / Curation changes.
+- No merge, commit, or push without explicit approval.
+- Runtime DB/test data exists only on the Runtime machine.
+- Dev code audit must not assume Runtime records are locally available.
+
 Responsibility split:
 - `default`: category taxonomy defaults owned by the future taxonomy resolver/catalog
 - `mapping`: category/subtype mapping-selected checks owned by the future resolver

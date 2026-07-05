@@ -1,29 +1,130 @@
 # PROJECT_STATE
 
-Last Updated: 2026-06-19
+Last Updated: 2026-07-05
 
 ## Active Branch
 
-`feature/assignment-return-cta-taxonomy-ui`
+`main`
+
+Current mainline status:
+- merged at `7c044a1`
+- CTA documentation baseline inherited from `1d08fb1`
+
+## Completed Media Workflow
+
+- assignment revision media retention is allowed when the matching reset flag is false
+- retained media is accepted by capture and submission readiness
+- submitted review videos resolve through source asset `storage_path`
+- full deliverable rows are used for review media rendering
+- stale `deliverables-bundle` responses are ignored
+- runtime smoke passed with retained images, successful assignment submission, review images, review video playback, and reviewer acceptance
+- media flow is complete for current pipeline testing
+- Media Library duplicate entries remain a separate non-blocking follow-up for CTA / Curation work
+
+## Current Priority
+
+- `CTA & Curation`
+- CTA required fields and validation
+- taxonomy and curation required fields
+- user-return input fields for assigned workers
+- AI-filled versus needs-verification state
+- readiness gates before review and acceptance
+- consistent propagation from assignment return -> field pack -> review -> publishable data
+
+## 2026-06-20 CTA Milestone Closure And Taxonomy v1 Documentation Baseline
+
+Status:
+- CTA/contact milestone branch `feature/taxonomy-catalog-resolver` complete
+- CTA documentation baseline inherited from `1d08fb1`
+- Taxonomy v1 catalog implemented on `feature/taxonomy-v1-catalog`
+- resolver activation semantics implemented on `feature/taxonomy-v1-catalog`
+- Field Pack Agent catalog-awareness implemented on `feature/taxonomy-v1-catalog`
+- backend curated taxonomy storage/filtering implemented and automated-test verified
+- Homepage Signals / Content Pool taxonomy integration implemented and automated-test verified
+- static taxonomy closure matrix implemented as a completed static milestone on `feature/taxonomy-phase5a-closure-matrix`
+- runtime acceptance across representative fixtures remains pending
+
+2026-06-22 runtime verification:
+- the live Item Editor CTA path is proven end to end
+- item `51` `Golden Hour Coffee` preserved `ai_cta_contact_json.phone = 0804415224` through the workflow save path
+- deterministic source candidates override conflicting AI contact values
+- stale CTA contact suggestions can be cleared on regeneration
+- issued handoff snapshots remain immutable
+- no auto-confirmation was introduced
+- focused tests passed for the workflow CTA propagation path and repository persistence
+
+Locked CTA/contact contract:
+- CTA/contact is separate from taxonomy.
+- CTA/contact is place-only.
+- Standard CTA checks are always requested for place items:
+  - `phone`
+  - `line_url`
+  - `facebook_url`
+  - `website_url`
+  - `primary_cta`
+- `requested=true` means a human must verify the field, including confirming false, absent, or not found.
+- AI is suggestion-only:
+  - AI may provide suggested CTA values.
+  - AI cannot confirm CTA facts.
+  - AI cannot replace human verification.
+- Work Return and human review remain the confirmation source.
+- Existing issued assignment snapshots remain immutable.
+- `field_return_payload_json.requested_check_returns` remains the canonical Work Return payload.
+- `condition_note` remains unchanged.
+
+Locked taxonomy direction on this branch:
+- The taxonomy code present at `372bb50` is implementation scaffolding, not the approved final Taxonomy v1 catalog.
+- Real Taxonomy v1 categories are:
+  - `attractions`
+  - `activities`
+  - `hotels`
+  - `cafes`
+  - `restaurants`
+  - `transport`
+- The current Taxonomy v1 scaffold is not the final end-to-end Homepage Curation mapping.
+- Coordinates, map identity/link fields, Google Maps opening hours, and CTA/contact are excluded from taxonomy.
+- Required taxonomy means the field worker must answer; it does not mean the value must be true.
+- Approved catalog keys may be either required or Agent-triggered.
+- AI may activate approved Agent-triggered catalog keys and may provide suggested values.
+- AI must not create canonical unknown keys, override catalog schema, or remove required defaults.
+- Unknown/non-catalog ideas go to:
+  - handoff guidance
+  - `must_ask_question`
+  - Work Return additional notes
+- Unknown/non-catalog ideas do not become canonical taxonomy keys automatically.
+- Backend curated taxonomy storage/filtering is now implemented and automated-test verified.
+- Homepage Signals / Content Pool taxonomy integration is now implemented and automated-test verified.
+- The static closure matrix is implemented and checked in this phase.
+- Do not include any `custom` group or `custom.*` row in newly created handoff snapshots, including legacy stored rows.
+- Preserve legacy custom data at rest.
+- Already-issued immutable snapshots containing custom checks remain readable and returnable for compatibility.
+- Do not delete legacy stored data.
+Relevant docs:
+- root state: [../PROJECT_STATE.md](../PROJECT_STATE.md)
+- root policy: [../PROJECT_POLICY.md](../PROJECT_POLICY.md)
+- taxonomy v1 scope: [./docs/taxonomy-v1-scope.md](./docs/taxonomy-v1-scope.md)
 
 ## 2026-06-19 Work Return CTA / Curation Lock
 
 Status:
-- in progress on current branch
+- completed as the CTA milestone baseline
 
 Completed on this branch:
 - CTA Work Return stays on the approved compact list layout.
 - Curation rows use the existing requested-check return payload path and keep `condition_note`.
 - `handoffPackage.niche` remains the upstream Clean category context for collector-owned handoff construction.
 - Work Return no longer renders reserved metadata rows `taxonomy.category`, `taxonomy.subtype`, or `taxonomy.tags`.
-- Hidden legacy draft rows and `custom.*` rows remain preserved through draft merge and payload serialization.
+- Hidden legacy draft rows remain preserved through draft merge and payload serialization.
 - No auto-save, auto-submit, or auto-publish behavior was introduced by this patch.
 
-Pending:
+Completed on the current Taxonomy v1 branch:
 - taxonomy catalog/default resolver
-- category/subtype mapping-selected checks
-- AI-added taxonomy checks in the resolver
-- handoff builder changes that emit resolved taxonomy checks instead of placeholders
+- category-scoped actionable taxonomy checks instead of reserved placeholders
+- AI activation of approved Agent-triggered taxonomy keys and suggested values in the resolver
+- handoff builder changes that emit resolved actionable taxonomy checks instead of placeholders
+
+Pending for later phases:
+- runtime acceptance across representative fixtures
 
 Relevant tests:
 - `collector/tests/requested-check-return-form.behavior.test.mjs`
@@ -420,17 +521,12 @@ D:\UbonRuntime\
 
 # Next Priority
 
-1. Start `feat/article-workspace-test-harness`
-2. Define Article AI input contract:
-   - `field_pack`
-   - `research_seed`
-   - `field_return_mock`
-   - `photo_manifest_mock`
-   - `source_policy` metadata
-3. Add test fixture/dry-run mode for Article Workspace
-4. Allow pipeline testing through test frontweb only
-5. Keep production publish blocked for `test_external_research` data
-6. Add cleanup/purge path before real deploy
+1. Implement the approved Taxonomy v1 catalog on `feature/taxonomy-v1-catalog`.
+2. Keep the CTA documentation baseline from `1d08fb1` inherited on this branch.
+3. Keep the current taxonomy scaffold from `372bb50` treated as non-final.
+4. Complete backend curated taxonomy storage/filtering in a later phase.
+5. Bridge confirmed taxonomy facts into internal Homepage Signals / Content Pool filtering in a later phase.
+6. Keep public homepage behavior unchanged and keep human selection manual.
 
 ---
 
