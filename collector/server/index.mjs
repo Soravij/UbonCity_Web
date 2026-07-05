@@ -3493,6 +3493,9 @@ function evaluateAssignmentCaptureTopicReadiness(assignment, assignmentId, curre
 }
 function evaluateLatestAssignmentSubmissionCaptureTopicReadiness(assignment, assignmentId, currentRound) {
   const latestSubmissionIdFromAssignment = Number(assignment?.latest_submission_id || 0) || 0;
+  const round = Number(currentRound || 0) || 0;
+  const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
+  const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
   const latestSubmissionId = latestSubmissionIdFromAssignment > 0
     ? latestSubmissionIdFromAssignment
     : Number(typeof repo?.listAssignmentSubmissions === "function"
@@ -3558,13 +3561,20 @@ function evaluateLatestAssignmentSubmissionCaptureTopicReadiness(assignment, ass
     const createdAtMs = parseIsoMs(row?.created_at);
     let invalidCode = "";
     if (Number(row?.assignment_id || 0) !== Number(assignmentId || 0)) invalidCode = "assignment_mismatch";
-    else if (rowRound !== Number(currentRound || 0) || rowRound <= 0) invalidCode = "round_mismatch";
     else if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") invalidCode = "surface_mismatch";
     else if (!slotKey) invalidCode = "slot_missing";
     else if (!mediaType) invalidCode = "media_type_missing";
-    else if ((mediaType === "image" && !mimeType.startsWith("image/")) || (mediaType === "video" && !mimeType.startsWith("video/"))) invalidCode = "mime_type_mismatch";
-    else if (!String(row?.file_name || "").trim() || !storageDisk || !storagePath) invalidCode = "storage_reference_missing";
-    else if (createdAtMs <= 0 || (Date.now() - createdAtMs) >= ASSIGNMENT_WORK_SYNC_EXPIRY_MS) invalidCode = "asset_expired";
+    else {
+      const isCurrentRoundEligible = rowRound === round && rowRound > 0;
+      const isPreviousRoundEligible = rowRound === (round - 1) && rowRound > 0 && (
+        (mediaType === "image" && !imageResetRequired) ||
+        (mediaType === "video" && !videoResetRequired)
+      );
+      if (!isCurrentRoundEligible && !isPreviousRoundEligible) invalidCode = "round_mismatch";
+      else if ((mediaType === "image" && !mimeType.startsWith("image/")) || (mediaType === "video" && !mimeType.startsWith("video/"))) invalidCode = "mime_type_mismatch";
+      else if (!String(row?.file_name || "").trim() || !storageDisk || !storagePath) invalidCode = "storage_reference_missing";
+      else if (createdAtMs <= 0 || (Date.now() - createdAtMs) >= ASSIGNMENT_WORK_SYNC_EXPIRY_MS) invalidCode = "asset_expired";
+    }
     if (invalidCode) {
       invalidSelections.push({ asset_id: assetId, code: invalidCode, slot_key: slotKey || null, media_type: mediaType || null });
       continue;
