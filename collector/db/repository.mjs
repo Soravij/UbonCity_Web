@@ -7471,14 +7471,30 @@ function createAssignmentSubmissionDraftStateError(state) {
         .filter((row) => isFulfilledAssignmentDeliverableStatus(row?.status))
       : [];
 
-    const availableDeliverableTypes = normalizeAssignmentDeliverableTypeList(latestDeliverables.map((row) => row?.deliverable_type));
-    const expectedDeliverables = normalizeAssignmentDeliverableTypeList(summary?.expected_deliverables);
-    const missingDeliverableTypes = expectedDeliverables.filter((type) => !availableDeliverableTypes.includes(type));
+  const availableDeliverableTypes = normalizeAssignmentDeliverableTypeList(latestDeliverables.map((row) => row?.deliverable_type));
+  const expectedDeliverables = normalizeAssignmentDeliverableTypeList(summary?.expected_deliverables);
+  const missingDeliverableTypes = expectedDeliverables.filter((type) => !availableDeliverableTypes.includes(type));
+  const sourceAssetIds = Array.from(new Set(
+    latestDeliverables
+      .map((row) => Number(row?.source_asset_id || 0) || 0)
+      .filter((value) => value > 0)
+  ));
+  const sourceAssetStoragePathById = new Map();
+  if (sourceAssetIds.length) {
+    const placeholders = sourceAssetIds.map(() => "?").join(", ");
+    db.prepare(`SELECT id, storage_path FROM assets WHERE id IN (${placeholders})`)
+      .all(...sourceAssetIds)
+      .forEach((row) => {
+        const assetId = Number(row?.id || 0) || 0;
+        if (!assetId || sourceAssetStoragePathById.has(assetId)) return;
+        sourceAssetStoragePathById.set(assetId, String(row?.storage_path || "").trim() || null);
+      });
+  }
 
-    const deliverablesByType = {};
-    for (const type of ASSIGNMENT_DELIVERABLE_TYPES) {
-      deliverablesByType[type] = [];
-    }
+  const deliverablesByType = {};
+  for (const type of ASSIGNMENT_DELIVERABLE_TYPES) {
+    deliverablesByType[type] = [];
+  }
     for (const row of latestDeliverables) {
       const type = normalizeAssignmentDeliverableTypeValue(row?.deliverable_type);
       if (!type) continue;
@@ -7493,6 +7509,7 @@ function createAssignmentSubmissionDraftStateError(state) {
         text_content: row?.text_content || null,
         payload_json: row?.payload_json || null,
         source_asset_id: row?.source_asset_id == null ? null : Number(row.source_asset_id || 0) || null,
+        storage_path: sourceAssetStoragePathById.get(Number(row?.source_asset_id || 0) || 0) || null,
         source_url: row?.source_url || null,
         status: row?.status || null,
         created_by: row?.created_by || null,

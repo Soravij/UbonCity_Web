@@ -3605,12 +3605,37 @@ function renderAssignmentWorkMonitor(assignment) {
 }
 
 function resolveAssignmentReviewMediaUrl(item) {
-  const directUrl = String(item?.public_url || item?.source_url || "").trim();
+  const resolveStoragePathUrl = (value) => {
+    const pathValue = String(value || "").trim();
+    if (!pathValue) return "";
+    if (/^https?:\/\//i.test(pathValue) || pathValue.startsWith("/api/") || pathValue.startsWith("/media/")) return pathValue;
+    return `/media/${pathValue.replace(/\\/g, "/").replace(/^\/+/, "")}`;
+  };
+  const payload = item?.payload_json && typeof item.payload_json === "object" ? item.payload_json : null;
+  const directUrl = String(
+    item?.public_url
+    || item?.source_url
+    || item?.media_url
+    || payload?.public_url
+    || payload?.source_url
+    || payload?.media_url
+    || ""
+  ).trim();
   if (directUrl) return directUrl;
+  const storedPathUrl = resolveStoragePathUrl(
+    item?.storage_path
+    || item?.media_path
+    || payload?.storage_path
+    || payload?.media_path
+    || ""
+  );
+  if (storedPathUrl) return storedPathUrl;
   const sourceAssetId = Number(item?.source_asset_id || 0) || 0;
   if (!sourceAssetId) return "";
   const asset = findAssignmentAssetById(sourceAssetId);
-  return String(asset?.public_url || "").trim();
+  const assetDirectUrl = String(asset?.public_url || asset?.source_url || asset?.media_url || "").trim();
+  if (assetDirectUrl) return assetDirectUrl;
+  return resolveStoragePathUrl(asset?.storage_path || asset?.media_path || "");
 }
 
 function summarizeAssignmentReviewMediaLabel(item, fallbackPrefix) {
