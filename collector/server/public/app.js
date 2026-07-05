@@ -8827,9 +8827,14 @@ async function loadAssignmentDeliverablesBundle({ showStatus = true } = {}) {
     throw new Error("editor cannot load assignment deliverables from this surface");
   }
   const assignmentId = ensureSelectedAssignmentId();
-  const result = await api(`/api/assignments/${assignmentId}/deliverables/latest-bundle`);
-  if (Number(state.assignments.selectedId || 0) !== assignmentId) {
-    return result?.bundle || null;
+  const requestSeq = (loadAssignmentDeliverablesBundle._requestSeq || 0) + 1;
+  loadAssignmentDeliverablesBundle._requestSeq = requestSeq;
+  const [result, deliverablesResult] = await Promise.all([
+    api(`/api/assignments/${assignmentId}/deliverables/latest-bundle`),
+    api(`/api/assignments/${assignmentId}/deliverables`).catch(() => ({ deliverables: [] })),
+  ]);
+  if (requestSeq !== loadAssignmentDeliverablesBundle._requestSeq || Number(state.assignments.selectedId || 0) !== assignmentId) {
+    return null;
   }
   state.assignments.deliverablesBundle = result?.bundle || null;
   renderAssignmentDeliverablesSummary(state.assignments.deliverablesBundle, getAssignmentById(assignmentId));
@@ -10562,4 +10567,3 @@ applyAuthLandingNotice();
     redirectToLoginWithExpiredSession();
   }
 })();
-
