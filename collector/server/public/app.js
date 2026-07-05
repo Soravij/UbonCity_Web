@@ -3388,12 +3388,37 @@ function renderAssignmentWorkMonitor(assignment) {
 }
 
 function resolveAssignmentReviewMediaUrl(item) {
-  const directUrl = String(item?.public_url || item?.source_url || "").trim();
+  const resolveStoragePathUrl = (value) => {
+    const pathValue = String(value || "").trim();
+    if (!pathValue) return "";
+    if (/^https?:\/\//i.test(pathValue) || pathValue.startsWith("/api/") || pathValue.startsWith("/media/")) return pathValue;
+    return `/media/${pathValue.replace(/\\/g, "/").replace(/^\/+/, "")}`;
+  };
+  const payload = item?.payload_json && typeof item.payload_json === "object" ? item.payload_json : null;
+  const directUrl = String(
+    item?.public_url
+    || item?.source_url
+    || item?.media_url
+    || payload?.public_url
+    || payload?.source_url
+    || payload?.media_url
+    || ""
+  ).trim();
   if (directUrl) return directUrl;
+  const storedPathUrl = resolveStoragePathUrl(
+    item?.storage_path
+    || item?.media_path
+    || payload?.storage_path
+    || payload?.media_path
+    || ""
+  );
+  if (storedPathUrl) return storedPathUrl;
   const sourceAssetId = Number(item?.source_asset_id || 0) || 0;
   if (!sourceAssetId) return "";
   const asset = findAssignmentAssetById(sourceAssetId);
-  return String(asset?.public_url || "").trim();
+  const assetDirectUrl = String(asset?.public_url || asset?.source_url || asset?.media_url || "").trim();
+  if (assetDirectUrl) return assetDirectUrl;
+  return resolveStoragePathUrl(asset?.storage_path || asset?.media_path || "");
 }
 
 function summarizeAssignmentReviewMediaLabel(item, fallbackPrefix) {
@@ -3420,7 +3445,29 @@ function getAssignmentReviewMediaItems(assignment, deliverableType) {
   const bundle = state.assignments.deliverablesBundle && typeof state.assignments.deliverablesBundle === "object"
     ? state.assignments.deliverablesBundle
     : null;
+  const assignmentId = Number(assignment?.id || 0) || 0;
   const type = String(deliverableType || "").trim().toLowerCase();
+  const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
+  const submissions = Array.isArray(state.assignments.submissionRowsByAssignment?.[assignmentId])
+    ? state.assignments.submissionRowsByAssignment[assignmentId]
+    : (latestSubmission ? [latestSubmission] : []);
+  const deliverableRows = Array.isArray(state.assignments.deliverableRowsByAssignment?.[assignmentId])
+    ? state.assignments.deliverableRowsByAssignment[assignmentId]
+    : [];
+  const selectedBundle = selectAssignmentReviewMediaBundle(submissions, deliverableRows, type);
+  if (selectedBundle.source_type === "deliverables" && selectedBundle.items.length) {
+    const deliverableSourceRows = Array.isArray(bundle?.deliverables_by_type?.[type])
+      ? bundle.deliverables_by_type[type]
+      : selectedBundle.items;
+    return deliverableSourceRows
+      .map((row, index) => ({
+        key: `deliverable-${type}-${Number(row?.id || 0) || index}`,
+        url: resolveAssignmentReviewMediaUrl(row),
+        label: summarizeAssignmentReviewMediaLabel(row, `${getAssignmentDeliverableLabel(type)} ${index + 1}`),
+        meta: row?.created_at || row?.updated_at || "",
+      }))
+      .filter((row) => row.url);
+  }
   const fromBundle = Array.isArray(bundle?.deliverables_by_type?.[type])
     ? bundle.deliverables_by_type[type]
       .map((row, index) => ({
@@ -3433,7 +3480,16 @@ function getAssignmentReviewMediaItems(assignment, deliverableType) {
     : [];
   if (fromBundle.length) return fromBundle;
 
-  const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
+  if (selectedBundle.source_type === "payload" && selectedBundle.items.length) {
+    return selectedBundle.items
+      .map((asset, index) => ({
+        key: `payload-${type}-${Number(asset?.id || 0) || index}`,
+        url: String(asset?.public_url || "").trim(),
+        label: String(asset?.file_name || "").trim() || `${getAssignmentDeliverableLabel(type)} ${index + 1}`,
+        meta: String(asset?.mime_type || "").trim(),
+      }))
+      .filter((row) => row.url);
+  }
   const payloadAssets = Array.isArray(latestSubmission?.media_payload_json?.assets)
     ? latestSubmission.media_payload_json.assets
     : [];
@@ -6155,10 +6211,21 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     expectedBySlotKey.set(String(item?.slotKey || item?.uploadKey || "").trim(), item);
   });
   const nowMs = Date.now();
+  const requireImages = Boolean(assignment?.image_reset_required);
+  const requireVideos = Boolean(assignment?.video_reset_required);
   const rows = Array.isArray(state.assignments.assetLookup) ? state.assignments.assetLookup : [];
   const assignmentRows = rows.filter((row) => {
     if (Number(row?.assignment_id || 0) !== id) return false;
-    if (Number(row?.assignment_round || 0) !== currentRound) return false;
+    const assetRound = Number(row?.assignment_round || 0) || 0;
+    const assetMediaType = normalizeAssignmentCaptureMediaType(row?.assignment_media_type);
+    const isCurrentRound = assetRound === currentRound;
+    const isRetainedRound = assetRound === (currentRound - 1);
+    const canRetainPreviousRound = assetMediaType === "image"
+      ? !requireImages
+      : assetMediaType === "video"
+        ? !requireVideos
+        : false;
+    if (!isCurrentRound && !(isRetainedRound && canRetainPreviousRound)) return false;
     if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") return false;
     const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(row);
     const slotKey = slotTypeKey ? slotTypeKey.split("|")[0] : "";
@@ -6225,8 +6292,6 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     effectiveRows.push(...orderedRows.slice(0, maxCount));
   }
 
-  const requireImages = Boolean(assignment?.image_reset_required);
-  const requireVideos = Boolean(assignment?.video_reset_required);
   const countsBySlotKey = new Map();
   effectiveRows.forEach((row) => {
     const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(row);
@@ -8791,9 +8856,14 @@ async function loadAssignmentDeliverablesBundle({ showStatus = true } = {}) {
     throw new Error("editor cannot load assignment deliverables from this surface");
   }
   const assignmentId = ensureSelectedAssignmentId();
-  const result = await api(`/api/assignments/${assignmentId}/deliverables/latest-bundle`);
-  if (Number(state.assignments.selectedId || 0) !== assignmentId) {
-    return result?.bundle || null;
+  const requestSeq = (loadAssignmentDeliverablesBundle._requestSeq || 0) + 1;
+  loadAssignmentDeliverablesBundle._requestSeq = requestSeq;
+  const [result, deliverablesResult] = await Promise.all([
+    api(`/api/assignments/${assignmentId}/deliverables/latest-bundle`),
+    api(`/api/assignments/${assignmentId}/deliverables`).catch(() => ({ deliverables: [] })),
+  ]);
+  if (requestSeq !== loadAssignmentDeliverablesBundle._requestSeq || Number(state.assignments.selectedId || 0) !== assignmentId) {
+    return null;
   }
   state.assignments.deliverablesBundle = result?.bundle || null;
   renderAssignmentDeliverablesSummary(state.assignments.deliverablesBundle, getAssignmentById(assignmentId));
@@ -10526,4 +10596,3 @@ applyAuthLandingNotice();
     redirectToLoginWithExpiredSession();
   }
 })();
-
