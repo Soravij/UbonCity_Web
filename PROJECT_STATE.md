@@ -1,4 +1,4 @@
-# UbonCity Project State
+﻿# UbonCity Project State
 
 Last Updated: 2026-07-05
 
@@ -32,7 +32,7 @@ Last Updated: 2026-07-05
 ## CTA / Contact Milestone
 
 Status:
-- complete and merged into main at `7c044a1`
+- CTA/contact baseline is present on main.
 
 Verified CTA path:
 - Item Editor Generate/Regenerate -> `POST /api/run/ai-draft` -> `runAiDraftStage()` -> `normalizeFieldPack()` -> `buildFieldPackPayloadFromAgent()` -> `saveAgentFieldPack()` -> repository create/update -> `getCurrentFieldPackByItem()` -> CTA Review UI
