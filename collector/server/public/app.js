@@ -3738,7 +3738,10 @@ function getAssignmentReviewMediaItems(assignment, deliverableType) {
     : [];
   const selectedBundle = selectAssignmentReviewMediaBundle(submissions, deliverableRows, type);
   if (selectedBundle.source_type === "deliverables" && selectedBundle.items.length) {
-    return selectedBundle.items
+    const deliverableSourceRows = Array.isArray(bundle?.deliverables_by_type?.[type])
+      ? bundle.deliverables_by_type[type]
+      : selectedBundle.items;
+    return deliverableSourceRows
       .map((row, index) => ({
         key: `deliverable-${type}-${Number(row?.id || 0) || index}`,
         url: resolveAssignmentReviewMediaUrl(row),
