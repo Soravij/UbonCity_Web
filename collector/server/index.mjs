@@ -3208,6 +3208,139 @@ function normalizeAssignmentMediaPayloadAssets(mediaPayload) {
   })).filter((asset) => asset.id || asset.file_name || asset.slotKey);
 }
 
+<<<<<<< HEAD
+=======
+function resolveSelectedAssignmentMediaAssetIds(mediaPayload = null) {
+  const source = mediaPayload && typeof mediaPayload === "object" ? mediaPayload : null;
+  const assets = Array.isArray(source?.assets) ? source.assets : [];
+  return Array.from(new Set(
+    assets.map((asset) => Number(asset?.id || 0) || 0).filter((id) => id > 0)
+  ));
+}
+
+function resolveCurrentRoundEligibleAssignmentMediaAssets(assignment, assignmentId, currentRound, mediaPayload = null, options = {}) {
+  const selectedAssetIds = Array.isArray(options?.selectedAssetIds)
+    ? Array.from(new Set(options.selectedAssetIds.map((value) => Number(value || 0) || 0).filter((value) => value > 0)))
+    : resolveSelectedAssignmentMediaAssetIds(mediaPayload);
+  const fallbackAssets = normalizeAssignmentMediaPayloadAssets(mediaPayload);
+  if (typeof repo?.listAssignmentWorkAssetRows !== "function") {
+    return {
+      assets: fallbackAssets,
+      selected_asset_ids: selectedAssetIds,
+      invalid_selections: [],
+      authoritative: false,
+    };
+  }
+  const id = Number(assignmentId || 0) || 0;
+  const round = Number(currentRound || 0) || 0;
+  const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
+  const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
+  const nowMs = Date.now();
+  const allRows = id > 0 ? repo.listAssignmentWorkAssetRows(id) : [];
+  const invalidSelections = [];
+  if (!selectedAssetIds.length) {
+    return {
+      assets: [],
+      selected_asset_ids: [],
+      invalid_selections: invalidSelections,
+      authoritative: true,
+    };
+  }
+  const currentRoundRows = allRows.filter((row) => Number(row?.assignment_round || 0) === round);
+  const rowByAssetId = new Map();
+  for (const row of allRows) {
+    const assetId = Number(row?.asset_id || 0) || 0;
+    if (!assetId || rowByAssetId.has(assetId)) continue;
+    rowByAssetId.set(assetId, row);
+  }
+  const assets = [];
+  for (const assetId of selectedAssetIds) {
+    const row = rowByAssetId.get(assetId) || null;
+    if (!row) {
+      invalidSelections.push({ asset_id: assetId, code: "asset_not_found" });
+      continue;
+    }
+    const rowRound = Number(row?.assignment_round || 0) || 0;
+    const slotKey = String(row?.assignment_slot_key || "").trim().toLowerCase();
+    const mediaType = normalizeAssignmentCaptureMediaType(row?.assignment_media_type);
+    const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+    const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
+    const storagePath = String(row?.storage_path || "").trim();
+    const createdAtMs = parseIsoMs(row?.created_at);
+    let invalidCode = "";
+    if (Number(row?.assignment_id || 0) !== id) invalidCode = "assignment_mismatch";
+    else if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") invalidCode = "surface_mismatch";
+    else if (!slotKey) invalidCode = "slot_missing";
+    else if (!mediaType) invalidCode = "media_type_missing";
+    else {
+      const isCurrentRoundEligible = rowRound === round && rowRound > 0;
+      const isPreviousRoundEligible = rowRound === (round - 1) && rowRound > 0 && (
+        (mediaType === "image" && !imageResetRequired) ||
+        (mediaType === "video" && !videoResetRequired)
+      );
+      if (!isCurrentRoundEligible && !isPreviousRoundEligible) invalidCode = "round_mismatch";
+      else if ((mediaType === "image" && !mimeType.startsWith("image/")) || (mediaType === "video" && !mimeType.startsWith("video/"))) invalidCode = "mime_type_mismatch";
+      else if (!String(row?.file_name || "").trim() || !storageDisk || !storagePath) invalidCode = "storage_reference_missing";
+      else if (createdAtMs <= 0 || (nowMs - createdAtMs) >= ASSIGNMENT_WORK_SYNC_EXPIRY_MS) invalidCode = "asset_expired";
+    }
+    if (invalidCode) {
+      invalidSelections.push({ asset_id: assetId, code: invalidCode, slot_key: slotKey || null, media_type: mediaType || null });
+      continue;
+    }
+    assets.push({
+      id: assetId,
+      file_name: String(row?.file_name || "").trim() || null,
+      mime_type: mimeType || null,
+      size_bytes: Number(row?.size_bytes || 0) || 0,
+      storage_path: storagePath || null,
+      assignment_id: id,
+      assignment_round: rowRound,
+      assignment_surface: "assignment_work",
+      assignment_slot_key: slotKey,
+      assignment_media_type: mediaType,
+      assignment_sync_batch_id: String(row?.assignment_sync_batch_id || "").trim() || null,
+      slotKey,
+      mediaType,
+    });
+  }
+  return {
+    assets,
+    selected_asset_ids: selectedAssetIds,
+    invalid_selections: invalidSelections,
+    authoritative: true,
+  };
+}
+function resolveAssignmentSubmissionValidationMediaPayload(assignment, mediaPayload = null) {
+  const incomingAssets = normalizeAssignmentMediaPayloadAssets(mediaPayload);
+  const filteredRetainedAssets = [];
+  const effectiveAssets = [];
+  const seen = new Set();
+  const buildIdentityKey = (asset) => {
+    const assetId = Number(asset?.id || 0) || 0;
+    if (assetId > 0) return `id:${assetId}`;
+    const publicUrl = String(asset?.public_url || asset?.source_url || "").trim().toLowerCase();
+    const fileName = String(asset?.file_name || "").trim().toLowerCase();
+    if (publicUrl) return `url:${publicUrl}`;
+    return fileName ? `file:${fileName}` : "";
+  };
+  const pushUnique = (asset) => {
+    if (!asset || typeof asset !== "object") return;
+    const key = buildIdentityKey(asset);
+    if (key && seen.has(key)) return;
+    if (key) seen.add(key);
+    effectiveAssets.push(asset);
+  };
+  filteredRetainedAssets.forEach(pushUnique);
+  incomingAssets.forEach(pushUnique);
+  return {
+    assets: effectiveAssets,
+    mediaPayload: effectiveAssets.length ? { assets: effectiveAssets } : null,
+    incomingAssets,
+    retainedAssets: filteredRetainedAssets,
+  };
+}
+
+>>>>>>> f2b9472 (Allow retained media in assignment capture readiness)
 function findMissingCapturePrompts(expectedPrompts = [], assignmentId = 0, currentRound = 1, options) {
   const config = options && typeof options === "object" ? options : {};
   const structuredItems = Array.isArray(config?.structuredItems) ? config.structuredItems : [];
@@ -3319,9 +3452,6 @@ function evaluateAssignmentCaptureTopicReadiness(assignment, assignmentId, curre
 }
 function evaluateLatestAssignmentSubmissionCaptureTopicReadiness(assignment, assignmentId, currentRound) {
   const latestSubmissionIdFromAssignment = Number(assignment?.latest_submission_id || 0) || 0;
-  const round = Number(currentRound || 0) || 0;
-  const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
-  const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
   const latestSubmissionId = latestSubmissionIdFromAssignment > 0
     ? latestSubmissionIdFromAssignment
     : Number(typeof repo?.listAssignmentSubmissions === "function"
@@ -3390,17 +3520,9 @@ function evaluateLatestAssignmentSubmissionCaptureTopicReadiness(assignment, ass
     else if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") invalidCode = "surface_mismatch";
     else if (!slotKey) invalidCode = "slot_missing";
     else if (!mediaType) invalidCode = "media_type_missing";
-    else {
-      const isCurrentRoundEligible = rowRound === round && rowRound > 0;
-      const isPreviousRoundEligible = rowRound === (round - 1) && rowRound > 0 && (
-        (mediaType === "image" && !imageResetRequired) ||
-        (mediaType === "video" && !videoResetRequired)
-      );
-      if (!isCurrentRoundEligible && !isPreviousRoundEligible) invalidCode = "round_mismatch";
-      else if ((mediaType === "image" && !mimeType.startsWith("image/")) || (mediaType === "video" && !mimeType.startsWith("video/"))) invalidCode = "mime_type_mismatch";
-      else if (!String(row?.file_name || "").trim() || !storageDisk || !storagePath) invalidCode = "storage_reference_missing";
-      else if (createdAtMs <= 0 || (Date.now() - createdAtMs) >= ASSIGNMENT_WORK_SYNC_EXPIRY_MS) invalidCode = "asset_expired";
-    }
+    else if ((mediaType === "image" && !mimeType.startsWith("image/")) || (mediaType === "video" && !mimeType.startsWith("video/"))) invalidCode = "mime_type_mismatch";
+    else if (!String(row?.file_name || "").trim() || !storageDisk || !storagePath) invalidCode = "storage_reference_missing";
+    else if (createdAtMs <= 0 || (Date.now() - createdAtMs) >= ASSIGNMENT_WORK_SYNC_EXPIRY_MS) invalidCode = "asset_expired";
     if (invalidCode) {
       invalidSelections.push({ asset_id: assetId, code: invalidCode, slot_key: slotKey || null, media_type: mediaType || null });
       continue;
