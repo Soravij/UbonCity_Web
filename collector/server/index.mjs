@@ -3241,6 +3241,211 @@ function findMissingCapturePrompts(expectedPrompts = [], assignmentId = 0, curre
   return prompts.filter((prompt, index) => !uploadedShotSlugs.has(toCaptureShotSlug(prompt, index)));
 }
 
+function evaluateAssignmentCaptureTopicReadinessFromAssets(assignment, assignmentId, currentRound, sourceAssets = [], diagnostics = {}) {
+  const id = Number(assignmentId || 0) || 0;
+  const round = Number(currentRound || 0) || 0;
+  const context = resolveAssignmentSubmissionPromptContext(assignment);
+  const fieldPack = context?.fieldPack && typeof context.fieldPack === "object" ? context.fieldPack : null;
+  const structuredCaptureItems = fieldPack ? getStructuredFieldPackCaptureItems(fieldPack) : [];
+  const rawMustCaptureCount = Array.isArray(fieldPack?.checklists)
+    ? fieldPack.checklists.filter((row) => String(row?.checklist_type || "").trim().toLowerCase() === "must_capture").length
+    : 0;
+  if (!structuredCaptureItems.length) {
+    const kind = String(assignment?.assignment_kind || "").trim().toLowerCase() || "field";
+    const normalizationFailed = kind === "field" && rawMustCaptureCount > 0;
+    return {
+      requirements: [],
+      fulfilled_requirement_ids: [],
+      missing_requirements: [],
+      counts: { required_topics: 0, fulfilled_topics: 0, missing_topics: 0 },
+      can_submit: !normalizationFailed,
+      assignment_id: id || null,
+      assignment_round: round || null,
+      diagnostic_error: normalizationFailed ? "capture_requirements_normalization_failed" : null,
+      invalid_selections: Array.isArray(diagnostics?.invalid_selections) ? diagnostics.invalid_selections : [],
+    };
+  }
+  const countsBySlotTypeKey = new Map();
+  for (const asset of Array.isArray(sourceAssets) ? sourceAssets : []) {
+    const key = getAssignmentCaptureAssetSlotTypeKey(asset);
+    if (!key) continue;
+    countsBySlotTypeKey.set(key, (Number(countsBySlotTypeKey.get(key) || 0) || 0) + 1);
+  }
+  const requirements = structuredCaptureItems.map((item) => {
+    const slotKey = String(item?.slotKey || "").trim().toLowerCase();
+    const mediaType = normalizeAssignmentCaptureMediaType(item?.mediaType);
+    const requirementId = `${slotKey}|${mediaType}`;
+    const eligibleCount = Number(countsBySlotTypeKey.get(requirementId) || 0) || 0;
+    return {
+      requirement_id: requirementId,
+      slot_key: slotKey,
+      media_type: mediaType,
+      prompt: String(item?.prompt || "").trim(),
+      required: true,
+      min_files: 1,
+      eligible_asset_count: eligibleCount,
+      status: eligibleCount >= 1 ? "fulfilled" : "missing",
+    };
+  });
+  const fulfilledRequirementIds = requirements.filter((row) => row.status === "fulfilled").map((row) => row.requirement_id);
+  const missingRequirements = requirements.filter((row) => row.status === "missing");
+  const invalidSelections = Array.isArray(diagnostics?.invalid_selections) ? diagnostics.invalid_selections : [];
+  return {
+    requirements,
+    fulfilled_requirement_ids: fulfilledRequirementIds,
+    missing_requirements: missingRequirements,
+    counts: {
+      required_topics: requirements.length,
+      fulfilled_topics: fulfilledRequirementIds.length,
+      missing_topics: missingRequirements.length,
+    },
+    can_submit: missingRequirements.length === 0 && invalidSelections.length === 0,
+    assignment_id: id || null,
+    assignment_round: round || null,
+    invalid_selections: invalidSelections,
+    diagnostic_error: diagnostics?.diagnostic_error || null,
+  };
+}
+
+function evaluateAssignmentCaptureTopicReadiness(assignment, assignmentId, currentRound, mediaPayload = null) {
+  const resolved = resolveCurrentRoundEligibleAssignmentMediaAssets(assignment, assignmentId, currentRound, mediaPayload);
+  return evaluateAssignmentCaptureTopicReadinessFromAssets(
+    assignment,
+    assignmentId,
+    currentRound,
+    resolved.assets,
+    { invalid_selections: resolved.invalid_selections }
+  );
+}
+function evaluateLatestAssignmentSubmissionCaptureTopicReadiness(assignment, assignmentId, currentRound) {
+  const latestSubmissionIdFromAssignment = Number(assignment?.latest_submission_id || 0) || 0;
+  const round = Number(currentRound || 0) || 0;
+  const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
+  const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
+  const latestSubmissionId = latestSubmissionIdFromAssignment > 0
+    ? latestSubmissionIdFromAssignment
+    : Number(typeof repo?.listAssignmentSubmissions === "function"
+      ? (repo.listAssignmentSubmissions(assignmentId)[0]?.id || 0)
+      : 0) || 0;
+  if (!latestSubmissionId) {
+    return {
+      requirements: [],
+      fulfilled_requirement_ids: [],
+      missing_requirements: [{ reason: "latest_submission_missing" }],
+      counts: { required_topics: 0, fulfilled_topics: 0, missing_topics: 0 },
+      can_submit: false,
+      assignment_id: Number(assignmentId || 0) || null,
+      assignment_round: Number(currentRound || 0) || null,
+      invalid_selections: [],
+      latest_submission_id: null,
+    };
+  }
+  const latestDeliverables = typeof repo?.listAssignmentSubmissionDeliverablesBySubmission === "function"
+    ? repo.listAssignmentSubmissionDeliverablesBySubmission(assignmentId, latestSubmissionId)
+    : [];
+  const selectedAssetIds = Array.from(new Set(
+    latestDeliverables
+      .map((row) => Number(row?.source_asset_id || 0) || 0)
+      .filter((value) => value > 0)
+  ));
+  if (!selectedAssetIds.length) {
+    return {
+      requirements: [],
+      fulfilled_requirement_ids: [],
+      missing_requirements: [{ reason: "latest_deliverables_missing" }],
+      counts: { required_topics: 0, fulfilled_topics: 0, missing_topics: 0 },
+      can_submit: false,
+      assignment_id: Number(assignmentId || 0) || null,
+      assignment_round: Number(currentRound || 0) || null,
+      invalid_selections: [],
+      latest_submission_id: latestSubmissionId,
+    };
+  }
+  const workRows = typeof repo?.listAssignmentWorkAssetRows === "function"
+    ? repo.listAssignmentWorkAssetRows(assignmentId)
+    : [];
+  const rowByAssetId = new Map();
+  for (const row of Array.isArray(workRows) ? workRows : []) {
+    const assetId = Number(row?.asset_id || 0) || 0;
+    if (!assetId || rowByAssetId.has(assetId)) continue;
+    rowByAssetId.set(assetId, row);
+  }
+  const selectedRows = [];
+  const invalidSelections = [];
+  for (const assetId of selectedAssetIds) {
+    const row = rowByAssetId.get(assetId) || null;
+    if (!row) {
+      invalidSelections.push({ asset_id: assetId, code: "asset_not_found" });
+      continue;
+    }
+    const rowRound = Number(row?.assignment_round || 0) || 0;
+    const slotKey = String(row?.assignment_slot_key || "").trim().toLowerCase();
+    const mediaType = normalizeAssignmentCaptureMediaType(row?.assignment_media_type);
+    const mimeType = String(row?.mime_type || "").trim().toLowerCase();
+    const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
+    const storagePath = String(row?.storage_path || "").trim();
+    const createdAtMs = parseIsoMs(row?.created_at);
+    let invalidCode = "";
+    if (Number(row?.assignment_id || 0) !== Number(assignmentId || 0)) invalidCode = "assignment_mismatch";
+    else if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") invalidCode = "surface_mismatch";
+    else if (!slotKey) invalidCode = "slot_missing";
+    else if (!mediaType) invalidCode = "media_type_missing";
+    else {
+      const isCurrentRoundEligible = rowRound === round && rowRound > 0;
+      const isPreviousRoundEligible = rowRound === (round - 1) && rowRound > 0 && (
+        (mediaType === "image" && !imageResetRequired) ||
+        (mediaType === "video" && !videoResetRequired)
+      );
+      if (!isCurrentRoundEligible && !isPreviousRoundEligible) invalidCode = "round_mismatch";
+      else if ((mediaType === "image" && !mimeType.startsWith("image/")) || (mediaType === "video" && !mimeType.startsWith("video/"))) invalidCode = "mime_type_mismatch";
+      else if (!String(row?.file_name || "").trim() || !storageDisk || !storagePath) invalidCode = "storage_reference_missing";
+      else if (createdAtMs <= 0 || (Date.now() - createdAtMs) >= ASSIGNMENT_WORK_SYNC_EXPIRY_MS) invalidCode = "asset_expired";
+    }
+    if (invalidCode) {
+      invalidSelections.push({ asset_id: assetId, code: invalidCode, slot_key: slotKey || null, media_type: mediaType || null });
+      continue;
+    }
+    selectedRows.push({
+      id: assetId,
+      file_name: String(row?.file_name || "").trim() || null,
+      mime_type: mimeType || null,
+      size_bytes: Number(row?.size_bytes || 0) || 0,
+      storage_path: storagePath || null,
+      assignment_id: Number(assignmentId || 0) || 0,
+      assignment_round: rowRound,
+      assignment_surface: "assignment_work",
+      assignment_slot_key: slotKey,
+      assignment_media_type: mediaType,
+      assignment_sync_batch_id: String(row?.assignment_sync_batch_id || "").trim() || null,
+      slotKey,
+      mediaType,
+    });
+  }
+  if (!selectedRows.length || invalidSelections.length) {
+    return {
+      requirements: [],
+      fulfilled_requirement_ids: [],
+      missing_requirements: [{ reason: "latest_source_assets_invalid" }],
+      counts: { required_topics: 0, fulfilled_topics: 0, missing_topics: 1 },
+      can_submit: false,
+      assignment_id: Number(assignmentId || 0) || null,
+      assignment_round: Number(currentRound || 0) || null,
+      invalid_selections: invalidSelections,
+      latest_submission_id: latestSubmissionId,
+    };
+  }
+  const readiness = evaluateAssignmentCaptureTopicReadinessFromAssets(
+    assignment,
+    assignmentId,
+    currentRound,
+    selectedRows,
+    { invalid_selections: invalidSelections }
+  );
+  return {
+    ...readiness,
+    latest_submission_id: latestSubmissionId,
+  };
+}
 function enforceAssignmentSubmissionRequiredFields(assignment, articlePayload, assignmentId, currentRound, mediaPayload = null) {
   const payload = articlePayload && typeof articlePayload === "object" && !Array.isArray(articlePayload)
     ? articlePayload
