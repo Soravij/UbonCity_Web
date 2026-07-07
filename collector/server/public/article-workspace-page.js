@@ -1,4 +1,4 @@
-﻿import {
+import {
   api,
   canEditArticle,
   collectWorkspacePayload,
@@ -1098,6 +1098,72 @@ function renderConfirmedMetaVisibility() {
   button.textContent = workspaceState.confirmedMetaCollapsed ? "แสดงข้อมูลยืนยัน" : "ซ่อนข้อมูลยืนยัน";
 }
 
+function renderFieldReturnCompactValue(value) {
+  if (value === false) return "false";
+  if (value === true) return "true";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "-";
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? escapeHtml(text) : "-";
+  }
+  if (Array.isArray(value)) {
+    const rows = value
+      .map((entry) => renderFieldReturnCompactValue(entry))
+      .filter((entry) => entry && entry !== "-");
+    return rows.length ? rows.join(", ") : "-";
+  }
+  if (value && typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "number") || Object.prototype.hasOwnProperty.call(value, "unit")) {
+      const number = Object.prototype.hasOwnProperty.call(value, "number") ? value.number : null;
+      const unit = String(value.unit ?? "").trim();
+      const numberText = number === null || number === undefined ? "" : String(number).trim();
+      const compact = [numberText, unit].filter(Boolean).join(" ").trim();
+      if (compact) return escapeHtml(compact);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "value")) {
+      const nested = renderFieldReturnCompactValue(value.value);
+      if (nested && nested !== "-") return nested;
+    }
+    const text = String(value.text ?? value.label ?? "").trim();
+    if (text) return escapeHtml(text);
+    return "—";
+  }
+  const text = String(value ?? "").trim();
+  return text ? escapeHtml(text) : "-";
+}
+
+function renderConfirmedMetaSummary() {
+  const root = qs("confirmed-taxonomy-summary");
+  if (!root) return;
+  const evidence = fieldReturnEvidence();
+  const items = [];
+  const seen = new Set();
+  for (const item of Array.isArray(evidence?.items) ? evidence.items : []) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    if (String(item.group_key || "").trim().toLowerCase() !== "taxonomy") continue;
+    if (item.checked !== true) continue;
+    const key = String(item.key || "").trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    items.push(item);
+  }
+
+  if (!items.length) {
+    root.innerHTML = '<p class="muted">ยังไม่มีข้อมูลคัดกรองที่ยืนยันแล้ว</p>';
+    return;
+  }
+
+  root.innerHTML = `
+    <div class="readiness-summary">
+      ${items.map((item) => `
+        <div class="summary-row">
+          <strong>${escapeHtml(item.label || item.key || "-")}</strong>
+          <span>${item.found === false ? "ไม่พบ" : renderFieldReturnCompactValue(item.value)}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
 function fieldReturnEvidenceGroupLabel(groupKey) {
   if (groupKey === "cta_contact") return "CTA / ช่องทางติดต่อ";
   if (groupKey === "taxonomy") return "หมวดหมู่";
@@ -1110,7 +1176,7 @@ function renderFieldReturnEvidenceValue(value) {
     return rows.length ? rows.map((entry) => escapeHtml(entry)).join(", ") : "-";
   }
   if (value && typeof value === "object") {
-    return escapeHtml(JSON.stringify(value));
+    return "—";
   }
   const text = String(value ?? "").trim();
   return text ? escapeHtml(text) : "-";
@@ -1728,8 +1794,6 @@ function applyEditorWorkspaceView() {
   if (previewMobile) previewMobile.textContent = "\u0e21\u0e37\u0e2d\u0e16\u0e37\u0e2d";
   const mediaToggle = qs("btn-toggle-media-library");
   if (mediaToggle) mediaToggle.textContent = workspaceState.mediaCollapsed ? "\u0e41\u0e2a\u0e14\u0e07\u0e04\u0e25\u0e31\u0e07\u0e23\u0e39\u0e1b" : "\u0e0b\u0e48\u0e2d\u0e19\u0e04\u0e25\u0e31\u0e07\u0e23\u0e39\u0e1b";
-  const confirmedMetaToggle = qs("btn-toggle-confirmed-meta");
-  if (confirmedMetaToggle) confirmedMetaToggle.textContent = workspaceState.confirmedMetaCollapsed ? "\u0e41\u0e2a\u0e14\u0e07\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19" : "\u0e0b\u0e48\u0e2d\u0e19\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19";
   const systemToggle = qs("btn-toggle-writer-system-info");
   if (systemToggle) systemToggle.textContent = workspaceState.systemInfoCollapsed ? "\u0e41\u0e2a\u0e14\u0e07\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e23\u0e30\u0e1a\u0e1a" : "\u0e0b\u0e48\u0e2d\u0e19\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e23\u0e30\u0e1a\u0e1a";
   const selfCheckCard = qs("review-checklist")?.closest(".article-preview-review-card") || null;
@@ -1759,14 +1823,11 @@ function renderAll(options = {}) {
   renderStatusChip();
   renderActivityLog();
   renderWriterBrief();
-  renderFieldPackEvidencePanel();
-  renderTaxonomyReviewPanel();
-  renderFieldReturnEvidencePanel();
+  renderConfirmedMetaSummary();
   renderWriterSystemInfo();
   renderBlocks();
   renderHeroAndAssets();
   renderMediaLibraryVisibility();
-  renderConfirmedMetaVisibility();
   renderOtherTransportPanel();
   renderPreview();
   renderReviewChecklist();
@@ -2220,10 +2281,6 @@ function wire() {
     workspaceState.mediaCollapsed = !workspaceState.mediaCollapsed;
     renderMediaLibraryVisibility();
   });
-  qs("btn-toggle-confirmed-meta")?.addEventListener("click", () => {
-    workspaceState.confirmedMetaCollapsed = !workspaceState.confirmedMetaCollapsed;
-    renderConfirmedMetaVisibility();
-  });
   qs("btn-toggle-writer-system-info")?.addEventListener("click", () => {
     workspaceState.systemInfoCollapsed = !workspaceState.systemInfoCollapsed;
     renderWriterSystemInfo();
@@ -2338,6 +2395,5 @@ async function init() {
 }
 
 init();
-
 
 
