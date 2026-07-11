@@ -1,0 +1,22 @@
+{
+  "evals": [
+    {
+      "id": "audit-cta-noop-validator",
+      "skill": "audit",
+      "prompt": "Audit whether collector/db/repository.mjs's validateRequestedCheckReturnsForFinalSubmission function (around line 1371) and its call site (around repository.mjs:6742) still match what the repo's PROJECT_POLICY.md and collector/PROJECT_POLICY.md claim about CTA/taxonomy submission-time validation. Report findings.",
+      "expected_output": "Identifies that validateRequestedCheckReturnsForFinalSubmission is a no-op (dead code still wired in), cites file:line, and reasons about whether this is a policy violation or an intentional design per the repo's own 'Error Placement' policy section rather than treating it as an obvious bug."
+    },
+    {
+      "id": "audit-root-state-staleness",
+      "skill": "audit",
+      "prompt": "Audit whether the root PROJECT_STATE.md is stale by comparing its claims (branch name, taxonomy merge status, recent milestones) against the actual current git log and branch of this repository. Report what's stale and what's still accurate.",
+      "expected_output": "Compares PROJECT_STATE.md's 'Current Branch: main' and taxonomy-not-merged claims against actual git branch/log, flags concrete staleness with evidence (commit hashes/dates), doesn't just restate the doc."
+    },
+    {
+      "id": "implement-fix-broken-doc-link",
+      "skill": "implement",
+      "prompt": "collector/PROJECT_STATE.md links to './docs/taxonomy-v1-scope.md' (in the 2026-06-20 CTA Milestone section) but that file does not exist anywhere in the repo. Apply the smallest safe fix for this broken doc link.",
+      "expected_output": "Makes a single-purpose, minimal diff (either removes the dead link, replaces it with an accurate existing reference, or clearly marks it as pending) without touching unrelated content in the file, and reports files changed + why it's the smallest safe change. Does not commit/push."
+    }
+  ]
+}
