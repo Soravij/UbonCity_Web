@@ -1039,7 +1039,8 @@ function parseJsonSafe(value, fallback = null) {
 }
 
 function getAssignmentCurrentRound(assignment = null) {
-  return Math.max(1, (Number(assignment?.revision_round || 0) || 0) + 1);
+  const round = Number(assignment?.revision_round);
+  return Number.isFinite(round) && round > 0 ? round : 1;
 }
 
 function getAssignmentSubmissionDraftKey(assignmentId, assignment = null) {
@@ -3445,29 +3446,8 @@ function getAssignmentReviewMediaItems(assignment, deliverableType) {
   const bundle = state.assignments.deliverablesBundle && typeof state.assignments.deliverablesBundle === "object"
     ? state.assignments.deliverablesBundle
     : null;
-  const assignmentId = Number(assignment?.id || 0) || 0;
   const type = String(deliverableType || "").trim().toLowerCase();
   const latestSubmission = getLatestAssignmentSubmissionRow(assignment);
-  const submissions = Array.isArray(state.assignments.submissionRowsByAssignment?.[assignmentId])
-    ? state.assignments.submissionRowsByAssignment[assignmentId]
-    : (latestSubmission ? [latestSubmission] : []);
-  const deliverableRows = Array.isArray(state.assignments.deliverableRowsByAssignment?.[assignmentId])
-    ? state.assignments.deliverableRowsByAssignment[assignmentId]
-    : [];
-  const selectedBundle = selectAssignmentReviewMediaBundle(submissions, deliverableRows, type);
-  if (selectedBundle.source_type === "deliverables" && selectedBundle.items.length) {
-    const deliverableSourceRows = Array.isArray(bundle?.deliverables_by_type?.[type])
-      ? bundle.deliverables_by_type[type]
-      : selectedBundle.items;
-    return deliverableSourceRows
-      .map((row, index) => ({
-        key: `deliverable-${type}-${Number(row?.id || 0) || index}`,
-        url: resolveAssignmentReviewMediaUrl(row),
-        label: summarizeAssignmentReviewMediaLabel(row, `${getAssignmentDeliverableLabel(type)} ${index + 1}`),
-        meta: row?.created_at || row?.updated_at || "",
-      }))
-      .filter((row) => row.url);
-  }
   const fromBundle = Array.isArray(bundle?.deliverables_by_type?.[type])
     ? bundle.deliverables_by_type[type]
       .map((row, index) => ({
@@ -3479,17 +3459,6 @@ function getAssignmentReviewMediaItems(assignment, deliverableType) {
       .filter((row) => row.url)
     : [];
   if (fromBundle.length) return fromBundle;
-
-  if (selectedBundle.source_type === "payload" && selectedBundle.items.length) {
-    return selectedBundle.items
-      .map((asset, index) => ({
-        key: `payload-${type}-${Number(asset?.id || 0) || index}`,
-        url: String(asset?.public_url || "").trim(),
-        label: String(asset?.file_name || "").trim() || `${getAssignmentDeliverableLabel(type)} ${index + 1}`,
-        meta: String(asset?.mime_type || "").trim(),
-      }))
-      .filter((row) => row.url);
-  }
   const payloadAssets = Array.isArray(latestSubmission?.media_payload_json?.assets)
     ? latestSubmission.media_payload_json.assets
     : [];
@@ -3504,7 +3473,6 @@ function getAssignmentReviewMediaItems(assignment, deliverableType) {
     }))
     .filter((row) => row.url);
 }
-
 function getAssignmentReviewTextDeliverables() {
   const bundle = state.assignments.deliverablesBundle && typeof state.assignments.deliverablesBundle === "object"
     ? state.assignments.deliverablesBundle
