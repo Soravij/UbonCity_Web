@@ -1,4 +1,4 @@
-﻿import test from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -27,6 +27,43 @@ function extractNamedFunctionSource(source, name) {
     const char = source[index];
     if (char === "{") depth += 1;
     if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  throw new Error(`Could not extract function ${name}`);
+}
+
+function extractNamedFunctionSourceWithParams(source, name) {
+  const asyncMarker = `async function ${name}(`;
+  const syncMarker = `function ${name}(`;
+  const asyncStart = source.indexOf(asyncMarker);
+  const syncStart = source.indexOf(syncMarker);
+  const start = asyncStart >= 0 ? asyncStart : syncStart;
+  const marker = start === asyncStart ? asyncMarker : syncMarker;
+  assert.notEqual(start, -1, `${name} should exist`);
+  const parenStart = start + marker.length - 1;
+  let parenDepth = 0;
+  let paramsEnd = -1;
+  for (let index = parenStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '(') parenDepth += 1;
+    if (char === ')') {
+      parenDepth -= 1;
+      if (parenDepth === 0) {
+        paramsEnd = index;
+        break;
+      }
+    }
+  }
+  assert.notEqual(paramsEnd, -1, `${name} should have a parameter list`);
+  const bodyStart = source.indexOf('{', paramsEnd);
+  assert.notEqual(bodyStart, -1, `${name} should have a body`);
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '{') depth += 1;
+    if (char === '}') {
       depth -= 1;
       if (depth === 0) return source.slice(start, index + 1);
     }
@@ -3370,3 +3407,168 @@ test("assignment workspace summary uses a local updated-at formatter instead of 
   );
 });
 
+
+const loadAssignmentAssetsForTest = new Function(
+  "state",
+  "ensureSelectedAssignmentId",
+  "getAssignmentById",
+  "getAssignmentPageMode",
+  "api",
+  "buildAssignmentCaptureFileUploadQueue",
+  "applyAssignmentServerSyncedAssets",
+  "renderAssignmentDeliverableAssetOptions",
+  "renderAssignmentDeliverableAssetPreview",
+  "renderAssignmentDeliverablesSummary",
+  "renderAssignmentReviewSummary",
+  "renderAssignmentReviewSubmissionContent",
+  "setStatus",
+  "getAssignmentSubmissionFormConfig",
+  `${extractNamedFunctionSourceWithParams(appJs, "loadAssignmentAssets")}; return loadAssignmentAssets;`
+);
+
+const ensureAssignmentSubmissionPrefillLoadedForTest = new Function(
+  "state",
+  "isEditorUser",
+  "loadAssignmentSubmissionServerDraft",
+  "api",
+  "getAssignmentById",
+  "getAssignmentSubmissionDraftKey",
+  "getAssignmentSubmissionFormAssignment",
+  "renderAssignmentSubmissionForm",
+  "renderAssignmentReviewSummary",
+  "renderAssignmentReviewSubmissionContent",
+  `${extractNamedFunctionSourceWithParams(appJs, "ensureAssignmentSubmissionPrefillLoaded")}; return ensureAssignmentSubmissionPrefillLoaded;`
+);
+
+const getAssignmentSubmissionPrefillPayloadForTest = new Function(
+  "state",
+  "getAssignmentSubmissionDraftKey",
+  "readAssignmentSubmissionDraft",
+  "normalizeAssignmentSubmissionPayload",
+  `${extractNamedFunctionSource(appJs, "getAssignmentSubmissionPrefillPayload")}; return getAssignmentSubmissionPrefillPayload;`
+);
+
+function buildLoadAssignmentAssetsHarness(pageMode, rows) {
+  const state = {
+    assignments: {
+      selectedId: 1,
+      assets: [],
+      assetLookup: [],
+      contextFieldPack: null,
+      deliverablesBundle: null,
+    },
+  };
+  const loadAssignmentAssets = loadAssignmentAssetsForTest(
+    state,
+    () => 1,
+    () => ({ id: 1, content_item_id: 9 }),
+    () => pageMode,
+    async () => rows,
+    () => [],
+    () => ({ complete: true, expired_count: 0, assets: [] }),
+    () => {},
+    () => {},
+    () => {},
+    () => {},
+    () => {},
+    () => {},
+    () => ({ captureItems: [] })
+  );
+  return { state, loadAssignmentAssets };
+}
+
+function buildPrefillHydrationHarness(serverDraftPayload) {
+  const draftKey = "1:2";
+  const assignment = { id: 1, content_item_id: 9, revision_round: 2 };
+  const state = {
+    assignments: {
+      selectedId: 1,
+      latestSubmissionLoaded: {},
+      latestSubmissionRows: {},
+      latestSubmissionArticlePayloads: {},
+      serverSubmissionDraftPayloads: {},
+      serverSubmissionDraftLoaded: {},
+      contextFieldPack: null,
+    },
+  };
+  let renderCount = 0;
+  const loadAssignmentSubmissionServerDraft = async () => {
+    state.assignments.serverSubmissionDraftPayloads[draftKey] = serverDraftPayload;
+    state.assignments.serverSubmissionDraftLoaded[draftKey] = true;
+    return serverDraftPayload;
+  };
+  const ensureAssignmentSubmissionPrefillLoaded = ensureAssignmentSubmissionPrefillLoadedForTest(
+    state,
+    () => false,
+    loadAssignmentSubmissionServerDraft,
+    async () => ({ submissions: [] }),
+    () => assignment,
+    () => draftKey,
+    () => assignment,
+    () => {
+      renderCount += 1;
+    },
+    () => {},
+    () => {}
+  );
+  return { state, assignment, getRenderCount: () => renderCount, ensureAssignmentSubmissionPrefillLoaded };
+}
+
+test("work mode shows current-round assets from assetLookup even when they are unused", async () => {
+  const rows = [
+    { id: 11, selected_in_clean: 0, role: "unused", file_name: "round-asset-unused.jpg" },
+    { id: 12, selected_in_clean: 1, role: "gallery", file_name: "round-asset-selected.jpg" },
+  ];
+  const harness = buildLoadAssignmentAssetsHarness("work", rows);
+
+  await harness.loadAssignmentAssets();
+
+  assert.deepEqual(harness.state.assignments.assetLookup, rows);
+  assert.deepEqual(harness.state.assignments.assets, rows);
+});
+
+test("non-work mode keeps the existing selected-in-clean filtering", async () => {
+  const rows = [
+    { id: 21, selected_in_clean: 0, role: "unused", file_name: "round-asset-unused.jpg" },
+    { id: 22, selected_in_clean: 1, role: "gallery", file_name: "round-asset-selected.jpg" },
+  ];
+  const harness = buildLoadAssignmentAssetsHarness("review", rows);
+
+  await harness.loadAssignmentAssets();
+
+  assert.deepEqual(harness.state.assignments.assetLookup, rows);
+  assert.deepEqual(harness.state.assignments.assets, [rows[1]]);
+});
+
+test("server draft hydrates the submission form after async load", async () => {
+  const serverDraftPayload = { additional_text: "server draft text" };
+  const harness = buildPrefillHydrationHarness(serverDraftPayload);
+
+  await harness.ensureAssignmentSubmissionPrefillLoaded(harness.assignment);
+
+  assert.equal(harness.getRenderCount(), 1);
+  assert.deepEqual(
+    harness.state.assignments.serverSubmissionDraftPayloads["1:2"],
+    serverDraftPayload
+  );
+});
+
+test("local draft fallback still wins when there is no server draft", () => {
+  const state = {
+    assignments: {
+      serverSubmissionDraftPayloads: {},
+      latestSubmissionArticlePayloads: {
+        1: { additional_text: "latest submission text" },
+      },
+    },
+  };
+  const buildPrefillPayload = getAssignmentSubmissionPrefillPayloadForTest(
+    state,
+    () => "1:2",
+    () => ({ additional_text: "local draft text" }),
+    (payload) => payload
+  );
+  const result = buildPrefillPayload({ id: 1, content_item_id: 9 }, null);
+
+  assert.deepEqual(result, { additional_text: "local draft text" });
+});

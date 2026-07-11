@@ -7014,6 +7014,9 @@ async function ensureAssignmentSubmissionPrefillLoaded(assignment = null) {
   const assignmentId = Number(assignment?.id || 0) || 0;
   if (!assignmentId) return null;
   await loadAssignmentSubmissionServerDraft(assignment);
+  if (Number(state.assignments.selectedId || 0) === assignmentId && state.assignments.serverSubmissionDraftPayloads?.[getAssignmentSubmissionDraftKey(assignmentId, assignment)]) {
+    renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId)));
+  }
   if (state.assignments.latestSubmissionLoaded?.[assignmentId]) {
     return state.assignments.latestSubmissionArticlePayloads?.[assignmentId] || null;
   }
@@ -8865,7 +8868,9 @@ async function loadAssignmentAssets({ showStatus = false } = {}) {
     return Array.isArray(rows) ? rows : [];
   }
   state.assignments.assetLookup = Array.isArray(rows) ? rows : [];
-  state.assignments.assets = state.assignments.assetLookup.filter((row) => Number(row.selected_in_clean || 0) === 1 && String(row.role || "") !== "unused");
+  state.assignments.assets = pageMode === "work"
+    ? state.assignments.assetLookup
+    : state.assignments.assetLookup.filter((row) => Number(row.selected_in_clean || 0) === 1 && String(row.role || "") !== "unused");
   const formConfig = getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack);
   const localQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
   if (!localQueue.length) {
