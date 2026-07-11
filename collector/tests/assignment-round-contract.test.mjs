@@ -17,6 +17,7 @@ const repositoryJs = fs.readFileSync(
   path.join(collectorRoot, 'db', 'repository.mjs'),
   'utf8'
 );
+const reviewMediaItemsSource = extractNamedFunctionSource(appJs, 'getAssignmentReviewMediaItems');
 
 function extractNamedFunctionSource(source, name) {
   const marker = `function ${name}`;
@@ -122,6 +123,54 @@ test('assignment work round helpers no longer derive revision_round + 1', () => 
   snippets.forEach((snippet) => {
     assert.equal(snippet.includes('revision_round + 1'), false);
   });
+});
+
+test('review media helper stays bundle-first and falls back to latest submission payload', () => {
+  assert.equal(reviewMediaItemsSource.includes('selectAssignmentReviewMediaBundle'), false);
+  assert.equal(reviewMediaItemsSource.includes('submissionRowsByAssignment'), false);
+  assert.equal(reviewMediaItemsSource.includes('deliverableRowsByAssignment'), false);
+  assert.equal(reviewMediaItemsSource.includes('selectedBundle'), false);
+
+  const buildItems = new Function('state', `
+    function getLatestAssignmentSubmissionRow() { return state.latestSubmission; }
+    function resolveAssignmentReviewMediaUrl(item) { return String(item?.public_url || item?.url || '').trim(); }
+    function summarizeAssignmentReviewMediaLabel(item, fallbackLabel) { return String(item?.label || '').trim() || fallbackLabel; }
+    function getAssignmentDeliverableLabel(type) { return type === 'videos' ? 'Video' : 'Photo'; }
+    ${reviewMediaItemsSource}
+    return getAssignmentReviewMediaItems;
+  `);
+
+  const fromBundle = buildItems({
+    assignments: {
+      deliverablesBundle: {
+        deliverables_by_type: {
+          photos: [{ id: 1, public_url: 'https://example.test/bundle.jpg', created_at: '2026-01-01' }],
+        },
+      },
+    },
+    latestSubmission: null,
+  })({ id: 29 }, 'photos');
+  assert.equal(fromBundle.length, 1);
+  assert.equal(fromBundle[0].url, 'https://example.test/bundle.jpg');
+  assert.equal(fromBundle[0].label, 'Photo 1');
+
+  const fromPayload = buildItems({
+    assignments: {
+      deliverablesBundle: {
+        deliverables_by_type: {
+          photos: [],
+        },
+      },
+    },
+    latestSubmission: {
+      media_payload_json: {
+        assets: [{ id: 7, mime_type: 'image/jpeg', public_url: 'https://example.test/payload.jpg', file_name: 'payload.jpg' }],
+      },
+    },
+  })({ id: 29 }, 'photos');
+  assert.equal(fromPayload.length, 1);
+  assert.equal(fromPayload[0].url, 'https://example.test/payload.jpg');
+  assert.equal(fromPayload[0].label, 'payload.jpg');
 });
 
 test('draft save load and delete use the canonical assignment revision_round', () => {
