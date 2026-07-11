@@ -8848,6 +8848,7 @@ async function loadAssignmentDeliverablesBundle({ showStatus = true } = {}) {
 async function loadAssignmentAssets({ showStatus = false } = {}) {
   const assignmentId = ensureSelectedAssignmentId();
   const assignment = getAssignmentById(assignmentId);
+  const pageMode = getAssignmentPageMode();
   const contentItemId = Number(assignment?.content_item_id || 0) || 0;
   if (!contentItemId) {
     state.assignments.assets = [];
@@ -8856,7 +8857,10 @@ async function loadAssignmentAssets({ showStatus = false } = {}) {
     renderAssignmentDeliverableAssetPreview();
     return [];
   }
-  const rows = await api(`/api/assets?content_item_id=${contentItemId}`);
+  const assetQuery = pageMode === "work"
+    ? `/api/assets?assignment_id=${assignmentId}`
+    : `/api/assets?content_item_id=${contentItemId}`;
+  const rows = await api(assetQuery);
   if (Number(state.assignments.selectedId || 0) !== assignmentId) {
     return Array.isArray(rows) ? rows : [];
   }

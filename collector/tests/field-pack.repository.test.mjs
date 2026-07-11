@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -193,7 +193,64 @@ function createTestContext() {
     };
   }
 
-  function createRawOnlyAutoDependencies(itemId, suffix = "raw") {
+    function createAssignmentWorkAsset(itemId, assignmentId, round, suffix = "A", options = {}) {
+    const mimeType = String(options.mime_type || "image/jpeg");
+    const extension = String(options.extension || (mimeType.startsWith("video/") ? "mp4" : "jpg"));
+    const assetResult = db.prepare(`
+      INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
+      VALUES (?, 'local', ?, ?, ?, 100, ?)
+    `).run(
+      `work-asset-${itemId}-${assignmentId}-${round}-${suffix}`,
+      `uploads/${itemId}-${assignmentId}-${round}-${suffix}.${extension}`,
+      `${itemId}-${assignmentId}-${round}-${suffix}.${extension}`,
+      mimeType,
+      `work-checksum-${itemId}-${assignmentId}-${round}-${suffix}`
+    );
+    const assetId = Number(assetResult.lastInsertRowid || 0);
+    const role = String(options.role || "gallery").trim() || "gallery";
+    const selectedInClean = options.selected_in_clean == null ? 1 : Number(options.selected_in_clean || 0) ? 1 : 0;
+    const isCover = options.is_cover == null ? 0 : Number(options.is_cover || 0) ? 1 : 0;
+    const placementType = String(options.placement_type || (role === "inline" ? "inline" : role === "unused" ? "unused" : "gallery")).trim() || "gallery";
+    const mediaType = String(options.assignment_media_type || (mimeType.startsWith("video/") ? "video" : "image")).trim().toLowerCase() || "image";
+    const surface = String(options.assignment_surface || "assignment_work").trim() || "assignment_work";
+    const contentAssetResult = db.prepare(`
+      INSERT INTO content_assets (
+        content_item_id,
+        asset_id,
+        role,
+        selected_in_clean,
+        is_cover,
+        placement_type,
+        sort_order,
+        assignment_id,
+        assignment_round,
+        assignment_media_type,
+        assignment_surface,
+        assignment_sync_batch_id
+      ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+    `).run(
+      itemId,
+      assetId,
+      role,
+      selectedInClean,
+      isCover,
+      placementType,
+      assignmentId,
+      round,
+      mediaType,
+      surface,
+      `sync-${itemId}-${assignmentId}-${round}-${suffix}`
+    );
+    return {
+      asset_id: assetId,
+      content_asset_id: Number(contentAssetResult.lastInsertRowid || 0),
+      assignment_id: assignmentId,
+      assignment_round: round,
+      assignment_surface: surface,
+      assignment_media_type: mediaType,
+    };
+  }
+function createRawOnlyAutoDependencies(itemId, suffix = "raw") {
     const item = repo.getItem(itemId);
     const sourceResult = db.prepare(`
       INSERT INTO source_records (content_item_id, source_type, source_name, source_url, source_entity_id, payload_json)
@@ -308,6 +365,7 @@ function createTestContext() {
     createExecutionChannel,
     setRowTimestamps,
     createContentAsset,
+    createAssignmentWorkAsset,
     createRawOnlyAutoDependencies,
     createRawReview,
     createQualityCheck,
@@ -2075,12 +2133,11 @@ test("createAssignmentSubmissionDeliverable rejects source_asset_id from another
   }
 });
 
-test("resubmitted assignment reuses latest submission row and preserves media when no new media payload is sent", () => {
+test("resubmitted assignment creates a new submission row, preserves the previous one, and rebinds deliverables to the current round", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Resubmit Keep Media");
     const assignee = ctx.createUser("resubmit-keep-media");
-    const photoAsset = ctx.createContentAsset(item.id, "photo-a", { mime_type: "image/jpeg", extension: "jpg" });
     ctx.createReadinessBrief(item.id, "resubmit-keep-media");
 
     const assignmentResult = ctx.repo.createAssignmentFromReadiness(
@@ -2091,6 +2148,7 @@ test("resubmitted assignment reuses latest submission row and preserves media wh
       "admin"
     );
     const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const photoAssetFirstSubmission = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "photo-a", { mime_type: "image/jpeg", extension: "jpg" });
     const submission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
       submitted_by_user_id: assignee.id,
@@ -2099,7 +2157,7 @@ test("resubmitted assignment reuses latest submission row and preserves media wh
       media_payload_json: {
         assets: [
           {
-            id: photoAsset.asset_id,
+            id: photoAssetFirstSubmission.asset_id,
             file_name: "keep-media.jpg",
             mime_type: "image/jpeg",
             public_url: "/media/uploads/keep-media.jpg",
@@ -2119,7 +2177,7 @@ test("resubmitted assignment reuses latest submission row and preserves media wh
       submission_id: submission.id,
       deliverable_type: "photos",
       status: "submitted",
-      source_asset_id: photoAsset.asset_id,
+      source_asset_id: photoAssetFirstSubmission.asset_id,
       title: "Photo A",
     });
 
@@ -2138,20 +2196,41 @@ test("resubmitted assignment reuses latest submission row and preserves media wh
       contributor_note: "revised text only",
     });
 
-    assert.equal(resubmitted.id, submission.id);
+    assert.notEqual(resubmitted.id, submission.id);
     assert.equal(resubmitted.submission_state, "resubmitted");
     assert.equal(resubmitted.article_payload_json?.summary, "revised submission");
     assert.equal(Array.isArray(resubmitted.media_payload_json?.assets), true);
     assert.equal(resubmitted.media_payload_json.assets.length, 1);
     assert.equal(resubmitted.media_payload_json.assets[0]?.public_url, "/media/uploads/keep-media.jpg");
 
+    const previousSubmission = ctx.repo.getAssignmentSubmissionById(submission.id);
+    assert.equal(previousSubmission.article_payload_json?.summary, "first submission");
+
     const assignmentAfter = ctx.repo.getAssignmentById(assignmentId);
-    assert.equal(Number(assignmentAfter.latest_submission_id || 0), submission.id);
+    assert.equal(Number(assignmentAfter.latest_submission_id || 0), resubmitted.id);
+    assert.equal(Number(assignmentAfter.revision_round || 0), 1);
+
+    const photoAssetResubmit = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "photo-b", { mime_type: "image/jpeg", extension: "jpg" });
+    ctx.repo.createAssignmentSubmissionDeliverable({
+      assignment_id: assignmentId,
+      submission_id: resubmitted.id,
+      deliverable_type: "photos",
+      status: "submitted",
+      source_asset_id: photoAssetResubmit.asset_id,
+      title: "Photo B",
+    });
 
     const latestBundle = ctx.repo.getLatestAssignmentDeliverablesBundle(assignmentId);
-    assert.equal(Number(latestBundle.latest_submission_id || 0), submission.id);
+    assert.equal(Number(latestBundle.latest_submission_id || 0), resubmitted.id);
     assert.equal(Array.isArray(latestBundle.deliverables_by_type?.photos), true);
     assert.equal(latestBundle.deliverables_by_type.photos.length, 1);
+    assert.equal(Number(latestBundle.deliverables_by_type.photos[0]?.source_asset_id || 0), photoAssetResubmit.asset_id);
+
+    const previousDeliverables = ctx.repo
+      .listAssignmentSubmissionDeliverablesBySubmission(assignmentId, submission.id)
+      .filter((row) => row.deliverable_type === "photos");
+    assert.equal(previousDeliverables.length, 1);
+    assert.equal(Number(previousDeliverables[0]?.source_asset_id || 0), photoAssetFirstSubmission.asset_id);
   } finally {
     ctx.cleanup();
   }
@@ -2217,13 +2296,101 @@ test("resubmitted assignment merges incoming media payload into the existing sub
       },
     });
 
-    assert.equal(resubmitted.id, submission.id);
+    assert.notEqual(resubmitted.id, submission.id);
     assert.equal(Array.isArray(resubmitted.media_payload_json?.assets), true);
     assert.equal(resubmitted.media_payload_json.assets.length, 2);
     assert.deepEqual(
       resubmitted.media_payload_json.assets.map((asset) => asset.public_url),
       ["/media/uploads/photo-one.jpg", "/media/uploads/video-two.mp4"]
     );
+
+    const previousSubmission = ctx.repo.getAssignmentSubmissionById(submission.id);
+    assert.equal(Array.isArray(previousSubmission.media_payload_json?.assets), true);
+    assert.equal(previousSubmission.media_payload_json.assets.length, 1);
+    assert.equal(previousSubmission.media_payload_json.assets[0]?.public_url, "/media/uploads/photo-one.jpg");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("createAssignmentSubmissionDeliverable binds source_asset_id to the current assignment, round, and assignment_work surface", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Asset Binding Place");
+    const assignee = ctx.createUser("asset-binding");
+    ctx.createReadinessBrief(item.id, "asset-binding");
+
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const roundZeroAsset = ctx.createAssignmentWorkAsset(item.id, assignmentId, 0, "round-zero");
+
+    ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+    });
+    ctx.repo.updateAssignmentState(
+      assignmentId,
+      "submitted",
+      "submitter@local",
+      { actor_role: "user", reason_code: "submission_created" }
+    );
+    ctx.repo.updateAssignmentState(
+      assignmentId,
+      "revision_requested",
+      "reviewer@local",
+      { actor_role: "user", reason_code: "needs_revision" }
+    );
+    const resubmitted = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "resubmitted",
+    });
+
+    const currentRoundAsset = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "round-one");
+    const created = ctx.repo.createAssignmentSubmissionDeliverable({
+      assignment_id: assignmentId,
+      submission_id: resubmitted.id,
+      deliverable_type: "photos",
+      source_asset_id: currentRoundAsset.asset_id,
+    }, "tester@local");
+    assert.equal(Number(created.source_asset_id || 0), currentRoundAsset.asset_id);
+
+    assert.throws(() => {
+      ctx.repo.createAssignmentSubmissionDeliverable({
+        assignment_id: assignmentId,
+        submission_id: resubmitted.id,
+        deliverable_type: "photos",
+        source_asset_id: roundZeroAsset.asset_id,
+      }, "tester@local");
+    }, /source_asset_id does not belong to current assignment round/);
+
+    const foreignAssignmentId = assignmentId + 999000;
+    const foreignAssignmentAsset = ctx.createAssignmentWorkAsset(item.id, foreignAssignmentId, 0, "foreign-assignment");
+    assert.throws(() => {
+      ctx.repo.createAssignmentSubmissionDeliverable({
+        assignment_id: assignmentId,
+        submission_id: resubmitted.id,
+        deliverable_type: "photos",
+        source_asset_id: foreignAssignmentAsset.asset_id,
+      }, "tester@local");
+    }, /source_asset_id does not belong to assignment$/);
+
+    const wrongSurfaceAsset = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "wrong-surface", { assignment_surface: "reference_media" });
+    assert.throws(() => {
+      ctx.repo.createAssignmentSubmissionDeliverable({
+        assignment_id: assignmentId,
+        submission_id: resubmitted.id,
+        deliverable_type: "photos",
+        source_asset_id: wrongSurfaceAsset.asset_id,
+      }, "tester@local");
+    }, /source_asset_id does not belong to assignment work surface/);
   } finally {
     ctx.cleanup();
   }
@@ -2401,7 +2568,6 @@ test("createAssignmentSubmissionDeliverable rejects text-like deliverables that 
   try {
     const item = ctx.createItem("Omicron Place");
     const assignee = ctx.createUser("text-like");
-    const linkedAsset = ctx.createContentAsset(item.id, "linked");
     ctx.createReadinessBrief(item.id, "Omicron");
 
     const assignmentResult = ctx.repo.createAssignmentFromReadiness(
@@ -2412,6 +2578,7 @@ test("createAssignmentSubmissionDeliverable rejects text-like deliverables that 
       "admin"
     );
     const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const linkedAsset = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "linked");
     const submissionResult = ctx.db.prepare(`
       INSERT INTO content_assignment_submissions (
         assignment_id, content_item_id, submitted_by_user_id, submission_state,
@@ -2454,8 +2621,6 @@ test("createAssignmentSubmissionDeliverable rejects asset-backed deliverables wh
   try {
     const item = ctx.createItem("Pi Place");
     const assignee = ctx.createUser("asset-kind");
-    const imageAsset = ctx.createContentAsset(item.id, "image", { mime_type: "image/jpeg", extension: "jpg" });
-    const videoAsset = ctx.createContentAsset(item.id, "video", { mime_type: "video/mp4", extension: "mp4" });
     ctx.createReadinessBrief(item.id, "Pi");
 
     const assignmentResult = ctx.repo.createAssignmentFromReadiness(
@@ -2466,6 +2631,8 @@ test("createAssignmentSubmissionDeliverable rejects asset-backed deliverables wh
       "admin"
     );
     const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const imageAsset = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "image", { mime_type: "image/jpeg", extension: "jpg" });
+    const videoAsset = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "video", { mime_type: "video/mp4", extension: "mp4" });
     const submissionResult = ctx.db.prepare(`
       INSERT INTO content_assignment_submissions (
         assignment_id, content_item_id, submitted_by_user_id, submission_state,
@@ -2518,7 +2685,6 @@ test("summarizeAssignmentDeliverables counts only fulfilled deliverables for rea
   try {
     const item = ctx.createItem("Rho Place");
     const assignee = ctx.createUser("fulfilled-status");
-    const linkedAsset = ctx.createContentAsset(item.id, "fulfilled");
     ctx.createReadinessBrief(item.id, "Rho");
 
     const assignmentResult = ctx.repo.createAssignmentFromReadiness(
@@ -2529,6 +2695,7 @@ test("summarizeAssignmentDeliverables counts only fulfilled deliverables for rea
       "admin"
     );
     const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const linkedAsset = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "fulfilled");
     const submissionResult = ctx.db.prepare(`
       INSERT INTO content_assignment_submissions (
         assignment_id, content_item_id, submitted_by_user_id, submission_state,
@@ -2603,7 +2770,6 @@ test("createAssignmentSubmissionDeliverable rejects stale submission even when i
   try {
     const item = ctx.createItem("Sigma Place");
     const assignee = ctx.createUser("stale-submission");
-    const linkedAsset = ctx.createContentAsset(item.id, "stale");
     ctx.createReadinessBrief(item.id, "Sigma");
 
     const assignmentResult = ctx.repo.createAssignmentFromReadiness(
@@ -2614,6 +2780,7 @@ test("createAssignmentSubmissionDeliverable rejects stale submission even when i
       "admin"
     );
     const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const linkedAsset = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "stale");
 
     const oldSubmissionResult = ctx.db.prepare(`
       INSERT INTO content_assignment_submissions (
@@ -2704,8 +2871,6 @@ test("evaluateContentAssetCleanupEligibility blocks excluded asset referenced by
   try {
     const item = ctx.createItem("Upsilon Place");
     const assignee = ctx.createUser("cleanup-assignment");
-    const linkedAsset = ctx.createContentAsset(item.id, "cleanup-assignment");
-    ctx.repo.setContentAssetSelected(item.id, linkedAsset.asset_id, false);
     ctx.createReadinessBrief(item.id, "Upsilon");
 
     const assignmentResult = ctx.repo.createAssignmentFromReadiness(
@@ -2716,6 +2881,8 @@ test("evaluateContentAssetCleanupEligibility blocks excluded asset referenced by
       "admin"
     );
     const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const linkedAsset = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "cleanup-assignment");
+    ctx.repo.setContentAssetSelected(item.id, linkedAsset.asset_id, false);
     const submissionResult = ctx.db.prepare(`
       INSERT INTO content_assignment_submissions (
         assignment_id, content_item_id, submitted_by_user_id, submission_state,
