@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "crypto";
+﻿import { createHash, randomUUID } from "crypto";
 import path from "path";
 
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
@@ -4577,21 +4577,6 @@ export function createRepository(db) {
       contributor_note, reviewer_note, created_at, updated_at, reviewed_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  const updateAssignmentSubmissionStmt = db.prepare(`
-    UPDATE content_assignment_submissions
-    SET
-      submitted_by_user_id=?,
-      submission_state=?,
-      article_payload_json=?,
-      media_payload_json=?,
-      field_return_payload_json=?,
-      contributor_note=COALESCE(?, contributor_note),
-      reviewer_note=COALESCE(?, reviewer_note),
-      reviewed_at=COALESCE(?, reviewed_at),
-      updated_at=?
-    WHERE id=?
-  `);
-
   const listAssignmentSubmissionsStmt = db.prepare(`
     SELECT *
     FROM content_assignment_submissions
@@ -6296,7 +6281,6 @@ function normalizeStateValue(value, stateGroup) {
         ? normalizeAssignmentSubmissionRow(getAssignmentSubmissionByIdStmt.get(latestSubmissionId))
         : null;
       if (latestSubmission && Number(latestSubmission.assignment_id || 0) === assignmentId) {
-        const updatedAt = toBangkokSqlTimestamp();
         const nextArticlePayload = articlePayload == null
           ? latestSubmission.article_payload_json
           : mergeAssignmentSubmissionObjectPayload(latestSubmission.article_payload_json, articlePayload);
@@ -6306,7 +6290,10 @@ function normalizeStateValue(value, stateGroup) {
         const nextFieldReturnPayload = fieldReturnPayload == null
           ? latestSubmission.field_return_payload_json
           : fieldReturnPayload;
-        updateAssignmentSubmissionStmt.run(
+        const createdAt = toBangkokSqlTimestamp();
+        const res = insertAssignmentSubmissionStmt.run(
+          assignmentId,
+          Number(assignment.content_item_id),
           submittedByUserId,
           submissionState,
           nextArticlePayload ? JSON.stringify(nextArticlePayload) : null,
@@ -6314,17 +6301,17 @@ function normalizeStateValue(value, stateGroup) {
           nextFieldReturnPayload ? JSON.stringify(nextFieldReturnPayload) : null,
           contributorNote,
           reviewerNote,
-          reviewedAt,
-          updatedAt,
-          latestSubmissionId
+          createdAt,
+          createdAt,
+          reviewedAt
         );
-        setAssignmentLatestSubmission(assignmentId, latestSubmissionId);
+        const submissionId = Number(res.lastInsertRowid || 0);
+        setAssignmentLatestSubmission(assignmentId, submissionId);
         return normalizeAssignmentSubmissionRow(
-          db.prepare("SELECT * FROM content_assignment_submissions WHERE id=? LIMIT 1").get(latestSubmissionId)
+          db.prepare("SELECT * FROM content_assignment_submissions WHERE id=? LIMIT 1").get(submissionId)
         );
       }
     }
-
     const createdAt = toBangkokSqlTimestamp();
     const res = insertAssignmentSubmissionStmt.run(
       assignmentId,
@@ -6502,13 +6489,20 @@ function normalizeStateValue(value, stateGroup) {
     const sourceAssetId = payload.source_asset_id == null || payload.source_asset_id === ""
       ? null
       : Number(payload.source_asset_id || 0);
-    if (sourceAssetId != null && (!Number.isFinite(sourceAssetId) || sourceAssetId <= 0)) {
-      throw new Error("source_asset_id must be a positive integer");
-    }
-    if (sourceAssetId != null) {
+        if (sourceAssetId != null) {
       const linkedContentAsset = getContentAssetWithAssetByItemAndAssetStmt.get(contentItemId, sourceAssetId);
       if (!linkedContentAsset) {
         throw new Error("source_asset_id does not belong to content item");
+      }
+      if (Number(linkedContentAsset.assignment_id || 0) !== assignmentId) {
+        throw new Error("source_asset_id does not belong to assignment");
+      }
+      const canonicalAssignmentRound = Math.max(1, Number(assignment.revision_round || 0) || 1);
+      if (Number(linkedContentAsset.assignment_round || 0) !== canonicalAssignmentRound) {
+        throw new Error("source_asset_id does not belong to current assignment round");
+      }
+      if (String(linkedContentAsset.assignment_surface || "").trim().toLowerCase() !== "assignment_work") {
+        throw new Error("source_asset_id does not belong to assignment work surface");
       }
       if (
         ASSIGNMENT_ASSET_BACKED_DELIVERABLE_TYPES.has(deliverableType)
@@ -6516,8 +6510,7 @@ function normalizeStateValue(value, stateGroup) {
       ) {
         throw new Error("source_asset_id mime_type does not match deliverable_type");
       }
-    }
-    const sourceUrl = payload.source_url == null ? null : String(payload.source_url || "").trim() || null;
+    }const sourceUrl = payload.source_url == null ? null : String(payload.source_url || "").trim() || null;
     if (ASSIGNMENT_TEXT_LIKE_DELIVERABLE_TYPES.has(deliverableType) && !textContent && !sourceUrl) {
       throw new Error("text-like deliverables require text_content or source_url");
     }

@@ -1,4 +1,4 @@
-import "dotenv/config";
+﻿import "dotenv/config";
 import crypto from "crypto";
 import { once } from "events";
 import fsSync from "fs";
@@ -5820,13 +5820,13 @@ function parseAssetPathForUrl(storagePath) {
   return `/media/${relative}`;
 }
 
-function isCollectorControlledLocalAssetRow(row) {
+function isCollectorControlledLocalAssetRow(row, { allowVideo = false } = {}) {
   const storageDisk = String(row?.storage_disk || "").trim().toLowerCase();
   const storagePath = String(row?.storage_path || "").trim();
   const mimeType = String(row?.mime_type || "").trim().toLowerCase();
   if (!["local", "nas"].includes(storageDisk)) return false;
   if (!storagePath || /^https?:\/\//i.test(storagePath)) return false;
-  if (mimeType && !mimeType.startsWith("image/")) return false;
+  if (mimeType && !mimeType.startsWith("image/") && !(allowVideo && mimeType.startsWith("video/"))) return false;
   return true;
 }
 
@@ -5929,7 +5929,15 @@ function listDraftAssignmentWorkAssetRows(options = {}) {
       ca.assignment_id,
       ca.assignment_round,
       ca.assignment_media_type,
+      ca.assignment_surface,
       ca.content_item_id,
+      ca.role,
+      ca.selected_in_clean,
+      ca.is_cover,
+      ca.placement_type,
+      ca.sort_order,
+      ca.assignment_sync_batch_id,
+      a.id AS id,
       a.id AS asset_id,
       a.storage_disk,
       a.storage_path,
@@ -14351,46 +14359,62 @@ app.get("/api/exports", (_req, res) => {
 
 app.get("/api/assets", (req, res) => {
   const role = actorPolicyRole(req, "");
+  const assignmentId = Number(req.query.assignment_id || 0);
   const contentItemId = Number(req.query.content_item_id || 0);
   const onlySelected = role === "freelance" || String(req.query.only_selected || "0") === "1";
   const localOnly = String(req.query.local_only || "0") === "1";
   let rows = [];
 
-  if (contentItemId > 0) {
-    if (!ensureItemBriefReadAccess(req, res, contentItemId)) {
+  if (assignmentId > 0) {
+    const assignment = repo.getAssignmentById(assignmentId);
+    if (!assignment) {
+      res.status(404).json({ error: "assignment not found" });
       return;
     }
-    cleanupExpiredAssignmentWorkDraftAssets({ contentItemId, maxAgeMs: ASSIGNMENT_WORK_SYNC_EXPIRY_MS });
-  } else if (role !== "owner" && role !== "admin" && role !== "user") {
-    res.status(403).json({ error: "forbidden" });
-    return;
-  }
-
-  if (contentItemId > 0) {
-    rows = db
-      .prepare(`
-      SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type,
-             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface, ca.assignment_sync_batch_id,
-             c.title AS content_title
-      FROM assets a
-      LEFT JOIN content_assets ca ON ca.asset_id = a.id
-      LEFT JOIN content_items c ON c.id = ca.content_item_id
-      WHERE ca.content_item_id = ?
-      ORDER BY a.id DESC
-    `)
-      .all(contentItemId);
+    if (!hasAssignmentSubmissionAccess(req, assignment)) {
+      res.status(403).json({ error: "only assigned contributor can upload files for this assignment" });
+      return;
+    }
+    const assignmentRound = resolveAssignmentCurrentRound(assignment);
+    cleanupExpiredAssignmentWorkDraftAssets({ assignmentId, assignmentRound, maxAgeMs: ASSIGNMENT_WORK_SYNC_EXPIRY_MS });
+    rows = listDraftAssignmentWorkAssetRows({ assignmentId, assignmentRound });
   } else {
-    rows = db
-      .prepare(`
-      SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type,
-             ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface, ca.assignment_sync_batch_id,
-             c.title AS content_title
-      FROM assets a
-      LEFT JOIN content_assets ca ON ca.asset_id = a.id
-      LEFT JOIN content_items c ON c.id = ca.content_item_id
-      ORDER BY a.id DESC
-    `)
-      .all();
+    if (contentItemId > 0) {
+      if (!ensureItemBriefReadAccess(req, res, contentItemId)) {
+        return;
+      }
+      cleanupExpiredAssignmentWorkDraftAssets({ contentItemId, maxAgeMs: ASSIGNMENT_WORK_SYNC_EXPIRY_MS });
+    } else if (role !== "owner" && role !== "admin" && role !== "user") {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+
+    if (contentItemId > 0) {
+      rows = db
+        .prepare(`
+        SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type,
+               ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface, ca.assignment_sync_batch_id,
+               c.title AS content_title
+        FROM assets a
+        LEFT JOIN content_assets ca ON ca.asset_id = a.id
+        LEFT JOIN content_items c ON c.id = ca.content_item_id
+        WHERE ca.content_item_id = ?
+        ORDER BY a.id DESC
+      `)
+        .all(contentItemId);
+    } else {
+      rows = db
+        .prepare(`
+        SELECT a.*, ca.content_item_id, ca.role, ca.sort_order, ca.selected_in_clean, ca.is_cover, ca.placement_type,
+               ca.assignment_id, ca.assignment_round, ca.assignment_media_type, ca.assignment_surface, ca.assignment_sync_batch_id,
+               c.title AS content_title
+        FROM assets a
+        LEFT JOIN content_assets ca ON ca.asset_id = a.id
+        LEFT JOIN content_items c ON c.id = ca.content_item_id
+        ORDER BY a.id DESC
+      `)
+        .all();
+    }
   }
 
   const mapped = rows
@@ -14401,12 +14425,11 @@ app.get("/api/assets", (req, res) => {
       placement_type: String(row.placement_type || "unused"),
       public_url: parseAssetPathForUrl(row.storage_path),
     }))
-    .filter((row) => isCollectorControlledLocalAssetRow(row))
+    .filter((row) => isCollectorControlledLocalAssetRow(row, { allowVideo: assignmentId > 0 }))
     .filter((row) => (onlySelected ? row.selected_in_clean === 1 && row.role !== "unused" : true));
 
   res.json(mapped);
 });
-
 app.post("/api/assets/upload", requireRole("owner", "admin", "editor", "user"), uploadRateLimit, upload.array("file", 20), async (req, res) => {
   const files = Array.isArray(req.files) ? req.files : [];
   if (!files.length) {
