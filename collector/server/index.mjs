@@ -3626,6 +3626,10 @@ function normalizeAssignmentShotPromptList(assignment = null) {
   return Array.from(new Set(raw.map((value) => String(value || "").trim()).filter(Boolean)));
 }
 
+function inferLegacyCaptureMediaType(prompt) {
+  return /(วิดีโอ|video)/i.test(String(prompt || "")) ? "video" : "image";
+}
+
 function toCaptureShotSlug(prompt, index) {
   const base = String(prompt || "")
     .trim()
@@ -3650,14 +3654,24 @@ function enforceResetPerShotRequirements(assignment, assignmentId, currentRound)
   const imageResetRequired = Number(assignment?.image_reset_required ? 1 : 0) === 1;
   const videoResetRequired = Number(assignment?.video_reset_required ? 1 : 0) === 1;
   if (!imageResetRequired && !videoResetRequired) return;
-  const prompts = normalizeAssignmentShotPromptList(assignment);
-  if (!prompts.length) {
-    throw new Error("assignment reset requires shot_list_suggestions in brief_json");
+  const { fieldPack } = resolveAssignmentSubmissionPromptContext(assignment);
+  const structuredCaptureItems = fieldPack ? getStructuredFieldPackCaptureItems(fieldPack) : [];
+  const shotItems = structuredCaptureItems.length
+    ? structuredCaptureItems.map((item) => ({
+      prompt: item.prompt,
+      itemOrder: item.itemOrder,
+      displayIndex: item.displayIndex,
+      mediaType: item.mediaType,
+    }))
+    : normalizeAssignmentShotPromptList(assignment).map((prompt, index) => ({
+      prompt,
+      itemOrder: index,
+      displayIndex: index + 1,
+      mediaType: inferLegacyCaptureMediaType(prompt),
+    }));
+  if (!shotItems.length) {
+    throw new Error("assignment reset requires must_capture items in the field pack or shot_list_suggestions in brief_json");
   }
-  const requiredShotSlugs = prompts.map((prompt, index) => ({
-    slug: toCaptureShotSlug(prompt, index),
-    label: `${index + 1}. ${String(prompt || "").trim()}`,
-  }));
   const imageAssets = imageResetRequired
     ? repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image")
     : [];
@@ -3682,16 +3696,18 @@ function enforceResetPerShotRequirements(assignment, assignmentId, currentRound)
   }
 
   const errors = [];
-  for (const shot of requiredShotSlugs) {
-    if (imageResetRequired) {
-      const imageCount = Number(imageByShot.get(shot.slug) || 0) || 0;
-      if (imageCount < 1) errors.push(`image reset: missing image in shot "${shot.label}"`);
-      if (imageCount > 5) errors.push(`image reset: too many images in shot "${shot.label}" (max 5)`);
+  for (const item of shotItems) {
+    const slug = toCaptureShotSlug(item.prompt, item.itemOrder);
+    const label = `${item.displayIndex}. ${String(item.prompt || "").trim()}`;
+    if (item.mediaType === "image" && imageResetRequired) {
+      const imageCount = Number(imageByShot.get(slug) || 0) || 0;
+      if (imageCount < 1) errors.push(`image reset: missing image in shot "${label}"`);
+      if (imageCount > 5) errors.push(`image reset: too many images in shot "${label}" (max 5)`);
     }
-    if (videoResetRequired) {
-      const videoCount = Number(videoByShot.get(shot.slug) || 0) || 0;
-      if (videoCount < 1) errors.push(`video reset: missing video in shot "${shot.label}"`);
-      if (videoCount > 2) errors.push(`video reset: too many videos in shot "${shot.label}" (max 2)`);
+    if (item.mediaType === "video" && videoResetRequired) {
+      const videoCount = Number(videoByShot.get(slug) || 0) || 0;
+      if (videoCount < 1) errors.push(`video reset: missing video in shot "${label}"`);
+      if (videoCount > 2) errors.push(`video reset: too many videos in shot "${label}" (max 2)`);
     }
   }
   if (errors.length) {
