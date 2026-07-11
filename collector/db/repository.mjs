@@ -6364,7 +6364,7 @@ function normalizeStateValue(value, stateGroup) {
     if (!expiresAtRaw) throw new Error("expires_at is required");
     const assignment = normalizeAssignmentRow(getAssignmentByIdStmt.get(assignmentId));
     if (!assignment) throw new Error("assignment not found");
-    const revisionRound = Math.max(1, Number(payload.revision_round || assignment.revision_round + 1 || 1) || 1);
+    const revisionRound = Math.max(1, Number(assignment.revision_round || 0) || 1);
     const contentItemId = Number(assignment.content_item_id || 0) || 0;
     if (!contentItemId) throw new Error("assignment content_item_id is invalid");
     const articlePayload = payload.article_payload_json == null ? null : parseJsonInputStrict(payload.article_payload_json, "article_payload_json", "object");
@@ -6389,7 +6389,7 @@ function normalizeStateValue(value, stateGroup) {
     deleteExpiredAssignmentSubmissionDraftsStmt.run(nowIso);
     const assignment = normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
     if (!assignment) return null;
-    const revisionRound = Math.max(1, Number(options.revision_round || assignment.revision_round + 1 || 1) || 1);
+    const revisionRound = Math.max(1, Number(assignment.revision_round || 0) || 1);
     const row = normalizeAssignmentSubmissionDraftRow(getAssignmentSubmissionDraftStmt.get(id, actorId, revisionRound));
     if (!row) return null;
     const expiresAt = String(row.expires_at || "").trim();
@@ -6404,20 +6404,22 @@ function normalizeStateValue(value, stateGroup) {
   function deleteAssignmentSubmissionDraft(assignmentId, userId, revisionRound = 0) {
     const id = Number(assignmentId || 0) || 0;
     const actorId = Number(userId || 0) || 0;
-    const round = Math.max(1, Number(revisionRound || 0) || 0);
-    if (!id || !actorId || !round) return 0;
+    if (!id || !actorId) return 0;
+    const assignment = normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
+    if (!assignment) return 0;
+    const round = Math.max(1, Number(assignment.revision_round || 0) || 1);
     const result = deleteAssignmentSubmissionDraftStmt.run(id, actorId, round);
     return Number(result?.changes || 0) || 0;
   }
-
   function deleteAssignmentSubmissionDraftsByAssignment(assignmentId, revisionRound = 0) {
     const id = Number(assignmentId || 0) || 0;
-    const round = Math.max(1, Number(revisionRound || 0) || 0);
-    if (!id || !round) return 0;
+    if (!id) return 0;
+    const assignment = normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
+    if (!assignment) return 0;
+    const round = Math.max(1, Number(assignment.revision_round || 0) || 1);
     const result = deleteAssignmentSubmissionDraftsByAssignmentRoundStmt.run(id, round);
     return Number(result?.changes || 0) || 0;
   }
-
   function getAssignmentSubmissionDraftPrefill(assignmentId, userId, options = {}) {
     const id = Number(assignmentId || 0) || 0;
     const actorId = Number(userId || 0) || 0;
@@ -6425,7 +6427,7 @@ function normalizeStateValue(value, stateGroup) {
     const nowIso = toNullableDateIso(options.now, "now") || new Date().toISOString();
     const assignment = normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
     if (!assignment) return { draft: null, source: "none" };
-    const revisionRound = Math.max(1, Number(options.revision_round || assignment.revision_round + 1 || 1) || 1);
+    const revisionRound = Math.max(1, Number(assignment.revision_round || 0) || 1);
     const draft = getAssignmentSubmissionDraft(id, actorId, { now: nowIso, revision_round: revisionRound });
     if (draft) return { draft, source: "draft" };
     const assignmentState = String(assignment.state || "").trim().toLowerCase();

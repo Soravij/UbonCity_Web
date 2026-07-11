@@ -1039,7 +1039,8 @@ function parseJsonSafe(value, fallback = null) {
 }
 
 function getAssignmentCurrentRound(assignment = null) {
-  return Math.max(1, (Number(assignment?.revision_round || 0) || 0) + 1);
+  const round = Number(assignment?.revision_round);
+  return Number.isFinite(round) && round > 0 ? round : 1;
 }
 
 function getAssignmentSubmissionDraftKey(assignmentId, assignment = null) {
