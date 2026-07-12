@@ -5968,6 +5968,82 @@ function listDraftAssignmentWorkAssetRows(options = {}) {
   return Array.isArray(rows) ? rows : [];
 }
 
+function getAssignmentWorkAssetSlotMediaKey(row) {
+  const fileName = String(row?.file_name || "").trim().toLowerCase();
+  const slotKey = fileName.includes("__") ? fileName.split("__")[0] : "";
+  const mediaType = String(row?.assignment_media_type || "").trim().toLowerCase();
+  if (!mediaType) return "";
+  return `${slotKey}|${mediaType}`;
+}
+
+function listActiveAssignmentWorkAssetRows(options = {}) {
+  const rows = listDraftAssignmentWorkAssetRows(options);
+  const batchesByKey = new Map();
+  for (const row of rows) {
+    const key = getAssignmentWorkAssetSlotMediaKey(row);
+    if (!key) continue;
+    const batchId = String(row?.assignment_sync_batch_id || "").trim() || `legacy-${Number(row?.id || 0) || 0}`;
+    if (!batchesByKey.has(key)) batchesByKey.set(key, new Map());
+    const batches = batchesByKey.get(key);
+    if (!batches.has(batchId)) batches.set(batchId, []);
+    batches.get(batchId).push(row);
+  }
+  const activeRows = [];
+  for (const batches of batchesByKey.values()) {
+    let latestBatchRows = [];
+    let latestBatchRound = 0;
+    let latestBatchMarker = 0;
+    for (const batchRows of batches.values()) {
+      const batchRound = batchRows.reduce((maxRound, row) => Math.max(maxRound, Number(row?.assignment_round || 0) || 0), 0);
+      const batchMarker = batchRows.reduce((maxId, row) => Math.max(maxId, Number(row?.id || 0) || 0), 0);
+      if (batchRound > latestBatchRound || (batchRound === latestBatchRound && batchMarker > latestBatchMarker)) {
+        latestBatchRows = batchRows;
+        latestBatchRound = batchRound;
+        latestBatchMarker = batchMarker;
+      }
+    }
+    activeRows.push(...latestBatchRows);
+  }
+  return activeRows;
+}
+
+function removeAssignmentWorkReplacementLinksBeforeInsert(options = {}) {
+  const assignmentId = Number(options.assignmentId || 0) || 0;
+  const assignmentRound = Number(options.assignmentRound || 0) || 0;
+  const contentItemId = Number(options.contentItemId || 0) || 0;
+  const fileName = String(options.fileName || '').trim();
+  const assignmentSyncBatchId = String(options.assignmentSyncBatchId || '').trim();
+  const rawMediaType = String(options.mediaType || '').trim().toLowerCase();
+  const mediaType = rawMediaType.startsWith('video') ? 'video' : rawMediaType.startsWith('image') ? 'image' : rawMediaType;
+  if (!assignmentId || !assignmentRound || !contentItemId || !fileName || !mediaType) return 0;
+  const slotKey = String(fileName.includes('__') ? fileName.split('__')[0] : '').trim().toLowerCase();
+  if (!slotKey) return 0;
+  const rows = db.prepare(`
+    SELECT ca.id
+    FROM content_assets ca
+    JOIN assets a ON a.id = ca.asset_id
+    WHERE ca.assignment_id=?
+      AND ca.assignment_round=?
+      AND ca.content_item_id=?
+      AND COALESCE(ca.assignment_surface, '')='assignment_work'
+      AND COALESCE(ca.assignment_media_type, '')=?
+      AND LOWER(COALESCE(a.file_name, '')) LIKE ?
+      ${assignmentSyncBatchId ? "AND COALESCE(ca.assignment_sync_batch_id, '')<>?" : ""}
+  `).all(
+    assignmentId,
+    assignmentRound,
+    contentItemId,
+    mediaType,
+    `${slotKey}__%`,
+    ...(assignmentSyncBatchId ? [assignmentSyncBatchId] : [])
+  );
+  let removedLinks = 0;
+  const deleteLink = db.prepare('DELETE FROM content_assets WHERE id=?');
+  for (const row of rows) {
+    removedLinks += Number(deleteLink.run(Number(row?.id || 0) || 0)?.changes || 0) || 0;
+  }
+  return removedLinks;
+}
 function removeAssignmentWorkRowsByAssetIds(assetIds = []) {
   const ids = Array.from(new Set((Array.isArray(assetIds) ? assetIds : []).map((v) => Number(v || 0)).filter((v) => v > 0)));
   if (!ids.length) return { removed_links: 0, removed_assets: 0, deleted_files: [] };
@@ -14393,7 +14469,7 @@ app.get("/api/assets", (req, res) => {
     }
     const assignmentRound = resolveAssignmentCurrentRound(assignment);
     cleanupExpiredAssignmentWorkDraftAssets({ assignmentId, assignmentRound, maxAgeMs: ASSIGNMENT_WORK_SYNC_EXPIRY_MS });
-    rows = listDraftAssignmentWorkAssetRows({ assignmentId, assignmentRound });
+    rows = listActiveAssignmentWorkAssetRows({ assignmentId });
   } else {
     if (contentItemId > 0) {
       if (!ensureItemBriefReadAccess(req, res, contentItemId)) {
@@ -14827,6 +14903,14 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   try {
     db.exec("BEGIN IMMEDIATE");
     transactionBegun = true;
+    removeAssignmentWorkReplacementLinksBeforeInsert({
+      assignmentId,
+      assignmentRound,
+      contentItemId,
+      fileName: safeName,
+      mediaType,
+      assignmentSyncBatchId: syncBatchId,
+    });
     const insertResult = insert.run(
       assetUid,
       "local",
@@ -14881,6 +14965,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
 
   await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
   try {
+
     repo.logAudit(actorEmail(req), "assignment.asset.upload", "assignment", String(assignmentId), {
       assignment_id: assignmentId,
       assignment_round: assignmentRound,
@@ -14985,6 +15070,14 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
     const checksum = crypto.createHash("sha256").update(fileBuffer).digest("hex");
     const relativePath = path.relative(dirs.mediaDir, file.path);
     const assetUid = crypto.randomUUID();
+    removeAssignmentWorkReplacementLinksBeforeInsert({
+      assignmentId,
+      assignmentRound,
+      contentItemId,
+      fileName: file.originalname,
+      mediaType,
+      assignmentSyncBatchId: syncBatchId,
+    });
     const result = insert.run(assetUid, "local", relativePath, file.originalname, file.mimetype, file.size, checksum);
     const assetId = Number(result.lastInsertRowid);
     const assetRole = "unused";
@@ -15002,7 +15095,6 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
       "assignment_work",
       syncBatchId
     );
-
     repo.logAudit(actorEmail(req), "assignment.asset.upload", "assignment", String(assignmentId), {
       assignment_id: assignmentId,
       assignment_round: assignmentRound,

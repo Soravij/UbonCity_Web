@@ -6171,7 +6171,6 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
   if (!id) return { complete: false, assets: [], missing: [], syncSignature: "" };
   const assignment = getAssignmentById(id);
   if (!assignment) return { complete: false, assets: [], missing: [], syncSignature: "" };
-  const currentRound = getAssignmentCurrentRound(assignment);
   const normalizedItems = normalizeAssignmentCaptureUploadItems(captureItems);
   if (!normalizedItems.length) return { complete: false, assets: [], missing: [], syncSignature: "" };
   const expectedBySlotKey = new Map();
@@ -6182,18 +6181,10 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
   const requireImages = Boolean(assignment?.image_reset_required);
   const requireVideos = Boolean(assignment?.video_reset_required);
   const rows = Array.isArray(state.assignments.assetLookup) ? state.assignments.assetLookup : [];
+  // The server already resolves and sends only the active (retained/replaced-aware) assignment_work
+  // rows for this assignment, so no client-side round window is applied here.
   const assignmentRows = rows.filter((row) => {
     if (Number(row?.assignment_id || 0) !== id) return false;
-    const assetRound = Number(row?.assignment_round || 0) || 0;
-    const assetMediaType = normalizeAssignmentCaptureMediaType(row?.assignment_media_type);
-    const isCurrentRound = assetRound === currentRound;
-    const isRetainedRound = assetRound === (currentRound - 1);
-    const canRetainPreviousRound = assetMediaType === "image"
-      ? !requireImages
-      : assetMediaType === "video"
-        ? !requireVideos
-        : false;
-    if (!isCurrentRound && !(isRetainedRound && canRetainPreviousRound)) return false;
     if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") return false;
     const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(row);
     const slotKey = slotTypeKey ? slotTypeKey.split("|")[0] : "";

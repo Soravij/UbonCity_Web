@@ -196,13 +196,14 @@ function createTestContext() {
     function createAssignmentWorkAsset(itemId, assignmentId, round, suffix = "A", options = {}) {
     const mimeType = String(options.mime_type || "image/jpeg");
     const extension = String(options.extension || (mimeType.startsWith("video/") ? "mp4" : "jpg"));
+    const fileName = String(options.file_name || `${itemId}-${assignmentId}-${round}-${suffix}.${extension}`);
     const assetResult = db.prepare(`
       INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
       VALUES (?, 'local', ?, ?, ?, 100, ?)
     `).run(
       `work-asset-${itemId}-${assignmentId}-${round}-${suffix}`,
-      `uploads/${itemId}-${assignmentId}-${round}-${suffix}.${extension}`,
-      `${itemId}-${assignmentId}-${round}-${suffix}.${extension}`,
+      `uploads/${fileName}`,
+      fileName,
       mimeType,
       `work-checksum-${itemId}-${assignmentId}-${round}-${suffix}`
     );
@@ -239,7 +240,7 @@ function createTestContext() {
       round,
       mediaType,
       surface,
-      `sync-${itemId}-${assignmentId}-${round}-${suffix}`
+      String(options.assignment_sync_batch_id || `sync-${itemId}-${assignmentId}-${round}-${suffix}`)
     );
     return {
       asset_id: assetId,
@@ -2396,6 +2397,69 @@ test("createAssignmentSubmissionDeliverable binds source_asset_id to the current
   }
 });
 
+test("createAssignmentSubmissionDeliverable accepts every asset in the latest slot batch", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Latest Batch Binding Place");
+    const assignee = ctx.createUser("latest-batch-binding");
+    ctx.createReadinessBrief(item.id, "latest-batch-binding");
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+    const assignmentId = Number(assignmentResult.assignment.id || 0);
+    const oldAsset = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "old", {
+      file_name: "shot-a__old.jpg",
+      assignment_sync_batch_id: "batch-old",
+    });
+    const latestFirst = ctx.createAssignmentWorkAsset(item.id, assignmentId, 2, "latest-first", {
+      file_name: "shot-a__latest-first.jpg",
+      assignment_sync_batch_id: "batch-new",
+    });
+    const latestSecond = ctx.createAssignmentWorkAsset(item.id, assignmentId, 1, "latest-second", {
+      file_name: "shot-a__latest-second.jpg",
+      assignment_sync_batch_id: "batch-new",
+    });
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: assignmentId,
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+    });
+
+    for (const asset of [latestFirst, latestSecond]) {
+      const created = ctx.repo.createAssignmentSubmissionDeliverable({
+        assignment_id: assignmentId,
+        submission_id: submission.id,
+        deliverable_type: "photos",
+        source_asset_id: asset.asset_id,
+      }, "tester@local");
+      assert.equal(Number(created.source_asset_id || 0), asset.asset_id);
+    }
+    assert.throws(() => {
+      ctx.repo.createAssignmentSubmissionDeliverable({
+        assignment_id: assignmentId,
+        submission_id: submission.id,
+        deliverable_type: "photos",
+        source_asset_id: oldAsset.asset_id,
+      }, "tester@local");
+    }, /source_asset_id does not belong to current assignment round/);
+
+    ctx.repo.deleteAssignmentWorkAssetsByType(assignmentId, "image");
+    assert.throws(() => {
+      ctx.repo.createAssignmentSubmissionDeliverable({
+        assignment_id: assignmentId,
+        submission_id: submission.id,
+        deliverable_type: "photos",
+        source_asset_id: latestFirst.asset_id,
+      }, "tester@local");
+    }, /source_asset_id does not belong to content item/);
+  } finally {
+    ctx.cleanup();
+  }
+});
 test("assignment submission round-trips normalized field return payload and ignores client found", () => {
   const ctx = createTestContext();
   try {

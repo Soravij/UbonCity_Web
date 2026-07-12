@@ -4569,6 +4569,31 @@ export function createRepository(db) {
     DELETE FROM assets
     WHERE id=?
   `);
+  const listAssignmentWorkAssetsByAssignmentAndTypeStmt = db.prepare(`
+    SELECT
+      ca.id,
+      ca.assignment_round,
+      ca.assignment_sync_batch_id,
+      a.file_name
+    FROM content_assets ca
+    JOIN assets a ON a.id = ca.asset_id
+    WHERE ca.assignment_id=?
+      AND ca.content_item_id=?
+      AND COALESCE(ca.assignment_surface, '')='assignment_work'
+      AND COALESCE(ca.assignment_media_type, '')=?
+  `);
+  const listAssignmentWorkContentAssetsByTypeStmt = db.prepare(`
+    SELECT
+      ca.id AS content_asset_id,
+      ca.asset_id,
+      a.storage_disk,
+      a.storage_path
+    FROM content_assets ca
+    JOIN assets a ON a.id = ca.asset_id
+    WHERE ca.assignment_id=?
+      AND COALESCE(ca.assignment_surface, '')='assignment_work'
+      AND COALESCE(ca.assignment_media_type, '')=?
+  `);
 
   const insertAssignmentSubmissionStmt = db.prepare(`
     INSERT INTO content_assignment_submissions (
@@ -6169,7 +6194,7 @@ function normalizeStateValue(value, stateGroup) {
     const run = () => runInTransaction(db, () => {
       const current = normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
       if (!current) throw new Error("assignment not found");
-      const roundBeforeRevision = Math.max(1, (Number(current.revision_round || 0) || 0) + 1);
+      const roundBeforeRevision = Number(current.revision_round || 0) > 0 ? Number(current.revision_round) : 1;
       updateAssignmentMediaResetPolicyStmt.run(
         imageResetRequired,
         imageResetReason,
@@ -6184,10 +6209,10 @@ function normalizeStateValue(value, stateGroup) {
         reason_code: reasonCode,
       });
       const imageDeleteResult = imageResetRequired
-        ? deleteAssignmentRoundAssetsByType(id, roundBeforeRevision, "image")
+        ? deleteAssignmentWorkAssetsByType(id, "image")
         : { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
       const videoDeleteResult = videoResetRequired
-        ? deleteAssignmentRoundAssetsByType(id, roundBeforeRevision, "video")
+        ? deleteAssignmentWorkAssetsByType(id, "video")
         : { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
       const deletedFiles = []
         .concat(Array.isArray(imageDeleteResult?.deleted_files) ? imageDeleteResult.deleted_files : [])
@@ -6213,6 +6238,39 @@ function normalizeStateValue(value, stateGroup) {
 
   function deleteAssignmentRoundAssetsByType(assignmentId, assignmentRound, mediaType) {
     const rows = listAssignmentRoundAssetsByType(assignmentId, assignmentRound, mediaType);
+    if (!rows.length) return { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
+    const deletedFiles = [];
+    let removedContentAssets = 0;
+    let removedAssets = 0;
+    for (const row of rows) {
+      if (row.content_asset_id) {
+        const contentAssetResult = deleteContentAssetByIdStmt.run(row.content_asset_id);
+        removedContentAssets += Number(contentAssetResult?.changes || 0) || 0;
+      }
+      if (row.asset_id) {
+        const links = Number(countAssetLinksStmt.get(row.asset_id)?.c || 0) || 0;
+        if (!links) {
+          const assetResult = deleteAssetByIdStmt.run(row.asset_id);
+          const deleted = Number(assetResult?.changes || 0) || 0;
+          removedAssets += deleted;
+          if (deleted > 0 && row.storage_path && String(row.storage_disk || "").trim().toLowerCase() === "local") {
+            deletedFiles.push(String(row.storage_path || "").trim());
+          }
+        }
+      }
+    }
+    return {
+      removed_content_assets: removedContentAssets,
+      removed_assets: removedAssets,
+      deleted_files: deletedFiles,
+    };
+  }
+
+  function deleteAssignmentWorkAssetsByType(assignmentId, mediaType) {
+    const id = Number(assignmentId || 0) || 0;
+    const type = String(mediaType || "").trim().toLowerCase();
+    if (!id || !["image", "video"].includes(type)) return { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
+    const rows = listAssignmentWorkContentAssetsByTypeStmt.all(id, type);
     if (!rows.length) return { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
     const deletedFiles = [];
     let removedContentAssets = 0;
@@ -6451,6 +6509,41 @@ function normalizeStateValue(value, stateGroup) {
     return Number(result?.changes || 0) || 0;
   }
 
+  function isLatestActiveAssignmentWorkAsset(options = {}) {
+    const assignmentId = Number(options.assignmentId || 0) || 0;
+    const contentItemId = Number(options.contentItemId || 0) || 0;
+    const mediaType = String(options.mediaType || "").trim().toLowerCase();
+    const fileName = String(options.fileName || "").trim().toLowerCase();
+    const candidateRound = Number(options.candidateRound || 0) || 0;
+    const candidateContentAssetId = Number(options.candidateContentAssetId || 0) || 0;
+    if (!assignmentId || !contentItemId || !mediaType || !candidateContentAssetId) return false;
+    const slotKey = fileName.includes("__") ? fileName.split("__")[0] : "";
+    const rows = listAssignmentWorkAssetsByAssignmentAndTypeStmt.all(assignmentId, contentItemId, mediaType);
+    const batches = new Map();
+    for (const row of rows) {
+      const rowFileName = String(row.file_name || "").trim().toLowerCase();
+      const rowSlotKey = rowFileName.includes("__") ? rowFileName.split("__")[0] : "";
+      if (rowSlotKey !== slotKey) continue;
+      const rowId = Number(row.id || 0) || 0;
+      const batchId = String(row.assignment_sync_batch_id || "").trim() || `legacy-${rowId}`;
+      if (!batches.has(batchId)) batches.set(batchId, []);
+      batches.get(batchId).push(row);
+    }
+    let latestBatchRows = [];
+    let latestRound = -1;
+    let latestId = -1;
+    for (const batchRows of batches.values()) {
+      const batchRound = batchRows.reduce((maxRound, row) => Math.max(maxRound, Number(row.assignment_round || 0) || 0), 0);
+      const batchId = batchRows.reduce((maxId, row) => Math.max(maxId, Number(row.id || 0) || 0), 0);
+      if (batchRound > latestRound || (batchRound === latestRound && batchId > latestId)) {
+        latestBatchRows = batchRows;
+        latestRound = batchRound;
+        latestId = batchId;
+      }
+    }
+    return latestBatchRows.some((row) => Number(row.id || 0) === candidateContentAssetId);
+  }
+
   function createAssignmentSubmissionDeliverable(payload = {}, actorEmail = "system@local") {
     const assignmentId = Number(payload.assignment_id || 0);
     const submissionId = Number(payload.submission_id || 0);
@@ -6497,12 +6590,18 @@ function normalizeStateValue(value, stateGroup) {
       if (Number(linkedContentAsset.assignment_id || 0) !== assignmentId) {
         throw new Error("source_asset_id does not belong to assignment");
       }
-      const canonicalAssignmentRound = Math.max(1, Number(assignment.revision_round || 0) || 1);
-      if (Number(linkedContentAsset.assignment_round || 0) !== canonicalAssignmentRound) {
-        throw new Error("source_asset_id does not belong to current assignment round");
-      }
       if (String(linkedContentAsset.assignment_surface || "").trim().toLowerCase() !== "assignment_work") {
         throw new Error("source_asset_id does not belong to assignment work surface");
+      }
+      if (!isLatestActiveAssignmentWorkAsset({
+        assignmentId,
+        contentItemId,
+        mediaType: linkedContentAsset.assignment_media_type,
+        fileName: linkedContentAsset.file_name,
+        candidateRound: linkedContentAsset.assignment_round,
+        candidateContentAssetId: linkedContentAsset.id,
+      })) {
+        throw new Error("source_asset_id does not belong to current assignment round");
       }
       if (
         ASSIGNMENT_ASSET_BACKED_DELIVERABLE_TYPES.has(deliverableType)
@@ -12664,6 +12763,7 @@ function normalizeStateValue(value, stateGroup) {
     purgeExpiredAssignmentSubmissionDrafts,
     listAssignmentRoundAssetsByType,
     deleteAssignmentRoundAssetsByType,
+    deleteAssignmentWorkAssetsByType,
     createAssignmentSubmissionDeliverable,
     listAssignmentSubmissionDeliverablesBySubmission,
     listAssignmentSubmissionDeliverablesByAssignment,

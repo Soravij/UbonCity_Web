@@ -18,6 +18,16 @@
 - Claimed work should not accidentally appear to unrelated users/admins unless policy explicitly allows it.
 - Raw pool first-claim behavior is allowed for eligible unclaimed raw items.
 
+## 8. Revision Asset Replacement Policy
+
+- Retain prior media across revision requests until it is replaced by a new upload for the same slot or removed by a matching reset.
+- New upload for the same assignment + surface + slot + media type replaces the previous active batch for that key, whether the previous batch was uploaded in the same round or an earlier round.
+- The replacement key is assignment_id + assignment_surface + slot slug + assignment_media_type. The active batch for a key is the batch with the highest assignment_round (ties broken by the newest content_assets row); every file in that batch is active and all other batches for that key are superseded.
+- UI, readiness, and deliverable binding must resolve and use every asset in the latest active batch for each key. Superseded or reset assets must never be shown again or accepted for deliverable binding.
+- Old and new assets must not remain active together.
+- Matching reset removes every retained assignment_work link of that media type, across all rounds, not just the current round.
+- Never derive assignment work round as revision_round + 1.
+
 Placeholders:
 
 - Detailed owner/admin/user capability matrix: TBD / update later.
