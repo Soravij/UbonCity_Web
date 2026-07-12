@@ -19,6 +19,19 @@ Last Updated: 2026-07-05
 - media flow is complete for current pipeline testing
 - Media Library duplicate entries remain a separate non-blocking follow-up for CTA / Curation work
 
+### Media Behavior Implementation Notes
+
+Moved from `PROJECT_POLICY.md` §5 ("Current Implemented Media Behavior") — this is implementation
+status, not durable policy; the durable rule (no hard block before late-stage gates) lives in
+`PROJECT_POLICY.md` §5 Stage-specific Media Blocker Policy.
+
+- Clean reference-media select works.
+- Clean no longer sets cover in reference-media flow.
+- Clean AI Draft works using reference media and approved context.
+- Publish/Admin Review local media readiness remains enforced through `local_selected_count`/`local_cover_count`/`buildExportReadiness`.
+- Confirmed in code: early PATCH selected/role routes do not block Clean workflow only because an asset is not local publish-ready (matches the §5 stage-specific rule).
+- Confirmed in code: late publish/admin-review readiness still blocks non-local publish media (matches the §5 stage-specific rule).
+
 ## Current Priority
 
 - `CTA & Curation`
