@@ -3531,6 +3531,48 @@ function ensureContentDraftConfirmedMetaSupport(db) {
     db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_note TEXT;");
   }
 }
+
+// Canonical resolver for "which assignment_work rows are active" (PROJECT_POLICY.md §8).
+// Group rows by slot+media key, group each key by assignment_sync_batch_id, and keep only
+// the batch with the highest assignment_round (ties broken by the newest row id). Every
+// read/bind path that needs the active batch must go through this helper — do not re-derive
+// this grouping elsewhere.
+export function resolveActiveAssignmentWorkBatchRows(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const batchesByKey = new Map();
+  for (const row of list) {
+    const fileName = String(row?.file_name || "").trim().toLowerCase();
+    const slotKey = fileName.includes("__") ? fileName.split("__")[0] : "";
+    const mediaType = String(row?.assignment_media_type || "").trim().toLowerCase();
+    if (!mediaType) continue;
+    const key = `${slotKey}|${mediaType}`;
+    const batchId = String(row?.assignment_sync_batch_id || "").trim() || `legacy-${Number(row?.id || 0) || 0}`;
+    if (!batchesByKey.has(key)) batchesByKey.set(key, new Map());
+    const batches = batchesByKey.get(key);
+    if (!batches.has(batchId)) batches.set(batchId, []);
+    batches.get(batchId).push(row);
+  }
+  const activeRows = [];
+  for (const batches of batchesByKey.values()) {
+    let latestBatchRows = [];
+    let latestBatchRound = -1;
+    let latestBatchMarker = -1;
+    for (const batchRows of batches.values()) {
+      // One batch = one round is guaranteed at write time (chunk finalize pins the manifest
+      // round); the max() only tolerates legacy rows written before that invariant existed.
+      const batchRound = batchRows.reduce((maxRound, row) => Math.max(maxRound, Number(row?.assignment_round || 0) || 0), 0);
+      const batchMarker = batchRows.reduce((maxId, row) => Math.max(maxId, Number(row?.id || 0) || 0), 0);
+      if (batchRound > latestBatchRound || (batchRound === latestBatchRound && batchMarker > latestBatchMarker)) {
+        latestBatchRows = batchRows;
+        latestBatchRound = batchRound;
+        latestBatchMarker = batchMarker;
+      }
+    }
+    activeRows.push(...latestBatchRows);
+  }
+  return activeRows;
+}
+
 export function createRepository(db) {
   ensureLifecycleColumns(db);
   ensureTranslationTables(db);
@@ -4567,6 +4609,43 @@ export function createRepository(db) {
   `);
   const deleteAssetByIdStmt = db.prepare(`
     DELETE FROM assets
+    WHERE id=?
+  `);
+  const listAssignmentWorkAssetsByAssignmentAndTypeStmt = db.prepare(`
+    SELECT
+      ca.id,
+      ca.assignment_round,
+      ca.assignment_media_type,
+      ca.assignment_sync_batch_id,
+      a.file_name
+    FROM content_assets ca
+    JOIN assets a ON a.id = ca.asset_id
+    WHERE ca.assignment_id=?
+      AND ca.content_item_id=?
+      AND COALESCE(ca.assignment_surface, '')='assignment_work'
+      AND COALESCE(ca.assignment_media_type, '')=?
+  `);
+  const listAssignmentWorkContentAssetsByTypeStmt = db.prepare(`
+    SELECT
+      ca.id AS content_asset_id,
+      ca.asset_id,
+      ca.selected_in_clean,
+      ca.role,
+      a.storage_disk,
+      a.storage_path
+    FROM content_assets ca
+    JOIN assets a ON a.id = ca.asset_id
+    WHERE ca.assignment_id=?
+      AND COALESCE(ca.assignment_surface, '')='assignment_work'
+      AND COALESCE(ca.assignment_media_type, '')=?
+  `);
+  const detachContentAssetFromAssignmentWorkStmt = db.prepare(`
+    UPDATE content_assets
+    SET assignment_id=NULL,
+        assignment_round=0,
+        assignment_media_type=NULL,
+        assignment_surface=NULL,
+        assignment_sync_batch_id=NULL
     WHERE id=?
   `);
 
@@ -6169,7 +6248,7 @@ function normalizeStateValue(value, stateGroup) {
     const run = () => runInTransaction(db, () => {
       const current = normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
       if (!current) throw new Error("assignment not found");
-      const roundBeforeRevision = Math.max(1, (Number(current.revision_round || 0) || 0) + 1);
+      const roundBeforeRevision = Number(current.revision_round || 0) > 0 ? Number(current.revision_round) : 1;
       updateAssignmentMediaResetPolicyStmt.run(
         imageResetRequired,
         imageResetReason,
@@ -6184,10 +6263,10 @@ function normalizeStateValue(value, stateGroup) {
         reason_code: reasonCode,
       });
       const imageDeleteResult = imageResetRequired
-        ? deleteAssignmentRoundAssetsByType(id, roundBeforeRevision, "image")
+        ? deleteAssignmentWorkAssetsByType(id, "image")
         : { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
       const videoDeleteResult = videoResetRequired
-        ? deleteAssignmentRoundAssetsByType(id, roundBeforeRevision, "video")
+        ? deleteAssignmentWorkAssetsByType(id, "video")
         : { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
       const deletedFiles = []
         .concat(Array.isArray(imageDeleteResult?.deleted_files) ? imageDeleteResult.deleted_files : [])
@@ -6238,6 +6317,52 @@ function normalizeStateValue(value, stateGroup) {
       removed_content_assets: removedContentAssets,
       removed_assets: removedAssets,
       deleted_files: deletedFiles,
+    };
+  }
+
+  function deleteAssignmentWorkAssetsByType(assignmentId, mediaType) {
+    const id = Number(assignmentId || 0) || 0;
+    const type = String(mediaType || "").trim().toLowerCase();
+    if (!id || !["image", "video"].includes(type)) return { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
+    const rows = listAssignmentWorkContentAssetsByTypeStmt.all(id, type);
+    if (!rows.length) return { removed_content_assets: 0, removed_assets: 0, deleted_files: [], detached_content_assets: 0 };
+    const deletedFiles = [];
+    let removedContentAssets = 0;
+    let removedAssets = 0;
+    let detachedContentAssets = 0;
+    for (const row of rows) {
+      const promoted = Number(row.selected_in_clean || 0) === 1
+        || (String(row.role || "unused").trim().toLowerCase() || "unused") !== "unused";
+      if (promoted) {
+        // Promoted in Article Workspace: leave the editorial row and its file alone,
+        // only detach it from the assignment lifecycle.
+        if (row.content_asset_id) {
+          const detachResult = detachContentAssetFromAssignmentWorkStmt.run(row.content_asset_id);
+          detachedContentAssets += Number(detachResult?.changes || 0) || 0;
+        }
+        continue;
+      }
+      if (row.content_asset_id) {
+        const contentAssetResult = deleteContentAssetByIdStmt.run(row.content_asset_id);
+        removedContentAssets += Number(contentAssetResult?.changes || 0) || 0;
+      }
+      if (row.asset_id) {
+        const links = Number(countAssetLinksStmt.get(row.asset_id)?.c || 0) || 0;
+        if (!links) {
+          const assetResult = deleteAssetByIdStmt.run(row.asset_id);
+          const deleted = Number(assetResult?.changes || 0) || 0;
+          removedAssets += deleted;
+          if (deleted > 0 && row.storage_path && String(row.storage_disk || "").trim().toLowerCase() === "local") {
+            deletedFiles.push(String(row.storage_path || "").trim());
+          }
+        }
+      }
+    }
+    return {
+      removed_content_assets: removedContentAssets,
+      removed_assets: removedAssets,
+      deleted_files: deletedFiles,
+      detached_content_assets: detachedContentAssets,
     };
   }
 
@@ -6451,6 +6576,17 @@ function normalizeStateValue(value, stateGroup) {
     return Number(result?.changes || 0) || 0;
   }
 
+  function isLatestActiveAssignmentWorkAsset(options = {}) {
+    const assignmentId = Number(options.assignmentId || 0) || 0;
+    const contentItemId = Number(options.contentItemId || 0) || 0;
+    const mediaType = String(options.mediaType || "").trim().toLowerCase();
+    const candidateContentAssetId = Number(options.candidateContentAssetId || 0) || 0;
+    if (!assignmentId || !contentItemId || !mediaType || !candidateContentAssetId) return false;
+    const rows = listAssignmentWorkAssetsByAssignmentAndTypeStmt.all(assignmentId, contentItemId, mediaType);
+    const activeRows = resolveActiveAssignmentWorkBatchRows(rows);
+    return activeRows.some((row) => Number(row.id || 0) === candidateContentAssetId);
+  }
+
   function createAssignmentSubmissionDeliverable(payload = {}, actorEmail = "system@local") {
     const assignmentId = Number(payload.assignment_id || 0);
     const submissionId = Number(payload.submission_id || 0);
@@ -6497,12 +6633,18 @@ function normalizeStateValue(value, stateGroup) {
       if (Number(linkedContentAsset.assignment_id || 0) !== assignmentId) {
         throw new Error("source_asset_id does not belong to assignment");
       }
-      const canonicalAssignmentRound = Math.max(1, Number(assignment.revision_round || 0) || 1);
-      if (Number(linkedContentAsset.assignment_round || 0) !== canonicalAssignmentRound) {
-        throw new Error("source_asset_id does not belong to current assignment round");
-      }
       if (String(linkedContentAsset.assignment_surface || "").trim().toLowerCase() !== "assignment_work") {
         throw new Error("source_asset_id does not belong to assignment work surface");
+      }
+      if (!isLatestActiveAssignmentWorkAsset({
+        assignmentId,
+        contentItemId,
+        mediaType: linkedContentAsset.assignment_media_type,
+        fileName: linkedContentAsset.file_name,
+        candidateRound: linkedContentAsset.assignment_round,
+        candidateContentAssetId: linkedContentAsset.id,
+      })) {
+        throw new Error("source_asset_id does not belong to current assignment round");
       }
       if (
         ASSIGNMENT_ASSET_BACKED_DELIVERABLE_TYPES.has(deliverableType)
@@ -12664,6 +12806,7 @@ function normalizeStateValue(value, stateGroup) {
     purgeExpiredAssignmentSubmissionDrafts,
     listAssignmentRoundAssetsByType,
     deleteAssignmentRoundAssetsByType,
+    deleteAssignmentWorkAssetsByType,
     createAssignmentSubmissionDeliverable,
     listAssignmentSubmissionDeliverablesBySubmission,
     listAssignmentSubmissionDeliverablesByAssignment,

@@ -24,7 +24,7 @@ import {
   resolveAiConfig,
 } from "../config/ai.mjs";
 import { openDatabase } from "../db/client.mjs";
-import { createRepository, hasRecognizedEvaluationOverrideInput } from "../db/repository.mjs";
+import { createRepository, hasRecognizedEvaluationOverrideInput, resolveActiveAssignmentWorkBatchRows } from "../db/repository.mjs";
 import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/index.mjs";
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import {
@@ -5968,6 +5968,75 @@ function listDraftAssignmentWorkAssetRows(options = {}) {
   return Array.isArray(rows) ? rows : [];
 }
 
+function listActiveAssignmentWorkAssetRows(options = {}) {
+  return resolveActiveAssignmentWorkBatchRows(listDraftAssignmentWorkAssetRows(options));
+}
+
+// A row promoted in Article Workspace (selected as cover/gallery/inline) is owned by the
+// editorial lifecycle: assignment deletions must detach it from the assignment columns
+// instead of deleting the link (which could also delete the underlying file).
+function isPromotedContentAssetRow(row) {
+  if (Number(row?.selected_in_clean || 0) === 1) return true;
+  const role = String(row?.role || "unused").trim().toLowerCase() || "unused";
+  return role !== "unused";
+}
+
+function detachContentAssetFromAssignmentWork(contentAssetId) {
+  const id = Number(contentAssetId || 0) || 0;
+  if (!id) return 0;
+  const result = db.prepare(`
+    UPDATE content_assets
+    SET assignment_id=NULL,
+        assignment_round=0,
+        assignment_media_type=NULL,
+        assignment_surface=NULL,
+        assignment_sync_batch_id=NULL
+    WHERE id=?
+  `).run(id);
+  return Number(result?.changes || 0) || 0;
+}
+
+function removeAssignmentWorkReplacementLinksBeforeInsert(options = {}) {
+  const assignmentId = Number(options.assignmentId || 0) || 0;
+  const assignmentRound = Number(options.assignmentRound || 0) || 0;
+  const contentItemId = Number(options.contentItemId || 0) || 0;
+  const fileName = String(options.fileName || '').trim();
+  const assignmentSyncBatchId = String(options.assignmentSyncBatchId || '').trim();
+  const rawMediaType = String(options.mediaType || '').trim().toLowerCase();
+  const mediaType = rawMediaType.startsWith('video') ? 'video' : rawMediaType.startsWith('image') ? 'image' : rawMediaType;
+  if (!assignmentId || !assignmentRound || !contentItemId || !fileName || !mediaType) return 0;
+  const slotKey = String(fileName.includes('__') ? fileName.split('__')[0] : '').trim().toLowerCase();
+  if (!slotKey) return 0;
+  const rows = db.prepare(`
+    SELECT ca.id, ca.selected_in_clean, ca.role
+    FROM content_assets ca
+    JOIN assets a ON a.id = ca.asset_id
+    WHERE ca.assignment_id=?
+      AND ca.assignment_round=?
+      AND ca.content_item_id=?
+      AND COALESCE(ca.assignment_surface, '')='assignment_work'
+      AND COALESCE(ca.assignment_media_type, '')=?
+      AND LOWER(COALESCE(a.file_name, '')) LIKE ?
+      ${assignmentSyncBatchId ? "AND COALESCE(ca.assignment_sync_batch_id, '')<>?" : ""}
+  `).all(
+    assignmentId,
+    assignmentRound,
+    contentItemId,
+    mediaType,
+    `${slotKey}__%`,
+    ...(assignmentSyncBatchId ? [assignmentSyncBatchId] : [])
+  );
+  let removedLinks = 0;
+  const deleteLink = db.prepare('DELETE FROM content_assets WHERE id=?');
+  for (const row of rows) {
+    if (isPromotedContentAssetRow(row)) {
+      detachContentAssetFromAssignmentWork(Number(row?.id || 0) || 0);
+      continue;
+    }
+    removedLinks += Number(deleteLink.run(Number(row?.id || 0) || 0)?.changes || 0) || 0;
+  }
+  return removedLinks;
+}
 function removeAssignmentWorkRowsByAssetIds(assetIds = []) {
   const ids = Array.from(new Set((Array.isArray(assetIds) ? assetIds : []).map((v) => Number(v || 0)).filter((v) => v > 0)));
   if (!ids.length) return { removed_links: 0, removed_assets: 0, deleted_files: [] };
@@ -5976,9 +6045,13 @@ function removeAssignmentWorkRowsByAssetIds(assetIds = []) {
   const deletedFiles = [];
   for (const assetId of ids) {
     const linkRows = db.prepare(
-      "SELECT id, assignment_surface FROM content_assets WHERE asset_id=? AND COALESCE(assignment_surface,'')='assignment_work'"
+      "SELECT id, assignment_surface, selected_in_clean, role FROM content_assets WHERE asset_id=? AND COALESCE(assignment_surface,'')='assignment_work'"
     ).all(assetId);
     for (const linkRow of linkRows) {
+      if (isPromotedContentAssetRow(linkRow)) {
+        detachContentAssetFromAssignmentWork(Number(linkRow?.id || 0) || 0);
+        continue;
+      }
       const result = db.prepare("DELETE FROM content_assets WHERE id=?").run(Number(linkRow?.id || 0) || 0);
       removedLinks += Number(result?.changes || 0) || 0;
     }
@@ -14393,7 +14466,7 @@ app.get("/api/assets", (req, res) => {
     }
     const assignmentRound = resolveAssignmentCurrentRound(assignment);
     cleanupExpiredAssignmentWorkDraftAssets({ assignmentId, assignmentRound, maxAgeMs: ASSIGNMENT_WORK_SYNC_EXPIRY_MS });
-    rows = listDraftAssignmentWorkAssetRows({ assignmentId, assignmentRound });
+    rows = listActiveAssignmentWorkAssetRows({ assignmentId });
   } else {
     if (contentItemId > 0) {
       if (!ensureItemBriefReadAccess(req, res, contentItemId)) {
@@ -14802,7 +14875,9 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   }
 
   const contentItemId = Number(assignment.content_item_id || 0) || 0;
-  const assignmentRound = resolveAssignmentCurrentRound(assignment);
+  // One batch must never span rounds: keep the round captured at /uploads/start
+  // even if a revision request lands while the chunks are still uploading.
+  const assignmentRound = Number(manifest?.assignment_round || 0) || resolveAssignmentCurrentRound(assignment);
   const syncBatchId = sanitizeAssignmentSyncBatchId(manifest?.sync_batch_id);
   if (!syncBatchId) {
     await fs.unlink(finalAbsolutePath).catch(() => {});
@@ -14827,6 +14902,14 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   try {
     db.exec("BEGIN IMMEDIATE");
     transactionBegun = true;
+    removeAssignmentWorkReplacementLinksBeforeInsert({
+      assignmentId,
+      assignmentRound,
+      contentItemId,
+      fileName: safeName,
+      mediaType,
+      assignmentSyncBatchId: syncBatchId,
+    });
     const insertResult = insert.run(
       assetUid,
       "local",
@@ -14881,6 +14964,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
 
   await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
   try {
+
     repo.logAudit(actorEmail(req), "assignment.asset.upload", "assignment", String(assignmentId), {
       assignment_id: assignmentId,
       assignment_round: assignmentRound,
@@ -14985,6 +15069,14 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
     const checksum = crypto.createHash("sha256").update(fileBuffer).digest("hex");
     const relativePath = path.relative(dirs.mediaDir, file.path);
     const assetUid = crypto.randomUUID();
+    removeAssignmentWorkReplacementLinksBeforeInsert({
+      assignmentId,
+      assignmentRound,
+      contentItemId,
+      fileName: file.originalname,
+      mediaType,
+      assignmentSyncBatchId: syncBatchId,
+    });
     const result = insert.run(assetUid, "local", relativePath, file.originalname, file.mimetype, file.size, checksum);
     const assetId = Number(result.lastInsertRowid);
     const assetRole = "unused";
@@ -15002,7 +15094,6 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
       "assignment_work",
       syncBatchId
     );
-
     repo.logAudit(actorEmail(req), "assignment.asset.upload", "assignment", String(assignmentId), {
       assignment_id: assignmentId,
       assignment_round: assignmentRound,

@@ -6171,7 +6171,6 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
   if (!id) return { complete: false, assets: [], missing: [], syncSignature: "" };
   const assignment = getAssignmentById(id);
   if (!assignment) return { complete: false, assets: [], missing: [], syncSignature: "" };
-  const currentRound = getAssignmentCurrentRound(assignment);
   const normalizedItems = normalizeAssignmentCaptureUploadItems(captureItems);
   if (!normalizedItems.length) return { complete: false, assets: [], missing: [], syncSignature: "" };
   const expectedBySlotKey = new Map();
@@ -6182,18 +6181,10 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
   const requireImages = Boolean(assignment?.image_reset_required);
   const requireVideos = Boolean(assignment?.video_reset_required);
   const rows = Array.isArray(state.assignments.assetLookup) ? state.assignments.assetLookup : [];
+  // The server already resolves and sends only the active (retained/replaced-aware) assignment_work
+  // rows for this assignment, so no client-side round window is applied here.
   const assignmentRows = rows.filter((row) => {
     if (Number(row?.assignment_id || 0) !== id) return false;
-    const assetRound = Number(row?.assignment_round || 0) || 0;
-    const assetMediaType = normalizeAssignmentCaptureMediaType(row?.assignment_media_type);
-    const isCurrentRound = assetRound === currentRound;
-    const isRetainedRound = assetRound === (currentRound - 1);
-    const canRetainPreviousRound = assetMediaType === "image"
-      ? !requireImages
-      : assetMediaType === "video"
-        ? !requireVideos
-        : false;
-    if (!isCurrentRound && !(isRetainedRound && canRetainPreviousRound)) return false;
     if (String(row?.assignment_surface || "").trim().toLowerCase() !== "assignment_work") return false;
     const slotTypeKey = getAssignmentAssetSlotTypeKeyFromAsset(row);
     const slotKey = slotTypeKey ? slotTypeKey.split("|")[0] : "";
@@ -6223,6 +6214,10 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     activeRows.push(row);
   });
 
+  // Defensive mirror only: the server (resolveActiveAssignmentWorkBatchRows) already reduces
+  // assignment_work rows to one active batch per slot+media key before sending them, so this
+  // grouping is an idempotent no-op on current data. The server resolver is the source of
+  // truth — if the batch contract changes, change it there, not here.
   const groupedBySlotType = new Map();
   for (const row of activeRows) {
     const key = getAssignmentAssetSlotTypeKeyFromAsset(row);
@@ -7014,6 +7009,9 @@ async function ensureAssignmentSubmissionPrefillLoaded(assignment = null) {
   const assignmentId = Number(assignment?.id || 0) || 0;
   if (!assignmentId) return null;
   await loadAssignmentSubmissionServerDraft(assignment);
+  if (Number(state.assignments.selectedId || 0) === assignmentId && state.assignments.serverSubmissionDraftPayloads?.[getAssignmentSubmissionDraftKey(assignmentId, assignment)]) {
+    renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId)));
+  }
   if (state.assignments.latestSubmissionLoaded?.[assignmentId]) {
     return state.assignments.latestSubmissionArticlePayloads?.[assignmentId] || null;
   }
@@ -8865,7 +8863,9 @@ async function loadAssignmentAssets({ showStatus = false } = {}) {
     return Array.isArray(rows) ? rows : [];
   }
   state.assignments.assetLookup = Array.isArray(rows) ? rows : [];
-  state.assignments.assets = state.assignments.assetLookup.filter((row) => Number(row.selected_in_clean || 0) === 1 && String(row.role || "") !== "unused");
+  state.assignments.assets = pageMode === "work"
+    ? state.assignments.assetLookup
+    : state.assignments.assetLookup.filter((row) => Number(row.selected_in_clean || 0) === 1 && String(row.role || "") !== "unused");
   const formConfig = getAssignmentSubmissionFormConfig(assignment, state.assignments.contextFieldPack);
   const localQueue = buildAssignmentCaptureFileUploadQueue(assignmentId, formConfig.captureItems);
   if (!localQueue.length) {
