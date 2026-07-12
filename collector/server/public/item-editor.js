@@ -2537,6 +2537,9 @@ function buildFieldPackDefaults() {
   };
 }
 
+// No "taxonomy" group here: category/subtype/tags are reserved metadata keys
+// (PROJECT_POLICY.md 7A), not editable Curation questions, and the real
+// category-aware taxonomy catalog/resolver is not part of this change.
 const REQUESTED_CHECK_GROUP_TEMPLATES = [
   {
     group_key: "cta_contact",
@@ -2547,15 +2550,6 @@ const REQUESTED_CHECK_GROUP_TEMPLATES = [
       { key: "facebook_url", label: "ลิงก์ Facebook", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์เพจที่ถูกต้อง", condition_prompt: "", evidence_required: false },
       { key: "website_url", label: "ลิงก์เว็บไซต์", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์เว็บไซต์หลัก", condition_prompt: "", evidence_required: false },
       { key: "primary_cta", label: "CTA หลัก", answer_type: "select", instruction: "ยืนยันว่าควรพาคนไปกดอะไรเป็นหลัก", condition_prompt: "", evidence_required: false },
-    ],
-  },
-  {
-    group_key: "taxonomy",
-    group_label: "หมวดหมู่",
-    checks: [
-      { key: "category", label: "หมวดหลัก", answer_type: "text", instruction: "ยืนยันหมวดหลักของสถานที่", condition_prompt: "", evidence_required: false },
-      { key: "subtype", label: "หมวดย่อย", answer_type: "text", instruction: "ยืนยันหมวดย่อยที่ตรงที่สุด", condition_prompt: "", evidence_required: false },
-      { key: "tags", label: "แท็ก", answer_type: "multi_select", instruction: "ดูว่ามีแท็กไหนควรเติม", condition_prompt: "", evidence_required: false },
     ],
   },
 ];
@@ -4291,6 +4285,28 @@ function buildFieldPackApiPayload() {
       state.item
     );
   }
+  // The requested-check editor never renders a "taxonomy" group (PROJECT_POLICY.md 7A), so a
+  // hidden legacy taxonomy group already saved on this field pack would otherwise be dropped
+  // on save. Re-attach only its non-reserved keys here; the group is still never rendered.
+  if (!(Array.isArray(requestedChecksJson?.groups) && requestedChecksJson.groups.some((group) => String(group?.group_key || "").trim().toLowerCase() === "taxonomy"))) {
+    const savedTaxonomyGroup = (Array.isArray(savedRequestedChecksJson?.groups) ? savedRequestedChecksJson.groups : [])
+      .find((group) => String(group?.group_key || "").trim().toLowerCase() === "taxonomy");
+    const preservedTaxonomyChecks = (Array.isArray(savedTaxonomyGroup?.checks) ? savedTaxonomyGroup.checks : [])
+      .filter((check) => !["category", "subtype", "tags"].includes(String(check?.key || "").trim().toLowerCase()));
+    if (preservedTaxonomyChecks.length > 0) {
+      requestedChecksJson = {
+        version: 1,
+        groups: [
+          ...(Array.isArray(requestedChecksJson?.groups) ? requestedChecksJson.groups : []),
+          {
+            group_key: "taxonomy",
+            group_label: savedTaxonomyGroup.group_label || "Taxonomy",
+            checks: preservedTaxonomyChecks,
+          },
+        ],
+      };
+    }
+  }
   return {
     ...buildFieldPackTopLevelPayload({
       ...pack,
@@ -5855,30 +5871,8 @@ function wire() {
     if (!(target instanceof Element)) return;
     const groupNode = target.closest("[data-requested-group]");
     if (!groupNode) return;
-    if (target.getAttribute("data-action") === "add-requested-check") {
-      const current = readRequestedChecksEditorState();
-      const customGroup = current.groups.find((group) => group.group_key === "custom");
-      const nextIndex = Array.isArray(customGroup?.checks) ? customGroup.checks.length + 1 : 1;
-      if (!customGroup) {
-        current.groups.push({ group_key: "custom", group_label: "เช็กเพิ่ม", checks: [] });
-      }
-      current.groups.find((group) => group.group_key === "custom").checks.push({
-        key: `custom_${nextIndex}`,
-        requested: false,
-        label: "",
-        instruction: "",
-        answer_type: "text",
-        suggested_value: null,
-        condition_prompt: null,
-        evidence_required: false,
-        source: null,
-      });
-      renderRequestedChecksEditor({ requested_checks_json: current }, { resetBaseline: false });
-      applyEditorActionGuards();
-      renderStepFourGuides();
-      renderRequestedChecksPreview();
-      return;
-    }
+    // The action that used to add a new custom group/custom_N key here was removed:
+    // PROJECT_POLICY.md 7A forbids creating new custom groups in the active flow.
     if (target.getAttribute("data-action") === "remove-requested-check") {
       target.closest("[data-requested-check-row]")?.remove();
       applyEditorActionGuards();

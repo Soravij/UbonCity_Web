@@ -102,7 +102,6 @@ Locked taxonomy direction on this branch:
 Relevant docs:
 - root state: [../PROJECT_STATE.md](../PROJECT_STATE.md)
 - root policy: [../PROJECT_POLICY.md](../PROJECT_POLICY.md)
-- taxonomy v1 scope: [./docs/taxonomy-v1-scope.md](./docs/taxonomy-v1-scope.md)
 
 ## 2026-06-19 Work Return CTA / Curation Lock
 

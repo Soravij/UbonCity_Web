@@ -789,6 +789,8 @@ function normalizeStringListInput(value, fieldName) {
 
 const CTA_CONTACT_KEYS = Object.freeze(["phone", "line_url", "facebook_url", "website_url"]);
 const TAXONOMY_KEYS = Object.freeze(["category", "subtype"]);
+// PROJECT_POLICY.md 7A: reserved metadata keys, never editable Curation/requested-check questions.
+const RESERVED_TAXONOMY_CHECK_KEYS = Object.freeze(["category", "subtype", "tags"]);
 const CONFIDENCE_VALUES = new Set(["unknown", "low", "medium", "high", "verified"]);
 const CURATION_STATUS_VALUES = new Set(["not_started", "in_review", "curated"]);
 const CONFIRMED_META_STATUS_VALUES = new Set(["not_started", "in_review", "confirmed"]);
@@ -969,13 +971,17 @@ function normalizeRequestedCheckValueByAnswerType(value, answerType, fieldName) 
   return normalizeJsonSafeValue(value);
 }
 
-function normalizeRequestedChecksJson(value, fieldName = "requested_checks_json") {
+function normalizeRequestedChecksJson(value, fieldName = "requested_checks_json", options = {}) {
   const parsed = value && typeof value === "object" && !Array.isArray(value)
     ? value
     : parseJson(value, null);
   const base = defaultRequestedChecksJson();
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
   const groupsRaw = Array.isArray(parsed.groups) ? parsed.groups : [];
+  // allowedCustomCheckKeys, when a Set, restricts the "custom" group to keys that already existed
+  // on the field pack being updated (PROJECT_POLICY.md 7A: no new custom groups/keys; legacy custom
+  // rows stay readable/returnable). Left undefined for read paths, where nothing should be filtered.
+  const allowedCustomCheckKeys = options?.allowedCustomCheckKeys instanceof Set ? options.allowedCustomCheckKeys : null;
   return {
     version: 1,
     groups: groupsRaw
@@ -987,9 +993,13 @@ function normalizeRequestedChecksJson(value, fieldName = "requested_checks_json"
         const checks = checksRaw
           .map((check, checkIndex) => {
             if (!check || typeof check !== "object" || Array.isArray(check)) return null;
+            const key = String(check.key || "").trim().toLowerCase() || `check_${groupIndex}_${checkIndex}`;
+            // Reserved taxonomy metadata keys must never surface as editable Curation questions.
+            if (groupKey === "taxonomy" && RESERVED_TAXONOMY_CHECK_KEYS.includes(key)) return null;
+            if (groupKey === "custom" && allowedCustomCheckKeys && !allowedCustomCheckKeys.has(key)) return null;
             const answerType = normalizeRequestedCheckAnswerType(check.answer_type);
             return {
-              key: String(check.key || "").trim().toLowerCase() || `check_${groupIndex}_${checkIndex}`,
+              key,
               requested: Boolean(check.requested),
               label: String(check.label || "").trim() || "",
               instruction: String(check.instruction || "").trim() || "",
@@ -2203,6 +2213,7 @@ function normalizeArrayLikeInput(value, fieldName) {
 
 function normalizeFieldPackPayload(payload = {}, options = {}) {
   const requireContentItemId = options?.requireContentItemId !== false;
+  const allowedCustomCheckKeys = options?.allowedCustomCheckKeys instanceof Set ? options.allowedCustomCheckKeys : new Set();
   const contentItemId = payload?.content_item_id == null || payload.content_item_id === ""
     ? null
     : Number(payload.content_item_id || 0);
@@ -2244,7 +2255,7 @@ function normalizeFieldPackPayload(payload = {}, options = {}) {
     social_caption_angle: payload?.social_caption_angle == null ? null : String(payload.social_caption_angle || "").trim() || null,
     ai_cta_contact_json: JSON.stringify(normalizeAiCtaContactJson(payload?.ai_cta_contact_json)),
     ai_taxonomy_json: JSON.stringify(normalizeAiTaxonomyJson(payload?.ai_taxonomy_json)),
-    requested_checks_json: JSON.stringify(normalizeRequestedChecksJson(payload?.requested_checks_json)),
+    requested_checks_json: JSON.stringify(normalizeRequestedChecksJson(payload?.requested_checks_json, "requested_checks_json", { allowedCustomCheckKeys })),
     curated_cta_contact_json: JSON.stringify(normalizeCuratedCtaContactJson(payload?.curated_cta_contact_json)),
     curated_taxonomy_json: JSON.stringify(normalizeCuratedTaxonomyJson(payload?.curated_taxonomy_json)),
     curation_status: normalizeCurationStatusValue(payload?.curation_status),
@@ -10355,7 +10366,15 @@ function normalizeStateValue(value, stateGroup) {
       ...payload,
       content_item_id: existing.content_item_id,
     };
-    const normalized = normalizeFieldPackPayload(mergedPayload, { requireContentItemId: true });
+    // Legacy custom checks already saved on this field pack stay editable/persistable;
+    // no key outside this set can be introduced through this save (PROJECT_POLICY.md 7A).
+    const existingCustomGroup = (existing.requested_checks_json?.groups || []).find((group) => group?.group_key === "custom");
+    const allowedCustomCheckKeys = new Set(
+      (Array.isArray(existingCustomGroup?.checks) ? existingCustomGroup.checks : [])
+        .map((check) => String(check?.key || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const normalized = normalizeFieldPackPayload(mergedPayload, { requireContentItemId: true, allowedCustomCheckKeys });
     assertFieldPackSourcesBelongToItem(existing.content_item_id, normalized);
 
     if (normalized.is_current) {

@@ -12,6 +12,8 @@ See [../PROJECT_POLICY.md](../PROJECT_POLICY.md) for the canonical project-wide 
 - `condition_note` remains part of the existing `requested_check_returns` contract.
 - Hidden legacy draft rows and `custom.*` rows must be preserved through draft merge and payload handling.
 - Collector must not introduce auto-save, auto-submit, or auto-publish behavior through this UI path.
+- After Work Return is reviewed and accepted, Article Writers must not confirm CTA or Taxonomy again in Article Workspace; see root `PROJECT_POLICY.md` §7A Acceptance Boundary for the full contract.
+  - TH: หลัง Work Return ผ่านการตรวจและอนุมัติแล้ว ผู้เขียนบทความใน Article Workspace ต้องไม่ยืนยัน CTA หรือ Taxonomy ซ้ำอีก — ดูรายละเอียดเต็มที่ root `PROJECT_POLICY.md` §7A Acceptance Boundary
 
 Current work boundaries:
 - Current project focus is CTA & Curation.
