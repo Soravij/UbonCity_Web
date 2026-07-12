@@ -956,26 +956,13 @@ test("field pack requested_checks_json round-trips and preserves curator-owned c
               },
             ],
           },
-          {
-            group_key: "custom",
-            group_label: "เช็กเพิ่ม",
-            checks: [
-              {
-                key: "parking",
-                requested: false,
-                label: "ที่จอดรถ",
-                instruction: "ถ้ามีให้ระบุจำนวนคร่าว ๆ",
-                answer_type: "boolean_with_conditions",
-                suggested_value: { available: true },
-                condition_prompt: "ถ้ามีจำกัดให้ระบุเงื่อนไข",
-                evidence_required: false,
-              },
-            ],
-          },
         ],
       },
     });
 
+    // A brand-new field pack has no legacy custom baseline, so a "custom" group offered
+    // at create time is not part of this round-trip contract (see the dedicated custom-key
+    // create/update/legacy-preservation tests below).
     assert.deepEqual(pack.requested_checks_json, {
       version: 1,
       groups: [
@@ -993,23 +980,6 @@ test("field pack requested_checks_json round-trips and preserves curator-owned c
               condition_prompt: null,
               evidence_required: true,
               source: { kind: "ai", confidence: "medium" },
-            },
-          ],
-        },
-        {
-          group_key: "custom",
-          group_label: "เช็กเพิ่ม",
-          checks: [
-            {
-              key: "parking",
-              requested: false,
-              label: "ที่จอดรถ",
-              instruction: "ถ้ามีให้ระบุจำนวนคร่าว ๆ",
-              answer_type: "boolean_with_conditions",
-              suggested_value: { available: true },
-              condition_prompt: "ถ้ามีจำกัดให้ระบุเงื่อนไข",
-              evidence_required: false,
-              source: null,
             },
           ],
         },
@@ -1112,25 +1082,12 @@ test("buildAssignmentHandoffPreview includes only requested=true requested check
               },
             ],
           },
-          {
-            group_key: "custom",
-            group_label: "เช็กเพิ่ม",
-            checks: [
-              {
-                key: "parking",
-                requested: true,
-                label: "ที่จอดรถ",
-                instruction: "ดูว่าจอดรถได้กี่คัน",
-                answer_type: "boolean_with_conditions",
-                condition_prompt: "ถ้ามีจำกัดให้ระบุเงื่อนไข",
-                evidence_required: false,
-              },
-            ],
-          },
         ],
       },
     });
 
+    // A brand-new field pack has no legacy custom baseline, so a "custom" group is not part
+    // of this create-time contract (see the dedicated custom-key tests below).
     const preview = ctx.repo.buildAssignmentHandoffPreview(item.id);
     assert.deepEqual(preview.handoff_package?.requested_checks, {
       version: 1,
@@ -1149,23 +1106,6 @@ test("buildAssignmentHandoffPreview includes only requested=true requested check
               condition_prompt: null,
               evidence_required: true,
               source: { kind: "ai", confidence: "medium" },
-            },
-          ],
-        },
-        {
-          group_key: "custom",
-          group_label: "เช็กเพิ่ม",
-          checks: [
-            {
-              key: "parking",
-              requested: true,
-              label: "ที่จอดรถ",
-              instruction: "ดูว่าจอดรถได้กี่คัน",
-              answer_type: "boolean_with_conditions",
-              suggested_value: null,
-              condition_prompt: "ถ้ามีจำกัดให้ระบุเงื่อนไข",
-              evidence_required: false,
-              source: null,
             },
           ],
         },
@@ -1218,10 +1158,10 @@ test("buildAssignmentHandoffPreview excludes legacy cta_contact checks for non-p
             group_label: "หมวดหมู่",
             checks: [
               {
-                key: "category",
+                key: "parking",
                 requested: true,
-                label: "หมวดหลัก",
-                instruction: "ยืนยันหมวด",
+                label: "ที่จอดรถ",
+                instruction: "ยืนยันที่จอดรถ",
                 answer_type: "text",
                 suggested_value: "festival",
                 evidence_required: false,
@@ -1232,6 +1172,8 @@ test("buildAssignmentHandoffPreview excludes legacy cta_contact checks for non-p
       },
     });
 
+    // "category"/"subtype"/"tags" are reserved (PROJECT_POLICY.md 7A); a non-reserved
+    // taxonomy-group key is used here to keep testing the cta_contact place-only filter.
     const preview = ctx.repo.buildAssignmentHandoffPreview(item.id);
     assert.deepEqual(preview.handoff_package?.requested_checks, {
       version: 1,
@@ -1241,10 +1183,10 @@ test("buildAssignmentHandoffPreview excludes legacy cta_contact checks for non-p
           group_label: "หมวดหมู่",
           checks: [
             {
-              key: "category",
+              key: "parking",
               requested: true,
-              label: "หมวดหลัก",
-              instruction: "ยืนยันหมวด",
+              label: "ที่จอดรถ",
+              instruction: "ยืนยันที่จอดรถ",
               answer_type: "text",
               suggested_value: "festival",
               condition_prompt: null,
@@ -1415,12 +1357,12 @@ test("repairAssignmentHandoffSnapshotForAssignment backfills a missing handoff s
             group_label: "Taxonomy / ข้อมูลจัดหมวด",
             checks: [
               {
-                key: "tags",
+                key: "parking",
                 requested: true,
-                label: "แท็ก",
-                instruction: "ตรวจแท็ก",
-                answer_type: "multi_select",
-                suggested_value: ["family"],
+                label: "ที่จอดรถ",
+                instruction: "ตรวจที่จอดรถ",
+                answer_type: "text",
+                suggested_value: "lot",
                 condition_prompt: null,
                 evidence_required: false,
                 source: "ai",
@@ -1530,7 +1472,7 @@ test("createAssignmentFromReadiness snapshots CTA and taxonomy requested checks 
             group_key: "taxonomy",
             group_label: "Taxonomy",
             checks: [
-              { key: "tags", requested: true, label: "Tags", instruction: "Confirm tags", answer_type: "multi_select", suggested_value: ["family", "late-night"], evidence_required: false },
+              { key: "parking", requested: true, label: "Parking", instruction: "Confirm parking", answer_type: "multi_select", suggested_value: ["family", "late-night"], evidence_required: false },
               { key: "business_type", requested: true, label: "Business type", instruction: "Confirm business type", answer_type: "text", suggested_value: "restaurant", evidence_required: false },
               { key: "price_level", requested: true, label: "Price level", instruction: "Confirm price level", answer_type: "text", suggested_value: null, evidence_required: false },
             ],
@@ -3045,6 +2987,197 @@ test("saveItem update accepts event and location fields without throwing", () =>
     assert.equal(updated.event_period_text, "13-16 April 2026");
     assert.equal(updated.location_text, "Thung Si Mueang");
     assert.equal(updated.description_clean, "cleaned description");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("reserved taxonomy metadata keys are stripped and never become Work Return rows", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Reserved Taxonomy Key Place");
+    const requestedChecksJson = {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            { key: "category", requested: true, label: "Category", answer_type: "text" },
+            { key: "subtype", requested: true, label: "Subtype", answer_type: "text" },
+            { key: "tags", requested: true, label: "Tags", answer_type: "multi_select" },
+          ],
+        },
+      ],
+    };
+
+    const created = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      requested_checks_json: requestedChecksJson,
+    });
+    const taxonomyGroupOnCreate = created.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+    assert.equal(taxonomyGroupOnCreate?.checks?.length || 0, 0);
+
+    const updated = ctx.repo.updateFieldPack(created.id, {
+      requested_checks_json: requestedChecksJson,
+    });
+    const taxonomyGroupOnUpdate = updated.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+    assert.equal(taxonomyGroupOnUpdate?.checks?.length || 0, 0);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("new custom check keys are rejected on create and on update, both client-shaped and direct", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Reject New Custom Key Place");
+
+    const created = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "custom",
+            group_label: "Custom",
+            checks: [
+              { key: "custom_1", requested: true, label: "New custom check", answer_type: "text" },
+            ],
+          },
+        ],
+      },
+    });
+    const customGroupOnCreate = created.requested_checks_json.groups.find((group) => group.group_key === "custom");
+    assert.equal(customGroupOnCreate?.checks?.length || 0, 0, "a brand-new field pack has no legacy custom baseline to allow");
+
+    const updatedWithNewKey = ctx.repo.updateFieldPack(created.id, {
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "custom",
+            group_label: "Custom",
+            checks: [
+              { key: "custom_2", requested: true, label: "Another new custom check", answer_type: "text" },
+            ],
+          },
+        ],
+      },
+    });
+    const customGroupOnUpdate = updatedWithNewKey.requested_checks_json.groups.find((group) => group.group_key === "custom");
+    assert.equal(customGroupOnUpdate?.checks?.length || 0, 0, "a key never previously saved must not be created through an update");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("legacy custom check keys already saved on a field pack survive an update", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Legacy Custom Key Place");
+    const created = ctx.repo.createFieldPack({ content_item_id: item.id });
+
+    // Simulate data saved before this fix shipped: written directly, bypassing the
+    // create-time restriction that now blocks brand-new custom checks.
+    ctx.db.prepare("UPDATE field_packs SET requested_checks_json=? WHERE id=?").run(
+      JSON.stringify({
+        version: 1,
+        groups: [
+          {
+            group_key: "custom",
+            group_label: "Custom",
+            checks: [
+              {
+                key: "parking_fee",
+                requested: true,
+                label: "Parking fee",
+                instruction: "Confirm the latest parking fee",
+                answer_type: "text",
+                suggested_value: "Free for 2 hours",
+                condition_prompt: null,
+                evidence_required: false,
+                source: null,
+              },
+            ],
+          },
+        ],
+      }),
+      created.id
+    );
+
+    const updated = ctx.repo.updateFieldPack(created.id, {
+      editor_summary: "unrelated edit that must not drop legacy custom data",
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "custom",
+            group_label: "Custom",
+            checks: [
+              {
+                key: "parking_fee",
+                requested: false,
+                label: "Parking fee (confirmed free)",
+                instruction: "Confirm the latest parking fee",
+                answer_type: "text",
+                suggested_value: "Free for 2 hours",
+                condition_prompt: null,
+                evidence_required: false,
+                source: null,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const customGroup = updated.requested_checks_json.groups.find((group) => group.group_key === "custom");
+    const parkingCheck = customGroup?.checks?.find((check) => check.key === "parking_fee");
+    assert.ok(parkingCheck, "the pre-existing custom key must still be saveable");
+    assert.equal(parkingCheck.label, "Parking fee (confirmed free)");
+    assert.equal(updated.editor_summary, "unrelated edit that must not drop legacy custom data");
+
+    // Reading the field pack back (no write) must also still show the legacy data.
+    const reread = ctx.repo.getCurrentFieldPackByItem(item.id);
+    assert.ok(reread.requested_checks_json.groups.find((group) => group.group_key === "custom")?.checks?.length);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("standard CTA checks and taxonomy stripping do not interfere with each other", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("CTA Unaffected By Taxonomy Strip Place");
+    const created = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      requested_checks_json: {
+        version: 1,
+        groups: [
+          {
+            group_key: "cta_contact",
+            group_label: "CTA/contact",
+            checks: [
+              { key: "phone", requested: true, label: "Phone", answer_type: "phone" },
+            ],
+          },
+          {
+            group_key: "taxonomy",
+            group_label: "Taxonomy",
+            checks: [
+              { key: "category", requested: true, label: "Category", answer_type: "text" },
+            ],
+          },
+        ],
+      },
+    });
+
+    const ctaGroup = created.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
+    const taxonomyGroup = created.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+    assert.equal(ctaGroup?.checks?.[0]?.key, "phone");
+    assert.equal(ctaGroup?.checks?.[0]?.requested, true);
+    assert.equal(taxonomyGroup?.checks?.length || 0, 0);
   } finally {
     ctx.cleanup();
   }

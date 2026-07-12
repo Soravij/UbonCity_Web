@@ -572,14 +572,15 @@ test("requested-check editor shows CTA templates for place items", () => {
   });
 
   const ctaGroup = groups.find((group) => group.group_key === "cta_contact");
-  const taxonomyGroup = groups.find((group) => group.group_key === "taxonomy");
 
   assert.ok(ctaGroup);
   assert.deepEqual(
     ctaGroup.checks.map((check) => check.key),
     ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]
   );
-  assert.ok(taxonomyGroup);
+  // No "taxonomy" group: category/subtype/tags are reserved metadata keys
+  // (PROJECT_POLICY.md 7A), not editable Curation questions.
+  assert.equal(groups.some((group) => group.group_key === "taxonomy"), false);
 });
 
 test("requested-check editor hides CTA templates for non-place items", () => {
@@ -590,7 +591,7 @@ test("requested-check editor hides CTA templates for non-place items", () => {
   });
 
   assert.equal(groups.some((group) => group.group_key === "cta_contact"), false);
-  assert.equal(groups.some((group) => group.group_key === "taxonomy"), true);
+  assert.equal(groups.some((group) => group.group_key === "taxonomy"), false);
 });
 
 test("ai suggested values do not auto-set requested=true in editor groups", () => {
@@ -611,12 +612,11 @@ test("ai suggested values do not auto-set requested=true in editor groups", () =
   });
 
   const ctaPhone = groups.find((group) => group.group_key === "cta_contact")?.checks.find((check) => check.key === "phone");
-  const taxonomyCategory = groups.find((group) => group.group_key === "taxonomy")?.checks.find((check) => check.key === "category");
 
   assert.equal(ctaPhone?.requested, false);
   assert.equal(ctaPhone?.suggested_value, "0812345678");
-  assert.equal(taxonomyCategory?.requested, false);
-  assert.equal(taxonomyCategory?.suggested_value, "attractions");
+  // ai_taxonomy_json suggestions must not resurrect a "taxonomy" requested-check group.
+  assert.equal(groups.some((group) => group.group_key === "taxonomy"), false);
 });
 
 test("buildRequestedChecksEditorState prefers current AI suggestions over stale saved values", () => {
@@ -738,43 +738,11 @@ test("save merge preserves hidden legacy cta_contact checks for non-place items"
           },
         ],
       },
-      {
-        group_key: "taxonomy",
-        group_label: "Taxonomy",
-        checks: [
-          {
-            key: "category",
-            requested: true,
-            label: "Category",
-            instruction: "Confirm category",
-            answer_type: "text",
-            suggested_value: "festival",
-            source: null,
-            condition_prompt: null,
-            evidence_required: false,
-          },
-        ],
-      },
     ],
   };
   const uiState = {
     version: 1,
     groups: [
-      {
-        group_key: "taxonomy",
-        group_label: "Taxonomy",
-        checks: [
-          {
-            key: "category",
-            requested: true,
-            label: "Category",
-            instruction: "Confirm category",
-            answer_type: "text",
-            condition_prompt: null,
-            evidence_required: false,
-          },
-        ],
-      },
       {
         group_key: "custom",
         group_label: "Custom",
@@ -804,10 +772,10 @@ test("non-place preview omits hidden legacy cta_contact checks", () => {
           ],
         },
         {
-          group_key: "taxonomy",
-          group_label: "Taxonomy",
+          group_key: "custom",
+          group_label: "Custom",
           checks: [
-            { key: "category", requested: true, label: "Category", instruction: "Confirm category", answer_type: "text" },
+            { key: "parking", requested: true, label: "Parking", instruction: "Confirm parking", answer_type: "text" },
           ],
         },
       ],
@@ -818,8 +786,8 @@ test("non-place preview omits hidden legacy cta_contact checks", () => {
 
   const html = buildRequestedChecksPreviewHtml({ version: 1, groups });
   assert.match(html, /CTA Review/);
-  assert.match(html, /Suggested Focus/);
-  assert.match(html, /Category/);
+  assert.match(html, /Article context/);
+  assert.match(html, /Parking/);
   assert.doesNotMatch(html, /workflow-badge workflow-badge-sent">Phone/);
   assert.doesNotMatch(html, /Ã Â¸|Ã Â¹|à¹€à¸˜|à¹€à¸™â‚¬|ï¿½/);
 });
@@ -1024,14 +992,14 @@ test("AI suggestion metadata does not auto-request a check", () => {
     version: 1,
     groups: [
       {
-        group_key: "taxonomy",
-        group_label: "Taxonomy",
+        group_key: "custom",
+        group_label: "Custom",
         checks: [
           {
-            key: "tags",
+            key: "amenities",
             requested: false,
-            label: "Tags",
-            instruction: "Check which tags should be added",
+            label: "Amenities",
+            instruction: "Check which amenities should be added",
             answer_type: "multi_select",
             suggested_value: ["River view", "Cafe"],
             source: { kind: "ai", confidence: "medium" },
@@ -1046,32 +1014,14 @@ test("AI suggestion metadata does not auto-request a check", () => {
     version: 1,
     groups: [
       {
-        group_key: "taxonomy",
-        group_label: "Taxonomy",
+        group_key: "custom",
+        group_label: "Custom",
         checks: [
           {
-            key: "category",
+            key: "amenities",
             requested: false,
-            label: "Category",
-            instruction: "Confirm the primary category for the place",
-            answer_type: "text",
-            condition_prompt: null,
-            evidence_required: false,
-          },
-          {
-            key: "subtype",
-            requested: false,
-            label: "Subtype",
-            instruction: "Confirm the most accurate subtype",
-            answer_type: "text",
-            condition_prompt: null,
-            evidence_required: false,
-          },
-          {
-            key: "tags",
-            requested: false,
-            label: "Tags",
-            instruction: "Check which tags should be added",
+            label: "Amenities",
+            instruction: "Check which amenities should be added",
             answer_type: "multi_select",
             condition_prompt: null,
             evidence_required: false,
@@ -1082,11 +1032,11 @@ test("AI suggestion metadata does not auto-request a check", () => {
   };
 
   const result = mergeRequestedChecksForSave(uiState, existingState);
-  const taxonomyGroup = result.groups.find((group) => group.group_key === "taxonomy");
-  const tagsCheck = taxonomyGroup?.checks.find((check) => check.key === "tags");
+  const customGroup = result.groups.find((group) => group.group_key === "custom");
+  const amenitiesCheck = customGroup?.checks.find((check) => check.key === "amenities");
 
-  assert.equal(tagsCheck?.requested, false);
-  assert.deepEqual(tagsCheck?.suggested_value, ["River view", "Cafe"]);
+  assert.equal(amenitiesCheck?.requested, false);
+  assert.deepEqual(amenitiesCheck?.suggested_value, ["River view", "Cafe"]);
 });
 
 test("group labels in saved payload come from stable defaults, not DOM summary text", () => {
@@ -1119,6 +1069,19 @@ test("group labels in saved payload come from stable defaults, not DOM summary t
 test("requested-check UI still does not expose editable provenance or suggested_value inputs", () => {
   assert.equal(itemEditorJs.includes('data-check-field="source"'), false);
   assert.equal(itemEditorJs.includes('data-check-field="suggested_value"'), false);
+});
+
+test("requested-check UI has no way to create a new custom group or custom_N key", () => {
+  assert.equal(itemEditorJs.includes('"add-requested-check"'), false);
+  assert.equal(itemEditorJs.includes('group_key: "custom", group_label: "เช็กเพิ่ม", checks: [] })'), false);
+});
+
+test("requested-check group templates never define category/subtype/tags as editable checks", () => {
+  const templateKeys = REQUESTED_CHECK_GROUP_TEMPLATES.flatMap((group) => group.checks.map((check) => check.key));
+  assert.equal(REQUESTED_CHECK_GROUP_TEMPLATES.some((group) => group.group_key === "taxonomy"), false);
+  assert.equal(templateKeys.includes("category"), false);
+  assert.equal(templateKeys.includes("subtype"), false);
+  assert.equal(templateKeys.includes("tags"), false);
 });
 
 test("requested-check UI exposes compact CTA review and collapsed advanced editor affordance", () => {
@@ -2082,13 +2045,6 @@ test("buildFieldPackApiPayload merges full standard catalogs with saved custom g
       version: 1,
       groups: [
         {
-          group_key: "taxonomy",
-          group_label: "Taxonomy",
-          checks: [
-            { key: "parking", label: "Parking", requested: true, instruction: "verify parking", answer_type: "text" },
-          ],
-        },
-        {
           group_key: "custom",
           group_label: "Custom checks",
           checks: [
@@ -2113,9 +2069,9 @@ test("buildFieldPackApiPayload merges full standard catalogs with saved custom g
   });
   const result = buildFieldPackApiPayload();
 
-  assert.deepEqual(result.requested_checks_json.groups.map((group) => group.group_key), ["cta_contact", "taxonomy", "custom"]);
+  assert.deepEqual(result.requested_checks_json.groups.map((group) => group.group_key), ["cta_contact", "custom"]);
   assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact")?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
-  assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy")?.checks.map((check) => check.key), ["category", "subtype", "tags"]);
+  assert.equal(result.requested_checks_json.groups.some((group) => group.group_key === "taxonomy"), false);
   assert.equal(result.requested_checks_json.groups.find((group) => group.group_key === "custom")?.checks[0].suggested_value, "front desk only");
 });
 
@@ -2275,99 +2231,9 @@ test("buildFieldPackApiPayload overlays explicitly edited live CTA checks while 
   assert.equal(facebookCheck?.requested, true);
 });
 
-test("buildFieldPackApiPayload overlays explicitly edited live taxonomy checks while preserving untouched auto checks", () => {
-  requestedChecksEditorRoot = createRequestedChecksEditorRoot([
-    {
-      groupKey: "taxonomy",
-      checks: [
-        {
-          key: "category",
-          requested: false,
-          label: "Edited category",
-          instruction: "updated taxonomy instruction",
-          answer_type: "text",
-          condition_prompt: "edited taxonomy condition",
-          evidence_required: false,
-        },
-        {
-          key: "subtype",
-          requested: false,
-          label: "Subtype",
-          instruction: "confirm subtype",
-          answer_type: "text",
-          condition_prompt: null,
-          evidence_required: false,
-        },
-      ],
-    },
-  ]);
-  setRequestedChecksEditorBaselineState({
-    version: 1,
-    groups: [
-      {
-        group_key: "taxonomy",
-        group_label: "Taxonomy",
-        checks: [
-          {
-            key: "category",
-            requested: false,
-            label: "Category",
-            instruction: "confirm category",
-            answer_type: "text",
-            condition_prompt: null,
-            evidence_required: false,
-          },
-          {
-            key: "subtype",
-            requested: false,
-            label: "Subtype",
-            instruction: "confirm subtype",
-            answer_type: "text",
-            condition_prompt: null,
-            evidence_required: false,
-          },
-        ],
-      },
-    ],
-  });
-  setBuildFieldPackApiPayloadState({
-    requested_checks_json: { version: 1, groups: [] },
-    ai_cta_contact_json: {},
-    ai_taxonomy_json: {
-      category: "attractions",
-      subtype: "museum",
-    },
-    writer_notes: JSON.stringify({
-      contract_version: "1",
-      taxonomy_version: "page_curation_taxonomy_v1",
-      verification: {
-        needs_verification: ["category", "subtype"],
-        publish_blockers: [],
-      },
-      checklists: {
-        missing_data: [],
-      },
-    }),
-  });
-
-  const result = buildFieldPackApiPayload();
-  const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
-  const categoryCheck = taxonomyGroup?.checks.find((check) => check.key === "category");
-  const subtypeCheck = taxonomyGroup?.checks.find((check) => check.key === "subtype");
-  const tagsCheck = taxonomyGroup?.checks.find((check) => check.key === "tags");
-
-  assert.ok(taxonomyGroup);
-  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["category", "subtype", "tags"]);
-  assert.equal(categoryCheck?.requested, true);
-  assert.equal(categoryCheck?.label, "Edited category");
-  assert.equal(categoryCheck?.instruction, "updated taxonomy instruction");
-  assert.equal(categoryCheck?.condition_prompt, "edited taxonomy condition");
-  assert.equal(categoryCheck?.suggested_value, "attractions");
-  assert.equal(subtypeCheck?.requested, true);
-  assert.equal(subtypeCheck?.suggested_value, "museum");
-  assert.equal(tagsCheck?.requested, true);
-  assert.equal(tagsCheck?.suggested_value, null);
-});
+// The "taxonomy" overlay-merge case (category/subtype/tags editable checks) was removed:
+// those are reserved metadata keys (PROJECT_POLICY.md 7A), not editable Curation questions.
+// The equivalent overlay-merge mechanism is still covered by the cta_contact case above.
 
 test("buildFieldPackApiPayload preserves current custom groups from the live editor without letting stale auto rows override them", () => {
   requestedChecksEditorRoot = createRequestedChecksEditorRoot([
@@ -2504,7 +2370,7 @@ test("buildFieldPackApiPayload preserves current custom groups from the live edi
   assert.equal(ctaGroup.checks[0].suggested_value, "0812345678");
 });
 
-test("buildRequestedChecksAutoSaveState emits full standard catalogs and ignores unsupported AI suggestions", () => {
+test("buildRequestedChecksAutoSaveState emits the full CTA catalog and ignores unsupported AI suggestions", () => {
   const result = buildRequestedChecksAutoSaveState({
     ai_cta_contact_json: {
       phone: "0812345678",
@@ -2529,55 +2395,20 @@ test("buildRequestedChecksAutoSaveState emits full standard catalogs and ignores
   });
 
   const ctaGroup = result.groups.find((group) => group.group_key === "cta_contact");
-  const taxonomyGroup = result.groups.find((group) => group.group_key === "taxonomy");
 
   assert.deepEqual(ctaGroup?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
-  assert.deepEqual(taxonomyGroup?.checks.map((check) => check.key), ["category", "subtype", "tags"]);
   assert.equal(ctaGroup?.checks.every((check) => check.requested === true), true);
-  assert.equal(taxonomyGroup?.checks.every((check) => check.requested === true), true);
   assert.equal(ctaGroup?.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
   assert.equal(ctaGroup?.checks.find((check) => check.key === "line_url")?.suggested_value, null);
-  assert.equal(taxonomyGroup?.checks.find((check) => check.key === "category")?.suggested_value, "attractions");
-  assert.equal(taxonomyGroup?.checks.find((check) => check.key === "subtype")?.suggested_value, null);
+  // ai_taxonomy_json must not resurrect a "taxonomy" requested-check group (reserved metadata keys).
+  assert.equal(result.groups.some((group) => group.group_key === "taxonomy"), false);
 });
 
-test("buildFieldPackApiPayload emits full taxonomy catalog when AI data is empty", () => {
-  requestedChecksEditorRoot = createRequestedChecksEditorRoot([]);
-  setRequestedChecksEditorBaselineState(null);
-  setBuildFieldPackApiPayloadState({
-    requested_checks_json: { version: 1, groups: [] },
-    ai_cta_contact_json: {},
-    ai_taxonomy_json: {},
-    writer_notes: JSON.stringify({
-      contract_version: "1",
-      taxonomy_version: "page_curation_taxonomy_v1",
-      verification: {
-        needs_verification: ["category"],
-        publish_blockers: [],
-      },
-      checklists: {
-        missing_data: [],
-      },
-    }),
-  });
+// The "emits full taxonomy catalog" case was removed: category/subtype/tags are reserved
+// metadata keys (PROJECT_POLICY.md 7A), not editable Curation questions, so no taxonomy
+// group is ever auto-generated regardless of AI/writer_notes data.
 
-  const result = buildFieldPackApiPayload();
-  const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
-  const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
-  const categoryCheck = taxonomyGroup?.checks.find((check) => check.key === "category");
-  const subtypeCheck = taxonomyGroup?.checks.find((check) => check.key === "subtype");
-  const tagsCheck = taxonomyGroup?.checks.find((check) => check.key === "tags");
-
-  assert.ok(ctaGroup);
-  assert.ok(taxonomyGroup);
-  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["category", "subtype", "tags"]);
-  assert.equal(categoryCheck?.requested, true);
-  assert.equal(categoryCheck?.suggested_value, null);
-  assert.equal(subtypeCheck?.requested, true);
-  assert.equal(tagsCheck?.requested, true);
-});
-
-test("buildFieldPackApiPayload emits full standard catalogs when the requested-check editor root exists but is empty", () => {
+test("buildFieldPackApiPayload emits the full CTA catalog when the requested-check editor root exists but is empty", () => {
   requestedChecksEditorRoot = createRequestedChecksEditorRoot([]);
   setRequestedChecksEditorBaselineState(null);
   setBuildFieldPackApiPayloadState({
@@ -2594,12 +2425,240 @@ test("buildFieldPackApiPayload emits full standard catalogs when the requested-c
 
   const result = buildFieldPackApiPayload();
   const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
-  const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
 
   assert.ok(ctaGroup);
-  assert.ok(taxonomyGroup);
   assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
-  assert.deepEqual(taxonomyGroup.checks.map((check) => check.key), ["category", "subtype", "tags"]);
   assert.equal(ctaGroup.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
-  assert.equal(taxonomyGroup.checks.find((check) => check.key === "category")?.suggested_value, "attractions");
+  assert.equal(result.requested_checks_json.groups.some((group) => group.group_key === "taxonomy"), false);
+});
+
+test("buildFieldPackApiPayload preserves a hidden non-reserved taxonomy row the DOM editor never rendered", () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([
+    { groupKey: "cta_contact", checks: [] },
+  ]);
+  setRequestedChecksEditorBaselineState(null);
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            {
+              key: "parking",
+              requested: true,
+              label: "Parking",
+              instruction: "Confirm parking",
+              answer_type: "text",
+              suggested_value: "Street side",
+              condition_prompt: null,
+              evidence_required: false,
+              source: null,
+            },
+          ],
+        },
+      ],
+    },
+    ai_cta_contact_json: {},
+    ai_taxonomy_json: {},
+    writer_notes: "",
+  });
+
+  const result = buildFieldPackApiPayload();
+  const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+  const parkingCheck = taxonomyGroup?.checks?.find((check) => check.key === "parking");
+
+  assert.ok(taxonomyGroup, "a legacy taxonomy group not shown in the editor DOM must still survive save");
+  assert.ok(parkingCheck, "the non-reserved taxonomy key must not be dropped");
+  assert.equal(parkingCheck.label, "Parking");
+  assert.equal(parkingCheck.suggested_value, "Street side");
+});
+
+test("buildFieldPackApiPayload keeps reserved taxonomy keys stripped even while preserving the rest of a hidden legacy group", () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([
+    { groupKey: "cta_contact", checks: [] },
+  ]);
+  setRequestedChecksEditorBaselineState(null);
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            { key: "category", requested: true, label: "Category", answer_type: "text" },
+            { key: "subtype", requested: true, label: "Subtype", answer_type: "text" },
+            { key: "tags", requested: true, label: "Tags", answer_type: "multi_select" },
+            { key: "parking", requested: true, label: "Parking", answer_type: "text", suggested_value: "Street side" },
+          ],
+        },
+      ],
+    },
+    ai_cta_contact_json: {},
+    ai_taxonomy_json: {},
+    writer_notes: "",
+  });
+
+  const result = buildFieldPackApiPayload();
+  const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+  const taxonomyKeys = taxonomyGroup?.checks?.map((check) => check.key) || [];
+
+  assert.equal(taxonomyKeys.includes("category"), false);
+  assert.equal(taxonomyKeys.includes("subtype"), false);
+  assert.equal(taxonomyKeys.includes("tags"), false);
+  assert.deepEqual(taxonomyKeys, ["parking"]);
+});
+
+test("buildFieldPackApiPayload does not fabricate a taxonomy or custom group when no legacy data exists", () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([
+    { groupKey: "cta_contact", checks: [] },
+  ]);
+  setRequestedChecksEditorBaselineState(null);
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: { version: 1, groups: [] },
+    ai_cta_contact_json: {},
+    ai_taxonomy_json: {},
+    writer_notes: "",
+  });
+
+  const result = buildFieldPackApiPayload();
+
+  assert.equal(result.requested_checks_json.groups.some((group) => group.group_key === "taxonomy"), false);
+  assert.equal(result.requested_checks_json.groups.some((group) => group.group_key === "custom"), false);
+});
+
+test("buildFieldPackApiPayload does not fabricate a taxonomy group when the saved legacy group only ever held reserved keys", () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([
+    { groupKey: "cta_contact", checks: [] },
+  ]);
+  setRequestedChecksEditorBaselineState(null);
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            { key: "category", requested: true, label: "Category", answer_type: "text" },
+            { key: "subtype", requested: true, label: "Subtype", answer_type: "text" },
+            { key: "tags", requested: true, label: "Tags", answer_type: "multi_select" },
+          ],
+        },
+      ],
+    },
+    ai_cta_contact_json: {},
+    ai_taxonomy_json: {},
+    writer_notes: "",
+  });
+
+  const result = buildFieldPackApiPayload();
+
+  assert.equal(result.requested_checks_json.groups.some((group) => group.group_key === "taxonomy"), false);
+});
+
+test("buildFieldPackApiPayload CTA overlay-merge behavior is unchanged when a hidden legacy taxonomy row is also preserved", () => {
+  requestedChecksEditorRoot = createRequestedChecksEditorRoot([
+    {
+      groupKey: "cta_contact",
+      checks: [
+        {
+          key: "phone",
+          requested: false,
+          label: "Edited phone",
+          instruction: "updated instruction",
+          answer_type: "phone",
+          condition_prompt: "edited condition",
+          evidence_required: true,
+        },
+        {
+          key: "line_url",
+          requested: false,
+          label: "LINE URL",
+          instruction: "confirm line",
+          answer_type: "url",
+          condition_prompt: null,
+          evidence_required: false,
+        },
+      ],
+    },
+  ]);
+  setRequestedChecksEditorBaselineState({
+    version: 1,
+    groups: [
+      {
+        group_key: "cta_contact",
+        group_label: "CTA/contact",
+        checks: [
+          {
+            key: "phone",
+            requested: false,
+            label: "Phone",
+            instruction: "confirm phone",
+            answer_type: "phone",
+            condition_prompt: null,
+            evidence_required: false,
+          },
+          {
+            key: "line_url",
+            requested: false,
+            label: "LINE URL",
+            instruction: "confirm line",
+            answer_type: "url",
+            condition_prompt: null,
+            evidence_required: false,
+          },
+        ],
+      },
+    ],
+  });
+  setBuildFieldPackApiPayloadState({
+    requested_checks_json: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          checks: [
+            { key: "parking", requested: true, label: "Parking", answer_type: "text", suggested_value: "Street side" },
+          ],
+        },
+      ],
+    },
+    ai_cta_contact_json: {
+      phone: "0812345678",
+      line_url: "https://line.me/example",
+      confidence: "high",
+    },
+    ai_taxonomy_json: {},
+    writer_notes: JSON.stringify({
+      contract_version: "1",
+      taxonomy_version: "page_curation_taxonomy_v1",
+      verification: {
+        needs_verification: ["phone", "line_url"],
+        publish_blockers: [],
+      },
+      checklists: {
+        missing_data: [],
+      },
+    }),
+  });
+
+  const result = buildFieldPackApiPayload();
+  const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
+  const phoneCheck = ctaGroup?.checks.find((check) => check.key === "phone");
+  const lineUrlCheck = ctaGroup?.checks.find((check) => check.key === "line_url");
+  const taxonomyGroup = result.requested_checks_json.groups.find((group) => group.group_key === "taxonomy");
+
+  assert.equal(phoneCheck?.requested, true);
+  assert.equal(phoneCheck?.label, "Edited phone");
+  assert.equal(phoneCheck?.instruction, "updated instruction");
+  assert.equal(phoneCheck?.condition_prompt, "edited condition");
+  assert.equal(phoneCheck?.suggested_value, "0812345678");
+  assert.equal(lineUrlCheck?.requested, true);
+  assert.equal(lineUrlCheck?.suggested_value, "https://line.me/example");
+  assert.ok(taxonomyGroup, "unrelated hidden taxonomy preservation must not block the CTA overlay-merge path");
+  assert.equal(taxonomyGroup.checks[0]?.key, "parking");
 });
