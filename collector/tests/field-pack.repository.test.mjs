@@ -208,8 +208,10 @@ function createTestContext() {
       `work-checksum-${itemId}-${assignmentId}-${round}-${suffix}`
     );
     const assetId = Number(assetResult.lastInsertRowid || 0);
-    const role = String(options.role || "gallery").trim() || "gallery";
-    const selectedInClean = options.selected_in_clean == null ? 1 : Number(options.selected_in_clean || 0) ? 1 : 0;
+    // Real uploads insert role='unused', selected_in_clean=0; promotion happens later in
+    // Article Workspace. Tests opt in to a promoted row via options.role/selected_in_clean.
+    const role = String(options.role || "unused").trim() || "unused";
+    const selectedInClean = options.selected_in_clean == null ? 0 : Number(options.selected_in_clean || 0) ? 1 : 0;
     const isCover = options.is_cover == null ? 0 : Number(options.is_cover || 0) ? 1 : 0;
     const placementType = String(options.placement_type || (role === "inline" ? "inline" : role === "unused" ? "unused" : "gallery")).trim() || "gallery";
     const mediaType = String(options.assignment_media_type || (mimeType.startsWith("video/") ? "video" : "image")).trim().toLowerCase() || "image";

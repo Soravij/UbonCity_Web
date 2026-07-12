@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
-import { createRepository } from "../db/repository.mjs";
+import { createRepository, resolveActiveAssignmentWorkBatchRows } from "../db/repository.mjs";
 
 const testFilePath = fileURLToPath(import.meta.url);
 const testsDir = path.dirname(testFilePath);
@@ -54,13 +54,13 @@ const listDraftAssignmentWorkAssetRowsForTest = new Function(
 return listDraftAssignmentWorkAssetRows;`
 );
 
-const listActiveAssignmentWorkAssetRowsForTest = new Function(
+const listActiveAssignmentWorkAssetRowsForTest = (db) => new Function(
   "db",
+  "resolveActiveAssignmentWorkBatchRows",
   `${extractNamedFunctionSource(serverIndexJs, "listDraftAssignmentWorkAssetRows")}
-${extractNamedFunctionSource(serverIndexJs, "getAssignmentWorkAssetSlotMediaKey")}
 ${extractNamedFunctionSource(serverIndexJs, "listActiveAssignmentWorkAssetRows")}
 return listActiveAssignmentWorkAssetRows;`
-);
+)(db, resolveActiveAssignmentWorkBatchRows);
 
 const resolveAssignmentCurrentRoundForTest = new Function(
   `${extractNamedFunctionSource(serverIndexJs, "resolveAssignmentCurrentRound")}
@@ -70,7 +70,9 @@ return resolveAssignmentCurrentRound;`
 
 const removeAssignmentWorkReplacementLinksBeforeInsertForTest = new Function(
   "db",
-  `${extractNamedFunctionSource(serverIndexJs, "removeAssignmentWorkReplacementLinksBeforeInsert")}
+  `${extractNamedFunctionSource(serverIndexJs, "isPromotedContentAssetRow")}
+${extractNamedFunctionSource(serverIndexJs, "detachContentAssetFromAssignmentWork")}
+${extractNamedFunctionSource(serverIndexJs, "removeAssignmentWorkReplacementLinksBeforeInsert")}
 return removeAssignmentWorkReplacementLinksBeforeInsert;`
 );
 const isCollectorControlledLocalAssetRowForTest = new Function(
@@ -149,13 +151,18 @@ function createTestContext() {
     const assetId = Number(assetResult.lastInsertRowid || 0);
     const surface = String(options.assignment_surface || "assignment_work").trim() || "assignment_work";
     const mediaType = String(options.assignment_media_type || (mimeType.startsWith("video/") ? "video" : "image")).trim().toLowerCase();
-    db.prepare(`
+    // Real uploads insert role='unused', selected_in_clean=0; promotion happens later in
+    // Article Workspace. Tests opt in to a promoted row via options.role/selected_in_clean.
+    const role = String(options.role || "unused").trim() || "unused";
+    const selectedInClean = options.selected_in_clean == null ? 0 : Number(options.selected_in_clean || 0) ? 1 : 0;
+    const placementType = role === "unused" ? "unused" : role === "inline" ? "inline" : "gallery";
+    const linkResult = db.prepare(`
       INSERT INTO content_assets (
         content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order,
         assignment_id, assignment_round, assignment_media_type, assignment_surface, assignment_sync_batch_id
-      ) VALUES (?, ?, 'gallery', 1, 0, 'gallery', 0, ?, ?, ?, ?, ?)
-    `).run(itemId, assetId, assignmentId, round, mediaType, surface, String(options.assignment_sync_batch_id || options.assignmentSyncBatchId || `sync-${itemId}-${assignmentId}-${round}-${suffix}`));
-    return { asset_id: assetId };
+      ) VALUES (?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, ?)
+    `).run(itemId, assetId, role, selectedInClean, placementType, assignmentId, round, mediaType, surface, String(options.assignment_sync_batch_id || options.assignmentSyncBatchId || `sync-${itemId}-${assignmentId}-${round}-${suffix}`));
+    return { asset_id: assetId, content_asset_id: Number(linkResult.lastInsertRowid || 0) };
   }
 
   return { db, repo, cleanup, createItem, createUser, createAssignment, createAssignmentWorkAsset };
@@ -436,6 +443,50 @@ test("removeAssignmentWorkReplacementLinksBeforeInsert does not cross revision r
     assert.equal(Number(roundOneRows[0].asset_id || 0), roundOne.asset_id);
     assert.equal(roundTwoRows.length, 1);
     assert.equal(Number(roundTwoRows[0].asset_id || 0), roundTwo.asset_id);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("removeAssignmentWorkReplacementLinksBeforeInsert detaches a promoted row instead of deleting it", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Replacement Promoted Place");
+    const assignee = ctx.createUser("replace-promoted");
+    const assignment = ctx.createAssignment(item.id, assignee.id);
+    const round = 1;
+    const promoted = ctx.createAssignmentWorkAsset(item.id, assignment.id, round, "promoted", {
+      slot_key: "shot-x",
+      file_name: "shot-x__promoted.jpg",
+      assignment_sync_batch_id: "batch-old",
+      role: "gallery",
+      selected_in_clean: 1,
+    });
+    const plain = ctx.createAssignmentWorkAsset(item.id, assignment.id, round, "plain", {
+      slot_key: "shot-x",
+      file_name: "shot-x__plain.jpg",
+      assignment_sync_batch_id: "batch-old",
+    });
+
+    const removed = removeAssignmentWorkReplacementLinksBeforeInsertForTest(ctx.db)({
+      assignmentId: assignment.id,
+      assignmentRound: round,
+      contentItemId: item.id,
+      fileName: "shot-x__new.jpg",
+      mediaType: "image",
+      assignmentSyncBatchId: "batch-new",
+    });
+
+    assert.equal(removed, 1, "only the unpromoted sibling counts as removed");
+    const promotedRow = ctx.db.prepare("SELECT * FROM content_assets WHERE asset_id=?").get(promoted.asset_id);
+    assert.ok(promotedRow, "promoted row must survive replacement");
+    assert.equal(promotedRow.role, "gallery");
+    assert.equal(Number(promotedRow.selected_in_clean || 0), 1);
+    assert.equal(promotedRow.assignment_surface, null);
+    assert.equal(promotedRow.assignment_id, null);
+    assert.equal(promotedRow.assignment_sync_batch_id, null);
+    assert.equal(Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM assets WHERE id=?").get(promoted.asset_id).c || 0), 1);
+    assert.equal(Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assets WHERE asset_id=?").get(plain.asset_id).c || 0), 0);
   } finally {
     ctx.cleanup();
   }

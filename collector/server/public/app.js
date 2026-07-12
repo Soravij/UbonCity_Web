@@ -6214,6 +6214,10 @@ function getAssignmentServerSyncedAssetsForCaptureItems(assignmentId, captureIte
     activeRows.push(row);
   });
 
+  // Defensive mirror only: the server (resolveActiveAssignmentWorkBatchRows) already reduces
+  // assignment_work rows to one active batch per slot+media key before sending them, so this
+  // grouping is an idempotent no-op on current data. The server resolver is the source of
+  // truth — if the batch contract changes, change it there, not here.
   const groupedBySlotType = new Map();
   for (const row of activeRows) {
     const key = getAssignmentAssetSlotTypeKeyFromAsset(row);

@@ -27,6 +27,9 @@
 - Old and new assets must not remain active together.
 - Matching reset removes every retained assignment_work link of that media type, across all rounds, not just the current round.
 - Never derive assignment work round as revision_round + 1.
+- One batch = one round is a guaranteed invariant: chunked-upload finalize must use the assignment_round captured in the upload manifest at /uploads/start, never a live re-read of the assignment (a revision request landing mid-upload must not split a batch across rounds).
+- Active-batch resolution has exactly one implementation: resolveActiveAssignmentWorkBatchRows in collector/db/repository.mjs. Visibility, deliverable binding, and any future consumer must call it instead of re-deriving the grouping.
+- Promotion boundary: a content_assets row selected in Article Workspace (selected_in_clean=1 or role other than 'unused') is owned by the editorial lifecycle. Assignment lifecycle deletions (replacement-on-insert, revision reset, draft expiry) must never delete such a row or its file; they detach the row instead by clearing assignment_id, assignment_round, assignment_media_type, assignment_surface, and assignment_sync_batch_id.
 
 Placeholders:
 

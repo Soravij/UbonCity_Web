@@ -3531,6 +3531,48 @@ function ensureContentDraftConfirmedMetaSupport(db) {
     db.exec("ALTER TABLE content_drafts ADD COLUMN confirmed_note TEXT;");
   }
 }
+
+// Canonical resolver for "which assignment_work rows are active" (PROJECT_POLICY.md §8).
+// Group rows by slot+media key, group each key by assignment_sync_batch_id, and keep only
+// the batch with the highest assignment_round (ties broken by the newest row id). Every
+// read/bind path that needs the active batch must go through this helper — do not re-derive
+// this grouping elsewhere.
+export function resolveActiveAssignmentWorkBatchRows(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const batchesByKey = new Map();
+  for (const row of list) {
+    const fileName = String(row?.file_name || "").trim().toLowerCase();
+    const slotKey = fileName.includes("__") ? fileName.split("__")[0] : "";
+    const mediaType = String(row?.assignment_media_type || "").trim().toLowerCase();
+    if (!mediaType) continue;
+    const key = `${slotKey}|${mediaType}`;
+    const batchId = String(row?.assignment_sync_batch_id || "").trim() || `legacy-${Number(row?.id || 0) || 0}`;
+    if (!batchesByKey.has(key)) batchesByKey.set(key, new Map());
+    const batches = batchesByKey.get(key);
+    if (!batches.has(batchId)) batches.set(batchId, []);
+    batches.get(batchId).push(row);
+  }
+  const activeRows = [];
+  for (const batches of batchesByKey.values()) {
+    let latestBatchRows = [];
+    let latestBatchRound = -1;
+    let latestBatchMarker = -1;
+    for (const batchRows of batches.values()) {
+      // One batch = one round is guaranteed at write time (chunk finalize pins the manifest
+      // round); the max() only tolerates legacy rows written before that invariant existed.
+      const batchRound = batchRows.reduce((maxRound, row) => Math.max(maxRound, Number(row?.assignment_round || 0) || 0), 0);
+      const batchMarker = batchRows.reduce((maxId, row) => Math.max(maxId, Number(row?.id || 0) || 0), 0);
+      if (batchRound > latestBatchRound || (batchRound === latestBatchRound && batchMarker > latestBatchMarker)) {
+        latestBatchRows = batchRows;
+        latestBatchRound = batchRound;
+        latestBatchMarker = batchMarker;
+      }
+    }
+    activeRows.push(...latestBatchRows);
+  }
+  return activeRows;
+}
+
 export function createRepository(db) {
   ensureLifecycleColumns(db);
   ensureTranslationTables(db);
@@ -4573,6 +4615,7 @@ export function createRepository(db) {
     SELECT
       ca.id,
       ca.assignment_round,
+      ca.assignment_media_type,
       ca.assignment_sync_batch_id,
       a.file_name
     FROM content_assets ca
@@ -4586,6 +4629,8 @@ export function createRepository(db) {
     SELECT
       ca.id AS content_asset_id,
       ca.asset_id,
+      ca.selected_in_clean,
+      ca.role,
       a.storage_disk,
       a.storage_path
     FROM content_assets ca
@@ -4593,6 +4638,15 @@ export function createRepository(db) {
     WHERE ca.assignment_id=?
       AND COALESCE(ca.assignment_surface, '')='assignment_work'
       AND COALESCE(ca.assignment_media_type, '')=?
+  `);
+  const detachContentAssetFromAssignmentWorkStmt = db.prepare(`
+    UPDATE content_assets
+    SET assignment_id=NULL,
+        assignment_round=0,
+        assignment_media_type=NULL,
+        assignment_surface=NULL,
+        assignment_sync_batch_id=NULL
+    WHERE id=?
   `);
 
   const insertAssignmentSubmissionStmt = db.prepare(`
@@ -6271,11 +6325,23 @@ function normalizeStateValue(value, stateGroup) {
     const type = String(mediaType || "").trim().toLowerCase();
     if (!id || !["image", "video"].includes(type)) return { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
     const rows = listAssignmentWorkContentAssetsByTypeStmt.all(id, type);
-    if (!rows.length) return { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
+    if (!rows.length) return { removed_content_assets: 0, removed_assets: 0, deleted_files: [], detached_content_assets: 0 };
     const deletedFiles = [];
     let removedContentAssets = 0;
     let removedAssets = 0;
+    let detachedContentAssets = 0;
     for (const row of rows) {
+      const promoted = Number(row.selected_in_clean || 0) === 1
+        || (String(row.role || "unused").trim().toLowerCase() || "unused") !== "unused";
+      if (promoted) {
+        // Promoted in Article Workspace: leave the editorial row and its file alone,
+        // only detach it from the assignment lifecycle.
+        if (row.content_asset_id) {
+          const detachResult = detachContentAssetFromAssignmentWorkStmt.run(row.content_asset_id);
+          detachedContentAssets += Number(detachResult?.changes || 0) || 0;
+        }
+        continue;
+      }
       if (row.content_asset_id) {
         const contentAssetResult = deleteContentAssetByIdStmt.run(row.content_asset_id);
         removedContentAssets += Number(contentAssetResult?.changes || 0) || 0;
@@ -6296,6 +6362,7 @@ function normalizeStateValue(value, stateGroup) {
       removed_content_assets: removedContentAssets,
       removed_assets: removedAssets,
       deleted_files: deletedFiles,
+      detached_content_assets: detachedContentAssets,
     };
   }
 
@@ -6513,35 +6580,11 @@ function normalizeStateValue(value, stateGroup) {
     const assignmentId = Number(options.assignmentId || 0) || 0;
     const contentItemId = Number(options.contentItemId || 0) || 0;
     const mediaType = String(options.mediaType || "").trim().toLowerCase();
-    const fileName = String(options.fileName || "").trim().toLowerCase();
-    const candidateRound = Number(options.candidateRound || 0) || 0;
     const candidateContentAssetId = Number(options.candidateContentAssetId || 0) || 0;
     if (!assignmentId || !contentItemId || !mediaType || !candidateContentAssetId) return false;
-    const slotKey = fileName.includes("__") ? fileName.split("__")[0] : "";
     const rows = listAssignmentWorkAssetsByAssignmentAndTypeStmt.all(assignmentId, contentItemId, mediaType);
-    const batches = new Map();
-    for (const row of rows) {
-      const rowFileName = String(row.file_name || "").trim().toLowerCase();
-      const rowSlotKey = rowFileName.includes("__") ? rowFileName.split("__")[0] : "";
-      if (rowSlotKey !== slotKey) continue;
-      const rowId = Number(row.id || 0) || 0;
-      const batchId = String(row.assignment_sync_batch_id || "").trim() || `legacy-${rowId}`;
-      if (!batches.has(batchId)) batches.set(batchId, []);
-      batches.get(batchId).push(row);
-    }
-    let latestBatchRows = [];
-    let latestRound = -1;
-    let latestId = -1;
-    for (const batchRows of batches.values()) {
-      const batchRound = batchRows.reduce((maxRound, row) => Math.max(maxRound, Number(row.assignment_round || 0) || 0), 0);
-      const batchId = batchRows.reduce((maxId, row) => Math.max(maxId, Number(row.id || 0) || 0), 0);
-      if (batchRound > latestRound || (batchRound === latestRound && batchId > latestId)) {
-        latestBatchRows = batchRows;
-        latestRound = batchRound;
-        latestId = batchId;
-      }
-    }
-    return latestBatchRows.some((row) => Number(row.id || 0) === candidateContentAssetId);
+    const activeRows = resolveActiveAssignmentWorkBatchRows(rows);
+    return activeRows.some((row) => Number(row.id || 0) === candidateContentAssetId);
   }
 
   function createAssignmentSubmissionDeliverable(payload = {}, actorEmail = "system@local") {

@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
-import { createRepository } from "../db/repository.mjs";
+import { createRepository, resolveActiveAssignmentWorkBatchRows } from "../db/repository.mjs";
 
 const testFilePath = fileURLToPath(import.meta.url);
 const testsDir = path.dirname(testFilePath);
@@ -48,13 +48,13 @@ function extractNamedFunctionSource(source, name) {
   throw new Error(`Could not extract function ${name}`);
 }
 
-const listActiveAssignmentWorkAssetRowsForTest = new Function(
+const listActiveAssignmentWorkAssetRowsForTest = (db) => new Function(
   "db",
+  "resolveActiveAssignmentWorkBatchRows",
   `${extractNamedFunctionSource(serverIndexJs, "listDraftAssignmentWorkAssetRows")}
-${extractNamedFunctionSource(serverIndexJs, "getAssignmentWorkAssetSlotMediaKey")}
 ${extractNamedFunctionSource(serverIndexJs, "listActiveAssignmentWorkAssetRows")}
 return listActiveAssignmentWorkAssetRows;`
-);
+)(db, resolveActiveAssignmentWorkBatchRows);
 
 function createTestContext() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-asset-retention-"));
@@ -127,13 +127,18 @@ function createTestContext() {
     const assetId = Number(assetResult.lastInsertRowid || 0);
     const surface = String(options.assignment_surface || "assignment_work").trim() || "assignment_work";
     const mediaType = String(options.assignment_media_type || (mimeType.startsWith("video/") ? "video" : "image")).trim().toLowerCase();
-    db.prepare(`
+    // Real uploads insert role='unused', selected_in_clean=0; promotion happens later in
+    // Article Workspace. Tests opt in to a promoted row via options.role/selected_in_clean.
+    const role = String(options.role || "unused").trim() || "unused";
+    const selectedInClean = options.selected_in_clean == null ? 0 : Number(options.selected_in_clean || 0) ? 1 : 0;
+    const placementType = role === "unused" ? "unused" : role === "inline" ? "inline" : "gallery";
+    const linkResult = db.prepare(`
       INSERT INTO content_assets (
         content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order,
         assignment_id, assignment_round, assignment_media_type, assignment_surface, assignment_sync_batch_id
-      ) VALUES (?, ?, 'gallery', 1, 0, 'gallery', 0, ?, ?, ?, ?, ?)
-    `).run(itemId, assetId, assignmentId, round, mediaType, surface, `sync-${itemId}-${assignmentId}-${round}-${suffix}`);
-    return { asset_id: assetId };
+      ) VALUES (?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, ?)
+    `).run(itemId, assetId, role, selectedInClean, placementType, assignmentId, round, mediaType, surface, `sync-${itemId}-${assignmentId}-${round}-${suffix}`);
+    return { asset_id: assetId, content_asset_id: Number(linkResult.lastInsertRowid || 0) };
   }
 
   function requestRevision(assignmentId, payload = {}) {
@@ -406,6 +411,105 @@ test("a reset asset no longer exists and cannot be bound to a deliverable", () =
         source_asset_id: imageAsset.asset_id,
       }, "tester@local");
     }, /source_asset_id does not belong to content item/);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("chunk finalize pins assignment_round from the upload manifest instead of a live re-read", () => {
+  assert.match(
+    serverIndexJs,
+    /Number\(manifest\?\.assignment_round \|\| 0\) \|\| resolveAssignmentCurrentRound\(assignment\)/,
+    "finalize must use the round captured at /uploads/start so one batch never spans rounds"
+  );
+});
+
+test("image reset detaches a promoted (Article Workspace-selected) row instead of deleting it", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Reset Promoted Place");
+    const assignee = ctx.createUser("reset-promoted");
+    const assignment = ctx.createAssignment(item.id, assignee.id);
+    const promotedAsset = ctx.createAssignmentWorkAsset(item.id, assignment.id, 1, "cover", {
+      slot_key: "shot-p",
+      file_name: "shot-p__cover.jpg",
+      assignment_media_type: "image",
+    });
+    const draftAsset = ctx.createAssignmentWorkAsset(item.id, assignment.id, 1, "draft", {
+      slot_key: "shot-p",
+      file_name: "shot-p__draft.jpg",
+      assignment_media_type: "image",
+    });
+    ctx.repo.setContentAssetRole(item.id, promotedAsset.asset_id, "cover");
+
+    ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "admin", reason_code: "test_submit" });
+    ctx.requestRevision(assignment.id, {
+      image_reset_required: true,
+      image_reset_reason: "reshoot everything except the chosen cover",
+    });
+
+    const promotedRow = ctx.db.prepare("SELECT * FROM content_assets WHERE asset_id=?").get(promotedAsset.asset_id);
+    assert.ok(promotedRow, "promoted row must survive the reset");
+    assert.equal(promotedRow.role, "cover");
+    assert.equal(Number(promotedRow.selected_in_clean || 0), 1);
+    assert.equal(promotedRow.assignment_surface, null);
+    assert.equal(promotedRow.assignment_id, null);
+    assert.equal(promotedRow.assignment_sync_batch_id, null);
+    assert.equal(Number(promotedRow.assignment_round || 0), 0);
+    const promotedFile = ctx.db.prepare("SELECT COUNT(*) AS c FROM assets WHERE id=?").get(promotedAsset.asset_id);
+    assert.equal(Number(promotedFile.c || 0), 1, "promoted file must not be deleted");
+
+    const draftLinked = ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assets WHERE asset_id=?").get(draftAsset.asset_id);
+    assert.equal(Number(draftLinked.c || 0), 0, "non-promoted sibling is still reset");
+    const draftFile = ctx.db.prepare("SELECT COUNT(*) AS c FROM assets WHERE id=?").get(draftAsset.asset_id);
+    assert.equal(Number(draftFile.c || 0), 0);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+const removeAssignmentWorkRowsByAssetIdsForTest = (db) => new Function(
+  "db",
+  "fsSync",
+  "resolveStoragePath",
+  `${extractNamedFunctionSource(serverIndexJs, "isPromotedContentAssetRow")}
+${extractNamedFunctionSource(serverIndexJs, "detachContentAssetFromAssignmentWork")}
+${extractNamedFunctionSource(serverIndexJs, "removeAssignmentWorkRowsByAssetIds")}
+return removeAssignmentWorkRowsByAssetIds;`
+)(db, { unlinkSync() {} }, (storagePath) => storagePath);
+
+test("expiry/superseded cleanup detaches promoted rows and deletes only unpromoted drafts", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Cleanup Promoted Place");
+    const assignee = ctx.createUser("cleanup-promoted");
+    const assignment = ctx.createAssignment(item.id, assignee.id);
+    const promotedAsset = ctx.createAssignmentWorkAsset(item.id, assignment.id, 1, "keep", {
+      slot_key: "shot-q",
+      file_name: "shot-q__keep.jpg",
+      assignment_media_type: "image",
+    });
+    const draftAsset = ctx.createAssignmentWorkAsset(item.id, assignment.id, 1, "drop", {
+      slot_key: "shot-q",
+      file_name: "shot-q__drop.jpg",
+      assignment_media_type: "image",
+    });
+    ctx.repo.setContentAssetRole(item.id, promotedAsset.asset_id, "gallery");
+
+    const result = removeAssignmentWorkRowsByAssetIdsForTest(ctx.db)([promotedAsset.asset_id, draftAsset.asset_id]);
+    assert.equal(Number(result.removed_links || 0), 1, "only the unpromoted draft link is removed");
+
+    const promotedRow = ctx.db.prepare("SELECT * FROM content_assets WHERE asset_id=?").get(promotedAsset.asset_id);
+    assert.ok(promotedRow, "promoted row must survive cleanup");
+    assert.equal(promotedRow.role, "gallery");
+    assert.equal(promotedRow.assignment_surface, null);
+    const promotedFile = ctx.db.prepare("SELECT COUNT(*) AS c FROM assets WHERE id=?").get(promotedAsset.asset_id);
+    assert.equal(Number(promotedFile.c || 0), 1);
+
+    const draftLinked = ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assets WHERE asset_id=?").get(draftAsset.asset_id);
+    assert.equal(Number(draftLinked.c || 0), 0);
+    const draftFile = ctx.db.prepare("SELECT COUNT(*) AS c FROM assets WHERE id=?").get(draftAsset.asset_id);
+    assert.equal(Number(draftFile.c || 0), 0);
   } finally {
     ctx.cleanup();
   }
