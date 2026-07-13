@@ -1721,6 +1721,13 @@ test("repairAssignmentHandoffSnapshotForAssignment matches the normal handoff so
     );
     const normalSource = normal.handoff?.handoff_package_json?.source || null;
 
+    // an item may only carry one open field round (PROJECT_POLICY.md 7A), so retire the reference
+    // round before creating the snapshot-less one this test needs to repair
+    ctx.repo.updateAssignmentState(normal.assignment.id, "closed", "tester@local", {
+      actor_role: "admin",
+      reason_code: "test_close_reference_round",
+    });
+
     const missingSnapshotAssignment = ctx.repo.createAssignment(
       {
         content_item_id: item.id,

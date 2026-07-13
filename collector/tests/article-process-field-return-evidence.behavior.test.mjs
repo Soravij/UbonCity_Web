@@ -204,6 +204,7 @@ test("repo field return evidence helper returns normalized evidence without raw 
       submitted_by_user_id: user.id,
       assignment_id: assignment.id,
       submission_id: submission.id,
+      submission_source: "latest",
     });
     assert.equal(evidence.items[1].key, "custom.parking");
     assert.equal(evidence.items[1].found, false);
@@ -215,6 +216,38 @@ test("repo field return evidence helper returns normalized evidence without raw 
   }
 });
 
+test("field return evidence preserves boolean, zero, string, null, and condition_note values", () => {
+  const ctx = createContext();
+  try {
+    const item = ctx.createItem("Scalar Evidence Place");
+    const user = ctx.createUser("scalar-values");
+    const assignment = ctx.createAssignment(item.id, user.id);
+    ctx.repo.addAssignmentSubmission({
+      assignment_id: assignment.id,
+      submitted_by_user_id: user.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          "custom.false": { checked: true, answer_type: "boolean", value: false },
+          "custom.true": { checked: true, answer_type: "boolean", value: true },
+          "custom.zero": { checked: true, answer_type: "text", value: 0 },
+          "custom.string": { checked: true, answer_type: "text", value: "kept" },
+          "custom.null": { checked: true, answer_type: "text", value: null, condition_note: "verify later" },
+        },
+      },
+    });
+
+    const byKey = new Map(ctx.repo.buildFieldReturnEvidenceByItem(item.id).items.map((row) => [row.key, row]));
+    assert.equal(byKey.get("custom.false").value, false);
+    assert.equal(byKey.get("custom.true").value, true);
+    assert.equal(byKey.get("custom.zero").value, 0);
+    assert.equal(byKey.get("custom.string").value, "kept");
+    assert.equal(byKey.get("custom.null").value, null);
+    assert.equal(byKey.get("custom.null").condition_note, "verify later");
+  } finally {
+    ctx.cleanup();
+  }
+});
 test("article-process payload exposes summarized field return evidence with submitter display names only", () => {
   const ctx = createContext();
   try {
@@ -257,6 +290,7 @@ test("article-process payload exposes summarized field return evidence with subm
           submitted_at: payload.field_return_evidence.items[0].submitted_at,
           submitted_by: "User payload",
           assignment_id: assignment.id,
+          submission_source: "latest",
         },
       ],
     });
@@ -300,23 +334,25 @@ test("article-process payload returns safe empty field return evidence for event
   }
 });
 
-test("field return evidence submitted_at uses updated_at after resubmission", () => {
+test("field return evidence submitted_at uses updated_at after accepted resubmission", () => {
   const ctx = createContext();
   try {
     const item = ctx.createItem("Resubmission Evidence Place");
     const user = ctx.createUser("resubmit");
     const assignment = ctx.createAssignment(item.id, user.id);
+    ctx.db.prepare(`
+      INSERT INTO content_assignment_handoff_snapshots (
+        assignment_id, content_item_id, readiness_brief_id, handoff_package_json, guard_status, force_reason, created_by
+      ) VALUES (?, ?, NULL, '{}', 'ready', NULL, 'test'
+      )
+    `).run(assignment.id, item.id);
     const initialSubmission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignment.id,
       submitted_by_user_id: user.id,
       submission_state: "submitted",
       field_return_payload_json: {
         requested_check_returns: {
-          "cta_contact.phone": {
-            checked: true,
-            value: "0811111111",
-            evidence: "initial call",
-          },
+          "cta_contact.phone": { checked: true, value: "0811111111", evidence: "initial call" },
         },
       },
     });
@@ -330,20 +366,19 @@ test("field return evidence submitted_at uses updated_at after resubmission", ()
       submission_state: "resubmitted",
       field_return_payload_json: {
         requested_check_returns: {
-          "cta_contact.phone": {
-            checked: true,
-            value: "0822222222",
-            evidence: "updated call",
-          },
+          "cta_contact.phone": { checked: true, value: "0822222222", evidence: "updated call" },
         },
       },
     });
+    ctx.repo.updateAssignmentState(assignment.id, "resubmitted", "submitter@local", { actor_role: "user", reason_code: "submission_created" });
+    ctx.repo.updateAssignmentState(assignment.id, "accepted", "reviewer@local", { actor_role: "admin", reason_code: "accepted" });
     const refreshedEvidence = ctx.repo.buildFieldReturnEvidenceByItem(item.id);
 
-    assert.equal(resubmission.id, initialSubmission.id);
+    assert.notEqual(resubmission.id, initialSubmission.id);
     assert.notEqual(String(resubmission.updated_at || ""), "");
     assert.equal(refreshedEvidence.items[0].submitted_at, resubmission.updated_at);
     assert.equal(refreshedEvidence.items[0].value, "0822222222");
+    assert.equal(refreshedEvidence.items[0].submission_source, "accepted");
   } finally {
     ctx.cleanup();
   }

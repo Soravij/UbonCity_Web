@@ -4692,15 +4692,24 @@ function buildArticleProcessPayload(req, item) {
           submitted_at: row?.submitted_at || null,
           submitted_by: submittedBy,
           assignment_id: Number(row?.assignment_id || 0) || null,
+          submission_source: row?.submission_source === "accepted" ? "accepted" : "latest",
         };
       })
       : [],
   };
+  // "accepted" means the confirmed_* values on the draft were written by reviewer acceptance (§7A).
+  // Legacy rows predating the acceptance pipeline were self-set in the workspace and must not be
+  // presented as reviewer-confirmed facts.
+  const confirmedMetaSource = repo.listAssignmentsByItem(Number(item?.id || 0) || 0)
+    .some((row) => Number(row?.accepted_submission_id || 0) > 0)
+    ? "accepted"
+    : "legacy";
   return {
     item_id: Number(item?.id || 0) || 0,
     status: articleStatus,
     workflow_model: workflowModel,
     latest_draft: latestDraft,
+    confirmed_meta_source: confirmedMetaSource,
     field_return_evidence: fieldReturnEvidence,
     publishable_source: publishableSource?.source || null,
     publishable_source_ready: Boolean(publishableSource?.ready_for_publish_source),
@@ -10343,8 +10352,9 @@ app.post("/api/items/:id/assignments/from-readiness", requireRole("owner"), (req
     });
   } catch (err) {
     const msg = String(err?.message || "Cannot create assignment from readiness");
-    const status = /not ready_for_content|not ready_for_handoff|readiness snapshot is required|force_reason is required/i.test(msg) ? 409 : 400;
-    res.status(status).json({ error: msg });
+    const isConflict = err?.code === "CONFLICT"
+      || /not ready_for_content|not ready_for_handoff|readiness snapshot is required|force_reason is required/i.test(msg);
+    res.status(isConflict ? 409 : 400).json({ error: msg });
   }
 });
 
@@ -10784,7 +10794,7 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
     });
   } catch (err) {
     const msg = String(err?.message || "Cannot create assignment");
-    const isConflict = /UNIQUE|constraint/i.test(msg);
+    const isConflict = err?.code === "CONFLICT" || /UNIQUE|constraint/i.test(msg);
     res.status(isConflict ? 409 : 400).json({ error: msg });
   }
 });
@@ -11094,6 +11104,7 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
       internal_note: req.body?.internal_note,
       actor_role: role,
       reason_code: reasonCode,
+      actor_user_id: Number(req.authUser?.id || 0) || null,
     });
     if (isRevisionRequest && revisionResult) {
       for (const relativePath of Array.isArray(revisionResult?.deleted_files) ? revisionResult.deleted_files : []) {
@@ -11163,6 +11174,114 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
     res.json({ ok: true, assignment });
   } catch (err) {
     res.status(400).json({ error: String(err?.message || "Cannot update assignment state") });
+  }
+});
+
+// §7A rework round: closes the accepted field assignment and issues a new field round with its own
+// handoff snapshot. Requires the actor to re-enter their own password (this discards nothing, but it
+// re-opens human-confirmed CTA/Taxonomy for another field verification round).
+function canReturnFieldAssignmentForRework(req, assignment) {
+  const role = actorPolicyRole(req);
+  const actorId = getAuthUserId(req.authUser);
+  if (!actorId) return false;
+  if (role === "owner") return true;
+  if (role === "admin") return canSeeAssignmentByManagementLine(req.authUser, assignment);
+  // the person who issued the assignment can pull their own work back
+  if (role === "user") return Number(assignment?.assigned_by_user_id || 0) === actorId;
+  return false;
+}
+
+app.post("/api/assignments/:id/return-to-field", requireRole("owner", "admin", "user"), async (req, res) => {
+  const assignmentId = Number(req.params.id || 0);
+  if (!assignmentId) {
+    res.status(400).json({ error: "Invalid assignment id" });
+    return;
+  }
+  const assignment = repo.getAssignmentById(assignmentId);
+  if (!assignment) {
+    res.status(404).json({ error: "assignment not found" });
+    return;
+  }
+  if (!canReturnFieldAssignmentForRework(req, assignment)) {
+    res.status(403).json({ error: "เฉพาะผู้สั่งงานนี้ หรือ role ที่สูงกว่า จึงส่งงานกลับไปทำรอบใหม่ได้" });
+    return;
+  }
+  const note = String(req.body?.note || "").trim();
+  if (!note) {
+    res.status(400).json({ error: "กรุณาระบุเหตุผลที่ส่งงานกลับไปทำรอบใหม่" });
+    return;
+  }
+  const password = String(req.body?.password || "");
+  if (!password) {
+    res.status(400).json({ error: "กรุณายืนยันรหัสผ่านของบัญชีนี้ก่อนส่งงานกลับ" });
+    return;
+  }
+  // Handing the new round to a different worker is an assignment decision and must clear the same
+  // assignee gates as POST /api/items/:id/assignments — being the assigner is not enough on its own.
+  const requestedAssigneeId = Number(req.body?.assignee_user_id || 0) || 0;
+  if (requestedAssigneeId) {
+    const role = actorPolicyRole(req);
+    const assigneeRole = getUserAssignmentRole(requestedAssigneeId);
+    if (!assigneeRole) {
+      res.status(400).json({ error: "assignee_user_id ไม่ถูกต้อง" });
+      return;
+    }
+    if (!canAssignToUserByManagementLine(req.authUser, requestedAssigneeId)) {
+      res.status(403).json({ error: "assigner cannot assign work outside the management subtree" });
+      return;
+    }
+    if (!canAssignInternalWork(role, req.authUser?.id, assigneeRole, requestedAssigneeId)) {
+      res.status(403).json({ error: "assigner role cannot assign internal work to the selected user" });
+      return;
+    }
+    if (!canAssignUserToAssignmentKind("field", assigneeRole)) {
+      const allowedAssigneeRoles = getAllowedAssigneeRolesForAssignmentKind("field");
+      res.status(400).json({ error: `assignment_kind=field requires assignee role in [${allowedAssigneeRoles.join(", ") || "unknown"}]` });
+      return;
+    }
+  }
+
+  const actorId = getAuthUserId(req.authUser);
+  const reauth = await authenticateViaBackendLogin(String(req.authUser?.email || ""), password);
+  if (!reauth.ok || Number(reauth.user?.id || 0) !== Number(actorId || 0)) {
+    repo.logAudit(actorEmail(req), "assignment.return_to_field.reauth_failed", "assignment", String(assignmentId), {
+      assignment_id: assignmentId,
+      reason: reauth.ok ? "identity_mismatch" : String(reauth.error || "invalid_password"),
+    }, {
+      assignment_id: assignmentId,
+    });
+    const status = reauth.ok ? 403 : (reauth.status === 503 || reauth.status === 502 ? reauth.status : 401);
+    res.status(status).json({ error: reauth.ok ? "รหัสผ่านไม่ตรงกับบัญชีที่ใช้งานอยู่" : "รหัสผ่านไม่ถูกต้อง" });
+    return;
+  }
+
+  try {
+    const result = repo.returnFieldAssignmentForRework(assignmentId, actorEmail(req), {
+      note,
+      actor_role: actorPolicyRole(req),
+      actor_user_id: actorId,
+      assignee_user_id: requestedAssigneeId || null,
+      due_at: req.body?.due_at || null,
+    });
+    repo.logAudit(actorEmail(req), "assignment.return_to_field", "content_item", String(assignment.content_item_id || ""), {
+      previous_assignment_id: assignmentId,
+      new_assignment_id: result?.assignment?.id || null,
+      new_handoff_snapshot_id: result?.handoff?.id || null,
+      note,
+    }, {
+      assignment_id: assignmentId,
+    });
+    res.json({
+      ok: true,
+      previous_assignment_id: result?.previous_assignment_id || assignmentId,
+      closed_assignment: result?.closed_assignment || null,
+      assignment: result?.assignment || null,
+      handoff: result?.handoff || null,
+    });
+  } catch (err) {
+    const message = String(err?.message || "Cannot return assignment for a new field round");
+    const status = /must be accepted|only field assignments|note is required/i.test(message) ? 409 : 400;
+    res.status(status).json({ error: message });
   }
 });
 

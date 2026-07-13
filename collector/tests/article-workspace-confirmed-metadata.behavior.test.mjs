@@ -31,9 +31,11 @@ function createElement(id = "", value = "") {
   };
 }
 
-async function loadCoreModule() {
+async function loadCoreModule(missingIds = []) {
   const elements = new Map();
+  const missing = new Set(missingIds);
   const getElementById = (id) => {
+    if (missing.has(id)) return null;
     if (!elements.has(id)) elements.set(id, createElement(id));
     return elements.get(id);
   };
@@ -68,8 +70,21 @@ async function loadCoreModule() {
   return { mod, elements };
 }
 
-test("collectWorkspacePayload keeps confirmed metadata inside draft only", async () => {
-  const { mod, elements } = await loadCoreModule();
+const CONFIRMED_INPUT_IDS = [
+  "confirmed-phone",
+  "confirmed-line-url",
+  "confirmed-facebook-url",
+  "confirmed-website-url",
+  "confirmed-primary-cta",
+  "confirmed-category",
+  "confirmed-subtype",
+  "confirmed-tags",
+  "confirmed-meta-status",
+  "confirmed-note",
+];
+
+test("collectWorkspacePayload mirrors stored confirmed draft metadata when confirmed inputs are absent", async () => {
+  const { mod, elements } = await loadCoreModule(CONFIRMED_INPUT_IDS);
   mod.state.item = {
     id: 48,
     title: "Test place",
@@ -87,10 +102,20 @@ test("collectWorkspacePayload keeps confirmed metadata inside draft only", async
       body: "Draft body",
       meta_title: "Draft meta",
       meta_description: "Draft meta description",
-      confirmed_cta_contact_json: mod.defaultConfirmedCtaContact(),
-      confirmed_taxonomy_json: mod.defaultConfirmedTaxonomy(),
-      confirmed_meta_status: "not_started",
-      confirmed_note: "",
+      confirmed_cta_contact_json: {
+        phone: "0812345678",
+        line_url: "https://line.me/ti/p/test-line",
+        facebook_url: "https://facebook.com/test-place",
+        website_url: "https://example.com/test-place",
+        primary_cta: "line",
+      },
+      confirmed_taxonomy_json: {
+        category: "attractions",
+        subtype: "museum",
+        tags: ["family", "art"],
+      },
+      confirmed_meta_status: "confirmed",
+      confirmed_note: "accepted from assignment #7 round 1 submission #9",
     },
   };
 
@@ -100,16 +125,6 @@ test("collectWorkspacePayload keeps confirmed metadata inside draft only", async
   elements.set("article-meta-title", createElement("article-meta-title", "เมตาไตเติล"));
   elements.set("article-meta-description", createElement("article-meta-description", "เมตาคำอธิบาย"));
   elements.set("article-body", createElement("article-body", "เนื้อหา"));
-  elements.set("confirmed-phone", createElement("confirmed-phone", "0812345678"));
-  elements.set("confirmed-line-url", createElement("confirmed-line-url", "https://line.me/ti/p/test-line"));
-  elements.set("confirmed-facebook-url", createElement("confirmed-facebook-url", "https://facebook.com/test-place"));
-  elements.set("confirmed-website-url", createElement("confirmed-website-url", "https://example.com/test-place"));
-  elements.set("confirmed-primary-cta", createElement("confirmed-primary-cta", "line"));
-  elements.set("confirmed-category", createElement("confirmed-category", "attractions"));
-  elements.set("confirmed-subtype", createElement("confirmed-subtype", "museum"));
-  elements.set("confirmed-tags", createElement("confirmed-tags", "family, art, family"));
-  elements.set("confirmed-meta-status", createElement("confirmed-meta-status", "confirmed"));
-  elements.set("confirmed-note", createElement("confirmed-note", "editor note"));
 
   const payload = mod.collectWorkspacePayload();
 
@@ -117,6 +132,7 @@ test("collectWorkspacePayload keeps confirmed metadata inside draft only", async
   assert.equal(payload.item.confirmed_taxonomy_json, undefined);
   assert.equal(payload.item.confirmed_meta_status, undefined);
   assert.equal(payload.draft.draft_title, "ชื่อบทความ");
+  // no DOM inputs exist anymore — payload must mirror the stored draft values untouched
   assert.deepEqual(payload.draft.confirmed_cta_contact_json, {
     phone: "0812345678",
     line_url: "https://line.me/ti/p/test-line",
@@ -130,11 +146,11 @@ test("collectWorkspacePayload keeps confirmed metadata inside draft only", async
     tags: ["family", "art"],
   });
   assert.equal(payload.draft.confirmed_meta_status, "confirmed");
-  assert.equal(payload.draft.confirmed_note, "editor note");
+  assert.equal(payload.draft.confirmed_note, "accepted from assignment #7 round 1 submission #9");
 });
 
-test("collectWorkspacePayload returns safe confirmed metadata defaults when fields are blank", async () => {
-  const { mod, elements } = await loadCoreModule();
+test("collectWorkspacePayload returns safe confirmed metadata defaults when no confirmed data exists", async () => {
+  const { mod, elements } = await loadCoreModule(CONFIRMED_INPUT_IDS);
   mod.state.item = {
     id: 48,
     title: "Test place",
@@ -161,16 +177,6 @@ test("collectWorkspacePayload returns safe confirmed metadata defaults when fiel
     "article-meta-title",
     "article-meta-description",
     "article-body",
-    "confirmed-phone",
-    "confirmed-line-url",
-    "confirmed-facebook-url",
-    "confirmed-website-url",
-    "confirmed-primary-cta",
-    "confirmed-category",
-    "confirmed-subtype",
-    "confirmed-tags",
-    "confirmed-meta-status",
-    "confirmed-note",
   ].forEach((id) => elements.set(id, createElement(id, "")));
 
   const payload = mod.collectWorkspacePayload();

@@ -6,12 +6,10 @@
   currentOtherTransportMeta,
   currentAssignmentState,
   currentReviewNote,
-  canApplyFieldReturnEvidenceToConfirmedCta,
   defaultConfirmedCtaContact,
   defaultConfirmedTaxonomy,
   fieldReturnEvidence,
   applyArticleSuggestionFieldValues,
-  applyFieldReturnEvidenceToConfirmedCta,
   applySeoSuggestionFieldValues,
   embedOrientation,
   ensureSelectedAssetId,
@@ -23,7 +21,6 @@
   isImageAsset,
   latestDraft,
   loadWorkspace,
-  normalizeCommaSeparatedTags,
   normalizeEmbedUrl,
   otherTransportSubtypeLabel,
   primaryAssignment,
@@ -1122,6 +1119,7 @@ function renderFieldReturnEvidencePanel() {
   const evidence = fieldReturnEvidence();
   const items = (Array.isArray(evidence?.items) ? evidence.items : []).filter((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    if (item.submission_source !== "accepted") return false;
     if (String(item.group_key || "").trim().toLowerCase() === "cta_contact" && !isPlaceItem(state.item)) {
       return false;
     }
@@ -1148,7 +1146,6 @@ function renderFieldReturnEvidencePanel() {
         <h3>${escapeHtml(fieldReturnEvidenceGroupLabel(groupKey))}</h3>
         <ul>
           ${rows.map((item) => {
-            const canApply = canApplyFieldReturnEvidenceToConfirmedCta(item, state.item);
             const submittedMeta = [item.submitted_at ? formatDateTime(item.submitted_at) : "", item.submitted_by || ""].filter(Boolean).join(" · ");
             return `
               <li>
@@ -1157,11 +1154,10 @@ function renderFieldReturnEvidencePanel() {
                 <div class="summary-row"><strong>ตรวจแล้ว</strong><span>${item.checked ? "ใช่" : "ไม่ใช่"}</span></div>
                 <div class="summary-row"><strong>${item.found ? "พบข้อมูล" : "ไม่พบข้อมูล"}</strong><span>${item.found ? "ใช่" : "ไม่ใช่"}</span></div>
                 <div class="summary-row"><strong>ค่าที่พบ</strong><span>${renderFieldReturnEvidenceValue(item.value)}</span></div>
-                <div class="summary-row"><strong>เงื่อนไข/ข้อจำกัด</strong><span>${escapeHtml(item.condition_note || "-")}</span></div>
+                <div class="summary-row"><strong>เงื่อนไข/ข้อจำกัด</strong><span>${renderFieldReturnEvidenceValue(item.condition_note)}</span></div>
                 <div class="summary-row"><strong>หลักฐาน/แหล่งที่มา</strong><span>${escapeHtml(item.evidence || "-")}</span></div>
                 <div class="summary-row"><strong>หมายเหตุ</strong><span>${escapeHtml(item.note || "-")}</span></div>
                 <div class="summary-row"><strong>ส่งกลับเมื่อ</strong><span>${escapeHtml(submittedMeta || "-")}</span></div>
-                ${canApply ? `<div class="toolbar compact-toolbar"><button type="button" class="utility-action" data-action="apply-field-return-evidence" data-field-return-key="${escapeHtml(item.key)}">ใช้ค่านี้</button></div>` : ""}
               </li>
             `;
           }).join("")}
@@ -1172,31 +1168,134 @@ function renderFieldReturnEvidencePanel() {
   setInlineStatus("field-return-evidence-status", "แสดงข้อมูลที่คนเช็กส่งกลับแบบอ่านอย่างเดียว");
 }
 
-function renderWorkspaceFields() {
-  const item = state.item || {};
+function confirmedSummaryValue(value) {
+  if (Array.isArray(value)) {
+    const rows = value.map((entry) => String(entry || "").trim()).filter(Boolean);
+    return rows.length ? escapeHtml(rows.join(", ")) : "-";
+  }
+  if (value && typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "number")) {
+      const unit = String(value.unit || "").trim();
+      return escapeHtml(`${value.number ?? "-"}${unit ? ` ${unit}` : ""}`);
+    }
+    return escapeHtml(JSON.stringify(value));
+  }
+  const text = String(value ?? "").trim();
+  return text ? escapeHtml(text) : "-";
+}
+
+function acceptedFieldReturnEvidenceByGroup(groupKey) {
+  const evidence = fieldReturnEvidence();
+  return (Array.isArray(evidence?.items) ? evidence.items : []).filter((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+    if (row.submission_source !== "accepted") return false;
+    return String(row.group_key || "").trim().toLowerCase() === groupKey && row.checked === true;
+  });
+}
+
+// Confirmed values are only trustworthy when reviewer acceptance wrote them (§7A). Legacy rows were
+// self-set by writers in this very workspace, so they must never be shown as reviewer-confirmed.
+function hasAcceptedConfirmedMetadata() {
+  return String(state.articleProcess?.confirmed_meta_source || "").trim().toLowerCase() === "accepted";
+}
+
+function renderConfirmedCtaSummary() {
+  const root = qs("confirmed-cta-summary");
+  if (!root) return;
+  const labels = [
+    ["phone", "เบอร์โทร"],
+    ["line_url", "ลิงก์ LINE"],
+    ["facebook_url", "ลิงก์ Facebook"],
+    ["website_url", "ลิงก์เว็บไซต์"],
+    ["primary_cta", "ปุ่มหลัก"],
+  ];
+  if (!isPlaceItem(state.item) || !hasAcceptedConfirmedMetadata()) {
+    root.innerHTML = '<p class="muted">ยังไม่มีข้อมูลยืนยันจากผู้ตรวจ</p>';
+    return;
+  }
+  // The persisted confirmed values are the accumulated truth: a rework round only overwrites the
+  // checks it actually answered, so the latest round's evidence alone would be an incomplete picture.
   const draft = latestDraft();
-  const confirmedCtaContact = draft?.confirmed_cta_contact_json && typeof draft.confirmed_cta_contact_json === "object"
+  const confirmedCta = draft?.confirmed_cta_contact_json && typeof draft.confirmed_cta_contact_json === "object"
     ? draft.confirmed_cta_contact_json
     : defaultConfirmedCtaContact();
+  const evidenceRows = new Map(
+    acceptedFieldReturnEvidenceByGroup("cta_contact")
+      .map((row) => [String(row.check_key || "").trim().toLowerCase(), row])
+  );
+  root.innerHTML = labels.map(([key, label]) => {
+    const value = confirmedCta[key] ?? null;
+    const evidenceRow = evidenceRows.get(key) || null;
+    const display = value == null
+      ? (evidenceRow && evidenceRow.found === false ? "ไม่พบ" : "-")
+      : confirmedSummaryValue(value);
+    const conditionNote = String(evidenceRow?.condition_note || "").trim();
+    return `<div class="summary-row"><strong>${escapeHtml(label)}</strong><span>${display}${conditionNote ? ` — ${escapeHtml(conditionNote)}` : ""}</span></div>`;
+  }).join("");
+}
+
+function renderConfirmedTaxonomySummary() {
+  const root = qs("confirmed-taxonomy-summary");
+  if (!root) return;
+  if (!hasAcceptedConfirmedMetadata()) {
+    root.innerHTML = '<p class="muted">ยังไม่มีข้อมูลยืนยันจากผู้ตรวจ</p>';
+    return;
+  }
+  // category/subtype/tags are reserved keys: they never appear as requested checks, so they can only
+  // come from the persisted confirmed taxonomy stamped at acceptance.
+  const draft = latestDraft();
   const confirmedTaxonomy = draft?.confirmed_taxonomy_json && typeof draft.confirmed_taxonomy_json === "object"
     ? draft.confirmed_taxonomy_json
     : defaultConfirmedTaxonomy();
+  const reservedHtml = [
+    ["หมวดหลัก", confirmedTaxonomy.category],
+    ["หมวดย่อย", confirmedTaxonomy.subtype],
+    ["แท็ก", confirmedTaxonomy.tags],
+  ]
+    .map(([label, value]) => `<div class="summary-row"><strong>${escapeHtml(label)}</strong><span>${confirmedSummaryValue(value)}</span></div>`)
+    .join("");
+  // non-reserved Curation answers (price range, etc.) live only in the accepted Work Return
+  const extraHtml = acceptedFieldReturnEvidenceByGroup("taxonomy")
+    .map((row) => {
+      const display = row.found === false ? "ไม่พบ" : confirmedSummaryValue(row.value);
+      const conditionNote = String(row.condition_note || "").trim();
+      return `<div class="summary-row"><strong>${escapeHtml(row.label || row.key)}</strong><span>${display}${conditionNote ? ` — ${escapeHtml(conditionNote)}` : ""}</span></div>`;
+    })
+    .join("");
+  root.innerHTML = reservedHtml + extraHtml;
+}
+function renderConfirmedMetaStatusSummary() {
+  const root = qs("confirmed-meta-status-summary");
+  if (!root) return;
+  const draft = latestDraft();
+  const status = String(draft?.confirmed_meta_status || "not_started").trim().toLowerCase();
+  const statusLabel = status === "confirmed" ? "ยืนยันแล้ว" : status === "in_review" ? "กำลังทวน" : "ยังไม่เริ่ม";
+  const rows = [
+    ["สถานะ", statusLabel],
+    ["ยืนยันเมื่อ", draft?.confirmed_at ? formatDateTime(draft.confirmed_at) : "-"],
+    ["บันทึกประกอบ", String(draft?.confirmed_note || "").trim() || "-"],
+  ];
+  root.innerHTML = rows
+    .map(([label, value]) => `<div class="summary-row"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></div>`)
+    .join("");
+}
+
+function renderConfirmedMetaSummary() {
+  renderConfirmedCtaSummary();
+  renderConfirmedTaxonomySummary();
+  renderConfirmedMetaStatusSummary();
+}
+
+function renderWorkspaceFields() {
+  const item = state.item || {};
+  const draft = latestDraft();
   const bodyValue = draft?.body || item.description_clean || item.description_raw || "";
   fillField("article-title", draft?.draft_title || item.title || "");
   fillField("article-excerpt", draft?.excerpt || item.summary || "");
   fillField("article-slug", item.slug || "");
   fillField("article-meta-title", draft?.meta_title || item.meta_title || "");
   fillField("article-meta-description", draft?.meta_description || item.meta_description || "");
-  fillField("confirmed-phone", confirmedCtaContact.phone || "");
-  fillField("confirmed-line-url", confirmedCtaContact.line_url || "");
-  fillField("confirmed-facebook-url", confirmedCtaContact.facebook_url || "");
-  fillField("confirmed-website-url", confirmedCtaContact.website_url || "");
-  fillField("confirmed-primary-cta", confirmedCtaContact.primary_cta || "");
-  fillField("confirmed-category", confirmedTaxonomy.category || "");
-  fillField("confirmed-subtype", confirmedTaxonomy.subtype || "");
-  fillField("confirmed-tags", Array.isArray(confirmedTaxonomy.tags) ? confirmedTaxonomy.tags.join(", ") : "");
-  fillField("confirmed-meta-status", draft?.confirmed_meta_status || "not_started");
-  fillField("confirmed-note", draft?.confirmed_note || "");
+  renderConfirmedMetaSummary();
   fillField("article-body", bodyValue);
   if (isOtherTransportItem(item)) {
     const meta = currentOtherTransportMeta();
@@ -1691,16 +1790,6 @@ function applyEditorWorkspaceView() {
     ["article-slug", "Slug"],
     ["article-meta-title", "Meta Title"],
     ["article-meta-description", "Meta Description"],
-    ["confirmed-phone", "\u0e40\u0e1a\u0e2d\u0e23\u0e4c\u0e42\u0e17\u0e23"],
-    ["confirmed-line-url", "\u0e25\u0e34\u0e07\u0e01\u0e4c LINE"],
-    ["confirmed-facebook-url", "\u0e25\u0e34\u0e07\u0e01\u0e4c Facebook"],
-    ["confirmed-website-url", "\u0e25\u0e34\u0e07\u0e01\u0e4c\u0e40\u0e27\u0e47\u0e1a\u0e44\u0e0b\u0e15\u0e4c"],
-    ["confirmed-primary-cta", "\u0e1b\u0e38\u0e48\u0e21\u0e2b\u0e25\u0e31\u0e01"],
-    ["confirmed-category", "\u0e2b\u0e21\u0e27\u0e14\u0e2b\u0e25\u0e31\u0e01"],
-    ["confirmed-subtype", "\u0e2b\u0e21\u0e27\u0e14\u0e22\u0e48\u0e2d"],
-    ["confirmed-tags", "\u0e41\u0e17\u0e47\u0e01"],
-    ["confirmed-meta-status", "\u0e2a\u0e16\u0e32\u0e19\u0e30"],
-    ["confirmed-note", "\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e1b\u0e23\u0e30\u0e01\u0e2d\u0e1a"],
   ];
   labels.forEach(([id, text]) => {
     const label = qs(id)?.closest("div")?.querySelector("label");
@@ -1762,6 +1851,7 @@ function renderAll(options = {}) {
   renderFieldPackEvidencePanel();
   renderTaxonomyReviewPanel();
   renderFieldReturnEvidencePanel();
+  renderConfirmedMetaSummary();
   renderWriterSystemInfo();
   renderBlocks();
   renderHeroAndAssets();
@@ -2014,49 +2104,6 @@ function insertVideoEmbed() {
   input.value = "";
 }
 
-function applyFieldReturnEvidenceByKey(key) {
-  const evidence = fieldReturnEvidence();
-  const item = (Array.isArray(evidence?.items) ? evidence.items : []).find((row) => String(row?.key || "").trim().toLowerCase() === String(key || "").trim().toLowerCase()) || null;
-  if (!canApplyFieldReturnEvidenceToConfirmedCta(item, state.item)) return false;
-  const currentValues = {
-    phone: String(qs("confirmed-phone")?.value || ""),
-    line_url: String(qs("confirmed-line-url")?.value || ""),
-    facebook_url: String(qs("confirmed-facebook-url")?.value || ""),
-    website_url: String(qs("confirmed-website-url")?.value || ""),
-    primary_cta: String(qs("confirmed-primary-cta")?.value || ""),
-  };
-  const nextValues = applyFieldReturnEvidenceToConfirmedCta(currentValues, item, state.item);
-  const nextFieldName = String(item.key || "").trim().toLowerCase().split(".")[1] || "";
-  const currentValue = String(currentValues[nextFieldName] || "").trim();
-  const nextValue = String(nextValues[nextFieldName] || "").trim();
-  if (currentValue && currentValue !== nextValue) {
-    const confirmed = window.confirm("มีค่าที่ยืนยันไว้แล้ว ต้องการแทนที่ด้วยค่าที่คนเช็กส่งกลับหรือไม่?");
-    if (!confirmed) return false;
-  }
-  fillField("confirmed-phone", nextValues.phone || "");
-  fillField("confirmed-line-url", nextValues.line_url || "");
-  fillField("confirmed-facebook-url", nextValues.facebook_url || "");
-  fillField("confirmed-website-url", nextValues.website_url || "");
-  fillField("confirmed-primary-cta", nextValues.primary_cta || "");
-  setWorkspaceDirty(true);
-  renderSubmitReadiness();
-  renderStatusChip();
-  applyActionGuards();
-  setInlineStatus("field-return-evidence-status", "คัดลอกค่ามาไว้ในข้อมูลยืนยันแล้ว กรุณากดบันทึก");
-  return true;
-}
-
-function handleFieldReturnEvidencePanelClick(event) {
-  const actionNode = event?.target?.closest?.("[data-action='apply-field-return-evidence']");
-  if (!actionNode) return false;
-  try {
-    return applyFieldReturnEvidenceByKey(actionNode.dataset.fieldReturnKey || "");
-  } catch (err) {
-    setInlineStatus("field-return-evidence-status", err.message, "error");
-    return false;
-  }
-}
-
 async function handleSubmitReviewClick() {
   try {
     const validation = validateWorkspace();
@@ -2134,35 +2181,6 @@ function wire() {
       applyActionGuards();
     });
   });
-  ["confirmed-phone", "confirmed-line-url", "confirmed-facebook-url", "confirmed-website-url", "confirmed-category", "confirmed-subtype", "confirmed-note"].forEach((id) => {
-    qs(id)?.addEventListener("input", () => {
-      setWorkspaceDirty(true);
-      renderSubmitReadiness();
-      renderStatusChip();
-      applyActionGuards();
-    });
-  });
-  qs("confirmed-tags")?.addEventListener("change", () => {
-    fillField("confirmed-tags", normalizeCommaSeparatedTags(qs("confirmed-tags")?.value || "").join(", "));
-    setWorkspaceDirty(true);
-    renderSubmitReadiness();
-    renderStatusChip();
-    applyActionGuards();
-  });
-  qs("confirmed-tags")?.addEventListener("input", () => {
-    setWorkspaceDirty(true);
-    renderSubmitReadiness();
-    renderStatusChip();
-    applyActionGuards();
-  });
-  ["confirmed-primary-cta", "confirmed-meta-status"].forEach((id) => {
-    qs(id)?.addEventListener("change", () => {
-      setWorkspaceDirty(true);
-      renderSubmitReadiness();
-      renderStatusChip();
-      applyActionGuards();
-    });
-  });
   ["other-transport-type", "other-transport-contact-name", "other-transport-contact-details", "other-transport-phone", "other-transport-link"].forEach((id) => {
     ["input", "change"].forEach((eventName) => {
       qs(id)?.addEventListener(eventName, () => {
@@ -2228,7 +2246,6 @@ function wire() {
     workspaceState.systemInfoCollapsed = !workspaceState.systemInfoCollapsed;
     renderWriterSystemInfo();
   });
-  qs("field-return-evidence-panel")?.addEventListener("click", handleFieldReturnEvidencePanelClick);
   registerSubmitReadinessTargetDelegation();
   qs("asset-library")?.addEventListener("click", async (event) => {
     const actionNode = event.target.closest("[data-action]");

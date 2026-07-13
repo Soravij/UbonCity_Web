@@ -204,9 +204,24 @@ function normalizeReviewContentDetailAsQueueItem(baseItem, reviewContent) {
       google_place_id: reviewContent?.google_place_id || null,
       image: reviewContent?.effective_cover_image || reviewContent?.image || null,
     },
+    confirmed_cta: {
+      phone: reviewContent?.phone || null,
+      line_url: reviewContent?.line_url || null,
+      facebook_url: reviewContent?.facebook_url || null,
+      website_url: reviewContent?.website_url || null,
+      primary_cta: reviewContent?.primary_cta || null,
+    },
     history: Array.isArray(reviewContent?.history) ? reviewContent.history : [],
   });
 }
+
+const CONFIRMED_CTA_FIELDS = [
+  ["phone", "เบอร์โทร"],
+  ["line_url", "ลิงก์ LINE"],
+  ["facebook_url", "ลิงก์ Facebook"],
+  ["website_url", "ลิงก์เว็บไซต์"],
+  ["primary_cta", "ปุ่มหลัก"],
+];
 
 function canReusePendingReviewDraft(item) {
   const reviewContentId = Number(item?.review_content_id || 0) || 0;
@@ -931,6 +946,14 @@ export default function Approvals({ token, onPendingChanged, onNavigate }) {
                         Decision panel only. Use Open Review Page to inspect real rendered output.
                       </div>
                       <p className="muted">Review ID {detail.review_id || "-"} | Source {detail.source_content_item_id || "-"} | {pendingTypeLabel(detail)} / {pendingCategoryLabel(detail)}</p>
+                      {detail.pending_type === "place" ? (
+                        <div className="approvals-history-item">
+                          <div className="approvals-history-head"><strong>CTA / ข้อมูลติดต่อ — ยืนยันจาก collector</strong></div>
+                          {CONFIRMED_CTA_FIELDS.map(([key, label]) => (
+                            <p key={key} className="muted">{label}: {detail.confirmed_cta?.[key] || "-"}</p>
+                          ))}
+                        </div>
+                      ) : null}
                       <label style={{ display: "block", marginBottom: 6 }}>Decision note</label>
                       <textarea rows={3} value={note} onChange={(e) => setReviewNotes((current) => ({ ...current, [item.review_id]: e.target.value }))} placeholder="Add decision note" readOnly={activeTab !== "pending"} />
                       <div style={{ marginTop: 10 }}>

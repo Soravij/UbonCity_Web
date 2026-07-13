@@ -287,78 +287,26 @@
               <div class="article-section-head article-subsection-head">
                 <div>
                   <h3 class="section-title">ช่องทางติดต่อและปุ่มหลัก</h3>
-                  <p class="muted">ใช้สำหรับยืนยันข้อมูลที่ editor ต้องการเก็บไว้แยกจากเนื้อหาบทความ</p>
+                  <p class="muted">ยืนยันโดยผู้ตรวจเมื่อรับงานภาคสนาม — แสดงอย่างเดียว</p>
                 </div>
               </div>
-              <div class="grid">
-                <div>
-                  <label>เบอร์โทร</label>
-                  <input id="confirmed-phone" inputmode="tel" />
-                </div>
-                <div>
-                  <label>ลิงก์ LINE</label>
-                  <input id="confirmed-line-url" placeholder="https://..." />
-                </div>
-                <div>
-                  <label>ลิงก์ Facebook</label>
-                  <input id="confirmed-facebook-url" placeholder="https://..." />
-                </div>
-                <div>
-                  <label>ลิงก์เว็บไซต์</label>
-                  <input id="confirmed-website-url" placeholder="https://..." />
-                </div>
-                <div>
-                  <label>ปุ่มหลัก</label>
-                  <select id="confirmed-primary-cta">
-                    <option value="">ยังไม่เลือก</option>
-                    <option value="map">แผนที่</option>
-                    <option value="phone">โทร</option>
-                    <option value="line">LINE</option>
-                  </select>
-                </div>
-              </div>
+              <div id="confirmed-cta-summary" class="article-brief-doc"></div>
 
               <div class="article-section-head article-subsection-head">
                 <div>
                   <h3 class="section-title">หมวดหมู่และแท็ก</h3>
-                  <p class="muted">ใช้บันทึกหมวดหลัก หมวดย่อย และแท็กที่ editor ยืนยันแล้ว</p>
+                  <p class="muted">ยืนยันโดยผู้ตรวจเมื่อรับงานภาคสนาม — แสดงอย่างเดียว</p>
                 </div>
               </div>
-              <div class="grid">
-                <div>
-                  <label>หมวดหลัก</label>
-                  <input id="confirmed-category" />
-                </div>
-                <div>
-                  <label>หมวดย่อย</label>
-                  <input id="confirmed-subtype" />
-                </div>
-                <div class="full-span">
-                  <label>แท็ก</label>
-                  <input id="confirmed-tags" placeholder="คั่นด้วยเครื่องหมายจุลภาค" />
-                </div>
-              </div>
+              <div id="confirmed-taxonomy-summary" class="article-brief-doc"></div>
 
               <div class="article-section-head article-subsection-head">
                 <div>
                   <h3 class="section-title">สถานะการยืนยัน</h3>
-                  <p class="muted">ใช้ติดตามว่าข้อมูลส่วนนี้อยู่ระหว่างตรวจหรือยืนยันแล้ว</p>
+                  <p class="muted">สถานะจากการรับงานของผู้ตรวจ — แสดงอย่างเดียว</p>
                 </div>
               </div>
-              <div class="grid">
-                <div>
-                  <label>สถานะ</label>
-                  <select id="confirmed-meta-status">
-                    <option value="not_started">ยังไม่เริ่ม</option>
-                    <option value="in_review">กำลังทวน</option>
-                    <option value="confirmed">ยืนยันแล้ว</option>
-                  </select>
-                </div>
-                <div class="full-span">
-                  <label>บันทึกประกอบ</label>
-                  <textarea id="confirmed-note" rows="3" placeholder="จดเหตุผลหรือข้อสังเกตเพิ่มเติม"></textarea>
-                </div>
-              </div>
+              <div id="confirmed-meta-status-summary" class="article-brief-doc"></div>
             </div>
           </div>
 

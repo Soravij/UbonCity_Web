@@ -8,27 +8,19 @@ function normalizeStringOrNull(value) {
   return text || null;
 }
 
-export function buildConfirmedCtaContactReviewFields(confirmedCtaContact = {}) {
-  const source = confirmedCtaContact && typeof confirmedCtaContact === "object"
+export function buildConfirmedCtaContactReviewFields(confirmedCtaContact = null) {
+  const source = confirmedCtaContact && typeof confirmedCtaContact === "object" && !Array.isArray(confirmedCtaContact)
     ? confirmedCtaContact
-    : {};
-  const mapped = {
+    : null;
+  if (!source) return {};
+  const primaryCta = normalizeStringOrNull(source.primary_cta);
+  return {
     phone: normalizeStringOrNull(source.phone),
     line_url: normalizeStringOrNull(source.line_url),
     facebook_url: normalizeStringOrNull(source.facebook_url),
     website_url: normalizeStringOrNull(source.website_url),
-    primary_cta: normalizeStringOrNull(source.primary_cta),
+    primary_cta: ["map", "phone", "line"].includes(primaryCta) ? primaryCta : null,
   };
-
-  const result = {};
-  if (mapped.phone) result.phone = mapped.phone;
-  if (mapped.line_url) result.line_url = mapped.line_url;
-  if (mapped.facebook_url) result.facebook_url = mapped.facebook_url;
-  if (mapped.website_url) result.website_url = mapped.website_url;
-  if (mapped.primary_cta && ["map", "phone", "line"].includes(mapped.primary_cta)) {
-    result.primary_cta = mapped.primary_cta;
-  }
-  return result;
 }
 
 export function pickReviewIngestConfirmedCtaContact({
@@ -37,18 +29,15 @@ export function pickReviewIngestConfirmedCtaContact({
   curatedCtaContact = null,
   fieldReturnPayload = null,
 } = {}) {
-  const result = buildConfirmedCtaContactReviewFields(latestDraft?.confirmed_cta_contact_json || {});
-  if (hasOwnField(result, "phone")) return result;
-  if (hasOwnField(result, "line_url")) return result;
-  if (hasOwnField(result, "facebook_url")) return result;
-  if (hasOwnField(result, "website_url")) return result;
-  if (hasOwnField(result, "primary_cta")) return result;
   void aiCtaContact;
   void curatedCtaContact;
   void fieldReturnPayload;
-  return result;
+  // Explicit nulls clear stored CTA on the backend, so only a reviewer-confirmed draft may send
+  // the five keys. An unconfirmed draft omits them and the backend preserves what it already has.
+  const isConfirmed = String(latestDraft?.confirmed_meta_status || "").trim().toLowerCase() === "confirmed";
+  if (!isConfirmed) return {};
+  return buildConfirmedCtaContactReviewFields(latestDraft?.confirmed_cta_contact_json);
 }
-
 export function buildReviewIngestContentPayload({
   contentType = "place",
   sourceLang = "th",

@@ -661,6 +661,25 @@
             </div>
             <p class="muted">ผลตรวจไม่ผ่าน: ขอแก้เพิ่มแล้วให้ผู้ทำงานกลับไปแก้และส่งงานกลับในขั้นนี้ | ผลตรวจผ่าน: งานนี้เสร็จแล้ว</p>
           </div>
+
+          <div id="assignment-return-to-field" class="assignment-workspace-section hidden">
+            <h4 class="assignment-subtitle">ส่งงานกลับไปทำรอบใหม่</h4>
+            <p class="muted assignment-workspace-help">งานที่รับผ่านแล้วจะไม่ถูกแก้ย้อนหลัง ระบบจะปิดรอบเดิมไว้เป็นหลักฐาน แล้วเปิดรอบภาคสนามใหม่พร้อมชุดคำสั่งงานใหม่ ค่าที่ยืนยันไว้เดิมจะยังอยู่จนกว่าจะรับงานรอบใหม่ และจะถูกทับเฉพาะช่องที่คนตรวจติ๊กยืนยันใหม่เท่านั้น</p>
+            <div class="grid">
+              <div style="grid-column: 1 / -1;">
+                <label>เหตุผลที่ส่งกลับ (บังคับ)</label>
+                <textarea id="assignment-return-note" placeholder="ระบุว่าต้องกลับไปตรวจสอบหรือเก็บข้อมูลอะไรเพิ่ม"></textarea>
+              </div>
+              <div>
+                <label>ยืนยันรหัสผ่านของบัญชีคุณ (บังคับ)</label>
+                <input id="assignment-return-password" type="password" autocomplete="current-password" placeholder="รหัสผ่านของบัญชีที่ล็อกอินอยู่" />
+              </div>
+            </div>
+            <div class="toolbar assignment-step-toolbar">
+              <button id="btn-assignment-return-to-field" class="warn step-main">ส่งกลับไปทำรอบใหม่</button>
+            </div>
+            <p id="assignment-return-status" class="muted"></p>
+          </div>
           <div id="assignment-review-hover-preview" class="asset-hover-preview hidden">
             <img id="assignment-review-hover-preview-image" alt="assignment review preview" />
           </div>

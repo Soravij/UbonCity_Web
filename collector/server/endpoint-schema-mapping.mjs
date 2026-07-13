@@ -57,25 +57,15 @@ export function buildAssignmentSubmissionPayload({
 }
 
 export function mergeConfirmedDraftMetadata(draftPayload = {}, latestDraft = null) {
-  const hasOwnField = (key) => Object.prototype.hasOwnProperty.call(draftPayload, key);
+  // confirmed_* is reviewer-owned acceptance data (§7A). Client payload is never
+  // trusted here — the stored latest-draft values always win, so editor-work saves
+  // can only carry the accepted values forward, never rewrite them.
   return {
-    confirmed_cta_contact_json: hasOwnField("confirmed_cta_contact_json")
-      ? draftPayload.confirmed_cta_contact_json
-      : (latestDraft?.confirmed_cta_contact_json ?? undefined),
-    confirmed_taxonomy_json: hasOwnField("confirmed_taxonomy_json")
-      ? draftPayload.confirmed_taxonomy_json
-      : (latestDraft?.confirmed_taxonomy_json ?? undefined),
-    confirmed_meta_status: hasOwnField("confirmed_meta_status")
-      ? draftPayload.confirmed_meta_status
-      : (latestDraft?.confirmed_meta_status ?? undefined),
-    confirmed_by_user_id: hasOwnField("confirmed_by_user_id")
-      ? draftPayload.confirmed_by_user_id
-      : (latestDraft?.confirmed_by_user_id ?? undefined),
-    confirmed_at: hasOwnField("confirmed_at")
-      ? draftPayload.confirmed_at
-      : (latestDraft?.confirmed_at ?? undefined),
-    confirmed_note: hasOwnField("confirmed_note")
-      ? draftPayload.confirmed_note
-      : (latestDraft?.confirmed_note ?? undefined),
+    confirmed_cta_contact_json: latestDraft?.confirmed_cta_contact_json ?? undefined,
+    confirmed_taxonomy_json: latestDraft?.confirmed_taxonomy_json ?? undefined,
+    confirmed_meta_status: latestDraft?.confirmed_meta_status ?? undefined,
+    confirmed_by_user_id: latestDraft?.confirmed_by_user_id ?? undefined,
+    confirmed_at: latestDraft?.confirmed_at ?? undefined,
+    confirmed_note: latestDraft?.confirmed_note ?? undefined,
   };
 }

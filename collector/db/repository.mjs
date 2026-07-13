@@ -791,6 +791,15 @@ const CTA_CONTACT_KEYS = Object.freeze(["phone", "line_url", "facebook_url", "we
 const TAXONOMY_KEYS = Object.freeze(["category", "subtype"]);
 // PROJECT_POLICY.md 7A: reserved metadata keys, never editable Curation/requested-check questions.
 const RESERVED_TAXONOMY_CHECK_KEYS = Object.freeze(["category", "subtype", "tags"]);
+// PROJECT_POLICY.md 7A Rework Round: an item has at most one field round in these states at a time.
+const OPEN_FIELD_ROUND_STATES = new Set([
+  "assigned",
+  "in_progress",
+  "submitted",
+  "resubmitted",
+  "revision_requested",
+  "accepted",
+]);
 const CONFIDENCE_VALUES = new Set(["unknown", "low", "medium", "high", "verified"]);
 const CURATION_STATUS_VALUES = new Set(["not_started", "in_review", "curated"]);
 const CONFIRMED_META_STATUS_VALUES = new Set(["not_started", "in_review", "confirmed"]);
@@ -1245,7 +1254,8 @@ function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName) {
   try {
     if (answerType === "url") return normalizeOptionalUrlValue(rawValue, fieldName);
     if (["text", "phone", "select", "hours"].includes(answerType)) {
-      return String(rawValue || "").trim() || null;
+      if (typeof rawValue === "string") return rawValue.trim() || null;
+      return rawValue;
     }
     if (answerType === "multi_select") {
       return Array.isArray(rawValue) ? normalizeStringListInput(rawValue, fieldName) : [];
@@ -1295,7 +1305,9 @@ function normalizeRequestedCheckReturnEntry(rawValue, fieldName) {
   const evidence = normalizeFieldReturnEvidence(row, fieldName);
   const evidenceText = row.evidence == null ? null : String(row.evidence || "").trim() || null;
   const note = row.note == null ? null : String(row.note || "").trim() || null;
-  const conditionNote = row.condition_note == null ? null : String(row.condition_note || "").trim() || null;
+  const conditionNote = row.condition_note == null
+    ? null
+    : (typeof row.condition_note === "string" ? row.condition_note.trim() || null : row.condition_note);
   const value = checked
     ? normalizeRequestedCheckReturnValue(row.value, answerType, `${fieldName}.value`)
     : (answerType === "multi_select" ? null : null);
@@ -2368,8 +2380,22 @@ function normalizeFieldPackAssignmentInputs(value) {
   });
 }
 
+// SQLite has no nested BEGIN. Track depth per database handle so a transactional helper can call
+// another one and simply join the outer transaction instead of throwing.
+const transactionDepthByDb = new WeakMap();
+
 function runInTransaction(db, fn) {
+  const depth = transactionDepthByDb.get(db) || 0;
+  if (depth > 0) {
+    transactionDepthByDb.set(db, depth + 1);
+    try {
+      return fn();
+    } finally {
+      transactionDepthByDb.set(db, (transactionDepthByDb.get(db) || 1) - 1);
+    }
+  }
   db.exec("BEGIN IMMEDIATE");
+  transactionDepthByDb.set(db, 1);
   try {
     const result = fn();
     db.exec("COMMIT");
@@ -2379,6 +2405,8 @@ function runInTransaction(db, fn) {
       db.exec("ROLLBACK");
     } catch {}
     throw error;
+  } finally {
+    transactionDepthByDb.set(db, 0);
   }
 }
 
@@ -3375,6 +3403,12 @@ function ensureAssignmentTableSupport(db) {
   }
   if (!names.has("video_reset_reason")) {
     db.exec("ALTER TABLE content_assignments ADD COLUMN video_reset_reason TEXT;");
+  }
+  if (!names.has("accepted_submission_id")) {
+    db.exec("ALTER TABLE content_assignments ADD COLUMN accepted_submission_id INTEGER;");
+  }
+  if (!names.has("accepted_handoff_snapshot_id")) {
+    db.exec("ALTER TABLE content_assignments ADD COLUMN accepted_handoff_snapshot_id INTEGER;");
   }
 }
 
@@ -4578,6 +4612,11 @@ export function createRepository(db) {
       updated_at=CURRENT_TIMESTAMP
     WHERE id=?
   `);
+  const markAssignmentAcceptedProvenanceStmt = db.prepare(`
+    UPDATE content_assignments
+    SET accepted_submission_id=?, accepted_handoff_snapshot_id=?, updated_at=CURRENT_TIMESTAMP
+    WHERE id=?
+  `);
   const updateAssignmentMediaResetPolicyStmt = db.prepare(`
     UPDATE content_assignments
     SET
@@ -4762,6 +4801,30 @@ export function createRepository(db) {
     FROM content_assignment_handoff_snapshots
     WHERE assignment_id=?
     ORDER BY id DESC
+    LIMIT 1
+  `);
+
+  // handoff created_at is SQLite CURRENT_TIMESTAMP (UTC); submission created_at is Asia/Bangkok (+07:00, no DST)
+  const latestAssignmentHandoffAtOrBeforeBangkokStmt = db.prepare(`
+    SELECT *
+    FROM content_assignment_handoff_snapshots
+    WHERE assignment_id=? AND created_at <= datetime(?, '-7 hours')
+    ORDER BY id DESC
+    LIMIT 1
+  `);
+
+  const oldestAssignmentHandoffByAssignmentStmt = db.prepare(`
+    SELECT *
+    FROM content_assignment_handoff_snapshots
+    WHERE assignment_id=?
+    ORDER BY id ASC
+    LIMIT 1
+  `);
+
+  const hasAcceptedFieldRoundStmt = db.prepare(`
+    SELECT 1
+    FROM content_assignments
+    WHERE content_item_id=? AND accepted_submission_id IS NOT NULL AND assignment_kind='field'
     LIMIT 1
   `);
 
@@ -6024,6 +6087,20 @@ function normalizeStateValue(value, stateGroup) {
     return profile;
   }
 
+  function assertNoOpenFieldRound(contentItemId) {
+    const itemId = Number(contentItemId || 0) || 0;
+    if (!itemId) return;
+    const openFieldRound = listAssignmentsByItem(itemId).find((row) => {
+      if (String(row?.assignment_kind || "").trim().toLowerCase() !== "field") return false;
+      return OPEN_FIELD_ROUND_STATES.has(String(row?.state || "").trim().toLowerCase());
+    });
+    if (openFieldRound) {
+      throw createConflictError(
+        `an open field round already exists for this item (assignment #${openFieldRound.id}, state ${openFieldRound.state}); close it or use the rework round flow`
+      );
+    }
+  }
+
   function createAssignment(payload = {}, actorUserId = null, metadata = {}) {
     const contentItemId = Number(payload.content_item_id || 0);
     const assigneeUserId = Number(payload.assignee_user_id || 0);
@@ -6055,6 +6132,12 @@ function normalizeStateValue(value, stateGroup) {
     const assignmentKind = normalizeAssignmentKindValue(payload.assignment_kind, "field");
     const state = normalizeStateValue(payload.state || "assigned", "assignment");
     if (!state) throw new Error("invalid assignment state");
+    // §7A Rework Round (locked): an item has at most one open field round. This is the single
+    // chokepoint — createAssignmentFromReadiness routes through here too, and the rework flow closes
+    // the accepted round before creating the next one, so it passes.
+    if (assignmentKind === "field") {
+      assertNoOpenFieldRound(contentItemId);
+    }
     const dueAt = payload.due_at == null || payload.due_at === "" ? null : toNullableDateIso(payload.due_at, "due_at");
     const briefJson = payload.brief_json == null ? null : parseJsonInputStrict(payload.brief_json, "brief_json", "object");
     const requirementsJson = payload.requirements_json == null
@@ -6136,7 +6219,135 @@ function normalizeStateValue(value, stateGroup) {
     return listExternalAssignmentsByAssignerStmt.all(Number(assignerUserId || 0), safeLimit).map(normalizeAssignmentRow);
   }
 
+  function resolveAcceptedAssignmentProvenance(assignment) {
+    const assignmentId = Number(assignment?.id || 0) || 0;
+    const assignmentKind = String(assignment?.assignment_kind || "field").trim().toLowerCase();
+    const submissionId = Number(assignment?.latest_submission_id || 0) || null;
+    const submission = submissionId ? getAssignmentSubmissionById(submissionId) : null;
+    if (submission && Number(submission.assignment_id || 0) !== assignmentId) {
+      throw new Error(`latest submission #${submissionId} does not belong to assignment #${assignmentId}`);
+    }
+    let handoff = null;
+    if (submission?.created_at) {
+      handoff = normalizeAssignmentHandoffRow(
+        latestAssignmentHandoffAtOrBeforeBangkokStmt.get(assignmentId, submission.created_at)
+      );
+      if (!handoff) {
+        // No snapshot predates the submission. That happens when the snapshot was backfilled by the
+        // repair tool after the Work Return, or when a legacy submission row carries a UTC timestamp
+        // instead of Bangkok time. Falling back to the OLDEST snapshot keeps a repaired assignment
+        // acceptable without ever letting a later reissue shadow a snapshot that does predate it.
+        handoff = normalizeAssignmentHandoffRow(oldestAssignmentHandoffByAssignmentStmt.get(assignmentId));
+      }
+    }
+    const handoffMatchesItem = Boolean(handoff)
+      && Number(handoff.content_item_id || 0) === Number(assignment.content_item_id || 0);
+    // Only field assignments are issued with a handoff snapshot. Editorial and direct
+    // assignments never get one, so a hard requirement here would make them unacceptable.
+    if (assignmentKind === "field" && submission && !handoffMatchesItem) {
+      throw new Error(`accepted submission #${submissionId} has no matching handoff snapshot`);
+    }
+    return { submission, handoff: handoffMatchesItem ? handoff : null };
+  }
+
+  // Accepted answers land in a schema-constrained column (URL/enum validated). A Work Return
+  // may legitimately hold free text there (a LINE id instead of a URL), which must not make
+  // acceptance itself fail — the raw answer stays readable in requested_check_returns.
+  function coerceAcceptedCtaContactValue(key, rawValue) {
+    const value = typeof rawValue === "string" ? rawValue.trim() || null : null;
+    if (value == null) return null;
+    const fieldName = `confirmed_cta_contact_json.${key}`;
+    try {
+      if (key === "primary_cta") return normalizePrimaryCtaValue(value, fieldName);
+      if (key.endsWith("_url")) return normalizeOptionalUrlValue(value, fieldName);
+      return value;
+    } catch {
+      return null;
+    }
+  }
+
+  function applyAcceptedAssignmentConfirmedMetadata(assignment, actorUserId = null) {
+    const assignmentId = Number(assignment?.id || 0) || 0;
+    if (!assignmentId) return;
+    const { submission, handoff } = resolveAcceptedAssignmentProvenance(assignment);
+    const contentItemId = Number(assignment.content_item_id || 0) || 0;
+    // Read this BEFORE the provenance stamp below, otherwise this very acceptance would count as the
+    // item's "previous" accepted round. Re-accepting the same assignment after a revision still sees its
+    // own earlier pointer here, which is what keeps that round's confirmed values alive.
+    const hadAcceptedRoundBefore = contentItemId ? Boolean(hasAcceptedFieldRoundStmt.get(contentItemId)) : false;
+    markAssignmentAcceptedProvenanceStmt.run(
+      submission?.id || null,
+      handoff?.id || null,
+      assignmentId
+    );
+    const assignmentKind = String(assignment.assignment_kind || "field").trim().toLowerCase();
+    if (assignmentKind !== "field" || !submission) return;
+    if (!contentItemId) return;
+    const item = getItem(contentItemId);
+    if (!item) return;
+    const latestDraft = latestDraftByItem(contentItemId);
+    const returns = submission.field_return_payload_json?.requested_check_returns || {};
+    const isPlaceItem = String(item.type || "").trim().toLowerCase() === "place";
+    // Only a value that a human ticked and a reviewer accepted counts as confirmed (§7A). Values sitting in
+    // the draft of an item that never had an accepted round are writer self-set leftovers from the old
+    // editable workspace, so they are not a baseline to carry forward.
+    const draftCta = (hadAcceptedRoundBefore && latestDraft?.confirmed_cta_contact_json) || defaultConfirmedCtaContact();
+    // Patch semantics, not replace: a Work Return only speaks for the checks it actually answered.
+    //   checked + found   -> overwrite with the new value
+    //   checked + not found -> the human verified there is none, clear it
+    //   unchecked         -> not verified this round, keep what a previous accepted round confirmed
+    const confirmedCtaContact = isPlaceItem
+      ? Object.keys(defaultConfirmedCtaContact()).reduce((acc, key) => {
+        const entry = returns[`cta_contact.${key}`];
+        if (!entry || entry.checked !== true) {
+          acc[key] = draftCta[key] ?? null;
+          return acc;
+        }
+        acc[key] = coerceAcceptedCtaContactValue(key, entry.found === true ? entry.value : null);
+        return acc;
+      }, {})
+      : draftCta;
+    const draftTaxonomy = (hadAcceptedRoundBefore && latestDraft?.confirmed_taxonomy_json) || defaultConfirmedTaxonomy();
+    const confirmedTaxonomy = {
+      category: item.category == null ? null : String(item.category || "").trim() || null,
+      subtype: draftTaxonomy.subtype ?? null,
+      tags: Array.isArray(draftTaxonomy.tags) ? draftTaxonomy.tags : [],
+    };
+    const confirmedFields = {
+      confirmed_cta_contact_json: confirmedCtaContact,
+      confirmed_taxonomy_json: confirmedTaxonomy,
+      confirmed_meta_status: "confirmed",
+      confirmed_by_user_id: actorUserId == null ? null : Number(actorUserId || 0) || null,
+      confirmed_at: new Date().toISOString(),
+      confirmed_note: `accepted from assignment #${assignmentId} round ${Math.max(1, Number(assignment.revision_round || 0) || 1)} submission #${submission.id}`,
+    };
+    if (latestDraft) {
+      saveDraft(contentItemId, latestDraft.generation_run_uid, {
+        draft_title: latestDraft.draft_title,
+        excerpt: latestDraft.excerpt,
+        body: latestDraft.body,
+        meta_title: latestDraft.meta_title,
+        meta_description: latestDraft.meta_description,
+        suggested_related: latestDraft.suggested_related || [],
+        ai_quality_score: latestDraft.ai_quality_score ?? null,
+        status: latestDraft.status || "generated",
+        ...confirmedFields,
+      });
+    } else {
+      saveDraft(contentItemId, `accepted-meta-${assignmentId}`, {
+        // keep the item's real title so a sync before article generation cannot publish "Untitled draft"
+        draft_title: String(item.title || "").trim() || "Untitled draft",
+        status: "draft",
+        ...confirmedFields,
+      });
+    }
+  }
+
   function updateAssignmentState(assignmentId, nextState, actorEmail = "system@local", payload = {}) {
+    return runInTransaction(db, () => updateAssignmentStateInternal(assignmentId, nextState, actorEmail, payload));
+  }
+
+  function updateAssignmentStateInternal(assignmentId, nextState, actorEmail = "system@local", payload = {}) {
     const id = Number(assignmentId || 0);
     const normalizedState = normalizeStateValue(nextState, "assignment");
     if (!id) throw new Error("assignmentId is required");
@@ -6170,6 +6381,12 @@ function normalizeStateValue(value, stateGroup) {
       shouldClearAcceptedAt,
       id
     );
+    if (normalizedState === "accepted") {
+      applyAcceptedAssignmentConfirmedMetadata(
+        normalizeAssignmentRow(getAssignmentByIdStmt.get(id)),
+        payload.actor_user_id
+      );
+    }
     if (shouldSyncWorkflow) {
       upsertWorkflowModel(
         Number(existing.content_item_id),
@@ -6267,7 +6484,7 @@ function normalizeStateValue(value, stateGroup) {
         videoResetReason,
         id
       );
-      const assignment = updateAssignmentState(id, "revision_requested", actorEmail, {
+      const assignment = updateAssignmentStateInternal(id, "revision_requested", actorEmail, {
         contributor_note: contributorNote,
         internal_note: internalNote,
         actor_role: actorRole,
@@ -8938,8 +9155,36 @@ function normalizeStateValue(value, stateGroup) {
     return next;
   }
 
+  // Values a human already confirmed for this item, keyed by return_key. A rework round shows them as
+  // read-only reference under each check so the worker can re-verify only what actually changed.
+  // They are NOT pre-checked: ticking a check means "a human verified it this round".
+  function buildPreviousConfirmedCheckValues(item) {
+    const itemId = Number(item?.id || 0) || 0;
+    if (!itemId) return {};
+    // Handoff packages are rebuilt by every readiness/handoff preview, so keep the common case (an item
+    // that was never accepted, therefore has nothing previously confirmed) down to one indexed lookup.
+    if (!hasAcceptedFieldRoundStmt.get(itemId)) return {};
+    const previous = {};
+    const evidence = buildFieldReturnEvidenceByItem(itemId);
+    for (const row of Array.isArray(evidence?.items) ? evidence.items : []) {
+      if (row?.submission_source !== "accepted" || row?.checked !== true) continue;
+      const key = String(row.key || "").trim().toLowerCase();
+      if (!key) continue;
+      previous[key] = row.found === true ? (row.value ?? null) : null;
+    }
+    const confirmedCta = latestDraftByItem(itemId)?.confirmed_cta_contact_json || null;
+    if (confirmedCta && String(item?.type || "").trim().toLowerCase() === "place") {
+      // confirmed CTA is the accumulated truth across rounds, so it wins over any single round's answer
+      for (const key of Object.keys(defaultConfirmedCtaContact())) {
+        previous[`cta_contact.${key}`] = confirmedCta[key] ?? null;
+      }
+    }
+    return previous;
+  }
+
   function buildRequestedChecksHandoffPayload(requestedChecks, item) {
     const normalized = normalizeRequestedChecksJson(requestedChecks);
+    const previousConfirmed = buildPreviousConfirmedCheckValues(item);
     const groups = normalized.groups
       .filter((group) => {
         const normalizedGroupKey = String(group?.group_key || "").trim().toLowerCase();
@@ -8951,7 +9196,17 @@ function normalizeStateValue(value, stateGroup) {
       .map((group) => ({
         group_key: group.group_key,
         group_label: group.group_label,
-        checks: (Array.isArray(group.checks) ? group.checks : []).filter((check) => check?.requested === true),
+        checks: (Array.isArray(group.checks) ? group.checks : [])
+          .filter((check) => check?.requested === true)
+          .map((check) => {
+            const returnKey = `${group.group_key}.${check.key}`;
+            const previousValue = Object.prototype.hasOwnProperty.call(previousConfirmed, returnKey)
+              ? previousConfirmed[returnKey]
+              : undefined;
+            return previousValue == null
+              ? check
+              : { ...check, previous_confirmed_value: previousValue };
+          }),
       }))
       .filter((group) => group.checks.length > 0);
     if (!groups.length) return null;
@@ -9444,8 +9699,14 @@ function normalizeStateValue(value, stateGroup) {
       .map((assignment) => {
         const assignmentId = Number(assignment?.id || 0) || 0;
         const latestSubmissionId = Number(assignment?.latest_submission_id || 0) || 0;
-        if (!assignmentId || !latestSubmissionId) return [];
-        const submission = getAssignmentSubmissionById(latestSubmissionId);
+        // accepted submission is the immutable accepted source (§7A); latest is only a
+        // pre-acceptance preview and must never shadow an accepted round
+        const acceptedSubmissionId = Number(assignment?.accepted_submission_id || 0) || 0;
+        const acceptedSubmission = acceptedSubmissionId ? getAssignmentSubmissionById(acceptedSubmissionId) : null;
+        const useAccepted = Boolean(acceptedSubmission && Number(acceptedSubmission.assignment_id || 0) === assignmentId);
+        const submissionId = useAccepted ? acceptedSubmissionId : latestSubmissionId;
+        if (!assignmentId || !submissionId) return [];
+        const submission = useAccepted ? acceptedSubmission : getAssignmentSubmissionById(submissionId);
         const returns = submission?.field_return_payload_json?.requested_check_returns;
         if (!returns || typeof returns !== "object") return [];
         const submittedAt = submission?.updated_at || submission?.created_at || null;
@@ -9461,13 +9722,16 @@ function normalizeStateValue(value, stateGroup) {
             checked: entry?.checked === true,
             found: entry?.found === true,
             value: entry?.value ?? null,
-            condition_note: String(entry?.condition_note || "").trim() || null,
+            condition_note: entry?.condition_note == null
+              ? null
+              : (typeof entry.condition_note === "string" ? entry.condition_note.trim() || null : entry.condition_note),
             evidence: String(entry?.evidence || "").trim() || null,
             note: String(entry?.note || "").trim() || null,
             submitted_at: submittedAt,
             submitted_by_user_id: Number(submission?.submitted_by_user_id || 0) || null,
             assignment_id: assignmentId,
-            submission_id: latestSubmissionId,
+            submission_id: submissionId,
+            submission_source: useAccepted ? "accepted" : "latest",
           };
         });
       })
@@ -9478,9 +9742,23 @@ function normalizeStateValue(value, stateGroup) {
         if (bTime !== aTime) return bTime - aTime;
         return (Number(b?.submission_id || 0) || 0) - (Number(a?.submission_id || 0) || 0);
       });
+    // An item can carry several field rounds (a rework round supersedes an earlier one), so keep one
+    // row per check key. An accepted answer always wins over an unaccepted one: a rework round that is
+    // submitted but not yet accepted must not shadow the accepted round that is still authoritative.
+    const seenKeys = new Set();
+    const pickNewestPerKey = (rows) => rows.filter((row) => {
+      const key = String(row?.key || "").trim().toLowerCase();
+      if (!key || seenKeys.has(key)) return false;
+      seenKeys.add(key);
+      return true;
+    });
+    const currentRoundItems = [
+      ...pickNewestPerKey(items.filter((row) => row?.submission_source === "accepted")),
+      ...pickNewestPerKey(items.filter((row) => row?.submission_source !== "accepted")),
+    ];
     return {
       version: 1,
-      items,
+      items: currentRoundItems,
     };
   }
 
@@ -9494,6 +9772,10 @@ function normalizeStateValue(value, stateGroup) {
   ) {
     const itemId = Number(contentItemId || 0);
     if (!itemId) throw new Error("content_item_id is required");
+
+    // §7A Rework Round: the one-open-round guard lives in createAssignment (the shared chokepoint),
+    // but check before building the handoff preview so a conflict costs nothing.
+    assertNoOpenFieldRound(itemId);
 
     const preview = buildAssignmentHandoffPreview(itemId);
     if (!preview.handoff_package) {
@@ -9563,6 +9845,79 @@ function normalizeStateValue(value, stateGroup) {
         brief_override_applied: briefOverrideApplied,
       },
     };
+  }
+
+  // §7A rework round: an accepted field assignment is never reopened or rewritten. It is closed as a
+  // finished round, and a NEW field assignment (with its own handoff snapshot and its own provenance)
+  // is issued. Accepting the new round patches the confirmed values it actually answered.
+  function returnFieldAssignmentForRework(assignmentId, actorEmail = "system@local", payload = {}) {
+    const id = Number(assignmentId || 0) || 0;
+    if (!id) throw new Error("assignmentId is required");
+    const existing = normalizeAssignmentRow(getAssignmentByIdStmt.get(id));
+    if (!existing) throw new Error("assignment not found");
+    if (String(existing.assignment_kind || "").trim().toLowerCase() !== "field") {
+      throw new Error("only field assignments can be returned for a new field round");
+    }
+    const currentState = String(existing.state || "").trim().toLowerCase();
+    if (currentState !== "accepted") {
+      throw new Error(`assignment must be accepted before it can be returned for rework (current state: ${currentState || "unknown"})`);
+    }
+    const note = String(payload.note || "").trim();
+    if (!note) throw new Error("note is required when returning an accepted assignment for rework");
+    const actorRole = normalizeWorkflowActorRole(payload.actor_role);
+    const actorUserId = Number(payload.actor_user_id || 0) || null;
+    const contentItemId = Number(existing.content_item_id || 0) || 0;
+    const nextAssigneeUserId = Number(payload.assignee_user_id || 0) || Number(existing.assignee_user_id || 0) || null;
+
+    return runInTransaction(db, () => {
+      const closedAssignment = updateAssignmentStateInternal(id, "closed", actorEmail, {
+        actor_role: actorRole,
+        reason_code: "field_rework_round_opened",
+        internal_note: note,
+        actor_user_id: actorUserId,
+      });
+      const created = createAssignmentFromReadiness(
+        contentItemId,
+        {
+          assignee_user_id: nextAssigneeUserId,
+          assignee_name: nextAssigneeUserId ? null : existing.assignee_name || null,
+          assignee_contact: nextAssigneeUserId ? null : existing.assignee_contact || null,
+          external_assignee_profile_json: nextAssigneeUserId ? null : existing.external_assignee_profile_json || null,
+          assignment_kind: "field",
+          internal_note: note,
+          due_at: payload.due_at || null,
+          force_override: true,
+          force_reason: `field rework round opened from assignment #${id}`,
+        },
+        actorUserId,
+        actorEmail,
+        actorRole,
+        { requireReadyForHandoff: false }
+      );
+      // syncWorkflowAssignmentStateOnCreate preserves an existing assignment_state, so without this the
+      // workflow model would still read "closed" while the new round sits in "assigned".
+      // closed -> assigned is not a legal assignment transition, hence the explicit reconcile.
+      upsertWorkflowModel(
+        contentItemId,
+        {
+          assignment_state: String(created.assignment?.state || "assigned"),
+          last_transition_note: note,
+        },
+        actorEmail,
+        {
+          actor_role: actorRole,
+          reason_code: "field_rework_round_opened",
+          assignment_id: Number(created.assignment?.id || 0) || null,
+          skip_assignment_transition_validation: true,
+        }
+      );
+      return {
+        closed_assignment: closedAssignment,
+        assignment: created.assignment,
+        handoff: created.handoff,
+        previous_assignment_id: id,
+      };
+    });
   }
 
   function repairAssignmentHandoffSnapshotForAssignment(assignmentId, fieldPackId, options = {}) {
@@ -12798,6 +13153,7 @@ function normalizeStateValue(value, stateGroup) {
     listAuditByTarget,
     createAssignment,
     createAssignmentFromReadiness,
+    returnFieldAssignmentForRework,
     repairAssignmentHandoffSnapshotForAssignment,
     getAssignmentById,
     getLatestAssignmentHandoffByAssignment,

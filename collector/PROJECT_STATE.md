@@ -1,6 +1,6 @@
 # PROJECT_STATE
 
-Last Updated: 2026-07-05
+Last Updated: 2026-07-13
 
 ## Active Branch
 
@@ -30,6 +30,50 @@ Current mainline status:
 - AI-filled versus needs-verification state
 - readiness gates before review and acceptance
 - consistent propagation from assignment return -> field pack -> review -> publishable data
+
+## 2026-07-13 §7A Acceptance Boundary Closure (branch `fix/cta-taxonomy-accepted-source`)
+
+Status:
+- implemented, local tests green; runtime verification pending (Codex)
+
+Collector changes:
+- `updateAssignmentState` is now a `runInTransaction` wrapper over `updateAssignmentStateInternal`; `requestAssignmentRevisionWithReset` calls the internal variant (single transaction owner, no nested BEGIN)
+- transition into `accepted` runs `applyAcceptedAssignmentConfirmedMetadata` in the same transaction:
+  - resolves the accepted submission from `latest_submission_id` (validated against the assignment)
+  - resolves the handoff snapshot in effect at submission time via `created_at <= datetime(submission.created_at, '-7 hours')` (handoff timestamps are UTC, submission timestamps are Asia/Bangkok). There is no fallback to the *latest* handoff, so a later reissue can never shadow the snapshot that was actually in effect. When no snapshot predates the submission at all (snapshot backfilled by the repair tool after the Work Return, or a legacy submission row stored in UTC), the **oldest** snapshot of that assignment is used instead of failing — an assignment must never become permanently unacceptable. A `field` assignment with no snapshot at all, or one belonging to another content item, still throws and rolls back.
+  - Editorial/direct assignments are never issued a handoff, so they accept with a null handoff pointer and no confirmed mapping.
+  - writes `accepted_submission_id` / `accepted_handoff_snapshot_id` (idempotent ALTERs added; columns already existed as orphans on Runtime)
+  - maps `requested_check_returns` `cta_contact.*` into `confirmed_cta_contact_json` with **patch semantics** (place items only): `checked && found` → overwrite, `checked && !found` → clear, **unchecked → keep the previously confirmed value**. Values that fail the confirmed-column schema (a LINE id where a URL is expected, `primary_cta` outside the enum) persist as null instead of failing the acceptance; the raw answer stays readable in `requested_check_returns`.
+  - stamps `confirmed_taxonomy_json.category` from `item.category`, sets `confirmed_meta_status='confirmed'` with actor/timestamp/note
+  - upserts into the latest draft row, or creates deterministic `accepted-meta-<assignmentId>` when no draft exists; re-accept after revision overwrites the same row
+- `PATCH /api/assignments/:id/state` passes `actor_user_id`
+- AI draft generation (`workflow.mjs`) carries `confirmed_*` forward from the previous draft on regeneration
+- `mergeConfirmedDraftMetadata` now ignores client payload entirely — editor-work can never rewrite `confirmed_*`
+- `buildFieldReturnEvidenceByItem` prefers the accepted submission per assignment, tags rows with `submission_source`, and keeps only the newest round per check key so a superseded round cannot shadow the current one
+- `runInTransaction` is now depth-tracked per database handle, so transactional repository helpers can call each other instead of throwing on a nested `BEGIN`
+- Article Workspace: confirmed CTA/taxonomy/status sections replaced with read-only summaries (`confirmed-cta-summary`, `confirmed-taxonomy-summary`, `confirmed-meta-status-summary`); apply-evidence ("ใช้ค่านี้") path removed. Summaries render the persisted confirmed values (the accumulated truth across rounds) and only when `article_process.confirmed_meta_source === "accepted"` — legacy rows self-set by writers before the acceptance pipeline are never shown as reviewer-confirmed.
+
+Rework round (§7A "Rework Round", locked):
+- `repo.returnFieldAssignmentForRework()` closes the accepted round and issues a new field assignment with its own handoff snapshot, in one transaction. Nothing from the finished round is deleted.
+- `POST /api/assignments/:id/return-to-field` — requires a note, requires the actor to re-enter their own password (verified through `authenticateViaBackendLogin`, identity must match the session), and is limited to the assignment's `assigned_by_user_id` or a higher role (owner/admin, admin still bounded by management line). Handing the new round to a *different* worker clears the same assignee gates as the normal create route (`canAssignToUserByManagementLine`, `canAssignInternalWork`, role-vs-kind). Failed re-auth is audit-logged.
+- one open field round per item is enforced in `createAssignment` — the shared chokepoint every field-assignment path (including `createAssignmentFromReadiness`) routes through. It raises `createConflictError`, and both create routes now map `err.code === "CONFLICT"` to HTTP 409. The rework flow closes the accepted round first, so it is the only way to supersede a round.
+- opening a rework round reconciles `content_workflow_models.assignment_state` to the new round (`closed -> assigned` is not a legal assignment transition, so it is an explicit reconcile sync)
+- `buildFieldReturnEvidenceByItem` keeps one row per check key with **accepted winning over unaccepted**, so a rework round that is submitted but not yet accepted never shadows the accepted answer that is still authoritative
+- UI: "ส่งงานกลับไปทำรอบใหม่" section in the assignment review panel, visible only on an accepted field round for a permitted actor.
+- The new round's requested checks carry `previous_confirmed_value` as read-only reference ("ยืนยันไว้รอบก่อน: …"), never pre-checked.
+
+Tests:
+- `collector/tests/assignment-accept-confirmed-metadata.repository.test.mjs` (27 cases: atomic rollback, handoff round resolution, repaired/legacy-UTC handoff, editorial without handoff, patch semantics scoped to accepted field rounds only (an accepted editorial round must not count as the baseline), rework round, evidence dedupe) — green
+- rewritten: `endpoint-schema-mapping-surface`, `article-workspace-confirmed-metadata-surface`, `article-workspace-confirmed-metadata.behavior`, `article-workspace-field-return-evidence.behavior` — green
+- `revision-asset-replacement-ui` route guard now allowlists the one intentional new route instead of pinning a raw count
+- full collector suite compared against a `main` worktree baseline: identical failing set, zero new failures
+
+Runtime verification checklist (hand off to Codex):
+- field assignment with requested checks → Work Return with CTA answers → accept → `confirmed_meta_status='confirmed'` + accepted pointers set without opening the workspace
+- forged `confirmed_*` via `PUT /editor-work` does not change the DB
+- revision → resubmit different phone → re-accept updates confirmed values + pointers
+- **rework round**: accept → "ส่งงานกลับไปทำรอบใหม่" with a wrong password (must fail 401 + audit row), then the correct password → old round `closed`, new round `assigned` with a new handoff snapshot → worker sees "ยืนยันไว้รอบก่อน" hints → re-verify only the phone → accept → phone overwritten, untouched fields still hold the round-1 values
+- AI regenerate keeps confirmed values; sync → Approvals shows CTA block; approve/publish; public API returns accepted phone
 
 ## 2026-06-20 CTA Milestone Closure And Taxonomy v1 Documentation Baseline
 

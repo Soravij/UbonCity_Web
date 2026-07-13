@@ -18,6 +18,7 @@ function createBaseArgs(overrides = {}) {
       location_text: "Ubon",
     },
     latestDraft: {
+      confirmed_meta_status: "confirmed",
       confirmed_cta_contact_json: {
         phone: "0812345678",
         line_url: "https://line.me/ti/p/test-line",
@@ -63,6 +64,46 @@ test("review ingest content payload includes confirmed CTA/contact for place con
   );
 });
 
+test("review ingest content payload sends all five confirmed CTA keys including explicit null", () => {
+  const content = buildReviewIngestContentPayload(createBaseArgs({
+    latestDraft: {
+      confirmed_meta_status: "confirmed",
+      confirmed_cta_contact_json: {
+        phone: null,
+        line_url: null,
+        facebook_url: null,
+        website_url: null,
+        primary_cta: null,
+      },
+    },
+  }));
+
+  assert.deepEqual(
+    Object.fromEntries(["phone", "line_url", "facebook_url", "website_url", "primary_cta"].map((key) => [key, content[key]])),
+    { phone: null, line_url: null, facebook_url: null, website_url: null, primary_cta: null }
+  );
+});
+
+test("review ingest content payload omits CTA keys entirely when the draft is not confirmed", () => {
+  const content = buildReviewIngestContentPayload(createBaseArgs({
+    latestDraft: {
+      confirmed_meta_status: "not_started",
+      confirmed_cta_contact_json: {
+        phone: null,
+        line_url: null,
+        facebook_url: null,
+        website_url: null,
+        primary_cta: null,
+      },
+    },
+  }));
+
+  // omitted keys make the backend preserve stored CTA; only an accepted round may clear it
+  ["phone", "line_url", "facebook_url", "website_url", "primary_cta"].forEach((key) => {
+    assert.equal(Object.prototype.hasOwnProperty.call(content, key), false);
+  });
+});
+
 test("review ingest content payload excludes CTA/contact for event content even when draft has values", () => {
   const content = buildReviewIngestContentPayload(createBaseArgs({
     contentType: "event",
@@ -93,6 +134,7 @@ test("review ingest content payload does not propagate taxonomy into review cont
 test("review ingest content payload ignores AI curated and field-return sources for CTA/contact", () => {
   const content = buildReviewIngestContentPayload(createBaseArgs({
     latestDraft: {
+      confirmed_meta_status: "confirmed",
       confirmed_cta_contact_json: {
         phone: "0812345678",
         primary_cta: "phone",
@@ -114,7 +156,7 @@ test("review ingest content payload ignores AI curated and field-return sources 
 
   assert.equal(content.phone, "0812345678");
   assert.equal(content.primary_cta, "phone");
-  assert.equal(content.line_url, undefined);
-  assert.equal(content.facebook_url, undefined);
-  assert.equal(content.website_url, undefined);
+  assert.equal(content.line_url, null);
+  assert.equal(content.facebook_url, null);
+  assert.equal(content.website_url, null);
 });

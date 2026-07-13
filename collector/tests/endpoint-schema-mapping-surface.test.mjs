@@ -208,7 +208,7 @@ test("assignment submission repository path still works with and without field_r
   }
 });
 
-test("confirmed draft metadata merge preserves existing values when omitted and accepts explicit updates separately", () => {
+test("confirmed draft metadata merge ignores client payload entirely and always returns stored values", () => {
   const latestDraft = {
     confirmed_cta_contact_json: { phone: "0812345678", primary_cta: "phone" },
     confirmed_taxonomy_json: { category: "attractions", subtype: "museum", tags: ["family"] },
@@ -224,18 +224,28 @@ test("confirmed draft metadata merge preserves existing values when omitted and 
   assert.equal(preserved.confirmed_meta_status, "confirmed");
   assert.equal(preserved.confirmed_note, "keep me");
 
-  const updated = mergeConfirmedDraftMetadata({
+  // forged client payload must never win over the stored acceptance data (§7A)
+  const forged = mergeConfirmedDraftMetadata({
     confirmed_cta_contact_json: { phone: "0899999999", primary_cta: "line" },
     confirmed_taxonomy_json: { category: "restaurants", subtype: "cafe", tags: ["coffee"] },
     confirmed_meta_status: "in_review",
     confirmed_by_user_id: 55,
     confirmed_at: "2026-06-12T09:00:00.000Z",
-    confirmed_note: "updated",
+    confirmed_note: "forged",
   }, latestDraft);
-  assert.deepEqual(updated.confirmed_cta_contact_json, { phone: "0899999999", primary_cta: "line" });
-  assert.deepEqual(updated.confirmed_taxonomy_json, { category: "restaurants", subtype: "cafe", tags: ["coffee"] });
-  assert.equal(updated.confirmed_meta_status, "in_review");
-  assert.equal(updated.confirmed_by_user_id, 55);
-  assert.equal(updated.confirmed_at, "2026-06-12T09:00:00.000Z");
-  assert.equal(updated.confirmed_note, "updated");
+  assert.deepEqual(forged.confirmed_cta_contact_json, latestDraft.confirmed_cta_contact_json);
+  assert.deepEqual(forged.confirmed_taxonomy_json, latestDraft.confirmed_taxonomy_json);
+  assert.equal(forged.confirmed_meta_status, "confirmed");
+  assert.equal(forged.confirmed_by_user_id, 44);
+  assert.equal(forged.confirmed_at, "2026-06-11T10:30:00.000Z");
+  assert.equal(forged.confirmed_note, "keep me");
+
+  // no stored draft yet — every key stays undefined so saveDraft applies its own defaults
+  const empty = mergeConfirmedDraftMetadata({ confirmed_meta_status: "confirmed" }, null);
+  assert.equal(empty.confirmed_cta_contact_json, undefined);
+  assert.equal(empty.confirmed_taxonomy_json, undefined);
+  assert.equal(empty.confirmed_meta_status, undefined);
+  assert.equal(empty.confirmed_by_user_id, undefined);
+  assert.equal(empty.confirmed_at, undefined);
+  assert.equal(empty.confirmed_note, undefined);
 });

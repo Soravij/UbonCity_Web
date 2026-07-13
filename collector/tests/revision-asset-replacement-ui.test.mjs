@@ -257,12 +257,21 @@ function getRouteBlock(source, signature) {
   return source.slice(start, next === -1 ? source.length : next);
 }
 
+// Routes intentionally added on top of HEAD. Anything else showing up here is an accidental route.
+const EXPECTED_NEW_ROUTES_VS_HEAD = [
+  'app.post("/api/assignments/:id/return-to-field"',
+];
+
 test("index route wiring keeps HEAD route count and replacement helper on assignment upload only", async () => {
   const { execFileSync } = await import("node:child_process");
   const headIndex = execFileSync("git", ["show", "HEAD:collector/server/index.mjs"], { cwd: collectorRoot, encoding: "utf8" });
   const currentRoutes = getRouteSignatures(indexMjs);
   const headRoutes = getRouteSignatures(headIndex);
-  assert.equal(currentRoutes.length, headRoutes.length);
+  const addedRoutes = currentRoutes.filter((route) => !headRoutes.includes(route));
+  const removedRoutes = headRoutes.filter((route) => !currentRoutes.includes(route));
+  assert.deepEqual(addedRoutes, EXPECTED_NEW_ROUTES_VS_HEAD);
+  assert.deepEqual(removedRoutes, []);
+  assert.equal(currentRoutes.length, headRoutes.length + EXPECTED_NEW_ROUTES_VS_HEAD.length);
 
   const avatarBlock = getRouteBlock(indexMjs, 'app.post("/api/users/avatar/upload"');
   const directBlock = getRouteBlock(indexMjs, 'app.post("/api/assignments/:id/assets/upload"');

@@ -19,6 +19,7 @@ import { createTranslationGenerator } from "../translation/service.mjs";
 import { runAutomaticTranslationChecks } from "../quality/translation-checks.mjs";
 import { executeBackendAiJson, isBackendAiConfigured } from "./backend-ai-client.mjs";
 import { buildCleanStructuredContext, buildFieldPackContractFromCleanContext, validateCleanMinimum } from "./clean-context.mjs";
+import { mergeConfirmedDraftMetadata } from "../server/endpoint-schema-mapping.mjs";
 
 function traceAiDraft(stage, details = {}) {
   const ts = new Date().toISOString();
@@ -2464,6 +2465,8 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
         suggested_related: finalItem.suggested_related || [],
         ai_quality_score: finalItem.ai_quality_score || 0,
         status: "generated",
+        // accepted confirmed_* metadata must survive a regenerated draft row (§7A)
+        ...mergeConfirmedDraftMetadata({}, repo.latestDraftByItem(finalItem.id)),
       });
       traceAiDraft("draft.save.ok", { item_id: Number(finalItem?.id || 0) || null });
       const latestDraft = repo.latestDraftByItem(finalItem.id);

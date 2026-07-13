@@ -78,6 +78,36 @@ test("review ingest update params preserve existing CTA/contact when payload omi
   assert.equal(params.at(-1), 99);
 });
 
+test("review ingest update params clear existing CTA/contact when explicit nulls are sent", () => {
+  const existing = {
+    phone: "0812345678",
+    line_url: "https://line.me/ti/p/existing",
+    facebook_url: "https://facebook.com/existing",
+    website_url: "https://example.com/existing",
+    primary_cta: "phone",
+  };
+  const rawPayload = {
+    content_type: "place",
+    lang: "th",
+    category: "attractions",
+    title: "Test place",
+    body: "<p>Body</p>",
+    phone: null,
+    line_url: null,
+    facebook_url: null,
+    website_url: null,
+    primary_cta: null,
+  };
+  const params = buildReviewContentUpdateParams({
+    existing,
+    content: sanitizeContentPayload(rawPayload),
+    rawContentPayload: rawPayload,
+    currentBatchUid: "batch-null",
+    reviewContentId: 101,
+  });
+
+  assert.deepEqual(params.slice(16, 21), [null, null, null, null, null]);
+});
 test("review ingest update params apply explicit CTA/contact replacements", () => {
   const existing = {
     phone: "0812345678",

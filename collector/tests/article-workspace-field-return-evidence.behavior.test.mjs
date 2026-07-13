@@ -100,7 +100,12 @@ function formatDateTime(value) {
   return String(value || "").trim() || "-";
 }
 
-async function createPageHarness({ itemType = "place", evidenceItems = [], confirmedValues = {}, confirmResult = true } = {}) {
+async function createPageHarness({
+  itemType = "place",
+  evidenceItems = [],
+  latestDraft = null,
+  confirmedMetaSource = "accepted",
+} = {}) {
   const coreMod = await loadCoreModule();
   const elements = new Map();
   const getElement = (id) => {
@@ -115,70 +120,58 @@ async function createPageHarness({ itemType = "place", evidenceItems = [], confi
       meta_title: "Original meta title",
       meta_description: "Original meta description",
     },
+    articleProcess: { confirmed_meta_source: confirmedMetaSource },
   };
   const statusCalls = [];
-  let dirtyCalls = 0;
-  let confirmCalls = 0;
   getElement("field-return-evidence-panel");
   getElement("field-return-evidence-status");
-  getElement("article-title").value = "Original title";
-  getElement("article-excerpt").value = "Original summary";
-  getElement("article-body").value = "Original body";
-  getElement("article-meta-title").value = "Original meta title";
-  getElement("article-meta-description").value = "Original meta description";
-  getElement("confirmed-phone").value = confirmedValues.phone || "";
-  getElement("confirmed-line-url").value = confirmedValues.line_url || "";
-  getElement("confirmed-facebook-url").value = confirmedValues.facebook_url || "";
-  getElement("confirmed-website-url").value = confirmedValues.website_url || "";
-  getElement("confirmed-primary-cta").value = confirmedValues.primary_cta || "";
+  getElement("confirmed-cta-summary");
+  getElement("confirmed-taxonomy-summary");
+  getElement("confirmed-meta-status-summary");
 
   const context = {
     Map,
+    Set,
+    Object,
+    Array,
+    String,
     state,
-    window: {
-      confirm() {
-        confirmCalls += 1;
-        return confirmResult;
-      },
-    },
     qs(id) {
       return getElement(id);
     },
     fieldReturnEvidence() {
       return { version: 1, items: evidenceItems };
     },
+    latestDraft() {
+      return latestDraft;
+    },
     escapeHtml,
     formatDateTime,
     isPlaceItem: coreMod.isPlaceItem,
-    canApplyFieldReturnEvidenceToConfirmedCta: coreMod.canApplyFieldReturnEvidenceToConfirmedCta,
+    defaultConfirmedCtaContact: coreMod.defaultConfirmedCtaContact,
+    defaultConfirmedTaxonomy: coreMod.defaultConfirmedTaxonomy,
     setInlineStatus(id, message, kind = "success") {
       statusCalls.push({ id, message, kind });
       const node = getElement(id);
       node.textContent = String(message || "");
       node.className = kind;
     },
-    applyFieldReturnEvidenceToConfirmedCta: coreMod.applyFieldReturnEvidenceToConfirmedCta,
-    fillField(id, value) {
-      getElement(id).value = String(value ?? "");
-    },
-    setWorkspaceDirty() {
-      dirtyCalls += 1;
-    },
-    renderSubmitReadiness() {},
-    renderStatusChip() {},
-    applyActionGuards() {},
   };
   context.globalThis = context;
   vm.runInNewContext(`
 ${extractFunctionBlock(pageSource, "fieldReturnEvidenceGroupLabel")}
 ${extractFunctionBlock(pageSource, "renderFieldReturnEvidenceValue")}
 ${extractFunctionBlock(pageSource, "renderFieldReturnEvidencePanel")}
-${extractFunctionBlock(pageSource, "applyFieldReturnEvidenceByKey")}
-${extractFunctionBlock(pageSource, "handleFieldReturnEvidencePanelClick")}
+${extractFunctionBlock(pageSource, "confirmedSummaryValue")}
+${extractFunctionBlock(pageSource, "acceptedFieldReturnEvidenceByGroup")}
+${extractFunctionBlock(pageSource, "hasAcceptedConfirmedMetadata")}
+${extractFunctionBlock(pageSource, "renderConfirmedCtaSummary")}
+${extractFunctionBlock(pageSource, "renderConfirmedTaxonomySummary")}
+${extractFunctionBlock(pageSource, "renderConfirmedMetaStatusSummary")}
+${extractFunctionBlock(pageSource, "renderConfirmedMetaSummary")}
 globalThis.__pageHooks = {
   renderFieldReturnEvidencePanel,
-  applyFieldReturnEvidenceByKey,
-  handleFieldReturnEvidencePanelClick,
+  renderConfirmedMetaSummary,
 };
 `, context, { filename: "article-workspace-field-return-page.js" });
   return {
@@ -187,8 +180,6 @@ globalThis.__pageHooks = {
     getElement,
     state,
     statusCalls,
-    getDirtyCalls: () => dirtyCalls,
-    getConfirmCalls: () => confirmCalls,
   };
 }
 
@@ -199,12 +190,14 @@ test("CTA apply helper rejects non-place context", async () => {
     key: "cta_contact.phone",
     found: true,
     value: "0812345678",
+        submission_source: "accepted",
   }, { type: "event" }), false);
   assert.deepEqual(
     mod.applyFieldReturnEvidenceToConfirmedCta({ phone: "0899999999" }, {
       key: "cta_contact.phone",
       found: true,
       value: "0812345678",
+        submission_source: "accepted",
     }, { type: "event" }),
     {
       phone: "0899999999",
@@ -216,7 +209,7 @@ test("CTA apply helper rejects non-place context", async () => {
   );
 });
 
-test("renderFieldReturnEvidencePanel renders CTA apply action for place only", async () => {
+test("renderFieldReturnEvidencePanel is read-only and hides CTA rows for non-place items", async () => {
   const placeHarness = await createPageHarness({
     itemType: "place",
     evidenceItems: [
@@ -227,7 +220,8 @@ test("renderFieldReturnEvidencePanel renders CTA apply action for place only", a
         checked: true,
         found: true,
         value: "0812345678",
-        condition_note: "",
+        submission_source: "accepted",
+        condition_note: "ต้องโทรยืนยันก่อนเผยแพร่",
         evidence: "โทรสอบถาม",
         note: "",
         submitted_at: "2026-06-12T10:00:00.000Z",
@@ -236,7 +230,12 @@ test("renderFieldReturnEvidencePanel renders CTA apply action for place only", a
     ],
   });
   placeHarness.hooks.renderFieldReturnEvidencePanel();
-  assert.match(placeHarness.getElement("field-return-evidence-panel").innerHTML, /data-action="apply-field-return-evidence"/);
+  const placeHtml = placeHarness.getElement("field-return-evidence-panel").innerHTML;
+  assert.match(placeHtml, /cta_contact\.phone/);
+  assert.match(placeHtml, /0812345678/);
+  assert.match(placeHtml, /ต้องโทรยืนยันก่อนเผยแพร่/);
+  assert.doesNotMatch(placeHtml, /data-action="apply-field-return-evidence"/);
+  assert.doesNotMatch(placeHtml, /ใช้ค่านี้/);
 
   const eventHarness = await createPageHarness({
     itemType: "event",
@@ -248,7 +247,8 @@ test("renderFieldReturnEvidencePanel renders CTA apply action for place only", a
         checked: true,
         found: true,
         value: "0812345678",
-        condition_note: "",
+        submission_source: "accepted",
+        condition_note: "ต้องโทรยืนยันก่อนเผยแพร่",
         evidence: "โทรสอบถาม",
         note: "",
         submitted_at: "2026-06-12T10:00:00.000Z",
@@ -257,131 +257,106 @@ test("renderFieldReturnEvidencePanel renders CTA apply action for place only", a
     ],
   });
   eventHarness.hooks.renderFieldReturnEvidencePanel();
-  assert.doesNotMatch(eventHarness.getElement("field-return-evidence-panel").innerHTML, /data-action="apply-field-return-evidence"/);
   assert.doesNotMatch(eventHarness.getElement("field-return-evidence-panel").innerHTML, /cta_contact\.phone/);
   assert.doesNotMatch(eventHarness.getElement("field-return-evidence-panel").innerHTML, /เบอร์โทร/);
 });
 
-test("applyFieldReturnEvidenceByKey updates actual confirmed CTA field and marks workspace dirty", async () => {
+test("renderFieldReturnEvidencePanel shows empty state for non-accepted evidence", async () => {
+  const harness = await createPageHarness({
+    itemType: "place",
+    evidenceItems: [{
+      key: "cta_contact.phone",
+      group_key: "cta_contact",
+      checked: true,
+      found: true,
+      value: "0812345678",
+      submission_source: "latest",
+    }],
+  });
+
+  harness.hooks.renderFieldReturnEvidencePanel();
+  assert.match(harness.getElement("field-return-evidence-panel").innerHTML, /ยังไม่มีข้อมูลที่คนเช็กส่งกลับ/);
+});
+test("renderConfirmedMetaSummary shows accepted confirmed values read-only", async () => {
   const harness = await createPageHarness({
     itemType: "place",
     evidenceItems: [
-      {
-        key: "cta_contact.phone",
-        group_key: "cta_contact",
-        label: "เบอร์โทร",
-        checked: true,
-        found: true,
-        value: "0812345678",
-        condition_note: "",
-        evidence: "โทรสอบถาม",
-        note: "",
-        submitted_at: "2026-06-12T10:00:00.000Z",
-        submitted_by: "checker",
-      },
-    ],
-    confirmedValues: {
-      phone: "",
-      line_url: "https://line.me/existing",
-      facebook_url: "https://facebook.com/existing",
-      website_url: "https://existing.example.com",
-      primary_cta: "phone",
-    },
-  });
-
-  const applied = harness.hooks.applyFieldReturnEvidenceByKey("cta_contact.phone");
-  assert.equal(applied, true);
-  assert.equal(harness.getElement("confirmed-phone").value, "0812345678");
-  assert.equal(harness.getElement("confirmed-line-url").value, "https://line.me/existing");
-  assert.equal(harness.getElement("article-title").value, "Original title");
-  assert.equal(harness.getElement("article-body").value, "Original body");
-  assert.equal(harness.getDirtyCalls(), 1);
-});
-
-test("delegated click handler uses selector and dataset path to apply evidence", async () => {
-  const harness = await createPageHarness({
-    itemType: "place",
-    evidenceItems: [
-      {
-        key: "cta_contact.phone",
-        group_key: "cta_contact",
-        label: "เบอร์โทร",
-        checked: true,
-        found: true,
-        value: "0812345678",
-      },
-    ],
-    confirmedValues: {
-      phone: "",
-      line_url: "https://line.me/existing",
-      facebook_url: "https://facebook.com/existing",
-      website_url: "https://existing.example.com",
-      primary_cta: "phone",
-    },
-  });
-
-  const result = harness.hooks.handleFieldReturnEvidencePanelClick({
-    target: {
-      closest(selector) {
-        assert.equal(selector, "[data-action='apply-field-return-evidence']");
-        return {
-          dataset: {
-            action: "apply-field-return-evidence",
-            fieldReturnKey: "cta_contact.phone",
-          },
-        };
-      },
-    },
-  });
-
-  assert.equal(result, true);
-  assert.equal(harness.getElement("confirmed-phone").value, "0812345678");
-  assert.equal(harness.getElement("article-title").value, "Original title");
-  assert.equal(harness.getElement("article-excerpt").value, "Original summary");
-  assert.equal(harness.getElement("article-meta-title").value, "Original meta title");
-  assert.equal(harness.getDirtyCalls(), 1);
-});
-
-test("applyFieldReturnEvidenceByKey exercises overwrite confirmation and rejects invalid or not-found values", async () => {
-  const overwriteHarness = await createPageHarness({
-    itemType: "place",
-    evidenceItems: [
-      {
-        key: "cta_contact.phone",
-        group_key: "cta_contact",
-        label: "เบอร์โทร",
-        checked: true,
-        found: true,
-        value: "0812345678",
-      },
-      {
-        key: "cta_contact.primary_cta",
-        group_key: "cta_contact",
-        label: "ปุ่มหลัก",
-        checked: true,
-        found: true,
-        value: "website",
-      },
       {
         key: "cta_contact.line_url",
         group_key: "cta_contact",
+        check_key: "line_url",
         label: "ลิงก์ LINE",
         checked: true,
         found: false,
-        value: "https://line.me/ignored",
+        value: null,
+        submission_source: "accepted",
+      },
+      {
+        key: "taxonomy.price_range",
+        group_key: "taxonomy",
+        check_key: "price_range",
+        label: "ช่วงราคา",
+        checked: true,
+        found: true,
+        value: { number: 120, unit: "บาท" },
+        submission_source: "accepted",
       },
     ],
-    confirmedValues: {
-      phone: "0899999999",
-      primary_cta: "phone",
+    latestDraft: {
+      confirmed_cta_contact_json: {
+        phone: "0812345678",
+        line_url: null,
+        facebook_url: null,
+        website_url: null,
+        primary_cta: "phone",
+      },
+      confirmed_taxonomy_json: { category: "attractions", subtype: "museum", tags: ["family"] },
+      confirmed_meta_status: "confirmed",
+      confirmed_at: "2026-07-13T10:00:00.000Z",
+      confirmed_note: "accepted from assignment #7 round 1 submission #9",
     },
-    confirmResult: false,
   });
 
-  assert.equal(overwriteHarness.hooks.applyFieldReturnEvidenceByKey("cta_contact.phone"), false);
-  assert.equal(overwriteHarness.getConfirmCalls(), 1);
-  assert.equal(overwriteHarness.getElement("confirmed-phone").value, "0899999999");
-  assert.equal(overwriteHarness.hooks.applyFieldReturnEvidenceByKey("cta_contact.primary_cta"), false);
-  assert.equal(overwriteHarness.hooks.applyFieldReturnEvidenceByKey("cta_contact.line_url"), false);
-  assert.equal(overwriteHarness.getDirtyCalls(), 0);
+  harness.hooks.renderConfirmedMetaSummary();
+
+  // the persisted confirmed values are the accumulated truth across rounds and are shown read-only
+  const ctaHtml = harness.getElement("confirmed-cta-summary").innerHTML;
+  assert.match(ctaHtml, /0812345678/);
+  // a value cleared by a "checked, not found" answer renders as not found, never as an editable field
+  assert.match(ctaHtml, /ไม่พบ/);
+  assert.doesNotMatch(ctaHtml, /<input|<select|<textarea/);
+
+  const taxonomyHtml = harness.getElement("confirmed-taxonomy-summary").innerHTML;
+  // reserved keys can never be requested checks, so they come from the confirmed taxonomy itself
+  assert.match(taxonomyHtml, /attractions/);
+  assert.match(taxonomyHtml, /museum/);
+  assert.match(taxonomyHtml, /family/);
+  // non-reserved Curation answers surface from the accepted evidence with compact number/unit formatting
+  assert.match(taxonomyHtml, /ช่วงราคา/);
+  assert.match(taxonomyHtml, /120 บาท/);
+  assert.doesNotMatch(taxonomyHtml, /<input|<select|<textarea/);
+
+  const statusHtml = harness.getElement("confirmed-meta-status-summary").innerHTML;
+  assert.match(statusHtml, /ยืนยันแล้ว/);
+  assert.match(statusHtml, /accepted from assignment #7 round 1 submission #9/);
+});
+
+test("renderConfirmedMetaSummary hides draft values that reviewer acceptance never wrote", async () => {
+  const harness = await createPageHarness({
+    itemType: "place",
+    evidenceItems: [],
+    // legacy row: confirmed_* was self-set in the workspace before the acceptance pipeline existed
+    confirmedMetaSource: "legacy",
+    latestDraft: {
+      confirmed_cta_contact_json: { phone: "draft-only" },
+      confirmed_taxonomy_json: { category: "draft-only" },
+      confirmed_meta_status: "confirmed",
+    },
+  });
+  harness.hooks.renderConfirmedMetaSummary();
+  assert.match(harness.getElement("confirmed-cta-summary").innerHTML, /ยังไม่มีข้อมูลยืนยันจากผู้ตรวจ/);
+  assert.doesNotMatch(harness.getElement("confirmed-cta-summary").innerHTML, /draft-only/);
+  assert.match(harness.getElement("confirmed-taxonomy-summary").innerHTML, /ยังไม่มีข้อมูลยืนยันจากผู้ตรวจ/);
+  assert.doesNotMatch(harness.getElement("confirmed-taxonomy-summary").innerHTML, /draft-only/);
+  assert.match(harness.getElement("confirmed-meta-status-summary").innerHTML, /ยืนยันแล้ว/);
 });

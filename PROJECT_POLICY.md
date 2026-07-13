@@ -383,6 +383,42 @@ Placeholders:
 - CTA/Taxonomy ที่ผ่านการอนุมัติแล้วและแสดงใน Article Workspace ต้องเป็นข้อมูลแสดงผลอย่างเดียว (read-only) ในฐานะผลการตรวจสอบ
 - การแก้ไขเชิงบรรณาธิการภายหลัง ต้องแยกเป็น override flow ต่างหากที่มีที่มา (provenance) ชัดเจน และต้องไม่เขียนทับผลที่มนุษย์ยืนยันไว้เดิมแบบเงียบ ๆ
 
+### Rework Round (locked)
+
+**English**
+
+- An accepted field assignment is a finished round. It is never reopened, un-accepted, or rewritten.
+- Going back means issuing a NEW field round: the accepted round is closed as evidence, and a new field assignment is created with its own handoff snapshot and its own provenance.
+- Nothing from the finished round is deleted: its handoff snapshot, submission, and `requested_check_returns` stay as the record of what was confirmed and when.
+- An item has at most one open field round. Opening a rework round closes the previous one.
+- The current (newest) round is the source of truth for display; superseded rounds must not shadow it.
+- Acceptance patches confirmed values, it does not replace them:
+  - `checked` + found → overwrite the confirmed value
+  - `checked` + not found → the human verified there is none, clear the confirmed value
+  - not `checked` → not verified this round, keep what a **previous accepted FIELD round** confirmed. A value is confirmed data only if a human ticked it and a reviewer accepted a field round; a value sitting in the draft of an item that never had an accepted field round is a writer self-set leftover and must be cleared, never carried forward. An accepted round of any other kind (e.g. editorial) never counts as this baseline, even though it also sets `accepted_submission_id` — that pointer only records provenance for its own kind, it does not vouch for CTA/taxonomy data.
+- A rework round shows previously confirmed answers as read-only reference. They are never pre-checked: ticking a check means a human verified it in that round.
+- Confirmed values may only be displayed as reviewer-confirmed when reviewer acceptance actually wrote them (`accepted_submission_id` is set). Legacy rows self-set in Article Workspace must not be presented as confirmed facts.
+- Returning an accepted round for rework requires the actor to re-authenticate with their own password.
+- Authority follows the management tree, not the role name alone: `owner` is the tree root and may rework any assignment; `admin` may rework only assignments inside their own management subtree; `user` may rework only an assignment they issued themselves. An admin from another branch of the tree has no authority over this work and is refused — a higher role does not grant cross-branch authority.
+- Handing the new round to a different worker is an assignment decision and must clear the same assignee gates as creating an assignment (management subtree, internal-work permission, assignee role allowed for `field`). Being the original assigner is not sufficient on its own.
+
+**ภาษาไทย**
+
+- งานภาคสนามที่รับผ่านแล้ว (accepted) ถือเป็นรอบที่จบแล้ว จะไม่ถูกเปิดซ้ำ ไม่ถอนการรับงาน และไม่ถูกเขียนทับย้อนหลัง
+- การย้อนกลับ = การเปิด "รอบใหม่": ปิดรอบเดิมไว้เป็นหลักฐาน แล้วสร้าง field assignment ใหม่ที่มี handoff snapshot และ provenance ของตัวเอง
+- ห้ามลบข้อมูลของรอบที่จบแล้ว ทั้ง handoff snapshot, submission และ `requested_check_returns` ต้องคงอยู่เป็นบันทึกว่ายืนยันอะไรไว้เมื่อใด
+- หนึ่ง item มีรอบภาคสนามที่เปิดอยู่ได้ไม่เกินหนึ่งรอบ การเปิดรอบใหม่จะปิดรอบก่อนหน้าเสมอ
+- รอบปัจจุบัน (ใหม่ที่สุด) คือแหล่งความจริงสำหรับการแสดงผล รอบที่ถูกแทนที่แล้วต้องไม่บังข้อมูลของรอบปัจจุบัน
+- การรับงานเป็นการ "patch" ค่าที่ยืนยันไว้ ไม่ใช่การแทนที่ทั้งชุด:
+  - ติ๊ก + พบข้อมูล → เขียนทับค่าที่ยืนยันไว้เดิม
+  - ติ๊ก + ไม่พบข้อมูล → มนุษย์ยืนยันว่าไม่มี ให้ล้างค่าเดิม
+  - ไม่ติ๊ก → รอบนี้ไม่ได้ตรวจ ให้คงเฉพาะค่าที่ **รอบภาคสนาม (field) ก่อนหน้าติ๊กแล้วผ่านการรับงาน (accept)** เท่านั้น ค่าจะนับเป็นข้อมูลที่ยืนยันแล้วก็ต่อเมื่อมีคนติ๊กและผู้ตรวจรับงานรอบภาคสนามนั้น ถ้า item นั้นไม่เคยมีรอบภาคสนามที่ถูก accept เลย ค่าที่ค้างอยู่ใน draft คือค่าที่นักเขียนตั้งเอง ต้องล้าง ห้ามอุ้มค่าเดิมมาเป็นค่าที่ยืนยันแล้ว — assignment ประเภทอื่น (เช่น editorial) ที่ถูก accept ไม่นับเป็นฐานนี้ แม้จะมี `accepted_submission_id` เหมือนกัน เพราะ pointer นั้นบันทึก provenance ของงานประเภทนั้นเท่านั้น ไม่ได้ยืนยันข้อมูล CTA/taxonomy
+- รอบใหม่ต้องแสดงคำตอบที่ยืนยันไว้รอบก่อนเป็นข้อมูลอ้างอิงแบบอ่านอย่างเดียว และต้องไม่ติ๊กมาให้ล่วงหน้า เพราะการติ๊ก = มนุษย์ตรวจแล้วในรอบนั้น
+- ค่าที่ยืนยันแล้วจะแสดงในฐานะ "ยืนยันโดยผู้ตรวจ" ได้เฉพาะเมื่อการรับงานเป็นผู้เขียนค่านั้นจริง (มี `accepted_submission_id`) ข้อมูลเก่าที่ผู้เขียนบทความเคยตั้งเองใน Article Workspace ต้องไม่ถูกแสดงเป็นข้อเท็จจริงที่ยืนยันแล้ว
+- การส่งงานที่รับผ่านแล้วกลับไปทำรอบใหม่ ต้องยืนยันรหัสผ่านของบัญชีผู้ใช้งานนั้นซ้ำเสมอ
+- สิทธิ์ยึดตามสายบังคับบัญชา (management tree) ไม่ใช่ชื่อ role อย่างเดียว: `owner` เป็น root ของ tree ทำได้ทุกงาน; `admin` ทำได้เฉพาะงานที่อยู่ใน subtree ของตัวเอง; `user` ทำได้เฉพาะงานที่ตัวเองเป็นผู้สั่ง — **admin จากอีกสายไม่มีอำนาจเหนืองานของสายอื่น และต้องถูกปฏิเสธ** role ที่สูงกว่าไม่ได้แปลว่าข้ามสายได้
+- การมอบงานรอบใหม่ให้คนอื่นถือเป็นการสั่งงาน ต้องผ่านด่านเดียวกับการสร้าง assignment (อยู่ใน subtree, สิทธิ์สั่งงานภายใน, role ของผู้รับต้องรับงาน `field` ได้) การเป็นผู้สั่งงานเดิมอย่างเดียวไม่พอ
+
 ## 7B. Operational Rules
 
 **English**

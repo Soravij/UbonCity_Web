@@ -4153,6 +4153,7 @@ function updateAssignmentActionControls(assignment) {
     if (imageResetCheckbox) imageResetCheckbox.checked = false;
     if (videoResetCheckbox) videoResetCheckbox.checked = false;
     syncAssignmentReviewResetReasonUI();
+    syncAssignmentReturnToFieldUI(null);
     return;
   }
 
@@ -4212,6 +4213,7 @@ function updateAssignmentActionControls(assignment) {
     syncUploadButton.disabled = !canEditorSubmitFromAssignmentSurface || isReadOnlyInWork || submissionActions.length === 0;
   }
   syncAssignmentReviewResetReasonUI();
+  syncAssignmentReturnToFieldUI(assignment);
 }
 
 function applyLogoutUI() {
@@ -7287,6 +7289,9 @@ function getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage = nu
             suggested_value: Object.prototype.hasOwnProperty.call(check || {}, "suggested_value")
               ? check.suggested_value
               : null,
+            previous_confirmed_value: Object.prototype.hasOwnProperty.call(check || {}, "previous_confirmed_value")
+              ? check.previous_confirmed_value
+              : null,
             evidence_required: check?.evidence_required === true,
             source: check?.source || null,
           };
@@ -7478,6 +7483,23 @@ function buildAssignmentRequestedCheckReturnSecondaryFieldsHtml(row) {
   `;
 }
 
+function formatAssignmentRequestedCheckPreviousConfirmedValue(value) {
+  if (value == null) return "";
+  if (Array.isArray(value)) {
+    const rows = value.map((entry) => String(entry ?? "").trim()).filter(Boolean);
+    return rows.join(", ");
+  }
+  if (typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "number")) {
+      const unit = String(value.unit || "").trim();
+      return `${value.number ?? "-"}${unit ? ` ${unit}` : ""}`;
+    }
+    return "";
+  }
+  if (typeof value === "boolean") return value ? "ใช่" : "ไม่ใช่";
+  return String(value).trim();
+}
+
 function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
   const checked = row.checked === true;
   const usesSuggestedValue = hasAssignmentRequestedCheckMeaningfulSuggestedValue(check.suggested_value, check.answer_type)
@@ -7486,6 +7508,9 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
   const rowModifierClass = String(options?.rowModifierClass || "").trim();
   const extraClass = rowModifierClass ? ` ${rowModifierClass}` : "";
   const conditionValue = String(row?.condition_note || "");
+  // Reference only: what a human already confirmed in an earlier round. Never pre-checked — ticking
+  // the box means "verified this round". Leaving it unticked keeps the confirmed value as it is.
+  const previousConfirmedText = formatAssignmentRequestedCheckPreviousConfirmedValue(check.previous_confirmed_value);
   return `
     <div class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row${extraClass}" data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
       <div class="assignment-capture-row requested-check-row-main">
@@ -7503,6 +7528,9 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
           <div class="requested-check-row-condition">
             <input type="text" data-requested-check-field="condition_note" value="${escapeHtml(conditionValue)}" placeholder="เงื่อนไข/รายละเอียดเพิ่มเติม" ${checked ? "" : "disabled"} />
           </div>
+        ` : ""}
+        ${previousConfirmedText ? `
+          <p class="muted">ยืนยันไว้รอบก่อน: ${escapeHtml(previousConfirmedText)} (ไม่ติ๊ก = ใช้ค่านี้ต่อ)</p>
         ` : ""}
       </div>
     </div>
@@ -8535,6 +8563,68 @@ async function applyAssignmentReviewDecision(action) {
   );
   await refreshAssignments({ showStatus: false, preserveSelection: true });
   setJsonPreview("assignment-selected-json", result?.assignment || getAssignmentById(assignmentId));
+}
+
+function canReturnAssignmentToField(assignment) {
+  if (!assignment) return false;
+  if (String(assignment.assignment_kind || "").trim().toLowerCase() !== "field") return false;
+  if (String(assignment.state || "").trim().toLowerCase() !== "accepted") return false;
+  // review-lane control only, same scope as the other review workspace sections
+  if (getAssignmentPageMode() !== "review") return false;
+  if (!canSeeAssignmentExtendedReviewSurface()) return false;
+  const role = currentRole();
+  if (role === "owner" || role === "admin") return true;
+  if (role !== "user") return false;
+  const actorId = Number(state.user?.id || 0) || 0;
+  return actorId > 0 && Number(assignment.assigned_by_user_id || 0) === actorId;
+}
+
+function syncAssignmentReturnToFieldUI(assignment) {
+  const section = qs("assignment-return-to-field");
+  if (!section) return;
+  const allowed = canReturnAssignmentToField(assignment);
+  section.classList.toggle("hidden", !allowed);
+  if (!allowed) {
+    const note = qs("assignment-return-note");
+    const password = qs("assignment-return-password");
+    if (note) note.value = "";
+    if (password) password.value = "";
+    setStatus("assignment-return-status", "");
+  }
+}
+
+async function returnSelectedAssignmentToField() {
+  const assignmentId = ensureSelectedAssignmentId();
+  const assignment = getAssignmentById(assignmentId);
+  if (!canReturnAssignmentToField(assignment)) {
+    throw new Error("เฉพาะผู้สั่งงานนี้ หรือ role ที่สูงกว่า จึงส่งงานกลับไปทำรอบใหม่ได้");
+  }
+  const note = String(qs("assignment-return-note")?.value || "").trim();
+  if (!note) {
+    throw new Error("กรุณาระบุเหตุผลที่ส่งงานกลับไปทำรอบใหม่");
+  }
+  const password = String(qs("assignment-return-password")?.value || "");
+  if (!password) {
+    throw new Error("กรุณายืนยันรหัสผ่านของบัญชีนี้ก่อนส่งงานกลับ");
+  }
+  const result = await api(`/api/assignments/${assignmentId}/return-to-field`, {
+    method: "POST",
+    body: JSON.stringify({ note, password }),
+  });
+  const passwordInput = qs("assignment-return-password");
+  if (passwordInput) passwordInput.value = "";
+  const noteInput = qs("assignment-return-note");
+  if (noteInput) noteInput.value = "";
+  const newAssignmentId = Number(result?.assignment?.id || 0) || 0;
+  setStatus(
+    "assignment-status",
+    `ปิดรอบ #${assignmentId} และเปิดรอบภาคสนามใหม่ #${newAssignmentId || "-"} แล้ว`
+  );
+  await refreshAssignments({ showStatus: false });
+  if (newAssignmentId) {
+    state.assignments.selectedId = newAssignmentId;
+    await refreshAssignments({ showStatus: false, preserveSelection: true });
+  }
 }
 
 function buildAssignmentDeliverablePayloadFromForm() {
@@ -10479,6 +10569,17 @@ function wireAssignments() {
       });
     } catch (err) {
       setStatus("assignment-status", err.message, true);
+    }
+  });
+
+  qs("btn-assignment-return-to-field")?.addEventListener("click", async (event) => {
+    const btn = event.currentTarget;
+    try {
+      await withButtonLoading(btn, "กำลังส่งกลับ...", async () => {
+        await returnSelectedAssignmentToField();
+      });
+    } catch (err) {
+      setStatus("assignment-return-status", err.message, true);
     }
   });
 
