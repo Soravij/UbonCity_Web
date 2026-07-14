@@ -71,6 +71,18 @@ test("generic provenance URL never becomes a website candidate", () => {
   assert.deepEqual(result, {});
 });
 
+test("a rejected-website host is never cited as CTA provenance, even when it supplies another field", () => {
+  const result = deriveCtaContactCandidatesFromStructuredContext({
+    approved_context: [
+      { selected_text: "Phone: 082-222-2222", provenance: { evidence_source_url: "https://maps.google.com/maps/place/ubon" } },
+      { selected_text: "Facebook: https://facebook.com/uboncity", provenance: { evidence_source_url: "https://official.example/contact" } },
+    ],
+  });
+  assert.equal(result.phone, "0822222222");
+  assert.equal(result.facebook_url, "https://facebook.com/uboncity");
+  assert.deepEqual(result.source, ["https://official.example/contact"]);
+});
+
 test("prebuilt CTA candidates cannot bypass approved-context extraction", () => {
   const result = mergeAiCtaWithDeterministicCandidates({}, {
     cta_contact_candidates: { website_url: "https://generic-source.example/article" },

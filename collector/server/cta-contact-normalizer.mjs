@@ -31,15 +31,12 @@ function hostname(value) {
   return text(value).toLowerCase().replace(/^www\./, "");
 }
 
-function classifyUrl(value) {
-  const normalized = normalizeUrl(value);
-  if (!normalized) return null;
-  const parsed = new URL(normalized);
+// Shared with extractCandidates: a host CTA refuses to call a "website" must also never be cited as
+// CTA provenance, or the provenance list ends up naming a source that looks like a rejected suggestion.
+function isRejectedWebsiteHost(parsed) {
   const host = hostname(parsed.hostname);
   const path = parsed.pathname.toLowerCase();
-  if (FACEBOOK_HOSTS.has(host) || host.endsWith(".facebook.com")) return { key: "facebook_url", value: normalized };
-  if (LINE_HOSTS.has(host) || host.endsWith(".line.me")) return { key: "line_url", value: normalized };
-  const rejected = REJECTED_WEBSITE_HOSTS.has(host)
+  return REJECTED_WEBSITE_HOSTS.has(host)
     || host.startsWith("maps.google.")
     || (host.includes("google.") && (parsed.searchParams.has("cid") || path.includes("/maps") || path.includes("/place/")))
     || host.endsWith("googleusercontent.com")
@@ -48,7 +45,16 @@ function classifyUrl(value) {
     || host.endsWith("wongnai.com")
     || (host === "goo.gl" && path.startsWith("/maps"))
     || /\.(jpg|jpeg|png|webp|gif|svg|mp4)$/i.test(path);
-  return rejected ? null : { key: "website_url", value: normalized };
+}
+
+function classifyUrl(value) {
+  const normalized = normalizeUrl(value);
+  if (!normalized) return null;
+  const parsed = new URL(normalized);
+  const host = hostname(parsed.hostname);
+  if (FACEBOOK_HOSTS.has(host) || host.endsWith(".facebook.com")) return { key: "facebook_url", value: normalized };
+  if (LINE_HOSTS.has(host) || host.endsWith(".line.me")) return { key: "line_url", value: normalized };
+  return isRejectedWebsiteHost(parsed) ? null : { key: "website_url", value: normalized };
 }
 
 export function normalizePhoneSuggestion(value) {
@@ -124,7 +130,7 @@ function extractCandidates(context = {}) {
       }
     }
     const provenance = normalizeUrl(record.source);
-    if (used && provenance) sources.push(provenance);
+    if (used && provenance && !isRejectedWebsiteHost(new URL(provenance))) sources.push(provenance);
   }
   if (sources.length) result.source = [...new Set(sources)];
   return result;
