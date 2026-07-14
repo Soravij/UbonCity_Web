@@ -704,6 +704,7 @@ test("field pack metadata defaults stay safe on legacy-style null or invalid val
       category: null,
       subtype: null,
       tags: [],
+      suggested_checks: [],
       source: [],
       confidence: "unknown",
       note: null,
@@ -1089,28 +1090,40 @@ test("buildAssignmentHandoffPreview includes only requested=true requested check
     // A brand-new field pack has no legacy custom baseline, so a "custom" group is not part
     // of this create-time contract (see the dedicated custom-key tests below).
     const preview = ctx.repo.buildAssignmentHandoffPreview(item.id);
-    assert.deepEqual(preview.handoff_package?.requested_checks, {
-      version: 1,
-      groups: [
+    const groups = preview.handoff_package?.requested_checks?.groups || [];
+    const ctaGroup = groups.find((group) => group.group_key === "cta_contact");
+    assert.deepEqual(ctaGroup, {
+      group_key: "cta_contact",
+      group_label: "CTA/ติดต่อ",
+      checks: [
         {
-          group_key: "cta_contact",
-          group_label: "CTA/ติดต่อ",
-          checks: [
-            {
-              key: "phone",
-              requested: true,
-              label: "เบอร์โทร",
-              instruction: "ยืนยันเบอร์",
-              answer_type: "phone",
-              suggested_value: "0812345678",
-              condition_prompt: null,
-              evidence_required: true,
-              source: { kind: "ai", confidence: "medium" },
-            },
-          ],
+          key: "phone",
+          requested: true,
+          label: "เบอร์โทร",
+          instruction: "ยืนยันเบอร์",
+          answer_type: "phone",
+          suggested_value: "0812345678",
+          condition_prompt: null,
+          evidence_required: true,
+          source: { kind: "ai", confidence: "medium" },
         },
       ],
     });
+    // line_url was requested=false, so it never reaches the worker.
+    assert.equal(ctaGroup.checks.some((check) => check.key === "line_url"), false);
+
+    // The taxonomy group is resolved from the catalog, not from the field pack: this item is an
+    // attractions place, so its required category defaults are asked even though the curator never
+    // configured them. The agent-triggered keys stay off until AI or the curator switches them on.
+    const taxonomyGroup = groups.find((group) => group.group_key === "taxonomy");
+    assert.deepEqual(
+      taxonomyGroup.checks.map((check) => check.key).sort(),
+      ["entry_fee_required", "parking", "pet_friendly", "setting_type", "toilet_available", "wheelchair_accessible"]
+    );
+    assert.equal(taxonomyGroup.checks.every((check) => check.requested === true), true);
+    assert.equal(taxonomyGroup.checks.every((check) => check.required === true), true);
+    // Nobody generated suggestions, so no taxonomy row arrives pre-filled.
+    assert.equal(taxonomyGroup.checks.every((check) => check.suggested_value === null), true);
   } finally {
     ctx.cleanup();
   }
@@ -1491,16 +1504,31 @@ test("createAssignmentFromReadiness snapshots CTA and taxonomy requested checks 
 
     const requestedChecks = result.handoff.handoff_package_json?.requested_checks;
     assert.deepEqual(requestedChecks?.groups?.map((group) => group.group_key), ["cta_contact", "taxonomy"]);
-    assert.equal(
-      requestedChecks?.groups?.reduce((sum, group) => sum + (Array.isArray(group?.checks) ? group.checks.length : 0), 0),
-      8
-    );
-    assert.equal(requestedChecks?.groups?.[0]?.checks?.[0]?.suggested_value, "080-111-2222");
-    assert.equal(requestedChecks?.groups?.[1]?.checks?.[0]?.condition_prompt, null);
-    assert.equal(requestedChecks?.groups?.[1]?.checks?.[0]?.source, null);
-    assert.equal(requestedChecks?.groups?.[1]?.checks?.[2]?.key, "price_level");
-    assert.equal(requestedChecks?.groups?.[1]?.checks?.[2]?.suggested_value, null);
-    assert.equal(requestedChecks?.groups?.[1]?.checks?.[2]?.requested, true);
+
+    const ctaChecks = requestedChecks.groups.find((group) => group.group_key === "cta_contact").checks;
+    assert.equal(ctaChecks.length, 5);
+    assert.equal(ctaChecks[0].suggested_value, "080-111-2222");
+
+    const taxonomyChecks = requestedChecks.groups.find((group) => group.group_key === "taxonomy").checks;
+    const byKey = new Map(taxonomyChecks.map((check) => [check.key, check]));
+
+    // `parking` is a real catalog key for an attractions place, so the catalog — not the field pack —
+    // owns its schema. The curator's hand-written multi_select shape and its suggested value are
+    // replaced by the resolved contract (§7A: the catalog schema cannot be overridden).
+    assert.equal(byKey.get("parking").answer_type, "boolean_with_conditions");
+    assert.equal(byKey.get("parking").required, true);
+    assert.equal(byKey.get("parking").suggested_value, null);
+
+    // Every other required attractions default is asked too, even though the curator never wrote it.
+    ["pet_friendly", "wheelchair_accessible", "toilet_available", "entry_fee_required", "setting_type"]
+      .forEach((key) => assert.equal(byKey.get(key)?.requested, true, `missing catalog default ${key}`));
+
+    // Keys the catalog does not know are curator-authored legacy rows: they survive untouched rather
+    // than being deleted (§7A: do not delete legacy stored data).
+    assert.equal(byKey.get("business_type").answer_type, "text");
+    assert.equal(byKey.get("business_type").suggested_value, "restaurant");
+    assert.equal(byKey.get("price_level").suggested_value, null);
+    assert.equal(byKey.get("price_level").requested, true);
   } finally {
     ctx.cleanup();
   }
@@ -1828,8 +1856,10 @@ test("repairAssignmentHandoffSnapshotForAssignment uses the explicit historical 
     assert.equal(dryRun.created, false);
     assert.equal(dryRun.reason, "dry_run");
     assert.equal(dryRun.field_pack_id, fieldPackA.id);
-    assert.equal(dryRun.requested_check_group_count, 1);
-    assert.equal(dryRun.requested_check_count, 1);
+    // cta_contact from field pack A, plus the taxonomy group the catalog resolves for an attractions
+    // place (6 required category defaults) — the repaired snapshot is built the same way a fresh one is.
+    assert.equal(dryRun.requested_check_group_count, 2);
+    assert.equal(dryRun.requested_check_count, 7);
     assert.equal(dryRun.would_apply, true);
     assert.equal(dryRun.applied, false);
 
@@ -1846,8 +1876,9 @@ test("repairAssignmentHandoffSnapshotForAssignment uses the explicit historical 
     assert.equal(repaired.mode, "repair_from_explicit_field_pack");
     assert.deepEqual(
       repaired.handoff?.handoff_package_json?.requested_checks?.groups?.map((group) => group.group_key),
-      ["cta_contact"]
+      ["cta_contact", "taxonomy"]
     );
+    // The point of the test: repair sourced its CTA checks from field pack A, not B.
     assert.equal(
       repaired.handoff?.handoff_package_json?.requested_checks?.groups?.[0]?.checks?.[0]?.instruction,
       "Check phone A"
@@ -2478,6 +2509,55 @@ test("assignment submission round-trips normalized field return payload and igno
     const fetched = ctx.repo.getAssignmentSubmissionById(submission.id);
     assert.equal(fetched.field_return_payload_json.checklist_results[0].found, true);
     assert.equal(fetched.field_return_payload_json.note, "field return note");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("on a yes/no Curation check the tick is the answer and the value is only its qualifier", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Yes No Taxonomy Answer");
+    const assignee = ctx.createUser("yes-no-taxonomy-answer");
+    ctx.createReadinessBrief(item.id, "yes-no-taxonomy-answer");
+    ctx.repo.createFieldPack({ content_item_id: item.id, status: "ready_for_field" });
+    const assignmentResult = ctx.repo.createAssignmentFromReadiness(
+      item.id,
+      { assignee_user_id: assignee.id, force_override: true, force_reason: "test" },
+      assignee.id,
+      "tester@local",
+      "admin"
+    );
+
+    const submission = ctx.repo.addAssignmentSubmission({
+      assignment_id: Number(assignmentResult.assignment.id || 0),
+      submitted_by_user_id: assignee.id,
+      submission_state: "submitted",
+      field_return_payload_json: {
+        requested_check_returns: {
+          // ticked with a qualifier: there IS air conditioning, but only in part of the place
+          "taxonomy.air_conditioning": { checked: true, answer_type: "boolean_with_conditions", value: "เฉพาะในร้าน" },
+          // ticked with nothing typed: a plain "มี", with no strings attached
+          "taxonomy.toilet_available": { checked: true, answer_type: "boolean", value: "" },
+          // not ticked: the worker looked and there is none
+          "taxonomy.parking": { checked: false, answer_type: "boolean_with_conditions", value: "" },
+          // CTA keeps its own meaning: ticked with no value = verified that there is no phone
+          "cta_contact.phone": { checked: true, answer_type: "phone", value: "" },
+        },
+      },
+    });
+
+    const returns = submission.field_return_payload_json.requested_check_returns;
+    // Ticking is the ใช่. It counts as an answer whether or not a qualifier came with it — going looking
+    // for a value here (the way CTA does) would read a plain "มีห้องน้ำ" as "ไม่พบ".
+    assert.equal(returns["taxonomy.air_conditioning"].found, true);
+    assert.equal(returns["taxonomy.air_conditioning"].value, "เฉพาะในร้าน");
+    assert.equal(returns["taxonomy.toilet_available"].found, true);
+    assert.equal(returns["taxonomy.toilet_available"].value, null);
+    // Not ticking is the worker's ไม่มี, not a gap.
+    assert.equal(returns["taxonomy.parking"].found, false);
+    // And an empty CTA field still means "verified: there is none".
+    assert.equal(returns["cta_contact.phone"].found, false);
   } finally {
     ctx.cleanup();
   }

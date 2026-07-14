@@ -1257,8 +1257,14 @@ function renderConfirmedTaxonomySummary() {
   // non-reserved Curation answers (price range, etc.) live only in the accepted Work Return
   const extraHtml = acceptedFieldReturnEvidenceByGroup("taxonomy")
     .map((row) => {
-      const display = row.found === false ? "ไม่พบ" : confirmedSummaryValue(row.value);
       const conditionNote = String(row.condition_note || "").trim();
+      // On a Curation row the worker's tick is the answer, and its value is only the qualifier. So an
+      // unticked row means ไม่มี — the worker looked and there is none — not "we failed to find out".
+      // A ticked row with no qualifier is a plain ใช่.
+      const hasQualifier = row.value != null && String(row.value).trim().length > 0;
+      const display = row.found === false
+        ? "ไม่มี"
+        : (hasQualifier ? confirmedSummaryValue(row.value) : "ใช่");
       return `<div class="summary-row"><strong>${escapeHtml(row.label || row.key)}</strong><span>${display}${conditionNote ? ` — ${escapeHtml(conditionNote)}` : ""}</span></div>`;
     })
     .join("");

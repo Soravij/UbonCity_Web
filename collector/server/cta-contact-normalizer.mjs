@@ -142,7 +142,9 @@ function normalizeApprovedCtaContactCandidates(value) {
 
 export function mergeAiCtaWithDeterministicCandidates(aiValue = {}, structuredContext = {}) {
   const ai = normalizeAiCtaContactJson(aiValue);
-  const deterministic = normalizeApprovedCtaContactCandidates(extractCandidates(structuredContext));
+  // The default parameter only covers `undefined`, and callers pass an explicit null when the item has
+  // no structured context yet. An item with no context has no deterministic candidates, not a crash.
+  const deterministic = normalizeApprovedCtaContactCandidates(extractCandidates(structuredContext || {}));
   const result = { ...ai };
   for (const key of ["phone", "line_url", "facebook_url", "website_url"]) {
     if (deterministic[key]) result[key] = deterministic[key];

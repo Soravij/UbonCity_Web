@@ -2030,6 +2030,16 @@ function resolveAgentCtaSuggestions(aiFieldPack, existingFieldPack, item) {
   return mergeAiCtaWithDeterministicCandidates(aiFieldPack.ai_cta_contact_json, item?.structured_context || null);
 }
 
+// Same lifecycle as CTA above: one AI run is one snapshot. normalizeFieldPack already reduced the
+// agent's raw output to keys the catalog allows for this item, so the pack either carries this run's
+// taxonomy suggestions or nothing.
+function resolveAgentTaxonomySuggestions(aiFieldPack, existingFieldPack) {
+  // Deterministic mode or a failed AI run: no fresh suggestions, so keep what is stored.
+  if (!aiFieldPack || typeof aiFieldPack !== "object") return existingFieldPack?.ai_taxonomy_json || {};
+  const suggestions = aiFieldPack.ai_taxonomy_json;
+  return suggestions && typeof suggestions === "object" && !Array.isArray(suggestions) ? suggestions : {};
+}
+
 export function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = null, options = {}) {
   const source = fieldPack && typeof fieldPack === "object" ? fieldPack : {};
   const existingId = Number(existingFieldPack?.id || 0) || 0;
@@ -2061,6 +2071,7 @@ export function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = nu
     field_pack_references: normalizeAgentFieldPackReferences(source.field_pack_references),
     field_pack_media_hints: normalizeAgentFieldPackMediaHints(source.field_pack_media_hints),
     ai_cta_contact_json: resolveAgentCtaSuggestions(fieldPack, existingFieldPack, options?.item || null),
+    ai_taxonomy_json: resolveAgentTaxonomySuggestions(fieldPack, existingFieldPack),
   };
 }
 

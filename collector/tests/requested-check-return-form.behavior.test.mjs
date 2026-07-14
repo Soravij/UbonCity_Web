@@ -335,7 +335,10 @@ const buildAssignmentRequestedCheckReturnSectionHtml = loadNamedFunction(appJs, 
   escapeHtml,
 });
 const updateAssignmentRequestedCheckReturnRowState = loadNamedFunction(appJs, "updateAssignmentRequestedCheckReturnRowState");
-const readAssignmentRequestedCheckReturnDraftFromForm = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm");
+const withAssumedUrlScheme = loadNamedFunction(appJs, "withAssumedUrlScheme");
+const readAssignmentRequestedCheckReturnDraftFromForm = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm", {
+  withAssumedUrlScheme,
+});
 
 const normalizeRequestedCheckAnswerType = loadNamedFunction(repositoryJs, "normalizeRequestedCheckAnswerType");
 const normalizeRequestedCheckReturnKey = loadNamedFunction(repositoryJs, "normalizeRequestedCheckReturnKey");
@@ -1128,8 +1131,12 @@ test("requested-check form reader keeps hidden custom rows and reads taxonomy co
   });
 
   const payload = buildAssignmentRequestedCheckReturnPayloadFromDraft(draft);
+  // answer_type rides along into the submitted payload: the server infers it from the value's shape
+  // when absent, and a yes/no check's qualifier-text value gives it nothing to infer from (unlike the
+  // old boolean-valued rows, where the JS type itself was the signal).
   assert.deepEqual(payload.requested_check_returns["taxonomy.tags"], {
     checked: true,
+    answer_type: "multi_select",
     value: ["cafe", "family", "rooftop"],
     condition_note: null,
     evidence: null,
@@ -1137,11 +1144,105 @@ test("requested-check form reader keeps hidden custom rows and reads taxonomy co
   });
   assert.deepEqual(payload.requested_check_returns["taxonomy.price_range"], {
     checked: true,
+    answer_type: "number_with_unit",
     value: { number: 500, unit: "บาท" },
     condition_note: null,
     evidence: null,
     note: null,
   });
+});
+
+test("a yes/no check ticked with no qualifier survives the client-to-server wire as found:true, not found:false", () => {
+  // This wires the real client payload builder straight into the real server-side normalizer — the
+  // exact seam a prior regression slipped through, because the client and server sides were each
+  // tested in isolation with the server side handed an answer_type it would never actually receive.
+  const draft = {
+    requested_check_returns: {
+      // worker ticked "มีแอร์" and typed nothing — the common case, not the edge case
+      "taxonomy.air_conditioning": { checked: true, answer_type: "boolean_with_conditions", value: "" },
+      // worker ticked and typed a qualifier
+      "taxonomy.parking": { checked: true, answer_type: "boolean_with_conditions", value: "เฉพาะในร้าน" },
+      // worker left this one unticked
+      "taxonomy.pet_friendly": { checked: false, answer_type: "boolean", value: "" },
+    },
+  };
+  const payload = buildAssignmentRequestedCheckReturnPayloadFromDraft(draft);
+  const normalized = normalizeRequestedCheckReturns(payload.requested_check_returns);
+
+  assert.equal(normalized["taxonomy.air_conditioning"].found, true);
+  assert.equal(normalized["taxonomy.air_conditioning"].answer_type, "boolean_with_conditions");
+  assert.equal(normalized["taxonomy.parking"].found, true);
+  assert.equal(normalized["taxonomy.parking"].value, "เฉพาะในร้าน");
+  assert.equal(normalized["taxonomy.pet_friendly"].found, false);
+});
+
+test("a CTA url typed without a scheme survives the client-to-server wire as found:true with https:// added", () => {
+  // Same seam as the yes/no regression above, for a different reason: once answer_type actually travels
+  // to the server, a url check goes through strict http(s):// validation for the first time. A worker
+  // typing "facebook.com/mypage" (very plausible — no scheme) would otherwise have that answer silently
+  // rejected server-side and read back indistinguishable from "verified: there is no link".
+  const noSchemeRowNode = {
+    getAttribute(name) {
+      if (name === "data-requested-check-return-key") return "cta_contact.facebook_url";
+      if (name === "data-requested-check-answer-type") return "url";
+      return null;
+    },
+    querySelector(selector) {
+      if (selector === "[data-requested-check-field='checked']") return { checked: true };
+      if (selector === "[data-requested-check-field='value']") return { value: "facebook.com/mypage" };
+      return null;
+    },
+  };
+  const alreadySchemedRowNode = {
+    getAttribute(name) {
+      if (name === "data-requested-check-return-key") return "cta_contact.website_url";
+      if (name === "data-requested-check-answer-type") return "url";
+      return null;
+    },
+    querySelector(selector) {
+      if (selector === "[data-requested-check-field='checked']") return { checked: true };
+      if (selector === "[data-requested-check-field='value']") return { value: "https://already-ok.example" };
+      return null;
+    },
+  };
+  const emptyUntickedRowNode = {
+    getAttribute(name) {
+      if (name === "data-requested-check-return-key") return "cta_contact.line_url";
+      if (name === "data-requested-check-answer-type") return "url";
+      return null;
+    },
+    querySelector(selector) {
+      if (selector === "[data-requested-check-field='checked']") return { checked: false };
+      if (selector === "[data-requested-check-field='value']") return { value: "" };
+      return null;
+    },
+  };
+  const formNode = {
+    querySelectorAll(selector) {
+      return selector === "[data-requested-check-row]"
+        ? [noSchemeRowNode, alreadySchemedRowNode, emptyUntickedRowNode]
+        : [];
+    },
+  };
+  const readDraft = loadNamedFunction(appJs, "readAssignmentRequestedCheckReturnDraftFromForm", {
+    qs: () => formNode,
+    state: { assignments: { requestedCheckReturnDrafts: {} } },
+    withAssumedUrlScheme,
+  });
+
+  const draft = readDraft(12);
+  assert.equal(draft.requested_check_returns["cta_contact.facebook_url"].value, "https://facebook.com/mypage");
+  // an empty, unticked url field is not fabricated into a URL
+  assert.equal(draft.requested_check_returns["cta_contact.line_url"].value, "");
+
+  const payload = buildAssignmentRequestedCheckReturnPayloadFromDraft(draft);
+  const normalized = normalizeRequestedCheckReturns(payload.requested_check_returns);
+
+  assert.equal(normalized["cta_contact.facebook_url"].found, true);
+  assert.equal(normalized["cta_contact.facebook_url"].value, "https://facebook.com/mypage");
+  assert.equal(normalized["cta_contact.website_url"].found, true);
+  assert.equal(normalized["cta_contact.website_url"].value, "https://already-ok.example");
+  assert.equal(normalized["cta_contact.line_url"].found, false);
 });
 
 test("requested-check row state toggles taxonomy condition input with checkbox without erasing the condition text", () => {
@@ -1437,6 +1538,7 @@ test("requested-check payload builder keeps field_return_payload_json separate a
     requested_check_returns: {
       "cta_contact.phone": {
         checked: true,
+        answer_type: "phone",
         value: "0812345678",
         condition_note: "Reachable only at night",
         evidence: "https://example.com/evidence",
@@ -1444,6 +1546,7 @@ test("requested-check payload builder keeps field_return_payload_json separate a
       },
       "taxonomy.tags": {
         checked: false,
+        answer_type: "multi_select",
         value: ["cafe", "family"],
         condition_note: null,
         evidence: null,
@@ -1451,7 +1554,11 @@ test("requested-check payload builder keeps field_return_payload_json separate a
       },
     },
   });
-  assert.equal(Object.prototype.hasOwnProperty.call(payload.requested_check_returns["cta_contact.phone"], "answer_type"), false);
+  // label/group_key are presentation-only and get stripped. answer_type is not: the server infers a
+  // check's type from the submitted value's shape when it is absent, and a yes/no check's qualifier-text
+  // value gives it nothing to infer from, so it has to travel with the payload.
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.requested_check_returns["cta_contact.phone"], "label"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.requested_check_returns["cta_contact.phone"], "group_key"), false);
 });
 
 test("requested-check return normalization infers runtime types from payload shape", () => {

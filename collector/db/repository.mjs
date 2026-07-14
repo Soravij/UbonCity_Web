@@ -2,6 +2,7 @@
 import path from "path";
 
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
+import { getTaxonomyCheckLabel, resolveTaxonomyRequestedChecksGroup } from "../server/taxonomy-resolver.mjs";
 
 function parseTags(raw) {
   if (!raw) return [];
@@ -823,6 +824,9 @@ function defaultAiTaxonomy() {
     category: null,
     subtype: null,
     tags: [],
+    // Per-catalog-key suggestions the agent produced for this item. category/subtype/tags above are the
+    // reserved Clean-owned metadata keys and stay separate from them.
+    suggested_checks: [],
     source: [],
     confidence: "unknown",
     note: null,
@@ -1063,10 +1067,30 @@ function normalizeAiTaxonomyJson(value, fieldName = "ai_taxonomy_json") {
     : parseJson(value, null);
   const base = defaultAiTaxonomy();
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return base;
+  // Shape only. Whether a key is real, applies to this item's category, and carries a value its answer
+  // contract allows is the catalog's call, and it is made in normalizeAiTaxonomySuggestions before the
+  // pack ever reaches this layer — the repository has no item in hand here.
+  const suggestedChecks = (Array.isArray(parsed.suggested_checks) ? parsed.suggested_checks : [])
+    .reduce((acc, row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return acc;
+      const taxonomyKey = String(row.taxonomy_key || "").trim().toLowerCase();
+      if (!taxonomyKey || acc.some((entry) => entry.taxonomy_key === taxonomyKey)) return acc;
+      acc.push({
+        taxonomy_key: taxonomyKey,
+        ...(Object.prototype.hasOwnProperty.call(row, "suggested_value")
+          ? { suggested_value: normalizeJsonSafeValue(row.suggested_value) }
+          : {}),
+        ...(row.condition_note == null
+          ? {}
+          : { condition_note: String(row.condition_note || "").trim() || null }),
+      });
+      return acc;
+    }, []);
   return {
     category: parsed.category == null ? null : String(parsed.category || "").trim() || null,
     subtype: parsed.subtype == null ? null : String(parsed.subtype || "").trim() || null,
     tags: normalizeJsonSourceList(parsed.tags, `${fieldName}.tags`),
+    suggested_checks: suggestedChecks,
     source: normalizeJsonSourceList(parsed.source, `${fieldName}.source`),
     confidence: normalizeConfidenceValue(parsed.confidence),
     note: parsed.note == null ? null : String(parsed.note || "").trim() || null,
@@ -1261,7 +1285,11 @@ function normalizeRequestedCheckReturnValue(rawValue, answerType, fieldName) {
       return Array.isArray(rawValue) ? normalizeStringListInput(rawValue, fieldName) : [];
     }
     if (answerType === "boolean" || answerType === "boolean_with_conditions") {
-      return typeof rawValue === "boolean" ? rawValue : null;
+      // The tick is the yes. The value is the qualifier the worker typed next to it ("เฉพาะในร้าน"), so
+      // "มีแอร์" and "มีแอร์ แต่เฉพาะในร้าน" are one row, not two fields. An older payload that still
+      // sends a real boolean is kept as one rather than thrown away.
+      if (typeof rawValue === "boolean") return rawValue;
+      return typeof rawValue === "string" ? rawValue.trim() || null : null;
     }
     if (answerType === "number_with_unit") {
       if (typeof rawValue === "number" && Number.isFinite(rawValue)) return { number: rawValue, unit: null };
@@ -1314,11 +1342,16 @@ function normalizeRequestedCheckReturnEntry(rawValue, fieldName) {
   const hasEvidence = evidence.evidence_deliverable_id != null || Boolean(evidence.evidence_source_url) || Boolean(evidenceText);
   const hasCondition = Boolean(conditionNote);
   const hasNote = Boolean(note);
+  // On a yes/no check the tick IS the answer: ticking "มีแอร์" means there is air conditioning, whether
+  // or not the worker also typed a qualifier next to it. So `found` must not go looking for a value here
+  // the way it does for CTA — there, a ticked-but-empty row genuinely means "verified: there is no phone".
+  // Not ticking a yes/no check is the worker's "ไม่มี" (§7A: required means the worker must answer).
+  const isYesNoCheck = answerType === "boolean" || answerType === "boolean_with_conditions";
   const found = checked && (
-    hasMeaningfulValue(value)
+    isYesNoCheck
+    || hasMeaningfulValue(value)
     || hasEvidence
     || (answerType === "note_only" && (hasNote || hasCondition))
-    || (answerType === "boolean_with_conditions" && (value === true || hasCondition))
   );
   return {
     checked,
@@ -1589,6 +1622,10 @@ function fieldReturnEvidenceLabelFromKey(groupKey, checkKey) {
     if (normalizedCheckKey === "category") return "หมวดหลัก";
     if (normalizedCheckKey === "subtype") return "หมวดย่อย";
     if (normalizedCheckKey === "tags") return "แท็ก";
+    // Catalog keys own their own Thai label; without this the Article Workspace would title-case the
+    // raw key and show a reviewer "Work Power Outlets" instead of "มีปลั๊กทำงาน".
+    const catalogLabel = getTaxonomyCheckLabel(normalizedCheckKey);
+    if (catalogLabel) return catalogLabel;
   }
   return normalizedCheckKey
     .split(/[_\-.]+/)
@@ -9200,10 +9237,24 @@ function normalizeStateValue(value, stateGroup) {
     return String(value).trim().toLowerCase();
   }
 
-  function buildRequestedChecksHandoffPayload(requestedChecks, item) {
+  function buildRequestedChecksHandoffPayload(requestedChecks, item, options = {}) {
     const normalized = normalizeRequestedChecksJson(requestedChecks);
     const previousConfirmed = buildPreviousConfirmedCheckValues(item);
-    const groups = normalized.groups
+    // §7A: the resolver writes the taxonomy checklist into the handoff snapshot, resolved from the
+    // catalog against this item's category. The stored requested_checks_json only carries the curator's
+    // per-key requested/rejected decision; everything else (labels, answer types, applicability,
+    // suggestions) is resolved fresh here and then frozen into the snapshot, so an issued assignment
+    // stays stable even when the live catalog later changes.
+    const resolvedTaxonomy = resolveTaxonomyRequestedChecksGroup({
+      existingGroup: normalized.groups.find((group) => group?.group_key === "taxonomy") || null,
+      item,
+      aiTaxonomy: normalizeAiTaxonomyJson(options?.aiTaxonomy ?? null),
+    });
+    const sourceGroups = [
+      ...normalized.groups.filter((group) => group?.group_key !== "taxonomy"),
+      ...(resolvedTaxonomy ? [resolvedTaxonomy] : []),
+    ];
+    const groups = sourceGroups
       .filter((group) => {
         const normalizedGroupKey = String(group?.group_key || "").trim().toLowerCase();
         if (normalizedGroupKey === "cta_contact") {
@@ -9266,7 +9317,9 @@ function normalizeStateValue(value, stateGroup) {
     const recommendedHook = String(fieldPack?.social_hook || "").trim() || null;
     const socialCaptionAngle = String(fieldPack?.social_caption_angle || "").trim() || null;
     const fieldNotes = String(fieldPack?.field_notes || "").trim() || null;
-    const requestedChecks = buildRequestedChecksHandoffPayload(fieldPack?.requested_checks_json, item);
+    const requestedChecks = buildRequestedChecksHandoffPayload(fieldPack?.requested_checks_json, item, {
+      aiTaxonomy: fieldPack?.ai_taxonomy_json ?? null,
+    });
 
     return finalizeAssignmentHandoffPackage({
       brief_summary: briefSummary,

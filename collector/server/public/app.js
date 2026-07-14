@@ -7236,8 +7236,11 @@ function hasAssignmentRequestedCheckMeaningfulValue(value, answerType = "text") 
   if (normalized === "number_with_unit") {
     return Boolean(String(value?.number ?? "").trim() || String(value?.unit ?? "").trim());
   }
+  // A yes/no check carries a qualifier string, not a boolean — the tick holds the answer. (A boolean can
+  // still arrive on a legacy row, and it is still meaningful.)
   if (normalized === "boolean" || normalized === "boolean_with_conditions") {
-    return typeof value === "boolean";
+    if (typeof value === "boolean") return true;
+    return String(value || "").trim().length > 0;
   }
   if (normalized === "note_only") return false;
   return String(formatRequestedCheckSuggestedValue(value, normalized) || "").trim().length > 0;
@@ -7293,6 +7296,10 @@ function getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage = nu
               ? check.previous_confirmed_value
               : null,
             evidence_required: check?.evidence_required === true,
+            // Answer schema the taxonomy catalog resolved for this check, frozen into the snapshot:
+            // the closed vocabulary a select must choose from, and the prompt for a yes/no qualifier.
+            allowed_values: Array.isArray(check?.allowed_values) ? check.allowed_values : null,
+            condition_prompt: String(check?.condition_prompt || "").trim(),
             source: check?.source || null,
           };
         })
@@ -7311,7 +7318,8 @@ function getAssignmentRequestedCheckDefaultValue(answerType = "text") {
   const normalized = String(answerType || "").trim().toLowerCase();
   if (normalized === "multi_select") return [];
   if (normalized === "number_with_unit") return { number: "", unit: "" };
-  if (normalized === "boolean" || normalized === "boolean_with_conditions" || normalized === "note_only") return null;
+  if (normalized === "note_only") return null;
+  // boolean / boolean_with_conditions fall through: their value is the qualifier text, empty by default.
   return "";
 }
 
@@ -7327,8 +7335,9 @@ function cloneAssignmentRequestedCheckValue(value, answerType = "text") {
       unit: String(value.unit ?? "").trim(),
     };
   }
-  if (normalized === "boolean" || normalized === "boolean_with_conditions") {
-    return typeof value === "boolean" ? value : null;
+  // Legacy rows may still hold a real boolean; new ones hold the qualifier text.
+  if ((normalized === "boolean" || normalized === "boolean_with_conditions") && typeof value === "boolean") {
+    return value;
   }
   if (normalized === "note_only") return null;
   return value == null ? "" : String(value || "");
@@ -7373,6 +7382,11 @@ function buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPacka
         instruction: check.instruction,
         suggested_value: check.suggested_value,
         evidence_required: check.evidence_required,
+        // Carried on the row so the value input can render the real choices and the right placeholder.
+        // buildAssignmentRequestedCheckReturnPayloadFromDraft picks the answer fields explicitly, so
+        // this never rides along into the submitted payload.
+        allowed_values: check.allowed_values,
+        condition_prompt: check.condition_prompt,
         source: check.source,
       };
     });
@@ -7415,6 +7429,11 @@ function buildAssignmentRequestedCheckReturnPayloadFromDraft(draft = null) {
   Object.entries(normalized.requested_check_returns || {}).forEach(([returnKey, row]) => {
     requested_check_returns[returnKey] = {
       checked: row.checked === true,
+      // The server infers answer_type from the submitted value's shape when this is absent, and a real
+      // JS boolean used to be that signal for a yes/no check. Now that a yes/no check's value is a
+      // qualifier string, that signal is gone, so it has to be sent explicitly or a plain ticked "ใช่"
+      // with no qualifier text infers as answer_type "text" and reads back as found:false.
+      answer_type: String(row.answer_type || "text").trim().toLowerCase() || "text",
       value: row.value == null ? null : row.value,
       condition_note: String(row.condition_note || "").trim() || null,
       evidence: String(row.evidence || "").trim() || null,
@@ -7428,19 +7447,34 @@ function buildAssignmentRequestedCheckReturnValueInputHtml(row) {
   const answerType = String(row?.answer_type || "text").trim().toLowerCase() || "text";
   const checked = row?.checked === true;
   const disabledAttr = checked ? "" : "disabled";
+  // A yes/no check is answered by ticking it, exactly like a CTA row: tick = ใช่/มี, no tick = ไม่มี.
+  // The input next to it is not the answer, it is the qualifier on that answer — "มีแอร์" ticked with
+  // "เฉพาะในร้าน" typed in. That keeps Curation to one line per question instead of a tick plus a
+  // separate ใช่/ไม่ใช่ dropdown that says the same thing twice.
   if (answerType === "boolean" || answerType === "boolean_with_conditions") {
-    const currentValue = row?.value === true ? "true" : (row?.value === false ? "false" : "");
+    const qualifier = typeof row?.value === "string" ? row.value : "";
+    const placeholder = String(row?.condition_prompt || "").trim() || "ถ้าจริงไม่ทั้งหมด ให้ระบุเงื่อนไข";
+    return `<input data-requested-check-field="value" type="text" value="${escapeHtml(qualifier)}" placeholder="${escapeHtml(placeholder)}" ${disabledAttr} />`;
+  }
+  // A catalog select is a closed vocabulary (price_level: budget/standard/premium, ...). Rendering it as
+  // a free-text box would let a worker type something the taxonomy cannot store, so offer the real
+  // choices. Read-back is unchanged: this still reports through data-requested-check-field="value".
+  const allowedValues = Array.isArray(row?.allowed_values)
+    ? row.allowed_values.map((entry) => String(entry || "").trim()).filter(Boolean)
+    : [];
+  if (answerType === "select" && allowedValues.length) {
+    const currentValue = row?.value == null ? "" : String(row.value || "").trim();
     return `
       <select data-requested-check-field="value" ${disabledAttr}>
         <option value="" ${currentValue === "" ? "selected" : ""}>-- ยังไม่ระบุ --</option>
-        <option value="true" ${currentValue === "true" ? "selected" : ""}>ใช่</option>
-        <option value="false" ${currentValue === "false" ? "selected" : ""}>ไม่ใช่</option>
+        ${allowedValues.map((entry) => `<option value="${escapeHtml(entry)}" ${currentValue === entry ? "selected" : ""}>${escapeHtml(entry)}</option>`).join("")}
       </select>
     `;
   }
   if (answerType === "multi_select") {
     const listValue = Array.isArray(row?.value) ? row.value : [];
-    return `<textarea data-requested-check-field="value" rows="1" placeholder="ใส่ทีละบรรทัด"${disabledAttr}>${escapeHtml(listValue.map((value) => String(value || "").trim()).filter(Boolean).join("\n"))}</textarea>`;
+    const placeholder = allowedValues.length ? `เลือกจาก: ${allowedValues.join(", ")} (ใส่ทีละบรรทัด)` : "ใส่ทีละบรรทัด";
+    return `<textarea data-requested-check-field="value" rows="1" placeholder="${escapeHtml(placeholder)}"${disabledAttr}>${escapeHtml(listValue.map((value) => String(value || "").trim()).filter(Boolean).join("\n"))}</textarea>`;
   }
   if (answerType === "number_with_unit") {
     const numberValue = row?.value && typeof row.value === "object" && !Array.isArray(row.value)
@@ -7558,8 +7592,12 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
         const row = normalizedDraft.requested_check_returns?.[check.return_key] || {};
         const placement = resolveAssignmentCurationCheckPlacement(check, row);
         if (placement === "hidden") return;
+        // A yes/no row already carries its qualifier in the value input, so a second condition_note box
+        // would ask the same question twice and cost the row its single line. A select or a
+        // number_with_unit row is different: there the value is the answer, and the condition is extra.
+        const isYesNo = check.answer_type === "boolean" || check.answer_type === "boolean_with_conditions";
         const rowHtml = buildAssignmentRequestedCheckReturnRowHtml(check, row, {
-          showConditionNote: true,
+          showConditionNote: !isYesNo,
           rowModifierClass: "requested-check-curation-row",
         });
         if (placement === "primary") {
@@ -7616,6 +7654,20 @@ function updateAssignmentRequestedCheckReturnRowState(rowNode) {
   }
 }
 
+// A field worker typing a URL by hand very plausibly leaves off the scheme ("facebook.com/mypage").
+// The server's URL check is strict http(s):// (repository.mjs normalizeHttpUrl), so an unprefixed value
+// would fail that validation and the checked answer would silently read back as found:false — indistinguishable
+// from "verified: there is no link". Prepending https:// here, at the point the value is read from the
+// form, fixes the common case transparently: the corrected value is what ends up in draft state, so the
+// next render shows it back to the worker instead of only fixing the outgoing submission payload.
+// A value that still isn't a real URL after this (e.g. "@myshop") is left for the server to reject as
+// today — this only supplies a missing scheme, it does not try to validate or repair anything else.
+function withAssumedUrlScheme(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed || /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
 function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
   const id = Number(assignmentId || 0) || 0;
   if (!id) return null;
@@ -7635,10 +7687,9 @@ function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
     const checked = rowNode.querySelector("[data-requested-check-field='checked']")?.checked === true;
     let value = null;
     if (answerType === "boolean" || answerType === "boolean_with_conditions") {
-      const rawValue = String(rowNode.querySelector("[data-requested-check-field='value']")?.value || "").trim().toLowerCase();
-      if (rawValue === "true") value = true;
-      else if (rawValue === "false") value = false;
-      else value = null;
+      // The tick already carries ใช่/ไม่ใช่. This input is the qualifier on a "ใช่", so it reads back as
+      // plain text — an empty one just means "ใช่ ไม่มีเงื่อนไข".
+      value = String(rowNode.querySelector("[data-requested-check-field='value']")?.value || "").trim();
     } else if (answerType === "multi_select") {
       value = String(rowNode.querySelector("[data-requested-check-field='value']")?.value || "").split("\n").map((part) => String(part || "").trim()).filter(Boolean);
     } else if (answerType === "number_with_unit") {
@@ -7648,6 +7699,8 @@ function readAssignmentRequestedCheckReturnDraftFromForm(assignmentId) {
       value = Number.isFinite(numeric) ? { number: numeric, unit: unitValue || null } : null;
     } else if (answerType === "note_only") {
       value = null;
+    } else if (answerType === "url") {
+      value = withAssumedUrlScheme(rowNode.querySelector("[data-requested-check-field='value']")?.value);
     } else {
       value = String(rowNode.querySelector("[data-requested-check-field='value']")?.value || "").trim();
     }

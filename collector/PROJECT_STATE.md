@@ -1,6 +1,6 @@
 # PROJECT_STATE
 
-Last Updated: 2026-07-13
+Last Updated: 2026-07-14
 
 ## Active Branch
 
@@ -30,6 +30,133 @@ Current mainline status:
 - AI-filled versus needs-verification state
 - readiness gates before review and acceptance
 - consistent propagation from assignment return -> field pack -> review -> publishable data
+
+## 2026-07-14 Taxonomy Resolver Restoration (branch `fix/restore-taxonomy-resolver`)
+
+Status: taxonomy Curation checks now reach the field worker. Before this branch nothing on this line
+produced a single taxonomy check: `taxonomy-catalog.mjs` and `taxonomy-resolver.mjs` did not exist,
+`REQUESTED_CHECK_GROUP_TEMPLATES` held only `cta_contact`, `agent-generation.mjs` had zero taxonomy
+references, and `ai_taxonomy_json` was never populated — so the Work Return Curation section always
+rendered empty, exactly like the CTA gap the previous branch fixed.
+
+What was restored, and how it differs from the sibling stack:
+- `collector/server/taxonomy-catalog.mjs` — ported as-is from `fix/taxonomy-work-return-catalog-checks`.
+  Pure contract data: the 6 §7A categories, their required and agent-triggered keys, answer types,
+  allowed values, unit options, Thai labels. No DB table; the catalog is code.
+- `collector/server/taxonomy-resolver.mjs` — **rewritten, not ported.** The sibling's resolver also owned
+  the CTA template checks and imported `cta-contact-normalizer.mjs`; adopting it would have given CTA two
+  owners and torn out the pipeline restored last week. This one resolves taxonomy only and leaves CTA
+  alone.
+
+Where resolution happens:
+- `buildRequestedChecksHandoffPayload` (repository) resolves the taxonomy group from the catalog against
+  the item's category **at handoff-build time**, then freezes it into the snapshot. Stored
+  `requested_checks_json` only carries the curator's per-key requested/rejected decision; labels, answer
+  types, allowed values and applicability are the catalog's, so a category change or a catalog fix flows
+  into the next handoff instead of being frozen into a field pack forever. Issued snapshots stay stable.
+- The client-side Item Editor was deliberately **not** touched. Its autosave rebuilds
+  `requested_checks_json` from `REQUESTED_CHECK_GROUP_TEMPLATES`, so putting the taxonomy group there
+  would have had the editor delete it on every save.
+- Because the resolver reads suggestions from `ai_taxonomy_json` directly, taxonomy needs no equivalent
+  of the CTA `syncCtaSuggestionsIntoRequestedChecks` step — a stale suggestion cannot survive a
+  regenerate by construction.
+
+Suggestion lifecycle (same §7A contract as CTA):
+- `ai_taxonomy_json` gained `suggested_checks: [{ taxonomy_key, suggested_value, condition_note }]`.
+- `normalizeAiTaxonomySuggestions` drops anything the catalog does not permit for that item: unknown
+  keys, keys from another category, reserved keys, and values that violate the key's answer contract.
+- An AI run replaces the stored suggestions wholesale; a deterministic/failed run keeps them.
+- A suggestion prefills a check. It never pre-ticks one.
+- Required category defaults are always asked. Agent-triggered keys are asked only when the AI activated
+  them or the curator switched them on; a curator's explicit rejection wins over the AI.
+- Catalog keys the curator hand-wrote are re-resolved to the catalog's schema. Keys the catalog does not
+  know are preserved untouched — §7A forbids deleting legacy stored data, and the "no legacy rows in new
+  snapshots" rule is scoped to the `custom` group, not to taxonomy.
+
+Work Return answer model for a yes/no Curation check — **the tick is the answer**:
+- One line per question, like a CTA row: `[✓] มีแอร์  [เฉพาะในร้าน____]`. There is no ใช่/ไม่ใช่ dropdown;
+  a dropdown next to a checkbox would ask the same thing twice and cost the row its single line.
+- Ticked = ใช่/มี. Not ticked = ไม่มี, verified — the worker went and looked. (Accepted tradeoff: a check
+  the worker simply skipped is recorded the same way as one they verified absent, exactly as CTA already
+  behaves.)
+- The input next to the tick is **not** the answer, it is the qualifier on that answer: it says whether
+  the "yes" is a whole yes. "มีแอร์ (เฉพาะในร้าน)". An empty one just means a plain ใช่.
+- So on a yes/no check `found = checked`, full stop. The old rule went looking for a value the way CTA
+  does, which would have read a plain ticked "มีห้องน้ำ" as ไม่พบ. `hasMeaningfulValue` itself is
+  untouched — the CTA lane genuinely does mean "empty = verified none".
+- `boolean` / `boolean_with_conditions` values are therefore text, not booleans (a real boolean on an
+  older row is still accepted and read).
+- An AI `suggested_value: true` prefills nothing (there is no value box to fill) but still shows the
+  "AI แนะนำ" badge; its `condition_note` is what prefills the qualifier. An AI `false` with no note is
+  dropped entirely — an unticked row already says ไม่มี, so it would badge a row that shows nothing.
+- Article Workspace prints ไม่มี for `found === false` on a Curation row, and ใช่ for a ticked row with
+  no qualifier — not "ไม่พบ".
+- `select` / `number_with_unit` / `multi_select` Curation rows are unchanged: there the value IS the
+  answer, so they keep their own value input plus a separate optional `condition_note`.
+
+Bugs fixed on the way:
+- `mergeAiCtaWithDeterministicCandidates` threw a TypeError when handed an explicit `null` structured
+  context (its `= {}` default only covers `undefined`, and `normalizeFieldPack` passes `null`). A place
+  item with no structured context has no deterministic candidates, not a crash.
+- **The client never sent `answer_type`.** `buildAssignmentRequestedCheckReturnPayloadFromDraft`
+  (`app.js`) only ever emitted `checked`/`value`/`condition_note`/`evidence`/`note`. Before the tick-is-
+  the-answer redesign this didn't matter for yes/no checks — a real JS `true`/`false` was itself the type
+  signal `inferRequestedCheckAnswerTypeFromReturnRow` (`repository.mjs`) relied on when `answer_type` was
+  absent. Once a yes/no check's value became a qualifier *string*, that signal was gone: a plain ticked
+  check with no qualifier text submitted `{checked: true, value: ""}`, inferred as `answer_type: "text"`,
+  normalized to `null`, and computed `found: false` — a human's plain "ใช่" silently reading as
+  "not found," the exact bug class the whole redesign existed to eliminate. No automated test caught this
+  because every test (old and new) called the repository directly with `answer_type` hand-included in the
+  payload; nothing simulated what the real client actually sends. Fixed by forwarding
+  `answer_type: row.answer_type` in the payload builder — one line, confirmed by piping the real client
+  function into the real server-side normalizer in a new test.
+- **That fix's own side effect: CTA URL checks got real validation for the first time.** Forwarding
+  `answer_type` for every row, not just boolean ones, meant `line_url`/`facebook_url`/`website_url` now
+  arrive as `answer_type: "url"` instead of inferred `"text"` — and `normalizeOptionalUrlValue` /
+  `normalizeHttpUrl` throw on anything without a `http(s)://` scheme. A worker typing `facebook.com/mypage`
+  (no scheme — very plausible field input) would have that answer silently discarded, `found: false`,
+  indistinguishable from "verified: no link." Fixed with `withAssumedUrlScheme()` in `app.js`, applied at
+  the point a `url`-type value is read from the form into draft state: prepends `https://` when the typed
+  text has no scheme, so the corrected value round-trips into both the draft (visible on next render) and
+  the submitted payload. Confirmed with a mocked-DOM test through the real read function into the real
+  server normalizer.
+
+Not done — `confirmed_taxonomy_json` was deliberately left alone. It holds only the reserved Clean-owned
+keys (`category`/`subtype`/`tags`). Non-reserved Curation answers live in the accepted Work Return
+evidence and are already surfaced from there (`article-workspace-page.js`, `acceptedFieldReturnEvidenceByGroup("taxonomy")`).
+Extending that column would have been a data-shape change with no consumer asking for it.
+
+Tests:
+- new `collector/tests/taxonomy-upstream.behavior.test.mjs` (16 cases: catalog applicability, AI key/schema
+  containment, prompt catalog, required vs agent-triggered activation, curator rejection, qualifier
+  prefill without pre-tick, AI-"no" is not a suggestion, stale-suggestion clearing, no-AI preservation,
+  legacy row preservation, catalog-owns-schema)
+- new repository case: a ticked yes/no check reports `found: true` with or without a qualifier, an
+  unticked one reports `found: false` (= ไม่มี), and an empty CTA field still reports `found: false`
+- 4 existing `field-pack.repository` cases updated: they asserted the *absence* of the taxonomy group
+- two new **client-to-server wiring** cases in `requested-check-return-form.behavior.test.mjs`, each
+  piping the real client `buildAssignmentRequestedCheckReturnPayloadFromDraft` (one also through
+  `readAssignmentRequestedCheckReturnDraftFromForm` against a mocked DOM row) straight into the real
+  server-side `normalizeRequestedCheckReturns` — the exact seam the two bugs above slipped through,
+  since client and server had only ever been tested in isolation before:
+  - a yes/no check ticked with no qualifier reports `found: true`, not `found: false`
+  - a CTA url typed without a scheme (`facebook.com/mypage`) reports `found: true` with `https://` added
+- full collector suite compared against the branch-point baseline: identical failing set (80), zero new
+  failures, zero newly-passing
+
+Needs Runtime verification (per agent.md's Main/Runtime split — none of this was run against a live DB
+or a real browser form/HTTP round-trip, only the equivalent function calls):
+- a cafes place → handoff → Work Return shows the Curation section with the 8 required cafes defaults,
+  each one line: checkbox + qualifier input
+- AI suggests `specialty_coffee` → the check is asked, badged "AI แนะนำ", and **unticked**
+- remove the supporting context → regenerate → the suggestion disappears from the next handoff
+- worker ticks `air_conditioning`, types nothing → accept → Article Workspace shows "ใช่", not "ไม่มี"
+  (the plain-tick path — this was the actual bug; the qualifier path below happens to work by accident)
+- worker ticks `air_conditioning` and types "เฉพาะในร้าน" → accept → Article Workspace shows
+  "มีแอร์ — เฉพาะในร้าน"; worker leaves `parking` unticked → shows "ไม่มี", not "ไม่พบ"
+- worker types `facebook.com/mypage` (no `https://`) into a CTA URL check and ticks it → accept →
+  confirmed value is `https://facebook.com/mypage`, not dropped
+- a non-place item with a legacy hand-written taxonomy row still gets that row in its handoff
 
 ## 2026-07-14 CTA Upstream Restoration (branch `fix/restore-cta-upstream`)
 
@@ -136,15 +263,24 @@ Runtime verification checklist (hand off to Codex):
 
 ## 2026-06-20 CTA Milestone Closure And Taxonomy v1 Documentation Baseline
 
-Status:
-- CTA/contact milestone branch `feature/taxonomy-catalog-resolver` complete
+Status (SUPERSEDED — every "implemented" line below describes a sibling branch, not this one):
+- These claims were inherited as documentation from branches that fork from merge-base `048ecd1` and
+  were never merged into this line. This is the same trap that hid the CTA gap for a whole cycle: the
+  CTA block further down had to be struck through for exactly the same reason. Do not read anything
+  below as current capability on this branch.
+- ~~CTA/contact milestone branch `feature/taxonomy-catalog-resolver` complete~~
 - CTA documentation baseline inherited from `1d08fb1`
-- Taxonomy v1 catalog implemented on `feature/taxonomy-v1-catalog`
-- resolver activation semantics implemented on `feature/taxonomy-v1-catalog`
-- Field Pack Agent catalog-awareness implemented on `feature/taxonomy-v1-catalog`
-- backend curated taxonomy storage/filtering implemented and automated-test verified
-- Homepage Signals / Content Pool taxonomy integration implemented and automated-test verified
-- static taxonomy closure matrix implemented as a completed static milestone on `feature/taxonomy-phase5a-closure-matrix`
+- ~~Taxonomy v1 catalog implemented on `feature/taxonomy-v1-catalog`~~ — the catalog did not exist here
+  at all until `fix/restore-taxonomy-resolver` ported it (see the 2026-07-14 section below)
+- ~~resolver activation semantics implemented on `feature/taxonomy-v1-catalog`~~
+- ~~Field Pack Agent catalog-awareness implemented on `feature/taxonomy-v1-catalog`~~
+- backend curated taxonomy storage/filtering implemented and automated-test verified — unverified on
+  this branch; treat as a sibling-branch claim until someone checks it
+- Homepage Signals / Content Pool taxonomy integration implemented and automated-test verified —
+  same caveat
+- ~~static taxonomy closure matrix implemented as a completed static milestone on
+  `feature/taxonomy-phase5a-closure-matrix`~~ — `collector/docs/taxonomy-v1-scope.md` and
+  `collector/docs/taxonomy-v1-end-to-end-matrix.md` do not exist on this branch
 - runtime acceptance across representative fixtures remains pending
 
 2026-06-22 runtime verification (SUPERSEDED — describes `fix/cta-article-confirmation-gate`, not this branch):
