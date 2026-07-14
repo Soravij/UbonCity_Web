@@ -31,6 +31,65 @@ Current mainline status:
 - readiness gates before review and acceptance
 - consistent propagation from assignment return -> field pack -> review -> publishable data
 
+## 2026-07-14 CTA Upstream Restoration (branch `fix/restore-cta-upstream`)
+
+Status:
+- implemented, focused + full collector suite green locally; runtime verification pending (Codex)
+
+Why: the accepted-source pipeline (below) consumed CTA answers correctly, but nothing ever *produced*
+CTA suggestions on this branch — `ai_cta_contact_json` was always `{}`, so field packs shipped with an
+empty CTA block even when the approved context plainly held a phone and a Facebook page.
+
+Restored, place-only, suggestion-only:
+- `collector/server/cta-contact-normalizer.mjs`: deterministic candidate extraction from **approved
+  context only** (never `evidence_blocks`), Thai phone normalization, URL classification into
+  `facebook_url` / `line_url` / `website_url`, and rejection of map/CDN/provenance URLs as websites.
+- `buildPromptInput()` passes `cta_contact_candidates` to the agent; both the initial and revision
+  prompts request `ai_cta_contact_json` and state that CTA values are unconfirmed suggestions.
+- Server-side fallback after the AI answers: deterministic candidates override conflicting AI values,
+  so a phone the AI drops is still recovered from the approved context.
+- `source` provenance on a suggestion always comes from the approved rows that produced it. AI-supplied
+  `source` is discarded — the AI does not get to vouch for its own evidence.
+
+CTA suggestion lifecycle (see `PROJECT_POLICY.md` §7A "CTA/Taxonomy Suggestion Lifecycle"):
+- Suggestions are a snapshot of one AI run, not an accumulator. A regenerate rebuilds them, so a value
+  the approved context no longer supports **disappears**. This matters because the Work Return form
+  prefills suggestions into the worker's input: a stale value is one tick away from becoming confirmed.
+- A run that produced no AI pack (deterministic mode, or an AI failure with fallback) never clobbers the
+  stored suggestions.
+- Non-place items never generate CTA suggestions, and their legacy stored data is left untouched.
+- `buildAssignmentRequestedCheckReturnDraftFromHandoffPackage` prefills the value but **never pre-ticks**
+  the check. The pre-tick was latent dead code while `ai_cta_contact_json` was empty; restoring CTA would
+  have activated it into silent AI auto-confirmation.
+- The handoff reads suggestions from `requested_checks_json`, **not** from `ai_cta_contact_json`, and the
+  AI draft path never rewrote it. `saveAgentFieldPack` now re-points the existing `cta_contact` rows at the
+  suggestions each run resolved (value/source only — which checks are requested, their labels and answer
+  types stay the curator's). Without this, clearing `ai_cta_contact_json` was invisible to the field worker
+  until someone happened to re-save the Item Editor.
+- `buildRequestedChecksHandoffPayload` drops a `suggested_value` that contradicts a `previous_confirmed_value`
+  and keeps the confirmed answer as read-only reference. Confirmed wins: a suggestion that disagrees with a
+  human-verified answer would otherwise be one tick away from overwriting it. For CTA this also covers a
+  human explicitly verifying a field as absent (checked, not found) — `buildPreviousConfirmedCheckValues`
+  had to stop collapsing "never confirmed" and "confirmed: none" into the same `null`, or the contradiction
+  check above could not tell them apart.
+- `scripts/real-external-agent.mjs` passes the item into `normalizeFieldPack` — without it the place-only
+  gate stripped the agent's CTA suggestions before they ever reached the collector.
+
+Tests:
+- `collector/tests/cta-upstream.behavior.test.mjs` (15 cases: extraction/provenance, prompt candidates,
+  deterministic override, stale-clearing, no-AI preservation, place-only gate, external-engine parity,
+  requested-checks re-sync)
+- `assignment-accept-confirmed-metadata.repository`: a suggestion contradicting a confirmed value is dropped
+  from the next round's handoff; an unconfirmed check keeps its suggestion
+- `requested-check-return-form.behavior` updated: a suggested value prefills but never pre-ticks
+- full collector suite compared against a `fix/cta-taxonomy-accepted-source` baseline: identical failing
+  set, zero new failures
+
+Not in scope (next round): taxonomy has no catalog/resolver on this branch, so no taxonomy checks are
+generated at all and `ai_taxonomy_json` is never populated. Two known traps to fix when it returns:
+`hasMeaningfulValue(false)` treats a "ไม่ใช่" answer as *not found*, and acceptance never maps taxonomy
+check answers into `confirmed_taxonomy_json`.
+
 ## 2026-07-13 §7A Acceptance Boundary Closure (branch `fix/cta-taxonomy-accepted-source`)
 
 Status:
@@ -88,14 +147,21 @@ Status:
 - static taxonomy closure matrix implemented as a completed static milestone on `feature/taxonomy-phase5a-closure-matrix`
 - runtime acceptance across representative fixtures remains pending
 
-2026-06-22 runtime verification:
-- the live Item Editor CTA path is proven end to end
-- item `51` `Golden Hour Coffee` preserved `ai_cta_contact_json.phone = 0804415224` through the workflow save path
-- deterministic source candidates override conflicting AI contact values
-- stale CTA contact suggestions can be cleared on regeneration
+2026-06-22 runtime verification (SUPERSEDED — describes `fix/cta-article-confirmation-gate`, not this branch):
+- This block was inherited as documentation from a sibling stack whose CTA code was never merged here.
+  The upstream CTA pipeline it describes (candidate extraction, prompt candidates, post-AI fallback)
+  did not exist on this branch at all until `fix/restore-cta-upstream` restored it — which is exactly
+  why an approved context holding a phone and a Facebook page produced a field pack with empty CTA.
+- Do not read the claims below as current capability. Kept only as the record of what the old stack did.
+- ~~the live Item Editor CTA path is proven end to end~~
+- ~~item `51` `Golden Hour Coffee` preserved `ai_cta_contact_json.phone = 0804415224` through the workflow save path~~
+- ~~deterministic source candidates override conflicting AI contact values~~
+- ~~stale CTA contact suggestions can be cleared on regeneration~~
+- ~~focused tests passed for the workflow CTA propagation path and repository persistence~~
+
+Still true independently of the above:
 - issued handoff snapshots remain immutable
 - no auto-confirmation was introduced
-- focused tests passed for the workflow CTA propagation path and repository persistence
 
 Locked CTA/contact contract:
 - CTA/contact is separate from taxonomy.

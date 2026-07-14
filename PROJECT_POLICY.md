@@ -359,6 +359,36 @@ Placeholders:
 - snapshot ที่ออกไปแล้วและแก้ไขไม่ได้ (immutable) ซึ่งมี custom check อยู่ ยังคงอ่านและคืนค่าได้เพื่อความเข้ากันได้
 - ห้ามลบข้อมูลเก่าที่เก็บไว้แล้ว
 
+### CTA/Taxonomy Suggestion Lifecycle (locked)
+
+**English**
+
+- Precedence is always: human-confirmed > deterministic (supported by approved context) > AI guess.
+- A suggestion exists to save the field worker typing, not to answer for them.
+- A suggestion may prefill the value of a Work Return check. A suggestion must never pre-tick a check.
+- Ticking is the human verification act. A field pack must never produce a return payload that reads as verified without a human ticking it.
+- Suggestions are a snapshot of the latest generation run, not an accumulator across runs.
+- A regeneration rebuilds suggestions, so a value the approved context no longer supports must disappear. Stale suggestions must be clearable.
+- A generation run that produced no AI output (deterministic mode, or an AI failure that fell back) must not clobber stored suggestions.
+- Suggestion provenance (`source`) must come from the approved context rows that produced the value. AI-supplied provenance is not trusted and is discarded.
+- A suggestion must never contradict an already human-confirmed value for the same field.
+- Suggestion generation is gated by the same rules as the field it suggests: CTA suggestions are place-only.
+- Generating a suggestion for an ineligible item is forbidden, but deleting that item's legacy stored data is also forbidden.
+
+**ภาษาไทย**
+
+- ลำดับความสำคัญเสมอ: ค่าที่มนุษย์ยืนยัน > ค่า deterministic (มีหลักฐานใน approved context รองรับ) > ค่าที่ AI เดา
+- suggestion มีไว้เพื่อลดการพิมพ์ของพนักงานภาคสนาม ไม่ใช่มีไว้ตอบแทนเขา
+- suggestion เติมค่า (prefill) ลงในช่องของ Work Return check ได้ แต่ต้องไม่ติ๊ก check ให้ล่วงหน้าเด็ดขาด
+- การติ๊กคือการกระทำที่มนุษย์ใช้ยืนยัน field pack ต้องไม่สร้าง payload ที่อ่านได้ว่า "ยืนยันแล้ว" โดยที่ไม่มีมนุษย์ติ๊ก
+- suggestion เป็นภาพ ณ รอบ generate ล่าสุด ไม่ใช่ค่าที่สะสมข้ามรอบ
+- การ regenerate ต้องสร้าง suggestion ใหม่ ค่าที่ approved context ไม่รองรับแล้วต้องหายไป ค่าที่ค้างต้องลบออกได้
+- รอบ generate ที่ไม่ได้ผลลัพธ์จาก AI (โหมด deterministic หรือ AI ล้มเหลวแล้ว fallback) ต้องไม่ไปเขียนทับ suggestion ที่เก็บไว้
+- ที่มา (`source`) ของ suggestion ต้องมาจากแถว approved context ที่ผลิตค่านั้นจริง ที่มาที่ AI ให้มาเองไม่น่าเชื่อถือและต้องถูกทิ้ง
+- suggestion ต้องไม่ขัดแย้งกับค่าที่มนุษย์ยืนยันไปแล้วในฟิลด์เดียวกัน
+- การสร้าง suggestion ถูกจำกัดด้วยกฎเดียวกับฟิลด์ที่มันแนะนำ: CTA suggestion ใช้กับ place เท่านั้น
+- ห้ามสร้าง suggestion ให้ item ที่ไม่เข้าเกณฑ์ แต่ก็ห้ามลบข้อมูลเก่าที่เก็บไว้ของ item นั้นเช่นกัน
+
 ### Acceptance Boundary
 
 **English**

@@ -365,6 +365,97 @@ test("unchecked CTA returns keep the previously confirmed value instead of wipin
   }
 });
 
+test("a suggestion that contradicts a confirmed value is dropped from the next round's handoff", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Suggestion Versus Confirmed");
+    const assignee = ctx.createUser("suggest-vs-confirmed");
+    ctx.createReadinessBrief(item.id);
+    // A stale AI suggestion sits on the field pack: the Work Return form prefills suggested_value into
+    // the worker's input, so if it survived it would be one tick away from overwriting the confirmed answer.
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      // the handoff is only built from the field pack once it is ready for the field
+      status: "ready_for_field",
+      ai_summary: "Field pack with a CTA suggestion",
+      requested_checks_json: {
+        version: 1,
+        groups: [{
+          group_key: "cta_contact",
+          group_label: "CTA/ติดต่อ",
+          checks: [
+            { key: "phone", requested: true, label: "เบอร์โทร", answer_type: "phone", suggested_value: "0899999999" },
+            { key: "line_url", requested: true, label: "ลิงก์ LINE", answer_type: "url", suggested_value: "https://line.me/ti/p/keep" },
+          ],
+        }],
+      },
+    });
+
+    const firstAssignment = ctx.createFieldAssignment(item.id, assignee.id);
+    ctx.submitWithReturns(firstAssignment, assignee.id, {
+      "cta_contact.phone": { checked: true, value: "0810000001" },
+    });
+    ctx.repo.updateAssignmentState(firstAssignment, "accepted", "reviewer@local", { actor_role: "admin", reason_code: "accepted" });
+    assert.equal(ctx.repo.latestDraftByItem(item.id).confirmed_cta_contact_json.phone, "0810000001");
+
+    const rework = ctx.repo.returnFieldAssignmentForRework(firstAssignment, "reviewer@local", { note: "แก้เบอร์", actor_role: "admin" });
+    const checks = rework.handoff.handoff_package_json.requested_checks.groups
+      .find((group) => group.group_key === "cta_contact").checks;
+
+    const phone = checks.find((check) => check.key === "phone");
+    assert.equal(phone.suggested_value, null, "the suggestion contradicts what a human confirmed, so it is dropped");
+    assert.equal(phone.source, null);
+    assert.equal(phone.previous_confirmed_value, "0810000001", "the confirmed answer stays as read-only reference");
+
+    // A check nobody confirmed keeps its suggestion: the point of a suggestion is to save the worker typing.
+    const lineUrl = checks.find((check) => check.key === "line_url");
+    assert.equal(lineUrl.suggested_value, "https://line.me/ti/p/keep");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("a suggestion is dropped even when the confirmed answer was 'verified: none' (not just a different value)", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Suggestion Versus Confirmed Absent");
+    const assignee = ctx.createUser("suggest-vs-absent");
+    ctx.createReadinessBrief(item.id);
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      ai_summary: "Field pack with a stale phone suggestion",
+      requested_checks_json: {
+        version: 1,
+        groups: [{
+          group_key: "cta_contact",
+          group_label: "CTA/ติดต่อ",
+          checks: [
+            { key: "phone", requested: true, label: "เบอร์โทร", answer_type: "phone", suggested_value: "0899999999" },
+          ],
+        }],
+      },
+    });
+
+    const firstAssignment = ctx.createFieldAssignment(item.id, assignee.id);
+    // checked + no value: the worker verified there is no phone, not that they skipped the question.
+    ctx.submitWithReturns(firstAssignment, assignee.id, {
+      "cta_contact.phone": { checked: true, value: null },
+    });
+    ctx.repo.updateAssignmentState(firstAssignment, "accepted", "reviewer@local", { actor_role: "admin", reason_code: "accepted" });
+    assert.equal(ctx.repo.latestDraftByItem(item.id).confirmed_cta_contact_json.phone, null);
+
+    const rework = ctx.repo.returnFieldAssignmentForRework(firstAssignment, "reviewer@local", { note: "double-check", actor_role: "admin" });
+    const phone = rework.handoff.handoff_package_json.requested_checks.groups
+      .find((group) => group.group_key === "cta_contact").checks
+      .find((check) => check.key === "phone");
+    assert.equal(phone.suggested_value, null, "a human already verified there is no phone; the stale suggestion must not survive");
+    assert.equal(phone.source, null);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("returnFieldAssignmentForRework closes the accepted round and issues a new field round with its own handoff", () => {
   const ctx = createTestContext();
   try {

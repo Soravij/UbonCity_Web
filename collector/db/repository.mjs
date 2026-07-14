@@ -9175,11 +9175,29 @@ function normalizeStateValue(value, stateGroup) {
     const confirmedCta = latestDraftByItem(itemId)?.confirmed_cta_contact_json || null;
     if (confirmedCta && String(item?.type || "").trim().toLowerCase() === "place") {
       // confirmed CTA is the accumulated truth across rounds, so it wins over any single round's answer
+      // (e.g. round 1 confirmed phone, round 2 resubmits every key including an unchecked phone row,
+      // which shadows round 1's evidence row above before the checked===true filter drops it).
       for (const key of Object.keys(defaultConfirmedCtaContact())) {
-        previous[`cta_contact.${key}`] = confirmedCta[key] ?? null;
+        const returnKey = `cta_contact.${key}`;
+        const confirmedValue = confirmedCta[key] ?? null;
+        // A key nobody has ever confirmed sits at this object's default null too. Only record it in
+        // `previous` when there is a real value, or the evidence loop above already proved a human
+        // explicitly verified it absent — otherwise "never touched" and "verified: none" collapse into
+        // the same null and the contradiction check below can no longer tell them apart.
+        if (confirmedValue == null && !Object.prototype.hasOwnProperty.call(previous, returnKey)) continue;
+        previous[returnKey] = confirmedValue;
       }
     }
     return previous;
+  }
+
+  function requestedCheckValueFingerprint(value) {
+    if (value == null) return "";
+    if (Array.isArray(value)) {
+      return JSON.stringify(value.map((entry) => String(entry ?? "").trim().toLowerCase()).sort());
+    }
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value).trim().toLowerCase();
   }
 
   function buildRequestedChecksHandoffPayload(requestedChecks, item) {
@@ -9200,12 +9218,25 @@ function normalizeStateValue(value, stateGroup) {
           .filter((check) => check?.requested === true)
           .map((check) => {
             const returnKey = `${group.group_key}.${check.key}`;
-            const previousValue = Object.prototype.hasOwnProperty.call(previousConfirmed, returnKey)
-              ? previousConfirmed[returnKey]
-              : undefined;
-            return previousValue == null
-              ? check
-              : { ...check, previous_confirmed_value: previousValue };
+            // hasPreviousConfirmed distinguishes "never verified this round" (skip) from "verified,
+            // and the answer was that it doesn't exist" (previousValue === null — still a confirmed
+            // fact for a CTA field: not-found is not a maybe). Collapsing both to "== null" let a
+            // stale suggestion survive a human's explicit "verified: none" answer.
+            const hasPreviousConfirmed = Object.prototype.hasOwnProperty.call(previousConfirmed, returnKey);
+            const previousValue = hasPreviousConfirmed ? previousConfirmed[returnKey] : undefined;
+            if (!hasPreviousConfirmed) return check;
+            // §7A suggestion lifecycle: a suggestion must never contradict an already human-confirmed
+            // value. The Work Return form prefills suggested_value into the worker's input, so a
+            // suggestion that disagrees with what a human confirmed would be one tick away from
+            // overwriting it. Confirmed wins: drop the conflicting suggestion and keep the confirmed
+            // answer as read-only reference. The worker can still type a new value if they verify one.
+            const contradictsConfirmed = check.suggested_value != null
+              && requestedCheckValueFingerprint(check.suggested_value) !== requestedCheckValueFingerprint(previousValue);
+            return {
+              ...check,
+              ...(contradictsConfirmed ? { suggested_value: null, source: null } : {}),
+              ...(previousValue == null ? {} : { previous_confirmed_value: previousValue }),
+            };
           }),
       }))
       .filter((group) => group.checks.length > 0);

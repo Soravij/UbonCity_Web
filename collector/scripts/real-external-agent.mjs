@@ -190,7 +190,9 @@ async function generateFieldPack(body) {
   }
 
   const data = await response.json();
-  const parsed = normalizeFieldPack(parseJsonLike(extractResponseText(data)));
+  // Pass the item: CTA suggestions are place-only, so without it normalizeFieldPack would strip the
+  // agent's ai_cta_contact_json before it ever reaches the collector.
+  const parsed = normalizeFieldPack(parseJsonLike(extractResponseText(data)), { item });
   if (!parsed) {
     throw new Error("OpenAI field-pack response is not valid JSON");
   }

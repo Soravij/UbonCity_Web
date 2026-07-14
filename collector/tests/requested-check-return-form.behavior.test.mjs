@@ -416,7 +416,9 @@ test("requested-check section uses namespaced keys and hides reserved taxonomy m
   );
 
   const draft = buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage);
-  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, true);
+  // A suggestion prefills the value so the worker does not retype it, but it never pre-ticks the check:
+  // ticking is the human verification act that turns a suggestion into confirmed data (§7A).
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, false);
   assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0812345678");
   assert.equal(draft.requested_check_returns["taxonomy.category"].value, "restaurants");
   assert.equal(getAssignmentRequestedCheckDefaultValue("boolean"), null);
@@ -480,9 +482,9 @@ test("requested-check draft auto-checks and prefills suggested values without ch
   };
 
   const draft = buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPackage);
-  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, true);
+  assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, false);
   assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0812345678");
-  assert.equal(draft.requested_check_returns["taxonomy.tags"].checked, true);
+  assert.equal(draft.requested_check_returns["taxonomy.tags"].checked, false);
   assert.deepEqual(draft.requested_check_returns["taxonomy.tags"].value, ["family", "cafe"]);
 });
 

@@ -20,6 +20,7 @@ import { runAutomaticTranslationChecks } from "../quality/translation-checks.mjs
 import { executeBackendAiJson, isBackendAiConfigured } from "./backend-ai-client.mjs";
 import { buildCleanStructuredContext, buildFieldPackContractFromCleanContext, validateCleanMinimum } from "./clean-context.mjs";
 import { mergeConfirmedDraftMetadata } from "../server/endpoint-schema-mapping.mjs";
+import { isCtaEligibleItem, mergeAiCtaWithDeterministicCandidates } from "../server/cta-contact-normalizer.mjs";
 
 function traceAiDraft(stage, details = {}) {
   const ts = new Date().toISOString();
@@ -2017,7 +2018,19 @@ function normalizeAgentFieldPackMediaHints(value) {
   }).filter(Boolean);
 }
 
-function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = null) {
+// CTA suggestions are a snapshot of one AI run, never an accumulator. Carrying values forward across
+// runs would make a suggestion the approved context no longer supports impossible to clear, and the
+// Work Return form prefills suggestions into the worker's input, so a stale value is one tick away
+// from becoming confirmed data.
+function resolveAgentCtaSuggestions(aiFieldPack, existingFieldPack, item) {
+  // §7A: CTA/contact is place-only. Never generate for other kinds, but never delete legacy data either.
+  if (!isCtaEligibleItem(item)) return existingFieldPack?.ai_cta_contact_json || {};
+  // Deterministic mode or a failed AI run: no fresh suggestions, so keep what is stored.
+  if (!aiFieldPack || typeof aiFieldPack !== "object") return existingFieldPack?.ai_cta_contact_json || {};
+  return mergeAiCtaWithDeterministicCandidates(aiFieldPack.ai_cta_contact_json, item?.structured_context || null);
+}
+
+export function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = null, options = {}) {
   const source = fieldPack && typeof fieldPack === "object" ? fieldPack : {};
   const existingId = Number(existingFieldPack?.id || 0) || 0;
   const requestedStatus = String(source.status || "").trim().toLowerCase();
@@ -2047,6 +2060,7 @@ function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = null) {
     field_pack_checklists: Array.isArray(source.field_pack_checklists) ? source.field_pack_checklists : [],
     field_pack_references: normalizeAgentFieldPackReferences(source.field_pack_references),
     field_pack_media_hints: normalizeAgentFieldPackMediaHints(source.field_pack_media_hints),
+    ai_cta_contact_json: resolveAgentCtaSuggestions(fieldPack, existingFieldPack, options?.item || null),
   };
 }
 
@@ -2161,16 +2175,53 @@ function assertAgentFieldPackContract(fieldPack) {
   }
 }
 
-function saveAgentFieldPack(repo, item, fieldPack, actorEmail, options = {}) {
+// The handoff snapshot reads suggestions from requested_checks_json, not from ai_cta_contact_json
+// (repository buildRequestedChecksHandoffPayload). Re-point the existing cta_contact rows at the
+// suggestions this run resolved, or a value the approved context no longer supports would keep
+// prefilling the worker's Work Return form until someone happened to re-save the Item Editor.
+// Only value/source move: which checks are requested, their labels and answer types stay the curator's.
+function syncCtaSuggestionsIntoRequestedChecks(requestedChecksJson, ctaSuggestions) {
+  const groups = Array.isArray(requestedChecksJson?.groups) ? requestedChecksJson.groups : null;
+  if (!groups?.some((group) => String(group?.group_key || "").trim().toLowerCase() === "cta_contact")) return null;
+  const cta = ctaSuggestions && typeof ctaSuggestions === "object" && !Array.isArray(ctaSuggestions) ? ctaSuggestions : {};
+  return {
+    version: Number(requestedChecksJson.version) || 1,
+    groups: groups.map((group) => {
+      if (String(group?.group_key || "").trim().toLowerCase() !== "cta_contact") return group;
+      return {
+        ...group,
+        checks: (Array.isArray(group.checks) ? group.checks : []).map((check) => {
+          const suggested = cta[String(check?.key || "").trim().toLowerCase()];
+          const suggestedValue = suggested == null || suggested === "" ? null : suggested;
+          return {
+            ...check,
+            suggested_value: suggestedValue,
+            source: suggestedValue == null
+              ? null
+              : { kind: "ai", confidence: String(cta.confidence || "unknown"), note: null },
+          };
+        }),
+      };
+    }),
+  };
+}
+
+export function saveAgentFieldPack(repo, item, fieldPack, actorEmail, options = {}) {
   const currentItem = repo.getItem(item.id);
   if (!currentItem) throw new Error(`item ${item.id} not found while saving field pack`);
   const existingFieldPack = repo.getCurrentFieldPackByItem(item.id);
   const cleanContract = options.cleanContract || null;
   const contractPayload = buildFieldPackPayloadFromCleanContract(cleanContract);
   const sourceDraftInputSnapshotId = Number(options.sourceDraftInputSnapshotId || 0) || null;
-  const basePayload = buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack);
+  const basePayload = buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack, { item });
+  // Only when this run actually regenerated CTA suggestions (a place item with an AI pack). A
+  // deterministic/failed run keeps the stored suggestions, so its requested checks stay as they are.
+  const syncedRequestedChecks = isCtaEligibleItem(item) && fieldPack && typeof fieldPack === "object"
+    ? syncCtaSuggestionsIntoRequestedChecks(existingFieldPack?.requested_checks_json, basePayload.ai_cta_contact_json)
+    : null;
   const payload = {
     ...basePayload,
+    ...(syncedRequestedChecks ? { requested_checks_json: syncedRequestedChecks } : {}),
     ai_highlights: Array.isArray(basePayload.ai_highlights) && basePayload.ai_highlights.length
       ? basePayload.ai_highlights
       : contractPayload.ai_highlights,

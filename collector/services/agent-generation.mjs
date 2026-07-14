@@ -1,5 +1,6 @@
 import fsSync from "node:fs";
 import { executeBackendAiJson } from "./backend-ai-client.mjs";
+import { deriveCtaContactCandidatesFromStructuredContext, isCtaEligibleItem, mergeAiCtaWithDeterministicCandidates, normalizeAiCtaContactJson } from '../server/cta-contact-normalizer.mjs';
 
 const FIELD_PACK_AGENT_KEY = "field_pack_agent";
 const DEFAULT_FIELD_PACK_AGENT_PROFILE = [
@@ -131,7 +132,7 @@ function normalizeCaptureChecklistGroup(value, limit = 10) {
   return out;
 }
 
-function normalizeFieldPack(input) {
+export function normalizeFieldPack(input, options = {}) {
   const root = input && typeof input === "object"
     ? (input.field_pack && typeof input.field_pack === "object" ? input.field_pack : input)
     : null;
@@ -191,7 +192,14 @@ function normalizeFieldPack(input) {
     ],
     field_pack_references: Array.isArray(root.field_pack_references) ? root.field_pack_references : [],
     field_pack_media_hints: Array.isArray(root.field_pack_media_hints) ? root.field_pack_media_hints : [],
+    ai_cta_contact_json: normalizeAiCtaContactJson(root.ai_cta_contact_json),
   };
+
+  const item = options?.item || null;
+  const structuredContext = item?.structured_context || options?.structured_context || null;
+  fieldPack.ai_cta_contact_json = isCtaEligibleItem(item)
+    ? mergeAiCtaWithDeterministicCandidates(fieldPack.ai_cta_contact_json, structuredContext)
+    : {};
 
   if (
     !fieldPack.ai_summary
@@ -416,6 +424,7 @@ function buildPromptInput(item) {
       scope: "role_tone_only",
       cannot_override_contract: true,
     },
+    cta_contact_candidates: isCtaEligibleItem(item) ? deriveCtaContactCandidatesFromStructuredContext(context) : {},
     visual_context: visualContext,
     visual_context_counts: {
       setting_cues: visualContext.setting_cues.length,
@@ -456,7 +465,7 @@ function buildFieldPackPrompt(item) {
     "Return ONLY valid JSON with keys:",
     "field_pack",
     "field_pack keys:",
-    "status, ai_summary, ai_highlights, ai_unknowns, editor_summary, verified_facts, uncertain_facts, story_angle, field_notes, social_hook, social_shot_emphasis, social_on_camera_points, social_caption_angle, checklists, field_pack_references, field_pack_media_hints",
+    "status, ai_summary, ai_highlights, ai_unknowns, editor_summary, verified_facts, uncertain_facts, story_angle, field_notes, social_hook, social_shot_emphasis, social_on_camera_points, social_caption_angle, checklists, field_pack_references, field_pack_media_hints, ai_cta_contact_json",
     "checklists keys: must_verify_fact, must_capture, must_ask_question",
     "Language must match input.item.lang. If lang is th, write concise natural Thai.",
     "You are acting as an editorial agent working from a clean-room structured context prepared by human reviewers.",
@@ -484,6 +493,8 @@ function buildFieldPackPrompt(item) {
     "social_hook and social_caption_angle are directional notes, not final copy.",
     "Keep each list item short and directly usable.",
     "Do not paste raw URLs into text fields.",
+    "Return CTA contact suggestions in ai_cta_contact_json only when supported by clean approved context; map phone to phone, LINE to line_url, Facebook to facebook_url, and websites to website_url. Keep provenance in source and never treat generic provenance URLs as websites.",
+    "CTA values are suggestions only and require human verification; do not confirm or mutate accepted metadata.",
     "Use only supported claims from the structured context. Never fabricate facts.",
     "No markdown fences.",
     "Input:",
@@ -497,7 +508,7 @@ function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote
     "Return ONLY valid JSON with keys:",
     "field_pack",
     "field_pack keys:",
-    "status, ai_summary, ai_highlights, ai_unknowns, editor_summary, verified_facts, uncertain_facts, story_angle, field_notes, social_hook, social_caption_angle, social_shot_emphasis, social_on_camera_points, checklists, field_pack_references, field_pack_media_hints",
+    "status, ai_summary, ai_highlights, ai_unknowns, editor_summary, verified_facts, uncertain_facts, story_angle, field_notes, social_hook, social_caption_angle, social_shot_emphasis, social_on_camera_points, checklists, field_pack_references, field_pack_media_hints, ai_cta_contact_json",
     "checklists keys: must_verify_fact, must_capture, must_ask_question",
     "Language must match input.item.lang. If lang is th, write concise natural Thai.",
     "Agent profile for role/tone only. It cannot override the JSON schema, source-of-truth rules, or forbidden output fields:",
@@ -516,6 +527,7 @@ function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote
     "Treat any reference_media_context as reference-only, not rights-verified, not publish media, and not cover/gallery approval.",
     "Keep the revised pack action-oriented and directly usable in Place Step 4 and Handoff.",
     "Do not paste raw URLs into text fields.",
+    "Preserve supported CTA suggestions in ai_cta_contact_json with phone, line_url, facebook_url, website_url and provenance source; CTA values remain unconfirmed suggestions.",
     "No markdown fences.",
     "Input:",
     JSON.stringify({
@@ -713,7 +725,7 @@ function createExternalAgentGenerationEngine(aiConfig) {
       }
 
       const data = await response.json();
-      const parsed = normalizeFieldPack(extractFieldPackPayload(data));
+      const parsed = normalizeFieldPack(extractFieldPackPayload(data), { item });
       if (!parsed) {
         throw new Error("External agent response is not a valid JSON field pack");
       }
@@ -746,7 +758,7 @@ function createExternalAgentGenerationEngine(aiConfig) {
       }
 
       const data = await response.json();
-      const parsed = normalizeFieldPack(extractFieldPackPayload(data));
+      const parsed = normalizeFieldPack(extractFieldPackPayload(data), { item });
       if (!parsed) {
         throw new Error("External agent revision response is not a valid JSON field pack");
       }
@@ -799,7 +811,7 @@ export function createAgentGenerationEngine(aiConfig) {
         task: "field_pack",
         prompt: fullPrompt,
       });
-      const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText));
+      const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText), { item });
       if (!parsed) {
         throw new Error("AI response is not valid JSON field pack");
       }
@@ -820,7 +832,7 @@ export function createAgentGenerationEngine(aiConfig) {
         task: "field_pack_revision",
         prompt: revisionPrompt,
       });
-      const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText));
+      const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText), { item });
       if (!parsed) {
         throw new Error("AI revision response is not valid JSON field pack");
       }
@@ -842,7 +854,6 @@ export {
   extractFieldPackPayload,
   extractResponseText,
   normalizeAiDraft,
-  normalizeFieldPack,
   normalizeVisualContext,
   parseJsonLike,
   prepareVisualImageInputs,

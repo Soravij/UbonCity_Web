@@ -7360,7 +7360,9 @@ function buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPacka
         check_key: check.check_key,
         return_key: check.return_key,
         answer_type: check.answer_type,
-        checked: hasSuggestedValue,
+        // §7A: AI may prefill a suggested value to save the worker typing, but it must never pre-tick
+        // the check. Ticking is the human verification act that turns a suggestion into confirmed data.
+        checked: false,
         value: hasSuggestedValue
           ? cloneAssignmentRequestedCheckValue(check.suggested_value, check.answer_type)
           : getAssignmentRequestedCheckDefaultValue(check.answer_type),

@@ -45,20 +45,13 @@ status, not durable policy; the durable rule (no hard block before late-stage ga
 ## CTA / Contact Milestone
 
 Status:
-- CTA/contact baseline is present on main.
+- The current branch contains the accepted-source CTA pipeline.
+- CTA candidate generation and post-AI fallback were missing before this restoration.
+- CTA generation is considered proven end to end only after the focused CTA tests for this restoration pass.
 
-Verified CTA path:
+Restored CTA upstream path:
 - Item Editor Generate/Regenerate -> `POST /api/run/ai-draft` -> `runAiDraftStage()` -> `normalizeFieldPack()` -> `buildFieldPackPayloadFromAgent()` -> `saveAgentFieldPack()` -> repository create/update -> `getCurrentFieldPackByItem()` -> CTA Review UI
-
-Runtime verification:
-- item `51` `Golden Hour Coffee` showed `ai_cta_contact_json.phone = 0804415224`
-- current AI-generated CTA fields persist through the real workflow save path
-- deterministic source candidates override conflicting AI contact values
-- AI regeneration can clear stale CTA contact suggestions
-- deterministic/null path does not erase existing CTA data
-- existing issued assignment snapshots remain immutable
-- CTA remains place-only
-- AI suggestions never auto-confirm CTA/contact
+- CTA remains place-only and AI values remain unconfirmed suggestions; human verification is still required.
 
 Locked CTA rules:
 - CTA/contact is separate from taxonomy.
