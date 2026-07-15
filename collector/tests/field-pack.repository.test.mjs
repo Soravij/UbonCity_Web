@@ -1047,7 +1047,7 @@ test("field pack does not auto-create requested checks from AI suggestions", () 
   }
 });
 
-test("buildAssignmentHandoffPreview includes only requested=true requested checks", () => {
+test("buildAssignmentHandoffPreview sends every catalog-applicable taxonomy key, requested-only for cta_contact", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Requested Checks Handoff");
@@ -1113,15 +1113,39 @@ test("buildAssignmentHandoffPreview includes only requested=true requested check
     assert.equal(ctaGroup.checks.some((check) => check.key === "line_url"), false);
 
     // The taxonomy group is resolved from the catalog, not from the field pack: this item is an
-    // attractions place, so its required category defaults are asked even though the curator never
-    // configured them. The agent-triggered keys stay off until AI or the curator switches them on.
+    // attractions place, so every catalog-applicable key (required category defaults plus every
+    // agent-triggered key) reaches the worker, so they can tick one off even if nobody suggested it in
+    // advance. `requested`/`required` distinguish "must answer" from "available to select" — they are
+    // no longer a gate on whether the key is sent at all.
     const taxonomyGroup = groups.find((group) => group.group_key === "taxonomy");
     assert.deepEqual(
       taxonomyGroup.checks.map((check) => check.key).sort(),
-      ["entry_fee_required", "parking", "pet_friendly", "setting_type", "toilet_available", "wheelchair_accessible"]
+      [
+        "child_friendly",
+        "entry_fee_required",
+        "hiking_required",
+        "parking",
+        "pet_friendly",
+        "religious_dress_code",
+        "setting_type",
+        "swimming_allowed",
+        "toilet_available",
+        "waterfront",
+        "wheelchair_accessible",
+      ]
     );
-    assert.equal(taxonomyGroup.checks.every((check) => check.requested === true), true);
-    assert.equal(taxonomyGroup.checks.every((check) => check.required === true), true);
+    const requiredKeys = ["parking", "pet_friendly", "wheelchair_accessible", "toilet_available", "entry_fee_required", "setting_type"];
+    const agentTriggeredKeys = ["waterfront", "child_friendly", "swimming_allowed", "hiking_required", "religious_dress_code"];
+    requiredKeys.forEach((key) => {
+      const check = taxonomyGroup.checks.find((entry) => entry.key === key);
+      assert.equal(check.requested, true);
+      assert.equal(check.required, true);
+    });
+    agentTriggeredKeys.forEach((key) => {
+      const check = taxonomyGroup.checks.find((entry) => entry.key === key);
+      assert.equal(check.requested, false);
+      assert.equal(check.required, false);
+    });
     // Nobody generated suggestions, so no taxonomy row arrives pre-filled.
     assert.equal(taxonomyGroup.checks.every((check) => check.suggested_value === null), true);
   } finally {
@@ -1857,9 +1881,10 @@ test("repairAssignmentHandoffSnapshotForAssignment uses the explicit historical 
     assert.equal(dryRun.reason, "dry_run");
     assert.equal(dryRun.field_pack_id, fieldPackA.id);
     // cta_contact from field pack A, plus the taxonomy group the catalog resolves for an attractions
-    // place (6 required category defaults) — the repaired snapshot is built the same way a fresh one is.
+    // place (6 required category defaults + 5 agent-triggered keys, all sent so a worker can select one
+    // even without a suggestion) — the repaired snapshot is built the same way a fresh one is.
     assert.equal(dryRun.requested_check_group_count, 2);
-    assert.equal(dryRun.requested_check_count, 7);
+    assert.equal(dryRun.requested_check_count, 12);
     assert.equal(dryRun.would_apply, true);
     assert.equal(dryRun.applied, false);
 

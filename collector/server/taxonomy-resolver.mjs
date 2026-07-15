@@ -135,9 +135,11 @@ function resolveSuggestedValueForCheck(entry, aiSuggestion) {
     : null;
 }
 
-// A catalog key that is `required` for the item's category is always asked. An `agent_triggered` key is
-// asked only when someone switched it on: the curator explicitly (a stored row), or the AI by
-// suggesting something for it (§7A: "AI may activate approved Agent-triggered catalog keys").
+// This flag no longer gates whether a key reaches the worker (repository.mjs sends every
+// catalog-applicable taxonomy key regardless of activation) — it marks which keys are mandatory/
+// display-priority. A `required` catalog key is always flagged. An `agent_triggered` key is flagged
+// only when someone switched it on: the curator explicitly (a stored row), or the AI by suggesting
+// something for it (§7A: "AI may activate approved Agent-triggered catalog keys").
 function resolveRequestedFlag(entry, savedCheck, aiSuggestion) {
   if (entry.activation_mode === "required") return true;
   if (savedCheck) {

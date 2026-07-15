@@ -70,8 +70,11 @@ Suggestion lifecycle (same §7A contract as CTA):
   keys, keys from another category, reserved keys, and values that violate the key's answer contract.
 - An AI run replaces the stored suggestions wholesale; a deterministic/failed run keeps them.
 - A suggestion prefills a check. It never pre-ticks one.
-- Required category defaults are always asked. Agent-triggered keys are asked only when the AI activated
-  them or the curator switched them on; a curator's explicit rejection wins over the AI.
+- Required category defaults are always asked (marked `required`/`requested: true`). Every
+  agent-triggered key applicable to the item's category is also sent to the worker regardless of
+  activation, so they can select one on-site that nobody suggested in advance — `requested`/`required`/
+  `source` are display-priority metadata, not a gate on reaching the worker at all. A curator's past
+  rejection no longer excludes a key; it only means the key carries no AI/required signal to prioritize.
 - Catalog keys the curator hand-wrote are re-resolved to the catalog's schema. Keys the catalog does not
   know are preserved untouched — §7A forbids deleting legacy stored data, and the "no legacy rows in new
   snapshots" rule is scoped to the `custom` group, not to taxonomy.

@@ -7607,10 +7607,18 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
           rowModifierClass: "requested-check-curation-row",
         });
         if (placement === "primary") {
-          primaryRows.push(rowHtml);
+          primaryRows.push({ check, html: rowHtml });
         } else {
           additionalRows.push({ row, html: rowHtml });
         }
+      });
+      // Within primary, an AI recommendation earns top billing over a plain required category default
+      // that nobody flagged — a stable sort keeps each tier's own catalog order otherwise unchanged.
+      const primaryRowsSorted = [...primaryRows].sort((left, right) => {
+        const leftHasAiSignal = hasAssignmentRequestedCheckMeaningfulValue(left.check?.suggested_value, left.check?.answer_type) || Boolean(left.check?.source);
+        const rightHasAiSignal = hasAssignmentRequestedCheckMeaningfulValue(right.check?.suggested_value, right.check?.answer_type) || Boolean(right.check?.source);
+        if (leftHasAiSignal === rightHasAiSignal) return 0;
+        return leftHasAiSignal ? -1 : 1;
       });
       const shouldOpenAdditional = additionalRows.some(({ row }) => row?.checked === true
         || hasAssignmentRequestedCheckMeaningfulValue(row?.value, row?.answer_type)
@@ -7619,7 +7627,7 @@ function buildAssignmentRequestedCheckReturnSectionHtml(assignment = null, hando
       return `
         <div class="assignment-brief-section full-span requested-check-cta-section requested-check-curation-section" data-requested-check-group="${escapeHtml(group.group_key)}">
           <div class="assignment-brief-label">Curation</div>
-          ${primaryRows.join("")}
+          ${primaryRowsSorted.map((entry) => entry.html).join("")}
           ${additionalRows.length ? `
             <details class="requested-check-curation-more"${shouldOpenAdditional ? " open" : ""}>
               <summary class="requested-check-curation-more-summary">ตัวเลือกเพิ่มเติม (${additionalRows.length})</summary>

@@ -9262,12 +9262,19 @@ function normalizeStateValue(value, stateGroup) {
         }
         return true;
       })
-      .map((group) => ({
-        group_key: group.group_key,
-        group_label: group.group_label,
-        checks: (Array.isArray(group.checks) ? group.checks : [])
-          .filter((check) => check?.requested === true)
-          .map((check) => {
+      .map((group) => {
+        const groupKey = String(group?.group_key || "").trim().toLowerCase();
+        const groupChecks = Array.isArray(group.checks) ? group.checks : [];
+        // Taxonomy sends every catalog-applicable key regardless of activation, so a field worker can
+        // still tick one off nobody suggested in advance (§7A baseline: category defaults plus every
+        // agent-triggered key stay available to select). `requested`/`required`/`source` remain as
+        // metadata for the client to prioritize display, not a gate on reaching the client at all.
+        // cta_contact/custom keep the original requested-only gate.
+        const eligibleChecks = groupKey === "taxonomy" ? groupChecks : groupChecks.filter((check) => check?.requested === true);
+        return {
+          group_key: group.group_key,
+          group_label: group.group_label,
+          checks: eligibleChecks.map((check) => {
             const returnKey = `${group.group_key}.${check.key}`;
             // hasPreviousConfirmed distinguishes "never verified this round" (skip) from "verified,
             // and the answer was that it doesn't exist" (previousValue === null — still a confirmed
@@ -9289,7 +9296,8 @@ function normalizeStateValue(value, stateGroup) {
               ...(previousValue == null ? {} : { previous_confirmed_value: previousValue }),
             };
           }),
-      }))
+        };
+      })
       .filter((group) => group.checks.length > 0);
     if (!groups.length) return null;
     return {

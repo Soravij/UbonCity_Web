@@ -318,11 +318,13 @@ const buildAssignmentRequestedCheckReturnValueInputHtml = loadNamedFunction(appJ
 const buildAssignmentRequestedCheckReturnSecondaryFieldsHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnSecondaryFieldsHtml", {
   escapeHtml,
 });
+const formatAssignmentRequestedCheckPreviousConfirmedValue = loadNamedFunction(appJs, "formatAssignmentRequestedCheckPreviousConfirmedValue");
 const buildAssignmentRequestedCheckReturnRowHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnRowHtml", {
   hasAssignmentRequestedCheckMeaningfulSuggestedValue,
   areAssignmentRequestedCheckValuesEqual,
   buildAssignmentRequestedCheckReturnValueInputHtml,
   buildAssignmentRequestedCheckReturnSecondaryFieldsHtml,
+  formatAssignmentRequestedCheckPreviousConfirmedValue,
   escapeHtml,
 });
 const buildAssignmentRequestedCheckReturnSectionHtml = loadNamedFunction(appJs, "buildAssignmentRequestedCheckReturnSectionHtml", {
@@ -424,7 +426,9 @@ test("requested-check section uses namespaced keys and hides reserved taxonomy m
   assert.equal(draft.requested_check_returns["cta_contact.phone"].checked, false);
   assert.equal(draft.requested_check_returns["cta_contact.phone"].value, "0812345678");
   assert.equal(draft.requested_check_returns["taxonomy.category"].value, "restaurants");
-  assert.equal(getAssignmentRequestedCheckDefaultValue("boolean"), null);
+  // boolean/boolean_with_conditions default to an empty qualifier string, not null: the tick alone is
+  // the answer, and this field is only ever the qualifier text next to it (getAssignmentRequestedCheckDefaultValue).
+  assert.equal(getAssignmentRequestedCheckDefaultValue("boolean"), "");
   assert.deepEqual(getAssignmentRequestedCheckDefaultValue("multi_select"), []);
   assert.deepEqual(getAssignmentRequestedCheckDefaultValue("number_with_unit"), { number: "", unit: "" });
 
@@ -615,6 +619,40 @@ test("requested-check section places only real suggested taxonomy rows into Cura
   assert.equal(sectionHtml.includes('data-requested-check-return-key="taxonomy.tags"'), false);
   assert.ok(sectionHtml.indexOf('data-requested-check-return-key="taxonomy.price_range"') > detailsStart);
   assert.match(sectionHtml, /ตัวเลือกเพิ่มเติม \(1\)/);
+});
+
+test("requested-check section sorts primary Curation rows with AI-recommended keys before plain required keys", () => {
+  const handoffPackage = {
+    requested_checks: {
+      version: 1,
+      groups: [
+        {
+          group_key: "taxonomy",
+          group_label: "Taxonomy",
+          // Catalog order deliberately puts the plain required keys first and the AI-recommended ones
+          // last, so the assertion below only passes if the section actually re-sorts them.
+          checks: [
+            { key: "wheelchair_accessible", requested: true, required: true, label: "Wheelchair", answer_type: "boolean" },
+            { key: "toilet_available", requested: true, required: true, label: "Toilet", answer_type: "boolean" },
+            { key: "parking", requested: true, required: true, label: "Parking", answer_type: "boolean", suggested_value: "รีวิวระบุว่ามีที่จอด" },
+            { key: "waterfront", requested: false, required: false, label: "Waterfront", answer_type: "boolean", source: { kind: "ai", confidence: "medium", note: null } },
+          ],
+        },
+      ],
+    },
+  };
+
+  const sectionHtml = buildAssignmentRequestedCheckReturnSectionHtml(null, handoffPackage, null);
+  const parkingIndex = sectionHtml.indexOf('data-requested-check-return-key="taxonomy.parking"');
+  const waterfrontIndex = sectionHtml.indexOf('data-requested-check-return-key="taxonomy.waterfront"');
+  const wheelchairIndex = sectionHtml.indexOf('data-requested-check-return-key="taxonomy.wheelchair_accessible"');
+  const toiletIndex = sectionHtml.indexOf('data-requested-check-return-key="taxonomy.toilet_available"');
+  assert.ok(parkingIndex >= 0 && waterfrontIndex >= 0 && wheelchairIndex >= 0 && toiletIndex >= 0);
+  // AI-recommended (suggested_value or source), regardless of catalog order, comes first...
+  assert.ok(parkingIndex < wheelchairIndex);
+  assert.ok(waterfrontIndex < wheelchairIndex);
+  // ...then the plain required keys follow in their original catalog order.
+  assert.ok(wheelchairIndex < toiletIndex);
 });
 
 test("requested-check section keeps additional taxonomy rows collapsed by default and opens them for checked or meaningful saved values", () => {
