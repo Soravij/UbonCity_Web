@@ -145,6 +145,87 @@ test("review ingest update params apply explicit CTA/contact replacements", () =
   assert.equal(params[20], "line");
 });
 
+test("review ingest insert params store confirmed taxonomy checks in review_payload_json", () => {
+  const content = createSanitizedContent({
+    confirmed_taxonomy_checks: { parking: true, price_level: "budget" },
+  });
+
+  const params = buildReviewContentInsertParams({
+    sourceSystem: "collector-app",
+    sourceContentItemId: 42,
+    content,
+    currentBatchUid: "batch-1",
+  });
+
+  assert.deepEqual(JSON.parse(params.at(-1)).confirmed_taxonomy_checks, { parking: true, price_level: "budget" });
+});
+
+test("review ingest insert params omit confirmed_taxonomy_checks entirely when none are sent", () => {
+  const content = createSanitizedContent();
+
+  const params = buildReviewContentInsertParams({
+    sourceSystem: "collector-app",
+    sourceContentItemId: 42,
+    content,
+    currentBatchUid: "batch-1",
+  });
+
+  assert.equal(Object.prototype.hasOwnProperty.call(JSON.parse(params.at(-1)), "confirmed_taxonomy_checks"), false);
+});
+
+test("review ingest update params preserve existing confirmed taxonomy checks when payload omits them", () => {
+  const existing = {
+    review_payload_json: JSON.stringify({
+      snapshot_meta: { translation_langs: [] },
+      confirmed_taxonomy_checks: { parking: true, wifi_available: false },
+    }),
+  };
+  const rawPayload = {
+    content_type: "place",
+    lang: "th",
+    category: "attractions",
+    title: "Test place",
+    body: "<p>Body</p>",
+  };
+
+  const params = buildReviewContentUpdateParams({
+    existing,
+    content: sanitizeContentPayload(rawPayload),
+    rawContentPayload: rawPayload,
+    currentBatchUid: "batch-2",
+    reviewContentId: 99,
+  });
+
+  assert.deepEqual(JSON.parse(params.at(-2)).confirmed_taxonomy_checks, { parking: true, wifi_available: false });
+});
+
+test("review ingest update params overwrite confirmed taxonomy checks when the payload sends new ones", () => {
+  const existing = {
+    review_payload_json: JSON.stringify({
+      snapshot_meta: { translation_langs: [] },
+      confirmed_taxonomy_checks: { parking: true },
+    }),
+  };
+  const rawPayload = {
+    content_type: "place",
+    lang: "th",
+    category: "attractions",
+    title: "Test place",
+    body: "<p>Body</p>",
+    confirmed_taxonomy_checks: { parking: false, wifi_available: true },
+  };
+
+  const params = buildReviewContentUpdateParams({
+    existing,
+    content: sanitizeContentPayload(rawPayload),
+    rawContentPayload: rawPayload,
+    currentBatchUid: "batch-2",
+    reviewContentId: 99,
+  });
+
+  assert.deepEqual(JSON.parse(params.at(-2)).confirmed_taxonomy_checks, { parking: false, wifi_available: true });
+});
+
 test("approve mapping passes CTA/contact from review content to place fields", () => {
   const mapped = mapReviewContentCtaFieldsToPlaceRecord({
     phone: "0812345678",

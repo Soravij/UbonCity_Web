@@ -600,6 +600,7 @@ test("saveDraft round-trips confirmed metadata json and status fields", () => {
       category: "attractions",
       subtype: "museum",
       tags: ["family", "art"],
+      checks: {},
     });
     assert.equal(saved.confirmed_meta_status, "confirmed");
     assert.equal(saved.confirmed_by_user_id, reviewer.id);

@@ -38,6 +38,15 @@ export function pickReviewIngestConfirmedCtaContact({
   if (!isConfirmed) return {};
   return buildConfirmedCtaContactReviewFields(latestDraft?.confirmed_cta_contact_json);
 }
+
+// Curation signal only, not a public fact (admin decision-making, never shown to a public reader) — a
+// flat map of the taxonomy checks a field worker confirmed, e.g. { parking: true, price_level: "budget" }.
+export function pickReviewIngestConfirmedTaxonomyChecks({ latestDraft = null } = {}) {
+  const isConfirmed = String(latestDraft?.confirmed_meta_status || "").trim().toLowerCase() === "confirmed";
+  if (!isConfirmed) return {};
+  const checks = latestDraft?.confirmed_taxonomy_json?.checks;
+  return checks && typeof checks === "object" && !Array.isArray(checks) ? { ...checks } : {};
+}
 export function buildReviewIngestContentPayload({
   contentType = "place",
   sourceLang = "th",
@@ -55,6 +64,10 @@ export function buildReviewIngestContentPayload({
   const confirmedCtaContact =
     normalizedContentType === "place"
       ? pickReviewIngestConfirmedCtaContact({ latestDraft })
+      : {};
+  const confirmedTaxonomyChecks =
+    normalizedContentType === "place"
+      ? pickReviewIngestConfirmedTaxonomyChecks({ latestDraft })
       : {};
 
   return {
@@ -79,6 +92,10 @@ export function buildReviewIngestContentPayload({
     transport_contact_details: otherTransportMeta?.contact_details || null,
     transport_link_url: otherTransportMeta?.link_url || null,
     ...confirmedCtaContact,
+    // Omitted (not sent as `{}`) when unconfirmed, matching confirmedCtaContact's omit-vs-clear
+    // contract: the backend must tell "nothing confirmed yet" apart from "reviewer confirmed zero
+    // checks", and only the latter may overwrite what is already stored.
+    ...(Object.keys(confirmedTaxonomyChecks).length ? { confirmed_taxonomy_checks: confirmedTaxonomyChecks } : {}),
     translation_langs: Array.isArray(translationLangs) ? translationLangs : [],
   };
 }

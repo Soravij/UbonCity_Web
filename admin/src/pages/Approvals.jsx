@@ -211,6 +211,11 @@ function normalizeReviewContentDetailAsQueueItem(baseItem, reviewContent) {
       website_url: reviewContent?.website_url || null,
       primary_cta: reviewContent?.primary_cta || null,
     },
+    // Curation signal only, admin-session-only from the backend (never sent to the public review-access
+    // token path) — see admin/PROJECT_POLICY.md: "Admin may review resolved taxonomy data and returned values."
+    confirmed_taxonomy_checks: reviewContent?.confirmed_taxonomy_checks && typeof reviewContent.confirmed_taxonomy_checks === "object"
+      ? reviewContent.confirmed_taxonomy_checks
+      : {},
     history: Array.isArray(reviewContent?.history) ? reviewContent.history : [],
   });
 }
@@ -222,6 +227,24 @@ const CONFIRMED_CTA_FIELDS = [
   ["website_url", "ลิงก์เว็บไซต์"],
   ["primary_cta", "ปุ่มหลัก"],
 ];
+
+// One compact line per card, not a full checklist — this is a curation signal for deciding how to
+// present content, not a source of truth to audit (that lives in collector's Article Workspace).
+function formatConfirmedTaxonomyChecksSummary(checks) {
+  const entries = Object.entries(checks && typeof checks === "object" ? checks : {})
+    .filter(([, value]) => value !== false && value != null && value !== "")
+    .map(([key, value]) => {
+      if (value === true) return key;
+      if (Array.isArray(value)) return value.length ? `${key}: ${value.join(", ")}` : null;
+      if (typeof value === "object") {
+        const unit = value.unit ? ` ${value.unit}` : "";
+        return `${key}: ${value.number ?? "-"}${unit}`;
+      }
+      return `${key}: ${value}`;
+    })
+    .filter(Boolean);
+  return entries.length ? entries.join(", ") : null;
+}
 
 function canReusePendingReviewDraft(item) {
   const reviewContentId = Number(item?.review_content_id || 0) || 0;
@@ -952,6 +975,7 @@ export default function Approvals({ token, onPendingChanged, onNavigate }) {
                           {CONFIRMED_CTA_FIELDS.map(([key, label]) => (
                             <p key={key} className="muted">{label}: {detail.confirmed_cta?.[key] || "-"}</p>
                           ))}
+                          <p className="muted">Taxonomy: {formatConfirmedTaxonomyChecksSummary(detail.confirmed_taxonomy_checks) || "-"}</p>
                         </div>
                       ) : null}
                       <label style={{ display: "block", marginBottom: 6 }}>Decision note</label>

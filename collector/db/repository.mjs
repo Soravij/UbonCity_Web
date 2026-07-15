@@ -883,6 +883,7 @@ function defaultConfirmedTaxonomy() {
     category: null,
     subtype: null,
     tags: [],
+    checks: {},
   };
 }
 
@@ -1431,6 +1432,20 @@ function normalizeConfirmedCtaContactJson(value, fieldName = "confirmed_cta_cont
   };
 }
 
+function normalizeConfirmedTaxonomyChecks(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const checks = {};
+  for (const [key, checkValue] of Object.entries(value)) {
+    const normalizedKey = String(key || "").trim().toLowerCase();
+    // category/subtype/tags are reserved metadata, never a Curation check answer (§7A) — a stray
+    // collision here must not shadow the real reserved fields stored alongside `checks`.
+    if (!normalizedKey || ["category", "subtype", "tags"].includes(normalizedKey)) continue;
+    if (checkValue === undefined) continue;
+    checks[normalizedKey] = checkValue;
+  }
+  return checks;
+}
+
 function normalizeConfirmedTaxonomyJson(value, fieldName = "confirmed_taxonomy_json") {
   const parsed = value && typeof value === "object" && !Array.isArray(value)
     ? value
@@ -1441,6 +1456,7 @@ function normalizeConfirmedTaxonomyJson(value, fieldName = "confirmed_taxonomy_j
     category: parsed.category == null ? null : String(parsed.category || "").trim() || null,
     subtype: parsed.subtype == null ? null : String(parsed.subtype || "").trim() || null,
     tags: normalizeJsonSourceList(parsed.tags, `${fieldName}.tags`),
+    checks: normalizeConfirmedTaxonomyChecks(parsed.checks),
   };
 }
 
@@ -6303,6 +6319,16 @@ function normalizeStateValue(value, stateGroup) {
     }
   }
 
+  // A ticked check with no qualifier is a plain "ใช่" (true): the taxonomy answer_type comment in
+  // taxonomy-resolver.mjs already treats an empty qualifier as "nothing extra to say", not "unanswered" —
+  // this mirrors that so a confirmed boolean check reads as a clean signal instead of a stray "".
+  function coerceAcceptedTaxonomyCheckValue(rawValue) {
+    if (rawValue == null) return true;
+    if (typeof rawValue === "string") return rawValue.trim() || true;
+    if (Array.isArray(rawValue)) return rawValue.length ? rawValue : true;
+    return rawValue;
+  }
+
   function applyAcceptedAssignmentConfirmedMetadata(assignment, actorUserId = null) {
     const assignmentId = Number(assignment?.id || 0) || 0;
     if (!assignmentId) return;
@@ -6345,10 +6371,29 @@ function normalizeStateValue(value, stateGroup) {
       }, {})
       : draftCta;
     const draftTaxonomy = (hadAcceptedRoundBefore && latestDraft?.confirmed_taxonomy_json) || defaultConfirmedTaxonomy();
+    const draftTaxonomyChecks = draftTaxonomy.checks && typeof draftTaxonomy.checks === "object" ? draftTaxonomy.checks : {};
+    // Curation signal only (not a public fact): a flat map of the taxonomy checks a field worker
+    // actually answered this round, patched onto whatever a previous accepted round already confirmed —
+    // same semantics as confirmedCtaContact above, scoped to the `taxonomy.*` return keys.
+    const confirmedTaxonomyChecks = isPlaceItem
+      ? Object.entries(returns).reduce((acc, [returnKey, entry]) => {
+        const [groupKey, ...rest] = String(returnKey || "").split(".");
+        if (groupKey !== "taxonomy") return acc;
+        const checkKey = rest.join(".").trim().toLowerCase();
+        if (!checkKey || ["category", "subtype", "tags"].includes(checkKey)) return acc;
+        if (!entry || entry.checked !== true) {
+          if (Object.hasOwn(draftTaxonomyChecks, checkKey)) acc[checkKey] = draftTaxonomyChecks[checkKey];
+          return acc;
+        }
+        acc[checkKey] = entry.found === true ? coerceAcceptedTaxonomyCheckValue(entry.value) : false;
+        return acc;
+      }, {})
+      : draftTaxonomyChecks;
     const confirmedTaxonomy = {
       category: item.category == null ? null : String(item.category || "").trim() || null,
       subtype: draftTaxonomy.subtype ?? null,
       tags: Array.isArray(draftTaxonomy.tags) ? draftTaxonomy.tags : [],
+      checks: confirmedTaxonomyChecks,
     };
     const confirmedFields = {
       confirmed_cta_contact_json: confirmedCtaContact,

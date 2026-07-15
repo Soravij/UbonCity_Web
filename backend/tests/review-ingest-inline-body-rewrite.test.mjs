@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { rewriteBodyMediaToBackendUrls } from "../services/reviewIngestService.js";
-import { shapePublicReviewContent } from "../services/reviewContentService.js";
+import { shapeAdminReviewContent, shapePublicReviewContent } from "../services/reviewContentService.js";
 
 test("media_manifest inline rows rewrite stored body away from collector upload URLs", () => {
   const html = '<p><img src="https://collector-test.uboncity.com/uploads/example.jpg" alt="example"></p>';
@@ -73,4 +73,33 @@ test("public review shaping strips collector source metadata and collector URLs 
   assert.equal(shaped.history, undefined);
   assert.doesNotMatch(serialized, /collector-test\.uboncity\.com/);
   assert.doesNotMatch(serialized, /\/media\/uploads\//);
+});
+
+test("admin review shaping keeps the public scrubbing but adds the confirmed taxonomy Curation signal", () => {
+  const baseItem = {
+    id: 77,
+    body: "<p>Body</p>",
+    assets: { cover: null, gallery: [], inline: [] },
+    review_payload: { confirmed_taxonomy_checks: { parking: true, price_level: "budget" } },
+    history: [{ id: 1 }],
+  };
+
+  const adminShaped = shapeAdminReviewContent(baseItem);
+  assert.deepEqual(adminShaped.confirmed_taxonomy_checks, { parking: true, price_level: "budget" });
+  // still the same scrubbed public shape otherwise — admin does not get review_payload/history back
+  assert.equal(adminShaped.review_payload, undefined);
+  assert.equal(adminShaped.history, undefined);
+
+  const publicShaped = shapePublicReviewContent(baseItem);
+  assert.equal(Object.prototype.hasOwnProperty.call(publicShaped, "confirmed_taxonomy_checks"), false);
+});
+
+test("admin review shaping defaults confirmed_taxonomy_checks to an empty object when nothing was confirmed", () => {
+  const adminShaped = shapeAdminReviewContent({
+    id: 77,
+    body: "<p>Body</p>",
+    assets: { cover: null, gallery: [], inline: [] },
+    review_payload: { snapshot_meta: { translation_langs: [] } },
+  });
+  assert.deepEqual(adminShaped.confirmed_taxonomy_checks, {});
 });

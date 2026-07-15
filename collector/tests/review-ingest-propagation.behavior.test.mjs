@@ -131,6 +131,67 @@ test("review ingest content payload does not propagate taxonomy into review cont
   assert.equal(content.category, "attractions");
 });
 
+test("review ingest content payload includes confirmed taxonomy checks for place content", () => {
+  const content = buildReviewIngestContentPayload(createBaseArgs({
+    latestDraft: {
+      confirmed_meta_status: "confirmed",
+      confirmed_taxonomy_json: {
+        category: "restaurants",
+        subtype: null,
+        tags: [],
+        checks: { parking: true, price_level: "budget", wifi_available: false },
+      },
+    },
+  }));
+
+  assert.deepEqual(content.confirmed_taxonomy_checks, { parking: true, price_level: "budget", wifi_available: false });
+});
+
+test("review ingest content payload omits confirmed_taxonomy_checks entirely when the draft is not confirmed", () => {
+  const content = buildReviewIngestContentPayload(createBaseArgs({
+    latestDraft: {
+      confirmed_meta_status: "not_started",
+      confirmed_taxonomy_json: {
+        category: "restaurants",
+        checks: { parking: true },
+      },
+    },
+  }));
+
+  // omitted (not sent as {}) so the backend cannot mistake "nothing confirmed yet" for "confirmed zero checks"
+  assert.equal(Object.prototype.hasOwnProperty.call(content, "confirmed_taxonomy_checks"), false);
+});
+
+test("review ingest content payload omits confirmed_taxonomy_checks when there are no confirmed checks yet", () => {
+  const content = buildReviewIngestContentPayload(createBaseArgs({
+    latestDraft: {
+      confirmed_meta_status: "confirmed",
+      confirmed_taxonomy_json: { category: "restaurants", checks: {} },
+    },
+  }));
+
+  assert.equal(Object.prototype.hasOwnProperty.call(content, "confirmed_taxonomy_checks"), false);
+});
+
+test("review ingest content payload excludes confirmed_taxonomy_checks for event content even when draft has values", () => {
+  const content = buildReviewIngestContentPayload(createBaseArgs({
+    contentType: "event",
+    item: {
+      category: "events",
+      slug: "test-event",
+      event_period_text: "1-2 Jan",
+      location_text: "Ubon",
+    },
+    latestDraft: {
+      confirmed_meta_status: "confirmed",
+      confirmed_taxonomy_json: { category: "restaurants", checks: { parking: true } },
+    },
+  }));
+
+  assert.equal(Object.prototype.hasOwnProperty.call(content, "confirmed_taxonomy_checks"), false);
+  assert.equal(content.content_type, "event");
+});
+
 test("review ingest content payload ignores AI curated and field-return sources for CTA/contact", () => {
   const content = buildReviewIngestContentPayload(createBaseArgs({
     latestDraft: {

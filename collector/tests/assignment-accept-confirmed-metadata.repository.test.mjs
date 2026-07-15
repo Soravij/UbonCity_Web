@@ -365,6 +365,65 @@ test("unchecked CTA returns keep the previously confirmed value instead of wipin
   }
 });
 
+test("accept maps checked taxonomy returns into confirmed_taxonomy_json.checks as a curation signal", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Accept Taxonomy Mapping", "place", "cafes");
+    const assignee = ctx.createUser("tax-map");
+    ctx.createReadinessBrief(item.id);
+    const assignmentId = ctx.createFieldAssignment(item.id, assignee.id);
+
+    ctx.submitWithReturns(assignmentId, assignee.id, {
+      // §7A: a yes/no check's tick IS the answer, so `found` is recomputed server-side from
+      // answer_type + checked, not trusted off the wire — an explicit answer_type is required here
+      // for a ticked-but-empty-qualifier boolean row to recompute as found (see normalizeRequestedCheckReturnEntry).
+      "taxonomy.parking": { checked: true, answer_type: "boolean", value: "" },
+      "taxonomy.price_level": { checked: true, value: "budget" },
+      "taxonomy.wifi_available": { checked: true, found: false },
+      "taxonomy.pet_friendly": { checked: false },
+    });
+    ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", { actor_role: "admin", reason_code: "accepted" });
+
+    const checks = ctx.repo.latestDraftByItem(item.id).confirmed_taxonomy_json.checks;
+    assert.equal(checks.parking, true, "checked + found with no qualifier collapses to a plain true signal");
+    assert.equal(checks.price_level, "budget", "checked + found with a value keeps the value");
+    assert.equal(checks.wifi_available, false, "checked + not found is confirmed absent");
+    assert.equal(Object.hasOwn(checks, "pet_friendly"), false, "unchecked with nothing confirmed before stays unset");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("unchecked taxonomy returns keep the previously confirmed check instead of wiping it", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Taxonomy Patch Semantics", "place", "cafes");
+    const assignee = ctx.createUser("tax-patch");
+    ctx.createReadinessBrief(item.id);
+    const firstAssignment = ctx.createFieldAssignment(item.id, assignee.id);
+    ctx.submitWithReturns(firstAssignment, assignee.id, {
+      "taxonomy.parking": { checked: true, answer_type: "boolean", value: "" },
+      "taxonomy.wifi_available": { checked: true, answer_type: "boolean", value: "" },
+    });
+    ctx.repo.updateAssignmentState(firstAssignment, "accepted", "reviewer@local", { actor_role: "admin", reason_code: "accepted" });
+
+    // rework round: only wifi is re-verified (now absent); parking is not touched this round
+    const rework = ctx.repo.returnFieldAssignmentForRework(firstAssignment, "reviewer@local", { note: "ตรวจใหม่", actor_role: "admin" });
+    const secondAssignment = Number(rework.assignment.id || 0);
+    ctx.submitWithReturns(secondAssignment, assignee.id, {
+      "taxonomy.wifi_available": { checked: true, found: false },
+      "taxonomy.parking": { checked: false },
+    });
+    ctx.repo.updateAssignmentState(secondAssignment, "accepted", "reviewer@local", { actor_role: "admin", reason_code: "accepted" });
+
+    const checks = ctx.repo.latestDraftByItem(item.id).confirmed_taxonomy_json.checks;
+    assert.equal(checks.wifi_available, false, "re-verified as absent overwrites the earlier confirmed true");
+    assert.equal(checks.parking, true, "unchecked keeps the previously confirmed value");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("a suggestion that contradicts a confirmed value is dropped from the next round's handoff", () => {
   const ctx = createTestContext();
   try {

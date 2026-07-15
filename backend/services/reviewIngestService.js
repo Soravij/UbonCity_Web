@@ -293,6 +293,12 @@ export function sanitizeContentPayload(payload = {}) {
     translation_langs: Array.isArray(payload.translation_langs)
       ? payload.translation_langs.map((entry) => String(entry || "").trim().toLowerCase()).filter(Boolean)
       : [],
+    // Curation signal only (not a public fact, never shown on the public site) — trusted as-is since
+    // this is the same token-authenticated collector-to-backend sync boundary CTA already crosses;
+    // shape is already validated upstream against the taxonomy catalog before it reaches here.
+    confirmed_taxonomy_checks: payload.confirmed_taxonomy_checks && typeof payload.confirmed_taxonomy_checks === "object" && !Array.isArray(payload.confirmed_taxonomy_checks)
+      ? payload.confirmed_taxonomy_checks
+      : null,
   };
 }
 
@@ -312,6 +318,39 @@ export function mergeExistingReviewContentCtaFields(existingRow = {}, content = 
   };
 }
 
+function parseExistingReviewPayload(reviewPayloadJson) {
+  try {
+    const parsed = JSON.parse(reviewPayloadJson || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// Same omit-vs-clear contract as mergeExistingReviewContentCtaFields: an ingest that never sent
+// confirmed_taxonomy_checks at all (draft not yet reviewer-confirmed, or an event item) must not
+// wipe out what a previous accepted round already stored in review_payload_json.
+export function mergeExistingReviewContentTaxonomyChecks(existingRow = {}, content = {}, rawContentPayload = {}) {
+  const raw = rawContentPayload && typeof rawContentPayload === "object" ? rawContentPayload : {};
+  if (hasOwnContentField(raw, "confirmed_taxonomy_checks")) {
+    return content.confirmed_taxonomy_checks && typeof content.confirmed_taxonomy_checks === "object"
+      ? content.confirmed_taxonomy_checks
+      : {};
+  }
+  const existingPayload = parseExistingReviewPayload(existingRow?.review_payload_json);
+  return existingPayload.confirmed_taxonomy_checks && typeof existingPayload.confirmed_taxonomy_checks === "object"
+    ? existingPayload.confirmed_taxonomy_checks
+    : {};
+}
+
+function buildReviewPayloadJson(content, confirmedTaxonomyChecks) {
+  const payload = { snapshot_meta: { translation_langs: content.translation_langs } };
+  if (confirmedTaxonomyChecks && Object.keys(confirmedTaxonomyChecks).length) {
+    payload.confirmed_taxonomy_checks = confirmedTaxonomyChecks;
+  }
+  return JSON.stringify(payload);
+}
+
 export function buildReviewContentInsertParams({
   sourceSystem,
   sourceContentItemId,
@@ -326,7 +365,7 @@ export function buildReviewContentInsertParams({
     content.phone, content.line_url, content.facebook_url, content.website_url, content.primary_cta, content.tracking_entity_type, content.tracking_entity_id,
     content.transport_contact_details, content.transport_link_url, content.slug, content.slug ? 1 : 0,
     content.public_entity_type, content.public_entity_id, currentBatchUid,
-    JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
+    buildReviewPayloadJson(content, content.confirmed_taxonomy_checks),
   ];
 }
 
@@ -338,13 +377,14 @@ export function buildReviewContentUpdateParams({
   reviewContentId,
 } = {}) {
   const preservedCtaFields = mergeExistingReviewContentCtaFields(existing, content, rawContentPayload);
+  const confirmedTaxonomyChecks = mergeExistingReviewContentTaxonomyChecks(existing, content, rawContentPayload);
   return [
     content.lang, content.category, content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
     content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url, content.google_place_id,
     content.transport_subtype, content.transport_contact_name, content.transport_contact_phone, preservedCtaFields.phone, preservedCtaFields.line_url, preservedCtaFields.facebook_url, preservedCtaFields.website_url,
     preservedCtaFields.primary_cta, content.tracking_entity_type, content.tracking_entity_id, content.transport_contact_details,
     content.transport_link_url, content.slug, content.slug ? 1 : 0, content.public_entity_type, content.public_entity_id,
-    currentBatchUid, JSON.stringify({ snapshot_meta: { translation_langs: content.translation_langs } }),
+    currentBatchUid, buildReviewPayloadJson(content, confirmedTaxonomyChecks),
     reviewContentId,
   ];
 }
@@ -488,7 +528,7 @@ export async function ingestReviewContent(payload, options = {}) {
   const currentBatchUid = crypto.randomUUID();
 
   const [existingRows] = await pool.query(
-    `SELECT id, status, current_batch_uid
+    `SELECT id, status, current_batch_uid, review_payload_json
      FROM review_contents
      WHERE source_system=? AND source_content_item_id=? AND content_type=?
      LIMIT 1`,

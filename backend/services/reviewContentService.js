@@ -221,6 +221,21 @@ export function shapePublicReviewContent(item) {
   };
 }
 
+// Admin/editor session only (never the public review-access token — frontend/PROJECT_POLICY.md forbids
+// Work Return internals reaching the public site). Adds the resolved taxonomy Curation signal
+// admin/PROJECT_POLICY.md explicitly allows admin to review, on top of the same scrubbed public shape.
+export function shapeAdminReviewContent(item) {
+  const shaped = shapePublicReviewContent(item);
+  if (!shaped || typeof shaped !== "object") return shaped;
+  const confirmedTaxonomyChecks = item?.review_payload?.confirmed_taxonomy_checks;
+  return {
+    ...shaped,
+    confirmed_taxonomy_checks: confirmedTaxonomyChecks && typeof confirmedTaxonomyChecks === "object" && !Array.isArray(confirmedTaxonomyChecks)
+      ? confirmedTaxonomyChecks
+      : {},
+  };
+}
+
 export async function getReviewContentById(id) {
   const reviewId = Number(id);
   if (!Number.isFinite(reviewId) || reviewId <= 0) return null;
