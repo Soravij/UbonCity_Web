@@ -481,6 +481,8 @@ Responsibility split:
 - `resolved handoff snapshot`: immutable checklist copied into assignment handoff
 - `Work Return response`: field-worker answers stored in `requested_check_returns`
 
+Terminology note (not the full state machine, which remains TBD below): "approved" means different things at different layers, and confusing them costs real diagnostic time. Collector's item workflow status `approved` only means the collector-side ingest/editorial workflow finished — it says nothing about backend publication. Backend `review_contents.status` is a separate gate (`pending_review` -> reviewer decision); only once a review is accepted there does it get a `public_entity_id` and a corresponding `places`/`events` row created. Homepage curation, CTA analytics, and public listing all read from that second gate (`places.is_approved` + `place_translations` existing for the requested/`th` language) — a collector-"approved" item with no backend review decision yet, or a `places` row with no translations row, is invisible everywhere downstream even though it looks "done" upstream. Check both layers before assuming a "why isn't this showing up" report is a bug.
+
 Placeholders:
 
 - Exact approval workflow state machine: TBD / update later.
@@ -488,6 +490,8 @@ Placeholders:
 - Taxonomy/revision assignment policy: TBD / update later.
 
 **ภาษาไทย**
+
+หมายเหตุเรื่องคำศัพท์ (ยังไม่ใช่ state machine แบบเต็ม ซึ่งยังเป็น TBD ด้านล่าง): คำว่า "approved" มีความหมายต่างกันไปตามชั้นของระบบ และถ้าสับสนกันจะเสียเวลาวินิจฉัยจริง สถานะ workflow ของ item ฝั่ง collector ที่เป็น `approved` หมายถึงแค่ workflow รับ-เตรียมข้อมูล/บรรณาธิการฝั่ง collector เสร็จแล้วเท่านั้น ไม่ได้บอกอะไรเรื่องการเผยแพร่ฝั่ง backend เลย ส่วน `review_contents.status` ฝั่ง backend เป็นด่านแยกต่างหาก (`pending_review` -> การตัดสินใจของผู้ตรวจ) ต่อเมื่อ review ผ่านด่านนี้แล้วเท่านั้นถึงจะได้ `public_entity_id` และมีการสร้างแถว `places`/`events` ขึ้นมาจริง homepage curation, CTA analytics และ public listing ทั้งหมดอ่านจากด่านที่สองนี้ (`places.is_approved` + ต้องมีแถว `place_translations` ของภาษาที่ขอ/`th`) — item ที่ "approved" แค่ฝั่ง collector แต่ยังไม่ผ่านการตัดสินใจ review ฝั่ง backend หรือมีแถว `places` แต่ไม่มี translation จะไม่ปรากฏที่ไหนเลยในฝั่งสาธารณะ ทั้งที่ดูเหมือน "เสร็จแล้ว" จากมุมต้นทาง ให้เช็คทั้งสองชั้นก่อนจะสรุปว่า "ทำไมไม่ขึ้น" คือบั๊ก
 
 - ห้าม merge, commit, หรือ push โดยไม่ได้รับอนุมัติชัดเจนก่อน
 - ข้อมูล Runtime DB/ข้อมูลทดสอบ มีอยู่เฉพาะบนเครื่อง Runtime เท่านั้น

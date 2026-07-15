@@ -1,6 +1,6 @@
 ﻿# UbonCity Project State
 
-Last Updated: 2026-07-13
+Last Updated: 2026-07-15
 
 ## Current Branch
 
@@ -66,10 +66,47 @@ Locked CTA rules:
 - Work Return and human review remain the confirmation source.
 - Existing issued assignment snapshots remain immutable.
 
+## 2026-07-15 CTA Public Rendering Redesign (planned, not yet implemented)
+
+Decided direction (from the item-47 Runtime finding that a confirmed `facebook_url` had no public
+rendering path — see audit findings on `frontend/components/PlaceDetailContent.jsx:194`):
+
+- The public CTA block moves to be the last content block on the place detail page (after the
+  contact-details block, immediately before the "nearby places" navigation link — that link is
+  navigation, not content, so it stays after the CTA block).
+- The block always shows every populated contact channel for the place — not a single curated
+  "primary" one. Fixed display order, decided once, not configurable per place:
+  1. Map (`map_url`)
+  2. Phone (`phone`)
+  3. LINE (`line_url`)
+  4. Facebook (`facebook_url`)
+  5. Website (`website_url`)
+  Rationale: directions first (highest immediate intent), then the two most common direct-contact
+  channels for a Thai consumer audience, then lower-intent social/reference links last.
+- `primary_cta` is retired as a concept — nothing in the redesigned block singles one channel out,
+  so there is nothing left for it to select. This is a change to the "Locked CTA rules" list above
+  (§7A "Standard CTA checks for place") and to `PROJECT_POLICY.md` §7A, which must be edited in the
+  same change (EN+TH together, per §11) once this ships, not before.
+
+Scope this touches (implement step, not done yet):
+- Frontend: extend `ctaRows` to all 5 channels in the order above; move the block's render position;
+  drop `primary_cta` from the click-tracking `metadata_json` payload.
+- Backend: add `FACEBOOK_CLICK` / `WEBSITE_CLICK` to `analytics_events.event_type` (migration) and to
+  every hardcoded `event_type IN (...)` list in `analyticsController.js`; leave `places.primary_cta` /
+  `review_contents.primary_cta` as an inert legacy column (do not backfill or drop — this project does
+  not delete legacy stored data).
+- Collector: stop asking field workers to pick a `primary_cta` in the Curation/CTA checklist
+  (`REQUESTED_CHECK_GROUP_TEMPLATES` cta_contact group, `cta-contact-normalizer.mjs`); leave already
+  stored `primary_cta` answers untouched.
+- Policy: update `PROJECT_POLICY.md` §7A "Standard CTA checks for place" to drop `primary_cta` from
+  the list, bilingual, in the same change that ships the code.
+
+Not started. Flagging here so the plan survives context loss before the implement step picks it up.
+
 ## 2026-07-13 §7A Acceptance Boundary Closure (branch `fix/cta-taxonomy-accepted-source`)
 
 Status:
-- implemented on `fix/cta-taxonomy-accepted-source`, not yet merged; runtime verification pending (Codex)
+- merged to `main` (confirmed present in `main` history as of `e38c572`); Runtime DB verification for the checklist below is still pending (Codex) — merged-to-main and runtime-verified are separate facts, do not conflate them
 
 Closed root causes:
 - assignment `accepted` transition now maps the accepted submission's `requested_check_returns` into `content_drafts.confirmed_*` (CTA place-only, category from Clean-owned `item.category`) inside a single repository transaction with the state transition — no partial accept state is possible
@@ -95,15 +132,15 @@ Known open gaps (not fixed in this change set):
 ## Taxonomy / Curation Status
 
 - Assignment-return Curation flow and `requested_check_returns` handling are present on main.
-- Taxonomy v1 catalog/resolver, backend curated taxonomy storage/filtering, and Homepage Signals / Content Pool filtering are implemented on feature branches (`feature/taxonomy-v1-catalog`, `feature/taxonomy-phase5a-closure-matrix`, `feature/taxonomy-phase3-backend-storage`, `feature/taxonomy-phase3b-backend-filtering`, `feature/taxonomy-phase4a-content-pool-filtering`, `feature/taxonomy-phase4b-admin-content-pool-filters`).
-- The static taxonomy closure matrix is complete as a feature-branch milestone.
-- Runtime acceptance across representative fixtures remains pending.
-- This documentation does not claim the feature-branch taxonomy work is merged to main.
+- The taxonomy catalog/resolver (`collector/server/taxonomy-catalog.mjs`, `collector/server/taxonomy-resolver.mjs`) is merged to `main` (commit `6bcb1cd` "Restore taxonomy resolver workflow", ported from `fix/taxonomy-work-return-catalog-checks`) — a cafes/attractions/etc. Work Return now gets real resolved taxonomy checks instead of an empty Curation section. See `collector/PROJECT_STATE.md` 2026-07-14 "Taxonomy Resolver Restoration" for the detailed restore notes.
+- Backend curated taxonomy storage/filtering, and Homepage Signals / Content Pool filtering, remain feature-branch-only work (`feature/taxonomy-phase5a-closure-matrix`, `feature/taxonomy-phase3-backend-storage`, `feature/taxonomy-phase3b-backend-filtering`, `feature/taxonomy-phase4a-content-pool-filtering`, `feature/taxonomy-phase4b-admin-content-pool-filters`) — do not assume these are on `main`.
+- The static taxonomy closure matrix is complete as a feature-branch milestone (separate from the catalog/resolver restoration above).
+- Runtime acceptance across representative fixtures remains pending for both the merged catalog/resolver and the still-unmerged backend/Homepage-Signals filtering work.
 
 ## Confirmed Direction
 
 - CTA/contact baseline is present on main.
-- Taxonomy v1 remains documented as feature-branch work and runtime acceptance is still pending.
+- Taxonomy v1's catalog/resolver (worker-facing Curation checks) is merged to main; backend curated storage/filtering and Homepage Signals / Content Pool integration remain feature-branch work with runtime acceptance still pending.
 - Real taxonomy categories for the current Taxonomy v1 feature-branch category set are:
   - `attractions`
   - `activities`
@@ -119,6 +156,7 @@ Known open gaps (not fixed in this change set):
 
 ## Pending / Update Later
 
+- CTA public rendering redesign (all 5 channels, fixed order, drop `primary_cta`) — see 2026-07-15 section above
 - CTA / Curation follow-up work
 - Media Library deduplication
 - Runtime acceptance across representative fixtures

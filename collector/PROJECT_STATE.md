@@ -593,14 +593,17 @@ DB_NAME=uboncity
 Acts as source of truth.
 
 ## Current main baseline
-- `19b4d27` Merge AI policy rows for translation repair and SEO agent
-- `3f9d2d6` Merge translation repair from recheck issues
-- `f8a1d99` Merge translation source fingerprint stale gate
-- `20d7967` Ignore draft fallback homepage layout on public home
+A hardcoded commit list here goes stale within days — do not trust one found in this file. Run
+`git log -1` on the machine in question to get the true current baseline. As of 2026-07-15, local
+dev `main` HEAD is `e38c572` (well past the `19b4d27` line previously recorded here).
 
 ## Runtime Machine
-- runtime repo confirmed on `main`
-- runtime repo confirmed at commit `19b4d27`
+Do not hardcode a branch/commit here — it drifts out of sync with dev by design (see root
+`PROJECT_POLICY.md` §9: push from dev -> pull on runtime -> restart -> smoke test happens on demand,
+not continuously). Check the runtime repo's actual `git branch --show-current` / `git log -1` before
+relying on any state claim about it. As of 2026-07-15, the runtime repo was found on
+`fix/restore-taxonomy-resolver` at `1189e87` (behind dev `main`'s `e38c572` by two commits); a sync
+to `main` was initiated the same day — re-check rather than assuming it completed.
 
 ## Collector source
 - collector/main now includes translation stale gate, translation repair, and AI feature policy updates
