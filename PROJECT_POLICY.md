@@ -449,6 +449,22 @@ Placeholders:
 - สิทธิ์ยึดตามสายบังคับบัญชา (management tree) ไม่ใช่ชื่อ role อย่างเดียว: `owner` เป็น root ของ tree ทำได้ทุกงาน; `admin` ทำได้เฉพาะงานที่อยู่ใน subtree ของตัวเอง; `user` ทำได้เฉพาะงานที่ตัวเองเป็นผู้สั่ง — **admin จากอีกสายไม่มีอำนาจเหนืองานของสายอื่น และต้องถูกปฏิเสธ** role ที่สูงกว่าไม่ได้แปลว่าข้ามสายได้
 - การมอบงานรอบใหม่ให้คนอื่นถือเป็นการสั่งงาน ต้องผ่านด่านเดียวกับการสร้าง assignment (อยู่ใน subtree, สิทธิ์สั่งงานภายใน, role ของผู้รับต้องรับงาน `field` ได้) การเป็นผู้สั่งงานเดิมอย่างเดียวไม่พอ
 
+### Admin Visibility of the Curation Signal (locked)
+
+**English**
+
+- Confirmed CTA/Taxonomy answers, once they reach the backend's review content record, are a curation signal for internal admin decision-making only (e.g. whether/how to feature an item) — never a public fact and never shown on the public frontend.
+- Only an `owner` or `admin` backend session (an admin-panel account) may read this signal. Every other caller of `GET /review-content/:id` — `editor`/`freelance` sessions and the public review-access token — receives the same scrubbed public shape, with no CTA/Taxonomy curation fields.
+- The `user` role is intentionally excluded from this gate too: it works exclusively inside the collector app and never authenticates into the admin panel, so it has no path to this endpoint in practice.
+- This role list must exist in exactly one place (`REVIEW_CONTENT_INTERNAL_ROLES` in `backend/middleware/authMiddleware.js`), shared by both the route gate and the response-shaping check. The two must never hardcode separate copies of the list — a past drift between them let one check pass while the other still rejected the same role.
+
+**ภาษาไทย**
+
+- คำตอบ CTA/Taxonomy ที่ยืนยันแล้ว เมื่อไปถึง review content record ฝั่ง backend คือ curation signal สำหรับการตัดสินใจภายในของแอดมินเท่านั้น (เช่น จะ feature รายการนี้หรือไม่/อย่างไร) ไม่ใช่ข้อมูลสาธารณะ และห้ามแสดงบน public frontend เด็ดขาด
+- มีเฉพาะ backend session ของ role `owner` หรือ `admin` (บัญชี admin panel) เท่านั้นที่อ่านสัญญาณนี้ได้ ผู้เรียก `GET /review-content/:id` รายอื่นทั้งหมด — session ของ `editor`/`freelance` และ public review-access token — จะได้ shape สาธารณะแบบเดียวกัน ไม่มีฟิลด์ CTA/Taxonomy curation ติดมาด้วย
+- role `user` ถูกกันออกจากด่านนี้โดยตั้งใจเช่นกัน เพราะทำงานเฉพาะใน collector app เท่านั้น ไม่เคย login เข้า admin panel เลย จึงไม่มีทางเรียก endpoint นี้ในทางปฏิบัติ
+- รายชื่อ role นี้ต้องมีอยู่ที่เดียวเท่านั้น (`REVIEW_CONTENT_INTERNAL_ROLES` ใน `backend/middleware/authMiddleware.js`) ใช้ร่วมกันทั้ง route gate และ response-shaping check ห้าม hardcode แยกกัน 2 ชุด — เคย drift กันมาแล้วครั้งหนึ่ง ทำให้เช็คจุดหนึ่งผ่านแต่อีกจุดยังปฏิเสธ role เดียวกันอยู่
+
 ## 7B. Operational Rules
 
 **English**
