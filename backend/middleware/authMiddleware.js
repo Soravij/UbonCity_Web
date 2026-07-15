@@ -6,6 +6,13 @@ const JWT_AUDIENCE_BACKEND = String(process.env.JWT_AUDIENCE_BACKEND || "uboncit
 const JWT_AUDIENCE_REVIEW = String(process.env.JWT_AUDIENCE_REVIEW || "uboncity-review").trim();
 const REVIEW_ACCESS_TTL_SECONDS = Math.max(60, Number(process.env.REVIEW_ACCESS_TTL_SECONDS || 600) || 600);
 
+// Roles that may read review content with a backend session (curation signal, admin-panel
+// accounts only — owner/admin. The "user" role works exclusively in the collector app and never
+// logs into the admin panel, so it is intentionally excluded here too). Shared with
+// reviewContentController.js so the route gate and the response-shaping check can't drift out of
+// sync with each other.
+export const REVIEW_CONTENT_INTERNAL_ROLES = new Set(["owner", "admin"]);
+
 if (!JWT_SECRET || JWT_SECRET.length < 32 || JWT_SECRET.toLowerCase().includes("change")) {
   throw new Error("JWT_SECRET is missing or weak. Set a strong secret (min 32 chars).");
 }
@@ -60,7 +67,7 @@ export const protectReviewContentReadAccess = (req, res, next) => {
   try {
     const decoded = verifyBackendJwt(token);
     const role = String(decoded?.role || "").toLowerCase();
-    if (role !== "admin" && role !== "owner") {
+    if (!REVIEW_CONTENT_INTERNAL_ROLES.has(role)) {
       return res.status(403).json({ message: "Admin only" });
     }
     req.user = decoded;

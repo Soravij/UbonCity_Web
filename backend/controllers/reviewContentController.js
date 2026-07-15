@@ -7,14 +7,11 @@ import {
 } from "../services/reviewDecisionService.js";
 import { getReviewContentById, shapeAdminReviewContent, shapePublicReviewContent } from "../services/reviewContentService.js";
 import { ingestReviewContent } from "../services/reviewIngestService.js";
-import { issueReviewAccessToken } from "../middleware/authMiddleware.js";
+import { issueReviewAccessToken, REVIEW_CONTENT_INTERNAL_ROLES } from "../middleware/authMiddleware.js";
 
 function isDebugDiagnosticsEnabled() {
   return String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
 }
-
-// Curation signal, internal accounts only — owner/admin/user, not editor/freelance (external contractors).
-const INTERNAL_TAXONOMY_SIGNAL_ROLES = new Set(["owner", "admin", "user"]);
 
 function isMultipartReviewIngestRequest(req) {
   const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
@@ -145,7 +142,7 @@ export async function getReviewContentDetail(req, res) {
     // (public review-link token) — never both. Within a backend session, only an internal account role
     // gets the taxonomy Curation signal; editor/freelance (external contractor) sessions see the same
     // shape a public review-access token does.
-    const isInternalAccount = Boolean(req.user) && INTERNAL_TAXONOMY_SIGNAL_ROLES.has(String(req.user?.role || "").toLowerCase());
+    const isInternalAccount = Boolean(req.user) && REVIEW_CONTENT_INTERNAL_ROLES.has(String(req.user?.role || "").toLowerCase());
     const shaped = isInternalAccount ? shapeAdminReviewContent(item) : shapePublicReviewContent(item);
     return res.json({ item: shaped });
   } catch {
