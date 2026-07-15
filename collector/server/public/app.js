@@ -7255,12 +7255,17 @@ function isAssignmentCurationRenderableCheck(check) {
   return true;
 }
 
-function resolveAssignmentCurationCheckPlacement(check, row, options = {}) {
+function resolveAssignmentCurationCheckPlacement(check) {
   if (!isAssignmentCurationRenderableCheck(check)) return "hidden";
-  const checkKey = String(check?.check_key || check?.key || "").trim().toLowerCase();
-  const applicableKeys = options?.applicableKeys instanceof Set ? options.applicableKeys : null;
+  // Required (category-default) checks are mandatory to answer regardless of any AI signal — §7A:
+  // "Required taxonomy means the field worker must answer." Folding them behind a collapsed disclosure
+  // risks the worker never seeing a question they're obligated to answer.
+  if (check?.required === true) return "primary";
   if (hasAssignmentRequestedCheckMeaningfulValue(check?.suggested_value, check?.answer_type)) return "primary";
-  if (applicableKeys?.has(checkKey)) return "primary";
+  // A check the AI activated from approved-context evidence but with nothing to prefill (a plain "yes"
+  // with no qualifier) still carries a real signal via its badge — folding it away silently drops the
+  // one hint ("AI already looked at this") the worker was supposed to see.
+  if (check?.source) return "primary";
   return "additional";
 }
 
@@ -7286,6 +7291,7 @@ function getAssignmentRequestedCheckGroupsFromHandoffPackage(handoffPackage = nu
             check_key: checkKey,
             return_key: returnKey,
             requested: check?.requested === true,
+            required: check?.required === true,
             label: String(check?.label || "").trim(),
             instruction: String(check?.instruction || "").trim(),
             answer_type: String(check?.answer_type || "text").trim().toLowerCase() || "text",

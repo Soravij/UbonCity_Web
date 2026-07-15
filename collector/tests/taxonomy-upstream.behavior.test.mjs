@@ -219,6 +219,30 @@ test("a regenerate the approved context no longer supports clears the stale taxo
   assert.equal(check.requested, true);
 });
 
+test("an agent-triggered key's AI-attributed activation does not outlive the evidence that produced it", () => {
+  const stale = {
+    group_key: "taxonomy",
+    checks: [{ key: "specialty_coffee", requested: true, suggested_value: true, source: { kind: "ai" } }],
+  };
+  // this run produced no suggestion for this key at all
+  const group = resolveTaxonomyRequestedChecksGroup({ existingGroup: stale, item: item(), aiTaxonomy: {} });
+  // §7A: suggestions are a snapshot of the latest run, not an accumulator. A `requested: true` that only
+  // ever existed because the AI activated it must reset along with the suggestion it came from, or an
+  // agent-triggered key stays permanently asked once AI happens to notice it once.
+  assert.equal(group.checks.find((check) => check.key === "specialty_coffee").requested, false);
+});
+
+test("a curator's own activation of an agent-triggered key stays sticky without this run's AI evidence", () => {
+  const saved = {
+    group_key: "taxonomy",
+    checks: [{ key: "specialty_coffee", requested: true, suggested_value: null, source: null }],
+  };
+  const group = resolveTaxonomyRequestedChecksGroup({ existingGroup: saved, item: item(), aiTaxonomy: {} });
+  // Only an AI-attributed activation expires with its evidence. A curator's own decision to ask this
+  // question has no such expiry — it stays asked until the curator changes it.
+  assert.equal(group.checks.find((check) => check.key === "specialty_coffee").requested, true);
+});
+
 test("the deterministic/no-AI path never erases stored taxonomy suggestions", () => {
   const existing = {
     id: 9,

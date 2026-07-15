@@ -58,8 +58,11 @@ Where resolution happens:
   `requested_checks_json` from `REQUESTED_CHECK_GROUP_TEMPLATES`, so putting the taxonomy group there
   would have had the editor delete it on every save.
 - Because the resolver reads suggestions from `ai_taxonomy_json` directly, taxonomy needs no equivalent
-  of the CTA `syncCtaSuggestionsIntoRequestedChecks` step — a stale suggestion cannot survive a
-  regenerate by construction.
+  of the CTA `syncCtaSuggestionsIntoRequestedChecks` step for `suggested_value`/`source` — those two
+  fields are recomputed from this run's `aiTaxonomy` every time, so a stale suggestion cannot survive a
+  regenerate by construction. The `requested` flag is a separate field with its own rule (see
+  `resolveRequestedFlag`): it re-checks against this run's suggestion only when the saved flag was itself
+  AI-attributed (`source.kind === "ai"`); a curator's own activation stays sticky either way.
 
 Suggestion lifecycle (same §7A contract as CTA):
 - `ai_taxonomy_json` gained `suggested_checks: [{ taxonomy_key, suggested_value, condition_note }]`.

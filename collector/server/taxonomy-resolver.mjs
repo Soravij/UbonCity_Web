@@ -140,7 +140,14 @@ function resolveSuggestedValueForCheck(entry, aiSuggestion) {
 // suggesting something for it (§7A: "AI may activate approved Agent-triggered catalog keys").
 function resolveRequestedFlag(entry, savedCheck, aiSuggestion) {
   if (entry.activation_mode === "required") return true;
-  if (savedCheck) return savedCheck.requested === true;
+  if (savedCheck) {
+    // A saved `requested: true` that was itself AI-attributed (source.kind === "ai") must not outlive
+    // the evidence that produced it, or it becomes exactly the accumulator §7A forbids: re-check it
+    // against this run's aiSuggestion instead of trusting the stored flag forever. A curator's own
+    // activation (any other source, including none) carries no such expiry.
+    if (savedCheck.source?.kind === "ai") return Boolean(aiSuggestion);
+    return savedCheck.requested === true;
+  }
   return Boolean(aiSuggestion);
 }
 

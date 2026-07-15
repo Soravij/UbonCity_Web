@@ -734,7 +734,7 @@ test("requested-check curation helper treats only non-reserved taxonomy keys as 
   assert.equal(isAssignmentCurationRenderableCheck({ group_key: "taxonomy", check_key: "air_conditioning" }), true);
 });
 
-test("requested-check curation placement uses only meaningful suggested values for primary fallback", () => {
+test("requested-check curation placement promotes required checks, meaningful suggestions, and AI-evidence badges to primary", () => {
   assert.equal(
     resolveAssignmentCurationCheckPlacement(
       { group_key: "taxonomy", check_key: "air_conditioning", answer_type: "boolean", suggested_value: true },
@@ -755,6 +755,24 @@ test("requested-check curation placement uses only meaningful suggested values f
       { value: ["family"] }
     ),
     "hidden"
+  );
+  // A required category default has nothing to suggest this run, but it is mandatory to answer, so it
+  // must never fold behind the collapsed "ตัวเลือกเพิ่มเติม" disclosure (§7A).
+  assert.equal(
+    resolveAssignmentCurationCheckPlacement(
+      { group_key: "taxonomy", check_key: "wifi_available", answer_type: "boolean", required: true, suggested_value: null },
+      {}
+    ),
+    "primary"
+  );
+  // The AI activated this key from approved-context evidence but had no qualifier to prefill; the badge
+  // alone is the signal the worker is supposed to see, so it must not fold away either.
+  assert.equal(
+    resolveAssignmentCurationCheckPlacement(
+      { group_key: "taxonomy", check_key: "specialty_coffee", answer_type: "boolean", suggested_value: null, source: { kind: "ai", confidence: "medium", note: null } },
+      {}
+    ),
+    "primary"
   );
 });
 
