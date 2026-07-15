@@ -5,6 +5,7 @@ import MediaGallery from "@/components/MediaGallery";
 import RotatedImage from "@/components/RotatedImage";
 import { hasRichHtmlContent, sanitizeRichContentHtml } from "@/lib/richContent";
 import { resolveDecisionSignalFromTags } from "@/lib/phase56-decision-helpers.mjs";
+import { buildPlaceCtaRows } from "@/lib/place-cta.mjs";
 import { postAnalyticsEvent } from "@/lib/api";
 
 const DETAIL_COPY = {
@@ -24,6 +25,8 @@ const DETAIL_COPY = {
     ctaMap: "Open Map",
     ctaPhone: "Call",
     ctaLine: "Open LINE",
+    ctaFacebook: "Facebook Page",
+    ctaWebsite: "Visit Website",
     audience: { family: "Family / mixed ages", couple: "Couples / photo-friendly trips", solo: "Solo / small groups", all: "Most travelers" },
     time: { morning: "Morning to daytime", evening: "Late afternoon to evening", anytime: "Anytime" },
     budget: { budget: "Budget-friendly", mid: "Mid-range", premium: "Premium / flexible budget" },
@@ -44,6 +47,8 @@ const DETAIL_COPY = {
     ctaMap: "เปิดแผนที่",
     ctaPhone: "โทร",
     ctaLine: "เปิด LINE",
+    ctaFacebook: "เปิด Facebook",
+    ctaWebsite: "เปิดเว็บไซต์",
     audience: { family: "ครอบครัว / ไปได้หลายช่วงวัย", couple: "คู่รัก / เน้นบรรยากาศและถ่ายรูป", solo: "เดี่ยวหรือกลุ่มเล็ก", all: "เหมาะกับผู้เดินทางทั่วไป" },
     time: { morning: "ช่วงเช้าถึงกลางวัน", evening: "ช่วงเย็นถึงค่ำ", anytime: "ไปได้ทุกช่วงเวลา" },
     budget: { budget: "ประหยัดและคุมงบ", mid: "งบปานกลาง", premium: "งบยืดหยุ่นหรือพรีเมียม" },
@@ -188,14 +193,7 @@ export default function PlaceDetailContent({ place, activeLang = "th", category,
     : blocks;
   const decisionSignal = resolveDecisionSignal(place, category);
   const nearbyHref = `/${activeLang}/${category}/${place?.slug}`;
-  const ctaMapUrl = String(place?.map_url || "").trim();
-  const ctaPhone = String(place?.phone || place?.transport_contact_phone || "").trim();
-  const ctaLineUrl = String(place?.line_url || "").trim();
-  const ctaRows = [
-    ctaMapUrl ? { key: "map", label: detailCopy.ctaMap, href: ctaMapUrl, eventType: "MAP_CLICK" } : null,
-    ctaPhone ? { key: "phone", label: detailCopy.ctaPhone, href: `tel:${ctaPhone}`, eventType: "PHONE_CLICK" } : null,
-    ctaLineUrl ? { key: "line", label: detailCopy.ctaLine, href: ctaLineUrl, eventType: "LINE_CLICK" } : null,
-  ].filter(Boolean);
+  const ctaRows = buildPlaceCtaRows(place, detailCopy);
   const shouldTrackPublicCtaClick = !isReviewMode && hasPublishedPlaceIdentity(place);
   const isTransportCategory = String(category || "").trim().toLowerCase() === "transport";
   const contactRows = isTransportCategory
@@ -298,9 +296,6 @@ export default function PlaceDetailContent({ place, activeLang = "th", category,
                     source_path: safeRelativePathname(),
                     entity_type: "place",
                     entity_id: Number(place?.id || 0),
-                    metadata_json: {
-                      primary_cta: String(place?.primary_cta || "").trim().toLowerCase() || null,
-                    },
                   });
                 }}
                 className="interactive-tile inline-flex rounded-full px-5 py-3 text-sm font-semibold transition"

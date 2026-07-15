@@ -209,7 +209,6 @@ function normalizeReviewContentDetailAsQueueItem(baseItem, reviewContent) {
       line_url: reviewContent?.line_url || null,
       facebook_url: reviewContent?.facebook_url || null,
       website_url: reviewContent?.website_url || null,
-      primary_cta: reviewContent?.primary_cta || null,
     },
     // Curation signal only, admin-session-only from the backend (never sent to the public review-access
     // token path) — see admin/PROJECT_POLICY.md: "Admin may review resolved taxonomy data and returned values."
@@ -225,7 +224,6 @@ const CONFIRMED_CTA_FIELDS = [
   ["line_url", "ลิงก์ LINE"],
   ["facebook_url", "ลิงก์ Facebook"],
   ["website_url", "ลิงก์เว็บไซต์"],
-  ["primary_cta", "ปุ่มหลัก"],
 ];
 
 // One compact line per card, not a full checklist — this is a curation signal for deciding how to

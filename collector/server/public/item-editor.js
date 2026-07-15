@@ -2549,7 +2549,6 @@ const REQUESTED_CHECK_GROUP_TEMPLATES = [
       { key: "line_url", label: "ลิงก์ LINE", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์ที่ใช้ได้จริง", condition_prompt: "", evidence_required: false },
       { key: "facebook_url", label: "ลิงก์ Facebook", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์เพจที่ถูกต้อง", condition_prompt: "", evidence_required: false },
       { key: "website_url", label: "ลิงก์เว็บไซต์", answer_type: "url", instruction: "ถ้ามีให้ขอลิงก์เว็บไซต์หลัก", condition_prompt: "", evidence_required: false },
-      { key: "primary_cta", label: "CTA หลัก", answer_type: "select", instruction: "ยืนยันว่าควรพาคนไปกดอะไรเป็นหลัก", condition_prompt: "", evidence_required: false },
     ],
   },
 ];
@@ -3286,7 +3285,6 @@ function getCompactGuidanceLabel(key, fallbackLabel = "") {
     line_url: "LINE URL",
     facebook_url: "Facebook URL",
     website_url: "Website URL",
-    primary_cta: "Primary CTA",
   };
   return englishCtaLabels[normalizedKey] || String(fallbackLabel || "").trim() || normalizedKey || "-";
 }
@@ -3564,7 +3562,6 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
     facebook_url: ["facebook_url", "facebook", "facebookUrl", "contact.facebook_url", "cta.facebook_url"],
     line_url: ["line_url", "line", "lineUrl", "contact.line_url", "cta.line_url"],
     website_url: ["website_url", "website", "websiteUrl", "contact.website_url", "cta.website_url", "source_url"],
-    primary_cta: ["primary_cta", "cta.primary_cta", "map_url", "location_url"],
   };
 
   const ctaRows = isPlaceItem
@@ -3609,15 +3606,6 @@ function buildRequestedChecksCompactSummaryData(fieldPack = {}, groups = [], ite
           ].join(" | ")
         );
         if (phoneFromFacts) cleanCandidates.push({ value: phoneFromFacts, statuses: ["found", "verified"] });
-      }
-      if (key === "primary_cta" && referencesByUse.map_url) {
-        cleanCandidates.unshift({ value: "map", statuses: ["suggested"] });
-      }
-      if (key === "primary_cta") {
-        const mapCandidate = cleanCandidates.find((candidate) => String(normalizeGuidanceDisplayValue(candidate?.value, key) || "").trim());
-        if (mapCandidate && !hasRequestedCheckMeaningfulValue(confirmedValue.value) && !fieldReturn?.found) {
-          cleanCandidates.unshift({ value: "map", statuses: ["suggested"] });
-        }
       }
       const requestedCheck = selectedChecks.find((selected) => String(selected?.key || "").trim().toLowerCase() === key) || null;
       const resolvedRow = resolveGuidanceRowValue({

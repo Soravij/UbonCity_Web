@@ -44,23 +44,18 @@ function selectPreferredPlaceSlug(content, requestedSlug, existingSlug) {
   return buildFallbackPlaceSlug(content);
 }
 
-function buildApproveWarnings(content) {
+export function buildApproveWarnings(content) {
   const warnings = [];
   const mapUrl = String(content?.map_url || "").trim();
   const phone = String(content?.phone || "").trim();
   const transportContactPhone = String(content?.transport_contact_phone || "").trim();
   const hasPhoneCta = Boolean(phone || transportContactPhone);
   const lineUrl = String(content?.line_url || "").trim();
-  const primaryCta = String(content?.primary_cta || "").trim().toLowerCase();
-  if (!mapUrl && !hasPhoneCta && !lineUrl) {
-    warnings.push({ code: "CTA_EMPTY", message: "No CTA data (map_url/phone/line_url) in review content" });
+  const facebookUrl = String(content?.facebook_url || "").trim();
+  const websiteUrl = String(content?.website_url || "").trim();
+  if (!mapUrl && !hasPhoneCta && !lineUrl && !facebookUrl && !websiteUrl) {
+    warnings.push({ code: "CTA_EMPTY", message: "No CTA data (map_url/phone/line_url/facebook_url/website_url) in review content" });
   }
-  if (primaryCta && !["map", "phone", "line"].includes(primaryCta)) {
-    warnings.push({ code: "PRIMARY_CTA_INVALID", message: "primary_cta is not in supported set" });
-  }
-  if (primaryCta === "map" && !mapUrl) warnings.push({ code: "PRIMARY_CTA_MAP_MISSING", message: "primary_cta=map but map_url is empty" });
-  if (primaryCta === "phone" && !hasPhoneCta) warnings.push({ code: "PRIMARY_CTA_PHONE_MISSING", message: "primary_cta=phone but phone is empty" });
-  if (primaryCta === "line" && !lineUrl) warnings.push({ code: "PRIMARY_CTA_LINE_MISSING", message: "primary_cta=line but line_url is empty" });
   return warnings;
 }
 

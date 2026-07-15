@@ -281,8 +281,9 @@ Placeholders:
 - Current canonical category path is `item.category -> buildFieldPackHandoffPackage(...) -> handoffPackage.niche`.
 - CTA/contact is separate from taxonomy.
 - CTA/contact is place-only.
-- Standard CTA checks for place are `phone`, `line_url`, `facebook_url`, `website_url`, and `primary_cta`.
+- Standard CTA checks for place are `phone`, `line_url`, `facebook_url`, and `website_url`.
 - Standard CTA checks for place are always requested for human verification.
+- There is no "primary" CTA. The public place page renders every populated channel in a fixed order (map, phone, LINE, Facebook, website) as equal peers; `primary_cta` is a retired legacy column, still readable on old records, never written by new Curation answers.
 - `requested=true` means a human must verify the field, including false, absent, or not found.
 - AI may suggest CTA/taxonomy values but cannot confirm facts.
 - Work Return and human review remain the confirmation source.
@@ -323,8 +324,9 @@ Placeholders:
 - เส้นทางของหมวดหมู่ที่เป็นทางการปัจจุบันคือ `item.category -> buildFieldPackHandoffPackage(...) -> handoffPackage.niche`
 - CTA/ข้อมูลติดต่อ แยกออกจาก taxonomy
 - CTA/ข้อมูลติดต่อ ใช้เฉพาะกับ place เท่านั้น
-- รายการ CTA มาตรฐานสำหรับ place คือ `phone`, `line_url`, `facebook_url`, `website_url`, และ `primary_cta`
+- รายการ CTA มาตรฐานสำหรับ place คือ `phone`, `line_url`, `facebook_url`, และ `website_url`
 - รายการ CTA มาตรฐานของ place จะถูกขอให้มนุษย์ยืนยันเสมอ
+- ไม่มี CTA "หลัก" อีกต่อไป หน้า place สาธารณะแสดงทุกช่องทางที่มีข้อมูลเรียงตามลำดับตายตัว (แผนที่, โทร, LINE, Facebook, เว็บไซต์) เท่าเทียมกัน `primary_cta` เป็นคอลัมน์เก่าที่เลิกใช้แล้ว ยังอ่านค่าของ record เก่าได้ แต่คำตอบ Curation ใหม่จะไม่เขียนค่าลงไปอีก
 - `requested=true` หมายความว่ามนุษย์ต้องยืนยันฟิลด์นั้น ไม่ว่าค่าจะเป็น false, ไม่มีข้อมูล หรือหาไม่พบก็ตาม
 - AI เสนอค่าของ CTA/taxonomy ได้ แต่ยืนยันข้อเท็จจริงเองไม่ได้
 - Work Return และการตรวจโดยมนุษย์ (human review) ยังคงเป็นแหล่งยืนยันข้อมูล

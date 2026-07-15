@@ -60,13 +60,13 @@ Locked CTA rules:
   - `line_url`
   - `facebook_url`
   - `website_url`
-  - `primary_cta`
+- There is no "primary" CTA (retired 2026-07-15, see "CTA Public Rendering Redesign" below); `primary_cta` is a legacy column, no longer part of the requested-check template.
 - `requested=true` means a human must verify the item field, including confirming false, absent, or not found.
 - AI may suggest values, but AI cannot confirm CTA facts.
 - Work Return and human review remain the confirmation source.
 - Existing issued assignment snapshots remain immutable.
 
-## 2026-07-15 CTA Public Rendering Redesign (planned, not yet implemented)
+## 2026-07-15 CTA Public Rendering Redesign (implemented on `feature/cta-public-rendering-redesign`, Runtime verification pending)
 
 Decided direction (from the item-47 Runtime finding that a confirmed `facebook_url` had no public
 rendering path — see audit findings on `frontend/components/PlaceDetailContent.jsx:194`):
@@ -88,20 +88,29 @@ rendering path — see audit findings on `frontend/components/PlaceDetailContent
   (§7A "Standard CTA checks for place") and to `PROJECT_POLICY.md` §7A, which must be edited in the
   same change (EN+TH together, per §11) once this ships, not before.
 
-Scope this touches (implement step, not done yet):
-- Frontend: extend `ctaRows` to all 5 channels in the order above; move the block's render position;
-  drop `primary_cta` from the click-tracking `metadata_json` payload.
-- Backend: add `FACEBOOK_CLICK` / `WEBSITE_CLICK` to `analytics_events.event_type` (migration) and to
-  every hardcoded `event_type IN (...)` list in `analyticsController.js`; leave `places.primary_cta` /
-  `review_contents.primary_cta` as an inert legacy column (do not backfill or drop — this project does
-  not delete legacy stored data).
-- Collector: stop asking field workers to pick a `primary_cta` in the Curation/CTA checklist
-  (`REQUESTED_CHECK_GROUP_TEMPLATES` cta_contact group, `cta-contact-normalizer.mjs`); leave already
-  stored `primary_cta` answers untouched.
-- Policy: update `PROJECT_POLICY.md` §7A "Standard CTA checks for place" to drop `primary_cta` from
-  the list, bilingual, in the same change that ships the code.
+Implemented:
+- Frontend (`frontend/components/PlaceDetailContent.jsx`): `ctaRows` now includes all 5 channels in
+  the order above (block position was already last-before-nearby-link, no move needed); the click
+  payload no longer sends `metadata_json.primary_cta`.
+- Backend: `backend/migrations/016_cta_analytics_facebook_website_click.sql` adds `FACEBOOK_CLICK` /
+  `WEBSITE_CLICK` to `analytics_events.event_type`; `analyticsController.js` (`ALLOWED_EVENT_TYPES` and
+  every hardcoded `event_type IN (...)` list, plus `by_type`/top-entities breakdowns) accepts and
+  surfaces both new types. `places.primary_cta` / `review_contents.primary_cta` left as inert legacy
+  columns (not backfilled, not dropped).
+- Collector: `primary_cta` removed from `REQUESTED_CHECK_GROUP_TEMPLATES` (`item-editor.js`) and from
+  `cta-contact-normalizer.mjs` (`CTA_KEYS`, `getValidCtaSuggestedValue`) — no longer asked or
+  AI-suggested. Existing `confirmed_cta_contact_json.primary_cta` values from past accepted rounds are
+  untouched (separate storage, not the requested-check template). Updated the collector behavior tests
+  that asserted the old 5-key template/labels (`requested-check-ui.behavior.test.mjs`); full collector
+  suite re-run after the change matches the pre-change baseline exactly (same single pre-existing
+  unrelated failure, zero new failures).
+- Policy: `PROJECT_POLICY.md` §7A "Standard CTA checks for place" updated to drop `primary_cta`,
+  bilingual, plus a new line stating there is no "primary" CTA.
 
-Not started. Flagging here so the plan survives context loss before the implement step picks it up.
+Pending:
+- Migration 016 has not been run anywhere (no DB connection on the dev machine) — needs to be applied
+  on Runtime, then a real place with all 5 fields populated needs a manual click-through smoke test per
+  root `PROJECT_POLICY.md` §10.
 
 ## 2026-07-13 §7A Acceptance Boundary Closure (branch `fix/cta-taxonomy-accepted-source`)
 

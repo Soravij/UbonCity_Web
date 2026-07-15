@@ -1,7 +1,7 @@
 import pool from "../config/db.js";
 import { cleanPlainText } from "../validators/inputSanitizer.js";
 
-const ALLOWED_EVENT_TYPES = new Set(["MAP_CLICK", "PHONE_CLICK", "LINE_CLICK"]);
+const ALLOWED_EVENT_TYPES = new Set(["MAP_CLICK", "PHONE_CLICK", "LINE_CLICK", "FACEBOOK_CLICK", "WEBSITE_CLICK"]);
 const ALLOWED_ENTITY_TYPES = new Set(["place", "event", "review_content"]);
 const METADATA_MAX_BYTES = 2048;
 const ALLOWED_RANGE_DAYS = new Set([7, 30, 90]);
@@ -146,11 +146,13 @@ export async function getCtaSummary(req, res) {
          SUM(CASE WHEN event_type='MAP_CLICK' AND created_at >= (NOW() - INTERVAL ? DAY) THEN 1 ELSE 0 END) AS map_clicks,
          SUM(CASE WHEN event_type='PHONE_CLICK' AND created_at >= (NOW() - INTERVAL ? DAY) THEN 1 ELSE 0 END) AS phone_clicks,
          SUM(CASE WHEN event_type='LINE_CLICK' AND created_at >= (NOW() - INTERVAL ? DAY) THEN 1 ELSE 0 END) AS line_clicks,
+         SUM(CASE WHEN event_type='FACEBOOK_CLICK' AND created_at >= (NOW() - INTERVAL ? DAY) THEN 1 ELSE 0 END) AS facebook_clicks,
+         SUM(CASE WHEN event_type='WEBSITE_CLICK' AND created_at >= (NOW() - INTERVAL ? DAY) THEN 1 ELSE 0 END) AS website_clicks,
          SUM(CASE WHEN created_at >= (NOW() - INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS last_7_days,
          SUM(CASE WHEN created_at >= (NOW() - INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS last_30_days
        FROM analytics_events
-       WHERE event_type IN ('MAP_CLICK','PHONE_CLICK','LINE_CLICK')`,
-      [rangeDays, rangeDays, rangeDays, rangeDays]
+       WHERE event_type IN ('MAP_CLICK','PHONE_CLICK','LINE_CLICK','FACEBOOK_CLICK','WEBSITE_CLICK')`,
+      [rangeDays, rangeDays, rangeDays, rangeDays, rangeDays, rangeDays]
     );
     const row = rows?.[0] || {};
     return res.json({
@@ -160,6 +162,8 @@ export async function getCtaSummary(req, res) {
         MAP_CLICK: Number(row.map_clicks || 0),
         PHONE_CLICK: Number(row.phone_clicks || 0),
         LINE_CLICK: Number(row.line_clicks || 0),
+        FACEBOOK_CLICK: Number(row.facebook_clicks || 0),
+        WEBSITE_CLICK: Number(row.website_clicks || 0),
       },
       last_7_days: Number(row.last_7_days || 0),
       last_30_days: Number(row.last_30_days || 0),
@@ -186,6 +190,8 @@ export async function getTopEntities(req, res) {
          SUM(CASE WHEN a.event_type='MAP_CLICK' THEN 1 ELSE 0 END) AS map_clicks,
          SUM(CASE WHEN a.event_type='PHONE_CLICK' THEN 1 ELSE 0 END) AS phone_clicks,
          SUM(CASE WHEN a.event_type='LINE_CLICK' THEN 1 ELSE 0 END) AS line_clicks,
+         SUM(CASE WHEN a.event_type='FACEBOOK_CLICK' THEN 1 ELSE 0 END) AS facebook_clicks,
+         SUM(CASE WHEN a.event_type='WEBSITE_CLICK' THEN 1 ELSE 0 END) AS website_clicks,
          MAX(a.created_at) AS latest_click_at
        FROM analytics_events a
        LEFT JOIN places p
@@ -194,7 +200,7 @@ export async function getTopEntities(req, res) {
          ON p.category_id=c.id
        LEFT JOIN place_translations pt
          ON pt.place_id=p.id AND pt.lang='th'
-       WHERE a.event_type IN ('MAP_CLICK','PHONE_CLICK','LINE_CLICK')
+       WHERE a.event_type IN ('MAP_CLICK','PHONE_CLICK','LINE_CLICK','FACEBOOK_CLICK','WEBSITE_CLICK')
          AND a.created_at >= (NOW() - INTERVAL ? DAY)
          AND a.entity_type='place'
          AND a.entity_id IS NOT NULL
@@ -215,6 +221,8 @@ export async function getTopEntities(req, res) {
         map_clicks: Number(row.map_clicks || 0),
         phone_clicks: Number(row.phone_clicks || 0),
         line_clicks: Number(row.line_clicks || 0),
+        facebook_clicks: Number(row.facebook_clicks || 0),
+        website_clicks: Number(row.website_clicks || 0),
         latest_click_at: row.latest_click_at || null,
       })),
     });
@@ -231,7 +239,7 @@ export async function getRecentAnalyticsEvents(req, res) {
     const [rows] = await pool.query(
       `SELECT id, event_type, entity_type, entity_id, source_path, referrer_path, metadata_json, created_at
        FROM analytics_events
-       WHERE event_type IN ('MAP_CLICK','PHONE_CLICK','LINE_CLICK')
+       WHERE event_type IN ('MAP_CLICK','PHONE_CLICK','LINE_CLICK','FACEBOOK_CLICK','WEBSITE_CLICK')
        ORDER BY created_at DESC, id DESC
        LIMIT ?`,
       [limit]

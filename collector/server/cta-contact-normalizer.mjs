@@ -1,5 +1,4 @@
-const CTA_KEYS = ["phone", "line_url", "facebook_url", "website_url", "primary_cta"];
-const PRIMARY_CTA_VALUES = new Set(["phone", "line", "map"]);
+const CTA_KEYS = ["phone", "line_url", "facebook_url", "website_url"];
 const FACEBOOK_HOSTS = new Set(["facebook.com", "m.facebook.com", "mbasic.facebook.com", "fb.com"]);
 const LINE_HOSTS = new Set(["line.me", "lin.ee", "liff.line.me"]);
 const REJECTED_WEBSITE_HOSTS = new Set(["maps.google.com", "google.com", "maps.app.goo.gl", "g.page", "lh3.googleusercontent.com", "streetviewpixels-pa.googleapis.com", "api.mapbox.com"]);
@@ -76,7 +75,6 @@ export function normalizePhoneSuggestion(value) {
 export function getValidCtaSuggestedValue(key, value) {
   const normalizedKey = text(key).toLowerCase();
   if (normalizedKey === "phone") return normalizePhoneSuggestion(value);
-  if (normalizedKey === "primary_cta") return PRIMARY_CTA_VALUES.has(text(value).toLowerCase()) ? text(value).toLowerCase() : null;
   const classified = classifyUrl(value);
   return classified?.key === normalizedKey ? classified.value : null;
 }

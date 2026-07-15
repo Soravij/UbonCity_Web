@@ -576,7 +576,7 @@ test("requested-check editor shows CTA templates for place items", () => {
   assert.ok(ctaGroup);
   assert.deepEqual(
     ctaGroup.checks.map((check) => check.key),
-    ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]
+    ["phone", "line_url", "facebook_url", "website_url"]
   );
   // No "taxonomy" group: category/subtype/tags are reserved metadata keys
   // (PROJECT_POLICY.md 7A), not editable Curation questions.
@@ -1262,11 +1262,9 @@ test("facebook reference URL maps into CTA review when ai and curated shells are
   }, { type: "place", category: "restaurants" });
   const ctaHtml = extractSectionHtml(extractDefaultGuidanceHtml(html), "CTA Review");
   const facebookRow = extractCompactSummaryRow(ctaHtml, "Facebook URL");
-  const primaryCtaRow = extractCompactSummaryRow(ctaHtml, "Primary CTA");
 
   assert.match(facebookRow, /facebook\.com\/FuPanich/);
   assert.doesNotMatch(facebookRow, /No value/i);
-  assert.match(primaryCtaRow, /map/i);
 });
 
 test("phone fallback only maps from verified facts when a thai phone pattern is present", () => {
@@ -1996,7 +1994,6 @@ test("compact CTA review renders English fallback labels in default view", () =>
       line_url: "https://line.me/example",
       facebook_url: "https://facebook.com/example",
       website_url: "https://example.com",
-      primary_cta: "map",
     },
     requested_checks_json: { version: 1, groups: [] },
   }, { type: "place", category: "attractions" });
@@ -2006,7 +2003,6 @@ test("compact CTA review renders English fallback labels in default view", () =>
   assert.match(guidanceHtml, /LINE URL/);
   assert.match(guidanceHtml, /Facebook URL/);
   assert.match(guidanceHtml, /Website URL/);
-  assert.match(guidanceHtml, /Primary CTA/);
 });
 
 test("compact CTA review default view does not render Thai CTA labels", () => {
@@ -2070,7 +2066,7 @@ test("buildFieldPackApiPayload merges full standard catalogs with saved custom g
   const result = buildFieldPackApiPayload();
 
   assert.deepEqual(result.requested_checks_json.groups.map((group) => group.group_key), ["cta_contact", "custom"]);
-  assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact")?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
+  assert.deepEqual(result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact")?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url"]);
   assert.equal(result.requested_checks_json.groups.some((group) => group.group_key === "taxonomy"), false);
   assert.equal(result.requested_checks_json.groups.find((group) => group.group_key === "custom")?.checks[0].suggested_value, "front desk only");
 });
@@ -2124,16 +2120,14 @@ test("buildFieldPackApiPayload prefers current auto CTA recommendations over sta
   const lineUrlCheck = ctaGroup?.checks.find((check) => check.key === "line_url");
   const facebookCheck = ctaGroup?.checks.find((check) => check.key === "facebook_url");
   const websiteCheck = ctaGroup?.checks.find((check) => check.key === "website_url");
-  const primaryCtaCheck = ctaGroup?.checks.find((check) => check.key === "primary_cta");
 
   assert.ok(ctaGroup);
-  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
+  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url"]);
   assert.equal(phoneCheck?.requested, true);
   assert.equal(phoneCheck?.suggested_value, "0812345678");
   assert.equal(lineUrlCheck?.suggested_value, null);
   assert.equal(facebookCheck?.suggested_value, null);
   assert.equal(websiteCheck?.suggested_value, null);
-  assert.equal(primaryCtaCheck?.suggested_value, null);
   assert.equal(phoneCheck?.label, REQUESTED_CHECK_GROUP_TEMPLATES.find((group) => group.group_key === "cta_contact")?.checks.find((check) => check.key === "phone")?.label);
 });
 
@@ -2219,7 +2213,7 @@ test("buildFieldPackApiPayload overlays explicitly edited live CTA checks while 
   const facebookCheck = ctaGroup?.checks.find((check) => check.key === "facebook_url");
 
   assert.ok(ctaGroup);
-  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
+  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url"]);
   assert.equal(phoneCheck?.requested, true);
   assert.equal(phoneCheck?.label, "Edited phone");
   assert.equal(phoneCheck?.instruction, "updated instruction");
@@ -2365,7 +2359,7 @@ test("buildFieldPackApiPayload preserves current custom groups from the live edi
   assert.ok(customGroup);
   assert.equal(customGroup.checks[0].key, "wifi_password");
   assert.ok(ctaGroup);
-  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
+  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url"]);
   assert.equal(ctaGroup.checks[0].requested, true);
   assert.equal(ctaGroup.checks[0].suggested_value, "0812345678");
 });
@@ -2396,7 +2390,7 @@ test("buildRequestedChecksAutoSaveState emits the full CTA catalog and ignores u
 
   const ctaGroup = result.groups.find((group) => group.group_key === "cta_contact");
 
-  assert.deepEqual(ctaGroup?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
+  assert.deepEqual(ctaGroup?.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url"]);
   assert.equal(ctaGroup?.checks.every((check) => check.requested === true), true);
   assert.equal(ctaGroup?.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
   assert.equal(ctaGroup?.checks.find((check) => check.key === "line_url")?.suggested_value, null);
@@ -2427,7 +2421,7 @@ test("buildFieldPackApiPayload emits the full CTA catalog when the requested-che
   const ctaGroup = result.requested_checks_json.groups.find((group) => group.group_key === "cta_contact");
 
   assert.ok(ctaGroup);
-  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url", "primary_cta"]);
+  assert.deepEqual(ctaGroup.checks.map((check) => check.key), ["phone", "line_url", "facebook_url", "website_url"]);
   assert.equal(ctaGroup.checks.find((check) => check.key === "phone")?.suggested_value, "0812345678");
   assert.equal(result.requested_checks_json.groups.some((group) => group.group_key === "taxonomy"), false);
 });
