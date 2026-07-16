@@ -18,6 +18,7 @@
     "backend:smoke:article-flow-e2e": "node scripts/smoke-article-flow-e2e-browser.mjs",
     "backend:smoke:article-revision-loop": "node scripts/smoke-article-revision-loop-browser.mjs",
     "backend:smoke:article-preview-sanitization": "node scripts/smoke-article-preview-sanitization-browser.mjs",
+    "smoke:facebook-url-raw-to-frontend": "node scripts/smoke-facebook-url-pipeline.mjs",
     "test:token": "node scripts/get-test-token.mjs",
     "smoke:find-item": "node scripts/find-smoke-item.mjs",
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
