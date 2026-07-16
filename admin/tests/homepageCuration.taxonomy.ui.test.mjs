@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  addCandidateToBlocks,
   addCandidatesToBlocks,
   applyPoolEntityTypeChange,
   buildPoolCandidateParams,
@@ -76,13 +77,29 @@ test("bulk add appends selected candidates and keeps duplicate guard/manual item
   assert.deepEqual(addCandidatesToBlocks(blocks, "featured_events", [{ id: 2, entity_type: "place" }]), blocks);
 });
 
+test("single-row add appends to the selected block and keeps its duplicate guard", () => {
+  const blocks = [{
+    key: "top_picks",
+    enabled: true,
+    manual_items: [{ entity_type: "place", entity_id: "1", label: "Existing" }],
+  }];
+  const added = addCandidateToBlocks(blocks, "top_picks", { id: 2, entity_type: "place", title: "New" });
+  assert.deepEqual(added[0].manual_items.map((item) => item.entity_id), ["1", "2"]);
+  const duplicate = addCandidateToBlocks(added, "top_picks", { id: 2, entity_type: "place", title: "New again" });
+  assert.deepEqual(duplicate[0].manual_items.map((item) => item.entity_id), ["1", "2"]);
+});
+
 test("Homepage Curation renders the lookup table and keeps lookup state out of layout serialization", () => {
   assert.match(source, /\[0, 1, 2\]\.map/);
+  assert.match(source, /className="full approvals-summary-grid"/);
   assert.match(source, /คุณสมบัติ \{slotIndex \+ 1\}/);
   assert.match(source, /<option value="">ไม่เลือก<\/option>/);
   assert.match(source, /<table>/);
   assert.match(source, /เลือกทั้งหมดในหน้าปัจจุบัน/);
   assert.match(source, /เพิ่มรายการที่เลือกเข้า Block/);
+  assert.match(source, /<th>การทำงาน<\/th>/);
+  assert.match(source, /onClick=\{\(\) => addPoolCandidateToBlock\(candidate\)\}/);
+  assert.match(source, /ใช้ในบล็อก/);
   assert.match(source, /setPoolSelectedCandidateKeys\(\[\]\);/);
   assert.match(source, /onClick=\{searchPoolCandidates\}/);
   assert.match(source, /taxonomyTrue: selectedTaxonomyLookupKeys\(poolState\.taxonomy_true\)/);

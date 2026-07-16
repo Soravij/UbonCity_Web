@@ -100,6 +100,7 @@ test("homepage curation taxonomy true filters", async (t) => {
       assert.deepEqual(items.map((item) => item.id), [1]);
       assert.deepEqual(items[0].taxonomy_summary, { parking: true });
       assert.equal(calls.length, 1);
+      assert.match(calls[0].sql, /p\.updated_at/);
       assert.equal(calls[0].sql.includes("parking"), false, "taxonomy key must not be interpolated into SQL");
     });
   });

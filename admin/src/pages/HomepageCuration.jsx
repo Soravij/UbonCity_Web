@@ -3,6 +3,7 @@ import { api, authHeaders } from "../api/api";
 import {
   EVENT_BLOCK_KEY,
   HERO_BLOCK_KEY,
+  addCandidateToBlocks,
   addCandidatesToBlocks,
   applyPoolEntityTypeChange,
   buildPoolCandidateParams,
@@ -564,6 +565,11 @@ export default function HomepageCuration({ token }) {
     setPoolSelectedCandidateKeys([]);
   }
 
+  function addPoolCandidateToBlock(candidate) {
+    if (!poolTargetBlockKey) return;
+    setBlocks((current) => addCandidateToBlocks(current, poolTargetBlockKey, candidate));
+  }
+
   async function onSaveDraft() {
     setSaving(true);
     setMessage("");
@@ -1019,31 +1025,35 @@ export default function HomepageCuration({ token }) {
                     placeholder={poolState.entity_type === "event" ? "ค้นหาชื่ออีเวนต์" : "ค้นหาด้วยชื่อหรือ slug"}
                   />
                 </label>
-                {poolState.entity_type === "place" ? [0, 1, 2].map((slotIndex) => (
-                  <label key={`taxonomy-slot-${slotIndex}`}>
-                    คุณสมบัติ {slotIndex + 1}
-                    <select
-                      value={poolState.taxonomy_true[slotIndex] || ""}
-                      onChange={(event) => updatePoolState({
-                        taxonomy_true: updateTaxonomyLookupSlot(poolState.taxonomy_true, slotIndex, event.target.value),
-                        items: [],
-                        error: "",
-                      })}
-                      disabled={Boolean(taxonomyCatalogError)}
-                    >
-                      <option value="">ไม่เลือก</option>
-                      {taxonomyCatalog.map((entry) => (
-                        <option
-                          key={entry.key}
-                          value={entry.key}
-                          disabled={poolState.taxonomy_true.some((selectedKey, selectedIndex) => selectedIndex !== slotIndex && selectedKey === entry.key)}
+                {poolState.entity_type === "place" ? (
+                  <div className="full approvals-summary-grid">
+                    {[0, 1, 2].map((slotIndex) => (
+                      <label key={`taxonomy-slot-${slotIndex}`}>
+                        คุณสมบัติ {slotIndex + 1}
+                        <select
+                          value={poolState.taxonomy_true[slotIndex] || ""}
+                          onChange={(event) => updatePoolState({
+                            taxonomy_true: updateTaxonomyLookupSlot(poolState.taxonomy_true, slotIndex, event.target.value),
+                            items: [],
+                            error: "",
+                          })}
+                          disabled={Boolean(taxonomyCatalogError)}
                         >
-                          {entry.label} ({entry.key})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )) : null}
+                          <option value="">ไม่เลือก</option>
+                          {taxonomyCatalog.map((entry) => (
+                            <option
+                              key={entry.key}
+                              value={entry.key}
+                              disabled={poolState.taxonomy_true.some((selectedKey, selectedIndex) => selectedIndex !== slotIndex && selectedKey === entry.key)}
+                            >
+                              {entry.label} ({entry.key})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
                 <label className="full">
                   ใช้ในบล็อก
                   <select value={poolTargetBlockKey} onChange={(event) => setPoolTargetBlockKey(event.target.value)} disabled={!eligiblePoolBlocks.length}>
@@ -1101,11 +1111,14 @@ export default function HomepageCuration({ token }) {
                       <th>หมวดหมู่/ประเภท</th>
                       <th>คุณสมบัติที่ตรง</th>
                       <th>อัปเดตล่าสุด</th>
+                      <th>การทำงาน</th>
                     </tr>
                   </thead>
                   <tbody>
                     {poolState.items.map((candidate) => {
                       const key = candidateSelectionKey(candidate);
+                      const targetBlock = blocks.find((block) => block.key === poolTargetBlockKey);
+                      const canUseInTargetBlock = canUseCandidateInBlock(targetBlock, candidate.entity_type);
                       const matches = Object.entries(candidate.taxonomy_summary || {})
                         .filter(([, value]) => value === true)
                         .map(([taxonomyKey]) => taxonomyCatalog.find((entry) => entry.key === taxonomyKey)?.label || taxonomyKey)
@@ -1124,6 +1137,16 @@ export default function HomepageCuration({ token }) {
                           <td>{candidate.category || getEntityTypeLabel(candidate.entity_type)}</td>
                           <td>{matches || "-"}</td>
                           <td>{candidate.updated_at ? new Date(candidate.updated_at).toLocaleString() : "-"}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="ghost tiny-btn"
+                              onClick={() => addPoolCandidateToBlock(candidate)}
+                              disabled={!canUseInTargetBlock}
+                            >
+                              ใช้ในบล็อก
+                            </button>
+                          </td>
                         </tr>
                       );
                     })}

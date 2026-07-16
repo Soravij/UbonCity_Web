@@ -861,6 +861,7 @@ export async function searchHomepageCurationCandidates({
 
   const candidateSql = `SELECT
        p.id,
+       p.updated_at,
        'place' AS entity_type,
        c.slug AS category,
        COALESCE(NULLIF(TRIM(p.slug), ''), CONCAT('place-', p.id)) AS slug,
