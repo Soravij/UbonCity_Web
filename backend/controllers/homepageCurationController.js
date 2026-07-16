@@ -1,5 +1,6 @@
 import {
   getHomepageCurationLayout,
+  getBooleanCompatibleTaxonomyCatalog,
   getPublishedHomepageLayout,
   previewHomepageCurationLayout,
   publishHomepageCurationLayout,
@@ -72,12 +73,22 @@ export async function searchHomepageCurationCandidatesHandler(req, res) {
       lang: req.query.lang || "th",
       q: req.query.q || "",
       limit: req.query.limit || 20,
+      taxonomyTrue: req.query.taxonomy_true || "",
     });
     res.json({ items });
   } catch (error) {
+    if (error?.code === "INVALID_TAXONOMY_TRUE_KEY") {
+      return res.status(400).json({ error: error.message });
+    }
     console.error("Failed to search homepage curation candidates:", error);
     res.status(500).json({ error: "Failed to search homepage curation candidates" });
   }
+}
+
+export async function getHomepageCurationTaxonomyCatalogHandler(req, res) {
+  const entityType = String(req.query?.entity_type || "place").trim().toLowerCase();
+  if (entityType !== "place") return res.json({ items: [] });
+  return res.json({ items: getBooleanCompatibleTaxonomyCatalog() });
 }
 
 export async function previewHomepageCurationLayoutHandler(req, res) {

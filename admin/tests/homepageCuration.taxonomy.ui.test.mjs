@@ -1,110 +1,95 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
-  addCandidateToBlocks,
+  addCandidatesToBlocks,
   applyPoolEntityTypeChange,
   buildPoolCandidateParams,
-  canUseCandidateInBlock,
+  candidateSelectionKey,
   clearPoolTaxonomySelection,
-  removePoolTaxonomyKey,
+  createTaxonomyLookupSlots,
+  selectCurrentCandidateRows,
+  selectedTaxonomyLookupKeys,
+  toggleCandidateSelection,
+  updateTaxonomyLookupSlot,
 } from "../src/lib/homepageCurationPool.js";
 
-function createPoolState(overrides = {}) {
-  return { q: "", entity_type: "place", taxonomy_true: [], loading: false, error: "", items: [], ...overrides };
-}
+const here = path.dirname(fileURLToPath(import.meta.url));
+const source = fs.readFileSync(path.join(here, "..", "src", "pages", "HomepageCuration.jsx"), "utf8");
 
-test("Content Pool taxonomy filter request contract", async (t) => {
-  await t.test("multiple selected keys travel as one comma-separated taxonomy_true", () => {
-    const params = buildPoolCandidateParams({
-      entityType: "place",
-      lang: "th",
-      q: "cafe",
-      limit: 20,
-      taxonomyTrue: ["parking", "air_conditioning"],
-    });
-    assert.equal(params.taxonomy_true, "parking,air_conditioning");
-    assert.equal(params.entity_type, "place");
-    assert.equal(params.lang, "th");
-    assert.equal(params.q, "cafe");
-    assert.equal(params.limit, 20);
-  });
-
-  await t.test("cleared selection sends no taxonomy_true at all", () => {
-    const cleared = removePoolTaxonomyKey(createPoolState({ taxonomy_true: ["parking"] }), "parking");
-    assert.deepEqual(cleared.taxonomy_true, []);
-    const params = buildPoolCandidateParams({ entityType: "place", taxonomyTrue: cleared.taxonomy_true });
-    assert.equal(Object.hasOwn(params, "taxonomy_true"), false);
-  });
-
-  await t.test("removing one of several keys keeps the rest", () => {
-    const next = removePoolTaxonomyKey(createPoolState({ taxonomy_true: ["parking", "wifi_available"] }), "parking");
-    assert.deepEqual(next.taxonomy_true, ["wifi_available"]);
-    assert.equal(buildPoolCandidateParams({ entityType: "place", taxonomyTrue: next.taxonomy_true }).taxonomy_true, "wifi_available");
-  });
-
-  await t.test("event mode never sends taxonomy_true, even with stale selection", () => {
-    const params = buildPoolCandidateParams({ entityType: "event", taxonomyTrue: ["parking"] });
-    assert.equal(Object.hasOwn(params, "taxonomy_true"), false);
-  });
-
-  await t.test("switching to event clears the selection, switching back does not resurrect it", () => {
-    const asEvent = applyPoolEntityTypeChange(createPoolState({ taxonomy_true: ["parking"] }), "event");
-    assert.deepEqual(asEvent.taxonomy_true, []);
-    assert.deepEqual(asEvent.items, []);
-
-    const backToPlace = applyPoolEntityTypeChange(asEvent, "place");
-    assert.deepEqual(backToPlace.taxonomy_true, []);
-    assert.equal(Object.hasOwn(buildPoolCandidateParams({
-      entityType: backToPlace.entity_type,
-      taxonomyTrue: backToPlace.taxonomy_true,
-    }), "taxonomy_true"), false);
-  });
-
-  await t.test("catalog load failure leaves no hidden filter on the next search", () => {
-    const afterFailure = clearPoolTaxonomySelection(createPoolState({ taxonomy_true: ["parking", "wifi_available"] }));
-    assert.deepEqual(afterFailure.taxonomy_true, []);
-    assert.deepEqual(afterFailure.items, []);
-    const params = buildPoolCandidateParams({
-      entityType: afterFailure.entity_type,
-      taxonomyTrue: afterFailure.taxonomy_true,
-    });
-    assert.equal(Object.hasOwn(params, "taxonomy_true"), false);
-  });
+test("taxonomy lookup keeps exactly three unique temporary slots", () => {
+  assert.deepEqual(createTaxonomyLookupSlots(), ["", "", ""]);
+  assert.deepEqual(createTaxonomyLookupSlots(["parking", "parking", "wifi_available"]), ["parking", "", "wifi_available"]);
+  assert.deepEqual(updateTaxonomyLookupSlot(["parking", "", ""], 1, "parking"), ["parking", "", ""]);
+  assert.deepEqual(updateTaxonomyLookupSlot(["parking", "", ""], 1, "wifi_available"), ["parking", "wifi_available", ""]);
+  assert.deepEqual(selectedTaxonomyLookupKeys(["parking", "", "wifi_available"]), ["parking", "wifi_available"]);
 });
 
-test("Content Pool block flow stays intact", async (t) => {
-  const placeBlock = { key: "top_picks", enabled: true, manual_items: [] };
-  const eventBlock = { key: "featured_events", enabled: true, manual_items: [] };
-  const candidate = { id: 7, entity_type: "place", title: "Cafe A", category: "cafes", slug: "cafe-a" };
+test("candidate request sends selected place keys only", () => {
+  assert.deepEqual(
+    buildPoolCandidateParams({ entityType: "place", lang: "th", q: "coffee", taxonomyTrue: ["parking", "", "wifi_available"] }),
+    { entity_type: "place", lang: "th", q: "coffee", limit: 20, taxonomy_true: "parking,wifi_available" }
+  );
+  assert.deepEqual(
+    applyPoolEntityTypeChange({ entity_type: "place", taxonomy_true: ["parking", "", ""], items: [{ id: 1 }], error: "old" }, "event"),
+    { entity_type: "event", taxonomy_true: ["", "", ""], items: [], error: "" }
+  );
+  assert.deepEqual(
+    clearPoolTaxonomySelection({ entity_type: "place", taxonomy_true: ["parking", "", ""], items: [{ id: 1 }], error: "old" }),
+    { entity_type: "place", taxonomy_true: ["", "", ""], items: [], error: "" }
+  );
+  assert.deepEqual(
+    buildPoolCandidateParams({ entityType: "event", lang: "th", q: "fair", taxonomyTrue: ["parking", "", ""] }),
+    { entity_type: "event", lang: "th", q: "fair", limit: 20 }
+  );
+});
 
-  await t.test("place candidate is usable in a place block only", () => {
-    assert.equal(canUseCandidateInBlock(placeBlock, "place"), true);
-    assert.equal(canUseCandidateInBlock(eventBlock, "place"), false);
-    assert.equal(canUseCandidateInBlock({ key: "hero", enabled: true }, "place"), false);
-    assert.equal(canUseCandidateInBlock({ ...placeBlock, enabled: false }, "place"), false);
-  });
+test("current page selection supports one row and select-all", () => {
+  const items = [
+    { id: 1, entity_type: "place" },
+    { id: 2, entity_type: "place" },
+  ];
+  const once = toggleCandidateSelection([], items[0]);
+  assert.deepEqual(once, [candidateSelectionKey(items[0])]);
+  const all = selectCurrentCandidateRows(items, once);
+  assert.deepEqual(new Set(all), new Set(["place:1", "place:2"]));
+  assert.deepEqual(selectCurrentCandidateRows(items, all), []);
+});
 
-  await t.test("using a candidate in a block appends it to that block only", () => {
-    const next = addCandidateToBlocks([placeBlock, eventBlock], "top_picks", candidate);
-    assert.deepEqual(next[0].manual_items, [
-      { entity_type: "place", entity_id: "7", category: "cafes", slug: "cafe-a", label: "Cafe A", note: "" },
-    ]);
-    assert.deepEqual(next[1].manual_items, []);
-  });
+test("bulk add appends selected candidates and keeps duplicate guard/manual items", () => {
+  const blocks = [{
+    key: "top_picks",
+    enabled: true,
+    manual_items: [{ entity_type: "place", entity_id: "1", label: "Existing" }],
+  }];
+  const next = addCandidatesToBlocks(blocks, "top_picks", [
+    { id: 1, entity_type: "place", title: "Duplicate" },
+    { id: 2, entity_type: "place", title: "New" },
+    { id: 2, entity_type: "place", title: "Duplicate in selection" },
+  ]);
+  assert.equal(next[0].manual_items.length, 2);
+  assert.equal(next[0].manual_items[0].label, "Existing");
+  assert.equal(next[0].manual_items[1].entity_id, "2");
+  assert.deepEqual(addCandidatesToBlocks(blocks, "featured_events", [{ id: 2, entity_type: "place" }]), blocks);
+});
 
-  await t.test("the same candidate is not added twice", () => {
-    const once = addCandidateToBlocks([placeBlock], "top_picks", candidate);
-    const twice = addCandidateToBlocks(once, "top_picks", candidate);
-    assert.equal(twice[0].manual_items.length, 1);
-  });
+test("Homepage Curation renders the lookup table and keeps lookup state out of layout serialization", () => {
+  assert.match(source, /\[0, 1, 2\]\.map/);
+  assert.match(source, /คุณสมบัติ \{slotIndex \+ 1\}/);
+  assert.match(source, /<option value="">ไม่เลือก<\/option>/);
+  assert.match(source, /<table>/);
+  assert.match(source, /เลือกทั้งหมดในหน้าปัจจุบัน/);
+  assert.match(source, /เพิ่มรายการที่เลือกเข้า Block/);
+  assert.match(source, /setPoolSelectedCandidateKeys\(\[\]\);/);
+  assert.match(source, /onClick=\{searchPoolCandidates\}/);
+  assert.match(source, /taxonomyTrue: selectedTaxonomyLookupKeys\(poolState\.taxonomy_true\)/);
+  assert.match(source, /taxonomyCatalog\.map/);
+  assert.match(source, /draft_blocks: serializeBlocks\(blocks\)/);
 
-  await t.test("a place candidate cannot be pushed into the event block", () => {
-    const next = addCandidateToBlocks([eventBlock], "featured_events", candidate);
-    assert.deepEqual(next[0].manual_items, []);
-  });
-
-  await t.test("no target block selected leaves blocks untouched", () => {
-    assert.deepEqual(addCandidateToBlocks([placeBlock], "", candidate), [placeBlock]);
-  });
+  const serializeStart = source.indexOf("function serializeBlocks");
+  const serializeEnd = source.indexOf("function createCandidateState", serializeStart);
+  assert.equal(source.slice(serializeStart, serializeEnd).includes("taxonomy_true"), false);
 });

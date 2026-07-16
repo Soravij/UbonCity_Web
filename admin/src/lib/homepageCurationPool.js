@@ -20,15 +20,30 @@ export function canUseCandidateInBlock(block, entityType) {
   return !isEventBlock(block);
 }
 
-function normalizeTaxonomySelection(value) {
-  return (Array.isArray(value) ? value : []).map((key) => String(key || "").trim()).filter(Boolean);
+export const TAXONOMY_LOOKUP_SLOT_COUNT = 3;
+
+export function createTaxonomyLookupSlots(value = []) {
+  const slots = Array.from({ length: TAXONOMY_LOOKUP_SLOT_COUNT }, (_, index) => String(value?.[index] || "").trim());
+  return slots.map((key, index) => (key && slots.indexOf(key) !== index ? "" : key));
+}
+
+export function selectedTaxonomyLookupKeys(value = []) {
+  return Array.from(new Set(createTaxonomyLookupSlots(value).filter(Boolean)));
+}
+
+export function updateTaxonomyLookupSlot(slots, index, value) {
+  const next = createTaxonomyLookupSlots(slots);
+  const key = String(value || "").trim();
+  if (key && next.some((entry, entryIndex) => entryIndex !== index && entry === key)) return next;
+  next[index] = key;
+  return next;
 }
 
 // taxonomy_true only travels with place searches, and only when the user can actually see and
 // remove the selection — an invisible filter silently shrinking results is a bug, not a filter.
 export function buildPoolCandidateParams({ entityType, lang, q, limit = 20, taxonomyTrue = [] } = {}) {
   const normalizedType = String(entityType || "").trim().toLowerCase();
-  const selected = normalizedType === "place" ? normalizeTaxonomySelection(taxonomyTrue) : [];
+  const selected = normalizedType === "place" ? selectedTaxonomyLookupKeys(taxonomyTrue) : [];
 
   return {
     entity_type: entityType,
@@ -44,29 +59,42 @@ export function applyPoolEntityTypeChange(poolState, nextEntityType) {
   return {
     ...poolState,
     entity_type: nextEntityType,
-    taxonomy_true: normalizedType === "place" ? normalizeTaxonomySelection(poolState?.taxonomy_true) : [],
+    taxonomy_true: normalizedType === "place" ? createTaxonomyLookupSlots(poolState?.taxonomy_true) : createTaxonomyLookupSlots(),
     items: [],
     error: "",
   };
 }
 
-export function removePoolTaxonomyKey(poolState, key) {
-  return {
-    ...poolState,
-    taxonomy_true: normalizeTaxonomySelection(poolState?.taxonomy_true).filter((entry) => entry !== key),
-    items: [],
-    error: "",
-  };
-}
-
-// When the catalog fails to load there is no UI left to render the chips, so the selection must go
-// with it — otherwise the next search is filtered by keys the user can neither see nor clear.
 export function clearPoolTaxonomySelection(poolState) {
   return {
     ...poolState,
-    taxonomy_true: [],
+    taxonomy_true: createTaxonomyLookupSlots(),
     items: [],
+    error: "",
   };
+}
+
+export function candidateSelectionKey(candidate) {
+  return `${String(candidate?.entity_type || "").trim().toLowerCase()}:${Number(candidate?.id || 0) || 0}`;
+}
+
+export function toggleCandidateSelection(selectedKeys, candidate) {
+  const key = candidateSelectionKey(candidate);
+  if (key.endsWith(":0")) return Array.from(selectedKeys || []);
+  const next = new Set(selectedKeys || []);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return Array.from(next);
+}
+
+export function selectCurrentCandidateRows(items, selected) {
+  const rows = Array.isArray(items) ? items : [];
+  const keys = rows.map(candidateSelectionKey).filter((key) => !key.endsWith(":0"));
+  const current = new Set(selected || []);
+  const allSelected = keys.length > 0 && keys.every((key) => current.has(key));
+  if (allSelected) keys.forEach((key) => current.delete(key));
+  else keys.forEach((key) => current.add(key));
+  return Array.from(current);
 }
 
 export function addCandidateToBlocks(blocks, poolTargetBlockKey, candidate) {
@@ -102,4 +130,11 @@ export function addCandidateToBlocks(blocks, poolTargetBlockKey, candidate) {
       ],
     };
   });
+}
+
+export function addCandidatesToBlocks(blocks, poolTargetBlockKey, candidates) {
+  return (Array.isArray(candidates) ? candidates : []).reduce(
+    (nextBlocks, candidate) => addCandidateToBlocks(nextBlocks, poolTargetBlockKey, candidate),
+    Array.isArray(blocks) ? blocks : []
+  );
 }

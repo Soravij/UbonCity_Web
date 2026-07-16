@@ -3,14 +3,18 @@ import { api, authHeaders } from "../api/api";
 import {
   EVENT_BLOCK_KEY,
   HERO_BLOCK_KEY,
-  addCandidateToBlocks,
+  addCandidatesToBlocks,
   applyPoolEntityTypeChange,
   buildPoolCandidateParams,
   canUseCandidateInBlock,
+  candidateSelectionKey,
   clearPoolTaxonomySelection,
   isEventBlock,
   isHeroBlock,
-  removePoolTaxonomyKey,
+  selectCurrentCandidateRows,
+  selectedTaxonomyLookupKeys,
+  toggleCandidateSelection,
+  updateTaxonomyLookupSlot,
 } from "../lib/homepageCurationPool";
 
 const LANGUAGE_OPTIONS = [
@@ -223,7 +227,7 @@ function createCandidateState(entityType = "place") {
   return {
     q: "",
     entity_type: entityType,
-    taxonomy_true: [],
+    taxonomy_true: ["", "", ""],
     loading: false,
     error: "",
     items: [],
@@ -251,6 +255,7 @@ export default function HomepageCuration({ token }) {
   const [poolTargetBlockKey, setPoolTargetBlockKey] = useState("");
   const [taxonomyCatalog, setTaxonomyCatalog] = useState([]);
   const [taxonomyCatalogError, setTaxonomyCatalogError] = useState("");
+  const [poolSelectedCandidateKeys, setPoolSelectedCandidateKeys] = useState([]);
   const previewRequestSeq = useRef(0);
 
   const serializedDraft = useMemo(() => serializeBlocks(blocks), [blocks]);
@@ -265,10 +270,10 @@ export default function HomepageCuration({ token }) {
     [blocks, poolState.entity_type]
   );
 
-  const selectedTaxonomyCatalogEntries = useMemo(() => {
-    const selected = new Set(Array.isArray(poolState.taxonomy_true) ? poolState.taxonomy_true : []);
-    return taxonomyCatalog.filter((entry) => selected.has(entry.key));
-  }, [poolState.taxonomy_true, taxonomyCatalog]);
+  const selectedPoolCandidates = useMemo(() => {
+    const selected = new Set(poolSelectedCandidateKeys);
+    return poolState.items.filter((candidate) => selected.has(candidateSelectionKey(candidate)));
+  }, [poolSelectedCandidateKeys, poolState.items]);
 
   useEffect(() => {
     if (poolState.entity_type !== "place") return;
@@ -284,9 +289,8 @@ export default function HomepageCuration({ token }) {
       } catch (error) {
         if (active) {
           setTaxonomyCatalog([]);
-          // Drop the selection with the catalog: without chips there is no way to see or remove it,
-          // and a hidden taxonomy_true would keep filtering every later search silently.
           setPoolState(clearPoolTaxonomySelection);
+          setPoolSelectedCandidateKeys([]);
           setTaxonomyCatalogError(error.response?.data?.error || "โหลดคุณสมบัติสำหรับกรองไม่สำเร็จ ตัวกรองคุณสมบัติถูกล้างแล้ว");
         }
       }
@@ -521,6 +525,7 @@ export default function HomepageCuration({ token }) {
   }
 
   async function searchPoolCandidates() {
+    setPoolSelectedCandidateKeys([]);
     setPoolState((current) => ({
       ...current,
       loading: true,
@@ -534,7 +539,7 @@ export default function HomepageCuration({ token }) {
           lang,
           q: poolState.q,
           limit: 20,
-          taxonomyTrue: poolState.taxonomy_true,
+          taxonomyTrue: selectedTaxonomyLookupKeys(poolState.taxonomy_true),
         }),
         headers: authHeaders(token),
       });
@@ -553,8 +558,10 @@ export default function HomepageCuration({ token }) {
     }
   }
 
-  function addPoolCandidateToBlock(candidate) {
-    setBlocks((current) => addCandidateToBlocks(current, poolTargetBlockKey, candidate));
+  function addSelectedPoolCandidatesToBlock() {
+    if (!poolTargetBlockKey || !selectedPoolCandidates.length) return;
+    setBlocks((current) => addCandidatesToBlocks(current, poolTargetBlockKey, selectedPoolCandidates));
+    setPoolSelectedCandidateKeys([]);
   }
 
   async function onSaveDraft() {
@@ -992,7 +999,10 @@ export default function HomepageCuration({ token }) {
                   ประเภทรายการ
                   <select
                     value={poolState.entity_type}
-                    onChange={(event) => setPoolState((current) => applyPoolEntityTypeChange(current, event.target.value))}
+                    onChange={(event) => {
+                      setPoolState((current) => applyPoolEntityTypeChange(current, event.target.value));
+                      setPoolSelectedCandidateKeys([]);
+                    }}
                   >
                     {ENTITY_TYPE_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -1009,28 +1019,31 @@ export default function HomepageCuration({ token }) {
                     placeholder={poolState.entity_type === "event" ? "ค้นหาชื่ออีเวนต์" : "ค้นหาด้วยชื่อหรือ slug"}
                   />
                 </label>
-                {poolState.entity_type === "place" ? (
-                  <label className="full">
-                    คุณสมบัติที่ต้องมี
+                {poolState.entity_type === "place" ? [0, 1, 2].map((slotIndex) => (
+                  <label key={`taxonomy-slot-${slotIndex}`}>
+                    คุณสมบัติ {slotIndex + 1}
                     <select
-                      multiple
-                      value={poolState.taxonomy_true}
+                      value={poolState.taxonomy_true[slotIndex] || ""}
                       onChange={(event) => updatePoolState({
-                        taxonomy_true: Array.from(event.target.selectedOptions, (option) => option.value),
+                        taxonomy_true: updateTaxonomyLookupSlot(poolState.taxonomy_true, slotIndex, event.target.value),
                         items: [],
                         error: "",
                       })}
                       disabled={Boolean(taxonomyCatalogError)}
                     >
+                      <option value="">ไม่เลือก</option>
                       {taxonomyCatalog.map((entry) => (
-                        <option key={entry.key} value={entry.key}>
+                        <option
+                          key={entry.key}
+                          value={entry.key}
+                          disabled={poolState.taxonomy_true.some((selectedKey, selectedIndex) => selectedIndex !== slotIndex && selectedKey === entry.key)}
+                        >
                           {entry.label} ({entry.key})
                         </option>
                       ))}
                     </select>
-                    <span className="muted">เลือกหลายข้อได้; ทุกข้อที่เลือกต้องมีค่าเป็น “ใช่”</span>
                   </label>
-                ) : null}
+                )) : null}
                 <label className="full">
                   ใช้ในบล็อก
                   <select value={poolTargetBlockKey} onChange={(event) => setPoolTargetBlockKey(event.target.value)} disabled={!eligiblePoolBlocks.length}>
@@ -1048,21 +1061,6 @@ export default function HomepageCuration({ token }) {
               </div>
 
               {taxonomyCatalogError ? <p className="status">{taxonomyCatalogError}</p> : null}
-              {poolState.entity_type === "place" && selectedTaxonomyCatalogEntries.length ? (
-                <div className="actions">
-                  {selectedTaxonomyCatalogEntries.map((entry) => (
-                    <button
-                      key={entry.key}
-                      type="button"
-                      className="ghost tiny-btn"
-                      onClick={() => setPoolState((current) => removePoolTaxonomyKey(current, entry.key))}
-                    >
-                      {entry.label} ×
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
               <div className="actions">
                 <button type="button" className="ghost" onClick={searchPoolCandidates} disabled={poolState.loading}>
                   {poolState.loading ? "กำลังค้นหา..." : "ค้นหารายการ"}
@@ -1076,38 +1074,62 @@ export default function HomepageCuration({ token }) {
             ) : null}
 
             {poolState.items.length ? (
-              <div className="homepage-curation-manual-list">
-                {poolState.items.map((candidate) => {
-                  const selectedBlock = blocks.find((block) => block.key === poolTargetBlockKey);
-                  const canUseInBlock = canUseCandidateInBlock(selectedBlock, candidate.entity_type);
-
-                  return (
-                    <div key={`pool-${candidate.entity_type}-${candidate.id}`} className="homepage-curation-manual-row">
-                      <div>
-                        <strong>{candidate.title || "-"}</strong>
-                        <p className="muted">
-                          {getEntityTypeLabel(candidate.entity_type)} #{candidate.id}
-                          {candidate.category ? ` | ${candidate.category}` : ""}
-                          {candidate.slug ? ` | รหัส: ${candidate.slug}` : ""}
-                        </p>
-                        {poolState.entity_type === "place" && candidate.taxonomy_summary ? (
-                          <p className="muted">
-                            คุณสมบัติ: {Object.entries(candidate.taxonomy_summary)
-                              .filter(([, value]) => value === true)
-                              .map(([key]) => taxonomyCatalog.find((entry) => entry.key === key)?.label || key)
-                              .join(", ") || "-"}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="actions">
-                        <button type="button" className="ghost tiny-btn" onClick={() => addPoolCandidateToBlock(candidate)} disabled={!canUseInBlock}>
-                          Use in block
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <>
+                <div className="actions">
+                  <span className="muted">เลือกแล้ว {selectedPoolCandidates.length} รายการ</span>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={addSelectedPoolCandidatesToBlock}
+                    disabled={!poolTargetBlockKey || !selectedPoolCandidates.length}
+                  >
+                    เพิ่มรายการที่เลือกเข้า Block
+                  </button>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>
+                        <input
+                          type="checkbox"
+                          checked={poolState.items.length > 0 && poolState.items.every((candidate) => poolSelectedCandidateKeys.includes(candidateSelectionKey(candidate)))}
+                          onChange={() => setPoolSelectedCandidateKeys((current) => selectCurrentCandidateRows(poolState.items, current))}
+                          aria-label="เลือกทั้งหมดในหน้าปัจจุบัน"
+                        />
+                      </th>
+                      <th>ชื่อ</th>
+                      <th>หมวดหมู่/ประเภท</th>
+                      <th>คุณสมบัติที่ตรง</th>
+                      <th>อัปเดตล่าสุด</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {poolState.items.map((candidate) => {
+                      const key = candidateSelectionKey(candidate);
+                      const matches = Object.entries(candidate.taxonomy_summary || {})
+                        .filter(([, value]) => value === true)
+                        .map(([taxonomyKey]) => taxonomyCatalog.find((entry) => entry.key === taxonomyKey)?.label || taxonomyKey)
+                        .join(", ");
+                      return (
+                        <tr key={`pool-${candidate.entity_type}-${candidate.id}`}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={poolSelectedCandidateKeys.includes(key)}
+                              onChange={() => setPoolSelectedCandidateKeys((current) => toggleCandidateSelection(current, candidate))}
+                              aria-label={`เลือกรายการ ${candidate.title || candidate.id}`}
+                            />
+                          </td>
+                          <td>{candidate.title || "-"}</td>
+                          <td>{candidate.category || getEntityTypeLabel(candidate.entity_type)}</td>
+                          <td>{matches || "-"}</td>
+                          <td>{candidate.updated_at ? new Date(candidate.updated_at).toLocaleString() : "-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </>
             ) : null}
           </article>
         </div>
