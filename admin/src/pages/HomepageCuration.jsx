@@ -1096,6 +1096,7 @@ export default function HomepageCuration({ token }) {
                     เพิ่มรายการที่เลือกเข้า Block
                   </button>
                 </div>
+                <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>
@@ -1152,6 +1153,7 @@ export default function HomepageCuration({ token }) {
                     })}
                   </tbody>
                 </table>
+                </div>
               </>
             ) : null}
           </article>

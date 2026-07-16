@@ -1868,6 +1868,40 @@ th {
   border-bottom-color: var(--theme-border);
 }
 
+:root[data-theme="dark"] .homepage-curation-block-list > .homepage-curation-block-card > .table-wrap > table {
+  background: #1b222d;
+  border: 1px solid var(--theme-border);
+  color: var(--theme-text);
+}
+
+:root[data-theme="dark"] .homepage-curation-block-list > .homepage-curation-block-card > .table-wrap > table th {
+  background: #222a35;
+  color: var(--theme-text);
+}
+
+:root[data-theme="dark"] .homepage-curation-block-list > .homepage-curation-block-card > .table-wrap > table td {
+  background: #1b222d;
+  color: var(--theme-text);
+}
+
+:root[data-theme="dark"] .homepage-curation-block-list > .homepage-curation-block-card > .table-wrap > table th,
+:root[data-theme="dark"] .homepage-curation-block-list > .homepage-curation-block-card > .table-wrap > table td {
+  border-bottom-color: var(--theme-border);
+}
+
+:root[data-theme="dark"] .homepage-curation-block-list > .homepage-curation-block-card > .table-wrap > table tbody tr:hover td {
+  background: #222a35;
+}
+
+:root[data-theme="dark"] .homepage-curation-block-list > .homepage-curation-block-card > .table-wrap > table input[type="checkbox"] {
+  accent-color: var(--theme-primary);
+}
+
+:root[data-theme="dark"] .homepage-curation-block-list > .homepage-curation-block-card > .table-wrap > table input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
+}
+
 :root[data-theme="dark"] .preview-cover-wrap,
 :root[data-theme="dark"] .preview-inline-image {
   border-color: var(--theme-border);

@@ -20,6 +20,7 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(path.join(here, "..", "src", "pages", "HomepageCuration.jsx"), "utf8");
+const appCss = fs.readFileSync(path.join(here, "..", "src", "App.css"), "utf8");
 
 test("taxonomy lookup keeps exactly three unique temporary slots", () => {
   assert.deepEqual(createTaxonomyLookupSlots(), ["", "", ""]);
@@ -95,6 +96,7 @@ test("Homepage Curation renders the lookup table and keeps lookup state out of l
   assert.match(source, /คุณสมบัติ \{slotIndex \+ 1\}/);
   assert.match(source, /<option value="">ไม่เลือก<\/option>/);
   assert.match(source, /<table>/);
+  assert.match(source, /<div className="table-wrap">\s*<table>/);
   assert.match(source, /เลือกทั้งหมดในหน้าปัจจุบัน/);
   assert.match(source, /เพิ่มรายการที่เลือกเข้า Block/);
   assert.match(source, /<th>การทำงาน<\/th>/);
@@ -109,4 +111,8 @@ test("Homepage Curation renders the lookup table and keeps lookup state out of l
   const serializeStart = source.indexOf("function serializeBlocks");
   const serializeEnd = source.indexOf("function createCandidateState", serializeStart);
   assert.equal(source.slice(serializeStart, serializeEnd).includes("taxonomy_true"), false);
+
+  assert.match(appCss, /:root\[data-theme="dark"\] \.homepage-curation-block-list > \.homepage-curation-block-card > \.table-wrap > table th/);
+  assert.match(appCss, /background: #222a35;/);
+  assert.match(appCss, /input\[type="checkbox"\] \{\s*accent-color: var\(--theme-primary\);/);
 });
