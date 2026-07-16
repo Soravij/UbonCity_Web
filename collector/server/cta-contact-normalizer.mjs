@@ -1,3 +1,5 @@
+import { decodeUrlEntities } from "../lib/decode-url-entities.mjs";
+
 const CTA_KEYS = ["phone", "line_url", "facebook_url", "website_url"];
 const FACEBOOK_HOSTS = new Set(["facebook.com", "m.facebook.com", "mbasic.facebook.com", "fb.com"]);
 const LINE_HOSTS = new Set(["line.me", "lin.ee", "liff.line.me"]);
@@ -15,7 +17,7 @@ function escapeRegex(value) {
 }
 
 function normalizeUrl(value) {
-  const raw = text(value).replace(/[.,;!?:ฯ،]+$/u, "");
+  const raw = decodeUrlEntities(text(value)).replace(/[.,;!?:ฯ،]+$/u, "");
   if (!/^https?:\/\//i.test(raw)) return null;
   try {
     const url = new URL(raw);

@@ -16,6 +16,7 @@ import {
   getCollectorRequiredIntegrationKeys,
 } from "./integration-readiness.mjs";
 import { resolvePaths } from "../config/paths.mjs";
+import { decodeUrlEntities } from "../lib/decode-url-entities.mjs";
 import {
   buildFeaturePolicyMap,
   listAiFeatureCatalog,
@@ -545,7 +546,7 @@ function normalizeOtherTransportContactText(value) {
 }
 
 function normalizeOtherTransportLink(value) {
-  const raw = String(value || "").trim();
+  const raw = decodeUrlEntities(String(value || "").trim());
   if (!raw) return "";
   try {
     const parsed = new URL(raw);

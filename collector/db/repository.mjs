@@ -3,6 +3,7 @@ import path from "path";
 
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
 import { getTaxonomyCheckLabel, resolveTaxonomyRequestedChecksGroup } from "../server/taxonomy-resolver.mjs";
+import { decodeUrlEntities } from "../lib/decode-url-entities.mjs";
 
 function parseTags(raw) {
   if (!raw) return [];
@@ -55,7 +56,7 @@ function normalizeImportedMediaUrl(value) {
 }
 
 function normalizeReferenceMediaUrl(value) {
-  const text = String(value || "").trim();
+  const text = decodeUrlEntities(String(value || "").trim());
   if (!text) return "";
 
   try {
@@ -462,7 +463,7 @@ function deriveWorkflowStatusFromRowStates(row = {}, fallback = "raw") {
 }
 
 function normalizeHttpUrl(raw, fieldName) {
-  const text = String(raw || "").trim();
+  const text = decodeUrlEntities(String(raw || "").trim());
   if (!text) return null;
   let parsed;
   try {

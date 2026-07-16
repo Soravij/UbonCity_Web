@@ -1,3 +1,5 @@
+import { decodeUrlEntities } from "../../lib/decode-url-entities.mjs";
+
 function toText(value) {
   return String(value ?? "").trim();
 }
@@ -78,7 +80,7 @@ function stripTrackingParams(parsedUrl) {
 }
 
 export function normalizeMediaUrl(value) {
-  const raw = toText(value);
+  const raw = decodeUrlEntities(toText(value));
   if (!raw) return "";
   try {
     const parsed = new URL(raw);
