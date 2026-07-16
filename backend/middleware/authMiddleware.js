@@ -88,6 +88,19 @@ export const protectReviewContentReadAccess = (req, res, next) => {
   }
 };
 
+// Gate for any surface that exposes the confirmed CTA/Taxonomy curation signal to a backend
+// session. It reads REVIEW_CONTENT_INTERNAL_ROLES so no caller has to restate the role list —
+// PROJECT_POLICY.md §7A "Admin Visibility of the Curation Signal (locked)" requires that list to
+// exist in exactly one place.
+export const authorizeReviewContentInternal = (req, res, next) => {
+  const role = String(req.user?.role || "").toLowerCase();
+  if (!REVIEW_CONTENT_INTERNAL_ROLES.has(role)) {
+    return res.status(403).json({ message: "Admin only" });
+  }
+
+  next();
+};
+
 export const authorizeAdmin = (req, res, next) => {
   const role = String(req.user?.role || "").toLowerCase();
   if (role !== "admin" && role !== "owner") {

@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, authHeaders } from "../api/api";
+import {
+  EVENT_BLOCK_KEY,
+  HERO_BLOCK_KEY,
+  addCandidateToBlocks,
+  applyPoolEntityTypeChange,
+  buildPoolCandidateParams,
+  canUseCandidateInBlock,
+  clearPoolTaxonomySelection,
+  isEventBlock,
+  isHeroBlock,
+  removePoolTaxonomyKey,
+} from "../lib/homepageCurationPool";
 
 const LANGUAGE_OPTIONS = [
   { value: "th", label: "ไทย" },
@@ -16,8 +28,6 @@ const FIXED_BLOCK_TYPES = {
   scenarios: "scenario-grid",
   featured_events: "event-list",
 };
-const HERO_BLOCK_KEY = "hero";
-const EVENT_BLOCK_KEY = "featured_events";
 const TAB_LAYOUT = "layout";
 const TAB_SIGNALS = "signals";
 
@@ -107,14 +117,6 @@ function normalizeFixedBlocksInCurrentOrder(blocks) {
   }
 
   return normalized;
-}
-
-function isHeroBlock(block) {
-  return String(block?.key || "").trim().toLowerCase() === HERO_BLOCK_KEY;
-}
-
-function isEventBlock(block) {
-  return String(block?.key || "").trim().toLowerCase() === EVENT_BLOCK_KEY;
 }
 
 function createManualItem(entityType = "place") {
@@ -221,6 +223,7 @@ function createCandidateState(entityType = "place") {
   return {
     q: "",
     entity_type: entityType,
+    taxonomy_true: [],
     loading: false,
     error: "",
     items: [],
@@ -229,14 +232,6 @@ function createCandidateState(entityType = "place") {
 
 function getDefaultCandidateEntityType(block) {
   return isEventBlock(block) ? "event" : "place";
-}
-
-function canUseCandidateInBlock(block, entityType) {
-  if (!block || isHeroBlock(block) || !block.enabled) return false;
-  if (String(entityType || "").trim().toLowerCase() === "event") {
-    return isEventBlock(block);
-  }
-  return !isEventBlock(block);
 }
 
 export default function HomepageCuration({ token }) {
@@ -254,6 +249,8 @@ export default function HomepageCuration({ token }) {
   const [previewBlocks, setPreviewBlocks] = useState([]);
   const [poolState, setPoolState] = useState(createCandidateState("place"));
   const [poolTargetBlockKey, setPoolTargetBlockKey] = useState("");
+  const [taxonomyCatalog, setTaxonomyCatalog] = useState([]);
+  const [taxonomyCatalogError, setTaxonomyCatalogError] = useState("");
   const previewRequestSeq = useRef(0);
 
   const serializedDraft = useMemo(() => serializeBlocks(blocks), [blocks]);
@@ -267,6 +264,36 @@ export default function HomepageCuration({ token }) {
     () => blocks.filter((block) => canUseCandidateInBlock(block, poolState.entity_type)),
     [blocks, poolState.entity_type]
   );
+
+  const selectedTaxonomyCatalogEntries = useMemo(() => {
+    const selected = new Set(Array.isArray(poolState.taxonomy_true) ? poolState.taxonomy_true : []);
+    return taxonomyCatalog.filter((entry) => selected.has(entry.key));
+  }, [poolState.taxonomy_true, taxonomyCatalog]);
+
+  useEffect(() => {
+    if (poolState.entity_type !== "place") return;
+    let active = true;
+    async function loadTaxonomyCatalog() {
+      setTaxonomyCatalogError("");
+      try {
+        const res = await api.get("/homepage-curation/taxonomy-catalog", {
+          params: { entity_type: "place" },
+          headers: authHeaders(token),
+        });
+        if (active) setTaxonomyCatalog(Array.isArray(res.data?.items) ? res.data.items : []);
+      } catch (error) {
+        if (active) {
+          setTaxonomyCatalog([]);
+          // Drop the selection with the catalog: without chips there is no way to see or remove it,
+          // and a hidden taxonomy_true would keep filtering every later search silently.
+          setPoolState(clearPoolTaxonomySelection);
+          setTaxonomyCatalogError(error.response?.data?.error || "โหลดคุณสมบัติสำหรับกรองไม่สำเร็จ ตัวกรองคุณสมบัติถูกล้างแล้ว");
+        }
+      }
+    }
+    loadTaxonomyCatalog();
+    return () => { active = false; };
+  }, [poolState.entity_type, token]);
 
   useEffect(() => {
     if (!eligiblePoolBlocks.length) {
@@ -334,8 +361,7 @@ export default function HomepageCuration({ token }) {
       setPreviewBlocks([]);
       setPreviewError(error.response?.data?.error || "Failed to preview homepage curation layout");
     } finally {
-      if (previewRequestSeq.current !== requestId) return;
-      setPreviewLoading(false);
+      if (previewRequestSeq.current === requestId) setPreviewLoading(false);
     }
   }, [lang, serializedDraft, token]);
 
@@ -503,12 +529,13 @@ export default function HomepageCuration({ token }) {
     }));
     try {
       const res = await api.get("/homepage-curation/candidates", {
-        params: {
-          entity_type: poolState.entity_type,
+        params: buildPoolCandidateParams({
+          entityType: poolState.entity_type,
           lang,
           q: poolState.q,
           limit: 20,
-        },
+          taxonomyTrue: poolState.taxonomy_true,
+        }),
         headers: authHeaders(token),
       });
       setPoolState((current) => ({
@@ -527,39 +554,7 @@ export default function HomepageCuration({ token }) {
   }
 
   function addPoolCandidateToBlock(candidate) {
-    const targetBlockKey = String(poolTargetBlockKey || "").trim().toLowerCase();
-    if (!targetBlockKey) return;
-
-    setBlocks((current) =>
-      current.map((block) => {
-        if (String(block?.key || "").trim().toLowerCase() !== targetBlockKey) return block;
-        if (!canUseCandidateInBlock(block, candidate?.entity_type)) return block;
-
-        const candidateId = Number(candidate?.id || 0) || null;
-        if (!candidateId) return block;
-
-        const candidateType = String(candidate?.entity_type || "").trim().toLowerCase();
-        const dup = (Array.isArray(block.manual_items) ? block.manual_items : []).some(
-          (item) => Number(item?.entity_id || 0) === candidateId && String(item?.entity_type || "").trim().toLowerCase() === candidateType
-        );
-        if (dup) return block;
-
-        return {
-          ...block,
-          manual_items: [
-            ...(Array.isArray(block.manual_items) ? block.manual_items : []),
-            {
-              entity_type: candidateType,
-              entity_id: String(candidateId),
-              category: String(candidate?.category || "").trim(),
-              slug: String(candidate?.slug || "").trim(),
-              label: String(candidate?.title || "").trim(),
-              note: "",
-            },
-          ],
-        };
-      })
-    );
+    setBlocks((current) => addCandidateToBlocks(current, poolTargetBlockKey, candidate));
   }
 
   async function onSaveDraft() {
@@ -997,7 +992,7 @@ export default function HomepageCuration({ token }) {
                   ประเภทรายการ
                   <select
                     value={poolState.entity_type}
-                    onChange={(event) => updatePoolState({ entity_type: event.target.value, items: [], error: "" })}
+                    onChange={(event) => setPoolState((current) => applyPoolEntityTypeChange(current, event.target.value))}
                   >
                     {ENTITY_TYPE_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -1014,6 +1009,28 @@ export default function HomepageCuration({ token }) {
                     placeholder={poolState.entity_type === "event" ? "ค้นหาชื่ออีเวนต์" : "ค้นหาด้วยชื่อหรือ slug"}
                   />
                 </label>
+                {poolState.entity_type === "place" ? (
+                  <label className="full">
+                    คุณสมบัติที่ต้องมี
+                    <select
+                      multiple
+                      value={poolState.taxonomy_true}
+                      onChange={(event) => updatePoolState({
+                        taxonomy_true: Array.from(event.target.selectedOptions, (option) => option.value),
+                        items: [],
+                        error: "",
+                      })}
+                      disabled={Boolean(taxonomyCatalogError)}
+                    >
+                      {taxonomyCatalog.map((entry) => (
+                        <option key={entry.key} value={entry.key}>
+                          {entry.label} ({entry.key})
+                        </option>
+                      ))}
+                    </select>
+                    <span className="muted">เลือกหลายข้อได้; ทุกข้อที่เลือกต้องมีค่าเป็น “ใช่”</span>
+                  </label>
+                ) : null}
                 <label className="full">
                   ใช้ในบล็อก
                   <select value={poolTargetBlockKey} onChange={(event) => setPoolTargetBlockKey(event.target.value)} disabled={!eligiblePoolBlocks.length}>
@@ -1029,6 +1046,22 @@ export default function HomepageCuration({ token }) {
                   </select>
                 </label>
               </div>
+
+              {taxonomyCatalogError ? <p className="status">{taxonomyCatalogError}</p> : null}
+              {poolState.entity_type === "place" && selectedTaxonomyCatalogEntries.length ? (
+                <div className="actions">
+                  {selectedTaxonomyCatalogEntries.map((entry) => (
+                    <button
+                      key={entry.key}
+                      type="button"
+                      className="ghost tiny-btn"
+                      onClick={() => setPoolState((current) => removePoolTaxonomyKey(current, entry.key))}
+                    >
+                      {entry.label} ×
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="actions">
                 <button type="button" className="ghost" onClick={searchPoolCandidates} disabled={poolState.loading}>
@@ -1057,6 +1090,14 @@ export default function HomepageCuration({ token }) {
                           {candidate.category ? ` | ${candidate.category}` : ""}
                           {candidate.slug ? ` | รหัส: ${candidate.slug}` : ""}
                         </p>
+                        {poolState.entity_type === "place" && candidate.taxonomy_summary ? (
+                          <p className="muted">
+                            คุณสมบัติ: {Object.entries(candidate.taxonomy_summary)
+                              .filter(([, value]) => value === true)
+                              .map(([key]) => taxonomyCatalog.find((entry) => entry.key === key)?.label || key)
+                              .join(", ") || "-"}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="actions">
                         <button type="button" className="ghost tiny-btn" onClick={() => addPoolCandidateToBlock(candidate)} disabled={!canUseInBlock}>

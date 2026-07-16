@@ -1,4 +1,8 @@
 import pool from "../config/db.js";
+import {
+  SUPPORTED_TAXONOMY_CATEGORIES,
+  getTaxonomyCatalogEntriesForCategory,
+} from "../../shared/taxonomy/taxonomy-catalog.mjs";
 
 const VALID_SOURCE_MODES = new Set(["manual-first-hybrid", "manual-only", "rule-only"]);
 const VALID_FALLBACK_MODES = new Set(["latest-approved", "featured", "none"]);
@@ -11,6 +15,12 @@ const FIXED_BLOCK_TYPES = {
   scenarios: "scenario-grid",
   featured_events: "event-list",
 };
+const BOOLEAN_COMPATIBLE_TAXONOMY_ANSWER_TYPES = new Set(["boolean", "boolean_with_conditions"]);
+// Confirmed taxonomy checks live inside review_payload_json, so a taxonomy_true filter cannot be
+// expressed in the candidate SQL. Rows are scanned page by page in id order until enough matches
+// are collected or the candidate set is exhausted — never a single fixed over-fetch, which would
+// silently hide older matching places.
+const TAXONOMY_FILTER_SCAN_PAGE_SIZE = 100;
 
 const DEFAULT_BLOCK_COPY = {
   th: {
@@ -164,6 +174,61 @@ function parseJson(value, fallback) {
   } catch {
     return fallback;
   }
+}
+
+export function parseConfirmedTaxonomyChecks(reviewPayloadJson) {
+  const payload = typeof reviewPayloadJson === "string"
+    ? parseJson(reviewPayloadJson, {})
+    : (reviewPayloadJson && typeof reviewPayloadJson === "object" && !Array.isArray(reviewPayloadJson) ? reviewPayloadJson : {});
+  const checks = payload?.confirmed_taxonomy_checks;
+  if (!checks || typeof checks !== "object" || Array.isArray(checks)) return {};
+  return Object.fromEntries(Object.entries(checks).filter(([key]) => String(key || "").trim()));
+}
+
+export function getBooleanCompatibleTaxonomyCatalog() {
+  const entriesByKey = new Map();
+  for (const category of SUPPORTED_TAXONOMY_CATEGORIES) {
+    for (const entry of getTaxonomyCatalogEntriesForCategory(category, "place")) {
+      const key = String(entry?.taxonomy_key || "").trim().toLowerCase();
+      const answerType = String(entry?.answer_type || "").trim().toLowerCase();
+      if (!key || !BOOLEAN_COMPATIBLE_TAXONOMY_ANSWER_TYPES.has(answerType) || entriesByKey.has(key)) continue;
+      entriesByKey.set(key, {
+        key,
+        label: String(entry?.label || key).trim() || key,
+        answer_type: answerType,
+      });
+    }
+  }
+  return Array.from(entriesByKey.values()).sort((a, b) => a.label.localeCompare(b.label, "th"));
+}
+
+export function normalizeTaxonomyTrueKeys(value, catalog = getBooleanCompatibleTaxonomyCatalog()) {
+  const keys = String(value || "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+  const selected = Array.from(new Set(keys));
+  if (!selected.length) return [];
+
+  const allowed = new Set((Array.isArray(catalog) ? catalog : []).map((entry) => String(entry?.key || "").trim().toLowerCase()));
+  const invalid = selected.find((key) => !allowed.has(key));
+  if (invalid) {
+    const error = new Error(`Invalid boolean taxonomy key: ${invalid}`);
+    error.code = "INVALID_TAXONOMY_TRUE_KEY";
+    throw error;
+  }
+  return selected;
+}
+
+function buildTaxonomySummary(reviewPayloadJson, selectedKeys) {
+  const confirmed = parseConfirmedTaxonomyChecks(reviewPayloadJson);
+  return Object.fromEntries(selectedKeys.map((key) => [key, confirmed[key] === true]));
+}
+
+function matchesTaxonomyTrueKeys(reviewPayloadJson, selectedKeys) {
+  if (!selectedKeys.length) return true;
+  const confirmed = parseConfirmedTaxonomyChecks(reviewPayloadJson);
+  return selectedKeys.every((key) => confirmed[key] === true);
 }
 
 function normalizeStringList(value) {
@@ -750,6 +815,7 @@ export async function searchHomepageCurationCandidates({
   lang = "th",
   q = "",
   limit = 20,
+  taxonomyTrue = "",
 }) {
   const normalizedType = VALID_ENTITY_TYPES.has(String(entityType || "").trim().toLowerCase())
     ? String(entityType).trim().toLowerCase()
@@ -758,6 +824,7 @@ export async function searchHomepageCurationCandidates({
   const normalizedQ = String(q || "").trim();
   const maxLimit = Math.max(1, Math.min(50, Number(limit || 20) || 20));
   const wildcard = `%${normalizedQ}%`;
+  const taxonomyTrueKeys = normalizedType === "place" ? normalizeTaxonomyTrueKeys(taxonomyTrue) : [];
 
   if (normalizedType === "event") {
     try {
@@ -792,18 +859,27 @@ export async function searchHomepageCurationCandidates({
     }
   }
 
-  const [rows] = await pool.query(
-    `SELECT
+  const candidateSql = `SELECT
        p.id,
        'place' AS entity_type,
        c.slug AS category,
        COALESCE(NULLIF(TRIM(p.slug), ''), CONCAT('place-', p.id)) AS slug,
        COALESCE(pt_req.title, pt_th.title) AS title,
-       COALESCE(pt_req.description, pt_th.description) AS description
+       COALESCE(pt_req.description, pt_th.description) AS description,
+       rc.review_payload_json
      FROM places p
      JOIN categories c ON c.id = p.category_id
      LEFT JOIN place_translations pt_req ON pt_req.place_id = p.id AND pt_req.lang=?
      LEFT JOIN place_translations pt_th ON pt_th.place_id = p.id AND pt_th.lang='th'
+     LEFT JOIN review_contents rc ON rc.id = (
+       SELECT rc_latest.id
+       FROM review_contents rc_latest
+       WHERE rc_latest.public_entity_type='place'
+         AND rc_latest.public_entity_id=p.id
+         AND rc_latest.status='published'
+       ORDER BY COALESCE(rc_latest.published_at, rc_latest.updated_at) DESC, rc_latest.id DESC
+       LIMIT 1
+     )
      WHERE p.is_approved=1
        AND (pt_req.id IS NOT NULL OR pt_th.id IS NOT NULL)
        AND (
@@ -813,9 +889,38 @@ export async function searchHomepageCurationCandidates({
          COALESCE(NULLIF(TRIM(p.slug), ''), CONCAT('place-', p.id)) LIKE ?
        )
      ORDER BY p.id DESC
-     LIMIT ?`,
-    [normalizedLang, normalizedQ, wildcard, wildcard, wildcard, maxLimit]
-  );
+     LIMIT ? OFFSET ?`;
+  const candidateParams = [normalizedLang, normalizedQ, wildcard, wildcard, wildcard];
 
-  return rows;
+  function shapeCandidateRow({ review_payload_json: reviewPayloadJson, ...row }) {
+    return {
+      ...row,
+      ...(taxonomyTrueKeys.length ? { taxonomy_summary: buildTaxonomySummary(reviewPayloadJson, taxonomyTrueKeys) } : {}),
+    };
+  }
+
+  if (!taxonomyTrueKeys.length) {
+    const [rows] = await pool.query(candidateSql, [...candidateParams, maxLimit, 0]);
+    return rows.map(shapeCandidateRow);
+  }
+
+  const pageSize = Math.max(maxLimit, TAXONOMY_FILTER_SCAN_PAGE_SIZE);
+  const matched = [];
+  let offset = 0;
+
+  while (matched.length < maxLimit) {
+    const [rows] = await pool.query(candidateSql, [...candidateParams, pageSize, offset]);
+    if (!rows.length) break;
+
+    for (const row of rows) {
+      if (!matchesTaxonomyTrueKeys(row?.review_payload_json, taxonomyTrueKeys)) continue;
+      matched.push(shapeCandidateRow(row));
+      if (matched.length >= maxLimit) break;
+    }
+
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return matched;
 }
