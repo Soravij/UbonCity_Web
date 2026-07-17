@@ -153,21 +153,49 @@ async function main() {
     await expectBlocked(blockedReviewAction.id, "review_actions");
     await expectBlocked(blockedIntelligence.id, "content_intelligence_models");
     await expectBlocked(blockedAssignment.id, "assignments");
-    await expectBlocked(blockedTranslation.id, "translations");
+    await expectBlocked(blockedTranslation.id, "translations_unpublished");
 
     logStep("purge.blocked");
+    // hard_blocker and cleanup_candidate cannot be overridden at purge: 409, no confirmation offered.
     const expectPurgeBlocked = async (id, key) => {
       const response = await client.post(`/api/admin/deleted-items/${id}/purge`, { reason: "smoke blocked" });
-      assert(response.status === 409, `expected 409 for blocked item ${id}`);
+      assert(response.status === 409, `expected 409 for blocked item ${id}, got ${response.status}`);
       assert((response.body?.blockers || []).some((row) => String(row?.key || "") === key), `missing purge blocker ${key}`);
     };
     await expectPurgeBlocked(blockedSource.id, "source_records");
-    await expectPurgeBlocked(blockedFieldPack.id, "field_packs");
     await expectPurgeBlocked(blockedPublished.id, "published_articles");
     await expectPurgeBlocked(blockedReviewAction.id, "review_actions");
     await expectPurgeBlocked(blockedIntelligence.id, "content_intelligence_models");
     await expectPurgeBlocked(blockedAssignment.id, "assignments");
-    await expectPurgeBlocked(blockedTranslation.id, "translations");
+
+    logStep("purge.needs_confirmation");
+    // confirm_required groups hold human curation: purge is refused with 400 until the owner names
+    // every one of them in confirmed_overrides, then it goes through.
+    const expectPurgeNeedsConfirmation = async (id, key) => {
+      const response = await client.post(`/api/admin/deleted-items/${id}/purge`, { reason: "smoke unconfirmed" });
+      assert(response.status === 400, `expected 400 for unconfirmed item ${id}, got ${response.status}`);
+      const missing = Array.isArray(response.body?.missing_confirmations) ? response.body.missing_confirmations : [];
+      assert(missing.some((row) => String(row?.key || "") === key), `missing confirmation entry ${key}`);
+      assert(
+        missing.every((row) => String(row?.category || "") === "confirm_required"),
+        `missing_confirmations should only carry confirm_required for ${id}`
+      );
+    };
+    await expectPurgeNeedsConfirmation(blockedFieldPack.id, "field_packs");
+    await expectPurgeNeedsConfirmation(blockedTranslation.id, "translations_unpublished");
+
+    logStep("purge.confirmed");
+    const expectPurgeWithConfirmation = async (id, confirmedOverrides) => {
+      const response = await client.post(`/api/admin/deleted-items/${id}/purge`, {
+        reason: "smoke confirmed override",
+        confirmed_overrides: confirmedOverrides,
+      });
+      assert(response.ok, `confirmed purge failed for ${id}: ${JSON.stringify(response.body)}`);
+      const gone = await client.get(`/api/admin/deleted-items/${id}/cleanup-check`);
+      assert(gone.status === 404, `confirmed-purged item ${id} should be gone`);
+    };
+    await expectPurgeWithConfirmation(blockedFieldPack.id, ["field_packs"]);
+    await expectPurgeWithConfirmation(blockedTranslation.id, ["translations_unpublished"]);
 
     logStep("purge.success");
     const purged = await client.post(`/api/admin/deleted-items/${purgeable.id}/purge`, { reason: "smoke purgeable" });
@@ -195,7 +223,9 @@ async function main() {
         blocked_review_action_reason_key: "review_actions",
         blocked_intelligence_reason_key: "content_intelligence_models",
         blocked_assignment_reason_key: "assignments",
-        blocked_translation_reason_key: "translations",
+        blocked_translation_reason_key: "translations_unpublished",
+        confirm_required_purge_rejected_without_overrides: true,
+        confirm_required_purge_accepted_with_overrides: true,
         purged_item_removed: true,
       },
     }, null, 2));

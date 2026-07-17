@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { planBulkItemDelete } from "../services/raw-delete.mjs";
+import { planBulkItemDelete, getNeverOverrideBlockersForItem } from "../services/raw-delete.mjs";
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 
@@ -61,18 +61,18 @@ function createTestContext() {
 // Unit tests for planBulkItemDelete (no DB needed)
 // ============================================================
 
-test("planBulkItemDelete is all-or-nothing when any selected item is blocked", () => {
+test("planBulkItemDelete skips NEVER-blocked items and still plans the rest (partial success)", () => {
   const result = planBulkItemDelete(
     [
       { id: 11, title: "Safe Raw Item" },
-      { id: 22, title: "Blocked Progressed Item" },
+      { id: 22, title: "Published Item" },
+      { id: 33, title: "Safe Non-Raw Item" },
     ],
     {
       getRawOnlyHardDeleteEligibility(itemId) {
-        if (Number(itemId) === 11) return { eligible: true };
-        return { eligible: false };
+        return { eligible: Number(itemId) === 11 };
       },
-      getMergeBlockersForItem(itemId) {
+      getNeverOverrideBlockersForItem(itemId) {
         if (Number(itemId) === 22) {
           return [{ key: "published_articles", label: "เผยแพร่ขึ้นเว็บแล้ว", count: 1 }];
         }
@@ -81,10 +81,35 @@ test("planBulkItemDelete is all-or-nothing when any selected item is blocked", (
     }
   );
 
-  assert.equal(result.ok, false);
-  assert.deepEqual(result.actions, []);
+  assert.equal(result.ok, false, "ok=false signals at least one blocked row");
+  assert.deepEqual(result.actions, [
+    { item_id: 11, mode: "hard" },
+    { item_id: 33, mode: "soft" },
+  ], "non-blocked items still planned");
   assert.equal(result.blocked_rows.length, 1);
   assert.equal(result.blocked_rows[0].item_id, 22);
+});
+
+// The bulk-delete endpoint reports 400 when plan.actions is empty while blocked_rows is not,
+// so that "every selected item is blocked" cannot be reported as a success that deleted 0 items.
+test("planBulkItemDelete leaves actions empty when every selected item is NEVER-blocked", () => {
+  const result = planBulkItemDelete(
+    [
+      { id: 22, title: "Published Item" },
+      { id: 55, title: "Reviewed Item" },
+    ],
+    {
+      getRawOnlyHardDeleteEligibility() {
+        return { eligible: false };
+      },
+      getNeverOverrideBlockersForItem() {
+        return [{ key: "published_articles", label: "เผยแพร่ขึ้นเว็บแล้ว", count: 1 }];
+      },
+    }
+  );
+
+  assert.deepEqual(result.actions, [], "nothing is planned");
+  assert.equal(result.blocked_rows.length, 2);
 });
 
 test("planBulkItemDelete plans hard delete for safe raw-only items and soft delete for non-blocked items", () => {
@@ -97,7 +122,7 @@ test("planBulkItemDelete plans hard delete for safe raw-only items and soft dele
       getRawOnlyHardDeleteEligibility(itemId) {
         return { eligible: Number(itemId) === 11 };
       },
-      getMergeBlockersForItem() {
+      getNeverOverrideBlockersForItem() {
         return [];
       },
     }
@@ -111,7 +136,7 @@ test("planBulkItemDelete plans hard delete for safe raw-only items and soft dele
   ]);
 });
 
-test("planBulkItemDelete blocks bulk delete when content_assignment_submission_deliverables blocks raw-only hard delete", () => {
+test("planBulkItemDelete soft-deletes an item whose only dependencies are non-NEVER (deliverables)", () => {
   const result = planBulkItemDelete(
     [
       { id: 44, title: "Raw Item With Deliverables" },
@@ -127,19 +152,16 @@ test("planBulkItemDelete blocks bulk delete when content_assignment_submission_d
         }
         return { eligible: true };
       },
-      getMergeBlockersForItem(itemId) {
-        if (Number(itemId) === 44) {
-          return [{ key: "content_assignment_submission_deliverables", count: 3 }];
-        }
+      // Deliverables are not a NEVER blocker: hard delete stays barred, soft delete is allowed.
+      getNeverOverrideBlockersForItem() {
         return [];
       },
     }
   );
 
-  assert.equal(result.ok, false);
-  assert.deepEqual(result.actions, []);
-  assert.equal(result.blocked_rows.length, 1);
-  assert.equal(result.blocked_rows[0].item_id, 44);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.blocked_rows, []);
+  assert.deepEqual(result.actions, [{ item_id: 44, mode: "soft" }]);
 });
 
 // ============================================================
@@ -318,6 +340,201 @@ test("bulkDeleteItems handles mixed hard and soft deletes in one transaction", (
     const softAfter = ctx.db.prepare("SELECT * FROM content_items WHERE id=?").get(softId);
     assert.ok(softAfter !== undefined, "soft item row still exists");
     assert.equal(Number(softAfter?.is_deleted || 0), 1, "soft item is_deleted=1");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+// ============================================================
+// NEVER-override blocker gate for soft delete
+// ============================================================
+
+function addDraft(db, itemId) {
+  db.prepare(
+    "INSERT INTO content_drafts (content_item_id, generation_run_uid, draft_title, body) VALUES (?,?,?,?)"
+  ).run(itemId, `run-${itemId}`, "Draft title", "Draft body");
+}
+
+function addAssignment(db, itemId) {
+  db.prepare("INSERT INTO content_assignments (assignment_uid, content_item_id) VALUES (?,?)").run(
+    `asg-${itemId}`,
+    itemId
+  );
+}
+
+function addPublishedArticle(db, itemId) {
+  const info = db
+    .prepare("INSERT INTO published_articles (content_item_id, slug, title, body) VALUES (?,?,?,?)")
+    .run(itemId, `slug-${itemId}`, "Published title", "Published body");
+  return Number(info.lastInsertRowid);
+}
+
+function addTranslation(db, itemId, publishedArticleId) {
+  db.prepare(
+    "INSERT INTO content_translations (source_content_item_id, source_published_article_id, source_fingerprint, lang) VALUES (?,?,?,?)"
+  ).run(itemId, publishedArticleId, `fp-${itemId}`, "en");
+}
+
+test("(a) soft delete passes when item only has drafts and assignments", () => {
+  const ctx = createTestContext();
+  try {
+    const id = Number(ctx.createRawItem("Item With Drafts")?.id || 0);
+    addDraft(ctx.db, id);
+    addAssignment(ctx.db, id);
+
+    // The full merge gate would block this item; the NEVER gate must not.
+    assert.deepEqual(getNeverOverrideBlockersForItem(ctx.db, id), [], "no NEVER blockers");
+
+    ctx.repo.deleteItem(id, "test@local", { delete_mode: "soft" });
+    const after = ctx.db.prepare("SELECT is_deleted FROM content_items WHERE id=?").get(id);
+    assert.equal(Number(after?.is_deleted || 0), 1, "item soft-deleted");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("(b) soft delete is blocked when item has a published article", () => {
+  const ctx = createTestContext();
+  try {
+    const id = Number(ctx.createRawItem("Published Item")?.id || 0);
+    addPublishedArticle(ctx.db, id);
+
+    const blockers = getNeverOverrideBlockersForItem(ctx.db, id);
+    assert.equal(blockers.length, 1);
+    assert.equal(blockers[0].key, "published_articles");
+    assert.equal(blockers[0].count, 1);
+    assert.match(blockers[0].remediation, /unpublish/i, "remediation tells the user what to do first");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("(b2) soft delete is blocked when item has review actions", () => {
+  const ctx = createTestContext();
+  try {
+    const id = Number(ctx.createRawItem("Reviewed Item")?.id || 0);
+    ctx.db.prepare("INSERT INTO review_actions (content_item_id, action) VALUES (?,?)").run(id, "approve");
+
+    const blockers = getNeverOverrideBlockersForItem(ctx.db, id);
+    assert.equal(blockers.length, 1);
+    assert.equal(blockers[0].key, "review_actions");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("(c) translations block soft delete only when bound to a published article", () => {
+  const ctx = createTestContext();
+  try {
+    const boundId = Number(ctx.createRawItem("Translated Published Item")?.id || 0);
+    const articleId = addPublishedArticle(ctx.db, boundId);
+    addTranslation(ctx.db, boundId, articleId);
+
+    const boundBlockers = getNeverOverrideBlockersForItem(ctx.db, boundId);
+    assert.ok(
+      boundBlockers.some((entry) => entry.key === "translations_published"),
+      "translation bound to a published article blocks"
+    );
+
+    const unboundId = Number(ctx.createRawItem("Translated Unpublished Item")?.id || 0);
+    addTranslation(ctx.db, unboundId, null);
+
+    assert.deepEqual(
+      getNeverOverrideBlockersForItem(ctx.db, unboundId),
+      [],
+      "translation with NULL source_published_article_id does not block"
+    );
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("(d) bulk delete mixing blocked and deletable items reports partial success", () => {
+  const ctx = createTestContext();
+  try {
+    const okId = Number(ctx.createRawItem("Deletable Item")?.id || 0);
+    addDraft(ctx.db, okId);
+    const blockedId = Number(ctx.createRawItem("Published Item")?.id || 0);
+    addPublishedArticle(ctx.db, blockedId);
+
+    const rows = [ctx.repo.getItem(okId), ctx.repo.getItem(blockedId)];
+    const plan = planBulkItemDelete(rows, {
+      getRawOnlyHardDeleteEligibility: (itemId) => ctx.repo.getRawOnlyHardDeleteEligibility(itemId),
+      getNeverOverrideBlockersForItem: (itemId) => getNeverOverrideBlockersForItem(ctx.db, itemId),
+    });
+
+    assert.deepEqual(plan.actions, [{ item_id: okId, mode: "soft" }], "only the deletable item is planned");
+    assert.equal(plan.blocked_rows.length, 1);
+    assert.equal(plan.blocked_rows[0].item_id, blockedId);
+    assert.equal(plan.blocked_rows[0].blockers[0].key, "published_articles");
+
+    const result = ctx.repo.bulkDeleteItems([], [okId], "test@local", {
+      softDeleteAuditDetailsById: { [okId]: { delete_mode: "soft", never_override_check: { passed: true, blockers: [] } } },
+    });
+    assert.deepEqual(result.deleted_ids, [okId]);
+
+    assert.equal(
+      Number(ctx.db.prepare("SELECT is_deleted FROM content_items WHERE id=?").get(okId)?.is_deleted || 0),
+      1,
+      "deletable item soft-deleted"
+    );
+    assert.equal(
+      Number(ctx.db.prepare("SELECT is_deleted FROM content_items WHERE id=?").get(blockedId)?.is_deleted || 0),
+      0,
+      "blocked item untouched"
+    );
+
+    const audit = ctx.db
+      .prepare("SELECT details_json FROM audit_logs WHERE action='item.delete' AND target_id=? ORDER BY id DESC LIMIT 1")
+      .get(String(okId));
+    assert.ok(audit?.details_json, "soft delete writes an audit row with details");
+    assert.equal(JSON.parse(audit.details_json).never_override_check.passed, true);
+  } finally {
+    ctx.cleanup();
+  }
+});
+// The eligibility backstop loops over the reference defs so a def for a new table cannot silently
+// drop out of the gate. The four curated tables already have hardcoded checks, so pulling
+// REFERENCE_CONFIRM_REQUIRED_DEFS into that loop must not change what is reported for them.
+test("confirm_required tables keep their existing hard-delete eligibility blockers, without duplicates", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.makeItemRawOnly(ctx.createRawItem("Curated Tables Item"));
+    const id = Number(item?.id || 0) || 0;
+    assert.equal(ctx.repo.getRawOnlyHardDeleteEligibility(id).eligible, true, "clean item is eligible");
+
+    ctx.db
+      .prepare(
+        `INSERT INTO content_drafts (content_item_id, generation_run_uid, draft_title, body)
+         VALUES (?,?,?,?)`
+      )
+      .run(id, `run-${id}`, "Draft", "Body");
+    ctx.db
+      .prepare(
+        `INSERT INTO field_packs (content_item_id, status, is_current, ai_summary, ai_highlights_json,
+           ai_unknowns_json, verified_facts_json, uncertain_facts_json, social_shot_emphasis_json,
+           social_on_camera_points_json, updated_by)
+         VALUES (?,?,1,?, '[]','[]','[]','[]','[]','[]', ?)`
+      )
+      .run(id, "ready_for_field", "Summary", "test");
+    ctx.db
+      .prepare(
+        `INSERT INTO content_translations (source_content_item_id, source_fingerprint, lang)
+         VALUES (?,?,?)`
+      )
+      .run(id, `fp-${id}`, "en");
+
+    const eligibility = ctx.repo.getRawOnlyHardDeleteEligibility(id);
+    assert.equal(eligibility.eligible, false, "curated references still block hard delete");
+
+    const keys = eligibility.blockers.map((entry) => entry.key);
+    for (const key of ["content_drafts", "field_packs", "content_translations"]) {
+      assert.equal(keys.filter((entry) => entry === key).length, 1, `${key} reported exactly once`);
+    }
+    // The def keys differ from the hardcoded check keys; the table-level guard keeps them out so the
+    // same rows are not counted twice under two names.
+    assert.equal(keys.includes("drafts"), false, "no duplicate blocker under the def key");
+    assert.equal(keys.includes("translations_unpublished"), false, "no narrower duplicate for translations");
   } finally {
     ctx.cleanup();
   }

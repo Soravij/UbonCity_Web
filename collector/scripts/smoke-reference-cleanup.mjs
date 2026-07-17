@@ -160,6 +160,8 @@ async function main() {
     logStep("references.cleanup");
     const cleaned = await client.post(`/api/admin/deleted-items/${fixture.itemId}/references/cleanup`, {
       groups: ["source_records", "reviews_raw", "quality_checks", "drafts", "review_reports", "field_packs", "content_assets", "content_workflow_models"],
+      // drafts and field_packs are confirm_required: the cleanup is refused unless the owner names them.
+      confirmed_overrides: ["drafts", "field_packs"],
       reason: "smoke reference cleanup",
     });
     assert(cleaned.ok, `cleanup failed: ${JSON.stringify(cleaned.body)}`);

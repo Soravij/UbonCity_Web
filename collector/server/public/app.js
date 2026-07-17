@@ -137,15 +137,12 @@ const REFERENCE_CLEANUP_CANDIDATE_KEYS = new Set([
   "source_records",
   "content_assets",
   "reviews_raw",
-  "drafts",
   "quality_checks",
   "review_reports",
   "staging_items",
   "content_versions",
   "evidence_blocks",
-  "approved_context_blocks",
   "draft_input_snapshots",
-  "field_packs",
   "content_workflow_models",
   "content_workflow_transitions",
   "content_readiness_briefs",
@@ -159,6 +156,15 @@ const REFERENCE_CLEANUP_CANDIDATE_KEYS = new Set([
   "content_intelligence_models",
   "internal_link_sources",
   "internal_link_targets",
+]);
+
+// Groups holding human curation: cleanable and purgeable only when the owner names each one
+// in confirmed_overrides. Mirrors REFERENCE_CONFIRM_REQUIRED_DEFS in db/repository.mjs.
+const REFERENCE_CONFIRM_REQUIRED_KEYS = new Set([
+  "drafts",
+  "field_packs",
+  "approved_context_blocks",
+  "translations_unpublished",
 ]);
 
 const state = {
@@ -181,6 +187,9 @@ const state = {
   referenceCleanupSelectedItemId: 0,
   referenceCleanupReferences: null,
   referenceCleanupSelectedGroups: new Set(),
+  referenceCleanupConfirmedOverrides: new Set(),
+  // itemId -> Set of confirm_required group keys the owner has ticked in the Data Cleanup table.
+  cleanupConfirmations: new Map(),
   cleanup: {
     rows: [],
     loaded: false,
@@ -2648,6 +2657,64 @@ function renderAiPolicyPanel() {
   }
 }
 
+function cleanupConfirmationsFor(itemId) {
+  const id = Number(itemId || 0) || 0;
+  if (!id) return new Set();
+  if (!(state.cleanupConfirmations instanceof Map)) state.cleanupConfirmations = new Map();
+  if (!state.cleanupConfirmations.has(id)) state.cleanupConfirmations.set(id, new Set());
+  return state.cleanupConfirmations.get(id);
+}
+
+function confirmRequiredGroupsOf(row) {
+  const groups = Array.isArray(row?.confirm_required) ? row.confirm_required : [];
+  return groups.filter((group) => REFERENCE_CONFIRM_REQUIRED_KEYS.has(String(group?.key || "").trim().toLowerCase()));
+}
+
+// Purge goes through only when nothing hard/cleanup-candidate is left and the owner has ticked
+// every curated group the item still carries.
+function canPurgeCleanupRow(row) {
+  if (row?.can_purge) return true;
+  if (!row?.can_purge_with_confirmation) return false;
+  const ticked = cleanupConfirmationsFor(row?.id);
+  const required = confirmRequiredGroupsOf(row).map((group) => String(group?.key || "").trim().toLowerCase());
+  return required.length > 0 && required.every((key) => ticked.has(key));
+}
+
+function formatConfirmDetail(detail) {
+  const who = String(detail?.actor || "").trim() || (detail?.actor_user_id ? `user #${detail.actor_user_id}` : "ไม่ระบุผู้ทำ");
+  const when = String(detail?.acted_at || "").trim() || "ไม่ระบุเวลา";
+  const extras = [detail?.status, detail?.lang].map((value) => String(value || "").trim()).filter(Boolean);
+  return `#${Number(detail?.record_id || 0) || "-"} ${who} · ${when}${extras.length ? ` · ${extras.join(" · ")}` : ""}`;
+}
+
+function renderCleanupConfirmRequiredCell(row) {
+  const groups = confirmRequiredGroupsOf(row);
+  if (!groups.length) return "";
+  const itemId = Number(row?.id || 0) || 0;
+  const ticked = cleanupConfirmationsFor(itemId);
+  return groups
+    .map((group) => {
+      const key = String(group?.key || "").trim().toLowerCase();
+      const count = Number(group?.count || 0) || 0;
+      const label = String(group?.label || key).trim() || key;
+      const reason = String(group?.confirm_reason_th || "").trim();
+      const checked = ticked.has(key) ? " checked" : "";
+      const details = (Array.isArray(group?.confirm_details) ? group.confirm_details : [])
+        .map((detail) => `<div class="muted">${escapeHtml(formatConfirmDetail(detail))}</div>`)
+        .join("");
+      return `
+        <div class="cleanup-confirm-group">
+          <label>
+            <input type="checkbox" data-cleanup-confirm-item="${itemId}" data-cleanup-confirm-group="${escapeHtml(key)}"${checked} />
+            ${escapeHtml(`ยืนยันลบ ${label} (${count})${reason ? ` - ${reason}` : ""}`)}
+          </label>
+          ${details}
+        </div>
+      `;
+    })
+    .join("");
+}
+
 function renderDataCleanupPanel() {
   const panel = qs("data-cleanup-panel");
   if (!panel) return;
@@ -2683,22 +2750,26 @@ function renderDataCleanupPanel() {
     tbody.appendChild(tr);
   } else {
     rows.forEach((row) => {
+      const itemId = Number(row?.id || 0) || 0;
       const blockers = Array.isArray(row?.blockers) ? row.blockers : [];
-      const blockerText = blockers.length
-        ? blockers.map((entry) => `${entry.label} (${Number(entry.count || 0) || 0})`).join(" | ")
+      const blocking = blockers.filter((entry) => String(entry?.category || "") !== "confirm_required");
+      const blockerText = blocking.length
+        ? blocking.map((entry) => `${entry.label} (${Number(entry.count || 0) || 0})`).join(" | ")
         : "-";
-      const canPurge = Boolean(row?.can_purge);
       const legacyWorkflowStatus = String(row?.legacy_workflow_status || "").trim();
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td>${Number(row?.id || 0) || "-"}</td>
+        <td>${itemId || "-"}</td>
         <td>${escapeHtml(String(row?.title || "").trim() || "-")}</td>
         <td>${escapeHtml(String(row?.category || "").trim() || "-")}</td>
         <td>${escapeHtml(legacyWorkflowStatus ? `legacy:${legacyWorkflowStatus}` : "-")}</td>
-        <td>${escapeHtml(blockerText)}</td>
+        <td>
+          <div>${escapeHtml(blockerText)}</div>
+          ${renderCleanupConfirmRequiredCell(row)}
+        </td>
         <td class="action-stack">
-          <button type="button" data-action="cleanup-check" data-id="${Number(row?.id || 0) || 0}">ตรวจ</button>
-          <button type="button" data-action="cleanup-purge" data-id="${Number(row?.id || 0) || 0}"${canPurge ? "" : " disabled"}>Purge</button>
+          <button type="button" data-action="cleanup-check" data-id="${itemId}">ตรวจ</button>
+          <button type="button" data-action="cleanup-purge" data-id="${itemId}"${canPurgeCleanupRow(row) ? "" : " disabled"}>Purge</button>
         </td>
       `;
       tbody.appendChild(tr);
@@ -2765,15 +2836,21 @@ function renderReferenceCleanupPanel() {
 
   const refs = state.referenceCleanupReferences;
   const groups = Array.isArray(refs?.groups) ? refs.groups : [];
-  const candidates = groups.filter((group) =>
-    String(group?.category || "").trim().toLowerCase() === "cleanup_candidate"
-    && REFERENCE_CLEANUP_CANDIDATE_KEYS.has(String(group?.key || "").trim().toLowerCase())
-  );
+  // Selectable = cleanup_candidate plus confirm_required; ticking a confirm_required group is the
+  // owner's confirmation, so it is sent back as confirmed_overrides on execute.
+  const candidates = groups.filter((group) => {
+    const category = String(group?.category || "").trim().toLowerCase();
+    const key = String(group?.key || "").trim().toLowerCase();
+    if (category === "cleanup_candidate") return REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key);
+    if (category === "confirm_required") return REFERENCE_CONFIRM_REQUIRED_KEYS.has(key);
+    return false;
+  });
   const blockers = groups.filter((group) => {
     const category = String(group?.category || "").trim().toLowerCase();
     const key = String(group?.key || "").trim().toLowerCase();
     if (category === "hard_blocker") return true;
     if (category === "cleanup_candidate" && !REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key)) return true;
+    if (category === "confirm_required" && !REFERENCE_CONFIRM_REQUIRED_KEYS.has(key)) return true;
     return false;
   });
 
@@ -2799,11 +2876,23 @@ function renderReferenceCleanupPanel() {
         const count = Number(group?.count || 0) || 0;
         const label = String(group?.label_th || key).trim() || key;
         const checked = state.referenceCleanupSelectedGroups.has(key) ? " checked" : "";
+        const needsConfirm = String(group?.category || "").trim().toLowerCase() === "confirm_required";
+        const reason = String(group?.confirm_reason_th || "").trim();
+        const details = needsConfirm
+          ? (Array.isArray(group?.confirm_details) ? group.confirm_details : [])
+              .map((detail) => `<div class="muted">${escapeHtml(formatConfirmDetail(detail))}</div>`)
+              .join("")
+          : "";
+        const prefix = needsConfirm ? "[ยืนยัน] " : "";
+        const suffix = needsConfirm && reason ? ` - ${reason}` : "";
         return `
-          <label class="assignment-brief-text">
-            <input type="checkbox" data-reference-cleanup-group="${escapeHtml(key)}"${checked} />
-            ${escapeHtml(`${label} (${count})`)}
-          </label>
+          <div class="cleanup-confirm-group">
+            <label class="assignment-brief-text">
+              <input type="checkbox" data-reference-cleanup-group="${escapeHtml(key)}"${checked} />
+              ${escapeHtml(`${prefix}${label} (${count})${suffix}`)}
+            </label>
+            ${details}
+          </div>
         `;
       }).join("");
     }
@@ -2887,10 +2976,11 @@ async function executeReferenceCleanup() {
   if (!itemId) throw new Error("กรุณาเลือกรายการก่อน");
   const groups = Array.from(state.referenceCleanupSelectedGroups || []);
   if (!groups.length) throw new Error("กรุณาเลือกกลุ่มข้อมูลที่ต้องการล้าง");
+  const confirmedOverrides = groups.filter((key) => REFERENCE_CONFIRM_REQUIRED_KEYS.has(key));
   const reason = String(window.prompt("เหตุผลในการล้างข้อมูลอ้างอิง (ไม่บังคับ)", "") || "").trim();
   const result = await api(`/api/admin/deleted-items/${itemId}/references/cleanup`, {
     method: "POST",
-    body: JSON.stringify({ groups, reason }),
+    body: JSON.stringify({ groups, reason, confirmed_overrides: confirmedOverrides }),
   });
   await loadReferencesForItem(itemId);
   await loadDataCleanupRows();
@@ -10284,13 +10374,16 @@ function wireUserSettings() {
         return;
       }
         if (action === "cleanup-purge") {
-          if (!window.confirm(`Purge item #${id} ใช่หรือไม่?`)) return;
+          const confirmedOverrides = Array.from(cleanupConfirmationsFor(id));
+          const overrideNote = confirmedOverrides.length ? `\nยืนยันข้ามกลุ่มที่คน curate ไว้: ${confirmedOverrides.join(", ")}` : "";
+          if (!window.confirm(`Purge item #${id} ใช่หรือไม่?${overrideNote}`)) return;
           const reason = String(window.prompt("เหตุผลในการ purge (ไม่บังคับ)", "") || "").trim();
           await withButtonLoading(btn, "กำลัง purge...", async () => {
             await api(`/api/admin/deleted-items/${id}/purge`, {
               method: "POST",
-              body: JSON.stringify({ reason }),
+              body: JSON.stringify({ reason, confirmed_overrides: confirmedOverrides }),
             });
+            state.cleanupConfirmations?.delete?.(id);
             await loadDataCleanupRows();
             renderReferenceCleanupPanel();
             setStatus("data-cleanup-status", `purge รายการ #${id} แล้ว`);
@@ -10313,6 +10406,18 @@ function wireUserSettings() {
       }
       setStatus("data-cleanup-status", err.message, true);
     }
+  });
+  qs("table-data-cleanup")?.querySelector("tbody")?.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
+    const itemId = Number(target.dataset.cleanupConfirmItem || 0) || 0;
+    const key = String(target.dataset.cleanupConfirmGroup || "").trim().toLowerCase();
+    if (!itemId || !key) return;
+    if (!REFERENCE_CONFIRM_REQUIRED_KEYS.has(key)) return;
+    const ticked = cleanupConfirmationsFor(itemId);
+    if (target.checked) ticked.add(key);
+    else ticked.delete(key);
+    renderDataCleanupPanel();
   });
   qs("reference-cleanup-item-id")?.addEventListener("change", (event) => {
     state.referenceCleanupSelectedItemId = Number(event.target?.value || 0) || 0;
@@ -10338,7 +10443,7 @@ function wireUserSettings() {
     if (target.type !== "checkbox") return;
     const key = String(target.dataset.referenceCleanupGroup || "").trim().toLowerCase();
     if (!key) return;
-    if (!REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key)) return;
+    if (!REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key) && !REFERENCE_CONFIRM_REQUIRED_KEYS.has(key)) return;
     if (target.checked) {
       state.referenceCleanupSelectedGroups.add(key);
     } else {

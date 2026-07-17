@@ -100,7 +100,45 @@ Placeholders:
 Placeholders:
 
 - Raw intake validation policy: TBD / update later.
-- Duplicate/raw merge policy: TBD / update later.
+- Duplicate/raw merge policy: TBD / update later. (The merge *gate* is covered below; how merge itself
+  resolves duplicates is not.)
+
+### Delete Tier Contract (locked)
+
+Four delete paths exist and each gates on a **different** rule. They must not be collapsed into one
+gate: the cost of being wrong differs per path, because only purge destroys data irreversibly.
+
+- **Soft delete** (`DELETE /api/items/:id`, `is_deleted=1`, reversible) gates **only on NEVER-level
+  blockers** — published articles, review actions, and translations bound to a published article.
+  Everything else (drafts, field packs, assignments, workflow state) must not block it: the row stays
+  in `content_items` and the full gate still runs at merge and at purge. Every successful soft delete
+  writes an `item.delete` audit row carrying the item snapshot and the NEVER-check result.
+  The NEVER keys are a strict subset of the hard blockers and are derived from
+  `REFERENCE_HARD_BLOCKER_DEFS` — they must not be restated as separate SQL.
+- **Bulk soft delete** (`POST /api/items/bulk-delete`) is **partial success**: items hitting a NEVER
+  blocker are skipped into `blocked_rows` with per-item reasons, the rest are deleted, and the
+  response reports both. When *every* selected item is blocked it must fail (400), never report
+  success with 0 deleted.
+- **Merge** (`mergeContentItems`) keeps the **full dependency gate** (`getMergeBlockersForItem`).
+- **Purge** (`POST /api/admin/deleted-items/:id/purge`, `DELETE FROM content_items`, irreversible)
+  classifies every reference group into exactly one of three tiers:
+  - `hard_blocker` — always rejected (409). No override exists, at any role.
+  - `cleanup_candidate` — rejected (409) until cleared through the reference-cleanup endpoint first.
+  - `confirm_required` — groups holding human curation (drafts, field packs, approved context,
+    unpublished translations). Rejected (400, listing `missing_confirmations`) unless the owner names
+    **every one** of them in the `confirmed_overrides` request field. The `item.purge` audit row must
+    record which groups were overridden, why confirmation was required, and the per-record detail.
+
+Two scripts are the verification gate for this contract, and both must be updated in the same change
+as any intentional change to the rules above:
+
+- `collector/scripts/smoke-data-cleanup.mjs` covers the API tiers — both the reject and the
+  confirmed-override path.
+- `collector/scripts/smoke-data-cleanup-ui-browser.mjs` covers the Data Cleanup table in a real
+  browser: that a `confirm_required` group renders one tickable checkbox per group with its
+  per-record detail, that Purge stays disabled until every one is ticked, that a `hard_blocker`
+  offers no checkbox at all, and that the resulting `item.purge` audit row carries the overrides.
+  It runs against its own backend and temp DB, so it never touches real data.
 
 **ภาษาไทย**
 
@@ -111,7 +149,42 @@ Placeholders:
 ส่วนที่ยังไม่กำหนด (Placeholders):
 
 - นโยบายตรวจสอบข้อมูลตอนรับเข้า (raw intake validation): ยังไม่กำหนด (TBD) / ทำภายหลัง
-- นโยบายการรวมรายการซ้ำ/ raw merge: ยังไม่กำหนด (TBD) / ทำภายหลัง
+- นโยบายการรวมรายการซ้ำ/ raw merge: ยังไม่กำหนด (TBD) / ทำภายหลัง (เกณฑ์บล็อก merge อยู่ด้านล่างแล้ว
+  แต่ตัว logic ว่า merge รวมรายการซ้ำอย่างไร ยังไม่กำหนด)
+
+### สัญญาของการลบแต่ละชั้น (locked)
+
+การลบมี 4 เส้นทาง และแต่ละเส้น **ใช้เกณฑ์คนละชุด** ห้ามยุบรวมเป็นเกณฑ์เดียว เพราะความเสียหายเมื่อ
+ตัดสินผิดไม่เท่ากัน — มีแต่ purge เท่านั้นที่ลบข้อมูลแบบกู้คืนไม่ได้
+
+- **Soft delete** (`DELETE /api/items/:id`, `is_deleted=1`, ย้อนกลับได้) เช็ค **เฉพาะ blocker ระดับ
+  NEVER** — บทความที่เผยแพร่แล้ว, ประวัติ review action, และงานแปลที่ผูกกับบทความที่เผยแพร่แล้ว
+  อย่างอื่น (drafts, field packs, assignment, workflow state) ต้องไม่บล็อก เพราะแถวยังอยู่ใน
+  `content_items` และยังต้องผ่านเกณฑ์เต็มตอน merge กับตอน purge อยู่ดี ทุกครั้งที่ soft delete สำเร็จ
+  ต้องเขียน audit `item.delete` พร้อม snapshot ของ item และผลการเช็ค NEVER
+  ชุด key ของ NEVER เป็น subset ของ hard blocker และ derive มาจาก `REFERENCE_HARD_BLOCKER_DEFS`
+  ห้ามเขียน SQL ซ้ำแยกไว้ต่างหาก
+- **Bulk soft delete** (`POST /api/items/bulk-delete`) เป็นแบบ **partial success**: item ที่ติด NEVER
+  ถูกข้ามไปอยู่ใน `blocked_rows` พร้อมเหตุผลรายตัว ที่เหลือลบตามปกติ และ response ต้องรายงานทั้งสองฝั่ง
+  ถ้าติดบล็อก**ทุกตัว** ต้องตอบ fail (400) ห้ามรายงานว่าสำเร็จทั้งที่ลบได้ 0 รายการ
+- **Merge** (`mergeContentItems`) ยังใช้ **เกณฑ์เต็ม** (`getMergeBlockersForItem`) ตามเดิม
+- **Purge** (`POST /api/admin/deleted-items/:id/purge`, `DELETE FROM content_items`, กู้คืนไม่ได้)
+  จัดกลุ่มข้อมูลอ้างอิงทุกกลุ่มเป็น 1 ใน 3 ชั้น:
+  - `hard_blocker` — ปฏิเสธเสมอ (409) ไม่มี override ไม่ว่า role ไหน
+  - `cleanup_candidate` — ปฏิเสธ (409) จนกว่าจะล้างผ่าน endpoint reference-cleanup ก่อน
+  - `confirm_required` — กลุ่มที่มีงานที่คน curate ไว้ (drafts, field packs, approved context,
+    งานแปลที่ยังไม่เผยแพร่) ปฏิเสธ (400 พร้อมรายการ `missing_confirmations`) จนกว่า owner จะระบุ
+    **ครบทุกตัว** ในฟิลด์ `confirmed_overrides` ของ request และ audit `item.purge` ต้องบันทึกว่ากลุ่มไหน
+    ถูก override, เหตุผลที่ต้องยืนยัน, และรายละเอียดราย record
+
+ด่าน verify ของสัญญานี้มี 2 ตัว และต้องแก้ไปพร้อมกันในทุกครั้งที่ตั้งใจเปลี่ยนกฎด้านบน:
+
+- `collector/scripts/smoke-data-cleanup.mjs` คลุมชั้นต่าง ๆ ฝั่ง API — ทั้งเส้นที่ถูกปฏิเสธและเส้นที่ยืนยัน
+  override แล้วผ่าน
+- `collector/scripts/smoke-data-cleanup-ui-browser.mjs` คลุมตาราง Data Cleanup บนเบราว์เซอร์จริง: กลุ่ม
+  `confirm_required` ต้องมี checkbox ให้ติ๊กกลุ่มละ 1 ช่องพร้อม detail ราย record, ปุ่ม Purge ต้อง disabled
+  จนกว่าจะติ๊กครบทุกกลุ่ม, `hard_blocker` ต้องไม่มี checkbox ให้ติ๊กเลย และ audit `item.purge` ที่ได้ต้อง
+  บันทึก override ไว้ครบ — สคริปต์นี้ยิง backend กับ temp DB ของตัวเอง จึงไม่แตะข้อมูลจริง
 
 ## 4. Clean / Agent Draft Policy
 
