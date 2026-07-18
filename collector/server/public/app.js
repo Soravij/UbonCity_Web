@@ -5069,6 +5069,92 @@ function applyPreferredLandingTab() {
   });
 }
 
+// ---- Item-list delete-blocker badges (read-only display) --------------------------------------
+// Drawn AFTER the queue renders, from a batch call to GET /api/items/blocker-summary. The list must
+// never wait on it: annotateRawTableBlockers runs fire-and-forget and swallows every failure
+// (console.warn only), so a slow or broken endpoint can never blank the queue. Only the ids actually
+// on screen are queried, chunked to the endpoint's 200-id cap. No client-side reference-key Set is
+// added here — the badge renders the server's confirm_required key/count list verbatim — so this does
+// not enlarge the manual-sync debt tracked for REFERENCE_*_KEYS in PROJECT_POLICY §3.
+let rawBlockerRenderSeq = 0;
+
+function collectRenderedRawItemIds() {
+  const ids = [];
+  for (const tableId of ["table-raw-intake", "table-raw-review"]) {
+    const table = document.getElementById(tableId);
+    if (!table) continue;
+    table.querySelectorAll("tbody tr[data-item-id]").forEach((tr) => {
+      const id = Number(tr.dataset.itemId || 0) || 0;
+      if (id > 0) ids.push(id);
+    });
+  }
+  return Array.from(new Set(ids));
+}
+
+// Maps one item's blocker summary to at most one badge, in priority order: a NEVER blocker (cannot
+// be soft-deleted) outranks a confirm/assignment (deletable, but purge will ask), and a fully clean
+// item gets no badge at all.
+function buildBlockerBadge(summary) {
+  const never = Array.isArray(summary?.never) ? summary.never : [];
+  const confirm = Array.isArray(summary?.confirm_required) ? summary.confirm_required : [];
+  const assignmentsOpen = Number(summary?.assignments_open || 0) || 0;
+  if (never.length > 0) {
+    const lines = never.map((entry) => {
+      // label is the server-side label_th; fall back to the raw key if a def ever ships without one.
+      const name = String(entry?.label || "").trim() || String(entry?.key || "");
+      const remediation = String(entry?.remediation || "").trim();
+      return `• ${name} (${Number(entry.count || 0) || 0})${remediation ? " — " + remediation : ""}`;
+    });
+    return { className: "is-never", label: "⛔ ลบไม่ได้", title: "ลบไม่ได้ ต้องแก้ก่อน:\n" + lines.join("\n") };
+  }
+  if (confirm.length > 0 || assignmentsOpen > 0) {
+    const lines = confirm.map((entry) => `• ${entry.key}: ${Number(entry.count || 0) || 0}`);
+    if (assignmentsOpen > 0) {
+      lines.push(`• มี assignment เปิดอยู่ ${assignmentsOpen} รายการ — ต้องปิดก่อน purge`);
+    }
+    const label = confirm.length > 0 ? `⚠ confirm ${confirm.length}` : "⚠ assignment";
+    return { className: "is-confirm", label, title: "ลบได้ แต่ตอน purge จะต้องยืนยัน:\n" + lines.join("\n") };
+  }
+  return null;
+}
+
+function applyBlockerBadge(itemId, summary) {
+  const row = document.querySelector(`tr[data-item-id="${itemId}"]`);
+  if (!row) return;
+  const cell = row.querySelector(".raw-title-cell");
+  if (!cell) return;
+  const existing = cell.querySelector(".delete-blocker-badge");
+  if (existing) existing.remove();
+  const badge = buildBlockerBadge(summary);
+  if (!badge) return;
+  const span = document.createElement("span");
+  span.className = `delete-blocker-badge ${badge.className}`;
+  span.textContent = badge.label;
+  span.title = badge.title;
+  cell.appendChild(span);
+}
+
+async function annotateRawTableBlockers() {
+  if (typeof isExternalContributorUser === "function" && isExternalContributorUser()) return;
+  const seq = ++rawBlockerRenderSeq;
+  const ids = collectRenderedRawItemIds();
+  if (ids.length === 0) return;
+  const CHUNK = 200; // GET /api/items/blocker-summary rejects more than 200 ids per request
+  try {
+    for (let index = 0; index < ids.length; index += CHUNK) {
+      const chunk = ids.slice(index, index + CHUNK);
+      const response = await api(`/api/items/blocker-summary?ids=${chunk.join(",")}`);
+      if (seq !== rawBlockerRenderSeq) return; // a newer render replaced the table; stop injecting
+      const map = response?.items || {};
+      for (const [id, summary] of Object.entries(map)) {
+        applyBlockerBadge(id, summary);
+      }
+    }
+  } catch (error) {
+    console.warn("[blocker-summary] failed to load delete-blocker badges", error);
+  }
+}
+
 function renderRawTable(items) {
   const tableWrap = qs("raw-table-wrap");
   if (!tableWrap) return;
@@ -5300,6 +5386,10 @@ function renderRawTable(items) {
   };
   if (intakeTbody) intakeTbody.onclick = handleRowAction;
   if (reviewTbody) reviewTbody.onclick = handleRowAction;
+
+  // Fire-and-forget: the queue above is already on screen, and annotateRawTableBlockers swallows its
+  // own failures, so a slow or broken blocker-summary call can never delay or break this render.
+  annotateRawTableBlockers();
 }
 
 function setSourceIntakeOpen(open) {

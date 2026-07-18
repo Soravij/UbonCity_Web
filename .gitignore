@@ -42,6 +42,7 @@ collector/media/generated/
 collector/media/published/
 collector/media/uploads/
 collector/staging/content/items/
+logs/prompt_debug_*.json
 /data/
 places_literals_current.txt
 places_mojibake_literals.txt

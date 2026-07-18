@@ -13254,6 +13254,79 @@ function normalizeStateValue(value, stateGroup) {
     };
   }
 
+  // Read-only display aggregation for the item-list delete-blocker badge. It reuses the exact
+  // reference def arrays the purge/cleanup gate uses (REFERENCE_CLEANUP_CANDIDATE_DEFS,
+  // REFERENCE_CONFIRM_REQUIRED_DEFS and the `assignments` entry of REFERENCE_HARD_BLOCKER_DEFS) so
+  // the badge can never disagree with the purge classification — no SQL is restated here. Unlike
+  // getDeletedItemReferenceGroups it does NOT require is_deleted=1 (the list shows live items) and
+  // it never mutates: it only counts. cleanup_candidate and confirm_required are each aggregated
+  // with one GROUP BY per def across every requested id (a per-page batch, not one COUNT per item
+  // per def); assignments_open runs the def's own scalar COUNT per id — a single cheap indexed
+  // lookup, kept separate because at purge time it is a hard blocker the owner can clear by closing
+  // the assignment. cleanup_candidate and confirm_required stay in separate response fields: their
+  // def sets are disjoint tables, and a confirm_required group must never be folded into the
+  // cleanup_candidate total (the purge gate treats them as different tiers).
+  function getItemReferenceBlockerCounts(itemIds = []) {
+    const ids = Array.from(
+      new Set(
+        (Array.isArray(itemIds) ? itemIds : [])
+          .map((value) => Number(value || 0) || 0)
+          .filter((value) => value > 0),
+      ),
+    );
+    const summary = new Map();
+    for (const id of ids) {
+      summary.set(id, { cleanup_candidate_count: 0, confirm_required: [], assignments_open: 0 });
+    }
+    if (ids.length === 0) return summary;
+
+    const placeholders = ids.map(() => "?").join(",");
+    // One reference def -> a Map of item id -> row count for the requested ids. Batches the common
+    // `col=?` defs with a single GROUP BY; falls back to a per-item scalar COUNT for any def whose
+    // predicate is compound (e.g. translations_unpublished's `... IS NULL`), so the derived column
+    // can never drop an AND clause. Either way the SQL comes from the def, never restated.
+    const countsByIdForDef = (def) => {
+      const out = new Map();
+      const simple = /^([A-Za-z_][A-Za-z0-9_]*)=\?$/.exec(def.where);
+      if (simple) {
+        const column = simple[1];
+        const rows = db
+          .prepare(`SELECT ${column} AS ref_id, COUNT(*) AS c FROM ${def.table} WHERE ${column} IN (${placeholders}) GROUP BY ${column}`)
+          .all(...ids);
+        for (const row of rows) out.set(Number(row?.ref_id || 0) || 0, Number(row?.c || 0) || 0);
+        return out;
+      }
+      const stmt = db.prepare(`SELECT COUNT(*) AS c FROM ${def.table} WHERE ${def.where}`);
+      for (const id of ids) out.set(id, Number(stmt.get(id)?.c || 0) || 0);
+      return out;
+    };
+
+    for (const def of REFERENCE_CLEANUP_CANDIDATE_DEFS) {
+      for (const [id, count] of countsByIdForDef(def)) {
+        const bucket = summary.get(id);
+        if (bucket && count > 0) bucket.cleanup_candidate_count += count;
+      }
+    }
+
+    for (const def of REFERENCE_CONFIRM_REQUIRED_DEFS) {
+      for (const [id, count] of countsByIdForDef(def)) {
+        const bucket = summary.get(id);
+        if (bucket && count > 0) bucket.confirm_required.push({ key: def.key, count });
+      }
+    }
+
+    const assignmentsDef = REFERENCE_HARD_BLOCKER_DEFS.find((def) => def.key === "assignments");
+    if (assignmentsDef) {
+      const stmt = db.prepare(assignmentsDef.sql);
+      for (const id of ids) {
+        const bucket = summary.get(id);
+        if (bucket) bucket.assignments_open = Number(stmt.get(id)?.c || 0) || 0;
+      }
+    }
+
+    return summary;
+  }
+
   function cleanupDeletedItemReferenceGroups({ itemId, groups, actorEmail, reason, confirmedOverrides }) {
     const id = Number(itemId || 0) || 0;
     if (!id) {
@@ -13560,6 +13633,7 @@ function normalizeStateValue(value, stateGroup) {
     evaluateContentAssetCleanupEligibility,
     listPostAssignmentAiInputCleanupCandidates,
     getDeletedItemReferenceGroups,
+    getItemReferenceBlockerCounts,
     cleanupDeletedItemReferenceGroups,
     addSearchEnrichmentRecord,
     listSearchEnrichmentByItem,

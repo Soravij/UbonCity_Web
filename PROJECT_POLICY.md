@@ -128,6 +128,12 @@ gate: the cost of being wrong differs per path, because only purge destroys data
     unpublished translations). Rejected (400, listing `missing_confirmations`) unless the owner names
     **every one** of them in the `confirmed_overrides` request field. The `item.purge` audit row must
     record which groups were overridden, why confirmation was required, and the per-record detail.
+- **Blocker summary display** (`GET /api/items/blocker-summary?ids=`, read-only) annotates the item
+  list with each item's delete-blocker state — NEVER blockers, the `cleanup_candidate` reference total,
+  the per-group `confirm_required` list, and open assignments — reusing the same reference defs as the
+  purge gate so the badge cannot disagree with it. It applies the same per-item visibility filter as
+  `GET /api/items` (out-of-scope ids are dropped from the response, not 403/404'd). It is display only:
+  it never deletes, purges, or otherwise mutates, and adds no new gate.
 
 Two scripts are the verification gate for this contract, and both must be updated in the same change
 as any intentional change to the rules above:
@@ -176,6 +182,11 @@ as any intentional change to the rules above:
     งานแปลที่ยังไม่เผยแพร่) ปฏิเสธ (400 พร้อมรายการ `missing_confirmations`) จนกว่า owner จะระบุ
     **ครบทุกตัว** ในฟิลด์ `confirmed_overrides` ของ request และ audit `item.purge` ต้องบันทึกว่ากลุ่มไหน
     ถูก override, เหตุผลที่ต้องยืนยัน, และรายละเอียดราย record
+- **Blocker summary (แสดงผล)** (`GET /api/items/blocker-summary?ids=`, read-only) แปะสถานะ blocker ของการลบ
+  ให้แต่ละ item บน item list — NEVER blocker, ยอดรวม `cleanup_candidate`, รายการ `confirm_required` ราย group,
+  และ assignment ที่เปิดอยู่ — โดยใช้ reference defs ชุดเดียวกับ purge gate จึงไม่มีทางขัดกับเกณฑ์ purge และกรอง
+  visibility ราย item แบบเดียวกับ `GET /api/items` (id นอก scope ถูกตัดออกจาก response ไม่ตอบ 403/404) เป็นการ
+  แสดงผลล้วน ไม่ลบ ไม่ purge ไม่แก้ข้อมูล และไม่เพิ่มเกณฑ์ใหม่
 
 ด่าน verify ของสัญญานี้มี 2 ตัว และต้องแก้ไปพร้อมกันในทุกครั้งที่ตั้งใจเปลี่ยนกฎด้านบน:
 

@@ -8326,6 +8326,52 @@ app.get("/api/items", (req, res) => {
   res.json(attachItemMatchFields(decorateVisibleItems(repo.listItemsByStatus(statuses)), { includeBulkPreview }));
 });
 
+// Read-only companion to the item list: given ?ids=1,2,3 it returns, per item, the delete-blocker
+// state the list badge needs — NEVER-override blockers (getNeverOverrideBlockersForItem), the
+// cleanup_candidate reference total, and open assignments (a purge-time hard blocker the owner can
+// clear). It reuses the same reference defs as the purge gate and mutates nothing. Registered
+// before /api/items/:id so "blocker-summary" is not swallowed as an :id. §3.
+const BLOCKER_SUMMARY_MAX_IDS = 200;
+app.get("/api/items/blocker-summary", requireRole("owner", "admin", "user"), (req, res) => {
+  const rawIds = String(req.query.ids || "")
+    .split(",")
+    .map((value) => Number(String(value).trim()))
+    .filter((value) => Number.isInteger(value) && value > 0);
+  const ids = Array.from(new Set(rawIds));
+  if (ids.length === 0) {
+    res.json({ items: {} });
+    return;
+  }
+  if (ids.length > BLOCKER_SUMMARY_MAX_IDS) {
+    res.status(400).json({ error: `too many ids (max ${BLOCKER_SUMMARY_MAX_IDS})` });
+    return;
+  }
+  // Same per-item visibility gate the item list applies (see the /api/items handler): an actor only
+  // gets blocker metadata for items it can actually see. An id that is missing/deleted or out of the
+  // actor's scope is dropped from the response map silently — the list drops such rows too rather
+  // than answering 403/404, so a mixed batch never leaks the existence or state of hidden items.
+  const visibleIds = ids.filter((id) => {
+    const item = repo.getItem(id);
+    if (!item) return false;
+    const scopeContext = resolveItemScopeContext(item);
+    return isItemVisibleToActor(req.authUser, item, scopeContext?.primaryAssignment || null);
+  });
+  const counts = repo.getItemReferenceBlockerCounts(visibleIds);
+  const items = {};
+  for (const id of visibleIds) {
+    const bucket = counts.get(id) || { cleanup_candidate_count: 0, confirm_required: [], assignments_open: 0 };
+    const never = getNeverOverrideBlockersForItem(id);
+    items[String(id)] = {
+      never,
+      soft_deletable: never.length === 0,
+      cleanup_candidate_count: Number(bucket.cleanup_candidate_count || 0) || 0,
+      confirm_required: Array.isArray(bucket.confirm_required) ? bucket.confirm_required : [],
+      assignments_open: Number(bucket.assignments_open || 0) || 0,
+    };
+  }
+  res.json({ items });
+});
+
 app.post("/api/items/bulk-delete", requireRole("admin", "owner"), (req, res) => {
   const ids = toUniquePositiveIds(req.body?.ids);
   if (!ids.length) {
