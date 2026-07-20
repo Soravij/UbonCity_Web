@@ -165,6 +165,10 @@ const REFERENCE_CONFIRM_REQUIRED_KEYS = new Set([
   "field_packs",
   "approved_context_blocks",
   "translations_unpublished",
+  "assignments",
+  "content_assignment_submissions",
+  "content_assignment_submission_deliverables",
+  "content_assignment_handoff_snapshots",
 ]);
 
 const state = {
@@ -2699,6 +2703,21 @@ function formatConfirmDetail(detail) {
   return `#${Number(detail?.record_id || 0) || "-"} ${who} · ${when}${extras.length ? ` · ${extras.join(" · ")}` : ""}`;
 }
 
+// A disabled Purge button with no reason next to it reads as a broken button. The three remaining
+// hard blockers can never be cleared from this page, so say so where the button is, using the def's own
+// Thai hint (the server ships it as resolution_hint) rather than a second copy of the wording here.
+// Tone borrows the existing --fail var inline, like the in-flight age cell — no new class.
+function renderPurgeBlockedReason(row) {
+  const hardBlockers = Array.isArray(row?.hard_blockers) ? row.hard_blockers : [];
+  if (!hardBlockers.length) return "";
+  const lines = hardBlockers.map((entry) => {
+    const label = String(entry?.label || entry?.key || "").trim();
+    const hint = String(entry?.resolution_hint || "").trim();
+    return hint ? `${label} — ${hint}` : label;
+  });
+  return `<div class="muted" style="color: var(--fail);">${escapeHtml(`Purge ไม่ได้: ${lines.join(" | ")}`)}</div>`;
+}
+
 function renderCleanupConfirmRequiredCell(row) {
   const groups = confirmRequiredGroupsOf(row);
   if (!groups.length) return "";
@@ -2854,7 +2873,19 @@ function renderInFlightPanel() {
     tbody.appendChild(tr);
   });
 
-  annotateInFlightBlockers();
+  paintInFlightBlockerBadges();
+}
+
+// Render reads the cache; only a load fetches. Repainting the table (sorting, ticking a confirm box,
+// opening the panel) must not put a request on the wire — the badge data cannot have changed, because
+// nothing between two renders wrote to the server. state.inFlight.blockerSummaries is the cache, and
+// it is cleared in applyInFlightRowsResponse so a real reload always refetches.
+function paintInFlightBlockerBadges() {
+  const tbody = qs("table-inflight-items")?.querySelector("tbody");
+  if (!tbody) return;
+  for (const [id, summary] of state.inFlight.blockerSummaries) {
+    applyBlockerBadge(id, summary, { root: tbody, cellSelector: "[data-blocker-cell]" });
+  }
 }
 
 // Same badge treatment as the item list: buildBlockerBadge/applyBlockerBadge are reused verbatim, and
@@ -2910,6 +2941,9 @@ async function loadInFlightRows({ showSuccessStatus = false } = {}) {
   try {
     const items = applyInFlightRowsResponse(await api("/api/items?in_flight=1"), "");
     renderInFlightPanel();
+    // The only place the blocker badges are fetched. Fire-and-forget, as before: it paints each chunk
+    // as it lands and never blocks or fails this load.
+    annotateInFlightBlockers();
     if (showSuccessStatus) {
       setStatus("data-cleanup-status", items.length ? `งานค้างระหว่างทาง ${items.length} รายการ` : "ไม่มีงานค้างระหว่างทาง");
     }
@@ -2977,6 +3011,7 @@ function renderDataCleanupPanel() {
         <td class="action-stack">
           <button type="button" data-action="cleanup-check" data-id="${itemId}">ตรวจ</button>
           <button type="button" data-action="cleanup-purge" data-id="${itemId}"${canPurgeCleanupRow(row) ? "" : " disabled"}>Purge</button>
+          ${renderPurgeBlockedReason(row)}
         </td>
       `;
       tbody.appendChild(tr);
@@ -5319,9 +5354,16 @@ function buildBlockerBadge(summary) {
     return { className: "is-never", label: "⛔ ลบไม่ได้", title: "ลบไม่ได้ ต้องแก้ก่อน:\n" + lines.join("\n") };
   }
   if (confirm.length > 0 || assignmentsOpen > 0) {
-    const lines = confirm.map((entry) => `• ${entry.key}: ${Number(entry.count || 0) || 0}`);
-    if (assignmentsOpen > 0) {
-      lines.push(`• มี assignment เปิดอยู่ ${assignmentsOpen} รายการ — ต้องปิดก่อน purge`);
+    // assignments is one of the confirm_required groups, so it is already in `confirm`. The extra line
+    // is only for the case where the summary carries assignments_open without the group (an actor whose
+    // confirm list came back empty), so it never duplicates a line that is already there.
+    // label_th comes from the def via the server, same as the disabled-Purge reason line. Fall back to
+    // the raw key only if a def ever ships without one.
+    const lines = confirm.map(
+      (entry) => `• ${String(entry?.label_th || "").trim() || entry.key}: ${Number(entry.count || 0) || 0}`
+    );
+    if (assignmentsOpen > 0 && !confirm.some((entry) => String(entry?.key || "") === "assignments")) {
+      lines.push(`• มี assignment เปิดอยู่ ${assignmentsOpen} รายการ`);
     }
     const label = confirm.length > 0 ? `⚠ confirm ${confirm.length}` : "⚠ assignment";
     return { className: "is-confirm", label, title: "ลบได้ แต่ตอน purge จะต้องยืนยัน:\n" + lines.join("\n") };

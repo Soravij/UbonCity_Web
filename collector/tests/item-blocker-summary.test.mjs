@@ -162,7 +162,9 @@ test("a field_pack surfaces in confirm_required and is NOT counted in cleanup_ca
     const id = ctx.createCleanLiveItem("Item With Field Pack");
     addFieldPack(ctx.db, id);
     const counts = ctx.repo.getItemReferenceBlockerCounts([id]).get(id);
-    assert.deepEqual(counts.confirm_required, [{ key: "field_packs", count: 1 }]);
+    // label_th travels with the group so the badge tooltip names it in Thai from the def, not a
+    // client-side copy of the wording.
+    assert.deepEqual(counts.confirm_required, [{ key: "field_packs", label_th: "field packs", count: 1 }]);
     // Curated groups are a distinct purge tier: they must never inflate the cleanup_candidate total.
     assert.equal(counts.cleanup_candidate_count, 0);
     // confirm_required is not a NEVER blocker, so the item stays soft-deletable.
@@ -186,7 +188,7 @@ test("translations split correctly: published -> never, unpublished -> confirm_r
     const counts = ctx.repo.getItemReferenceBlockerCounts([id]).get(id);
     assert.deepEqual(
       counts.confirm_required.find((entry) => entry.key === "translations_unpublished"),
-      { key: "translations_unpublished", count: 1 },
+      { key: "translations_unpublished", label_th: "งานแปลที่ยังไม่ผูกบทความเผยแพร่", count: 1 },
       "unpublished translation is a confirm_required group",
     );
     // Neither translation row is a cleanup_candidate def, so the cleanup total stays untouched.

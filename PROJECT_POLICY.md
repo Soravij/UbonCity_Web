@@ -113,8 +113,11 @@ gate: the cost of being wrong differs per path, because only purge destroys data
   Everything else (drafts, field packs, assignments, workflow state) must not block it: the row stays
   in `content_items` and the full gate still runs at merge and at purge. Every successful soft delete
   writes an `item.delete` audit row carrying the item snapshot and the NEVER-check result.
-  The NEVER keys are a strict subset of the hard blockers and are derived from
-  `REFERENCE_HARD_BLOCKER_DEFS` — they must not be restated as separate SQL.
+  The NEVER keys are derived from `REFERENCE_HARD_BLOCKER_DEFS` — they must not be restated as
+  separate SQL. They are currently the whole of that list, but the derivation stays **opt-in** (a
+  per-key remediation map in `services/raw-delete.mjs`): a hard blocker added later does not join the
+  soft-delete gate until it is named there. The NEVER set is exactly
+  `published_articles`, `review_actions`, `translations_published` and is locked by a test.
 - **Bulk soft delete** (`POST /api/items/bulk-delete`) is **partial success**: items hitting a NEVER
   blocker are skipped into `blocked_rows` with per-item reasons, the rest are deleted, and the
   response reports both. When *every* selected item is blocked it must fail (400), never report
@@ -122,12 +125,21 @@ gate: the cost of being wrong differs per path, because only purge destroys data
 - **Merge** (`mergeContentItems`) keeps the **full dependency gate** (`getMergeBlockersForItem`).
 - **Purge** (`POST /api/admin/deleted-items/:id/purge`, `DELETE FROM content_items`, irreversible)
   classifies every reference group into exactly one of three tiers:
-  - `hard_blocker` — always rejected (409). No override exists, at any role.
+  - `hard_blocker` — always rejected (409). No override exists, at any role. Exactly three groups:
+    `published_articles`, `review_actions`, `translations_published`. A group belongs here only when
+    **no workflow action can clear it** — it is already public, or it is audit history. Anything an
+    owner could legitimately resolve (closing an assignment, discarding a draft) is `confirm_required`
+    instead: a tier nothing can clear is a dead end, not a gate. Each def's `hint` is user-facing —
+    it renders verbatim under the disabled Purge button, so it must state what to do.
   - `cleanup_candidate` — rejected (409) until cleared through the reference-cleanup endpoint first.
-  - `confirm_required` — groups holding human curation (drafts, field packs, approved context,
-    unpublished translations). Rejected (400, listing `missing_confirmations`) unless the owner names
-    **every one** of them in the `confirmed_overrides` request field. The `item.purge` audit row must
-    record which groups were overridden, why confirmation was required, and the per-record detail.
+  - `confirm_required` — groups holding human work: drafts, field packs, approved context,
+    unpublished translations, and the **assignment family** (`assignments`,
+    `content_assignment_submissions`, `content_assignment_submission_deliverables`,
+    `content_assignment_handoff_snapshots`). Rejected (400, listing `missing_confirmations`) unless the
+    owner names **every one** of them in the `confirmed_overrides` request field. Each def must carry
+    per-record detail naming *whose* work is being destroyed (assignee/submitter, state, date). The
+    `item.purge` audit row must record which groups were overridden, why confirmation was required,
+    and the per-record detail.
 - **Blocker summary display** (`GET /api/items/blocker-summary?ids=`, read-only) annotates the item
   list with each item's delete-blocker state — NEVER blockers, the `cleanup_candidate` reference total,
   the per-group `confirm_required` list, and open assignments — reusing the same reference defs as the
@@ -181,19 +193,29 @@ as any intentional change to the rules above:
   อย่างอื่น (drafts, field packs, assignment, workflow state) ต้องไม่บล็อก เพราะแถวยังอยู่ใน
   `content_items` และยังต้องผ่านเกณฑ์เต็มตอน merge กับตอน purge อยู่ดี ทุกครั้งที่ soft delete สำเร็จ
   ต้องเขียน audit `item.delete` พร้อม snapshot ของ item และผลการเช็ค NEVER
-  ชุด key ของ NEVER เป็น subset ของ hard blocker และ derive มาจาก `REFERENCE_HARD_BLOCKER_DEFS`
-  ห้ามเขียน SQL ซ้ำแยกไว้ต่างหาก
+  ชุด key ของ NEVER derive มาจาก `REFERENCE_HARD_BLOCKER_DEFS` ห้ามเขียน SQL ซ้ำแยกไว้ต่างหาก
+  ตอนนี้ครบทั้งลิสต์นั้นพอดี แต่การ derive ยังเป็นแบบ **opt-in** (map remediation ราย key ใน
+  `services/raw-delete.mjs`) — hard blocker ที่เพิ่มทีหลังจะยังไม่เข้าเกณฑ์ soft delete จนกว่าจะถูกใส่ชื่อไว้ตรงนั้น
+  ชุด NEVER คือ `published_articles`, `review_actions`, `translations_published` เท่านั้น และมี test ล็อกไว้
 - **Bulk soft delete** (`POST /api/items/bulk-delete`) เป็นแบบ **partial success**: item ที่ติด NEVER
   ถูกข้ามไปอยู่ใน `blocked_rows` พร้อมเหตุผลรายตัว ที่เหลือลบตามปกติ และ response ต้องรายงานทั้งสองฝั่ง
   ถ้าติดบล็อก**ทุกตัว** ต้องตอบ fail (400) ห้ามรายงานว่าสำเร็จทั้งที่ลบได้ 0 รายการ
 - **Merge** (`mergeContentItems`) ยังใช้ **เกณฑ์เต็ม** (`getMergeBlockersForItem`) ตามเดิม
 - **Purge** (`POST /api/admin/deleted-items/:id/purge`, `DELETE FROM content_items`, กู้คืนไม่ได้)
   จัดกลุ่มข้อมูลอ้างอิงทุกกลุ่มเป็น 1 ใน 3 ชั้น:
-  - `hard_blocker` — ปฏิเสธเสมอ (409) ไม่มี override ไม่ว่า role ไหน
+  - `hard_blocker` — ปฏิเสธเสมอ (409) ไม่มี override ไม่ว่า role ไหน มีแค่ 3 กลุ่ม:
+    `published_articles`, `review_actions`, `translations_published` กลุ่มจะอยู่ชั้นนี้ได้ก็ต่อเมื่อ
+    **ไม่มี workflow action ไหนเคลียร์ได้** — คือเผยแพร่ไปแล้ว หรือเป็นประวัติ audit ส่วนอะไรที่ owner
+    จัดการเองได้ตามขั้นตอนปกติ (ปิด assignment, ทิ้ง draft) ต้องอยู่ `confirm_required` แทน เพราะชั้นที่ไม่มี
+    ทางเคลียร์คือทางตัน ไม่ใช่เกณฑ์ และ `hint` ของแต่ละ def เป็นข้อความที่ผู้ใช้เห็นจริง — ถูกแสดงตรง ๆ
+    ใต้ปุ่ม Purge ที่ disabled อยู่ จึงต้องบอกว่าให้ไปทำอะไรต่อ
   - `cleanup_candidate` — ปฏิเสธ (409) จนกว่าจะล้างผ่าน endpoint reference-cleanup ก่อน
-  - `confirm_required` — กลุ่มที่มีงานที่คน curate ไว้ (drafts, field packs, approved context,
-    งานแปลที่ยังไม่เผยแพร่) ปฏิเสธ (400 พร้อมรายการ `missing_confirmations`) จนกว่า owner จะระบุ
-    **ครบทุกตัว** ในฟิลด์ `confirmed_overrides` ของ request และ audit `item.purge` ต้องบันทึกว่ากลุ่มไหน
+  - `confirm_required` — กลุ่มที่มีงานที่คนลงแรงไว้: drafts, field packs, approved context,
+    งานแปลที่ยังไม่เผยแพร่ และ**ตระกูล assignment** (`assignments`,
+    `content_assignment_submissions`, `content_assignment_submission_deliverables`,
+    `content_assignment_handoff_snapshots`) ปฏิเสธ (400 พร้อมรายการ `missing_confirmations`) จนกว่า owner จะระบุ
+    **ครบทุกตัว** ในฟิลด์ `confirmed_overrides` ของ request แต่ละ def ต้องมี detail ราย record ที่บอกได้ว่ากำลัง
+    ทิ้ง**งานของใคร** (ผู้รับงาน/ผู้ส่งงาน, สถานะ, วันที่) และ audit `item.purge` ต้องบันทึกว่ากลุ่มไหน
     ถูก override, เหตุผลที่ต้องยืนยัน, และรายละเอียดราย record
 - **Blocker summary (แสดงผล)** (`GET /api/items/blocker-summary?ids=`, read-only) แปะสถานะ blocker ของการลบ
   ให้แต่ละ item บน item list — NEVER blocker, ยอดรวม `cleanup_candidate`, รายการ `confirm_required` ราย group,

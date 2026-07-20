@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { planBulkItemDelete, getNeverOverrideBlockersForItem } from "../services/raw-delete.mjs";
 import { openDatabase } from "../db/client.mjs";
-import { createRepository } from "../db/repository.mjs";
+import { createRepository, REFERENCE_HARD_BLOCKER_DEFS } from "../db/repository.mjs";
 
 process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "RawDelete!Test1";
 
@@ -449,6 +449,73 @@ test("(c) translations block soft delete only when bound to a published article"
   }
 });
 
+// The soft-delete gate is derived from REFERENCE_HARD_BLOCKER_DEFS, so moving a def between tiers can
+// silently widen or narrow it. These two lock the resulting set from both ends: the tier list itself,
+// and what an item carrying *every* candidate dependency actually reports.
+test("the hard_blocker tier is exactly the three permanent groups", () => {
+  assert.deepEqual(
+    REFERENCE_HARD_BLOCKER_DEFS.map((def) => def.key).sort(),
+    ["published_articles", "review_actions", "translations_published"],
+    "a group that a workflow action can clear must be confirm_required, not a hard blocker"
+  );
+  for (const def of REFERENCE_HARD_BLOCKER_DEFS) {
+    assert.ok(String(def.hint || "").trim(), `${def.key} needs a Thai hint — it renders under the disabled Purge button`);
+  }
+});
+
+test("NEVER-override soft-delete blockers stay at exactly three keys even when every dependency is present", () => {
+  const ctx = createTestContext();
+  try {
+    const id = Number(ctx.createRawItem("Item Carrying Everything")?.id || 0);
+    const userId = Number(
+      ctx.db.prepare("INSERT INTO users (email, display_name, role) VALUES (?,?,?)").run("who@local", "Who", "editor")
+        .lastInsertRowid
+    );
+
+    const articleId = addPublishedArticle(ctx.db, id);
+    addTranslation(ctx.db, id, articleId);
+    ctx.db.prepare("INSERT INTO review_actions (content_item_id, action) VALUES (?,?)").run(id, "approve");
+    addDraft(ctx.db, id);
+    addAssignment(ctx.db, id);
+    const assignmentId = Number(
+      ctx.db.prepare("SELECT id FROM content_assignments WHERE content_item_id=? LIMIT 1").get(id)?.id || 0
+    );
+    const submissionId = Number(
+      ctx.db
+        .prepare(
+          "INSERT INTO content_assignment_submissions (assignment_id, content_item_id, submitted_by_user_id) VALUES (?,?,?)"
+        )
+        .run(assignmentId, id, userId).lastInsertRowid
+    );
+    ctx.db
+      .prepare(
+        `INSERT INTO content_assignment_submission_deliverables
+           (assignment_id, submission_id, content_item_id, deliverable_type, created_by)
+         VALUES (?,?,?,?,?)`
+      )
+      .run(assignmentId, submissionId, id, "article", "who@local");
+    ctx.db
+      .prepare(
+        `INSERT INTO content_assignment_handoff_snapshots
+           (assignment_id, content_item_id, handoff_package_json, created_by)
+         VALUES (?,?,?,?)`
+      )
+      .run(assignmentId, id, "{}", "who@local");
+
+    const keys = getNeverOverrideBlockersForItem(ctx.db, id).map((entry) => entry.key).sort();
+    assert.deepEqual(
+      keys,
+      ["published_articles", "review_actions", "translations_published"],
+      "the assignment family must never bar a reversible soft delete"
+    );
+    for (const entry of getNeverOverrideBlockersForItem(ctx.db, id)) {
+      assert.ok(String(entry.remediation || "").trim(), `${entry.key} must tell the user how to unblock`);
+    }
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("(d) bulk delete mixing blocked and deletable items reports partial success", () => {
   const ctx = createTestContext();
   try {
@@ -523,18 +590,23 @@ test("confirm_required tables keep their existing hard-delete eligibility blocke
          VALUES (?,?,?)`
       )
       .run(id, `fp-${id}`, "en");
+    // content_assignments moved into REFERENCE_CONFIRM_REQUIRED_DEFS, so the backstop loop now walks
+    // over it too. Its def key (`assignments`) differs from the hardcoded check key
+    // (`content_assignments`), which makes it the case the table-level guard exists for.
+    addAssignment(ctx.db, id);
 
     const eligibility = ctx.repo.getRawOnlyHardDeleteEligibility(id);
     assert.equal(eligibility.eligible, false, "curated references still block hard delete");
 
     const keys = eligibility.blockers.map((entry) => entry.key);
-    for (const key of ["content_drafts", "field_packs", "content_translations"]) {
+    for (const key of ["content_drafts", "field_packs", "content_translations", "content_assignments"]) {
       assert.equal(keys.filter((entry) => entry === key).length, 1, `${key} reported exactly once`);
     }
     // The def keys differ from the hardcoded check keys; the table-level guard keeps them out so the
     // same rows are not counted twice under two names.
     assert.equal(keys.includes("drafts"), false, "no duplicate blocker under the def key");
     assert.equal(keys.includes("translations_unpublished"), false, "no narrower duplicate for translations");
+    assert.equal(keys.includes("assignments"), false, "no duplicate blocker under the assignments def key");
   } finally {
     ctx.cleanup();
   }

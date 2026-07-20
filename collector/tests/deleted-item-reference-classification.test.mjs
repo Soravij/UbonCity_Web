@@ -194,6 +194,106 @@ test("cleanup of a confirm_required group succeeds with confirmed_overrides and 
   }
 });
 
+test("the assignment family is confirm_required and its detail names whose work would be destroyed", () => {
+  const ctx = createTestContext();
+  try {
+    const id = ctx.createDeletedItem("Item With Open Assignment");
+    const userId = ctx.createUser("fieldworker@local");
+    ctx.db
+      .prepare(
+        "INSERT INTO content_assignments (assignment_uid, content_item_id, assignee_user_id, assignee_name, state) VALUES (?,?,?,?,?)"
+      )
+      .run(`asg-${id}`, id, userId, "Field Worker", "in_progress");
+    const assignmentId = Number(
+      ctx.db.prepare("SELECT id FROM content_assignments WHERE content_item_id=? LIMIT 1").get(id)?.id || 0
+    );
+    const submissionId = Number(
+      ctx.db
+        .prepare(
+          "INSERT INTO content_assignment_submissions (assignment_id, content_item_id, submitted_by_user_id, submission_state) VALUES (?,?,?,?)"
+        )
+        .run(assignmentId, id, userId, "submitted").lastInsertRowid
+    );
+    ctx.db
+      .prepare(
+        `INSERT INTO content_assignment_submission_deliverables
+           (assignment_id, submission_id, content_item_id, deliverable_type, status, created_by)
+         VALUES (?,?,?,?,?,?)`
+      )
+      .run(assignmentId, submissionId, id, "article", "draft", "fieldworker@local");
+    ctx.db
+      .prepare(
+        `INSERT INTO content_assignment_handoff_snapshots
+           (assignment_id, content_item_id, handoff_package_json, guard_status, created_by)
+         VALUES (?,?,?,?,?)`
+      )
+      .run(assignmentId, id, "{}", "ready", "owner@local");
+
+    const { map } = ctx.groupsOf(id);
+    for (const key of [
+      "assignments",
+      "content_assignment_submissions",
+      "content_assignment_submission_deliverables",
+      "content_assignment_handoff_snapshots",
+    ]) {
+      const group = map.get(key);
+      assert.ok(group, `${key} group present`);
+      assert.equal(group.category, "confirm_required", `${key} must be overridable, not a dead end`);
+      assert.ok(String(group.confirm_reason_th || "").trim(), `${key} states why confirmation is required`);
+      assert.equal(group.confirm_details.length, 1, `${key} carries detail per record`);
+    }
+
+    // The point of the detail is answering "whose work am I throwing away", not just "how many rows".
+    assert.equal(map.get("assignments").confirm_details[0].actor, "Field Worker");
+    assert.equal(map.get("assignments").confirm_details[0].actor_user_id, userId);
+    assert.equal(map.get("assignments").confirm_details[0].status, "in_progress");
+    assert.equal(map.get("content_assignment_submissions").confirm_details[0].actor, "fieldworker@local");
+    assert.equal(map.get("content_assignment_submissions").confirm_details[0].status, "submitted");
+    assert.equal(map.get("content_assignment_submission_deliverables").confirm_details[0].actor, "fieldworker@local");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("a confirmed assignment override actually clears the group", () => {
+  const ctx = createTestContext();
+  try {
+    const id = ctx.createDeletedItem("Item With Assignment To Clear");
+    ctx.db
+      .prepare("INSERT INTO content_assignments (assignment_uid, content_item_id) VALUES (?,?)")
+      .run(`asg-clear-${id}`, id);
+
+    assert.throws(
+      () =>
+        ctx.repo.cleanupDeletedItemReferenceGroups({
+          itemId: id,
+          groups: ["assignments"],
+          actorEmail: "owner@local",
+          reason: "test",
+        }),
+      /group requires confirmation/,
+      "an assignment must not be cleanable without an explicit confirmation"
+    );
+
+    ctx.repo.cleanupDeletedItemReferenceGroups({
+      itemId: id,
+      groups: ["assignments"],
+      actorEmail: "owner@local",
+      reason: "test",
+      confirmedOverrides: ["assignments"],
+    });
+
+    assert.equal(
+      Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assignments WHERE content_item_id=?").get(id)?.c || 0),
+      0,
+      "assignment removed once confirmed"
+    );
+    assert.deepEqual(lastCleanupAudit(ctx.db, id)?.confirmed_overrides, ["assignments"]);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("a hard_blocker group can never be cleaned even when named in confirmed_overrides", () => {
   const ctx = createTestContext();
   try {

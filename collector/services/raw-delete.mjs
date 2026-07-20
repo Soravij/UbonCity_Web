@@ -2,13 +2,18 @@ import { REFERENCE_HARD_BLOCKER_DEFS } from "../db/repository.mjs";
 
 // Soft-delete is reversible: the row stays in content_items with is_deleted=1 and the full
 // dependency gate still runs at merge and at purge. Only blockers that can never be overridden by
-// re-deleting later belong here — a strict subset of the hard blockers (an item under an open
-// assignment is still soft-deletable, a published one is not).
+// re-deleting later belong here — an item under an open assignment is still soft-deletable, a
+// published one is not.
 //
 // The keys and their SQL come from REFERENCE_HARD_BLOCKER_DEFS in db/repository.mjs so this gate
 // cannot drift from the purge classification. Only the soft-delete-specific remediation text —
 // what the user must do to make the delete possible — is stated here. translations_published is
 // already per-row in the def (source_published_article_id IS NOT NULL); no special case needed.
+//
+// This map currently names every hard blocker, but the filter below is NOT redundant: it is what
+// keeps the NEVER set opt-in. A future hard blocker with no entry here stays out of the soft-delete
+// gate by default, which is the safe direction — soft delete is reversible, so a new permanent
+// purge blocker must not silently start barring it too. The lock test asserts the resulting set.
 const NEVER_OVERRIDE_REMEDIATION = Object.freeze({
   published_articles: "ต้อง unpublish จาก main-site ก่อนจึงจะลบได้",
   review_actions: "ประวัติรีวิวลบไม่ได้ — ต้องให้ owner purge รายการนี้แทน",

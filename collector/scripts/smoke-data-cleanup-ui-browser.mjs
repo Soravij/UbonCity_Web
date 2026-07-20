@@ -11,8 +11,10 @@ import { assertLoginRole, resolveSmokeActor } from "./shared-smoke-auth.mjs";
 
 // Browser gate for root PROJECT_POLICY.md §3 Delete Tier Contract: smoke-data-cleanup.mjs proves the
 // API tiers, this proves the Data Cleanup table actually renders them — that a confirm_required group
-// is tickable per record, that Purge stays shut until every one is ticked, and that a hard_blocker
-// offers no override at all. Runs against its own backend + temp DB, so it never touches real data.
+// is tickable per record, that Purge stays shut until every one is ticked, that an open assignment is
+// one of those confirmable groups (naming its assignee) rather than a dead end, and that a hard_blocker
+// offers no override at all and says why next to its disabled button.
+// Runs against its own backend + temp DB, so it never touches real data.
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CWD = path.resolve(SCRIPT_DIR, "..");
@@ -157,7 +159,7 @@ async function login(auth) {
 
 // Fixtures are written straight to the temp DB: there is no API that creates a soft-deleted item
 // already carrying a curated field pack, which is exactly the state this gate needs.
-function createDeletedItem(db, { titleSuffix, withFieldPack = false, withPublishedArticle = false }) {
+function createDeletedItem(db, { titleSuffix, withFieldPack = false, withPublishedArticle = false, withAssignment = false }) {
   const uid = `smoke-cleanup-ui-${crypto.randomUUID()}`;
   const title = `Smoke Cleanup UI ${titleSuffix}`;
   const slug = `smoke-cleanup-ui-${titleSuffix.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
@@ -176,6 +178,12 @@ function createDeletedItem(db, { titleSuffix, withFieldPack = false, withPublish
         verified_facts_json, uncertain_facts_json, social_shot_emphasis_json, social_on_camera_points_json, updated_by
       ) VALUES (?, ?, 1, ?, '[]', '[]', '[]', '[]', '[]', '[]', ?)
     `).run(itemId, "ready_for_field", `Smoke field pack for ${titleSuffix}`, "smoke-data-cleanup-ui");
+  }
+  if (withAssignment) {
+    db.prepare(`
+      INSERT INTO content_assignments (assignment_uid, content_item_id, assignee_name, state)
+      VALUES (?, ?, ?, ?)
+    `).run(`smoke-ui-assignment-${crypto.randomUUID()}`, itemId, "Smoke Assignee", "assigned");
   }
   if (withPublishedArticle) {
     db.prepare(`
@@ -335,6 +343,10 @@ async function main() {
     db = openDatabase(env.DB_PATH, path.join(CWD, "database", "schema.sql"));
     const confirmItem = createDeletedItem(db, { titleSuffix: "Confirm Required", withFieldPack: true });
     const hardItem = createDeletedItem(db, { titleSuffix: "Hard Blocked", withPublishedArticle: true });
+    // The assignment family is confirm_required, not a hard blocker: this fixture is the browser-side
+    // proof that an open assignment offers a tickable override naming the assignee, and purges once
+    // ticked — the behaviour §3 changed to, and the reason both smoke scripts had to move together.
+    const assignmentItem = createDeletedItem(db, { titleSuffix: "Assignment Confirm", withAssignment: true });
 
     browserHandle = startBrowser(browserPath);
     cdp = await connectCdp(await waitForBrowserWsUrl(browserHandle));
@@ -427,18 +439,75 @@ async function main() {
         present: Boolean(button),
         disabled: Boolean(button?.disabled),
         blocker_text: tr?.children[4]?.textContent.trim() || "",
+        action_text: tr?.children[5]?.textContent.trim() || "",
         checkbox_count: (tr?.querySelectorAll('input[type="checkbox"]') || []).length,
       };
     })()`);
     assert(hardRow.present, "hard-blocked row missing from the table");
     assert(hardRow.disabled === true, "hard_blocker purge button must stay disabled");
     assert(hardRow.checkbox_count === 0, "hard_blocker must not offer a confirmation checkbox");
+    // A disabled button with no stated reason is the bug this asserts against: the def's Thai hint must
+    // be on screen next to the button, not only in a tooltip or in the blockers column.
+    assert(
+      hardRow.action_text.includes("Purge ไม่ได้") && hardRow.action_text.includes("unpublish"),
+      `disabled Purge must state the hard blocker's remediation: ${JSON.stringify(hardRow.action_text)}`
+    );
     checks.hard_blocked_disabled = true;
     checks.hard_blocker_text = hardRow.blocker_text;
+    checks.hard_blocked_reason_text = hardRow.action_text;
+
+    logStep("assignment.confirm");
+    const assignmentRow = await evaluate(cdp, `(() => {
+      const tr = document.querySelector('${purgeButtonSelector(assignmentItem.id)}')?.closest("tr");
+      const boxes = Array.from(tr?.querySelectorAll('input[data-cleanup-confirm-item="${assignmentItem.id}"]') || []);
+      return {
+        groups: boxes.map((box) => String(box.dataset.cleanupConfirmGroup || "")),
+        details: Array.from(tr?.querySelectorAll(".cleanup-confirm-group .muted") || []).map((node) => node.textContent.trim()),
+        purge_disabled: Boolean(tr?.querySelector('button[data-action="cleanup-purge"]')?.disabled),
+      };
+    })()`);
+    assert(
+      assignmentRow.groups.includes("assignments"),
+      `open assignment must offer a confirm checkbox, not a hard block: ${JSON.stringify(assignmentRow.groups)}`
+    );
+    assert(assignmentRow.purge_disabled === true, "assignment purge must stay disabled before the tick");
+    assert(
+      assignmentRow.details.some((line) => line.includes("Smoke Assignee")),
+      `assignment detail must name whose work is being destroyed: ${JSON.stringify(assignmentRow.details)}`
+    );
+    checks.assignment_confirm_checkbox_rendered = assignmentRow.groups;
+    checks.assignment_detail_rendered = assignmentRow.details;
+
+    await evaluate(cdp, `(() => {
+      document.querySelectorAll('input[data-cleanup-confirm-item="${assignmentItem.id}"]').forEach((box) => {
+        box.checked = true;
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      return true;
+    })()`);
+    await waitForCondition(cdp, `!document.querySelector('${purgeButtonSelector(assignmentItem.id)}')?.disabled`, 10000);
+    await evaluate(cdp, `document.querySelector('${purgeButtonSelector(assignmentItem.id)}')?.click(); true;`);
+    await waitForCondition(cdp, `!document.querySelector('${purgeButtonSelector(assignmentItem.id)}')`, 20000);
+    checks.assignment_purged_after_confirm = true;
+
+    const assignmentAudit = db.prepare(
+      "SELECT details_json FROM audit_logs WHERE action='item.purge' AND CAST(target_id AS INTEGER)=? ORDER BY id DESC LIMIT 1"
+    ).get(assignmentItem.id);
+    assert(assignmentAudit, `item.purge audit row missing for assignment item ${assignmentItem.id}`);
+    const assignmentOverrides = JSON.parse(assignmentAudit.details_json || "{}")?.confirmed_overrides || [];
+    assert(
+      assignmentOverrides.some((group) => String(group?.key || "") === "assignments"),
+      `audit must record the assignment override: ${JSON.stringify(assignmentOverrides)}`
+    );
+    checks.assignment_audit_recorded_override = true;
 
     console.log(JSON.stringify({
       ok: true,
-      fixtures: { confirm_required_item_id: confirmItem.id, hard_blocked_item_id: hardItem.id },
+      fixtures: {
+        confirm_required_item_id: confirmItem.id,
+        hard_blocked_item_id: hardItem.id,
+        assignment_confirm_item_id: assignmentItem.id,
+      },
       checks,
     }, null, 2));
   } finally {

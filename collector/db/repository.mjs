@@ -312,6 +312,83 @@ const REFERENCE_CONFIRM_REQUIRED_DEFS = Object.freeze([
       lang: row?.lang || null,
     }),
   },
+  // The assignment family. These are somebody's work-in-progress, not a permanent record: closing an
+  // assignment is a workflow action the owner can take, so barring purge forever was wrong. They are
+  // confirm_required for the same reason drafts and field packs are — deleting them throws away work a
+  // named person did — and the labels/reasons say whose work is being thrown away.
+  {
+    key: "assignments",
+    label_th: "งานที่มอบหมายให้คนอื่นไว้ (assignment)",
+    table: "content_assignments",
+    where: "content_item_id=?",
+    confirm_reason_th: "มีคนถืองานนี้อยู่ — ลบแล้วงานที่มอบหมายและรอบงานทั้งหมดหายไปด้วย",
+    detail_sql:
+      "SELECT id, assignee_user_id, assignee_name, state, due_at, updated_at, created_at FROM content_assignments WHERE content_item_id=? ORDER BY id ASC LIMIT 25",
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: Number(row?.assignee_user_id || 0) || null,
+      actor: row?.assignee_name || null,
+      acted_at: row?.updated_at || row?.created_at || null,
+      status: row?.state || null,
+      due_at: row?.due_at || null,
+    }),
+  },
+  {
+    key: "content_assignment_submissions",
+    label_th: "งานที่ส่งกลับมาแล้วจาก assignment",
+    table: "content_assignment_submissions",
+    where: "content_item_id=?",
+    confirm_reason_th: "เป็นงานที่คนส่งกลับมาแล้ว — ลบแล้วของที่เขาส่งหายทั้งหมด",
+    detail_sql: `
+      SELECT s.id AS id, s.submitted_by_user_id AS submitted_by_user_id, u.display_name AS submitted_by_name,
+             s.submission_state AS submission_state, s.reviewed_at AS reviewed_at, s.created_at AS created_at
+      FROM content_assignment_submissions s
+      LEFT JOIN users u ON u.id = s.submitted_by_user_id
+      WHERE s.content_item_id=?
+      ORDER BY s.id ASC
+      LIMIT 25
+    `,
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: Number(row?.submitted_by_user_id || 0) || null,
+      actor: row?.submitted_by_name || null,
+      acted_at: row?.reviewed_at || row?.created_at || null,
+      status: row?.submission_state || null,
+    }),
+  },
+  {
+    key: "content_assignment_submission_deliverables",
+    label_th: "ไฟล์และเนื้อหาที่ส่งมากับงาน",
+    table: "content_assignment_submission_deliverables",
+    where: "content_item_id=?",
+    confirm_reason_th: "เป็นของที่คนลงพื้นที่ทำมาส่ง — ลบแล้วเนื้อหาและไฟล์ที่ส่งหายไปด้วย",
+    detail_sql:
+      "SELECT id, deliverable_type, title, status, created_by, updated_at, created_at FROM content_assignment_submission_deliverables WHERE content_item_id=? ORDER BY id ASC LIMIT 25",
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: null,
+      actor: row?.created_by || null,
+      acted_at: row?.updated_at || row?.created_at || null,
+      status: row?.status || null,
+      deliverable_type: row?.deliverable_type || null,
+    }),
+  },
+  {
+    key: "content_assignment_handoff_snapshots",
+    label_th: "snapshot ตอนส่งมอบงานให้คนทำ",
+    table: "content_assignment_handoff_snapshots",
+    where: "content_item_id=?",
+    confirm_reason_th: "เป็นหลักฐานว่าส่งมอบโจทย์อะไรให้ใคร — ลบแล้วตรวจย้อนหลังไม่ได้",
+    detail_sql:
+      "SELECT id, guard_status, created_by, created_at FROM content_assignment_handoff_snapshots WHERE content_item_id=? ORDER BY id ASC LIMIT 25",
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: null,
+      actor: row?.created_by || null,
+      acted_at: row?.created_at || null,
+      status: row?.guard_status || null,
+    }),
+  },
 ]);
 const REFERENCE_CONFIRM_REQUIRED_KEYS = new Set(REFERENCE_CONFIRM_REQUIRED_DEFS.map((entry) => entry.key));
 const RAW_ONLY_HARD_DELETE_ALLOWED_REFERENCE_KEYS = new Set([
@@ -323,13 +400,15 @@ const RAW_ONLY_HARD_DELETE_ALLOWED_REFERENCE_KEYS = new Set([
 ]);
 // Exported so services/raw-delete.mjs can derive the soft-delete NEVER gate from the same SQL
 // instead of restating it: purge and soft-delete must not drift apart on what "published" means.
+//
+// Everything here is permanent by nature — it is already public, or it is audit history — so no
+// confirmation can override it at any role. Anything an owner could *legitimately resolve* through a
+// workflow action (closing an assignment, discarding a draft) belongs in REFERENCE_CONFIRM_REQUIRED_DEFS
+// instead; a tier that no action can clear is a dead end, not a gate. `hint` is user-facing: it is
+// rendered verbatim under the disabled Purge button, so it must say what to do, not just what is wrong.
 export const REFERENCE_HARD_BLOCKER_DEFS = Object.freeze([
-  { key: "assignments", label_th: "มี assignment งานอยู่", sql: "SELECT COUNT(*) AS c FROM content_assignments WHERE content_item_id=?", hint: "ต้องปิด assignment ก่อนผ่านหน้าส่งงาน" },
   { key: "published_articles", label_th: "เผยแพร่ขึ้นเว็บแล้ว", sql: "SELECT COUNT(*) AS c FROM published_articles WHERE content_item_id=?", hint: "ต้อง unpublish จาก backend ก่อน" },
-  { key: "content_assignment_submissions", label_th: "มีงานส่งกลับจาก assignment อยู่", sql: "SELECT COUNT(*) AS c FROM content_assignment_submissions WHERE content_item_id=?", hint: "ต้องปิดการตรวจงานก่อน" },
-  { key: "content_assignment_submission_deliverables", label_th: "มีไฟล์หรือข้อมูลส่งงานจาก assignment อยู่", sql: "SELECT COUNT(*) AS c FROM content_assignment_submission_deliverables WHERE content_item_id=?", hint: "ต้องปิดการตรวจงานก่อน" },
-  { key: "content_assignment_handoff_snapshots", label_th: "มี snapshot การส่งงานอยู่", sql: "SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots WHERE content_item_id=?", hint: "ผูกกับวงจร assignment" },
-  { key: "review_actions", label_th: "มีประวัติ action จาก review อยู่", sql: "SELECT COUNT(*) AS c FROM review_actions WHERE content_item_id=?", hint: "ประวัติ audit ห้ามลบ" },
+  { key: "review_actions", label_th: "มีประวัติ action จาก review อยู่", sql: "SELECT COUNT(*) AS c FROM review_actions WHERE content_item_id=?", hint: "ประวัติ audit ห้ามลบ — purge รายการนี้ไม่ได้" },
   { key: "translations_published", label_th: "มีงานแปลที่ผูกกับบทความที่เผยแพร่แล้ว", sql: "SELECT COUNT(*) AS c FROM content_translations WHERE source_content_item_id=? AND source_published_article_id IS NOT NULL", hint: "ต้อง unpublish บทความต้นทางก่อน" },
 ]);
 const REFERENCE_ALL_GROUP_KEYS = new Set([
@@ -13271,15 +13350,15 @@ function normalizeStateValue(value, stateGroup) {
   }
 
   // Read-only display aggregation for the item-list delete-blocker badge. It reuses the exact
-  // reference def arrays the purge/cleanup gate uses (REFERENCE_CLEANUP_CANDIDATE_DEFS,
-  // REFERENCE_CONFIRM_REQUIRED_DEFS and the `assignments` entry of REFERENCE_HARD_BLOCKER_DEFS) so
+  // reference def arrays the purge/cleanup gate uses (REFERENCE_CLEANUP_CANDIDATE_DEFS and
+  // REFERENCE_CONFIRM_REQUIRED_DEFS, including its `assignments` entry) so
   // the badge can never disagree with the purge classification — no SQL is restated here. Unlike
   // getDeletedItemReferenceGroups it does NOT require is_deleted=1 (the list shows live items) and
   // it never mutates: it only counts. cleanup_candidate and confirm_required are each aggregated
   // with one GROUP BY per def across every requested id (a per-page batch, not one COUNT per item
-  // per def); assignments_open runs the def's own scalar COUNT per id — a single cheap indexed
-  // lookup, kept separate because at purge time it is a hard blocker the owner can clear by closing
-  // the assignment. cleanup_candidate and confirm_required stay in separate response fields: their
+  // per def); assignments_open reuses the same batched read for the `assignments` def, kept as its own
+  // field because the in-flight table's soft-delete acknowledgement asks a different question than the
+  // purge tier. cleanup_candidate and confirm_required stay in separate response fields: their
   // def sets are disjoint tables, and a confirm_required group must never be folded into the
   // cleanup_candidate total (the purge gate treats them as different tiers).
   function getItemReferenceBlockerCounts(itemIds = []) {
@@ -13327,16 +13406,22 @@ function normalizeStateValue(value, stateGroup) {
     for (const def of REFERENCE_CONFIRM_REQUIRED_DEFS) {
       for (const [id, count] of countsByIdForDef(def)) {
         const bucket = summary.get(id);
-        if (bucket && count > 0) bucket.confirm_required.push({ key: def.key, count });
+        // label_th rides along so the badge tooltip can name the group in Thai without the client
+        // keeping its own key -> label table, which would add to the REFERENCE_*_KEYS manual-sync debt
+        // PROJECT_POLICY §3 already tracks. The def stays the single source of the wording.
+        if (bucket && count > 0) bucket.confirm_required.push({ key: def.key, label_th: def.label_th, count });
       }
     }
 
-    const assignmentsDef = REFERENCE_HARD_BLOCKER_DEFS.find((def) => def.key === "assignments");
+    // assignments is also counted in confirm_required above; assignments_open stays a separate field
+    // because it answers a different question for a different caller — the in-flight table's per-row
+    // *soft* delete uses it to raise an acknowledgement ("somebody is holding this work"), which is not
+    // the same thing as the purge tier the confirm_required list describes.
+    const assignmentsDef = REFERENCE_CONFIRM_REQUIRED_DEFS.find((def) => def.key === "assignments");
     if (assignmentsDef) {
-      const stmt = db.prepare(assignmentsDef.sql);
-      for (const id of ids) {
+      for (const [id, count] of countsByIdForDef(assignmentsDef)) {
         const bucket = summary.get(id);
-        if (bucket) bucket.assignments_open = Number(stmt.get(id)?.c || 0) || 0;
+        if (bucket) bucket.assignments_open = count;
       }
     }
 

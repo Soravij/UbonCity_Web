@@ -117,7 +117,7 @@ async function main() {
   let blockedPublished = null;
   let blockedReviewAction = null;
   let blockedIntelligence = null;
-  let blockedAssignment = null;
+  let confirmAssignment = null;
   let blockedTranslation = null;
 
   try {
@@ -133,7 +133,7 @@ async function main() {
     blockedPublished = createDeletedItem(db, { titleSuffix: "Blocked Published", withPublishedArticle: true });
     blockedReviewAction = createDeletedItem(db, { titleSuffix: "Blocked Review Action", withReviewAction: true });
     blockedIntelligence = createDeletedItem(db, { titleSuffix: "Blocked Intelligence", withIntelligenceModel: true });
-    blockedAssignment = createDeletedItem(db, { titleSuffix: "Blocked Assignment", withAssignment: true });
+    confirmAssignment = createDeletedItem(db, { titleSuffix: "Confirm Assignment", withAssignment: true });
     blockedTranslation = createDeletedItem(db, { titleSuffix: "Blocked Translation", withTranslation: true });
 
     logStep("check.core");
@@ -152,7 +152,7 @@ async function main() {
     await expectBlocked(blockedPublished.id, "published_articles");
     await expectBlocked(blockedReviewAction.id, "review_actions");
     await expectBlocked(blockedIntelligence.id, "content_intelligence_models");
-    await expectBlocked(blockedAssignment.id, "assignments");
+    await expectBlocked(confirmAssignment.id, "assignments");
     await expectBlocked(blockedTranslation.id, "translations_unpublished");
 
     logStep("purge.blocked");
@@ -166,7 +166,6 @@ async function main() {
     await expectPurgeBlocked(blockedPublished.id, "published_articles");
     await expectPurgeBlocked(blockedReviewAction.id, "review_actions");
     await expectPurgeBlocked(blockedIntelligence.id, "content_intelligence_models");
-    await expectPurgeBlocked(blockedAssignment.id, "assignments");
 
     logStep("purge.needs_confirmation");
     // confirm_required groups hold human curation: purge is refused with 400 until the owner names
@@ -183,6 +182,9 @@ async function main() {
     };
     await expectPurgeNeedsConfirmation(blockedFieldPack.id, "field_packs");
     await expectPurgeNeedsConfirmation(blockedTranslation.id, "translations_unpublished");
+    // The assignment family is confirm_required, not a hard blocker: an open assignment is work an
+    // owner can legitimately decide to throw away, so purge must ask rather than refuse outright.
+    await expectPurgeNeedsConfirmation(confirmAssignment.id, "assignments");
 
     logStep("purge.confirmed");
     const expectPurgeWithConfirmation = async (id, confirmedOverrides) => {
@@ -196,6 +198,8 @@ async function main() {
     };
     await expectPurgeWithConfirmation(blockedFieldPack.id, ["field_packs"]);
     await expectPurgeWithConfirmation(blockedTranslation.id, ["translations_unpublished"]);
+    // New happy path for the reclassification: confirm the assignment group and the purge goes through.
+    await expectPurgeWithConfirmation(confirmAssignment.id, ["assignments"]);
 
     logStep("purge.success");
     const purged = await client.post(`/api/admin/deleted-items/${purgeable.id}/purge`, { reason: "smoke purgeable" });
@@ -212,7 +216,7 @@ async function main() {
         blocked_published_item_id: blockedPublished.id,
         blocked_review_action_item_id: blockedReviewAction.id,
         blocked_intelligence_item_id: blockedIntelligence.id,
-        blocked_assignment_item_id: blockedAssignment.id,
+        confirm_assignment_item_id: confirmAssignment.id,
         blocked_translation_item_id: blockedTranslation.id,
       },
       checks: {
@@ -222,17 +226,19 @@ async function main() {
         blocked_published_reason_key: "published_articles",
         blocked_review_action_reason_key: "review_actions",
         blocked_intelligence_reason_key: "content_intelligence_models",
-        blocked_assignment_reason_key: "assignments",
+        confirm_assignment_reason_key: "assignments",
         blocked_translation_reason_key: "translations_unpublished",
         confirm_required_purge_rejected_without_overrides: true,
         confirm_required_purge_accepted_with_overrides: true,
+        assignment_purge_rejected_without_override: true,
+        assignment_purge_accepted_with_override: true,
         purged_item_removed: true,
       },
     }, null, 2));
   } finally {
     try {
       if (blockedTranslation?.id) cleanupFixture(db, blockedTranslation.id);
-      if (blockedAssignment?.id) cleanupFixture(db, blockedAssignment.id);
+      if (confirmAssignment?.id) cleanupFixture(db, confirmAssignment.id);
       if (blockedIntelligence?.id) cleanupFixture(db, blockedIntelligence.id);
       if (blockedReviewAction?.id) cleanupFixture(db, blockedReviewAction.id);
       if (blockedPublished?.id) cleanupFixture(db, blockedPublished.id);
