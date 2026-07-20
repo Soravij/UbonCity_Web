@@ -14039,6 +14039,7 @@ app.post("/api/admin/deleted-items/:id/references/cleanup", requireRole("owner")
       remaining_groups: normalizedRemainingGroups,
       remaining_blockers: normalizedRemainingGroups.filter((entry) => entry.category === "hard_blocker"),
       skipped_assets,
+      safe_sweep_skipped: Array.isArray(cleanupResult?.safe_sweep_skipped) ? cleanupResult.safe_sweep_skipped : [],
     });
   } catch (err) {
     const statusCode = Number(err?.statusCode || 0) || 400;

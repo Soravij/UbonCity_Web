@@ -141,6 +141,21 @@ test("published_articles stays hard_blocker and translations split per row", () 
   }
 });
 
+test("SAFE sweep excludes evidence_blocks only when deleting it would cascade approved context", () => {
+  const ctx = createTestContext();
+  try {
+    const protectedId = ctx.createDeletedItem("Evidence With Approved Context");
+    const evidenceId = Number(ctx.db.prepare("INSERT INTO evidence_blocks (content_item_id, block_type, text_value, status) VALUES (?,?,?,?)").run(protectedId, "fact", "evidence", "active").lastInsertRowid || 0);
+    ctx.db.prepare("INSERT INTO approved_context_blocks (content_item_id, evidence_block_id, selected_text, status, approved_by) VALUES (?,?,?,?,?)").run(protectedId, evidenceId, "approved", "active", "owner@local");
+    assert.equal(ctx.groupsOf(protectedId).map.has("evidence_blocks"), false, "SAFE list must not cascade-delete approved context");
+    assert.deepEqual(ctx.repo.getCascadeKilledConfirmKeys(protectedId), new Set(["evidence_blocks"]));
+    assert.equal(ctx.repo.getDeletedItemReferenceGroups(protectedId).safe_sweep_skipped[0]?.confirm_key, "approved_context_blocks");
+    const unprotectedId = ctx.createDeletedItem("Evidence Without Approved Context");
+    ctx.db.prepare("INSERT INTO evidence_blocks (content_item_id, block_type, text_value, status) VALUES (?,?,?,?)").run(unprotectedId, "fact", "evidence", "active");
+    assert.equal(ctx.groupsOf(unprotectedId).map.get("evidence_blocks")?.category, "cleanup_candidate", "no approved context stays SAFE");
+  } finally { ctx.cleanup(); }
+});
+
 test("cleanup of a confirm_required group is rejected without confirmed_overrides", () => {
   const ctx = createTestContext();
   try {

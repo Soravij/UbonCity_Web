@@ -159,7 +159,7 @@ async function login(auth) {
 
 // Fixtures are written straight to the temp DB: there is no API that creates a soft-deleted item
 // already carrying a curated field pack, which is exactly the state this gate needs.
-function createDeletedItem(db, { titleSuffix, withFieldPack = false, withPublishedArticle = false, withAssignment = false }) {
+function createDeletedItem(db, { titleSuffix, withFieldPack = false, withPublishedArticle = false, withAssignment = false, withApprovedContext = false }) {
   const uid = `smoke-cleanup-ui-${crypto.randomUUID()}`;
   const title = `Smoke Cleanup UI ${titleSuffix}`;
   const slug = `smoke-cleanup-ui-${titleSuffix.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
@@ -191,6 +191,16 @@ function createDeletedItem(db, { titleSuffix, withFieldPack = false, withPublish
         content_item_id, slug, title, body, excerpt, meta_title, meta_description, status
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(itemId, `${slug}-published`, title, `Published body for ${titleSuffix}`, `Published excerpt for ${titleSuffix}`, title, "smoke", "published");
+  }
+  if (withApprovedContext) {
+    const evidenceId = Number(db.prepare(`
+      INSERT INTO evidence_blocks (content_item_id, block_type, text_value, status)
+      VALUES (?, ?, ?, ?)
+    `).run(itemId, "fact", "Smoke evidence", "active").lastInsertRowid || 0) || 0;
+    db.prepare(`
+      INSERT INTO approved_context_blocks (content_item_id, evidence_block_id, selected_text, status, approved_by)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(itemId, evidenceId, "Smoke approved context", "active", "smoke-data-cleanup-ui@example.com");
   }
   return { id: itemId };
 }
@@ -347,6 +357,7 @@ async function main() {
     // proof that an open assignment offers a tickable override naming the assignee, and purges once
     // ticked — the behaviour §3 changed to, and the reason both smoke scripts had to move together.
     const assignmentItem = createDeletedItem(db, { titleSuffix: "Assignment Confirm", withAssignment: true });
+    const cascadeItem = createDeletedItem(db, { titleSuffix: "Cascade Guard", withApprovedContext: true });
 
     browserHandle = startBrowser(browserPath);
     cdp = await connectCdp(await waitForBrowserWsUrl(browserHandle));
@@ -501,12 +512,19 @@ async function main() {
     );
     checks.assignment_audit_recorded_override = true;
 
+    const cascadeReferences = await requestJson(`/api/admin/deleted-items/${cascadeItem.id}/references`, { token: ownerLogin.token });
+    assert(cascadeReferences.response.ok, "cascade guard references request failed");
+    assert(!(cascadeReferences.payload?.groups || []).some((row) => row?.key === "evidence_blocks"), "browser smoke: evidence must not be a SAFE cleanup candidate");
+    assert((cascadeReferences.payload?.safe_sweep_skipped || []).some((row) => row?.key === "evidence_blocks"), "browser smoke: cascade skip hint missing");
+    checks.cascade_guard_skip_hint = true;
+
     console.log(JSON.stringify({
       ok: true,
       fixtures: {
         confirm_required_item_id: confirmItem.id,
         hard_blocked_item_id: hardItem.id,
         assignment_confirm_item_id: assignmentItem.id,
+        cascade_guard_item_id: cascadeItem.id,
       },
       checks,
     }, null, 2));

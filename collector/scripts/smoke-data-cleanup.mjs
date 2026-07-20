@@ -28,6 +28,7 @@ function createDeletedItem(db, {
   withIntelligenceModel = false,
   withAssignment = false,
   withTranslation = false,
+  withApprovedContext = false,
 }) {
   const uid = `smoke-cleanup-${crypto.randomUUID()}`;
   const title = `Smoke Cleanup ${titleSuffix}`;
@@ -88,6 +89,16 @@ function createDeletedItem(db, {
       ) VALUES (?, ?, ?, ?, ?)
     `).run(itemId, `smoke-fingerprint-${crypto.randomUUID()}`, "en", "Smoke Translation", "pending");
   }
+  if (withApprovedContext) {
+    const evidenceId = Number(db.prepare(`
+      INSERT INTO evidence_blocks (content_item_id, block_type, text_value, status)
+      VALUES (?, ?, ?, ?)
+    `).run(itemId, "fact", "Smoke evidence", "active").lastInsertRowid || 0) || 0;
+    db.prepare(`
+      INSERT INTO approved_context_blocks (content_item_id, evidence_block_id, selected_text, status, approved_by)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(itemId, evidenceId, "Smoke approved context", "active", "smoke-data-cleanup@example.com");
+  }
 
   return { id: itemId };
 }
@@ -102,6 +113,8 @@ function cleanupFixture(db, itemId) {
   db.prepare("DELETE FROM published_articles WHERE content_item_id=?").run(id);
   db.prepare("DELETE FROM field_packs WHERE content_item_id=?").run(id);
   db.prepare("DELETE FROM source_records WHERE content_item_id=?").run(id);
+  db.prepare("DELETE FROM approved_context_blocks WHERE content_item_id=?").run(id);
+  db.prepare("DELETE FROM evidence_blocks WHERE content_item_id=?").run(id);
   db.prepare("DELETE FROM content_items WHERE id=?").run(id);
 }
 
@@ -119,6 +132,7 @@ async function main() {
   let blockedIntelligence = null;
   let confirmAssignment = null;
   let blockedTranslation = null;
+  let cascadeGuarded = null;
 
   try {
     logStep("auth.me");
@@ -135,6 +149,7 @@ async function main() {
     blockedIntelligence = createDeletedItem(db, { titleSuffix: "Blocked Intelligence", withIntelligenceModel: true });
     confirmAssignment = createDeletedItem(db, { titleSuffix: "Confirm Assignment", withAssignment: true });
     blockedTranslation = createDeletedItem(db, { titleSuffix: "Blocked Translation", withTranslation: true });
+    cascadeGuarded = createDeletedItem(db, { titleSuffix: "Cascade Guard", withApprovedContext: true });
 
     logStep("check.core");
     const purgeableCheck = await client.get(`/api/admin/deleted-items/${purgeable.id}/cleanup-check`);
@@ -154,6 +169,10 @@ async function main() {
     await expectBlocked(blockedIntelligence.id, "content_intelligence_models");
     await expectBlocked(confirmAssignment.id, "assignments");
     await expectBlocked(blockedTranslation.id, "translations_unpublished");
+    const cascadeReferences = await client.get(`/api/admin/deleted-items/${cascadeGuarded.id}/references`);
+    assert(cascadeReferences.ok, "cascade guard references failed");
+    assert(!(cascadeReferences.body?.groups || []).some((row) => row?.key === "evidence_blocks"), "SAFE sweep must skip evidence that would cascade approved context");
+    assert((cascadeReferences.body?.safe_sweep_skipped || []).some((row) => row?.key === "evidence_blocks"), "cascade guard skip reason missing");
 
     logStep("purge.blocked");
     // hard_blocker and cleanup_candidate cannot be overridden at purge: 409, no confirmation offered.
@@ -185,6 +204,7 @@ async function main() {
     // The assignment family is confirm_required, not a hard blocker: an open assignment is work an
     // owner can legitimately decide to throw away, so purge must ask rather than refuse outright.
     await expectPurgeNeedsConfirmation(confirmAssignment.id, "assignments");
+    await expectPurgeNeedsConfirmation(cascadeGuarded.id, "approved_context_blocks");
 
     logStep("purge.confirmed");
     const expectPurgeWithConfirmation = async (id, confirmedOverrides) => {
@@ -200,6 +220,12 @@ async function main() {
     await expectPurgeWithConfirmation(blockedTranslation.id, ["translations_unpublished"]);
     // New happy path for the reclassification: confirm the assignment group and the purge goes through.
     await expectPurgeWithConfirmation(confirmAssignment.id, ["assignments"]);
+    await expectPurgeWithConfirmation(cascadeGuarded.id, ["approved_context_blocks"]);
+    assert(Number(db.prepare("SELECT COUNT(*) AS c FROM evidence_blocks WHERE content_item_id=?").get(cascadeGuarded.id)?.c || 0) === 0, "cascade purge must remove evidence blocks");
+    assert(Number(db.prepare("SELECT COUNT(*) AS c FROM approved_context_blocks WHERE content_item_id=?").get(cascadeGuarded.id)?.c || 0) === 0, "cascade purge must remove approved context blocks");
+    const cascadeAudit = db.prepare("SELECT details_json FROM audit_logs WHERE action='item.purge' AND CAST(target_id AS INTEGER)=? ORDER BY id DESC LIMIT 1").get(cascadeGuarded.id);
+    const cascadeOverrides = JSON.parse(cascadeAudit?.details_json || "{}")?.confirmed_overrides || [];
+    assert(cascadeOverrides.some((entry) => String(entry?.key || "") === "approved_context_blocks"), "cascade purge audit must record approved context override");
 
     logStep("purge.success");
     const purged = await client.post(`/api/admin/deleted-items/${purgeable.id}/purge`, { reason: "smoke purgeable" });
@@ -218,6 +244,7 @@ async function main() {
         blocked_intelligence_item_id: blockedIntelligence.id,
         confirm_assignment_item_id: confirmAssignment.id,
         blocked_translation_item_id: blockedTranslation.id,
+        cascade_guarded_item_id: cascadeGuarded.id,
       },
       checks: {
         purgeable_can_purge: true,
@@ -232,12 +259,14 @@ async function main() {
         confirm_required_purge_accepted_with_overrides: true,
         assignment_purge_rejected_without_override: true,
         assignment_purge_accepted_with_override: true,
+        cascade_guard_skips_evidence_and_purges_with_approved_context_confirmation: true,
         purged_item_removed: true,
       },
     }, null, 2));
   } finally {
     try {
       if (blockedTranslation?.id) cleanupFixture(db, blockedTranslation.id);
+      if (cascadeGuarded?.id) cleanupFixture(db, cascadeGuarded.id);
       if (confirmAssignment?.id) cleanupFixture(db, confirmAssignment.id);
       if (blockedIntelligence?.id) cleanupFixture(db, blockedIntelligence.id);
       if (blockedReviewAction?.id) cleanupFixture(db, blockedReviewAction.id);

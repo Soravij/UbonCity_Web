@@ -242,6 +242,16 @@ const REFERENCE_CLEANUP_CANDIDATE_DEFS = Object.freeze([
   { key: "internal_link_targets", label_th: "internal link ปลายทาง", table: "internal_link_suggestions", where: "target_content_item_id=?" },
 ]);
 const REFERENCE_CLEANUP_CANDIDATE_KEYS = new Set(REFERENCE_CLEANUP_CANDIDATE_DEFS.map((entry) => entry.key));
+// SAFE cleanup must never reach confirm_required (or NEVER) data through an FK cascade. Keep
+// every such chain here so new confirm_required definitions are checked in one place.
+const CASCADE_KILLED_CONFIRM_KEY_DEFS = Object.freeze([
+  {
+    cleanup_key: "evidence_blocks",
+    confirm_key: "approved_context_blocks",
+    has_confirm_rows_sql: "SELECT COUNT(*) AS c FROM approved_context_blocks WHERE content_item_id=?",
+    reason_th: "มี approved context อยู่ จึงเก็บ evidence blocks ไว้ให้ purge ลบพร้อมกันหลัง owner ยืนยัน",
+  },
+]);
 // Groups carrying human curation. Deleting them destroys work a person signed off on, so they are
 // neither free-to-clean (cleanup_candidate) nor permanently barred (hard_blocker): an owner must
 // name each one in confirmed_overrides before it can be cleaned or purged past.
@@ -13266,11 +13276,12 @@ function normalizeStateValue(value, stateGroup) {
       throw err;
     }
 
+    const cascadeKilledConfirmKeys = getCascadeKilledConfirmKeys(id);
     const groups = [];
     for (const def of REFERENCE_CLEANUP_CANDIDATE_DEFS) {
       const row = db.prepare(`SELECT COUNT(*) AS c FROM ${def.table} WHERE ${def.where}`).get(id);
       const count = Number(row?.c || 0) || 0;
-      if (count < 1) continue;
+      if (count < 1 || cascadeKilledConfirmKeys.has(def.key)) continue;
       const group = {
         key: def.key,
         label_th: def.label_th,
@@ -13346,7 +13357,27 @@ function normalizeStateValue(value, stateGroup) {
         confirm_required_count: confirmRequiredCount,
         hard_blocker_count: hardBlockerCount,
       },
+      safe_sweep_skipped: getCascadeKilledConfirmSkipDetails(id, cascadeKilledConfirmKeys),
     };
+  }
+
+  function getCascadeKilledConfirmKeys(itemId) {
+    const id = Number(itemId || 0) || 0;
+    if (!id) return new Set();
+    const excluded = new Set();
+    for (const def of CASCADE_KILLED_CONFIRM_KEY_DEFS) {
+      const count = Number(db.prepare(def.has_confirm_rows_sql).get(id)?.c || 0) || 0;
+      if (count > 0) excluded.add(def.cleanup_key);
+    }
+    return excluded;
+  }
+
+  function getCascadeKilledConfirmSkipDetails(itemId, excludedKeys = getCascadeKilledConfirmKeys(itemId)) {
+    const id = Number(itemId || 0) || 0;
+    if (!id) return [];
+    return CASCADE_KILLED_CONFIRM_KEY_DEFS
+      .filter((def) => excludedKeys.has(def.cleanup_key))
+      .map((def) => ({ key: def.cleanup_key, confirm_key: def.confirm_key, reason_th: def.reason_th }));
   }
 
   // Read-only display aggregation for the item-list delete-blocker badge. It reuses the exact
@@ -13455,8 +13486,9 @@ function normalizeStateValue(value, stateGroup) {
         ? confirmedOverrides.map((entry) => String(entry || "").trim().toLowerCase()).filter(Boolean)
         : []
     );
+    const cascadeKilledConfirmKeys = getCascadeKilledConfirmKeys(id);
     for (const key of selectedGroups) {
-      if (REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key)) continue;
+      if (REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key) && !cascadeKilledConfirmKeys.has(key)) continue;
       if (REFERENCE_CONFIRM_REQUIRED_KEYS.has(key)) {
         if (!confirmedOverrideKeys.has(key)) {
           const err = new Error("group requires confirmation");
@@ -13470,7 +13502,7 @@ function normalizeStateValue(value, stateGroup) {
       const err = new Error("group not eligible for cleanup");
       err.statusCode = 400;
       err.group = key;
-      err.category = REFERENCE_ALL_GROUP_KEYS.has(key) ? "hard_blocker" : "invalid_group";
+      err.category = REFERENCE_ALL_GROUP_KEYS.has(key) ? "cascade_guard" : "invalid_group";
       throw err;
     }
 
@@ -13545,6 +13577,7 @@ function normalizeStateValue(value, stateGroup) {
       item_id: id,
       cleaned,
       deleted_asset_ids: [...new Set(deletedAssetIds)],
+      safe_sweep_skipped: getCascadeKilledConfirmSkipDetails(id, cascadeKilledConfirmKeys),
     };
   }
 
@@ -13735,6 +13768,7 @@ function normalizeStateValue(value, stateGroup) {
     evaluateContentAssetCleanupEligibility,
     listPostAssignmentAiInputCleanupCandidates,
     getDeletedItemReferenceGroups,
+    getCascadeKilledConfirmKeys,
     getItemReferenceBlockerCounts,
     cleanupDeletedItemReferenceGroups,
     addSearchEnrichmentRecord,

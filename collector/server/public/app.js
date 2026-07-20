@@ -3078,6 +3078,7 @@ function renderReferenceCleanupPanel() {
 
   const refs = state.referenceCleanupReferences;
   const groups = Array.isArray(refs?.groups) ? refs.groups : [];
+  const safeSweepSkipped = Array.isArray(refs?.safe_sweep_skipped) ? refs.safe_sweep_skipped : [];
   // Selectable = cleanup_candidate plus confirm_required; ticking a confirm_required group is the
   // owner's confirmation, so it is sent back as confirmed_overrides on execute.
   const candidates = groups.filter((group) => {
@@ -3111,7 +3112,7 @@ function renderReferenceCleanupPanel() {
     } else if (!refs) {
       candidatesNode.innerHTML = '<div class="assignment-brief-empty">กด "โหลดข้อมูลอ้างอิง" เพื่อเริ่มตรวจ</div>';
     } else if (!candidates.length) {
-      candidatesNode.innerHTML = '<div class="assignment-brief-empty">ไม่พบกลุ่มข้อมูลที่ล้างได้จากหน้านี้</div>';
+      candidatesNode.innerHTML = `${safeSweepSkipped.map((entry) => `<div class="assignment-brief-text">[SKIP] ${escapeHtml(String(entry?.reason_th || ""))}</div>`).join("")}<div class="assignment-brief-empty">ไม่พบกลุ่มข้อมูลที่ล้างได้จากหน้านี้</div>`;
     } else {
       candidatesNode.innerHTML = candidates.map((group) => {
         const key = String(group?.key || "").trim().toLowerCase();
@@ -3136,7 +3137,7 @@ function renderReferenceCleanupPanel() {
             ${details}
           </div>
         `;
-      }).join("");
+      }).join("") + safeSweepSkipped.map((entry) => `<div class="assignment-brief-text">[SKIP] ${escapeHtml(String(entry?.reason_th || ""))}</div>`).join("");
     }
   }
 

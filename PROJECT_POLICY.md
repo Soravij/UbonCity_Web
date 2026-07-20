@@ -210,6 +210,17 @@ as any intentional change to the rules above:
     ทางเคลียร์คือทางตัน ไม่ใช่เกณฑ์ และ `hint` ของแต่ละ def เป็นข้อความที่ผู้ใช้เห็นจริง — ถูกแสดงตรง ๆ
     ใต้ปุ่ม Purge ที่ disabled อยู่ จึงต้องบอกว่าให้ไปทำอะไรต่อ
   - `cleanup_candidate` — ปฏิเสธ (409) จนกว่าจะล้างผ่าน endpoint reference-cleanup ก่อน
+    **SAFE sweep must never cascade-delete `confirm_required` or NEVER data.** The repository enforces
+    this dynamically while classifying candidates for the individual item, and reports the skip reason
+    to the owner. The current FK chain is `evidence_blocks → approved_context_blocks`: when approved
+    context exists, evidence remains for purge to delete together only after the owner confirms the
+    approved context. Any new `confirm_required` definition or FK cascade must add its risk rule to
+    `CASCADE_KILLED_CONFIRM_KEY_DEFS`.
+    **SAFE sweep ต้องไม่ลบข้อมูล `confirm_required` หรือ NEVER ทางอ้อมผ่าน FK cascade**: repository จะตัด
+    candidate เฉพาะ item นั้นแบบ dynamic และรายงานเหตุผลให้ owner เห็น ปัจจุบัน chain คือ
+    `evidence_blocks → approved_context_blocks`; เมื่อมี approved context อยู่ จะเก็บ evidence ไว้ให้
+    purge ลบพร้อมกันหลัง owner ยืนยัน approved context แทน หากเพิ่ม `confirm_required` definition หรือ FK
+    cascade ใหม่ ต้องเพิ่มกติกาความเสี่ยงที่ `CASCADE_KILLED_CONFIRM_KEY_DEFS` ด้วย
   - `confirm_required` — กลุ่มที่มีงานที่คนลงแรงไว้: drafts, field packs, approved context,
     งานแปลที่ยังไม่เผยแพร่ และ**ตระกูล assignment** (`assignments`,
     `content_assignment_submissions`, `content_assignment_submission_deliverables`,
