@@ -8313,6 +8313,16 @@ app.get("/api/items", (req, res) => {
       return [attachItemScopeMetadata(req.authUser, item, scopeContext)];
     })
     ;
+  // Additive opt-in for the Data Cleanup "งานค้างระหว่างทาง" table: items past raw intake but not
+  // finished. Read-only, and it changes nothing when the param is absent — every existing caller
+  // (no param, or ?status=) keeps its current response. Same per-item visibility gate as the
+  // default list; the owner-only scoping of that table is enforced client-side by the Data Cleanup
+  // zone, exactly as the rest of that panel's reads are. §3
+  const inFlightOnly = String(req.query.in_flight || "").trim() === "1";
+  if (inFlightOnly) {
+    res.json(attachItemMatchFields(decorateVisibleItems(repo.listInFlightItems()), { includeBulkPreview }));
+    return;
+  }
   if (!status) {
     res.json(attachItemMatchFields(decorateVisibleItems(repo.listItems()), { includeBulkPreview }));
     return;

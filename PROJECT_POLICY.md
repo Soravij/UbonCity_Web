@@ -134,6 +134,19 @@ gate: the cost of being wrong differs per path, because only purge destroys data
   purge gate so the badge cannot disagree with it. It applies the same per-item visibility filter as
   `GET /api/items` (out-of-scope ids are dropped from the response, not 403/404'd). It is display only:
   it never deletes, purges, or otherwise mutates, and adds no new gate.
+- **In-flight items table** ("งานค้างระหว่างทาง", owner-only Data Cleanup zone, above the soft-deleted
+  table) lists items that have left raw intake but have not finished, read from
+  `GET /api/items?in_flight=1`. That param is additive: it selects on the **canonical** workflow head
+  (`production_state` not `collected`/`completed`, `publication_state` not `published`, `is_deleted=0`),
+  never the legacy `workflow_status` column, and its absence leaves every existing caller's response
+  unchanged. An item with **no workflow head row is excluded** — a missing head means intake never
+  advanced, so the item still belongs to the raw queue, where it does render (its null states classify
+  as the `raw_prep` bucket). The read must not create a head as a side effect: it reads through
+  `getWorkflowModelByItem`, never `ensureWorkflowModel`. The table is display only apart from a per-row delete that calls the existing
+  `DELETE /api/items/:id` under the **unchanged** soft-delete contract above — a NEVER blocker still
+  fails there with the server's message shown verbatim, and open assignments only raise an
+  acknowledgement confirm, never a new gate. It carries **no Purge button**: purge stays on the
+  soft-deleted table. Items here may also appear in the raw queue tables; that overlap is intended.
 
 Two scripts are the verification gate for this contract, and both must be updated in the same change
 as any intentional change to the rules above:
@@ -187,6 +200,18 @@ as any intentional change to the rules above:
   และ assignment ที่เปิดอยู่ — โดยใช้ reference defs ชุดเดียวกับ purge gate จึงไม่มีทางขัดกับเกณฑ์ purge และกรอง
   visibility ราย item แบบเดียวกับ `GET /api/items` (id นอก scope ถูกตัดออกจาก response ไม่ตอบ 403/404) เป็นการ
   แสดงผลล้วน ไม่ลบ ไม่ purge ไม่แก้ข้อมูล และไม่เพิ่มเกณฑ์ใหม่
+- **ตารางงานค้างระหว่างทาง** (โซน Data Cleanup เฉพาะ owner, อยู่เหนือตารางรายการที่ soft delete แล้ว)
+  แสดง item ที่พ้นขั้นรับข้อมูลดิบแล้วแต่ยังไม่จบ อ่านจาก `GET /api/items?in_flight=1` — param นี้เป็นแบบ
+  additive และคัดจาก workflow head **แบบ canonical** (`production_state` ไม่ใช่ `collected`/`completed`,
+  `publication_state` ไม่ใช่ `published`, `is_deleted=0`) ไม่ใช้คอลัมน์ `workflow_status` แบบเดิม และเมื่อ
+  ไม่ส่ง param นี้ response ของ caller เดิมทุกตัวต้องเหมือนเดิมทุกประการ item ที่**ไม่มีแถว workflow head
+  ถูกตัดออก** — head ที่หายแปลว่ายังไม่พ้นขั้นรับข้อมูล item จึงยังอยู่ในคิว raw และแสดงที่นั่นจริง (state ที่เป็น
+  null ถูกจัดเป็น bucket `raw_prep`) และการอ่านนี้ต้องไม่สร้าง head เป็นผลข้างเคียง — ใช้
+  `getWorkflowModelByItem` เท่านั้น ห้ามใช้ `ensureWorkflowModel` ตารางนี้เป็นการแสดงผลล้วน ยกเว้น
+  ปุ่มลบรายแถวที่เรียก `DELETE /api/items/:id` เดิมภายใต้สัญญา soft delete ข้างบน**แบบไม่แก้ไข** — ติด NEVER
+  blocker ก็ยังถูกปฏิเสธที่เดิมและต้องแสดงข้อความจาก server ตรง ๆ ส่วน assignment ที่เปิดอยู่แค่ขึ้น confirm
+  เพื่อรับทราบ ไม่ใช่เกณฑ์บล็อกใหม่ ตารางนี้**ไม่มีปุ่ม Purge** — purge อยู่ที่ตารางรายการที่ลบแล้วเท่านั้น
+  และ item ที่โผล่ในตารางนี้อาจโผล่ในตารางคิว raw ด้วย ซึ่งเป็นพฤติกรรมที่ตั้งใจ
 
 ด่าน verify ของสัญญานี้มี 2 ตัว และต้องแก้ไปพร้อมกันในทุกครั้งที่ตั้งใจเปลี่ยนกฎด้านบน:
 

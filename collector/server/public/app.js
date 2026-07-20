@@ -195,6 +195,18 @@ const state = {
     loaded: false,
     lastError: "",
   },
+  // Data Cleanup "งานค้างระหว่างทาง" table. Read-only list from GET /api/items?in_flight=1; the only
+  // write it drives is the existing DELETE /api/items/:id. stalledSort defaults to "oldest" so the
+  // longest-stuck work is on top, which is the whole point of the table.
+  inFlight: {
+    rows: [],
+    loaded: false,
+    lastError: "",
+    stalledSort: "oldest",
+    // itemId -> blocker summary from GET /api/items/blocker-summary, kept so the row delete button can
+    // check assignments_open without re-fetching.
+    blockerSummaries: new Map(),
+  },
   justExportedItemId: Number(new URLSearchParams(window.location.search).get("item_id") || 0),
   preferredTab: String(new URLSearchParams(window.location.search).get("tab") || "").trim().toLowerCase(),
   items: [],
@@ -2715,6 +2727,200 @@ function renderCleanupConfirmRequiredCell(row) {
     .join("");
 }
 
+// ---- Data Cleanup: "งานค้างระหว่างทาง" (in-flight items) --------------------------------------
+// Read-only view of items that left raw intake but have not finished. Sourced from
+// GET /api/items?in_flight=1 (canonical workflow states, not the legacy workflow_status column).
+// Items here may also appear in the raw queue tables — that overlap is intended; this table exists so
+// the owner has one place that answers "what is stuck, and for how long". The only write it can drive
+// is the pre-existing DELETE /api/items/:id. No purge button: purge stays on the soft-deleted table.
+
+// SQLite writes CURRENT_TIMESTAMP as "YYYY-MM-DD HH:MM:SS" — UTC, but with no timezone marker, which
+// Date.parse reads as *local* time and so misreports every age by the viewer's UTC offset. Normalize to
+// ISO and mark it UTC before parsing, but only when the value carries no timezone of its own, so
+// timestamps that already end in Z or ±HH:MM are left exactly as the server sent them.
+function parseServerTimestamp(value) {
+  const text = String(value || "").trim();
+  if (!text) return NaN;
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+  const normalized = hasTimezone ? text : `${text.replace(" ", "T")}Z`;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : Date.parse(text);
+}
+
+// "ค้างมา" age from updated_at. Thresholds match the badge tones: under a week is unremarkable,
+// 7-30 days warns, past 30 days is a hard signal. Returns the tone as a CSS var name so the cell can
+// borrow --warn/--fail inline rather than growing a class per tone.
+function formatInFlightStalledAge(updatedAt) {
+  const parsed = parseServerTimestamp(updatedAt);
+  if (!Number.isFinite(parsed)) return { text: "-", colorVar: "" };
+  const days = Math.floor((Date.now() - parsed) / 86400000);
+  if (days < 0) return { text: "-", colorVar: "" };
+  if (days < 1) return { text: "วันนี้", colorVar: "" };
+  if (days < 7) return { text: `${days} วัน`, colorVar: "" };
+  // 30 days exactly is still the warn band; only past 30 does it become a hard signal.
+  if (days <= 30) return { text: `${Math.floor(days / 7)} สัปดาห์`, colorVar: "--warn" };
+  return { text: `${Math.floor(days / 30)} เดือน`, colorVar: "--fail" };
+}
+
+function inFlightStalledSortValue(item) {
+  const parsed = parseServerTimestamp(item?.updated_at);
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+}
+
+// Thai label per canonical production state. Keyed on production_state rather than the snapshot's
+// compatibilityStatus because that helper collapses any state it does not know to "raw" — which let
+// submitted_for_admin_review fall through and render as raw snake_case English. Every state the
+// in-flight filter admits must have an entry here; the fallback is a last resort, not a design.
+const IN_FLIGHT_STATUS_LABELS = Object.freeze({
+  analyzed: "คัดข้อมูลแล้ว",
+  brief_generated: "สร้างโจทย์แล้ว",
+  ready_for_content: "พร้อมเขียนเนื้อหา",
+  generated: "ร่างเนื้อหาแล้ว",
+  content_in_progress: "กำลังเขียนเนื้อหา",
+  in_review: "อยู่ระหว่างตรวจ",
+  needs_revision: "ต้องแก้ไข",
+  rejected: "ถูกตีกลับ",
+  ready_for_publish: "อนุมัติแล้ว รอเผยแพร่",
+  submitted_for_admin_review: "ส่งให้แอดมินตรวจแล้ว",
+  collected: "ยังไม่พ้นขั้นรับข้อมูล",
+  completed: "เสร็จแล้ว",
+});
+
+// Assignment state wins when set: an item held by a freelancer reads as "handed off" regardless of how
+// far production had got. Publication state is checked before production state to preserve the
+// precedence getItemWorkflowSnapshot already applied — approved/unpublished outrank the production
+// state, and that grouping is left as-is here (tracked separately as its own finding).
+function buildInFlightStatusLabel(item) {
+  const snapshot = getItemWorkflowSnapshot(item);
+  if (snapshot.assignmentState) return "ส่งงานให้ทีมแล้ว";
+  if (snapshot.publicationState === "approved" || snapshot.publicationState === "unpublished") {
+    return "อนุมัติแล้ว รอเผยแพร่";
+  }
+  return IN_FLIGHT_STATUS_LABELS[snapshot.productionState] || snapshot.productionState || "-";
+}
+
+function renderInFlightPanel() {
+  const table = qs("table-inflight-items");
+  const tbody = table?.querySelector("tbody");
+  if (!tbody) return;
+  const rows = Array.isArray(state.inFlight?.rows) ? state.inFlight.rows : [];
+  const loaded = state.inFlight?.loaded === true;
+  const lastError = String(state.inFlight?.lastError || "").trim();
+
+  const header = qs("th-inflight-stalled");
+  if (header) {
+    const oldestFirst = state.inFlight?.stalledSort !== "newest";
+    header.textContent = oldestFirst ? "ค้างมา ▼" : "ค้างมา ▲";
+  }
+
+  tbody.innerHTML = "";
+
+  if (lastError) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="6" class="muted">${escapeHtml(`โหลดงานค้างระหว่างทางไม่สำเร็จ: ${lastError}`)}</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+  if (!loaded) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6" class="muted">กด "โหลดรายการ" เพื่อดึงงานค้างระหว่างทาง</td>';
+    tbody.appendChild(tr);
+    return;
+  }
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6" class="muted">ไม่มีงานค้างระหว่างทาง</td>';
+    tbody.appendChild(tr);
+    return;
+  }
+
+  const direction = state.inFlight?.stalledSort === "newest" ? -1 : 1;
+  const sorted = rows.slice().sort((a, b) => (inFlightStalledSortValue(a) - inFlightStalledSortValue(b)) * direction);
+
+  sorted.forEach((item) => {
+    const itemId = Number(item?.id || 0) || 0;
+    const age = formatInFlightStalledAge(item?.updated_at);
+    const ageStyle = age.colorVar ? ` style="color: var(${age.colorVar});"` : "";
+    const tr = document.createElement("tr");
+    tr.dataset.itemId = String(itemId);
+    tr.innerHTML = `
+      <td>${itemId}</td>
+      <td>${escapeHtml(String(item?.title || "-"))}</td>
+      <td>${escapeHtml(buildInFlightStatusLabel(item))}</td>
+      <td${ageStyle}>${escapeHtml(age.text)}</td>
+      <td data-blocker-cell></td>
+      <td><button type="button" data-inflight-action="delete" data-id="${itemId}">ลบ</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  annotateInFlightBlockers();
+}
+
+// Same badge treatment as the item list: buildBlockerBadge/applyBlockerBadge are reused verbatim, and
+// the fetch is fire-and-forget so a slow or broken blocker-summary call can never delay this table.
+// applyBlockerBadge is scoped to this table's tbody because an item can legitimately be rendered in
+// the raw queue at the same time, and an unscoped lookup would badge that row instead.
+let inFlightBlockerRenderSeq = 0;
+
+async function annotateInFlightBlockers() {
+  const table = qs("table-inflight-items");
+  const tbody = table?.querySelector("tbody");
+  if (!tbody) return;
+  const seq = ++inFlightBlockerRenderSeq;
+  const ids = Array.from(tbody.querySelectorAll("tr[data-item-id]"))
+    .map((tr) => Number(tr.dataset.itemId || 0) || 0)
+    .filter((id) => id > 0);
+  if (ids.length === 0) return;
+  try {
+    await fetchBlockerSummaries(ids, {
+      shouldAbort: () => seq !== inFlightBlockerRenderSeq,
+      onChunk: (map) => {
+        for (const [id, summary] of Object.entries(map)) {
+          state.inFlight.blockerSummaries.set(Number(id), summary);
+          applyBlockerBadge(id, summary, { root: tbody, cellSelector: "[data-blocker-cell]" });
+        }
+      },
+    });
+  } catch (error) {
+    console.warn("[blocker-summary] failed to load in-flight delete-blocker badges", error);
+  }
+}
+
+// Mirrors applyCleanupRowsResponse: folds one /api/items?in_flight=1 result into state. Shared by the
+// bootstrap pass and the explicit reload so both land in exactly the same shape. Does not render — the
+// caller decides when to paint.
+function applyInFlightRowsResponse(response, errorMessage = "") {
+  const items = Array.isArray(response) ? response : [];
+  state.inFlight.rows = items;
+  state.inFlight.loaded = true;
+  state.inFlight.lastError = String(errorMessage || "").trim();
+  state.inFlight.blockerSummaries.clear();
+  return items;
+}
+
+async function loadInFlightRows({ showSuccessStatus = false } = {}) {
+  if (!canAccessSystemPage()) {
+    state.inFlight.rows = [];
+    state.inFlight.loaded = false;
+    state.inFlight.lastError = "";
+    renderInFlightPanel();
+    return [];
+  }
+  try {
+    const items = applyInFlightRowsResponse(await api("/api/items?in_flight=1"), "");
+    renderInFlightPanel();
+    if (showSuccessStatus) {
+      setStatus("data-cleanup-status", items.length ? `งานค้างระหว่างทาง ${items.length} รายการ` : "ไม่มีงานค้างระหว่างทาง");
+    }
+    return items;
+  } catch (err) {
+    applyInFlightRowsResponse([], err?.message || "โหลดงานค้างระหว่างทางไม่สำเร็จ");
+    renderInFlightPanel();
+    throw err;
+  }
+}
+
 function renderDataCleanupPanel() {
   const panel = qs("data-cleanup-panel");
   if (!panel) return;
@@ -2725,6 +2931,7 @@ function renderDataCleanupPanel() {
   const toggleBtn = qs("btn-data-cleanup-toggle");
   if (toggleBtn) toggleBtn.textContent = state.dataCleanupPanelOpen ? "ซ่อนตั้งค่า" : "เปิดตั้งค่า";
   if (!state.dataCleanupPanelOpen) return;
+  renderInFlightPanel();
 
   const statusNode = qs("data-cleanup-status");
   const table = qs("table-data-cleanup");
@@ -5078,9 +5285,13 @@ function applyPreferredLandingTab() {
 // not enlarge the manual-sync debt tracked for REFERENCE_*_KEYS in PROJECT_POLICY §3.
 let rawBlockerRenderSeq = 0;
 
+// The two raw queue tables that carry delete-blocker badges. Shared by the id collector and the badge
+// applier so both always agree on which tables are in scope.
+const RAW_BLOCKER_TABLE_IDS = Object.freeze(["table-raw-intake", "table-raw-review"]);
+
 function collectRenderedRawItemIds() {
   const ids = [];
-  for (const tableId of ["table-raw-intake", "table-raw-review"]) {
+  for (const tableId of RAW_BLOCKER_TABLE_IDS) {
     const table = document.getElementById(tableId);
     if (!table) continue;
     table.querySelectorAll("tbody tr[data-item-id]").forEach((tr) => {
@@ -5118,10 +5329,17 @@ function buildBlockerBadge(summary) {
   return null;
 }
 
-function applyBlockerBadge(itemId, summary) {
-  const row = document.querySelector(`tr[data-item-id="${itemId}"]`);
+// `root` scopes the row lookup. Both callers pass one explicitly, because the same item id can be
+// rendered in the raw queue and in the Data Cleanup in-flight table at once, and a document-wide
+// lookup would resolve to whichever happens to come first in the DOM. The `document` default is kept
+// only so the signature stays usable for a single-table caller.
+// `cellSelector` picks which cell in the row receives the badge — the raw queue hangs it off the title,
+// the in-flight table has a dedicated Blockers column. The badge itself is unchanged in both.
+function applyBlockerBadge(itemId, summary, { root = document, cellSelector = ".raw-title-cell" } = {}) {
+  const scope = root || document;
+  const row = scope.querySelector(`tr[data-item-id="${itemId}"]`);
   if (!row) return;
-  const cell = row.querySelector(".raw-title-cell");
+  const cell = row.querySelector(cellSelector);
   if (!cell) return;
   const existing = cell.querySelector(".delete-blocker-badge");
   if (existing) existing.remove();
@@ -5134,22 +5352,41 @@ function applyBlockerBadge(itemId, summary) {
   cell.appendChild(span);
 }
 
+// Shared chunked reader for GET /api/items/blocker-summary. onChunk receives each response's id ->
+// summary map; shouldAbort is checked after every request so a caller whose table has since been
+// re-rendered can stop before injecting stale badges.
+async function fetchBlockerSummaries(ids, { onChunk, shouldAbort } = {}) {
+  const CHUNK = 200; // GET /api/items/blocker-summary rejects more than 200 ids per request
+  for (let index = 0; index < ids.length; index += CHUNK) {
+    const chunk = ids.slice(index, index + CHUNK);
+    const response = await api(`/api/items/blocker-summary?ids=${chunk.join(",")}`);
+    if (typeof shouldAbort === "function" && shouldAbort()) return;
+    if (typeof onChunk === "function") onChunk(response?.items || {});
+  }
+}
+
 async function annotateRawTableBlockers() {
   if (typeof isExternalContributorUser === "function" && isExternalContributorUser()) return;
   const seq = ++rawBlockerRenderSeq;
   const ids = collectRenderedRawItemIds();
   if (ids.length === 0) return;
-  const CHUNK = 200; // GET /api/items/blocker-summary rejects more than 200 ids per request
   try {
-    for (let index = 0; index < ids.length; index += CHUNK) {
-      const chunk = ids.slice(index, index + CHUNK);
-      const response = await api(`/api/items/blocker-summary?ids=${chunk.join(",")}`);
-      if (seq !== rawBlockerRenderSeq) return; // a newer render replaced the table; stop injecting
-      const map = response?.items || {};
-      for (const [id, summary] of Object.entries(map)) {
-        applyBlockerBadge(id, summary);
-      }
-    }
+    await fetchBlockerSummaries(ids, {
+      shouldAbort: () => seq !== rawBlockerRenderSeq, // a newer render replaced the table
+      onChunk: (map) => {
+        for (const [id, summary] of Object.entries(map)) {
+          // Scoped to the two raw queue tables rather than the whole document. The Data Cleanup
+          // in-flight table renders the same item ids, so an unscoped lookup would depend on these
+          // tables happening to come first in the DOM — and would silently badge nothing if that
+          // order ever changed, since those rows carry no .raw-title-cell. Applying per table is
+          // safe: applyBlockerBadge no-ops when the row is not inside the root it is given.
+          for (const tableId of RAW_BLOCKER_TABLE_IDS) {
+            const table = document.getElementById(tableId);
+            if (table) applyBlockerBadge(id, summary, { root: table });
+          }
+        }
+      },
+    });
   } catch (error) {
     console.warn("[blocker-summary] failed to load delete-blocker badges", error);
   }
@@ -9746,6 +9983,14 @@ async function refreshAll() {
         .then((response) => ({ ok: true, response }))
         .catch((error) => ({ ok: false, error }))
     : Promise.resolve({ ok: true, response: { items: [] } });
+  // Fetched alongside the soft-deleted list so both Data Cleanup tables are populated by the same
+  // bootstrap pass; otherwise the in-flight table would sit on its "press load" prompt while the table
+  // below it already showed rows.
+  const inFlightItemsPromise = canAccessSystemPage()
+    ? api("/api/items?in_flight=1")
+        .then((response) => ({ ok: true, response }))
+        .catch((error) => ({ ok: false, error }))
+    : Promise.resolve({ ok: true, response: [] });
 
   const requestedTab = getRequestedTabFromUrl();
   const shouldPrioritizeRawRender = requestedTab === "raw" || String(state.preferredTab || "").trim().toLowerCase() === "raw";
@@ -9767,11 +10012,12 @@ async function refreshAll() {
   }
   renderSourceIngestions(ingestions);
 
-  const [usersResponse, agentProfilesResponse, aiPoliciesResponse, cleanupResult] = await Promise.all([
+  const [usersResponse, agentProfilesResponse, aiPoliciesResponse, cleanupResult, inFlightResult] = await Promise.all([
     usersPromise.catch(() => ({ items: [] })),
     agentProfilesPromise.catch(() => ({ items: [] })),
     aiPoliciesPromise.catch((error) => ({ items: [], policy_catalog: [], _error: error?.message || "โหลด AI policy ไม่สำเร็จ" })),
     cleanupItemsPromise,
+    inFlightItemsPromise,
   ]);
 
   state.visibleUsers = Array.isArray(usersResponse?.items) ? usersResponse.items : [];
@@ -9784,6 +10030,10 @@ async function refreshAll() {
   applyCleanupRowsResponse(
     cleanupResult?.ok === false ? { items: [] } : cleanupResult?.response,
     cleanupResult?.ok === false ? cleanupResult?.error?.message || "โหลดรายการ cleanup ไม่สำเร็จ" : ""
+  );
+  applyInFlightRowsResponse(
+    inFlightResult?.ok === false ? [] : inFlightResult?.response,
+    inFlightResult?.ok === false ? inFlightResult?.error?.message || "โหลดงานค้างระหว่างทางไม่สำเร็จ" : ""
   );
   state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
   if (!state.referenceCleanupDeletedItems.some((row) => (Number(row?.id || 0) || 0) === Number(state.referenceCleanupSelectedItemId || 0))) {
@@ -10435,8 +10685,49 @@ function wireUserSettings() {
     const btn = event.currentTarget;
     try {
       await withButtonLoading(btn, "กำลังโหลด...", async () => {
-        await loadDataCleanupRows({ showSuccessStatus: true });
+        // The in-flight table failing must not stop the soft-deleted table from loading; it renders its
+        // own error row from state.inFlight.lastError.
+        await Promise.all([
+          loadInFlightRows().catch(() => null),
+          loadDataCleanupRows({ showSuccessStatus: true }),
+        ]);
       });
+    } catch (err) {
+      setStatus("data-cleanup-status", err.message, true);
+    }
+  });
+
+  qs("th-inflight-stalled")?.addEventListener("click", () => {
+    state.inFlight.stalledSort = state.inFlight.stalledSort === "newest" ? "oldest" : "newest";
+    renderInFlightPanel();
+  });
+
+  // Row delete: the pre-existing DELETE /api/items/:id contract, unchanged. A NEVER-level blocker is
+  // rejected there with 400 and the server's message is surfaced verbatim. An item with open
+  // assignments is still deletable per that contract, so the extra confirm is an acknowledgement
+  // prompt, not a gate.
+  qs("table-inflight-items")?.querySelector("tbody")?.addEventListener("click", async (event) => {
+    const btn = event.target.closest("button[data-inflight-action]");
+    if (!btn) return;
+    if (String(btn.dataset.inflightAction || "").trim() !== "delete") return;
+    const id = Number(btn.dataset.id || 0) || 0;
+    if (!id) return;
+
+    const assignmentsOpen = Number(state.inFlight.blockerSummaries.get(id)?.assignments_open || 0) || 0;
+    const prompt = assignmentsOpen > 0
+      ? `รายการ #${id} มี assignment ที่เปิดอยู่ ${assignmentsOpen} รายการ (มีคนถืองานอยู่)\nยังต้องการลบใช่หรือไม่?`
+      : `ลบรายการ #${id} ใช่หรือไม่?`;
+    if (!window.confirm(prompt)) return;
+
+    try {
+      await withButtonLoading(btn, "กำลังลบ...", async () => {
+        await api(`/api/items/${id}`, { method: "DELETE" });
+      });
+      setStatus("data-cleanup-status", `ลบรายการ #${id} แล้ว`);
+      await Promise.all([
+        loadInFlightRows().catch(() => null),
+        loadDataCleanupRows().catch(() => null),
+      ]);
     } catch (err) {
       setStatus("data-cleanup-status", err.message, true);
     }

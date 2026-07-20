@@ -820,6 +820,25 @@
                 <button id="btn-data-cleanup-load" type="button">โหลดรายการ</button>
                 <span id="data-cleanup-status" class="status"></span>
               </div>
+              <h4 class="section-title">งานค้างระหว่างทาง</h4>
+              <p class="muted">รายการที่พ้นขั้นรับข้อมูลดิบแล้ว แต่ยังไม่จบและยังไม่ถูกลบ</p>
+              <div class="table-wrap">
+                <table id="table-inflight-items">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>ชื่อเรื่อง</th>
+                      <th>สถานะ</th>
+                      <th id="th-inflight-stalled" style="cursor:pointer;" title="กดเพื่อสลับลำดับ">ค้างมา</th>
+                      <th>Blockers</th>
+                      <th>การทำงาน</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+
+              <h4 class="section-title">รายการที่ลบแล้ว (soft delete)</h4>
               <div class="table-wrap">
                 <table id="table-data-cleanup">
                   <thead>

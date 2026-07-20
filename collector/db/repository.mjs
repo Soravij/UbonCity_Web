@@ -5277,6 +5277,22 @@ export function createRepository(db) {
     });
   }
 
+  // "In flight" = an item that has left raw intake but has not finished: its workflow head has moved
+  // off production_state `collected`, and it has not reached a terminal state (production `completed`
+  // or publication `published`). Items with no head are excluded — no head means intake never
+  // advanced, so they still belong to the raw queue. listItems() already scopes to is_deleted=0.
+  function listInFlightItems() {
+    return listItems().filter((item) => {
+      const head = getWorkflowModelByItem(item.id);
+      if (!head) return false;
+      const productionState = String(head.production_state || "").trim().toLowerCase();
+      const publicationState = String(head.publication_state || "").trim().toLowerCase();
+      if (!productionState || productionState === "collected") return false;
+      if (productionState === "completed" || publicationState === "published") return false;
+      return true;
+    });
+  }
+
   function getItem(id) {
     return mapItem(getStmt.get(id));
   }
@@ -13469,6 +13485,7 @@ function normalizeStateValue(value, stateGroup) {
     saveItemWithFieldPack,
     listItems,
     listItemsByStatus,
+    listInFlightItems,
     getItem,
     deleteItem,
     getRawOnlyHardDeleteEligibility,
