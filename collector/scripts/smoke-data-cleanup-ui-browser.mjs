@@ -159,7 +159,7 @@ async function login(auth) {
 
 // Fixtures are written straight to the temp DB: there is no API that creates a soft-deleted item
 // already carrying a curated field pack, which is exactly the state this gate needs.
-function createDeletedItem(db, { titleSuffix, withFieldPack = false, withPublishedArticle = false, withAssignment = false, withApprovedContext = false }) {
+function createDeletedItem(db, { titleSuffix, withFieldPack = false, withPublishedArticle = false, withAssignment = false, withApprovedContext = false, withDeliverableAsset = false, mediaDir = "", submittedByUserId = 0 }) {
   const uid = `smoke-cleanup-ui-${crypto.randomUUID()}`;
   const title = `Smoke Cleanup UI ${titleSuffix}`;
   const slug = `smoke-cleanup-ui-${titleSuffix.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
@@ -202,7 +202,19 @@ function createDeletedItem(db, { titleSuffix, withFieldPack = false, withPublish
       VALUES (?, ?, ?, ?, ?)
     `).run(itemId, evidenceId, "Smoke approved context", "active", "smoke-data-cleanup-ui@example.com");
   }
-  return { id: itemId };
+  let deliverableAsset = null;
+  if (withDeliverableAsset) {
+    const assignmentId = Number(db.prepare("INSERT INTO content_assignments (assignment_uid, content_item_id) VALUES (?,?)").run(`smoke-ui-asset-assignment-${crypto.randomUUID()}`, itemId).lastInsertRowid || 0) || 0;
+    const submissionId = Number(db.prepare("INSERT INTO content_assignment_submissions (assignment_id, content_item_id, submitted_by_user_id, submission_state) VALUES (?,?,?,?)").run(assignmentId, itemId, Number(submittedByUserId || 0), "submitted").lastInsertRowid || 0) || 0;
+    const storagePath = `smoke/ui-purge-${crypto.randomUUID()}.txt`;
+    const filePath = path.join(mediaDir, storagePath);
+    fsSync.mkdirSync(path.dirname(filePath), { recursive: true });
+    fsSync.writeFileSync(filePath, "smoke UI deliverable asset");
+    const assetId = Number(db.prepare("INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum) VALUES (?,?,?,?,?,?,?)").run(`smoke-ui-purge-asset-${crypto.randomUUID()}`, "local", storagePath, "purge.txt", "text/plain", 25, `smoke-${crypto.randomUUID()}`).lastInsertRowid || 0) || 0;
+    db.prepare("INSERT INTO content_assignment_submission_deliverables (assignment_id, submission_id, content_item_id, deliverable_type, source_asset_id, status) VALUES (?,?,?,?,?,?)").run(assignmentId, submissionId, itemId, "file", assetId, "submitted");
+    deliverableAsset = { id: assetId, file_path: filePath };
+  }
+  return { id: itemId, deliverable_asset: deliverableAsset };
 }
 
 function resolveBrowserPath() {
@@ -358,6 +370,7 @@ async function main() {
     // ticked — the behaviour §3 changed to, and the reason both smoke scripts had to move together.
     const assignmentItem = createDeletedItem(db, { titleSuffix: "Assignment Confirm", withAssignment: true });
     const cascadeItem = createDeletedItem(db, { titleSuffix: "Cascade Guard", withApprovedContext: true });
+    const deliverableAssetItem = createDeletedItem(db, { titleSuffix: "Deliverable Asset", withDeliverableAsset: true, mediaDir: env.MEDIA_DIR, submittedByUserId: ownerLogin.user.id });
 
     browserHandle = startBrowser(browserPath);
     cdp = await connectCdp(await waitForBrowserWsUrl(browserHandle));
@@ -518,6 +531,16 @@ async function main() {
     assert((cascadeReferences.payload?.safe_sweep_skipped || []).some((row) => row?.key === "evidence_blocks"), "browser smoke: cascade skip hint missing");
     checks.cascade_guard_skip_hint = true;
 
+    const deliverablePurge = await requestJson(`/api/admin/deleted-items/${deliverableAssetItem.id}/purge`, {
+      method: "POST",
+      token: ownerLogin.token,
+      body: { reason: "browser smoke deliverable sweep", confirmed_overrides: ["assignments", "content_assignment_submissions", "content_assignment_submission_deliverables"] },
+    });
+    assert(deliverablePurge.response.ok, `deliverable asset purge failed: ${JSON.stringify(deliverablePurge.payload)}`);
+    assert(Number(deliverablePurge.payload?.assets_swept || 0) === 1, "browser smoke: assets_swept must be 1");
+    assert(!fsSync.existsSync(deliverableAssetItem.deliverable_asset.file_path), "browser smoke: deliverable file must be removed");
+    checks.purge_assets_swept = true;
+
     console.log(JSON.stringify({
       ok: true,
       fixtures: {
@@ -525,6 +548,7 @@ async function main() {
         hard_blocked_item_id: hardItem.id,
         assignment_confirm_item_id: assignmentItem.id,
         cascade_guard_item_id: cascadeItem.id,
+        deliverable_asset_item_id: deliverableAssetItem.id,
       },
       checks,
     }, null, 2));

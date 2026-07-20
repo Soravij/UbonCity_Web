@@ -63,6 +63,7 @@ import {
   toCleanupBlockerEntry,
   getNeverOverrideBlockersForItem as computeNeverOverrideBlockersForItem,
 } from "../services/raw-delete.mjs";
+import { sweepPurgedDeliverableAssets } from "../services/purge-asset-sweep.mjs";
 import { buildSeoSuggestionPrompt, buildSeoSuggestionRequestContext, normalizeSeoSuggestion } from "../services/seo-agent.mjs";
 import {
   absolutizeCollectorMediaUrl,
@@ -1885,6 +1886,13 @@ function listDeletedItemCleanupReports(limit = 100) {
 }
 
 function purgeDeletedItemTx(itemId, actorEmailValue, reasonText, confirmedOverrides = []) {
+  const deliverableAssetIds = db.prepare(`
+    SELECT DISTINCT source_asset_id
+    FROM content_assignment_submission_deliverables
+    WHERE content_item_id=? AND source_asset_id IS NOT NULL
+  `).all(Number(itemId || 0) || 0)
+    .map((entry) => Number(entry?.source_asset_id || 0) || 0)
+    .filter((assetId) => assetId > 0);
   db.exec("BEGIN IMMEDIATE");
   try {
     const row = getDeletedItemCleanupSnapshot(itemId);
@@ -1904,7 +1912,7 @@ function purgeDeletedItemTx(itemId, actorEmailValue, reasonText, confirmedOverri
       throw err;
     }
     const blockers = [];
-    repo.logAudit(actorEmailValue, "item.purge", "content_item", String(Number(itemId || 0) || 0), {
+    const auditDetails = {
       reason: String(reasonText || "").trim() || null,
       snapshot: {
         id: Number(row.id || 0) || 0,
@@ -1924,10 +1932,30 @@ function purgeDeletedItemTx(itemId, actorEmailValue, reasonText, confirmedOverri
       })),
       confirmed_overrides: plan.confirmed_overrides,
       purge_mode: "hard",
-    });
+      assets_swept: 0,
+      rows_removed: 0,
+      files_missing: 0,
+      assets_skipped: [],
+      asset_sweep_failures: [],
+    };
+    const auditResult = repo.logAudit(actorEmailValue, "item.purge", "content_item", String(Number(itemId || 0) || 0), auditDetails);
     db.prepare("DELETE FROM content_items WHERE id=?").run(Number(itemId || 0) || 0);
     db.exec("COMMIT");
-    return row;
+    const assetSweep = sweepPurgedDeliverableAssets(deliverableAssetIds, deleteAssetIfUnused);
+    auditDetails.assets_swept = assetSweep.assets_swept;
+    auditDetails.rows_removed = assetSweep.rows_removed;
+    auditDetails.files_missing = assetSweep.files_missing;
+    auditDetails.assets_skipped = assetSweep.assets_skipped;
+    auditDetails.asset_sweep_failures = assetSweep.asset_sweep_failures;
+    const auditId = Number(auditResult?.lastInsertRowid || 0) || 0;
+    if (auditId) {
+      try {
+        db.prepare("UPDATE audit_logs SET details_json=? WHERE id=?").run(JSON.stringify(auditDetails), auditId);
+      } catch (auditError) {
+        console.warn(`[purge asset sweep] audit ${auditId}: ${String(auditError?.message || auditError || "update failed")}`);
+      }
+    }
+    return { row, ...assetSweep };
   } catch (error) {
     try {
       db.exec("ROLLBACK");
@@ -6251,19 +6279,33 @@ function deleteAssetIfUnused(assetId) {
   }
   const assetRow = db.prepare("SELECT storage_disk, storage_path FROM assets WHERE id=? LIMIT 1").get(id) || null;
   let deletedFile = false;
+  let fileMissing = false;
+  let noLocalFile = false;
+  let fileWarning = null;
   if (assetRow && (assetRow.storage_disk === "local" || assetRow.storage_disk === "nas")) {
     const rawStoragePath = String(assetRow.storage_path || "").trim();
     if (rawStoragePath && !/^https?:\/\//i.test(rawStoragePath)) {
       try {
         fsSync.unlinkSync(resolveStoragePath(rawStoragePath));
         deletedFile = true;
-      } catch {
-        // Keep delete behavior best-effort and idempotent.
+      } catch (error) {
+        fileMissing = error?.code === "ENOENT";
+        fileWarning = error?.code === "ENOENT" ? "file already missing" : String(error?.message || "file delete failed");
       }
-    }
+    } else noLocalFile = true;
+  } else {
+    noLocalFile = true;
   }
   db.prepare("DELETE FROM assets WHERE id=?").run(id);
-  return { deleted_asset: true, deleted_file: deletedFile, blocked_references: [] };
+  return {
+    deleted_asset: true,
+    deleted_file: deletedFile,
+    file_removed: deletedFile,
+    file_missing: fileMissing,
+    no_local_file: noLocalFile,
+    blocked_references: [],
+    file_warning: fileWarning,
+  };
 }
 
 function purgeUnusedContentAssetsForItem(contentItemId) {
@@ -14076,11 +14118,16 @@ app.post("/api/admin/deleted-items/:id/purge", requireRole("owner"), (req, res) 
   const reason = String(req.body?.reason || "").trim();
   const confirmedOverrides = Array.isArray(req.body?.confirmed_overrides) ? req.body.confirmed_overrides : [];
   try {
-    const purgedRow = purgeDeletedItemTx(id, actorEmail(req), reason, confirmedOverrides);
+    const purgeResult = purgeDeletedItemTx(id, actorEmail(req), reason, confirmedOverrides);
     res.json({
       ok: true,
       purged: true,
-      item: buildPurgedDeletedItemResult(purgedRow, actorEmail(req), reason),
+      item: buildPurgedDeletedItemResult(purgeResult?.row, actorEmail(req), reason),
+      assets_swept: Number(purgeResult?.assets_swept || 0) || 0,
+      rows_removed: Number(purgeResult?.rows_removed || 0) || 0,
+      files_missing: Number(purgeResult?.files_missing || 0) || 0,
+      assets_skipped: Array.isArray(purgeResult?.assets_skipped) ? purgeResult.assets_skipped : [],
+      asset_sweep_failures: Array.isArray(purgeResult?.asset_sweep_failures) ? purgeResult.asset_sweep_failures : [],
     });
   } catch (err) {
     const statusCode = Number(err?.statusCode || 0) || 400;

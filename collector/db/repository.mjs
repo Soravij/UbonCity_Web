@@ -13584,7 +13584,7 @@ function normalizeStateValue(value, stateGroup) {
   function logAudit(actorEmail, action, targetType, targetId, details, metadata = {}) {
     const assignmentId = metadata?.assignment_id == null ? null : Number(metadata.assignment_id || 0) || null;
     const createdAt = toBangkokSqlTimestamp();
-    insertAuditStmt.run(
+    return insertAuditStmt.run(
       actorEmail,
       action,
       targetType,

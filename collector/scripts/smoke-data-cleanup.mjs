@@ -1,5 +1,6 @@
 import "dotenv/config";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolvePaths } from "../config/paths.mjs";
@@ -29,6 +30,9 @@ function createDeletedItem(db, {
   withAssignment = false,
   withTranslation = false,
   withApprovedContext = false,
+  withDeliverableAsset = false,
+  mediaDir = "",
+  submittedByUserId = 0,
 }) {
   const uid = `smoke-cleanup-${crypto.randomUUID()}`;
   const title = `Smoke Cleanup ${titleSuffix}`;
@@ -99,8 +103,27 @@ function createDeletedItem(db, {
       VALUES (?, ?, ?, ?, ?)
     `).run(itemId, evidenceId, "Smoke approved context", "active", "smoke-data-cleanup@example.com");
   }
+  let deliverableAsset = null;
+  if (withDeliverableAsset) {
+    const assignmentId = Number(db.prepare("INSERT INTO content_assignments (assignment_uid, content_item_id) VALUES (?,?)").run(`smoke-asset-assignment-${crypto.randomUUID()}`, itemId).lastInsertRowid || 0) || 0;
+    const submissionId = Number(db.prepare("INSERT INTO content_assignment_submissions (assignment_id, content_item_id, submitted_by_user_id, submission_state) VALUES (?,?,?,?)").run(assignmentId, itemId, Number(submittedByUserId || 0), "submitted").lastInsertRowid || 0) || 0;
+    const storagePath = `smoke/purge-${crypto.randomUUID()}.txt`;
+    const filePath = path.join(mediaDir, storagePath);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, "smoke deliverable asset");
+    const assetId = Number(db.prepare(`
+      INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(`smoke-purge-asset-${crypto.randomUUID()}`, "local", storagePath, "purge.txt", "text/plain", 22, `smoke-${crypto.randomUUID()}`).lastInsertRowid || 0) || 0;
+    db.prepare(`
+      INSERT INTO content_assignment_submission_deliverables
+        (assignment_id, submission_id, content_item_id, deliverable_type, source_asset_id, status)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(assignmentId, submissionId, itemId, "file", assetId, "submitted");
+    deliverableAsset = { id: assetId, file_path: filePath };
+  }
 
-  return { id: itemId };
+  return { id: itemId, deliverable_asset: deliverableAsset };
 }
 
 function cleanupFixture(db, itemId) {
@@ -133,6 +156,7 @@ async function main() {
   let confirmAssignment = null;
   let blockedTranslation = null;
   let cascadeGuarded = null;
+  let deliverableAssetItem = null;
 
   try {
     logStep("auth.me");
@@ -150,6 +174,7 @@ async function main() {
     confirmAssignment = createDeletedItem(db, { titleSuffix: "Confirm Assignment", withAssignment: true });
     blockedTranslation = createDeletedItem(db, { titleSuffix: "Blocked Translation", withTranslation: true });
     cascadeGuarded = createDeletedItem(db, { titleSuffix: "Cascade Guard", withApprovedContext: true });
+    deliverableAssetItem = createDeletedItem(db, { titleSuffix: "Deliverable Asset", withDeliverableAsset: true, mediaDir: dirs.mediaDir, submittedByUserId: auth.body.user.id });
 
     logStep("check.core");
     const purgeableCheck = await client.get(`/api/admin/deleted-items/${purgeable.id}/cleanup-check`);
@@ -205,6 +230,7 @@ async function main() {
     // owner can legitimately decide to throw away, so purge must ask rather than refuse outright.
     await expectPurgeNeedsConfirmation(confirmAssignment.id, "assignments");
     await expectPurgeNeedsConfirmation(cascadeGuarded.id, "approved_context_blocks");
+    await expectPurgeNeedsConfirmation(deliverableAssetItem.id, "content_assignment_submission_deliverables");
 
     logStep("purge.confirmed");
     const expectPurgeWithConfirmation = async (id, confirmedOverrides) => {
@@ -226,6 +252,13 @@ async function main() {
     const cascadeAudit = db.prepare("SELECT details_json FROM audit_logs WHERE action='item.purge' AND CAST(target_id AS INTEGER)=? ORDER BY id DESC LIMIT 1").get(cascadeGuarded.id);
     const cascadeOverrides = JSON.parse(cascadeAudit?.details_json || "{}")?.confirmed_overrides || [];
     assert(cascadeOverrides.some((entry) => String(entry?.key || "") === "approved_context_blocks"), "cascade purge audit must record approved context override");
+    const deliverablePurge = await client.post(`/api/admin/deleted-items/${deliverableAssetItem.id}/purge`, {
+      reason: "smoke deliverable asset sweep",
+      confirmed_overrides: ["assignments", "content_assignment_submissions", "content_assignment_submission_deliverables"],
+    });
+    assert(deliverablePurge.ok, `deliverable asset purge failed: ${JSON.stringify(deliverablePurge.body)}`);
+    assert(Number(deliverablePurge.body?.assets_swept || 0) === 1, "deliverable asset purge must report assets_swept: 1");
+    assert(!fs.existsSync(deliverableAssetItem.deliverable_asset.file_path), "deliverable file must be removed after purge commit");
 
     logStep("purge.success");
     const purged = await client.post(`/api/admin/deleted-items/${purgeable.id}/purge`, { reason: "smoke purgeable" });
@@ -245,6 +278,7 @@ async function main() {
         confirm_assignment_item_id: confirmAssignment.id,
         blocked_translation_item_id: blockedTranslation.id,
         cascade_guarded_item_id: cascadeGuarded.id,
+        deliverable_asset_item_id: deliverableAssetItem.id,
       },
       checks: {
         purgeable_can_purge: true,
@@ -260,6 +294,7 @@ async function main() {
         assignment_purge_rejected_without_override: true,
         assignment_purge_accepted_with_override: true,
         cascade_guard_skips_evidence_and_purges_with_approved_context_confirmation: true,
+        purge_reports_assets_swept_and_removes_deliverable_file: true,
         purged_item_removed: true,
       },
     }, null, 2));
@@ -267,6 +302,7 @@ async function main() {
     try {
       if (blockedTranslation?.id) cleanupFixture(db, blockedTranslation.id);
       if (cascadeGuarded?.id) cleanupFixture(db, cascadeGuarded.id);
+      if (deliverableAssetItem?.id) cleanupFixture(db, deliverableAssetItem.id);
       if (confirmAssignment?.id) cleanupFixture(db, confirmAssignment.id);
       if (blockedIntelligence?.id) cleanupFixture(db, blockedIntelligence.id);
       if (blockedReviewAction?.id) cleanupFixture(db, blockedReviewAction.id);
