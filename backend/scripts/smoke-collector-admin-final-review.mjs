@@ -1,4 +1,5 @@
 import "dotenv/config";
+import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
 import http from "node:http";
@@ -309,6 +310,11 @@ function buildImportPayload({
   const normalizedType = String(type || "place").trim().toLowerCase() === "event" ? "event" : "place";
   const normalizedManifest = mediaManifest && typeof mediaManifest === "object" ? mediaManifest : null;
   assert(normalizedManifest, "buildImportPayload requires mediaManifest for smoke verification");
+  const releaseId = crypto.randomUUID();
+  const manifestHash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify(normalizedManifest))
+    .digest("hex");
   return {
     source_system: "collector-app",
     source_base_url: String(sourceBaseUrl || "").trim() || undefined,
@@ -327,6 +333,8 @@ function buildImportPayload({
         meta_description: body.slice(0, 120),
         image: String(normalizedManifest?.cover?.source_url || "").trim(),
         media_manifest: normalizedManifest,
+        release_id: releaseId,
+        manifest_hash: manifestHash,
         published_at: publishedAt,
       },
     ],
