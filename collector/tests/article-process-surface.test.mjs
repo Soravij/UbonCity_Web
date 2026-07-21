@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -143,6 +144,7 @@ function loadBackendSyncPayloadBuilder(options = {}) {
     console,
   };
   const helperSource = `
+${extractFunctionBlock("parseReleaseSnapshotManifest")}
 ${extractFunctionBlock("buildBackendSyncPayload")}
 globalThis.__backendSyncHooks = {
   buildBackendSyncPayload,
@@ -151,6 +153,18 @@ globalThis.__backendSyncHooks = {
   context.globalThis = context;
   vm.runInNewContext(helperSource, context, { filename: "backend-sync-payload.js" });
   return context.__backendSyncHooks.buildBackendSyncPayload;
+}
+
+function loadReleaseManifestHasher() {
+  const context = { crypto };
+  const helperSource = `
+${extractFunctionBlock("manifestEntriesForReleaseHash")}
+${extractFunctionBlock("hashReleaseManifest")}
+globalThis.__releaseSnapshotHooks = { hashReleaseManifest };
+`;
+  context.globalThis = context;
+  vm.runInNewContext(helperSource, context, { filename: "release-manifest-hash.js" });
+  return context.__releaseSnapshotHooks.hashReleaseManifest;
 }
 
 test("article process routes exist with dedicated surface area", () => {
@@ -247,6 +261,39 @@ test("bulk backend sync excludes passed translations whose source fingerprint mi
     payload.translations.map((row) => ({ id: row.source_content_item_id, lang: row.lang })),
     [{ id: 101, lang: "en" }],
   );
+});
+
+test("item-scoped backend sync uses the release snapshot instead of live selected assets", () => {
+  const buildBackendSyncPayload = loadBackendSyncPayloadBuilder({
+    published: [{ content_item_id: 101, slug: "snapshot-item", title: "Snapshot item" }],
+    fingerprintByItemId: { 101: "fp-101-current" },
+  });
+  const snapshot = {
+    release_id: "release-101",
+    manifest_hash: "a".repeat(64),
+    manifest: { authority: "release_main_selected_assets", cover: null, gallery: [], inline: [], video: [] },
+  };
+  const payload = buildBackendSyncPayload({ contentItemId: 101, releaseSnapshot: snapshot });
+
+  assert.equal(payload.published[0].release_id, "release-101");
+  assert.equal(payload.published[0].manifest_hash, "a".repeat(64));
+  assert.deepEqual(payload.published[0].media_manifest, snapshot.manifest);
+  assert.throws(() => buildBackendSyncPayload({ contentItemId: 101 }), /release snapshot is required/);
+});
+
+test("release manifest hash tracks asset identity, checksum, role, position, and source URL", () => {
+  const hashReleaseManifest = loadReleaseManifestHasher();
+  const emptyManifest = { authority: "release_main_selected_assets", cover: null, gallery: [], inline: [], video: [] };
+  const original = {
+    ...emptyManifest,
+    cover: { source_asset_id: 7, source_checksum: "checksum-a", source_url: "/media/a.jpg" },
+  };
+  const changedRole = { ...emptyManifest, gallery: [{ source_asset_id: 7, source_checksum: "checksum-a", source_url: "/media/a.jpg" }] };
+  const changedChecksum = { ...original, cover: { ...original.cover, source_checksum: "checksum-b" } };
+
+  assert.match(hashReleaseManifest(emptyManifest), /^[a-f0-9]{64}$/);
+  assert.notEqual(hashReleaseManifest(original), hashReleaseManifest(changedRole));
+  assert.notEqual(hashReleaseManifest(original), hashReleaseManifest(changedChecksum));
 });
 
 test("required locale translation recheck gate allows release only when all required locales passed", () => {
