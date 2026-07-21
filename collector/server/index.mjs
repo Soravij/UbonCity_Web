@@ -56,7 +56,14 @@ import {
 } from "../services/agent-generation.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildArticleSuggestionPrompt, buildArticleSuggestionRequestContext, normalizeArticleSuggestion } from "../services/article-agent.mjs";
-import { planBulkItemDelete } from "../services/raw-delete.mjs";
+import {
+  planBulkItemDelete,
+  classifyPurgeGroups,
+  planDeletedItemPurge,
+  toCleanupBlockerEntry,
+  getNeverOverrideBlockersForItem as computeNeverOverrideBlockersForItem,
+} from "../services/raw-delete.mjs";
+import { sweepPurgedDeliverableAssets } from "../services/purge-asset-sweep.mjs";
 import { buildSeoSuggestionPrompt, buildSeoSuggestionRequestContext, normalizeSeoSuggestion } from "../services/seo-agent.mjs";
 import {
   absolutizeCollectorMediaUrl,
@@ -1781,6 +1788,32 @@ function getMergeBlockersForItem(itemId) {
   return blockers;
 }
 
+// Soft-delete only gates on NEVER-level blockers. The full getMergeBlockersForItem gate
+// still applies to merge and to purge, where the loss is irreversible.
+function getNeverOverrideBlockersForItem(itemId) {
+  return computeNeverOverrideBlockersForItem(db, itemId);
+}
+
+function buildItemAuditSnapshot(row) {
+  return {
+    id: Number(row?.id || 0) || 0,
+    item_uid: row?.item_uid || null,
+    type: row?.type || null,
+    category: row?.category || null,
+    title: row?.title || null,
+    slug: row?.slug || null,
+    legacy_workflow_status: row?.workflow_status || null,
+  };
+}
+
+function buildSoftDeleteAuditDetails(row) {
+  return {
+    delete_mode: "soft",
+    snapshot: buildItemAuditSnapshot(row),
+    never_override_check: { passed: true, blockers: [] },
+  };
+}
+
 function getDeletedItemCleanupSnapshot(itemId) {
   const id = Number(itemId || 0) || 0;
   if (!id) return null;
@@ -1791,9 +1824,23 @@ function getDeletedItemCleanupSnapshot(itemId) {
   `).get(id) || null;
 }
 
+// Classifies what stands between a deleted item and a purge, using the same three-way grouping the
+// reference-cleanup page shows: hard_blocker can never be overridden, cleanup_candidate must be
+// cleaned first, confirm_required needs the owner to name it in confirmed_overrides.
+function classifyPurgeGroupsForItem(itemId) {
+  return classifyPurgeGroups(repo.getDeletedItemReferenceGroups(Number(itemId || 0))?.groups || []);
+}
+
 function buildDeletedItemCleanupReport(row) {
   if (!row) return null;
-  const blockers = getMergeBlockersForItem(Number(row.id || 0));
+  const classified = classifyPurgeGroupsForItem(Number(row.id || 0));
+  const blockers = [
+    ...classified.hard_blockers,
+    ...classified.cleanup_candidates,
+    ...classified.confirm_required,
+  ].map(toCleanupBlockerEntry);
+  const canPurgeWithConfirmation =
+    classified.hard_blockers.length === 0 && classified.cleanup_candidates.length === 0;
   return {
     id: Number(row.id || 0) || 0,
     item_uid: row.item_uid || null,
@@ -1809,10 +1856,19 @@ function buildDeletedItemCleanupReport(row) {
     blockers,
     blocker_count: blockers.length,
     can_purge: blockers.length === 0,
+    can_purge_with_confirmation: canPurgeWithConfirmation,
+    required_confirmations: classified.confirm_required.map((group) => group.key),
+    hard_blockers: classified.hard_blockers.map(toCleanupBlockerEntry),
+    cleanup_candidates: classified.cleanup_candidates.map(toCleanupBlockerEntry),
+    confirm_required: classified.confirm_required.map((group) => ({
+      ...toCleanupBlockerEntry(group),
+      confirm_details: Array.isArray(group.confirm_details) ? group.confirm_details : [],
+    })),
     blocker_summary: blockers.map((entry) => ({
       key: entry.key,
       label: entry.label,
       count: Number(entry.count || 0) || 0,
+      category: entry.category,
     })),
   };
 }
@@ -1829,7 +1885,14 @@ function listDeletedItemCleanupReports(limit = 100) {
   return rows.map((row) => buildDeletedItemCleanupReport(row)).filter(Boolean);
 }
 
-function purgeDeletedItemTx(itemId, actorEmailValue, reasonText) {
+function purgeDeletedItemTx(itemId, actorEmailValue, reasonText, confirmedOverrides = []) {
+  const deliverableAssetIds = db.prepare(`
+    SELECT DISTINCT source_asset_id
+    FROM content_assignment_submission_deliverables
+    WHERE content_item_id=? AND source_asset_id IS NOT NULL
+  `).all(Number(itemId || 0) || 0)
+    .map((entry) => Number(entry?.source_asset_id || 0) || 0)
+    .filter((assetId) => assetId > 0);
   db.exec("BEGIN IMMEDIATE");
   try {
     const row = getDeletedItemCleanupSnapshot(itemId);
@@ -1838,15 +1901,18 @@ function purgeDeletedItemTx(itemId, actorEmailValue, reasonText) {
       err.statusCode = 404;
       throw err;
     }
-    const blockers = getMergeBlockersForItem(Number(itemId || 0));
-    if (blockers.length) {
-      const err = new Error("deleted item has purge blockers");
-      err.statusCode = 409;
-      err.blockers = blockers;
+    const classified = classifyPurgeGroupsForItem(Number(itemId || 0));
+    const plan = planDeletedItemPurge(classified, confirmedOverrides);
+    if (!plan.ok) {
+      const err = new Error(plan.error);
+      err.statusCode = plan.status;
+      if (plan.blockers.length) err.blockers = plan.blockers;
+      if (plan.missing_confirmations.length) err.missingConfirmations = plan.missing_confirmations;
       err.snapshot = row;
       throw err;
     }
-    repo.logAudit(actorEmailValue, "item.purge", "content_item", String(Number(itemId || 0) || 0), {
+    const blockers = [];
+    const auditDetails = {
       reason: String(reasonText || "").trim() || null,
       snapshot: {
         id: Number(row.id || 0) || 0,
@@ -1864,11 +1930,32 @@ function purgeDeletedItemTx(itemId, actorEmailValue, reasonText) {
         label: entry.label,
         count: Number(entry.count || 0) || 0,
       })),
+      confirmed_overrides: plan.confirmed_overrides,
       purge_mode: "hard",
-    });
+      assets_swept: 0,
+      rows_removed: 0,
+      files_missing: 0,
+      assets_skipped: [],
+      asset_sweep_failures: [],
+    };
+    const auditResult = repo.logAudit(actorEmailValue, "item.purge", "content_item", String(Number(itemId || 0) || 0), auditDetails);
     db.prepare("DELETE FROM content_items WHERE id=?").run(Number(itemId || 0) || 0);
     db.exec("COMMIT");
-    return row;
+    const assetSweep = sweepPurgedDeliverableAssets(deliverableAssetIds, deleteAssetIfUnused);
+    auditDetails.assets_swept = assetSweep.assets_swept;
+    auditDetails.rows_removed = assetSweep.rows_removed;
+    auditDetails.files_missing = assetSweep.files_missing;
+    auditDetails.assets_skipped = assetSweep.assets_skipped;
+    auditDetails.asset_sweep_failures = assetSweep.asset_sweep_failures;
+    const auditId = Number(auditResult?.lastInsertRowid || 0) || 0;
+    if (auditId) {
+      try {
+        db.prepare("UPDATE audit_logs SET details_json=? WHERE id=?").run(JSON.stringify(auditDetails), auditId);
+      } catch (auditError) {
+        console.warn(`[purge asset sweep] audit ${auditId}: ${String(auditError?.message || auditError || "update failed")}`);
+      }
+    }
+    return { row, ...assetSweep };
   } catch (error) {
     try {
       db.exec("ROLLBACK");
@@ -1896,7 +1983,12 @@ function buildPurgedDeletedItemResult(row, actorEmailValue, reasonText) {
 
 function formatItemBlockerSummary(rows = []) {
   return (Array.isArray(rows) ? rows : [])
-    .map((row) => `#${row.item_id} ${row.title || ""}: ${row.blockers.map((entry) => entry.label).join(", ")}`)
+    .map(
+      (row) =>
+        `#${row.item_id} ${row.title || ""}: ${row.blockers
+          .map((entry) => (entry.remediation ? `${entry.label} (${entry.remediation})` : entry.label))
+          .join(", ")}`
+    )
     .join(" | ");
 }
 
@@ -1930,7 +2022,7 @@ function assertItemsCanBeDeleted(items = []) {
   for (const item of Array.isArray(items) ? items : []) {
     const itemId = Number(item?.id || 0);
     if (!itemId) continue;
-    const itemBlockers = getMergeBlockersForItem(itemId);
+    const itemBlockers = getNeverOverrideBlockersForItem(itemId);
     if (itemBlockers.length) {
       blockers.push({
         item_id: itemId,
@@ -6187,19 +6279,33 @@ function deleteAssetIfUnused(assetId) {
   }
   const assetRow = db.prepare("SELECT storage_disk, storage_path FROM assets WHERE id=? LIMIT 1").get(id) || null;
   let deletedFile = false;
+  let fileMissing = false;
+  let noLocalFile = false;
+  let fileWarning = null;
   if (assetRow && (assetRow.storage_disk === "local" || assetRow.storage_disk === "nas")) {
     const rawStoragePath = String(assetRow.storage_path || "").trim();
     if (rawStoragePath && !/^https?:\/\//i.test(rawStoragePath)) {
       try {
         fsSync.unlinkSync(resolveStoragePath(rawStoragePath));
         deletedFile = true;
-      } catch {
-        // Keep delete behavior best-effort and idempotent.
+      } catch (error) {
+        fileMissing = error?.code === "ENOENT";
+        fileWarning = error?.code === "ENOENT" ? "file already missing" : String(error?.message || "file delete failed");
       }
-    }
+    } else noLocalFile = true;
+  } else {
+    noLocalFile = true;
   }
   db.prepare("DELETE FROM assets WHERE id=?").run(id);
-  return { deleted_asset: true, deleted_file: deletedFile, blocked_references: [] };
+  return {
+    deleted_asset: true,
+    deleted_file: deletedFile,
+    file_removed: deletedFile,
+    file_missing: fileMissing,
+    no_local_file: noLocalFile,
+    blocked_references: [],
+    file_warning: fileWarning,
+  };
 }
 
 function purgeUnusedContentAssetsForItem(contentItemId) {
@@ -8249,6 +8355,16 @@ app.get("/api/items", (req, res) => {
       return [attachItemScopeMetadata(req.authUser, item, scopeContext)];
     })
     ;
+  // Additive opt-in for the Data Cleanup "งานค้างระหว่างทาง" table: items past raw intake but not
+  // finished. Read-only, and it changes nothing when the param is absent — every existing caller
+  // (no param, or ?status=) keeps its current response. Same per-item visibility gate as the
+  // default list; the owner-only scoping of that table is enforced client-side by the Data Cleanup
+  // zone, exactly as the rest of that panel's reads are. §3
+  const inFlightOnly = String(req.query.in_flight || "").trim() === "1";
+  if (inFlightOnly) {
+    res.json(attachItemMatchFields(decorateVisibleItems(repo.listInFlightItems()), { includeBulkPreview }));
+    return;
+  }
   if (!status) {
     res.json(attachItemMatchFields(decorateVisibleItems(repo.listItems()), { includeBulkPreview }));
     return;
@@ -8260,6 +8376,52 @@ app.get("/api/items", (req, res) => {
     .filter(Boolean);
 
   res.json(attachItemMatchFields(decorateVisibleItems(repo.listItemsByStatus(statuses)), { includeBulkPreview }));
+});
+
+// Read-only companion to the item list: given ?ids=1,2,3 it returns, per item, the delete-blocker
+// state the list badge needs — NEVER-override blockers (getNeverOverrideBlockersForItem), the
+// cleanup_candidate reference total, and open assignments (a purge-time hard blocker the owner can
+// clear). It reuses the same reference defs as the purge gate and mutates nothing. Registered
+// before /api/items/:id so "blocker-summary" is not swallowed as an :id. §3.
+const BLOCKER_SUMMARY_MAX_IDS = 200;
+app.get("/api/items/blocker-summary", requireRole("owner", "admin", "user"), (req, res) => {
+  const rawIds = String(req.query.ids || "")
+    .split(",")
+    .map((value) => Number(String(value).trim()))
+    .filter((value) => Number.isInteger(value) && value > 0);
+  const ids = Array.from(new Set(rawIds));
+  if (ids.length === 0) {
+    res.json({ items: {} });
+    return;
+  }
+  if (ids.length > BLOCKER_SUMMARY_MAX_IDS) {
+    res.status(400).json({ error: `too many ids (max ${BLOCKER_SUMMARY_MAX_IDS})` });
+    return;
+  }
+  // Same per-item visibility gate the item list applies (see the /api/items handler): an actor only
+  // gets blocker metadata for items it can actually see. An id that is missing/deleted or out of the
+  // actor's scope is dropped from the response map silently — the list drops such rows too rather
+  // than answering 403/404, so a mixed batch never leaks the existence or state of hidden items.
+  const visibleIds = ids.filter((id) => {
+    const item = repo.getItem(id);
+    if (!item) return false;
+    const scopeContext = resolveItemScopeContext(item);
+    return isItemVisibleToActor(req.authUser, item, scopeContext?.primaryAssignment || null);
+  });
+  const counts = repo.getItemReferenceBlockerCounts(visibleIds);
+  const items = {};
+  for (const id of visibleIds) {
+    const bucket = counts.get(id) || { cleanup_candidate_count: 0, confirm_required: [], assignments_open: 0 };
+    const never = getNeverOverrideBlockersForItem(id);
+    items[String(id)] = {
+      never,
+      soft_deletable: never.length === 0,
+      cleanup_candidate_count: Number(bucket.cleanup_candidate_count || 0) || 0,
+      confirm_required: Array.isArray(bucket.confirm_required) ? bucket.confirm_required : [],
+      assignments_open: Number(bucket.assignments_open || 0) || 0,
+    };
+  }
+  res.json({ items });
 });
 
 app.post("/api/items/bulk-delete", requireRole("admin", "owner"), (req, res) => {
@@ -8279,24 +8441,34 @@ app.post("/api/items/bulk-delete", requireRole("admin", "owner"), (req, res) => 
   try {
     const plan = planBulkItemDelete(rows, {
       getRawOnlyHardDeleteEligibility: (itemId) => repo.getRawOnlyHardDeleteEligibility(itemId),
-      getMergeBlockersForItem,
+      getNeverOverrideBlockersForItem,
     });
-    if (!plan.ok) {
-      res.status(400).json({ error: `cannot delete items with dependency blockers: ${formatItemBlockerSummary(plan.blocked_rows)}` });
+
+    const blockedRows = Array.isArray(plan.blocked_rows) ? plan.blocked_rows : [];
+    // Nothing is deletable: report it as a failure rather than a success that deleted 0 items.
+    if (!plan.actions.length && blockedRows.length) {
+      res.status(400).json({
+        error: `cannot delete items with dependency blockers: ${formatItemBlockerSummary(blockedRows)}`,
+        blocked_count: blockedRows.length,
+        blocked_rows: blockedRows,
+      });
       return;
     }
 
+    const rowsById = new Map(rows.map((row) => [Number(row?.id || 0) || 0, row]));
     const hardItemIds = [];
     const softItemIds = [];
+    const softDeleteAuditDetailsById = {};
     for (const action of plan.actions) {
       if (action.mode === "hard") {
         hardItemIds.push(action.item_id);
       } else {
         softItemIds.push(action.item_id);
+        softDeleteAuditDetailsById[action.item_id] = buildSoftDeleteAuditDetails(rowsById.get(action.item_id));
       }
     }
 
-    const result = repo.bulkDeleteItems(hardItemIds, softItemIds, actorEmail(req));
+    const result = repo.bulkDeleteItems(hardItemIds, softItemIds, actorEmail(req), { softDeleteAuditDetailsById });
     const deletedIds = Array.isArray(result?.deleted_ids) ? result.deleted_ids : [];
     const deletedAssetIds = Array.isArray(result?.deleted_asset_ids) ? result.deleted_asset_ids : [];
 
@@ -8311,7 +8483,14 @@ app.post("/api/items/bulk-delete", requireRole("admin", "owner"), (req, res) => 
       }
     }
 
-    const responsePayload = { ok: true, deleted_count: deletedIds.length, ids: deletedIds };
+    const responsePayload = {
+      ok: true,
+      deleted_count: deletedIds.length,
+      ids: deletedIds,
+      deleted_ids: deletedIds,
+      blocked_count: blockedRows.length,
+      blocked_rows: blockedRows,
+    };
     if (assetsCleaned > 0) {
       responsePayload.assets_cleaned = assetsCleaned;
     }
@@ -13770,7 +13949,7 @@ app.delete("/api/items/:id", requireRole("admin", "owner"), (req, res) => {
     res.status(400).json({ error: message });
     return;
   }
-  repo.deleteItem(id, actorEmail(req));
+  repo.deleteItem(id, actorEmail(req), buildSoftDeleteAuditDetails(current));
   res.json({ ok: true });
 });
 
@@ -13864,12 +14043,14 @@ app.post("/api/admin/deleted-items/:id/references/cleanup", requireRole("owner")
   }
   const groups = Array.isArray(req.body?.groups) ? req.body.groups : [];
   const reason = String(req.body?.reason || "").trim();
+  const confirmedOverrides = Array.isArray(req.body?.confirmed_overrides) ? req.body.confirmed_overrides : [];
   try {
     const cleanupResult = repo.cleanupDeletedItemReferenceGroups({
       itemId: id,
       groups,
       actorEmail: actorEmail(req),
       reason,
+      confirmedOverrides,
     });
     const deletedAssetIds = Array.isArray(cleanupResult?.deleted_asset_ids) ? cleanupResult.deleted_asset_ids : [];
     let assetsCleaned = 0;
@@ -13900,6 +14081,7 @@ app.post("/api/admin/deleted-items/:id/references/cleanup", requireRole("owner")
       remaining_groups: normalizedRemainingGroups,
       remaining_blockers: normalizedRemainingGroups.filter((entry) => entry.category === "hard_blocker"),
       skipped_assets,
+      safe_sweep_skipped: Array.isArray(cleanupResult?.safe_sweep_skipped) ? cleanupResult.safe_sweep_skipped : [],
     });
   } catch (err) {
     const statusCode = Number(err?.statusCode || 0) || 400;
@@ -13915,6 +14097,14 @@ app.post("/api/admin/deleted-items/:id/references/cleanup", requireRole("owner")
       });
       return;
     }
+    if (statusCode === 400 && String(err?.message || "") === "group requires confirmation") {
+      res.status(400).json({
+        error: "group requires confirmation",
+        group: String(err?.group || "").trim().toLowerCase() || null,
+        category: "confirm_required",
+      });
+      return;
+    }
     res.status(400).json({ error: err instanceof Error ? err.message : "cleanup failed" });
   }
 });
@@ -13926,12 +14116,18 @@ app.post("/api/admin/deleted-items/:id/purge", requireRole("owner"), (req, res) 
     return;
   }
   const reason = String(req.body?.reason || "").trim();
+  const confirmedOverrides = Array.isArray(req.body?.confirmed_overrides) ? req.body.confirmed_overrides : [];
   try {
-    const purgedRow = purgeDeletedItemTx(id, actorEmail(req), reason);
+    const purgeResult = purgeDeletedItemTx(id, actorEmail(req), reason, confirmedOverrides);
     res.json({
       ok: true,
       purged: true,
-      item: buildPurgedDeletedItemResult(purgedRow, actorEmail(req), reason),
+      item: buildPurgedDeletedItemResult(purgeResult?.row, actorEmail(req), reason),
+      assets_swept: Number(purgeResult?.assets_swept || 0) || 0,
+      rows_removed: Number(purgeResult?.rows_removed || 0) || 0,
+      files_missing: Number(purgeResult?.files_missing || 0) || 0,
+      assets_skipped: Array.isArray(purgeResult?.assets_skipped) ? purgeResult.assets_skipped : [],
+      asset_sweep_failures: Array.isArray(purgeResult?.asset_sweep_failures) ? purgeResult.asset_sweep_failures : [],
     });
   } catch (err) {
     const statusCode = Number(err?.statusCode || 0) || 400;
@@ -13939,6 +14135,14 @@ app.post("/api/admin/deleted-items/:id/purge", requireRole("owner"), (req, res) 
       res.status(409).json({
         error: "deleted item has purge blockers",
         blockers: Array.isArray(err?.blockers) ? err.blockers : [],
+        item: err?.snapshot ? buildDeletedItemCleanupReport(err.snapshot) : null,
+      });
+      return;
+    }
+    if (statusCode === 400 && Array.isArray(err?.missingConfirmations)) {
+      res.status(400).json({
+        error: "purge requires confirmation for curated groups",
+        missing_confirmations: err.missingConfirmations,
         item: err?.snapshot ? buildDeletedItemCleanupReport(err.snapshot) : null,
       });
       return;

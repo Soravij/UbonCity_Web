@@ -23,6 +23,7 @@
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
     "smoke:mcp-chatgpt-test": "node scripts/smoke-mcp-chatgpt-test.mjs",
     "smoke:data-cleanup": "node scripts/smoke-data-cleanup.mjs",
+    "smoke:data-cleanup:ui": "node scripts/smoke-data-cleanup-ui-browser.mjs",
     "smoke:reference-cleanup": "node scripts/smoke-reference-cleanup.mjs",
     "smoke:field-pack:return-to-clean": "node scripts/smoke-field-pack-return-to-clean.mjs",
     "smoke:publish-sync-compensation": "node scripts/smoke-publish-sync-compensation.mjs",

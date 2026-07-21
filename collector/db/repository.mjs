@@ -221,15 +221,12 @@ const REFERENCE_CLEANUP_CANDIDATE_DEFS = Object.freeze([
   { key: "source_records", label_th: "แหล่งข้อมูลต้นทาง", table: "source_records", where: "content_item_id=?" },
   { key: "content_assets", label_th: "ไฟล์หรือรูปที่ผูกกับรายการนี้", table: "content_assets", where: "content_item_id=?" },
   { key: "reviews_raw", label_th: "รีวิวดิบ", table: "reviews_raw", where: "content_item_id=?" },
-  { key: "drafts", label_th: "AI drafts", table: "content_drafts", where: "content_item_id=?" },
   { key: "quality_checks", label_th: "ผลตรวจคุณภาพ", table: "quality_checks", where: "content_item_id=?" },
   { key: "review_reports", label_th: "review reports", table: "review_reports", where: "content_item_id=?" },
   { key: "staging_items", label_th: "staging/export", table: "staging_items", where: "content_item_id=?" },
   { key: "content_versions", label_th: "ประวัติเวอร์ชันคอนเทนต์", table: "content_versions", where: "content_item_id=?" },
   { key: "evidence_blocks", label_th: "evidence blocks", table: "evidence_blocks", where: "content_item_id=?" },
-  { key: "approved_context_blocks", label_th: "approved context", table: "approved_context_blocks", where: "content_item_id=?" },
   { key: "draft_input_snapshots", label_th: "draft input snapshots", table: "draft_input_snapshots", where: "content_item_id=?" },
-  { key: "field_packs", label_th: "field packs", table: "field_packs", where: "content_item_id=?" },
   { key: "content_workflow_models", label_th: "workflow models", table: "content_workflow_models", where: "content_item_id=?" },
   { key: "content_workflow_transitions", label_th: "workflow transitions", table: "content_workflow_transitions", where: "content_item_id=?" },
   { key: "content_readiness_briefs", label_th: "readiness briefs", table: "content_readiness_briefs", where: "content_item_id=?" },
@@ -245,6 +242,165 @@ const REFERENCE_CLEANUP_CANDIDATE_DEFS = Object.freeze([
   { key: "internal_link_targets", label_th: "internal link ปลายทาง", table: "internal_link_suggestions", where: "target_content_item_id=?" },
 ]);
 const REFERENCE_CLEANUP_CANDIDATE_KEYS = new Set(REFERENCE_CLEANUP_CANDIDATE_DEFS.map((entry) => entry.key));
+// SAFE cleanup must never reach confirm_required (or NEVER) data through an FK cascade. Keep
+// every such chain here so new confirm_required definitions are checked in one place.
+const CASCADE_KILLED_CONFIRM_KEY_DEFS = Object.freeze([
+  {
+    cleanup_key: "evidence_blocks",
+    confirm_key: "approved_context_blocks",
+    has_confirm_rows_sql: "SELECT COUNT(*) AS c FROM approved_context_blocks WHERE content_item_id=?",
+    reason_th: "มี approved context อยู่ จึงเก็บ evidence blocks ไว้ให้ purge ลบพร้อมกันหลัง owner ยืนยัน",
+  },
+]);
+// Groups carrying human curation. Deleting them destroys work a person signed off on, so they are
+// neither free-to-clean (cleanup_candidate) nor permanently barred (hard_blocker): an owner must
+// name each one in confirmed_overrides before it can be cleaned or purged past.
+const REFERENCE_CONFIRM_REQUIRED_DEFS = Object.freeze([
+  {
+    key: "drafts",
+    label_th: "AI drafts",
+    table: "content_drafts",
+    where: "content_item_id=?",
+    confirm_reason_th: "มี metadata ที่คนยืนยันแล้ว (confirmed_*)",
+    detail_sql:
+      "SELECT id, confirmed_by_user_id, confirmed_at, confirmed_meta_status, created_at FROM content_drafts WHERE content_item_id=? ORDER BY id ASC LIMIT 25",
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: Number(row?.confirmed_by_user_id || 0) || null,
+      actor: null,
+      acted_at: row?.confirmed_at || row?.created_at || null,
+      status: row?.confirmed_meta_status || null,
+    }),
+  },
+  {
+    key: "field_packs",
+    label_th: "field packs",
+    table: "field_packs",
+    where: "content_item_id=?",
+    confirm_reason_th: "มีการ curate โดยคน (curated_by_user_id/writer_*)",
+    detail_sql:
+      "SELECT id, curated_by_user_id, curated_at, curation_status, writer_ready, updated_by, created_at FROM field_packs WHERE content_item_id=? ORDER BY id ASC LIMIT 25",
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: Number(row?.curated_by_user_id || 0) || null,
+      actor: row?.updated_by || null,
+      acted_at: row?.curated_at || row?.created_at || null,
+      status: row?.curation_status || null,
+      writer_ready: Number(row?.writer_ready || 0) === 1,
+    }),
+  },
+  {
+    key: "approved_context_blocks",
+    label_th: "approved context",
+    table: "approved_context_blocks",
+    where: "content_item_id=?",
+    confirm_reason_th: "เป็น context ที่คนอนุมัติแล้ว (approved_by)",
+    detail_sql:
+      "SELECT id, approved_by, status, created_at, updated_at FROM approved_context_blocks WHERE content_item_id=? ORDER BY id ASC LIMIT 25",
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: null,
+      actor: row?.approved_by || null,
+      acted_at: row?.updated_at || row?.created_at || null,
+      status: row?.status || null,
+    }),
+  },
+  {
+    key: "translations_unpublished",
+    label_th: "งานแปลที่ยังไม่ผูกบทความเผยแพร่",
+    table: "content_translations",
+    where: "source_content_item_id=? AND source_published_article_id IS NULL",
+    confirm_reason_th: "มีงานแปลที่ยังไม่เผยแพร่",
+    detail_sql:
+      "SELECT id, lang, translation_status, created_at, updated_at FROM content_translations WHERE source_content_item_id=? AND source_published_article_id IS NULL ORDER BY id ASC LIMIT 25",
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: null,
+      actor: null,
+      acted_at: row?.updated_at || row?.created_at || null,
+      status: row?.translation_status || null,
+      lang: row?.lang || null,
+    }),
+  },
+  // The assignment family. These are somebody's work-in-progress, not a permanent record: closing an
+  // assignment is a workflow action the owner can take, so barring purge forever was wrong. They are
+  // confirm_required for the same reason drafts and field packs are — deleting them throws away work a
+  // named person did — and the labels/reasons say whose work is being thrown away.
+  {
+    key: "assignments",
+    label_th: "งานที่มอบหมายให้คนอื่นไว้ (assignment)",
+    table: "content_assignments",
+    where: "content_item_id=?",
+    confirm_reason_th: "มีคนถืองานนี้อยู่ — ลบแล้วงานที่มอบหมายและรอบงานทั้งหมดหายไปด้วย",
+    detail_sql:
+      "SELECT id, assignee_user_id, assignee_name, state, due_at, updated_at, created_at FROM content_assignments WHERE content_item_id=? ORDER BY id ASC LIMIT 25",
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: Number(row?.assignee_user_id || 0) || null,
+      actor: row?.assignee_name || null,
+      acted_at: row?.updated_at || row?.created_at || null,
+      status: row?.state || null,
+      due_at: row?.due_at || null,
+    }),
+  },
+  {
+    key: "content_assignment_submissions",
+    label_th: "งานที่ส่งกลับมาแล้วจาก assignment",
+    table: "content_assignment_submissions",
+    where: "content_item_id=?",
+    confirm_reason_th: "เป็นงานที่คนส่งกลับมาแล้ว — ลบแล้วของที่เขาส่งหายทั้งหมด",
+    detail_sql: `
+      SELECT s.id AS id, s.submitted_by_user_id AS submitted_by_user_id, u.display_name AS submitted_by_name,
+             s.submission_state AS submission_state, s.reviewed_at AS reviewed_at, s.created_at AS created_at
+      FROM content_assignment_submissions s
+      LEFT JOIN users u ON u.id = s.submitted_by_user_id
+      WHERE s.content_item_id=?
+      ORDER BY s.id ASC
+      LIMIT 25
+    `,
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: Number(row?.submitted_by_user_id || 0) || null,
+      actor: row?.submitted_by_name || null,
+      acted_at: row?.reviewed_at || row?.created_at || null,
+      status: row?.submission_state || null,
+    }),
+  },
+  {
+    key: "content_assignment_submission_deliverables",
+    label_th: "ไฟล์และเนื้อหาที่ส่งมากับงาน",
+    table: "content_assignment_submission_deliverables",
+    where: "content_item_id=?",
+    confirm_reason_th: "เป็นของที่คนลงพื้นที่ทำมาส่ง — ลบแล้วเนื้อหาและไฟล์ที่ส่งหายไปด้วย",
+    detail_sql:
+      "SELECT id, deliverable_type, title, status, created_by, updated_at, created_at FROM content_assignment_submission_deliverables WHERE content_item_id=? ORDER BY id ASC LIMIT 25",
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: null,
+      actor: row?.created_by || null,
+      acted_at: row?.updated_at || row?.created_at || null,
+      status: row?.status || null,
+      deliverable_type: row?.deliverable_type || null,
+    }),
+  },
+  {
+    key: "content_assignment_handoff_snapshots",
+    label_th: "snapshot ตอนส่งมอบงานให้คนทำ",
+    table: "content_assignment_handoff_snapshots",
+    where: "content_item_id=?",
+    confirm_reason_th: "เป็นหลักฐานว่าส่งมอบโจทย์อะไรให้ใคร — ลบแล้วตรวจย้อนหลังไม่ได้",
+    detail_sql:
+      "SELECT id, guard_status, created_by, created_at FROM content_assignment_handoff_snapshots WHERE content_item_id=? ORDER BY id ASC LIMIT 25",
+    detail_map: (row) => ({
+      record_id: Number(row?.id || 0) || 0,
+      actor_user_id: null,
+      actor: row?.created_by || null,
+      acted_at: row?.created_at || null,
+      status: row?.guard_status || null,
+    }),
+  },
+]);
+const REFERENCE_CONFIRM_REQUIRED_KEYS = new Set(REFERENCE_CONFIRM_REQUIRED_DEFS.map((entry) => entry.key));
 const RAW_ONLY_HARD_DELETE_ALLOWED_REFERENCE_KEYS = new Set([
   "source_records",
   "evidence_blocks",
@@ -252,17 +408,22 @@ const RAW_ONLY_HARD_DELETE_ALLOWED_REFERENCE_KEYS = new Set([
   "content_workflow_transitions",
   "content_assets",
 ]);
-const REFERENCE_HARD_BLOCKER_DEFS = Object.freeze([
-  { key: "assignments", label_th: "มี assignment งานอยู่", sql: "SELECT COUNT(*) AS c FROM content_assignments WHERE content_item_id=?", hint: "ต้องปิด assignment ก่อนผ่านหน้าส่งงาน" },
+// Exported so services/raw-delete.mjs can derive the soft-delete NEVER gate from the same SQL
+// instead of restating it: purge and soft-delete must not drift apart on what "published" means.
+//
+// Everything here is permanent by nature — it is already public, or it is audit history — so no
+// confirmation can override it at any role. Anything an owner could *legitimately resolve* through a
+// workflow action (closing an assignment, discarding a draft) belongs in REFERENCE_CONFIRM_REQUIRED_DEFS
+// instead; a tier that no action can clear is a dead end, not a gate. `hint` is user-facing: it is
+// rendered verbatim under the disabled Purge button, so it must say what to do, not just what is wrong.
+export const REFERENCE_HARD_BLOCKER_DEFS = Object.freeze([
   { key: "published_articles", label_th: "เผยแพร่ขึ้นเว็บแล้ว", sql: "SELECT COUNT(*) AS c FROM published_articles WHERE content_item_id=?", hint: "ต้อง unpublish จาก backend ก่อน" },
-  { key: "content_assignment_submissions", label_th: "มีงานส่งกลับจาก assignment อยู่", sql: "SELECT COUNT(*) AS c FROM content_assignment_submissions WHERE content_item_id=?", hint: "ต้องปิดการตรวจงานก่อน" },
-  { key: "content_assignment_submission_deliverables", label_th: "มีไฟล์หรือข้อมูลส่งงานจาก assignment อยู่", sql: "SELECT COUNT(*) AS c FROM content_assignment_submission_deliverables WHERE content_item_id=?", hint: "ต้องปิดการตรวจงานก่อน" },
-  { key: "content_assignment_handoff_snapshots", label_th: "มี snapshot การส่งงานอยู่", sql: "SELECT COUNT(*) AS c FROM content_assignment_handoff_snapshots WHERE content_item_id=?", hint: "ผูกกับวงจร assignment" },
-  { key: "review_actions", label_th: "มีประวัติ action จาก review อยู่", sql: "SELECT COUNT(*) AS c FROM review_actions WHERE content_item_id=?", hint: "ประวัติ audit ห้ามลบ" },
-  { key: "translations", label_th: "มีงานแปลที่ผูกอยู่", sql: "SELECT COUNT(*) AS c FROM content_translations WHERE source_content_item_id=?", hint: "มีงานแปลผูกข้ามรายการ" },
+  { key: "review_actions", label_th: "มีประวัติ action จาก review อยู่", sql: "SELECT COUNT(*) AS c FROM review_actions WHERE content_item_id=?", hint: "ประวัติ audit ห้ามลบ — purge รายการนี้ไม่ได้" },
+  { key: "translations_published", label_th: "มีงานแปลที่ผูกกับบทความที่เผยแพร่แล้ว", sql: "SELECT COUNT(*) AS c FROM content_translations WHERE source_content_item_id=? AND source_published_article_id IS NOT NULL", hint: "ต้อง unpublish บทความต้นทางก่อน" },
 ]);
 const REFERENCE_ALL_GROUP_KEYS = new Set([
   ...REFERENCE_CLEANUP_CANDIDATE_DEFS.map((entry) => entry.key),
+  ...REFERENCE_CONFIRM_REQUIRED_DEFS.map((entry) => entry.key),
   ...REFERENCE_HARD_BLOCKER_DEFS.map((entry) => entry.key),
 ]);
 const DIRECTION_NEXT_ACTIONS = new Set(["collect_now", "enrich_search", "watch_social", "hold", "skip"]);
@@ -5205,6 +5366,22 @@ export function createRepository(db) {
     });
   }
 
+  // "In flight" = an item that has left raw intake but has not finished: its workflow head has moved
+  // off production_state `collected`, and it has not reached a terminal state (production `completed`
+  // or publication `published`). Items with no head are excluded — no head means intake never
+  // advanced, so they still belong to the raw queue. listItems() already scopes to is_deleted=0.
+  function listInFlightItems() {
+    return listItems().filter((item) => {
+      const head = getWorkflowModelByItem(item.id);
+      if (!head) return false;
+      const productionState = String(head.production_state || "").trim().toLowerCase();
+      const publicationState = String(head.publication_state || "").trim().toLowerCase();
+      if (!productionState || productionState === "collected") return false;
+      if (productionState === "completed" || publicationState === "published") return false;
+      return true;
+    });
+  }
+
   function getItem(id) {
     return mapItem(getStmt.get(id));
   }
@@ -5262,9 +5439,9 @@ export function createRepository(db) {
     return getItem(id);
   }
 
-  function deleteItem(id, actorEmail = "system@local") {
+  function deleteItem(id, actorEmail = "system@local", details = null) {
     softDeleteStmt.run(id);
-    logAudit(actorEmail, "item.delete", "content_item", String(id), null);
+    logAudit(actorEmail, "item.delete", "content_item", String(id), details);
   }
 
   function getRawOnlyHardDeleteEligibility(itemId) {
@@ -5331,12 +5508,27 @@ export function createRepository(db) {
       ["staging_items", "SELECT COUNT(*) AS c FROM staging_items WHERE content_item_id=?"],
     ];
     const downstreamCheckKeys = new Set(downstreamChecks.map(([key]) => key));
-    for (const entry of REFERENCE_CLEANUP_CANDIDATE_DEFS) {
-      if (RAW_ONLY_HARD_DELETE_ALLOWED_REFERENCE_KEYS.has(entry.key)) continue;
-      if (downstreamCheckKeys.has(entry.key)) continue;
-      downstreamChecks.push([entry.key, `SELECT COUNT(*) AS c FROM ${entry.table} WHERE ${entry.where}`]);
-      downstreamCheckKeys.add(entry.key);
-    }
+    // Tables the checks above already read. A def pointing at one of them can only ever be a
+    // duplicate or a narrower slice of the same rows, so it cannot change `eligible` — adding it
+    // would only push a redundant blocker into the report.
+    const readTableName = (sql) => String(String(sql).match(/\bFROM\s+([a-z_][a-z0-9_]*)/i)?.[1] || "").toLowerCase();
+    const coveredTables = new Set(downstreamChecks.map(([, sql]) => readTableName(sql)));
+    // Backstop for reference groups that have no hardcoded check above: without this, adding a def
+    // for a new table would silently drop out of hard-delete eligibility. Both classification lists
+    // are covered so neither can drift out of the gate.
+    const addReferenceDefChecks = (defs) => {
+      for (const entry of defs) {
+        if (RAW_ONLY_HARD_DELETE_ALLOWED_REFERENCE_KEYS.has(entry.key)) continue;
+        if (downstreamCheckKeys.has(entry.key)) continue;
+        const table = String(entry.table || "").toLowerCase();
+        if (coveredTables.has(table)) continue;
+        downstreamChecks.push([entry.key, `SELECT COUNT(*) AS c FROM ${entry.table} WHERE ${entry.where}`]);
+        downstreamCheckKeys.add(entry.key);
+        coveredTables.add(table);
+      }
+    };
+    addReferenceDefChecks(REFERENCE_CLEANUP_CANDIDATE_DEFS);
+    addReferenceDefChecks(REFERENCE_CONFIRM_REQUIRED_DEFS);
 
     for (const [key, sql] of downstreamChecks) {
       const count = Number(db.prepare(sql).get(id)?.c || 0) || 0;
@@ -5413,7 +5605,8 @@ export function createRepository(db) {
     };
   }
 
-  function bulkDeleteItems(hardItemIds = [], softItemIds = [], actorEmail = "system@local") {
+  function bulkDeleteItems(hardItemIds = [], softItemIds = [], actorEmail = "system@local", options = {}) {
+    const softDeleteAuditDetailsById = options?.softDeleteAuditDetailsById || {};
     const hardIds = Array.isArray(hardItemIds)
       ? hardItemIds.map((id) => Number(id || 0)).filter((id) => id > 0)
       : [];
@@ -5468,7 +5661,7 @@ export function createRepository(db) {
 
       for (const id of softIds) {
         softDeleteStmt.run(id);
-        logAudit(actorEmail, "item.delete", "content_item", String(id), null);
+        logAudit(actorEmail, "item.delete", "content_item", String(id), softDeleteAuditDetailsById[id] || null);
         deletedIds.push(id);
       }
 
@@ -13083,11 +13276,12 @@ function normalizeStateValue(value, stateGroup) {
       throw err;
     }
 
+    const cascadeKilledConfirmKeys = getCascadeKilledConfirmKeys(id);
     const groups = [];
     for (const def of REFERENCE_CLEANUP_CANDIDATE_DEFS) {
       const row = db.prepare(`SELECT COUNT(*) AS c FROM ${def.table} WHERE ${def.where}`).get(id);
       const count = Number(row?.c || 0) || 0;
-      if (count < 1) continue;
+      if (count < 1 || cascadeKilledConfirmKeys.has(def.key)) continue;
       const group = {
         key: def.key,
         label_th: def.label_th,
@@ -13104,6 +13298,22 @@ function normalizeStateValue(value, stateGroup) {
           .filter((value) => value > 0);
       }
       groups.push(group);
+    }
+
+    for (const def of REFERENCE_CONFIRM_REQUIRED_DEFS) {
+      const row = db.prepare(`SELECT COUNT(*) AS c FROM ${def.table} WHERE ${def.where}`).get(id);
+      const count = Number(row?.c || 0) || 0;
+      if (count < 1) continue;
+      const detailRows = db.prepare(def.detail_sql).all(id);
+      groups.push({
+        key: def.key,
+        label_th: def.label_th,
+        count,
+        category: "confirm_required",
+        cleanup_action: "delete_rows",
+        confirm_reason_th: def.confirm_reason_th,
+        confirm_details: detailRows.map((detailRow) => def.detail_map(detailRow)),
+      });
     }
 
     for (const def of REFERENCE_HARD_BLOCKER_DEFS) {
@@ -13123,6 +13333,9 @@ function normalizeStateValue(value, stateGroup) {
     const cleanupCandidateCount = groups
       .filter((entry) => entry.category === "cleanup_candidate")
       .reduce((sum, entry) => sum + (Number(entry.count || 0) || 0), 0);
+    const confirmRequiredCount = groups
+      .filter((entry) => entry.category === "confirm_required")
+      .reduce((sum, entry) => sum + (Number(entry.count || 0) || 0), 0);
     const hardBlockerCount = groups
       .filter((entry) => entry.category === "hard_blocker")
       .reduce((sum, entry) => sum + (Number(entry.count || 0) || 0), 0);
@@ -13139,14 +13352,114 @@ function normalizeStateValue(value, stateGroup) {
       },
       groups,
       summary: {
-        total_references: cleanupCandidateCount + hardBlockerCount,
+        total_references: cleanupCandidateCount + confirmRequiredCount + hardBlockerCount,
         cleanup_candidate_count: cleanupCandidateCount,
+        confirm_required_count: confirmRequiredCount,
         hard_blocker_count: hardBlockerCount,
       },
+      safe_sweep_skipped: getCascadeKilledConfirmSkipDetails(id, cascadeKilledConfirmKeys),
     };
   }
 
-  function cleanupDeletedItemReferenceGroups({ itemId, groups, actorEmail, reason }) {
+  function getCascadeKilledConfirmKeys(itemId) {
+    const id = Number(itemId || 0) || 0;
+    if (!id) return new Set();
+    const excluded = new Set();
+    for (const def of CASCADE_KILLED_CONFIRM_KEY_DEFS) {
+      const count = Number(db.prepare(def.has_confirm_rows_sql).get(id)?.c || 0) || 0;
+      if (count > 0) excluded.add(def.cleanup_key);
+    }
+    return excluded;
+  }
+
+  function getCascadeKilledConfirmSkipDetails(itemId, excludedKeys = getCascadeKilledConfirmKeys(itemId)) {
+    const id = Number(itemId || 0) || 0;
+    if (!id) return [];
+    return CASCADE_KILLED_CONFIRM_KEY_DEFS
+      .filter((def) => excludedKeys.has(def.cleanup_key))
+      .map((def) => ({ key: def.cleanup_key, confirm_key: def.confirm_key, reason_th: def.reason_th }));
+  }
+
+  // Read-only display aggregation for the item-list delete-blocker badge. It reuses the exact
+  // reference def arrays the purge/cleanup gate uses (REFERENCE_CLEANUP_CANDIDATE_DEFS and
+  // REFERENCE_CONFIRM_REQUIRED_DEFS, including its `assignments` entry) so
+  // the badge can never disagree with the purge classification — no SQL is restated here. Unlike
+  // getDeletedItemReferenceGroups it does NOT require is_deleted=1 (the list shows live items) and
+  // it never mutates: it only counts. cleanup_candidate and confirm_required are each aggregated
+  // with one GROUP BY per def across every requested id (a per-page batch, not one COUNT per item
+  // per def); assignments_open reuses the same batched read for the `assignments` def, kept as its own
+  // field because the in-flight table's soft-delete acknowledgement asks a different question than the
+  // purge tier. cleanup_candidate and confirm_required stay in separate response fields: their
+  // def sets are disjoint tables, and a confirm_required group must never be folded into the
+  // cleanup_candidate total (the purge gate treats them as different tiers).
+  function getItemReferenceBlockerCounts(itemIds = []) {
+    const ids = Array.from(
+      new Set(
+        (Array.isArray(itemIds) ? itemIds : [])
+          .map((value) => Number(value || 0) || 0)
+          .filter((value) => value > 0),
+      ),
+    );
+    const summary = new Map();
+    for (const id of ids) {
+      summary.set(id, { cleanup_candidate_count: 0, confirm_required: [], assignments_open: 0 });
+    }
+    if (ids.length === 0) return summary;
+
+    const placeholders = ids.map(() => "?").join(",");
+    // One reference def -> a Map of item id -> row count for the requested ids. Batches the common
+    // `col=?` defs with a single GROUP BY; falls back to a per-item scalar COUNT for any def whose
+    // predicate is compound (e.g. translations_unpublished's `... IS NULL`), so the derived column
+    // can never drop an AND clause. Either way the SQL comes from the def, never restated.
+    const countsByIdForDef = (def) => {
+      const out = new Map();
+      const simple = /^([A-Za-z_][A-Za-z0-9_]*)=\?$/.exec(def.where);
+      if (simple) {
+        const column = simple[1];
+        const rows = db
+          .prepare(`SELECT ${column} AS ref_id, COUNT(*) AS c FROM ${def.table} WHERE ${column} IN (${placeholders}) GROUP BY ${column}`)
+          .all(...ids);
+        for (const row of rows) out.set(Number(row?.ref_id || 0) || 0, Number(row?.c || 0) || 0);
+        return out;
+      }
+      const stmt = db.prepare(`SELECT COUNT(*) AS c FROM ${def.table} WHERE ${def.where}`);
+      for (const id of ids) out.set(id, Number(stmt.get(id)?.c || 0) || 0);
+      return out;
+    };
+
+    for (const def of REFERENCE_CLEANUP_CANDIDATE_DEFS) {
+      for (const [id, count] of countsByIdForDef(def)) {
+        const bucket = summary.get(id);
+        if (bucket && count > 0) bucket.cleanup_candidate_count += count;
+      }
+    }
+
+    for (const def of REFERENCE_CONFIRM_REQUIRED_DEFS) {
+      for (const [id, count] of countsByIdForDef(def)) {
+        const bucket = summary.get(id);
+        // label_th rides along so the badge tooltip can name the group in Thai without the client
+        // keeping its own key -> label table, which would add to the REFERENCE_*_KEYS manual-sync debt
+        // PROJECT_POLICY §3 already tracks. The def stays the single source of the wording.
+        if (bucket && count > 0) bucket.confirm_required.push({ key: def.key, label_th: def.label_th, count });
+      }
+    }
+
+    // assignments is also counted in confirm_required above; assignments_open stays a separate field
+    // because it answers a different question for a different caller — the in-flight table's per-row
+    // *soft* delete uses it to raise an acknowledgement ("somebody is holding this work"), which is not
+    // the same thing as the purge tier the confirm_required list describes.
+    const assignmentsDef = REFERENCE_CONFIRM_REQUIRED_DEFS.find((def) => def.key === "assignments");
+    if (assignmentsDef) {
+      for (const [id, count] of countsByIdForDef(assignmentsDef)) {
+        const bucket = summary.get(id);
+        if (bucket) bucket.assignments_open = count;
+      }
+    }
+
+    return summary;
+  }
+
+  function cleanupDeletedItemReferenceGroups({ itemId, groups, actorEmail, reason, confirmedOverrides }) {
     const id = Number(itemId || 0) || 0;
     if (!id) {
       const err = new Error("invalid item id");
@@ -13168,14 +13481,29 @@ function normalizeStateValue(value, stateGroup) {
       err.statusCode = 400;
       throw err;
     }
+    const confirmedOverrideKeys = new Set(
+      Array.isArray(confirmedOverrides)
+        ? confirmedOverrides.map((entry) => String(entry || "").trim().toLowerCase()).filter(Boolean)
+        : []
+    );
+    const cascadeKilledConfirmKeys = getCascadeKilledConfirmKeys(id);
     for (const key of selectedGroups) {
-      if (!REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key)) {
-        const err = new Error("group not eligible for cleanup");
-        err.statusCode = 400;
-        err.group = key;
-        err.category = REFERENCE_ALL_GROUP_KEYS.has(key) ? "hard_blocker" : "invalid_group";
-        throw err;
+      if (REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key) && !cascadeKilledConfirmKeys.has(key)) continue;
+      if (REFERENCE_CONFIRM_REQUIRED_KEYS.has(key)) {
+        if (!confirmedOverrideKeys.has(key)) {
+          const err = new Error("group requires confirmation");
+          err.statusCode = 400;
+          err.group = key;
+          err.category = "confirm_required";
+          throw err;
+        }
+        continue;
       }
+      const err = new Error("group not eligible for cleanup");
+      err.statusCode = 400;
+      err.group = key;
+      err.category = REFERENCE_ALL_GROUP_KEYS.has(key) ? "cascade_guard" : "invalid_group";
+      throw err;
     }
 
     const cleaned = {};
@@ -13221,7 +13549,9 @@ function normalizeStateValue(value, stateGroup) {
           cleaned[key] = Number(result?.changes || 0) || 0;
           continue;
         }
-        const def = REFERENCE_CLEANUP_CANDIDATE_DEFS.find((entry) => entry.key === key);
+        const def =
+          REFERENCE_CLEANUP_CANDIDATE_DEFS.find((entry) => entry.key === key) ||
+          REFERENCE_CONFIRM_REQUIRED_DEFS.find((entry) => entry.key === key);
         if (!def) continue;
         const result = db.prepare(`DELETE FROM ${def.table} WHERE ${def.where}`).run(id);
         cleaned[key] = Number(result?.changes || 0) || 0;
@@ -13232,6 +13562,7 @@ function normalizeStateValue(value, stateGroup) {
         reason: String(reason || "").trim() || null,
         counts: cleaned,
         content_assets_removed: cleaned.content_assets || 0,
+        confirmed_overrides: selectedGroups.filter((key) => REFERENCE_CONFIRM_REQUIRED_KEYS.has(key)),
       });
       db.exec("COMMIT");
     } catch (error) {
@@ -13246,13 +13577,14 @@ function normalizeStateValue(value, stateGroup) {
       item_id: id,
       cleaned,
       deleted_asset_ids: [...new Set(deletedAssetIds)],
+      safe_sweep_skipped: getCascadeKilledConfirmSkipDetails(id, cascadeKilledConfirmKeys),
     };
   }
 
   function logAudit(actorEmail, action, targetType, targetId, details, metadata = {}) {
     const assignmentId = metadata?.assignment_id == null ? null : Number(metadata.assignment_id || 0) || null;
     const createdAt = toBangkokSqlTimestamp();
-    insertAuditStmt.run(
+    return insertAuditStmt.run(
       actorEmail,
       action,
       targetType,
@@ -13271,6 +13603,7 @@ function normalizeStateValue(value, stateGroup) {
     saveItemWithFieldPack,
     listItems,
     listItemsByStatus,
+    listInFlightItems,
     getItem,
     deleteItem,
     getRawOnlyHardDeleteEligibility,
@@ -13435,6 +13768,8 @@ function normalizeStateValue(value, stateGroup) {
     evaluateContentAssetCleanupEligibility,
     listPostAssignmentAiInputCleanupCandidates,
     getDeletedItemReferenceGroups,
+    getCascadeKilledConfirmKeys,
+    getItemReferenceBlockerCounts,
     cleanupDeletedItemReferenceGroups,
     addSearchEnrichmentRecord,
     listSearchEnrichmentByItem,

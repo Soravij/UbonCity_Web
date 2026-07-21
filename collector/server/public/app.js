@@ -137,15 +137,12 @@ const REFERENCE_CLEANUP_CANDIDATE_KEYS = new Set([
   "source_records",
   "content_assets",
   "reviews_raw",
-  "drafts",
   "quality_checks",
   "review_reports",
   "staging_items",
   "content_versions",
   "evidence_blocks",
-  "approved_context_blocks",
   "draft_input_snapshots",
-  "field_packs",
   "content_workflow_models",
   "content_workflow_transitions",
   "content_readiness_briefs",
@@ -159,6 +156,19 @@ const REFERENCE_CLEANUP_CANDIDATE_KEYS = new Set([
   "content_intelligence_models",
   "internal_link_sources",
   "internal_link_targets",
+]);
+
+// Groups holding human curation: cleanable and purgeable only when the owner names each one
+// in confirmed_overrides. Mirrors REFERENCE_CONFIRM_REQUIRED_DEFS in db/repository.mjs.
+const REFERENCE_CONFIRM_REQUIRED_KEYS = new Set([
+  "drafts",
+  "field_packs",
+  "approved_context_blocks",
+  "translations_unpublished",
+  "assignments",
+  "content_assignment_submissions",
+  "content_assignment_submission_deliverables",
+  "content_assignment_handoff_snapshots",
 ]);
 
 const state = {
@@ -181,10 +191,26 @@ const state = {
   referenceCleanupSelectedItemId: 0,
   referenceCleanupReferences: null,
   referenceCleanupSelectedGroups: new Set(),
+  referenceCleanupRequestSeq: 0,
+  referenceCleanupConfirmedOverrides: new Set(),
+  // itemId -> Set of confirm_required group keys the owner has ticked in the Data Cleanup table.
+  cleanupConfirmations: new Map(),
   cleanup: {
     rows: [],
     loaded: false,
     lastError: "",
+  },
+  // Data Cleanup "งานค้างระหว่างทาง" table. Read-only list from GET /api/items?in_flight=1; the only
+  // write it drives is the existing DELETE /api/items/:id. stalledSort defaults to "oldest" so the
+  // longest-stuck work is on top, which is the whole point of the table.
+  inFlight: {
+    rows: [],
+    loaded: false,
+    lastError: "",
+    stalledSort: "oldest",
+    // itemId -> blocker summary from GET /api/items/blocker-summary, kept so the row delete button can
+    // check assignments_open without re-fetching.
+    blockerSummaries: new Map(),
   },
   justExportedItemId: Number(new URLSearchParams(window.location.search).get("item_id") || 0),
   preferredTab: String(new URLSearchParams(window.location.search).get("tab") || "").trim().toLowerCase(),
@@ -2648,6 +2674,288 @@ function renderAiPolicyPanel() {
   }
 }
 
+function cleanupConfirmationsFor(itemId) {
+  const id = Number(itemId || 0) || 0;
+  if (!id) return new Set();
+  if (!(state.cleanupConfirmations instanceof Map)) state.cleanupConfirmations = new Map();
+  if (!state.cleanupConfirmations.has(id)) state.cleanupConfirmations.set(id, new Set());
+  return state.cleanupConfirmations.get(id);
+}
+
+function confirmRequiredGroupsOf(row) {
+  const groups = Array.isArray(row?.confirm_required) ? row.confirm_required : [];
+  return groups.filter((group) => REFERENCE_CONFIRM_REQUIRED_KEYS.has(String(group?.key || "").trim().toLowerCase()));
+}
+
+// Purge goes through only when nothing hard/cleanup-candidate is left and the owner has ticked
+// every curated group the item still carries.
+function canPurgeCleanupRow(row) {
+  if (row?.can_purge) return true;
+  if (!row?.can_purge_with_confirmation) return false;
+  const ticked = cleanupConfirmationsFor(row?.id);
+  const required = confirmRequiredGroupsOf(row).map((group) => String(group?.key || "").trim().toLowerCase());
+  return required.length > 0 && required.every((key) => ticked.has(key));
+}
+
+function formatConfirmDetail(detail) {
+  const who = String(detail?.actor || "").trim() || (detail?.actor_user_id ? `user #${detail.actor_user_id}` : "ไม่ระบุผู้ทำ");
+  const when = String(detail?.acted_at || "").trim() || "ไม่ระบุเวลา";
+  const extras = [detail?.status, detail?.lang].map((value) => String(value || "").trim()).filter(Boolean);
+  return `#${Number(detail?.record_id || 0) || "-"} ${who} · ${when}${extras.length ? ` · ${extras.join(" · ")}` : ""}`;
+}
+
+// A disabled Purge button with no reason next to it reads as a broken button. The three remaining
+// hard blockers can never be cleared from this page, so say so where the button is, using the def's own
+// Thai hint (the server ships it as resolution_hint) rather than a second copy of the wording here.
+// Tone borrows the existing --fail var inline, like the in-flight age cell — no new class.
+function renderPurgeBlockedReason(row) {
+  const hardBlockers = Array.isArray(row?.hard_blockers) ? row.hard_blockers : [];
+  if (!hardBlockers.length) return "";
+  const lines = hardBlockers.map((entry) => {
+    const label = String(entry?.label || entry?.key || "").trim();
+    const hint = String(entry?.resolution_hint || "").trim();
+    return hint ? `${label} — ${hint}` : label;
+  });
+  return `<div class="muted" style="color: var(--fail);">${escapeHtml(`Purge ไม่ได้: ${lines.join(" | ")}`)}</div>`;
+}
+
+function renderCleanupConfirmRequiredCell(row) {
+  const groups = confirmRequiredGroupsOf(row);
+  if (!groups.length) return "";
+  const itemId = Number(row?.id || 0) || 0;
+  const ticked = cleanupConfirmationsFor(itemId);
+  return groups
+    .map((group) => {
+      const key = String(group?.key || "").trim().toLowerCase();
+      const count = Number(group?.count || 0) || 0;
+      const label = String(group?.label || key).trim() || key;
+      const reason = String(group?.confirm_reason_th || "").trim();
+      const checked = ticked.has(key) ? " checked" : "";
+      const details = (Array.isArray(group?.confirm_details) ? group.confirm_details : [])
+        .map((detail) => `<div class="muted">${escapeHtml(formatConfirmDetail(detail))}</div>`)
+        .join("");
+      return `
+        <div class="cleanup-confirm-group">
+          <label>
+            <input type="checkbox" data-cleanup-confirm-item="${itemId}" data-cleanup-confirm-group="${escapeHtml(key)}"${checked} />
+            ${escapeHtml(`ยืนยันลบ ${label} (${count})${reason ? ` - ${reason}` : ""}`)}
+          </label>
+          ${details}
+        </div>
+      `;
+    })
+    .join("");
+}
+
+// ---- Data Cleanup: "งานค้างระหว่างทาง" (in-flight items) --------------------------------------
+// Read-only view of items that left raw intake but have not finished. Sourced from
+// GET /api/items?in_flight=1 (canonical workflow states, not the legacy workflow_status column).
+// Items here may also appear in the raw queue tables — that overlap is intended; this table exists so
+// the owner has one place that answers "what is stuck, and for how long". The only write it can drive
+// is the pre-existing DELETE /api/items/:id. No purge button: purge stays on the soft-deleted table.
+
+// SQLite writes CURRENT_TIMESTAMP as "YYYY-MM-DD HH:MM:SS" — UTC, but with no timezone marker, which
+// Date.parse reads as *local* time and so misreports every age by the viewer's UTC offset. Normalize to
+// ISO and mark it UTC before parsing, but only when the value carries no timezone of its own, so
+// timestamps that already end in Z or ±HH:MM are left exactly as the server sent them.
+function parseServerTimestamp(value) {
+  const text = String(value || "").trim();
+  if (!text) return NaN;
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+  const normalized = hasTimezone ? text : `${text.replace(" ", "T")}Z`;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : Date.parse(text);
+}
+
+// "ค้างมา" age from updated_at. Thresholds match the badge tones: under a week is unremarkable,
+// 7-30 days warns, past 30 days is a hard signal. Returns the tone as a CSS var name so the cell can
+// borrow --warn/--fail inline rather than growing a class per tone.
+function formatInFlightStalledAge(updatedAt) {
+  const parsed = parseServerTimestamp(updatedAt);
+  if (!Number.isFinite(parsed)) return { text: "-", colorVar: "" };
+  const days = Math.floor((Date.now() - parsed) / 86400000);
+  if (days < 0) return { text: "-", colorVar: "" };
+  if (days < 1) return { text: "วันนี้", colorVar: "" };
+  if (days < 7) return { text: `${days} วัน`, colorVar: "" };
+  // 30 days exactly is still the warn band; only past 30 does it become a hard signal.
+  if (days <= 30) return { text: `${Math.floor(days / 7)} สัปดาห์`, colorVar: "--warn" };
+  return { text: `${Math.floor(days / 30)} เดือน`, colorVar: "--fail" };
+}
+
+function inFlightStalledSortValue(item) {
+  const parsed = parseServerTimestamp(item?.updated_at);
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+}
+
+// Thai label per canonical production state. Keyed on production_state rather than the snapshot's
+// compatibilityStatus because that helper collapses any state it does not know to "raw" — which let
+// submitted_for_admin_review fall through and render as raw snake_case English. Every state the
+// in-flight filter admits must have an entry here; the fallback is a last resort, not a design.
+const IN_FLIGHT_STATUS_LABELS = Object.freeze({
+  analyzed: "คัดข้อมูลแล้ว",
+  brief_generated: "สร้างโจทย์แล้ว",
+  ready_for_content: "พร้อมเขียนเนื้อหา",
+  generated: "ร่างเนื้อหาแล้ว",
+  content_in_progress: "กำลังเขียนเนื้อหา",
+  in_review: "อยู่ระหว่างตรวจ",
+  needs_revision: "ต้องแก้ไข",
+  rejected: "ถูกตีกลับ",
+  ready_for_publish: "อนุมัติแล้ว รอเผยแพร่",
+  submitted_for_admin_review: "ส่งให้แอดมินตรวจแล้ว",
+  collected: "ยังไม่พ้นขั้นรับข้อมูล",
+  completed: "เสร็จแล้ว",
+});
+
+// Assignment state wins when set: an item held by a freelancer reads as "handed off" regardless of how
+// far production had got. Publication state is checked before production state to preserve the
+// precedence getItemWorkflowSnapshot already applied — approved/unpublished outrank the production
+// state, and that grouping is left as-is here (tracked separately as its own finding).
+function buildInFlightStatusLabel(item) {
+  const snapshot = getItemWorkflowSnapshot(item);
+  if (snapshot.assignmentState) return "ส่งงานให้ทีมแล้ว";
+  if (snapshot.publicationState === "approved" || snapshot.publicationState === "unpublished") {
+    return "อนุมัติแล้ว รอเผยแพร่";
+  }
+  return IN_FLIGHT_STATUS_LABELS[snapshot.productionState] || snapshot.productionState || "-";
+}
+
+function renderInFlightPanel() {
+  const table = qs("table-inflight-items");
+  const tbody = table?.querySelector("tbody");
+  if (!tbody) return;
+  const rows = Array.isArray(state.inFlight?.rows) ? state.inFlight.rows : [];
+  const loaded = state.inFlight?.loaded === true;
+  const lastError = String(state.inFlight?.lastError || "").trim();
+
+  const header = qs("th-inflight-stalled");
+  if (header) {
+    const oldestFirst = state.inFlight?.stalledSort !== "newest";
+    header.textContent = oldestFirst ? "ค้างมา ▼" : "ค้างมา ▲";
+  }
+
+  tbody.innerHTML = "";
+
+  if (lastError) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="6" class="muted">${escapeHtml(`โหลดงานค้างระหว่างทางไม่สำเร็จ: ${lastError}`)}</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+  if (!loaded) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6" class="muted">กด "โหลดรายการ" เพื่อดึงงานค้างระหว่างทาง</td>';
+    tbody.appendChild(tr);
+    return;
+  }
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6" class="muted">ไม่มีงานค้างระหว่างทาง</td>';
+    tbody.appendChild(tr);
+    return;
+  }
+
+  const direction = state.inFlight?.stalledSort === "newest" ? -1 : 1;
+  const sorted = rows.slice().sort((a, b) => (inFlightStalledSortValue(a) - inFlightStalledSortValue(b)) * direction);
+
+  sorted.forEach((item) => {
+    const itemId = Number(item?.id || 0) || 0;
+    const age = formatInFlightStalledAge(item?.updated_at);
+    const ageStyle = age.colorVar ? ` style="color: var(${age.colorVar});"` : "";
+    const tr = document.createElement("tr");
+    tr.dataset.itemId = String(itemId);
+    tr.innerHTML = `
+      <td>${itemId}</td>
+      <td>${escapeHtml(String(item?.title || "-"))}</td>
+      <td>${escapeHtml(buildInFlightStatusLabel(item))}</td>
+      <td${ageStyle}>${escapeHtml(age.text)}</td>
+      <td data-blocker-cell></td>
+      <td><button type="button" data-inflight-action="delete" data-id="${itemId}">ลบ</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  paintInFlightBlockerBadges();
+}
+
+// Render reads the cache; only a load fetches. Repainting the table (sorting, ticking a confirm box,
+// opening the panel) must not put a request on the wire — the badge data cannot have changed, because
+// nothing between two renders wrote to the server. state.inFlight.blockerSummaries is the cache, and
+// it is cleared in applyInFlightRowsResponse so a real reload always refetches.
+function paintInFlightBlockerBadges() {
+  const tbody = qs("table-inflight-items")?.querySelector("tbody");
+  if (!tbody) return;
+  for (const [id, summary] of state.inFlight.blockerSummaries) {
+    applyBlockerBadge(id, summary, { root: tbody, cellSelector: "[data-blocker-cell]" });
+  }
+}
+
+// Same badge treatment as the item list: buildBlockerBadge/applyBlockerBadge are reused verbatim, and
+// the fetch is fire-and-forget so a slow or broken blocker-summary call can never delay this table.
+// applyBlockerBadge is scoped to this table's tbody because an item can legitimately be rendered in
+// the raw queue at the same time, and an unscoped lookup would badge that row instead.
+let inFlightBlockerRenderSeq = 0;
+
+async function annotateInFlightBlockers() {
+  const table = qs("table-inflight-items");
+  const tbody = table?.querySelector("tbody");
+  if (!tbody) return;
+  const seq = ++inFlightBlockerRenderSeq;
+  const ids = Array.from(tbody.querySelectorAll("tr[data-item-id]"))
+    .map((tr) => Number(tr.dataset.itemId || 0) || 0)
+    .filter((id) => id > 0);
+  if (ids.length === 0) return;
+  try {
+    await fetchBlockerSummaries(ids, {
+      shouldAbort: () => seq !== inFlightBlockerRenderSeq,
+      onChunk: (map) => {
+        for (const [id, summary] of Object.entries(map)) {
+          state.inFlight.blockerSummaries.set(Number(id), summary);
+          applyBlockerBadge(id, summary, { root: tbody, cellSelector: "[data-blocker-cell]" });
+        }
+      },
+    });
+  } catch (error) {
+    console.warn("[blocker-summary] failed to load in-flight delete-blocker badges", error);
+  }
+}
+
+// Mirrors applyCleanupRowsResponse: folds one /api/items?in_flight=1 result into state. Shared by the
+// bootstrap pass and the explicit reload so both land in exactly the same shape. Does not render — the
+// caller decides when to paint.
+function applyInFlightRowsResponse(response, errorMessage = "") {
+  const items = Array.isArray(response) ? response : [];
+  state.inFlight.rows = items;
+  state.inFlight.loaded = true;
+  state.inFlight.lastError = String(errorMessage || "").trim();
+  state.inFlight.blockerSummaries.clear();
+  return items;
+}
+
+async function loadInFlightRows({ showSuccessStatus = false } = {}) {
+  if (!canAccessSystemPage()) {
+    state.inFlight.rows = [];
+    state.inFlight.loaded = false;
+    state.inFlight.lastError = "";
+    renderInFlightPanel();
+    return [];
+  }
+  try {
+    const items = applyInFlightRowsResponse(await api("/api/items?in_flight=1"), "");
+    renderInFlightPanel();
+    // The only place the blocker badges are fetched. Fire-and-forget, as before: it paints each chunk
+    // as it lands and never blocks or fails this load.
+    annotateInFlightBlockers();
+    if (showSuccessStatus) {
+      setStatus("data-cleanup-status", items.length ? `งานค้างระหว่างทาง ${items.length} รายการ` : "ไม่มีงานค้างระหว่างทาง");
+    }
+    return items;
+  } catch (err) {
+    applyInFlightRowsResponse([], err?.message || "โหลดงานค้างระหว่างทางไม่สำเร็จ");
+    renderInFlightPanel();
+    throw err;
+  }
+}
+
 function renderDataCleanupPanel() {
   const panel = qs("data-cleanup-panel");
   if (!panel) return;
@@ -2658,6 +2966,7 @@ function renderDataCleanupPanel() {
   const toggleBtn = qs("btn-data-cleanup-toggle");
   if (toggleBtn) toggleBtn.textContent = state.dataCleanupPanelOpen ? "ซ่อนตั้งค่า" : "เปิดตั้งค่า";
   if (!state.dataCleanupPanelOpen) return;
+  renderInFlightPanel();
 
   const statusNode = qs("data-cleanup-status");
   const table = qs("table-data-cleanup");
@@ -2683,22 +2992,27 @@ function renderDataCleanupPanel() {
     tbody.appendChild(tr);
   } else {
     rows.forEach((row) => {
+      const itemId = Number(row?.id || 0) || 0;
       const blockers = Array.isArray(row?.blockers) ? row.blockers : [];
-      const blockerText = blockers.length
-        ? blockers.map((entry) => `${entry.label} (${Number(entry.count || 0) || 0})`).join(" | ")
+      const blocking = blockers.filter((entry) => String(entry?.category || "") !== "confirm_required");
+      const blockerText = blocking.length
+        ? blocking.map((entry) => `${entry.label} (${Number(entry.count || 0) || 0})`).join(" | ")
         : "-";
-      const canPurge = Boolean(row?.can_purge);
       const legacyWorkflowStatus = String(row?.legacy_workflow_status || "").trim();
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td>${Number(row?.id || 0) || "-"}</td>
+        <td>${itemId || "-"}</td>
         <td>${escapeHtml(String(row?.title || "").trim() || "-")}</td>
         <td>${escapeHtml(String(row?.category || "").trim() || "-")}</td>
         <td>${escapeHtml(legacyWorkflowStatus ? `legacy:${legacyWorkflowStatus}` : "-")}</td>
-        <td>${escapeHtml(blockerText)}</td>
+        <td>
+          <div>${escapeHtml(blockerText)}</div>
+          ${renderCleanupConfirmRequiredCell(row)}
+        </td>
         <td class="action-stack">
-          <button type="button" data-action="cleanup-check" data-id="${Number(row?.id || 0) || 0}">ตรวจ</button>
-          <button type="button" data-action="cleanup-purge" data-id="${Number(row?.id || 0) || 0}"${canPurge ? "" : " disabled"}>Purge</button>
+          <button type="button" data-action="cleanup-check" data-id="${itemId}">ตรวจ</button>
+          <button type="button" data-action="cleanup-purge" data-id="${itemId}"${canPurgeCleanupRow(row) ? "" : " disabled"}>Purge</button>
+          ${renderPurgeBlockedReason(row)}
         </td>
       `;
       tbody.appendChild(tr);
@@ -2765,15 +3079,22 @@ function renderReferenceCleanupPanel() {
 
   const refs = state.referenceCleanupReferences;
   const groups = Array.isArray(refs?.groups) ? refs.groups : [];
-  const candidates = groups.filter((group) =>
-    String(group?.category || "").trim().toLowerCase() === "cleanup_candidate"
-    && REFERENCE_CLEANUP_CANDIDATE_KEYS.has(String(group?.key || "").trim().toLowerCase())
-  );
+  const safeSweepSkipped = Array.isArray(refs?.safe_sweep_skipped) ? refs.safe_sweep_skipped : [];
+  // Selectable = cleanup_candidate plus confirm_required; ticking a confirm_required group is the
+  // owner's confirmation, so it is sent back as confirmed_overrides on execute.
+  const candidates = groups.filter((group) => {
+    const category = String(group?.category || "").trim().toLowerCase();
+    const key = String(group?.key || "").trim().toLowerCase();
+    if (category === "cleanup_candidate") return REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key);
+    if (category === "confirm_required") return REFERENCE_CONFIRM_REQUIRED_KEYS.has(key);
+    return false;
+  });
   const blockers = groups.filter((group) => {
     const category = String(group?.category || "").trim().toLowerCase();
     const key = String(group?.key || "").trim().toLowerCase();
     if (category === "hard_blocker") return true;
     if (category === "cleanup_candidate" && !REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key)) return true;
+    if (category === "confirm_required" && !REFERENCE_CONFIRM_REQUIRED_KEYS.has(key)) return true;
     return false;
   });
 
@@ -2792,20 +3113,32 @@ function renderReferenceCleanupPanel() {
     } else if (!refs) {
       candidatesNode.innerHTML = '<div class="assignment-brief-empty">กด "โหลดข้อมูลอ้างอิง" เพื่อเริ่มตรวจ</div>';
     } else if (!candidates.length) {
-      candidatesNode.innerHTML = '<div class="assignment-brief-empty">ไม่พบกลุ่มข้อมูลที่ล้างได้จากหน้านี้</div>';
+      candidatesNode.innerHTML = `${safeSweepSkipped.map((entry) => `<div class="assignment-brief-text">[SKIP] ${escapeHtml(String(entry?.reason_th || ""))}</div>`).join("")}<div class="assignment-brief-empty">ไม่พบกลุ่มข้อมูลที่ล้างได้จากหน้านี้</div>`;
     } else {
       candidatesNode.innerHTML = candidates.map((group) => {
         const key = String(group?.key || "").trim().toLowerCase();
         const count = Number(group?.count || 0) || 0;
         const label = String(group?.label_th || key).trim() || key;
         const checked = state.referenceCleanupSelectedGroups.has(key) ? " checked" : "";
+        const needsConfirm = String(group?.category || "").trim().toLowerCase() === "confirm_required";
+        const reason = String(group?.confirm_reason_th || "").trim();
+        const details = needsConfirm
+          ? (Array.isArray(group?.confirm_details) ? group.confirm_details : [])
+              .map((detail) => `<div class="muted">${escapeHtml(formatConfirmDetail(detail))}</div>`)
+              .join("")
+          : "";
+        const prefix = needsConfirm ? "[ยืนยัน] " : "";
+        const suffix = needsConfirm && reason ? ` - ${reason}` : "";
         return `
-          <label class="assignment-brief-text">
-            <input type="checkbox" data-reference-cleanup-group="${escapeHtml(key)}"${checked} />
-            ${escapeHtml(`${label} (${count})`)}
-          </label>
+          <div class="cleanup-confirm-group">
+            <label class="assignment-brief-text">
+              <input type="checkbox" data-reference-cleanup-group="${escapeHtml(key)}"${checked} />
+              ${escapeHtml(`${prefix}${label} (${count})${suffix}`)}
+            </label>
+            ${details}
+          </div>
         `;
-      }).join("");
+      }).join("") + safeSweepSkipped.map((entry) => `<div class="assignment-brief-text">[SKIP] ${escapeHtml(String(entry?.reason_th || ""))}</div>`).join("");
     }
   }
 
@@ -2845,6 +3178,51 @@ function applyCleanupRowsResponse(response, errorMessage = "") {
   }
 }
 
+function replaceCleanupRow(item) {
+  const id = Number(item?.id || 0) || 0;
+  if (!id) return null;
+  state.cleanup.rows = Array.isArray(state.cleanup?.rows)
+    ? state.cleanup.rows.map((row) => (Number(row?.id || 0) === id ? item : row)).filter(Boolean)
+    : [];
+  state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
+  return item;
+}
+
+function beginReferenceCleanupRequest(itemId) {
+  const id = Number(itemId || 0) || 0;
+  if (!id) throw new Error("กรุณาเลือกรายการก่อน");
+  const requestSeq = (Number(state.referenceCleanupRequestSeq || 0) || 0) + 1;
+  state.referenceCleanupRequestSeq = requestSeq;
+  state.referenceCleanupSelectedItemId = id;
+  state.referenceCleanupReferences = null;
+  state.referenceCleanupSelectedGroups = new Set();
+  renderReferenceCleanupPanel();
+  return requestSeq;
+}
+
+function isCurrentReferenceCleanupRequest(requestSeq) {
+  return Number(requestSeq || 0) === Number(state.referenceCleanupRequestSeq || 0);
+}
+
+async function refreshCleanupRow(itemId, requestSeq) {
+  const id = Number(itemId || 0) || 0;
+  if (!id) throw new Error("กรุณาเลือกรายการก่อน");
+  const result = await api(`/api/admin/deleted-items/${id}/cleanup-check`);
+  if (!isCurrentReferenceCleanupRequest(requestSeq)) return null;
+  const item = replaceCleanupRow(result?.item || null);
+  renderDataCleanupPanel();
+  renderReferenceCleanupPanel();
+  return item;
+}
+
+async function refreshReferenceCleanupCheck(itemId, requestSeq) {
+  const item = await refreshCleanupRow(itemId, requestSeq);
+  if (!item || !isCurrentReferenceCleanupRequest(requestSeq)) return null;
+  const references = await loadReferencesForItem(itemId, requestSeq);
+  if (!isCurrentReferenceCleanupRequest(requestSeq)) return null;
+  return { item, references };
+}
+
 async function loadReferenceCleanupItems() {
   if (!isOwnerUser()) {
     state.referenceCleanupDeletedItems = [];
@@ -2869,16 +3247,20 @@ async function loadReferenceCleanupItems() {
   return state.referenceCleanupDeletedItems;
 }
 
-async function loadReferencesForItem(itemId) {
+async function loadReferencesForItem(itemId, requestSeq) {
   if (!isOwnerUser()) throw new Error("owner เท่านั้นที่ใช้งาน Reference Cleanup ได้");
   const id = Number(itemId || 0) || 0;
   if (!id) throw new Error("กรุณาเลือกรายการก่อน");
-  const response = await api(`/api/admin/deleted-items/${id}/references`);
-  state.referenceCleanupSelectedItemId = id;
-  state.referenceCleanupReferences = response || null;
-  state.referenceCleanupSelectedGroups = new Set();
-  renderReferenceCleanupPanel();
-  return response;
+  try {
+    const response = await api(`/api/admin/deleted-items/${id}/references`);
+    if (!isCurrentReferenceCleanupRequest(requestSeq)) return null;
+    state.referenceCleanupReferences = response || null;
+    renderReferenceCleanupPanel();
+    return response;
+  } catch (error) {
+    if (!isCurrentReferenceCleanupRequest(requestSeq)) return null;
+    throw error;
+  }
 }
 
 async function executeReferenceCleanup() {
@@ -2887,13 +3269,14 @@ async function executeReferenceCleanup() {
   if (!itemId) throw new Error("กรุณาเลือกรายการก่อน");
   const groups = Array.from(state.referenceCleanupSelectedGroups || []);
   if (!groups.length) throw new Error("กรุณาเลือกกลุ่มข้อมูลที่ต้องการล้าง");
+  const confirmedOverrides = groups.filter((key) => REFERENCE_CONFIRM_REQUIRED_KEYS.has(key));
   const reason = String(window.prompt("เหตุผลในการล้างข้อมูลอ้างอิง (ไม่บังคับ)", "") || "").trim();
   const result = await api(`/api/admin/deleted-items/${itemId}/references/cleanup`, {
     method: "POST",
-    body: JSON.stringify({ groups, reason }),
+    body: JSON.stringify({ groups, reason, confirmed_overrides: confirmedOverrides }),
   });
-  await loadReferencesForItem(itemId);
-  await loadDataCleanupRows();
+  const requestSeq = beginReferenceCleanupRequest(itemId);
+  await refreshReferenceCleanupCheck(itemId, requestSeq);
   return result;
 }
 
@@ -4979,6 +5362,129 @@ function applyPreferredLandingTab() {
   });
 }
 
+// ---- Item-list delete-blocker badges (read-only display) --------------------------------------
+// Drawn AFTER the queue renders, from a batch call to GET /api/items/blocker-summary. The list must
+// never wait on it: annotateRawTableBlockers runs fire-and-forget and swallows every failure
+// (console.warn only), so a slow or broken endpoint can never blank the queue. Only the ids actually
+// on screen are queried, chunked to the endpoint's 200-id cap. No client-side reference-key Set is
+// added here — the badge renders the server's confirm_required key/count list verbatim — so this does
+// not enlarge the manual-sync debt tracked for REFERENCE_*_KEYS in PROJECT_POLICY §3.
+let rawBlockerRenderSeq = 0;
+
+// The two raw queue tables that carry delete-blocker badges. Shared by the id collector and the badge
+// applier so both always agree on which tables are in scope.
+const RAW_BLOCKER_TABLE_IDS = Object.freeze(["table-raw-intake", "table-raw-review"]);
+
+function collectRenderedRawItemIds() {
+  const ids = [];
+  for (const tableId of RAW_BLOCKER_TABLE_IDS) {
+    const table = document.getElementById(tableId);
+    if (!table) continue;
+    table.querySelectorAll("tbody tr[data-item-id]").forEach((tr) => {
+      const id = Number(tr.dataset.itemId || 0) || 0;
+      if (id > 0) ids.push(id);
+    });
+  }
+  return Array.from(new Set(ids));
+}
+
+// Maps one item's blocker summary to at most one badge, in priority order: a NEVER blocker (cannot
+// be soft-deleted) outranks a confirm/assignment (deletable, but purge will ask), and a fully clean
+// item gets no badge at all.
+function buildBlockerBadge(summary) {
+  const never = Array.isArray(summary?.never) ? summary.never : [];
+  const confirm = Array.isArray(summary?.confirm_required) ? summary.confirm_required : [];
+  const assignmentsOpen = Number(summary?.assignments_open || 0) || 0;
+  if (never.length > 0) {
+    const lines = never.map((entry) => {
+      // label is the server-side label_th; fall back to the raw key if a def ever ships without one.
+      const name = String(entry?.label || "").trim() || String(entry?.key || "");
+      const remediation = String(entry?.remediation || "").trim();
+      return `• ${name} (${Number(entry.count || 0) || 0})${remediation ? " — " + remediation : ""}`;
+    });
+    return { className: "is-never", label: "⛔ ลบไม่ได้", title: "ลบไม่ได้ ต้องแก้ก่อน:\n" + lines.join("\n") };
+  }
+  if (confirm.length > 0 || assignmentsOpen > 0) {
+    // assignments is one of the confirm_required groups, so it is already in `confirm`. The extra line
+    // is only for the case where the summary carries assignments_open without the group (an actor whose
+    // confirm list came back empty), so it never duplicates a line that is already there.
+    // label_th comes from the def via the server, same as the disabled-Purge reason line. Fall back to
+    // the raw key only if a def ever ships without one.
+    const lines = confirm.map(
+      (entry) => `• ${String(entry?.label_th || "").trim() || entry.key}: ${Number(entry.count || 0) || 0}`
+    );
+    if (assignmentsOpen > 0 && !confirm.some((entry) => String(entry?.key || "") === "assignments")) {
+      lines.push(`• มี assignment เปิดอยู่ ${assignmentsOpen} รายการ`);
+    }
+    const label = confirm.length > 0 ? `⚠ confirm ${confirm.length}` : "⚠ assignment";
+    return { className: "is-confirm", label, title: "ลบได้ แต่ตอน purge จะต้องยืนยัน:\n" + lines.join("\n") };
+  }
+  return null;
+}
+
+// `root` scopes the row lookup. Both callers pass one explicitly, because the same item id can be
+// rendered in the raw queue and in the Data Cleanup in-flight table at once, and a document-wide
+// lookup would resolve to whichever happens to come first in the DOM. The `document` default is kept
+// only so the signature stays usable for a single-table caller.
+// `cellSelector` picks which cell in the row receives the badge — the raw queue hangs it off the title,
+// the in-flight table has a dedicated Blockers column. The badge itself is unchanged in both.
+function applyBlockerBadge(itemId, summary, { root = document, cellSelector = ".raw-title-cell" } = {}) {
+  const scope = root || document;
+  const row = scope.querySelector(`tr[data-item-id="${itemId}"]`);
+  if (!row) return;
+  const cell = row.querySelector(cellSelector);
+  if (!cell) return;
+  const existing = cell.querySelector(".delete-blocker-badge");
+  if (existing) existing.remove();
+  const badge = buildBlockerBadge(summary);
+  if (!badge) return;
+  const span = document.createElement("span");
+  span.className = `delete-blocker-badge ${badge.className}`;
+  span.textContent = badge.label;
+  span.title = badge.title;
+  cell.appendChild(span);
+}
+
+// Shared chunked reader for GET /api/items/blocker-summary. onChunk receives each response's id ->
+// summary map; shouldAbort is checked after every request so a caller whose table has since been
+// re-rendered can stop before injecting stale badges.
+async function fetchBlockerSummaries(ids, { onChunk, shouldAbort } = {}) {
+  const CHUNK = 200; // GET /api/items/blocker-summary rejects more than 200 ids per request
+  for (let index = 0; index < ids.length; index += CHUNK) {
+    const chunk = ids.slice(index, index + CHUNK);
+    const response = await api(`/api/items/blocker-summary?ids=${chunk.join(",")}`);
+    if (typeof shouldAbort === "function" && shouldAbort()) return;
+    if (typeof onChunk === "function") onChunk(response?.items || {});
+  }
+}
+
+async function annotateRawTableBlockers() {
+  if (typeof isExternalContributorUser === "function" && isExternalContributorUser()) return;
+  const seq = ++rawBlockerRenderSeq;
+  const ids = collectRenderedRawItemIds();
+  if (ids.length === 0) return;
+  try {
+    await fetchBlockerSummaries(ids, {
+      shouldAbort: () => seq !== rawBlockerRenderSeq, // a newer render replaced the table
+      onChunk: (map) => {
+        for (const [id, summary] of Object.entries(map)) {
+          // Scoped to the two raw queue tables rather than the whole document. The Data Cleanup
+          // in-flight table renders the same item ids, so an unscoped lookup would depend on these
+          // tables happening to come first in the DOM — and would silently badge nothing if that
+          // order ever changed, since those rows carry no .raw-title-cell. Applying per table is
+          // safe: applyBlockerBadge no-ops when the row is not inside the root it is given.
+          for (const tableId of RAW_BLOCKER_TABLE_IDS) {
+            const table = document.getElementById(tableId);
+            if (table) applyBlockerBadge(id, summary, { root: table });
+          }
+        }
+      },
+    });
+  } catch (error) {
+    console.warn("[blocker-summary] failed to load delete-blocker badges", error);
+  }
+}
+
 function renderRawTable(items) {
   const tableWrap = qs("raw-table-wrap");
   if (!tableWrap) return;
@@ -5210,6 +5716,10 @@ function renderRawTable(items) {
   };
   if (intakeTbody) intakeTbody.onclick = handleRowAction;
   if (reviewTbody) reviewTbody.onclick = handleRowAction;
+
+  // Fire-and-forget: the queue above is already on screen, and annotateRawTableBlockers swallows its
+  // own failures, so a slow or broken blocker-summary call can never delay or break this render.
+  annotateRawTableBlockers();
 }
 
 function setSourceIntakeOpen(open) {
@@ -9566,6 +10076,14 @@ async function refreshAll() {
         .then((response) => ({ ok: true, response }))
         .catch((error) => ({ ok: false, error }))
     : Promise.resolve({ ok: true, response: { items: [] } });
+  // Fetched alongside the soft-deleted list so both Data Cleanup tables are populated by the same
+  // bootstrap pass; otherwise the in-flight table would sit on its "press load" prompt while the table
+  // below it already showed rows.
+  const inFlightItemsPromise = canAccessSystemPage()
+    ? api("/api/items?in_flight=1")
+        .then((response) => ({ ok: true, response }))
+        .catch((error) => ({ ok: false, error }))
+    : Promise.resolve({ ok: true, response: [] });
 
   const requestedTab = getRequestedTabFromUrl();
   const shouldPrioritizeRawRender = requestedTab === "raw" || String(state.preferredTab || "").trim().toLowerCase() === "raw";
@@ -9587,11 +10105,12 @@ async function refreshAll() {
   }
   renderSourceIngestions(ingestions);
 
-  const [usersResponse, agentProfilesResponse, aiPoliciesResponse, cleanupResult] = await Promise.all([
+  const [usersResponse, agentProfilesResponse, aiPoliciesResponse, cleanupResult, inFlightResult] = await Promise.all([
     usersPromise.catch(() => ({ items: [] })),
     agentProfilesPromise.catch(() => ({ items: [] })),
     aiPoliciesPromise.catch((error) => ({ items: [], policy_catalog: [], _error: error?.message || "โหลด AI policy ไม่สำเร็จ" })),
     cleanupItemsPromise,
+    inFlightItemsPromise,
   ]);
 
   state.visibleUsers = Array.isArray(usersResponse?.items) ? usersResponse.items : [];
@@ -9604,6 +10123,10 @@ async function refreshAll() {
   applyCleanupRowsResponse(
     cleanupResult?.ok === false ? { items: [] } : cleanupResult?.response,
     cleanupResult?.ok === false ? cleanupResult?.error?.message || "โหลดรายการ cleanup ไม่สำเร็จ" : ""
+  );
+  applyInFlightRowsResponse(
+    inFlightResult?.ok === false ? [] : inFlightResult?.response,
+    inFlightResult?.ok === false ? inFlightResult?.error?.message || "โหลดงานค้างระหว่างทางไม่สำเร็จ" : ""
   );
   state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
   if (!state.referenceCleanupDeletedItems.some((row) => (Number(row?.id || 0) || 0) === Number(state.referenceCleanupSelectedItemId || 0))) {
@@ -10255,8 +10778,49 @@ function wireUserSettings() {
     const btn = event.currentTarget;
     try {
       await withButtonLoading(btn, "กำลังโหลด...", async () => {
-        await loadDataCleanupRows({ showSuccessStatus: true });
+        // The in-flight table failing must not stop the soft-deleted table from loading; it renders its
+        // own error row from state.inFlight.lastError.
+        await Promise.all([
+          loadInFlightRows().catch(() => null),
+          loadDataCleanupRows({ showSuccessStatus: true }),
+        ]);
       });
+    } catch (err) {
+      setStatus("data-cleanup-status", err.message, true);
+    }
+  });
+
+  qs("th-inflight-stalled")?.addEventListener("click", () => {
+    state.inFlight.stalledSort = state.inFlight.stalledSort === "newest" ? "oldest" : "newest";
+    renderInFlightPanel();
+  });
+
+  // Row delete: the pre-existing DELETE /api/items/:id contract, unchanged. A NEVER-level blocker is
+  // rejected there with 400 and the server's message is surfaced verbatim. An item with open
+  // assignments is still deletable per that contract, so the extra confirm is an acknowledgement
+  // prompt, not a gate.
+  qs("table-inflight-items")?.querySelector("tbody")?.addEventListener("click", async (event) => {
+    const btn = event.target.closest("button[data-inflight-action]");
+    if (!btn) return;
+    if (String(btn.dataset.inflightAction || "").trim() !== "delete") return;
+    const id = Number(btn.dataset.id || 0) || 0;
+    if (!id) return;
+
+    const assignmentsOpen = Number(state.inFlight.blockerSummaries.get(id)?.assignments_open || 0) || 0;
+    const prompt = assignmentsOpen > 0
+      ? `รายการ #${id} มี assignment ที่เปิดอยู่ ${assignmentsOpen} รายการ (มีคนถืองานอยู่)\nยังต้องการลบใช่หรือไม่?`
+      : `ลบรายการ #${id} ใช่หรือไม่?`;
+    if (!window.confirm(prompt)) return;
+
+    try {
+      await withButtonLoading(btn, "กำลังลบ...", async () => {
+        await api(`/api/items/${id}`, { method: "DELETE" });
+      });
+      setStatus("data-cleanup-status", `ลบรายการ #${id} แล้ว`);
+      await Promise.all([
+        loadInFlightRows().catch(() => null),
+        loadDataCleanupRows().catch(() => null),
+      ]);
     } catch (err) {
       setStatus("data-cleanup-status", err.message, true);
     }
@@ -10271,26 +10835,25 @@ function wireUserSettings() {
     try {
       if (action === "cleanup-check") {
         await withButtonLoading(btn, "กำลังตรวจ...", async () => {
-          const result = await api(`/api/admin/deleted-items/${id}/cleanup-check`);
-          const item = result?.item || null;
-          state.cleanup.rows = Array.isArray(state.cleanup?.rows)
-            ? state.cleanup.rows.map((row) => (Number(row?.id || 0) === id ? item : row)).filter(Boolean)
-            : [];
-          state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
-          renderDataCleanupPanel();
-          renderReferenceCleanupPanel();
+          state.referenceCleanupPanelOpen = true;
+          const requestSeq = beginReferenceCleanupRequest(id);
+          const checked = await refreshReferenceCleanupCheck(id, requestSeq);
+          if (!checked) return;
           setStatus("data-cleanup-status", `ตรวจรายการ #${id} แล้ว`);
         });
         return;
       }
         if (action === "cleanup-purge") {
-          if (!window.confirm(`Purge item #${id} ใช่หรือไม่?`)) return;
+          const confirmedOverrides = Array.from(cleanupConfirmationsFor(id));
+          const overrideNote = confirmedOverrides.length ? `\nยืนยันข้ามกลุ่มที่คน curate ไว้: ${confirmedOverrides.join(", ")}` : "";
+          if (!window.confirm(`Purge item #${id} ใช่หรือไม่?${overrideNote}`)) return;
           const reason = String(window.prompt("เหตุผลในการ purge (ไม่บังคับ)", "") || "").trim();
           await withButtonLoading(btn, "กำลัง purge...", async () => {
             await api(`/api/admin/deleted-items/${id}/purge`, {
               method: "POST",
-              body: JSON.stringify({ reason }),
+              body: JSON.stringify({ reason, confirmed_overrides: confirmedOverrides }),
             });
+            state.cleanupConfirmations?.delete?.(id);
             await loadDataCleanupRows();
             renderReferenceCleanupPanel();
             setStatus("data-cleanup-status", `purge รายการ #${id} แล้ว`);
@@ -10299,14 +10862,8 @@ function wireUserSettings() {
       } catch (err) {
       if (action === "cleanup-purge") {
         try {
-          const result = await api(`/api/admin/deleted-items/${id}/cleanup-check`);
-          const item = result?.item || null;
-          state.cleanup.rows = Array.isArray(state.cleanup?.rows)
-            ? state.cleanup.rows.map((row) => (Number(row?.id || 0) === id ? item : row)).filter(Boolean)
-            : [];
-          state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
-          renderDataCleanupPanel();
-          renderReferenceCleanupPanel();
+          const requestSeq = beginReferenceCleanupRequest(id);
+          await refreshCleanupRow(id, requestSeq);
         } catch {
           // ignore follow-up refresh failure and show original purge error
         }
@@ -10314,18 +10871,28 @@ function wireUserSettings() {
       setStatus("data-cleanup-status", err.message, true);
     }
   });
+  qs("table-data-cleanup")?.querySelector("tbody")?.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
+    const itemId = Number(target.dataset.cleanupConfirmItem || 0) || 0;
+    const key = String(target.dataset.cleanupConfirmGroup || "").trim().toLowerCase();
+    if (!itemId || !key) return;
+    if (!REFERENCE_CONFIRM_REQUIRED_KEYS.has(key)) return;
+    const ticked = cleanupConfirmationsFor(itemId);
+    if (target.checked) ticked.add(key);
+    else ticked.delete(key);
+    renderDataCleanupPanel();
+  });
   qs("reference-cleanup-item-id")?.addEventListener("change", (event) => {
-    state.referenceCleanupSelectedItemId = Number(event.target?.value || 0) || 0;
-    state.referenceCleanupReferences = null;
-    state.referenceCleanupSelectedGroups = new Set();
-    renderReferenceCleanupPanel();
+    beginReferenceCleanupRequest(Number(event.target?.value || 0) || 0);
   });
   qs("btn-reference-cleanup-load")?.addEventListener("click", async (event) => {
     const btn = event.currentTarget;
     try {
       await withButtonLoading(btn, "กำลังโหลด...", async () => {
         const id = Number(qs("reference-cleanup-item-id")?.value || state.referenceCleanupSelectedItemId || 0) || 0;
-        await loadReferencesForItem(id);
+        const requestSeq = beginReferenceCleanupRequest(id);
+        await loadReferencesForItem(id, requestSeq);
         setStatus("reference-cleanup-status", `โหลดข้อมูลอ้างอิง #${id} แล้ว`);
       });
     } catch (err) {
@@ -10338,7 +10905,7 @@ function wireUserSettings() {
     if (target.type !== "checkbox") return;
     const key = String(target.dataset.referenceCleanupGroup || "").trim().toLowerCase();
     if (!key) return;
-    if (!REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key)) return;
+    if (!REFERENCE_CLEANUP_CANDIDATE_KEYS.has(key) && !REFERENCE_CONFIRM_REQUIRED_KEYS.has(key)) return;
     if (target.checked) {
       state.referenceCleanupSelectedGroups.add(key);
     } else {

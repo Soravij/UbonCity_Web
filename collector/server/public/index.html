@@ -820,6 +820,25 @@
                 <button id="btn-data-cleanup-load" type="button">โหลดรายการ</button>
                 <span id="data-cleanup-status" class="status"></span>
               </div>
+              <h4 class="section-title">งานค้างระหว่างทาง</h4>
+              <p class="muted">รายการที่พ้นขั้นรับข้อมูลดิบแล้ว แต่ยังไม่จบและยังไม่ถูกลบ</p>
+              <div class="table-wrap">
+                <table id="table-inflight-items">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>ชื่อเรื่อง</th>
+                      <th>สถานะ</th>
+                      <th id="th-inflight-stalled" style="cursor:pointer;" title="กดเพื่อสลับลำดับ">ค้างมา</th>
+                      <th>Blockers</th>
+                      <th>การทำงาน</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+
+              <h4 class="section-title">รายการที่ลบแล้ว (soft delete)</h4>
               <div class="table-wrap">
                 <table id="table-data-cleanup">
                   <thead>
@@ -834,6 +853,31 @@
                   </thead>
                   <tbody></tbody>
                 </table>
+              </div>
+
+              <div id="reference-cleanup-panel" class="card hidden">
+                <div class="article-section-head">
+                  <div>
+                    <h4 class="section-title">Reference Cleanup</h4>
+                    <p class="muted">เลือกข้อมูลอ้างอิงที่ล้างได้ของรายการที่ตรวจแล้ว ก่อนยืนยันและ Purge</p>
+                  </div>
+                  <div class="toolbar compact-toolbar">
+                    <button id="btn-reference-cleanup-toggle" type="button">เปิดตั้งค่า</button>
+                  </div>
+                </div>
+                <div id="reference-cleanup-body" class="hidden">
+                  <div class="toolbar compact-toolbar">
+                    <label class="muted" for="reference-cleanup-item-id">รายการ</label>
+                    <select id="reference-cleanup-item-id"></select>
+                    <button id="btn-reference-cleanup-load" type="button">โหลดข้อมูลอ้างอิง</button>
+                    <button id="btn-reference-cleanup-execute" type="button" disabled>ล้าง</button>
+                    <span id="reference-cleanup-status" class="status"></span>
+                  </div>
+                  <h4 class="section-title">ข้อมูลที่ล้างได้</h4>
+                  <div id="reference-cleanup-candidates"></div>
+                  <h4 class="section-title">Hard blockers</h4>
+                  <div id="reference-cleanup-blockers"></div>
+                </div>
               </div>
             </div>
           </div>
