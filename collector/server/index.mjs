@@ -5246,6 +5246,7 @@ function buildSelectedAssetManifestEntry(contentItemId, asset, role, position = 
     original_file_name: String(asset?.file_name || "").trim() || null,
     storage_disk: String(asset?.storage_disk || "").trim().toLowerCase() || null,
     storage_path: String(asset?.storage_path || "").trim() || null,
+    source_checksum: String(asset?.checksum || "").trim().toLowerCase() || null,
   };
 }
 
@@ -5373,11 +5374,50 @@ function toPublishedMediaManifest(contentItemId) {
   };
 }
 
+function manifestEntriesForReleaseHash(manifest) {
+  const normalized = manifest && typeof manifest === "object" ? manifest : {};
+  const entries = [];
+  const add = (entry, role, position) => {
+    if (!entry || typeof entry !== "object") return;
+    entries.push({
+      asset_id: Number(entry.source_asset_id || entry.asset_id || 0) || null,
+      checksum: String(entry.source_checksum || entry.checksum || "").trim().toLowerCase() || null,
+      role,
+      position,
+      source_url: String(entry.source_url || entry.url || "").trim() || null,
+    });
+  };
+  add(normalized.cover, "cover", 0);
+  (Array.isArray(normalized.gallery) ? normalized.gallery : []).forEach((entry, position) => add(entry, "gallery", position));
+  (Array.isArray(normalized.inline) ? normalized.inline : []).forEach((entry, position) => add(entry, "inline", position));
+  (Array.isArray(normalized.video) ? normalized.video : []).forEach((entry, position) => add(entry, "video", position));
+  return entries;
+}
+
+function hashReleaseManifest(manifest) {
+  return crypto.createHash("sha256").update(JSON.stringify(manifestEntriesForReleaseHash(manifest))).digest("hex");
+}
+
+function parseReleaseSnapshotManifest(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") throw new Error("release snapshot is required for backend sync");
+  const manifest = snapshot.manifest && typeof snapshot.manifest === "object"
+    ? snapshot.manifest
+    : JSON.parse(String(snapshot.manifest_json || "{}"));
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    throw new Error("release snapshot manifest is invalid");
+  }
+  return manifest;
+}
+
 function buildBackendSyncPayload(options = {}) {
   if (!hasExplicitCollectorPublicBaseUrl()) {
     throw new Error("COLLECTOR_PUBLIC_BASE_URL is required for backend lifecycle sync.");
   }
   const contentItemId = Number(options?.contentItemId || options?.content_item_id || 0) || null;
+  const releaseSnapshot = options?.releaseSnapshot || options?.release_snapshot || null;
+  if (contentItemId && !releaseSnapshot) {
+    throw new Error("release snapshot is required for item-scoped backend sync");
+  }
   const currentSourceFingerprint = contentItemId ? getCurrentTranslationSourceFingerprint(repo, contentItemId) : "";
   const fingerprintByItemId = new Map();
   function getFingerprintForTranslation(row) {
@@ -5403,7 +5443,9 @@ function buildBackendSyncPayload(options = {}) {
       const sourceContentItemId = Number(row.content_item_id || 0) || 0;
       const sourceItem = repo.getItem(sourceContentItemId) || null;
       const otherTransportMeta = isOtherTransportItem(sourceItem) ? getOtherTransportMetadata(sourceItem) : null;
-      const mediaManifest = toPublishedMediaManifest(sourceContentItemId);
+      const mediaManifest = contentItemId
+        ? parseReleaseSnapshotManifest(releaseSnapshot)
+        : toPublishedMediaManifest(sourceContentItemId);
       const coverImage = String(mediaManifest?.cover?.source_url || "").trim();
       return {
         source_content_item_id: sourceContentItemId,
@@ -5430,6 +5472,8 @@ function buildBackendSyncPayload(options = {}) {
         transport_link_url: otherTransportMeta?.link_url || null,
         published_at: row.published_at,
         media_manifest: mediaManifest,
+        release_id: contentItemId ? String(releaseSnapshot.release_id || "").trim() || null : null,
+        manifest_hash: contentItemId ? String(releaseSnapshot.manifest_hash || "").trim() || null : null,
       };
     });
 
@@ -13399,10 +13443,32 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
       approval_notes: "อนุมัติจากขั้นตอนส่งออกไปเว็บไซต์หลัก",
     });
 
+    // A compensated first release has no published article but retains its approved
+    // snapshot. Retry that exact release; do not reread selected assets.
+    const activeReleaseSnapshot = repo.getActiveReleaseSnapshotByItem(id);
+    const releaseSnapshotResolution = activeReleaseSnapshot && !publishedArticleBefore
+      ? repo.resolveReleaseSnapshot({
+        contentItemId: id,
+        manifest: activeReleaseSnapshot.manifest,
+        manifestHash: activeReleaseSnapshot.manifest_hash,
+        approvedBy: actorEmail(req),
+        forceRetry: true,
+      })
+      : (() => {
+        const manifest = toPublishedMediaManifest(id);
+        return repo.resolveReleaseSnapshot({
+          contentItemId: id,
+          manifest,
+          manifestHash: hashReleaseManifest(manifest),
+          approvedBy: actorEmail(req),
+        });
+      })();
+    const releaseSnapshot = releaseSnapshotResolution.snapshot;
+
     let backendSync = null;
     if (autoSync) {
       assertCollectorIntegrationReadiness(collectorIntegrationConfig(), ["publish_sync_to_backend"]);
-      const payload = buildBackendSyncPayload({ contentItemId: id });
+      const payload = buildBackendSyncPayload({ contentItemId: id, releaseSnapshot });
       const simulateSyncFailure = String(req.query?.simulate_sync_failure || "0") === "1";
       const simulateSyncSuccess = String(req.query?.simulate_sync_success || "0") === "1";
       if ((simulateSyncFailure || simulateSyncSuccess) && !canUseLocalReleaseSyncSimulation()) {
@@ -13451,6 +13517,8 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
           status: syncStatus,
           error: body?.error || "Backend sync failed",
           payload_summary: backendSync.payload_summary,
+          release_id: releaseSnapshot.release_id,
+          manifest_hash: releaseSnapshot.manifest_hash,
         });
 
         let compensationResult = null;
@@ -13508,6 +13576,8 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
         content_item_id: id,
         published: payload.published.length,
         translations: payload.translations.length,
+        release_id: releaseSnapshot.release_id,
+        manifest_hash: releaseSnapshot.manifest_hash,
         result: body,
       });
     }
@@ -13516,6 +13586,8 @@ app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowR
       ok: true,
       ...result,
       backend_sync: backendSync,
+      release_snapshot: releaseSnapshot,
+      release_snapshot_action: releaseSnapshotResolution.action,
       readiness: buildExportReadiness(id),
     });
   } catch (err) {

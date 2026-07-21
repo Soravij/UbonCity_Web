@@ -3256,6 +3256,8 @@ export function compensateReleaseAfterSyncFailure(repo, actorEmail, options = {}
   const publishedArticle = repo.getPublishedArticleByItem(contentItemId);
   let articleStatusAfter = null;
   if (publishedArticle) {
+    // Release snapshots are immutable approval records. Compensation reverts only
+    // the mutable published article so the same approved release can be retried.
     if (publishedArticleBefore && typeof publishedArticleBefore === "object") {
       const restored = repo.restorePublishedArticleByItem(publishedArticleBefore);
       articleStatusAfter = String(restored?.status || "").trim().toLowerCase() || null;

@@ -264,7 +264,7 @@ async function removeMirroredFiles(entries = []) {
   }
 }
 
-async function persistMediaUsageRecord(executor, entityType, entityId, usageType, position, mirrored) {
+async function persistMediaUsageRecord(executor, entityType, entityId, usageType, position, mirrored, { snapshotApproved = false } = {}) {
   const [assetInsert] = await executor.query(
     `INSERT INTO media_assets (
        asset_uid, source_url, checksum, status, related_type, related_id,
@@ -274,7 +274,7 @@ async function persistMediaUsageRecord(executor, entityType, entityId, usageType
       crypto.randomUUID(),
       mirrored.resolved_source_url,
       mirrored.checksum,
-      "approved",
+      snapshotApproved ? "approved" : "pending",
       entityType,
       Number(entityId),
       mirrored.mime_type,
@@ -360,7 +360,7 @@ async function cleanupReplacedMediaAssets(oldRows = []) {
   await pool.query(`DELETE FROM media_assets WHERE id IN (${removablePlaceholders})`, removableIds);
 }
 
-async function applyMediaManifestForEntity(entityType, entityId, mediaManifest, sourceBaseUrl) {
+async function applyMediaManifestForEntity(entityType, entityId, mediaManifest, sourceBaseUrl, { snapshotApproved = false } = {}) {
   const manifest = sanitizeMediaManifest(mediaManifest, 0);
   const resultManifest = {
     authority: String(manifest.authority || "release_main_selected_assets"),
@@ -425,7 +425,8 @@ async function applyMediaManifestForEntity(entityType, entityId, mediaManifest, 
         entityId,
         row.usage_type,
         positionByUsage[row.usage_type] || 0,
-        row.mirrored
+        row.mirrored,
+        { snapshotApproved }
       );
       positionByUsage[row.usage_type] += 1;
 
@@ -498,6 +499,14 @@ function sanitizePublishedRow(row, index) {
 
   const mediaManifest = sanitizeMediaManifest(row?.media_manifest, index);
   const coverImageFromManifest = String(mediaManifest?.cover?.source_url || "").trim();
+  const releaseId = String(row?.release_id || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(releaseId)) {
+    throw new Error(`published[${index}].release_id must be a UUID`);
+  }
+  const manifestHash = String(row?.manifest_hash || "").trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(manifestHash)) {
+    throw new Error(`published[${index}].manifest_hash must be a SHA-256 hex digest`);
+  }
 
   return {
     source_content_item_id: sourceContentItemId,
@@ -565,6 +574,8 @@ function sanitizePublishedRow(row, index) {
       : null,
     image: coverImageFromManifest || null,
     media_manifest: mediaManifest,
+    release_id: releaseId,
+    manifest_hash: manifestHash,
     published_at: publishedAt,
   };
 }
@@ -717,6 +728,28 @@ async function ensureLifecycleSyncTables() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS lifecycle_release_imports (
+      id BIGINT NOT NULL AUTO_INCREMENT,
+      source_system VARCHAR(64) NOT NULL,
+      source_release_id CHAR(36) NOT NULL,
+      manifest_hash CHAR(64) NOT NULL,
+      source_content_type VARCHAR(32) NOT NULL,
+      source_content_item_id BIGINT NOT NULL,
+      local_entity_type VARCHAR(32) NULL,
+      local_entity_id BIGINT NULL,
+      status ENUM('processing','succeeded','failed') NOT NULL DEFAULT 'processing',
+      result_json JSON NULL,
+      failure_reason TEXT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_lifecycle_release_manifest (source_system, source_release_id, manifest_hash),
+      KEY idx_lifecycle_release_import_item (source_system, source_content_type, source_content_item_id),
+      KEY idx_lifecycle_release_import_status (status, updated_at)
+    )
+  `);
+
   const [placeMetaTitleCol] = await pool.query("SHOW COLUMNS FROM place_translations LIKE 'meta_title'");
   if (!placeMetaTitleCol.length) {
     await pool.query("ALTER TABLE place_translations ADD COLUMN meta_title VARCHAR(255) NULL");
@@ -796,6 +829,72 @@ async function upsertMapping(sourceSystem, sourceContentType, sourceContentItemI
       local_entity_type=VALUES(local_entity_type),
       local_entity_id=VALUES(local_entity_id)`,
     [sourceSystem, sourceContentType, Number(sourceContentItemId), localEntityType, Number(localEntityId)]
+  );
+}
+
+function parseLifecycleImportResult(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    return null;
+  }
+}
+
+async function claimLifecycleReleaseImport(sourceSystem, article) {
+  const [insertResult] = await pool.query(
+    `INSERT IGNORE INTO lifecycle_release_imports
+      (source_system, source_release_id, manifest_hash, source_content_type, source_content_item_id, status)
+     VALUES (?,?,?,?,?, 'processing')`,
+    [sourceSystem, article.release_id, article.manifest_hash, article.type, Number(article.source_content_item_id)]
+  );
+  const [rows] = await pool.query(
+    `SELECT * FROM lifecycle_release_imports
+     WHERE source_system=? AND source_release_id=? AND manifest_hash=?
+     LIMIT 1`,
+    [sourceSystem, article.release_id, article.manifest_hash]
+  );
+  const row = rows[0] || null;
+  if (!row) throw new Error("could not claim lifecycle release import");
+  if (
+    String(row.source_content_type || "") !== article.type
+    || Number(row.source_content_item_id || 0) !== Number(article.source_content_item_id || 0)
+  ) {
+    throw new Error("release_id and manifest_hash are already bound to a different content item");
+  }
+  if (Number(insertResult.affectedRows || 0) === 1) {
+    return { ...row, claimed: true };
+  }
+  if (String(row.status || "") === "failed") {
+    const [retryResult] = await pool.query(
+      `UPDATE lifecycle_release_imports
+       SET status='processing', failure_reason=NULL
+       WHERE id=? AND status='failed'`,
+      [Number(row.id)]
+    );
+    if (Number(retryResult.affectedRows || 0) === 1) {
+      return { ...row, status: "processing", claimed: true };
+    }
+  }
+  return { ...row, claimed: false };
+}
+
+async function completeLifecycleReleaseImport(importId, result) {
+  await pool.query(
+    `UPDATE lifecycle_release_imports
+     SET status='succeeded', local_entity_type=?, local_entity_id=?, result_json=?, failure_reason=NULL
+     WHERE id=?`,
+    [result.entity_type, Number(result.local_entity_id), JSON.stringify(result), Number(importId)]
+  );
+}
+
+async function failLifecycleReleaseImport(importId, reason) {
+  await pool.query(
+    `UPDATE lifecycle_release_imports
+     SET status='failed', failure_reason=?
+     WHERE id=?`,
+    [String(reason || "lifecycle import failed").slice(0, 4000), Number(importId)]
   );
 }
 
@@ -916,7 +1015,8 @@ async function upsertPlaceFromLifecycle(sourceSystem, article, translationsBySou
     "place",
     placeId,
     article.media_manifest,
-    options?.sourceBaseUrl
+    options?.sourceBaseUrl,
+    { snapshotApproved: options?.snapshotApproved === true }
   );
   const normalizedCover = String(mediaSync?.cover_url || "").trim() || null;
   if (normalizedCover) {
@@ -981,7 +1081,8 @@ async function upsertEventFromLifecycle(sourceSystem, article, translationsBySou
     "event",
     eventId,
     article.media_manifest,
-    options?.sourceBaseUrl
+    options?.sourceBaseUrl,
+    { snapshotApproved: options?.snapshotApproved === true }
   );
   const normalizedCover = String(mediaSync?.cover_url || "").trim() || null;
   if (normalizedCover) {
@@ -1080,43 +1181,78 @@ export const importPublishedLifecycleBundle = async (req, res) => {
     }
 
     let synced = 0;
+    let skipped = 0;
     let rejected = 0;
     let reviewResets = 0;
     const errors = [];
+    const skippedResults = [];
 
     for (let i = 0; i < published.length; i += 1) {
       const article = published[i];
       const sourceId = Number(article.source_content_item_id || 0);
       const sourceType = article.type;
 
-      let result;
-      if (sourceType === "event") {
-        result = await upsertEventFromLifecycle(sourceSystem, article, translationsBySource, { sourceBaseUrl });
-      } else {
-        result = await upsertPlaceFromLifecycle(sourceSystem, article, translationsBySource, { sourceBaseUrl });
+      const releaseImport = await claimLifecycleReleaseImport(sourceSystem, article);
+      if (!releaseImport.claimed && String(releaseImport.status || "") === "succeeded") {
+        skipped += 1;
+        skippedResults.push({
+          index: i,
+          source_content_item_id: sourceId,
+          release_id: article.release_id,
+          manifest_hash: article.manifest_hash,
+          result: parseLifecycleImportResult(releaseImport.result_json),
+        });
+        continue;
       }
-
-      if (!result.ok) {
+      if (!releaseImport.claimed) {
         rejected += 1;
-        errors.push({ index: i, source_content_item_id: sourceId, reason: result.reason || "sync failed" });
+        errors.push({ index: i, source_content_item_id: sourceId, reason: "release import is already processing" });
         continue;
       }
 
-      const importReview = await upsertCollectorImportReviewFromImport({
-        sourceSystem,
-        sourceContentType: sourceType,
-        sourceContentItemId: sourceId,
-        localEntityType: result.entity_type,
-        localEntityId: result.local_entity_id,
-        publishedAt: article.published_at,
-        article: result.review_article || article,
-        translations: translationsBySource[sourceId] || [],
-      });
-      if (importReview.review_reset) {
-        reviewResets += 1;
-      }
+      try {
+        let result;
+        if (sourceType === "event") {
+          result = await upsertEventFromLifecycle(sourceSystem, article, translationsBySource, { sourceBaseUrl, snapshotApproved: true });
+        } else {
+          result = await upsertPlaceFromLifecycle(sourceSystem, article, translationsBySource, { sourceBaseUrl, snapshotApproved: true });
+        }
 
-      synced += 1;
+        if (!result.ok) {
+          await failLifecycleReleaseImport(releaseImport.id, result.reason || "sync failed");
+          rejected += 1;
+          errors.push({ index: i, source_content_item_id: sourceId, reason: result.reason || "sync failed" });
+          continue;
+        }
+
+        const importReview = await upsertCollectorImportReviewFromImport({
+          sourceSystem,
+          sourceContentType: sourceType,
+          sourceContentItemId: sourceId,
+          localEntityType: result.entity_type,
+          localEntityId: result.local_entity_id,
+          publishedAt: article.published_at,
+          article: result.review_article || article,
+          translations: translationsBySource[sourceId] || [],
+        });
+        if (importReview.review_reset) {
+          reviewResets += 1;
+        }
+
+        const storedResult = {
+          entity_type: result.entity_type,
+          local_entity_id: result.local_entity_id,
+          import_review_id: Number(importReview?.review?.id || 0) || null,
+          review_reset: Boolean(importReview.review_reset),
+        };
+        await completeLifecycleReleaseImport(releaseImport.id, storedResult);
+        synced += 1;
+      } catch (err) {
+        const reason = String(err?.message || "sync failed");
+        await failLifecycleReleaseImport(releaseImport.id, reason);
+        rejected += 1;
+        errors.push({ index: i, source_content_item_id: sourceId, reason });
+      }
     }
 
     console.info("[lifecycle.import_published]", {
@@ -1124,6 +1260,7 @@ export const importPublishedLifecycleBundle = async (req, res) => {
       content_item_id: contentItemId,
       received: published.length,
       synced,
+      skipped,
       rejected,
       review_resets: reviewResets,
       at: new Date().toISOString(),
@@ -1138,9 +1275,11 @@ export const importPublishedLifecycleBundle = async (req, res) => {
       },
       received: published.length,
       synced,
+      skipped,
       rejected,
       review_resets: reviewResets,
       errors,
+      skipped_results: skippedResults,
     });
   } catch (err) {
     const msg = String(err?.message || "");

@@ -43,3 +43,10 @@ Current work boundaries:
 - Runtime DB/test data exists only on the Runtime machine.
 - Dev code audit must not assume Runtime records are locally available.
 - No merge, commit, or push without explicit approval.
+
+## Release snapshot invariant
+
+- A content item has exactly one active `release_snapshots` row (`superseded_at IS NULL`) at a time.
+- Backend-sync compensation may revert `published_articles`, but must never delete or alter a release snapshot.
+- A retry replays the same active snapshot, including its `release_id` and `manifest_hash`; it must not derive media from current selected assets.
+- A changed media asset identity, checksum, role, position, or source URL after release requires a new owner/admin `release-main` action, which supersedes the active snapshot and creates a new revision.
