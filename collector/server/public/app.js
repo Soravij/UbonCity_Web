@@ -191,6 +191,7 @@ const state = {
   referenceCleanupSelectedItemId: 0,
   referenceCleanupReferences: null,
   referenceCleanupSelectedGroups: new Set(),
+  referenceCleanupRequestSeq: 0,
   referenceCleanupConfirmedOverrides: new Set(),
   // itemId -> Set of confirm_required group keys the owner has ticked in the Data Cleanup table.
   cleanupConfirmations: new Map(),
@@ -3177,6 +3178,51 @@ function applyCleanupRowsResponse(response, errorMessage = "") {
   }
 }
 
+function replaceCleanupRow(item) {
+  const id = Number(item?.id || 0) || 0;
+  if (!id) return null;
+  state.cleanup.rows = Array.isArray(state.cleanup?.rows)
+    ? state.cleanup.rows.map((row) => (Number(row?.id || 0) === id ? item : row)).filter(Boolean)
+    : [];
+  state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
+  return item;
+}
+
+function beginReferenceCleanupRequest(itemId) {
+  const id = Number(itemId || 0) || 0;
+  if (!id) throw new Error("กรุณาเลือกรายการก่อน");
+  const requestSeq = (Number(state.referenceCleanupRequestSeq || 0) || 0) + 1;
+  state.referenceCleanupRequestSeq = requestSeq;
+  state.referenceCleanupSelectedItemId = id;
+  state.referenceCleanupReferences = null;
+  state.referenceCleanupSelectedGroups = new Set();
+  renderReferenceCleanupPanel();
+  return requestSeq;
+}
+
+function isCurrentReferenceCleanupRequest(requestSeq) {
+  return Number(requestSeq || 0) === Number(state.referenceCleanupRequestSeq || 0);
+}
+
+async function refreshCleanupRow(itemId, requestSeq) {
+  const id = Number(itemId || 0) || 0;
+  if (!id) throw new Error("กรุณาเลือกรายการก่อน");
+  const result = await api(`/api/admin/deleted-items/${id}/cleanup-check`);
+  if (!isCurrentReferenceCleanupRequest(requestSeq)) return null;
+  const item = replaceCleanupRow(result?.item || null);
+  renderDataCleanupPanel();
+  renderReferenceCleanupPanel();
+  return item;
+}
+
+async function refreshReferenceCleanupCheck(itemId, requestSeq) {
+  const item = await refreshCleanupRow(itemId, requestSeq);
+  if (!item || !isCurrentReferenceCleanupRequest(requestSeq)) return null;
+  const references = await loadReferencesForItem(itemId, requestSeq);
+  if (!isCurrentReferenceCleanupRequest(requestSeq)) return null;
+  return { item, references };
+}
+
 async function loadReferenceCleanupItems() {
   if (!isOwnerUser()) {
     state.referenceCleanupDeletedItems = [];
@@ -3201,16 +3247,20 @@ async function loadReferenceCleanupItems() {
   return state.referenceCleanupDeletedItems;
 }
 
-async function loadReferencesForItem(itemId) {
+async function loadReferencesForItem(itemId, requestSeq) {
   if (!isOwnerUser()) throw new Error("owner เท่านั้นที่ใช้งาน Reference Cleanup ได้");
   const id = Number(itemId || 0) || 0;
   if (!id) throw new Error("กรุณาเลือกรายการก่อน");
-  const response = await api(`/api/admin/deleted-items/${id}/references`);
-  state.referenceCleanupSelectedItemId = id;
-  state.referenceCleanupReferences = response || null;
-  state.referenceCleanupSelectedGroups = new Set();
-  renderReferenceCleanupPanel();
-  return response;
+  try {
+    const response = await api(`/api/admin/deleted-items/${id}/references`);
+    if (!isCurrentReferenceCleanupRequest(requestSeq)) return null;
+    state.referenceCleanupReferences = response || null;
+    renderReferenceCleanupPanel();
+    return response;
+  } catch (error) {
+    if (!isCurrentReferenceCleanupRequest(requestSeq)) return null;
+    throw error;
+  }
 }
 
 async function executeReferenceCleanup() {
@@ -3225,8 +3275,8 @@ async function executeReferenceCleanup() {
     method: "POST",
     body: JSON.stringify({ groups, reason, confirmed_overrides: confirmedOverrides }),
   });
-  await loadReferencesForItem(itemId);
-  await loadDataCleanupRows();
+  const requestSeq = beginReferenceCleanupRequest(itemId);
+  await refreshReferenceCleanupCheck(itemId, requestSeq);
   return result;
 }
 
@@ -10785,14 +10835,10 @@ function wireUserSettings() {
     try {
       if (action === "cleanup-check") {
         await withButtonLoading(btn, "กำลังตรวจ...", async () => {
-          const result = await api(`/api/admin/deleted-items/${id}/cleanup-check`);
-          const item = result?.item || null;
-          state.cleanup.rows = Array.isArray(state.cleanup?.rows)
-            ? state.cleanup.rows.map((row) => (Number(row?.id || 0) === id ? item : row)).filter(Boolean)
-            : [];
-          state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
-          renderDataCleanupPanel();
-          renderReferenceCleanupPanel();
+          state.referenceCleanupPanelOpen = true;
+          const requestSeq = beginReferenceCleanupRequest(id);
+          const checked = await refreshReferenceCleanupCheck(id, requestSeq);
+          if (!checked) return;
           setStatus("data-cleanup-status", `ตรวจรายการ #${id} แล้ว`);
         });
         return;
@@ -10816,14 +10862,8 @@ function wireUserSettings() {
       } catch (err) {
       if (action === "cleanup-purge") {
         try {
-          const result = await api(`/api/admin/deleted-items/${id}/cleanup-check`);
-          const item = result?.item || null;
-          state.cleanup.rows = Array.isArray(state.cleanup?.rows)
-            ? state.cleanup.rows.map((row) => (Number(row?.id || 0) === id ? item : row)).filter(Boolean)
-            : [];
-          state.referenceCleanupDeletedItems = Array.isArray(state.cleanup?.rows) ? state.cleanup.rows : [];
-          renderDataCleanupPanel();
-          renderReferenceCleanupPanel();
+          const requestSeq = beginReferenceCleanupRequest(id);
+          await refreshCleanupRow(id, requestSeq);
         } catch {
           // ignore follow-up refresh failure and show original purge error
         }
@@ -10844,17 +10884,15 @@ function wireUserSettings() {
     renderDataCleanupPanel();
   });
   qs("reference-cleanup-item-id")?.addEventListener("change", (event) => {
-    state.referenceCleanupSelectedItemId = Number(event.target?.value || 0) || 0;
-    state.referenceCleanupReferences = null;
-    state.referenceCleanupSelectedGroups = new Set();
-    renderReferenceCleanupPanel();
+    beginReferenceCleanupRequest(Number(event.target?.value || 0) || 0);
   });
   qs("btn-reference-cleanup-load")?.addEventListener("click", async (event) => {
     const btn = event.currentTarget;
     try {
       await withButtonLoading(btn, "กำลังโหลด...", async () => {
         const id = Number(qs("reference-cleanup-item-id")?.value || state.referenceCleanupSelectedItemId || 0) || 0;
-        await loadReferencesForItem(id);
+        const requestSeq = beginReferenceCleanupRequest(id);
+        await loadReferencesForItem(id, requestSeq);
         setStatus("reference-cleanup-status", `โหลดข้อมูลอ้างอิง #${id} แล้ว`);
       });
     } catch (err) {

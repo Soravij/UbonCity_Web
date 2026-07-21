@@ -159,7 +159,7 @@ async function login(auth) {
 
 // Fixtures are written straight to the temp DB: there is no API that creates a soft-deleted item
 // already carrying a curated field pack, which is exactly the state this gate needs.
-function createDeletedItem(db, { titleSuffix, withFieldPack = false, withPublishedArticle = false, withAssignment = false, withApprovedContext = false, withDeliverableAsset = false, mediaDir = "", submittedByUserId = 0 }) {
+function createDeletedItem(db, { titleSuffix, withSourceRecord = false, withFieldPack = false, withPublishedArticle = false, withAssignment = false, withApprovedContext = false, withDeliverableAsset = false, mediaDir = "", submittedByUserId = 0 }) {
   const uid = `smoke-cleanup-ui-${crypto.randomUUID()}`;
   const title = `Smoke Cleanup UI ${titleSuffix}`;
   const slug = `smoke-cleanup-ui-${titleSuffix.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
@@ -171,6 +171,12 @@ function createDeletedItem(db, { titleSuffix, withFieldPack = false, withPublish
   const itemId = Number(itemResult.lastInsertRowid || 0) || 0;
   assert(itemId > 0, `failed to create deleted item for ${titleSuffix}`);
 
+  if (withSourceRecord) {
+    db.prepare(`
+      INSERT INTO source_records (content_item_id, source_type, source_name, source_url, payload_json)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(itemId, "smoke", "Smoke source", `https://example.test/smoke-ui/${itemId}`, "{}");
+  }
   if (withFieldPack) {
     db.prepare(`
       INSERT INTO field_packs (
@@ -363,6 +369,7 @@ async function main() {
 
     logStep("fixture.create");
     db = openDatabase(env.DB_PATH, path.join(CWD, "database", "schema.sql"));
+    const sweepThenConfirmItem = createDeletedItem(db, { titleSuffix: "Sweep Then Confirm", withSourceRecord: true, withFieldPack: true });
     const confirmItem = createDeletedItem(db, { titleSuffix: "Confirm Required", withFieldPack: true });
     const hardItem = createDeletedItem(db, { titleSuffix: "Hard Blocked", withPublishedArticle: true });
     // The assignment family is confirm_required, not a hard blocker: this fixture is the browser-side
@@ -388,6 +395,39 @@ async function main() {
     await waitForCondition(cdp, '!document.getElementById("data-cleanup-body")?.classList.contains("hidden")', 10000);
     await evaluate(cdp, 'document.getElementById("btn-data-cleanup-load")?.click(); true;');
     await waitForCondition(cdp, `Boolean(document.querySelector('${purgeButtonSelector(confirmItem.id)}'))`, 15000);
+
+    logStep("reference.sweep_then_confirm");
+    await evaluate(cdp, `document.querySelector('#table-data-cleanup tbody button[data-action="cleanup-check"][data-id="${sweepThenConfirmItem.id}"]')?.click(); true;`);
+    await waitForCondition(cdp, `!document.getElementById("reference-cleanup-panel")?.classList.contains("hidden") && !document.getElementById("reference-cleanup-body")?.classList.contains("hidden")`, 10000);
+    await waitForCondition(cdp, `document.querySelector('#reference-cleanup-item-id')?.value === "${sweepThenConfirmItem.id}" && Boolean(document.querySelector('input[data-reference-cleanup-group="source_records"]'))`, 15000);
+    checks.reference_cleanup_panel_opens_for_checked_item = true;
+
+    await evaluate(cdp, `(() => {
+      const box = document.querySelector('input[data-reference-cleanup-group="source_records"]');
+      box.checked = true;
+      box.dispatchEvent(new Event("change", { bubbles: true }));
+      document.getElementById("btn-reference-cleanup-execute")?.click();
+      return true;
+    })()`);
+    await waitForCondition(cdp, `!document.querySelector('input[data-reference-cleanup-group="source_records"]')`, 15000);
+    const sweepCheck = await evaluate(cdp, `fetch('/api/admin/deleted-items/${sweepThenConfirmItem.id}/cleanup-check', { headers: { authorization: 'Bearer ' + (sessionStorage.getItem('collector_token') || localStorage.getItem('collector_token') || '') } }).then(async (response) => ({ ok: response.ok, item: (await response.json()).item }))`);
+    assert(sweepCheck?.ok, `cleanup-check after reachable sweep failed: ${JSON.stringify(sweepCheck)}`);
+    assert(sweepCheck?.item?.can_purge_with_confirmation === true, `sweep must leave a confirmation-only purge gate: ${JSON.stringify(sweepCheck?.item)}`);
+    assert(!(sweepCheck?.item?.cleanup_candidates || []).some((group) => String(group?.key || "") === "source_records"), `swept candidate must leave cleanup-check: ${JSON.stringify(sweepCheck?.item?.cleanup_candidates)}`);
+    checks.reference_candidate_swept = true;
+    checks.can_purge_with_confirmation_after_sweep = true;
+
+    await evaluate(cdp, `(() => {
+      document.querySelectorAll('input[data-cleanup-confirm-item="${sweepThenConfirmItem.id}"]').forEach((box) => {
+        box.checked = true;
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      return true;
+    })()`);
+    await waitForCondition(cdp, `!document.querySelector('${purgeButtonSelector(sweepThenConfirmItem.id)}')?.disabled`, 10000);
+    await evaluate(cdp, `document.querySelector('${purgeButtonSelector(sweepThenConfirmItem.id)}')?.click(); true;`);
+    await waitForCondition(cdp, `!document.querySelector('${purgeButtonSelector(sweepThenConfirmItem.id)}')`, 20000);
+    checks.reachable_sweep_then_confirm_purge = true;
 
     logStep("confirm.render");
     const confirmRow = await evaluate(cdp, `(() => {
@@ -544,6 +584,7 @@ async function main() {
     console.log(JSON.stringify({
       ok: true,
       fixtures: {
+        sweep_then_confirm_item_id: sweepThenConfirmItem.id,
         confirm_required_item_id: confirmItem.id,
         hard_blocked_item_id: hardItem.id,
         assignment_confirm_item_id: assignmentItem.id,

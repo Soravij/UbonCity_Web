@@ -32,8 +32,9 @@ enforces them; these are the collector-side facts that contract depends on:
   (`REFERENCE_CLEANUP_CANDIDATE_KEYS`, `REFERENCE_CONFIRM_REQUIRED_KEYS`). It must be updated in the
   same change whenever the server defs change — there is no runtime check that they agree.
   - TH: สอง Set นี้เป็นสำเนาที่ต้อง sync มือ ถ้า server defs เปลี่ยนต้องแก้ที่นี่ด้วยในครั้งเดียวกัน
-- The reference-cleanup UI panel in `app.js` (`reference-cleanup-*`) has no markup in `index.html` and
-  does not render today. The live owner UI is the Data Cleanup table.
+- The reference-cleanup UI panel is reachable from the Data Cleanup table after the owner clicks
+  `ตรวจ`: `#reference-cleanup-panel`, `#reference-cleanup-item-id`, and
+  `#btn-reference-cleanup-execute` let the owner sweep eligible candidates before confirmation and Purge.
 
 Current work boundaries:
 - Current project focus is CTA & Curation.
