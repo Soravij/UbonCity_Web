@@ -189,7 +189,7 @@ export async function replaceEntityMediaWithReviewBatch(executor, {
   }
 
   const [reviewAssets] = await executor.query(
-    `SELECT id, usage_type, position, source_url, resolved_source_url, storage_path, file_name, mime_type, size_bytes, checksum
+    `SELECT id, usage_type, position, source_url, resolved_source_url, storage_path, file_name, mime_type, size_bytes, checksum, caption
      FROM review_content_assets
      WHERE review_content_id=? AND batch_uid=? AND status='review_ready'
      ORDER BY usage_type ASC, position ASC, id ASC`,
@@ -255,14 +255,15 @@ export async function replaceEntityMediaWithReviewBatch(executor, {
       );
       const mediaAssetId = Number(assetInsert.insertId || 0) || 0;
       await executor.query(
-        `INSERT INTO content_image_usages (asset_id, entity_type, entity_id, usage_type, position, created_by)
-         VALUES (?,?,?,?,?,?)`,
+        `INSERT INTO content_image_usages (asset_id, entity_type, entity_id, usage_type, position, caption, created_by)
+         VALUES (?,?,?,?,?,?,?)`,
         [
           mediaAssetId,
           normalizedEntityType,
           Number(entityId),
           usageType,
           positionByUsage[usageType] || 0,
+          String(asset?.caption || "").trim() || null,
           actorUserId == null ? null : Number(actorUserId) || null,
         ]
       );

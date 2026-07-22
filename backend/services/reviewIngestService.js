@@ -354,11 +354,13 @@ function buildReviewPayloadJson(content, confirmedTaxonomyChecks) {
 export function buildReviewContentInsertParams({
   sourceSystem,
   sourceContentItemId,
+  sourceSubmissionId = null,
+  sourceManifestHash = null,
   content,
   currentBatchUid,
 } = {}) {
   return [
-    sourceSystem, sourceContentItemId, content.content_type, "pending_review", content.lang, content.category,
+    sourceSystem, sourceContentItemId, sourceSubmissionId, sourceManifestHash, content.content_type, "pending_review", content.lang, content.category,
     content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
     content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url,
     content.google_place_id, content.transport_subtype, content.transport_contact_name, content.transport_contact_phone,
@@ -375,11 +377,13 @@ export function buildReviewContentUpdateParams({
   rawContentPayload,
   currentBatchUid,
   reviewContentId,
+  sourceSubmissionId = null,
+  sourceManifestHash = null,
 } = {}) {
   const preservedCtaFields = mergeExistingReviewContentCtaFields(existing, content, rawContentPayload);
   const confirmedTaxonomyChecks = mergeExistingReviewContentTaxonomyChecks(existing, content, rawContentPayload);
   return [
-    content.lang, content.category, content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
+    sourceSubmissionId, sourceManifestHash, content.lang, content.category, content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
     content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url, content.google_place_id,
     content.transport_subtype, content.transport_contact_name, content.transport_contact_phone, preservedCtaFields.phone, preservedCtaFields.line_url, preservedCtaFields.facebook_url, preservedCtaFields.website_url,
     preservedCtaFields.primary_cta, content.tracking_entity_type, content.tracking_entity_id, content.transport_contact_details,
@@ -397,6 +401,18 @@ function flattenMediaManifest(manifest = {}) {
   gallery.forEach((entry, index) => queue.push({ usage_type: "gallery", entry, position: index }));
   inline.forEach((entry, index) => queue.push({ usage_type: "inline", entry, position: index }));
   return queue;
+}
+
+export function isRetryableReviewSubmission(existing = {}, sourceSubmissionId = null, sourceManifestHash = null, reviewReadyAssetCount = 0) {
+  const currentSubmissionId = String(existing?.source_submission_id || "").trim();
+  const currentManifestHash = String(existing?.source_manifest_hash || "").trim().toLowerCase();
+  return Boolean(
+    sourceSubmissionId
+    && sourceManifestHash
+    && currentSubmissionId === String(sourceSubmissionId).trim()
+    && currentManifestHash === String(sourceManifestHash).trim().toLowerCase()
+    && Number(reviewReadyAssetCount || 0) > 0
+  );
 }
 
 function escapeRegExp(value) {
@@ -519,6 +535,11 @@ export async function ingestReviewContent(payload, options = {}) {
     throw new Error("source_content_item_id must be positive");
   }
   const sourceBaseUrl = normalizeBaseUrl(payload?.source_base_url);
+  const sourceSubmissionId = String(payload?.source_submission_id || "").trim() || null;
+  const sourceManifestHash = String(payload?.source_manifest_hash || "").trim().toLowerCase() || null;
+  if ((sourceSubmissionId && !/^[a-f0-9-]{36}$/i.test(sourceSubmissionId)) || (sourceManifestHash && !/^[a-f0-9]{64}$/.test(sourceManifestHash))) {
+    throw new Error("invalid review submission snapshot provenance");
+  }
   const rawContentPayload = payload?.content && typeof payload.content === "object" ? payload.content : {};
   const content = sanitizeContentPayload(rawContentPayload);
   const mediaQueue = flattenMediaManifest(payload?.media_manifest || {});
@@ -528,13 +549,41 @@ export async function ingestReviewContent(payload, options = {}) {
   const currentBatchUid = crypto.randomUUID();
 
   const [existingRows] = await pool.query(
-    `SELECT id, status, current_batch_uid, review_payload_json
+    `SELECT id, status, current_batch_uid, review_payload_json, source_submission_id, source_manifest_hash
      FROM review_contents
      WHERE source_system=? AND source_content_item_id=? AND content_type=?
      LIMIT 1`,
     [sourceSystem, sourceContentItemId, content.content_type]
   );
   const existing = existingRows.length ? existingRows[0] : null;
+
+  if (existing && sourceSubmissionId && sourceManifestHash) {
+    const [readyAssetRows] = await pool.query(
+      `SELECT usage_type, COUNT(*) AS count
+       FROM review_content_assets
+       WHERE review_content_id=? AND batch_uid=? AND status='review_ready'
+       GROUP BY usage_type`,
+      [Number(existing.id || 0), String(existing.current_batch_uid || "").trim()]
+    );
+    const readyAssetCount = (Array.isArray(readyAssetRows) ? readyAssetRows : [])
+      .reduce((total, row) => total + (Number(row?.count || 0) || 0), 0);
+    if (isRetryableReviewSubmission(existing, sourceSubmissionId, sourceManifestHash, readyAssetCount)) {
+      const counts = { cover: 0, gallery: 0, inline: 0 };
+      for (const row of readyAssetRows) {
+        const usageType = normalizeRole(row?.usage_type, "gallery");
+        counts[usageType] = Number(row?.count || 0) || 0;
+      }
+      return {
+        id: Number(existing.id || 0) || 0,
+        status: String(existing.status || "pending_review").trim().toLowerCase() || "pending_review",
+        content_type: content.content_type,
+        source_content_item_id: sourceContentItemId,
+        current_batch_uid: String(existing.current_batch_uid || "").trim(),
+        asset_counts: counts,
+        retry: true,
+      };
+    }
+  }
 
   const connection = await pool.getConnection();
   const mirroredRows = [];
@@ -546,7 +595,7 @@ export async function ingestReviewContent(payload, options = {}) {
     if (!existing) {
       const [insertResult] = await connection.query(
         `INSERT INTO review_contents (
-          source_system, source_content_item_id, content_type, status, lang, category, title, body, excerpt,
+          source_system, source_content_item_id, source_submission_id, source_manifest_hash, content_type, status, lang, category, title, body, excerpt,
           meta_title, meta_description, event_period_text, location_text, latitude, longitude, map_url,
           google_place_id, transport_subtype, transport_contact_name, transport_contact_phone, phone, line_url, facebook_url, website_url, primary_cta,
           tracking_entity_type, tracking_entity_id,
@@ -556,6 +605,8 @@ export async function ingestReviewContent(payload, options = {}) {
         buildReviewContentInsertParams({
           sourceSystem,
           sourceContentItemId,
+          sourceSubmissionId,
+          sourceManifestHash,
           content,
           currentBatchUid,
         })
@@ -566,7 +617,7 @@ export async function ingestReviewContent(payload, options = {}) {
       await cleanupUnpublishedBatchAssets(reviewContentId, existing.current_batch_uid, connection);
       await connection.query(
         `UPDATE review_contents
-         SET status='pending_review', lang=?, category=?, title=?, body=?, excerpt=?, meta_title=?, meta_description=?,
+          SET status='pending_review', source_submission_id=?, source_manifest_hash=?, lang=?, category=?, title=?, body=?, excerpt=?, meta_title=?, meta_description=?,
              event_period_text=?, location_text=?, latitude=?, longitude=?, map_url=?, google_place_id=?,
              transport_subtype=?, transport_contact_name=?, transport_contact_phone=?, phone=?, line_url=?, facebook_url=?, website_url=?, primary_cta=?,
              tracking_entity_type=?, tracking_entity_id=?, transport_contact_details=?,
@@ -577,8 +628,10 @@ export async function ingestReviewContent(payload, options = {}) {
           existing,
           content,
           rawContentPayload,
-          currentBatchUid,
-          reviewContentId,
+            currentBatchUid,
+            reviewContentId,
+            sourceSubmissionId,
+            sourceManifestHash,
         })
       );
     }
@@ -624,13 +677,14 @@ export async function ingestReviewContent(payload, options = {}) {
       await connection.query(
         `INSERT INTO review_content_assets (
           review_content_id, batch_uid, usage_type, position, source_url, resolved_source_url, backend_url,
-          storage_disk, storage_path, file_name, mime_type, size_bytes, checksum, status, asset_origin
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          storage_disk, storage_path, file_name, mime_type, size_bytes, checksum, caption, source_asset_id, source_submission_id, status, asset_origin
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           reviewContentId, currentBatchUid, usageType, Number(mediaRow.position || 0),
           mirrored.source_url, mirrored.resolved_source_url, mirrored.backend_url,
           mirrored.storage_disk, mirrored.storage_path, mirrored.file_name, mirrored.mime_type,
-          mirrored.size_bytes, mirrored.checksum, "review_ready", "collector_import",
+          mirrored.size_bytes, mirrored.checksum, String(mediaRow?.entry?.caption || "").trim() || null,
+          mirrored.source_asset_id, sourceSubmissionId, "review_ready", "collector_import",
         ]
       );
     }
@@ -656,6 +710,8 @@ export async function ingestReviewContent(payload, options = {}) {
       payloadSnapshot: {
         source_system: sourceSystem,
         source_content_item_id: sourceContentItemId,
+        source_submission_id: sourceSubmissionId,
+        source_manifest_hash: sourceManifestHash,
         content_type: content.content_type,
         slug: content.slug,
         public_entity_id: content.public_entity_id,

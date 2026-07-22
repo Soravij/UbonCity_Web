@@ -78,6 +78,19 @@ test("replaceEntityMediaWithReviewBatch prefers storage_path-backed uploads url 
   await removeUploadFixture("uploads/published/places/99/55-batch-1-cover-0-1.jpg");
 });
 
+test("replaceEntityMediaWithReviewBatch carries the review-batch caption into the public usage", async () => {
+  await writeUploadFixture("uploads/review-caption.jpg");
+  const executor = createExecutor([{
+    id: 9, usage_type: "gallery", position: 0, source_url: "", resolved_source_url: "",
+    storage_path: "uploads/review-caption.jpg", file_name: "review-caption.jpg", mime_type: "image/jpeg", size_bytes: 12, checksum: "caption", caption: "Snapshot caption",
+  }]);
+  await replaceEntityMediaWithReviewBatch(executor, { entityType: "place", entityId: 11, reviewContentId: 12, batchUid: "caption-batch", actorUserId: 7 });
+  const usageInsert = executor.calls.find((call) => String(call.sql).replace(/\s+/g, " ").trim().toLowerCase().startsWith("insert into content_image_usages"));
+  assert.equal(usageInsert.params[5], "Snapshot caption");
+  await removeUploadFixture("uploads/review-caption.jpg");
+  await removeUploadFixture("uploads/published/places/11/12-caption-batch-gallery-0-9.jpg");
+});
+
 test("replaceEntityMediaWithReviewBatch still assigns published place storage when storage_path is missing", async () => {
   process.env.BACKEND_PUBLIC_URL = "https://api-test.uboncity.com";
   await writeUploadFixture("uploads/cover-fallback.jpg");

@@ -36,9 +36,10 @@ test("release snapshots preserve approved manifest across retry, revision, and c
     assert.equal(retry.snapshot.release_id, first.snapshot.release_id);
     assert.deepEqual(retry.snapshot.manifest, firstManifest);
 
-    const revision = ctx.repo.resolveReleaseSnapshot({ contentItemId: ctx.item.id, manifest: { ...firstManifest, gallery: [{ source_asset_id: 9 }] }, manifestHash: hash("c"), approvedBy: "admin@local" });
+    const revision = ctx.repo.resolveReleaseSnapshot({ contentItemId: ctx.item.id, manifest: { ...firstManifest, gallery: [{ source_asset_id: 9, caption: "Updated caption" }] }, manifestHash: hash("c"), approvedBy: "admin@local" });
     assert.equal(revision.action, "revision");
     assert.notEqual(revision.snapshot.release_id, first.snapshot.release_id);
+    assert.equal(revision.snapshot.manifest.gallery[0].caption, "Updated caption");
     assert.ok(ctx.db.prepare("SELECT superseded_at FROM release_snapshots WHERE release_id=?").get(first.snapshot.release_id).superseded_at);
 
     const compensationCalls = [];
@@ -53,6 +54,24 @@ test("release snapshots preserve approved manifest across retry, revision, and c
     });
     assert.deepEqual(compensationCalls, [ctx.item.id]);
     assert.equal(ctx.repo.getActiveReleaseSnapshotByItem(ctx.item.id).release_id, revision.snapshot.release_id);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("content asset captions are contextual and update only the item asset link", () => {
+  const ctx = createContext();
+  try {
+    const assetId = Number(ctx.db.prepare(
+      "INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, checksum) VALUES (?,?,?,?,?,?)"
+    ).run("caption-asset", "local", "uploads/caption.jpg", "caption.jpg", "image/jpeg", "a".repeat(64)).lastInsertRowid);
+    ctx.db.prepare(
+      "INSERT INTO content_assets (content_item_id, asset_id, role, selected_in_clean, is_cover, placement_type, sort_order) VALUES (?,?, 'gallery', 1, 0, 'gallery', 0)"
+    ).run(ctx.item.id, assetId);
+
+    const updated = ctx.repo.setContentAssetCaption(ctx.item.id, assetId, "Collector caption");
+    assert.equal(updated.caption, "Collector caption");
+    assert.equal(ctx.repo.listContentAssetsByItem(ctx.item.id, { onlySelected: true })[0].caption, "Collector caption");
   } finally {
     ctx.cleanup();
   }

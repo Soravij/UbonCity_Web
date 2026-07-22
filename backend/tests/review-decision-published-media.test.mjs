@@ -195,7 +195,8 @@ function createApproveHarness() {
           entity_id: params[2],
           usage_type: params[3],
           position: params[4],
-          created_by: params[5],
+          caption: params[5],
+          created_by: params[6],
         });
         return [{ insertId: state.contentImageUsages.length }];
       }
@@ -521,6 +522,7 @@ test("approveReviewContent updates published place image fields from storage_pat
       entity_id: 99,
       usage_type: "cover",
       position: 0,
+      caption: null,
       created_by: 7,
     });
 

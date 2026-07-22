@@ -176,6 +176,12 @@ export default function PlaceDetailContent({ place, activeLang = "th", category,
   const rawGalleryImages = Array.isArray(place?.media_gallery_images)
     ? place.media_gallery_images.map((value) => cleanMediaUrl(value)).filter(Boolean).filter((value, index, list) => list.indexOf(value) === index)
     : [];
+  const galleryItemByUrl = new Map(
+    (Array.isArray(place?.media_gallery_items) ? place.media_gallery_items : [])
+      .map((item) => ({ ...item, url: cleanMediaUrl(item?.url) }))
+      .filter((item) => item.url)
+      .map((item) => [item.url, item])
+  );
   const descriptionSource = rawGalleryImages.length ? stripLegacyGalleryMarkup(place?.description || "") : String(place?.description || "");
   const richDescriptionHtml = hasRichHtmlContent(descriptionSource) ? sanitizeRichContentHtml(descriptionSource) : "";
   const useRichHtmlRenderer = Boolean(richDescriptionHtml);
@@ -237,7 +243,11 @@ export default function PlaceDetailContent({ place, activeLang = "th", category,
       {normalizedGalleryImages.length ? (
         <MediaGallery
           title={detailCopy.galleryTitle}
-          items={normalizedGalleryImages.map((imageUrl, index) => ({ url: imageUrl, alt: `${place?.title || "Place"} gallery image ${index + 1}` }))}
+          items={normalizedGalleryImages.map((imageUrl, index) => ({
+            url: imageUrl,
+            alt: `${place?.title || "Place"} gallery image ${index + 1}`,
+            caption: galleryItemByUrl.get(imageUrl)?.caption || null,
+          }))}
         />
       ) : null}
 

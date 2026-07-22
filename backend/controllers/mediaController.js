@@ -729,15 +729,15 @@ export const createMediaUsage = async (req, res) => {
   try {
     await ensureMediaTables();
 
+    if (Object.hasOwn(req.body || {}, "caption")) {
+      return res.status(400).json({ error: "caption is managed by Collector release snapshots" });
+    }
+
     const assetId = cleanRelatedId(req.body?.asset_id);
     const entityType = sanitizeEntityType(req.body?.entity_type);
     const entityId = cleanRelatedId(req.body?.entity_id);
     const usageType = sanitizeUsageType(req.body?.usage_type, "gallery");
     const position = cleanPosition(req.body?.position);
-    const caption = req.body?.caption
-      ? cleanPlainText(req.body.caption, { max: LIMITS.SHORT_TEXT_MAX, field: "caption" })
-      : null;
-
     if (!assetId || !entityType || !entityId) {
       return res.status(400).json({ error: "asset_id, entity_type, entity_id are required" });
     }
@@ -753,7 +753,7 @@ export const createMediaUsage = async (req, res) => {
     await pool.query(
       `INSERT INTO content_image_usages (asset_id, entity_type, entity_id, usage_type, position, caption, created_by)
        VALUES (?,?,?,?,?,?,?)`,
-      [assetId, entityType, entityId, usageType, position, caption, asInt(req.user?.id)]
+      [assetId, entityType, entityId, usageType, position, null, asInt(req.user?.id)]
     );
 
     await applyLegacyCoverIfRequested(

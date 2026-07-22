@@ -15,6 +15,7 @@ function normalizeItems(items = [], title = "Gallery image") {
       return {
         url,
         alt: String(item?.alt || `${title} ${index + 1}`).trim(),
+        caption: String(item?.caption || "").trim() || null,
       };
     })
     .filter(Boolean);
@@ -66,17 +67,22 @@ export default function MediaGallery({ title, items = [] }) {
         </div>
         <div className="media-gallery-grid">
           {galleryItems.map((item, index) => (
-            <button
+            <figure
               key={`${item.url}-${index}`}
-              type="button"
               className={`media-gallery-tile ${tileVariant(index)}`.trim()}
-              onClick={() => setActiveIndex(index)}
-              aria-label={`Open image ${index + 1}`}
             >
-              <span className="media-gallery-tile-image-wrap">
-                <img src={item.url} alt={item.alt} loading="lazy" className="media-gallery-tile-image" />
-              </span>
-            </button>
+              <button
+                type="button"
+                className="media-gallery-tile-button"
+                onClick={() => setActiveIndex(index)}
+                aria-label={`Open image ${index + 1}`}
+              >
+                <span className="media-gallery-tile-image-wrap">
+                  <img src={item.url} alt={item.alt} loading="lazy" className="media-gallery-tile-image" />
+                </span>
+              </button>
+              {item.caption ? <figcaption className="media-gallery-tile-caption">{item.caption}</figcaption> : null}
+            </figure>
           ))}
         </div>
       </section>
@@ -116,6 +122,7 @@ export default function MediaGallery({ title, items = [] }) {
               ) : null}
               <figure className="media-gallery-lightbox-figure">
                 <img src={activeItem.url} alt={activeItem.alt} className="media-gallery-lightbox-image" />
+                {activeItem.caption ? <figcaption className="media-gallery-lightbox-caption">{activeItem.caption}</figcaption> : null}
               </figure>
               {galleryItems.length > 1 ? (
                 <button

@@ -152,12 +152,16 @@ function normalizeLifecycleMediaEntry(rawEntry, fallbackUsage = "gallery") {
   const selected = rawEntry?.selected == null ? true : Boolean(rawEntry.selected);
   if (!selected) return null;
   const usageType = normalizeUsageType(rawEntry?.role || fallbackUsage);
+  const caption = rawEntry?.caption == null
+    ? null
+    : cleanPlainText(rawEntry.caption, { required: false, max: LIMITS.SHORT_TEXT_MAX, field: "media_manifest.caption" }) || null;
   return {
     kind: "image",
     source_url: sourceUrl,
     role: usageType,
     selected: true,
     usage_type: usageType,
+    caption,
   };
 }
 
@@ -264,7 +268,7 @@ async function removeMirroredFiles(entries = []) {
   }
 }
 
-async function persistMediaUsageRecord(executor, entityType, entityId, usageType, position, mirrored, { snapshotApproved = false } = {}) {
+async function persistMediaUsageRecord(executor, entityType, entityId, usageType, position, mirrored, { snapshotApproved = false, caption = null } = {}) {
   const [assetInsert] = await executor.query(
     `INSERT INTO media_assets (
        asset_uid, source_url, checksum, status, related_type, related_id,
@@ -287,9 +291,9 @@ async function persistMediaUsageRecord(executor, entityType, entityId, usageType
 
   const assetId = Number(assetInsert.insertId || 0) || 0;
   await executor.query(
-    `INSERT INTO content_image_usages (asset_id, entity_type, entity_id, usage_type, position)
-     VALUES (?,?,?,?,?)`,
-    [assetId, entityType, Number(entityId), usageType, Number(position || 0)]
+    `INSERT INTO content_image_usages (asset_id, entity_type, entity_id, usage_type, position, caption)
+     VALUES (?,?,?,?,?,?)`,
+    [assetId, entityType, Number(entityId), usageType, Number(position || 0), caption]
   );
 
   return {
@@ -297,6 +301,7 @@ async function persistMediaUsageRecord(executor, entityType, entityId, usageType
     asset_id: assetId,
     role: usageType,
     selected: true,
+    caption,
   };
 }
 
@@ -426,7 +431,7 @@ async function applyMediaManifestForEntity(entityType, entityId, mediaManifest, 
         row.usage_type,
         positionByUsage[row.usage_type] || 0,
         row.mirrored,
-        { snapshotApproved }
+        { snapshotApproved, caption: row.caption }
       );
       positionByUsage[row.usage_type] += 1;
 

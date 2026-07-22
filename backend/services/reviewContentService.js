@@ -6,6 +6,8 @@ export async function ensureReviewInfrastructure() {
       id BIGINT NOT NULL AUTO_INCREMENT,
       source_system VARCHAR(64) NOT NULL,
       source_content_item_id BIGINT NOT NULL,
+      source_submission_id CHAR(36) NULL,
+      source_manifest_hash CHAR(64) NULL,
       content_type ENUM('place','event') NOT NULL,
       status ENUM('draft','pending_review','needs_revision','published') NOT NULL DEFAULT 'draft',
       lang VARCHAR(8) NOT NULL DEFAULT 'th',
@@ -58,6 +60,9 @@ export async function ensureReviewInfrastructure() {
       mime_type VARCHAR(120) NULL,
       size_bytes BIGINT NULL,
       checksum CHAR(64) NULL,
+      caption VARCHAR(255) NULL,
+      source_asset_id BIGINT NULL,
+      source_submission_id CHAR(36) NULL,
       status ENUM('review_ready','published','deleted') NOT NULL DEFAULT 'review_ready',
       asset_origin ENUM('collector_import') NOT NULL DEFAULT 'collector_import',
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -111,6 +116,14 @@ export async function ensureReviewInfrastructure() {
 
   const reviewContentColumnRepairs = [
     {
+      name: "source_submission_id",
+      alterSql: "ALTER TABLE review_contents ADD COLUMN source_submission_id CHAR(36) NULL AFTER source_content_item_id",
+    },
+    {
+      name: "source_manifest_hash",
+      alterSql: "ALTER TABLE review_contents ADD COLUMN source_manifest_hash CHAR(64) NULL AFTER source_submission_id",
+    },
+    {
       name: "phone",
       alterSql: "ALTER TABLE review_contents ADD COLUMN phone VARCHAR(120) NULL AFTER transport_contact_phone",
     },
@@ -142,6 +155,18 @@ export async function ensureReviewInfrastructure() {
 
   for (const repair of reviewContentColumnRepairs) {
     const [rows] = await pool.query("SHOW COLUMNS FROM review_contents LIKE ?", [repair.name]);
+    if (!Array.isArray(rows) || !rows.length) {
+      await pool.query(repair.alterSql);
+    }
+  }
+
+  const reviewAssetColumnRepairs = [
+    { name: "caption", alterSql: "ALTER TABLE review_content_assets ADD COLUMN caption VARCHAR(255) NULL AFTER checksum" },
+    { name: "source_asset_id", alterSql: "ALTER TABLE review_content_assets ADD COLUMN source_asset_id BIGINT NULL AFTER caption" },
+    { name: "source_submission_id", alterSql: "ALTER TABLE review_content_assets ADD COLUMN source_submission_id CHAR(36) NULL AFTER source_asset_id" },
+  ];
+  for (const repair of reviewAssetColumnRepairs) {
+    const [rows] = await pool.query("SHOW COLUMNS FROM review_content_assets LIKE ?", [repair.name]);
     if (!Array.isArray(rows) || !rows.length) {
       await pool.query(repair.alterSql);
     }

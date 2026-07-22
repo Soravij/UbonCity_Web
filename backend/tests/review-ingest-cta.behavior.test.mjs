@@ -38,11 +38,11 @@ test("review ingest insert params persist CTA/contact into review_contents paylo
     currentBatchUid: "batch-1",
   });
 
-  assert.equal(params[20], "0812345678");
-  assert.equal(params[21], "https://line.me/ti/p/test-line");
-  assert.equal(params[22], "https://facebook.com/test-place");
-  assert.equal(params[23], "https://example.com/test-place");
-  assert.equal(params[24], "line");
+  assert.equal(params[22], "0812345678");
+  assert.equal(params[23], "https://line.me/ti/p/test-line");
+  assert.equal(params[24], "https://facebook.com/test-place");
+  assert.equal(params[25], "https://example.com/test-place");
+  assert.equal(params[26], "line");
 });
 
 test("review ingest update params preserve existing CTA/contact when payload omits them", () => {
@@ -70,11 +70,11 @@ test("review ingest update params preserve existing CTA/contact when payload omi
     reviewContentId: 99,
   });
 
-  assert.equal(params[16], "0812345678");
-  assert.equal(params[17], "https://line.me/ti/p/existing");
-  assert.equal(params[18], "https://facebook.com/existing");
-  assert.equal(params[19], "https://example.com/existing");
-  assert.equal(params[20], "phone");
+  assert.equal(params[18], "0812345678");
+  assert.equal(params[19], "https://line.me/ti/p/existing");
+  assert.equal(params[20], "https://facebook.com/existing");
+  assert.equal(params[21], "https://example.com/existing");
+  assert.equal(params[22], "phone");
   assert.equal(params.at(-1), 99);
 });
 
@@ -138,11 +138,11 @@ test("review ingest update params apply explicit CTA/contact replacements", () =
     reviewContentId: 100,
   });
 
-  assert.equal(params[16], "0899999999");
-  assert.equal(params[17], "https://line.me/ti/p/updated");
-  assert.equal(params[18], "https://facebook.com/updated");
-  assert.equal(params[19], "https://example.com/updated");
-  assert.equal(params[20], "line");
+  assert.equal(params[18], "0899999999");
+  assert.equal(params[19], "https://line.me/ti/p/updated");
+  assert.equal(params[20], "https://facebook.com/updated");
+  assert.equal(params[21], "https://example.com/updated");
+  assert.equal(params[22], "line");
 });
 
 test("review ingest insert params store confirmed taxonomy checks in review_payload_json", () => {

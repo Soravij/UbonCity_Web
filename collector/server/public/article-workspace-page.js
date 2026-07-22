@@ -1535,10 +1535,15 @@ function renderHeroAndAssets() {
             ${selected ? '<span class="article-asset-selected">selected</span>' : ""}
           </span>
         </div>
+        <label class="article-asset-caption">
+          Caption
+          <input data-caption-input="${id}" value="${escapeHtml(row.caption || "")}" maxlength="255" placeholder="Optional caption" />
+        </label>
         <div class="toolbar compact-toolbar">
           <button type="button" data-action="insert-image" data-id="${id}" ${isImageAsset(row) ? "" : "disabled"} title="Insert image">Ins</button>
           <button type="button" data-action="set-cover" data-id="${id}" title="Set cover">Cov</button>
           <button type="button" data-action="set-gallery" data-id="${id}" data-active="${galleryActive ? "1" : "0"}" title="${galleryTitle}">Gal</button>
+          <button type="button" data-action="save-caption" data-id="${id}" title="Save caption">Cap</button>
         </div>
       </article>
     `;
@@ -2075,6 +2080,14 @@ async function updateAssetRole(assetId, role) {
   await refreshAssets();
 }
 
+async function updateAssetCaption(assetId, caption) {
+  await api(`/api/items/${state.itemId}/assets/${assetId}/caption`, {
+    method: "PATCH",
+    body: JSON.stringify({ caption }),
+  });
+  await refreshAssets();
+}
+
 function currentAssetRole(assetId) {
   const id = Number(assetId || 0);
   if (!id) return "unused";
@@ -2279,6 +2292,12 @@ function wire() {
         const nextRole = currentAssetRole(assetId) === "gallery" ? "unused" : "gallery";
         await updateAssetRole(assetId, nextRole);
         setInlineStatus("asset-status", nextRole === "gallery" ? "Added to gallery" : "Removed from gallery");
+        return;
+      }
+      if (action === "save-caption") {
+        const input = qs(`[data-caption-input="${assetId}"]`);
+        await updateAssetCaption(assetId, input?.value || "");
+        setInlineStatus("asset-status", "Caption saved");
         return;
       }
       if (action === "set-inline") {

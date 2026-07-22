@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS content_assets (
   is_cover INTEGER NOT NULL DEFAULT 0,
   placement_type TEXT NOT NULL DEFAULT 'unused',
   sort_order INTEGER NOT NULL DEFAULT 0,
+  caption VARCHAR(255),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
   FOREIGN KEY(asset_id) REFERENCES assets(id) ON DELETE CASCADE
@@ -1138,6 +1139,28 @@ CREATE TABLE IF NOT EXISTS release_snapshots (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE RESTRICT
 );
+
+CREATE TABLE IF NOT EXISTS review_submission_snapshots (
+  submission_id TEXT PRIMARY KEY,
+  content_item_id INTEGER NOT NULL,
+  manifest_json TEXT NOT NULL,
+  manifest_hash CHAR(64) NOT NULL,
+  submitted_by TEXT NOT NULL,
+  submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  superseded_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_submission_snapshots_item
+ON review_submission_snapshots(content_item_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_review_submission_snapshots_item_hash
+ON review_submission_snapshots(content_item_id, manifest_hash);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_review_submission_snapshots_active_item
+ON review_submission_snapshots(content_item_id)
+WHERE superseded_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_release_snapshots_item ON release_snapshots(content_item_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_release_snapshots_item_hash ON release_snapshots(content_item_id, manifest_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_release_snapshots_active_item ON release_snapshots(content_item_id) WHERE superseded_at IS NULL;

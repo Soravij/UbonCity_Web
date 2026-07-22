@@ -519,6 +519,7 @@ test("phase 5-6 backend targeted coverage", async (t) => {
         place_id: 11,
         usage_type: "gallery",
         position: 1,
+        caption: "Gallery caption 11",
         source_url: "https://img.example/media-gallery-11.jpg",
         storage_disk: "external",
         file_name: null,
@@ -592,6 +593,7 @@ test("phase 5-6 backend targeted coverage", async (t) => {
         decision_insight_flags_list: ["planned"],
       });
       assert.deepEqual(byId.get(11).media_gallery_images, ["https://img.example/media-gallery-11.jpg"]);
+      assert.equal("media_gallery_items" in byId.get(11), false);
 
       assert.equal(byId.get(11).effective_cover_image, "https://img.example/decision-cover-11.jpg");
       assert.equal(byId.get(11).effective_thumbnail_image, "https://img.example/decision-thumb-11.jpg");
@@ -653,6 +655,7 @@ test("phase 5-6 backend targeted coverage", async (t) => {
         place_id: 21,
         usage_type: "gallery",
         position: 1,
+        caption: "Detail gallery caption",
         source_url: "https://img.example/media-gallery-21.jpg",
         storage_disk: "external",
         file_name: null,
@@ -689,6 +692,9 @@ test("phase 5-6 backend targeted coverage", async (t) => {
         decision_insight_flags_list: ["nearby"],
       });
       assert.deepEqual(item.media_gallery_images, ["https://img.example/media-gallery-21.jpg"]);
+      assert.deepEqual(item.media_gallery_items, [
+        { url: "https://img.example/media-gallery-21.jpg", caption: "Detail gallery caption", width: null, height: null },
+      ]);
       assert.equal(item.effective_cover_image, "https://img.example/media-cover-21.jpg");
       assert.equal(item.effective_thumbnail_image, "https://img.example/media-gallery-21.jpg");
       assert.equal("req_description" in item, false);

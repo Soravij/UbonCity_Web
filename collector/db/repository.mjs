@@ -3006,6 +3006,9 @@ function ensureContentAssetWorkflowColumns(db) {
   if (!names.has("placement_type")) {
     db.exec("ALTER TABLE content_assets ADD COLUMN placement_type TEXT NOT NULL DEFAULT 'unused';");
   }
+  if (!names.has("caption")) {
+    db.exec("ALTER TABLE content_assets ADD COLUMN caption VARCHAR(255);");
+  }
   if (!names.has("assignment_id")) {
     db.exec("ALTER TABLE content_assets ADD COLUMN assignment_id INTEGER;");
   }
@@ -3792,6 +3795,28 @@ function ensureContentDraftConfirmedMetaSupport(db) {
   }
 }
 
+function ensureReviewSubmissionSnapshotTable(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS review_submission_snapshots (
+      submission_id TEXT PRIMARY KEY,
+      content_item_id INTEGER NOT NULL,
+      manifest_json TEXT NOT NULL,
+      manifest_hash CHAR(64) NOT NULL,
+      submitted_by TEXT NOT NULL,
+      submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      superseded_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE RESTRICT
+    );
+    CREATE INDEX IF NOT EXISTS idx_review_submission_snapshots_item
+      ON review_submission_snapshots(content_item_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_review_submission_snapshots_item_hash
+      ON review_submission_snapshots(content_item_id, manifest_hash);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_review_submission_snapshots_active_item
+      ON review_submission_snapshots(content_item_id) WHERE superseded_at IS NULL;
+  `);
+}
+
 // Canonical resolver for "which assignment_work rows are active" (PROJECT_POLICY.md §8).
 // Group rows by slot+media key, group each key by assignment_sync_batch_id, and keep only
 // the batch with the highest assignment_round (ties broken by the newest row id). Every
@@ -3850,6 +3875,7 @@ export function createRepository(db) {
   ensureContentDraftConfirmedMetaSupport(db);
   ensureAssignmentSubmissionDraftTableSupport(db);
   ensureFieldPackAssignmentForeignKeySupport(db);
+  ensureReviewSubmissionSnapshotTable(db);
   const getActiveReleaseSnapshotByItemStmt = db.prepare(`
     SELECT * FROM release_snapshots
     WHERE content_item_id=? AND superseded_at IS NULL
@@ -3862,6 +3888,20 @@ export function createRepository(db) {
   `);
   const supersedeActiveReleaseSnapshotStmt = db.prepare(`
     UPDATE release_snapshots SET superseded_at=CURRENT_TIMESTAMP
+    WHERE content_item_id=? AND superseded_at IS NULL
+  `);
+  const getActiveReviewSubmissionSnapshotByItemStmt = db.prepare(`
+    SELECT * FROM review_submission_snapshots
+    WHERE content_item_id=? AND superseded_at IS NULL
+    LIMIT 1
+  `);
+  const insertReviewSubmissionSnapshotStmt = db.prepare(`
+    INSERT INTO review_submission_snapshots (
+      submission_id, content_item_id, manifest_json, manifest_hash, submitted_by, submitted_at
+    ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  `);
+  const supersedeActiveReviewSubmissionSnapshotStmt = db.prepare(`
+    UPDATE review_submission_snapshots SET superseded_at=CURRENT_TIMESTAMP
     WHERE content_item_id=? AND superseded_at IS NULL
   `);
   const insertItemStmt = db.prepare(`
@@ -12005,6 +12045,55 @@ function normalizeStateValue(value, stateGroup) {
     return getImageWorkflowStatus(contentItemId);
   }
 
+  function normalizeReviewSubmissionSnapshot(row) {
+    if (!row) return null;
+    return { ...row, manifest: parseJson(row.manifest_json, {}) };
+  }
+
+  function getActiveReviewSubmissionSnapshotByItem(contentItemId) {
+    return normalizeReviewSubmissionSnapshot(getActiveReviewSubmissionSnapshotByItemStmt.get(Number(contentItemId || 0)));
+  }
+
+  function resolveReviewSubmissionSnapshot({ contentItemId, manifest, manifestHash, submittedBy } = {}) {
+    const itemId = Number(contentItemId || 0) || 0;
+    const hash = String(manifestHash || "").trim().toLowerCase();
+    const actor = String(submittedBy || "").trim();
+    if (!itemId) throw new Error("content_item_id is required for review submission snapshot");
+    if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error("manifest_hash must be a SHA-256 hex digest");
+    if (!actor) throw new Error("submitted_by is required for review submission snapshot");
+
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const active = normalizeReviewSubmissionSnapshot(getActiveReviewSubmissionSnapshotByItemStmt.get(itemId));
+      if (active && active.manifest_hash === hash) {
+        db.exec("COMMIT");
+        return { snapshot: active, action: "retry" };
+      }
+      if (active) supersedeActiveReviewSubmissionSnapshotStmt.run(itemId);
+      const submissionId = randomUUID();
+      insertReviewSubmissionSnapshotStmt.run(submissionId, itemId, JSON.stringify(manifest || {}), hash, actor);
+      const snapshot = normalizeReviewSubmissionSnapshot(getActiveReviewSubmissionSnapshotByItemStmt.get(itemId));
+      db.exec("COMMIT");
+      return { snapshot, action: active ? "revision" : "created" };
+    } catch (err) {
+      try { db.exec("ROLLBACK"); } catch {}
+      throw err;
+    }
+  }
+
+  function setContentAssetCaption(contentItemId, assetId, caption) {
+    const itemId = Number(contentItemId || 0) || 0;
+    const normalizedAssetId = Number(assetId || 0) || 0;
+    if (!itemId || !normalizedAssetId) throw new Error("Asset mapping not found");
+    const value = String(caption ?? "").trim();
+    if (value.length > 255) throw new Error("caption must be 255 characters or fewer");
+    const result = db.prepare(
+      "UPDATE content_assets SET caption=? WHERE content_item_id=? AND asset_id=?"
+    ).run(value || null, itemId, normalizedAssetId);
+    if (!Number(result.changes || 0)) throw new Error("Asset mapping not found");
+    return listContentAssetsByItem(itemId, { onlySelected: false }).find((row) => Number(row.asset_id || 0) === normalizedAssetId) || null;
+  }
+
   function listApprovedImageContext(contentItemId) {
     const rows = listContentAssetsByItem(contentItemId, { onlySelected: true });
     const cover = rows.find((row) => Number(row.is_cover || 0) === 1 || row.role === "cover") || null;
@@ -13784,6 +13873,8 @@ function normalizeStateValue(value, stateGroup) {
     getPublishedArticleByItem,
     getActiveReleaseSnapshotByItem,
     resolveReleaseSnapshot,
+    getActiveReviewSubmissionSnapshotByItem,
+    resolveReviewSubmissionSnapshot,
     setPublishedArticleStatusByItem,
     deletePublishedArticleByItem,
     restorePublishedArticleByItem,
@@ -13807,6 +13898,7 @@ function normalizeStateValue(value, stateGroup) {
     getImageWorkflowStatus,
     setContentAssetRole,
     setContentAssetSelected,
+    setContentAssetCaption,
     listApprovedImageContext,
     listApprovedLocalImageContext,
     normalizeReferenceMediaUrl,

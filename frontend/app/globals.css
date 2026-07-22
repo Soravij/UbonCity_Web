@@ -596,12 +596,31 @@ a {
 .media-gallery-tile {
   grid-column: span 1;
   position: relative;
+  margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
   cursor: pointer;
   text-align: left;
   overflow: hidden;
+}
+
+.media-gallery-tile-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.media-gallery-tile-caption,
+.media-gallery-lightbox-caption {
+  padding: 8px 10px;
+  color: var(--theme-text);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  text-align: left;
 }
 
 .media-gallery-tile.is-featured {
@@ -629,12 +648,12 @@ a {
 }
 
 .media-gallery-tile:hover .media-gallery-tile-image,
-.media-gallery-tile:focus-visible .media-gallery-tile-image {
+.media-gallery-tile-button:focus-visible .media-gallery-tile-image {
   transform: scale(1.02);
   filter: saturate(1.01);
 }
 
-.media-gallery-tile:focus-visible {
+.media-gallery-tile-button:focus-visible {
   outline: 2px solid var(--theme-focus-ring);
   outline-offset: 2px;
 }

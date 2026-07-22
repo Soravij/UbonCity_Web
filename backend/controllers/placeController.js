@@ -354,9 +354,8 @@ async function fetchNearbyCandidates(req, {
   );
 
   const mediaMap = await loadApprovedPlaceMediaMap(req, rows.map((row) => row.id));
-  const items = rows.map((row) =>
-    serializePublicPlaceResponse(
-      normalizePlaceForResponse(
+  const items = rows.map((row) => {
+    const normalized = normalizePlaceForResponse(
         req,
         {
           ...row,
@@ -364,9 +363,10 @@ async function fetchNearbyCandidates(req, {
           distance_km: Number.isFinite(Number(row?.distance_km)) ? Number(row.distance_km) : null,
         },
         mediaMap.get(Number(row.id))
-      )
-    )
-  );
+      );
+    const { media_gallery_items: _mediaGalleryItems, ...nearbyRow } = normalized;
+    return serializePublicPlaceResponse(nearbyRow);
+  });
 
   return items;
 }
@@ -435,6 +435,7 @@ async function loadApprovedPlaceMediaMap(req, placeIds) {
          ciu.entity_id AS place_id,
          ciu.usage_type,
          ciu.position,
+         ciu.caption,
          ma.source_url,
          ma.storage_disk,
          ma.file_name,
@@ -457,10 +458,18 @@ async function loadApprovedPlaceMediaMap(req, placeIds) {
       if (!mediaUrl) continue;
 
       const usageType = String(row?.usage_type || "").trim().toLowerCase();
-      const current = out.get(placeId) || { cover: null, gallery: [], inline: [] };
+      const current = out.get(placeId) || { cover: null, gallery: [], galleryItems: [], inline: [] };
 
       if (usageType === "cover" && !current.cover) current.cover = mediaUrl;
-      if (usageType === "gallery") current.gallery.push(mediaUrl);
+      if (usageType === "gallery") {
+        current.gallery.push(mediaUrl);
+        current.galleryItems.push({
+          url: mediaUrl,
+          caption: String(row?.caption || "").trim() || null,
+          width: null,
+          height: null,
+        });
+      }
       if (usageType === "inline") current.inline.push(mediaUrl);
 
       out.set(placeId, current);
@@ -474,7 +483,7 @@ async function loadApprovedPlaceMediaMap(req, placeIds) {
   }
 }
 
-function normalizeDecisionAndMedia(row, media = { cover: null, gallery: [], inline: [] }) {
+function normalizeDecisionAndMedia(row, media = { cover: null, gallery: [], galleryItems: [], inline: [] }) {
   const decisionFeaturedScore = Number(row?.decision_featured_score);
   const scenarioList = parseTagList(row?.decision_scenario_tags);
   const trendList = parseTagList(row?.decision_trend_flags);
@@ -483,6 +492,7 @@ function normalizeDecisionAndMedia(row, media = { cover: null, gallery: [], inli
 
   const mediaCoverImage = media?.cover || null;
   const mediaGalleryImages = Array.isArray(media?.gallery) ? media.gallery : [];
+  const mediaGalleryItems = Array.isArray(media?.galleryItems) ? media.galleryItems : [];
   const mediaInlineImages = Array.isArray(media?.inline) ? media.inline : [];
 
   const effectiveCover = row?.decision_cover_image || mediaCoverImage || row?.image || null;
@@ -502,6 +512,7 @@ function normalizeDecisionAndMedia(row, media = { cover: null, gallery: [], inli
     decision_insight_flags_list: insightList,
     media_cover_image: mediaCoverImage,
     media_gallery_images: mediaGalleryImages,
+    media_gallery_items: mediaGalleryItems,
     media_inline_images: mediaInlineImages,
     effective_cover_image: effectiveCover,
     effective_thumbnail_image: effectiveThumb,
@@ -546,6 +557,14 @@ function normalizePlaceForResponse(req, row, media) {
     media_gallery_images: (Array.isArray(normalized.media_gallery_images) ? normalized.media_gallery_images : [])
       .map((entry) => rewriteSelfHostedMediaUrl(req, entry))
       .filter(Boolean),
+    media_gallery_items: (Array.isArray(normalized.media_gallery_items) ? normalized.media_gallery_items : [])
+      .map((entry) => ({
+        url: rewriteSelfHostedMediaUrl(req, entry?.url),
+        caption: String(entry?.caption || "").trim() || null,
+        width: null,
+        height: null,
+      }))
+      .filter((entry) => entry.url),
     media_inline_images: (Array.isArray(normalized.media_inline_images) ? normalized.media_inline_images : [])
       .map((entry) => rewriteSelfHostedMediaUrl(req, entry))
       .filter(Boolean),
@@ -790,7 +809,8 @@ export const getPlaces = async (req, res) => {
     const mediaMap = await loadApprovedPlaceMediaMap(req, rows.map((row) => row.id));
     const items = rows.map((row) => {
       const normalized = normalizeDecisionAndMedia(row, mediaMap.get(Number(row.id)));
-      return includeUnapproved ? normalized : serializePublicPlaceResponse(normalized);
+      const { media_gallery_items: _mediaGalleryItems, ...listRow } = normalized;
+      return includeUnapproved ? listRow : serializePublicPlaceResponse(listRow);
     });
 
     res.json({ items });

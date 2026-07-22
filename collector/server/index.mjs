@@ -5247,6 +5247,7 @@ function buildSelectedAssetManifestEntry(contentItemId, asset, role, position = 
     storage_disk: String(asset?.storage_disk || "").trim().toLowerCase() || null,
     storage_path: String(asset?.storage_path || "").trim() || null,
     source_checksum: String(asset?.checksum || "").trim().toLowerCase() || null,
+    caption: String(asset?.caption || "").trim() || null,
   };
 }
 
@@ -5279,6 +5280,7 @@ function attachSelectedMediaMetadata(mediaManifest, selectedAssets, contentItemI
       original_file_name: String(entry.original_file_name || base?.original_file_name || "").trim() || null,
       storage_disk: String(entry.storage_disk || base?.storage_disk || "").trim().toLowerCase() || null,
       storage_path: String(entry.storage_path || base?.storage_path || "").trim() || null,
+      caption: String(entry.caption ?? base?.caption ?? "").trim() || null,
     };
   };
 
@@ -5385,6 +5387,7 @@ function manifestEntriesForReleaseHash(manifest) {
       role,
       position,
       source_url: String(entry.source_url || entry.url || "").trim() || null,
+      caption: String(entry.caption || "").trim() || null,
     });
   };
   add(normalized.cover, "cover", 0);
@@ -5407,6 +5410,33 @@ function parseReleaseSnapshotManifest(snapshot) {
     throw new Error("release snapshot manifest is invalid");
   }
   return manifest;
+}
+
+function parseReviewSubmissionSnapshotManifest(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") throw new Error("review submission snapshot is required");
+  const manifest = snapshot.manifest && typeof snapshot.manifest === "object"
+    ? snapshot.manifest
+    : JSON.parse(String(snapshot.manifest_json || "{}"));
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    throw new Error("review submission snapshot manifest is invalid");
+  }
+  return manifest;
+}
+
+function snapshotManifestAssets(manifest) {
+  const normalized = manifest && typeof manifest === "object" ? manifest : {};
+  return [normalized.cover, ...(Array.isArray(normalized.gallery) ? normalized.gallery : []), ...(Array.isArray(normalized.inline) ? normalized.inline : [])]
+    .filter((entry) => entry && typeof entry === "object")
+    .map((entry) => ({
+      asset_id: Number(entry.source_asset_id || 0) || null,
+      public_url: String(entry.source_url || entry.url || "").trim(),
+      file_name: String(entry.original_file_name || "").trim() || null,
+      mime_type: String(entry.mime_type || "").trim().toLowerCase() || null,
+      storage_disk: String(entry.storage_disk || "").trim().toLowerCase() || null,
+      storage_path: String(entry.storage_path || "").trim() || null,
+      checksum: String(entry.source_checksum || entry.checksum || "").trim().toLowerCase() || null,
+      caption: String(entry.caption || "").trim() || null,
+    }));
 }
 
 function projectMediaManifestForBackend(manifest) {
@@ -5516,8 +5546,9 @@ function buildReviewIngestPayload(options = {}) {
   const workflowModel = repo.ensureWorkflowModel(contentItemId);
   const publishableSource = repo.buildPublishableSourceByItem(contentItemId);
   const latestDraft = buildArticleProcessDraftPreview(item, workflowModel, publishableSource) || {};
-  const selectedAssets = repo.listContentAssetsByItem(contentItemId, { onlySelected: true });
-  const allAssets = repo.listContentAssetsByItem(contentItemId, { onlySelected: false });
+  const submissionSnapshot = options?.submissionSnapshot || options?.submission_snapshot || null;
+  const snapshotManifest = parseReviewSubmissionSnapshotManifest(submissionSnapshot);
+  const snapshotAssets = snapshotManifestAssets(snapshotManifest);
   const sourceBaseUrl = String(options?.sourceBaseUrl || options?.source_base_url || resolveCollectorPublicBaseUrl()).trim();
   const contentType = String(item?.type || "").trim().toLowerCase() === "event" ? "event" : "place";
   const otherTransportMeta = isOtherTransportItem(item) ? getOtherTransportMetadata(item) : null;
@@ -5527,10 +5558,10 @@ function buildReviewIngestPayload(options = {}) {
   const body = String(latestDraft?.body || item?.description_clean || item?.description_raw || "").trim();
   const rewrittenBody = rewriteCollectorHtmlMediaUrls(body, sourceBaseUrl);
   const mergedMediaResult = mergeInlineMediaManifestFromBody({
-    mediaManifest: rewriteMediaManifestForBase(toPublishedMediaManifest(contentItemId), sourceBaseUrl),
+    mediaManifest: rewriteMediaManifestForBase(snapshotManifest, sourceBaseUrl),
     bodyHtml: rewrittenBody,
     baseUrl: sourceBaseUrl,
-    allAssets,
+    allAssets: snapshotAssets,
     createInlineEntry: (asset, position) => buildSelectedAssetManifestEntry(contentItemId, asset, "inline", position),
   });
   const unresolvedCollectorUploadUrls = Array.isArray(mergedMediaResult?.diagnostics?.unresolved_collector_upload_urls)
@@ -5539,8 +5570,7 @@ function buildReviewIngestPayload(options = {}) {
   if (unresolvedCollectorUploadUrls.length > 0) {
     throw new Error(`body inline image must map to a local collector asset before admin review: ${unresolvedCollectorUploadUrls.join(", ")}`);
   }
-  const enrichedMediaManifest = attachSelectedMediaMetadata(mergedMediaResult?.mediaManifest || {}, selectedAssets, contentItemId);
-  const adminReviewMediaResult = sanitizeAdminReviewMediaManifest(enrichedMediaManifest, contentItemId);
+  const adminReviewMediaResult = sanitizeAdminReviewMediaManifest(mergedMediaResult?.mediaManifest || {}, contentItemId);
   const mediaManifest = adminReviewMediaResult.mediaManifest || {};
   const coverImage = String(mediaManifest?.cover?.source_url || "").trim();
   if (!coverImage) {
@@ -5583,6 +5613,8 @@ function buildReviewIngestPayload(options = {}) {
   return {
     source_system: "collector-app",
     source_content_item_id: contentItemId,
+    source_submission_id: String(submissionSnapshot.submission_id || "").trim(),
+    source_manifest_hash: String(submissionSnapshot.manifest_hash || "").trim().toLowerCase(),
     source_base_url: sourceBaseUrl,
     content: {
       ...buildReviewIngestContentPayload({
@@ -5607,19 +5639,18 @@ function buildReviewIngestPayload(options = {}) {
       ...mediaManifest,
       gallery: Array.isArray(mediaManifest?.gallery) ? mediaManifest.gallery : [],
       inline: Array.isArray(mediaManifest?.inline) ? mediaManifest.inline : [],
-      selected_asset_count: selectedAssets.length,
+      selected_asset_count: snapshotAssets.length,
     },
   };
 }
 
-function buildAdminReviewMultipartFilePlan(payload, contentItemId) {
-  const itemId = Number(contentItemId || 0) || 0;
-  const selectedAssets = repo.listContentAssetsByItem(itemId, { onlySelected: true });
-  const allAssets = repo.listContentAssetsByItem(itemId, { onlySelected: false });
+function buildAdminReviewMultipartFilePlan(payload, submissionSnapshot) {
+  const manifest = parseReviewSubmissionSnapshotManifest(submissionSnapshot);
+  const snapshotAssets = snapshotManifestAssets(manifest);
   return buildAdminReviewMultipartUploadPlan({
     payload,
-    selectedAssets,
-    allAssets,
+    selectedAssets: snapshotAssets,
+    allAssets: snapshotAssets,
     resolveStoragePath,
     fileExists: (absolutePath) => fsSync.existsSync(absolutePath),
   });
@@ -13678,11 +13709,20 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
       res.status(409).json({ error: "COLLECTOR_REVIEW_SYNC_TOKEN is required before admin review ingest." });
       return;
     }
+    const submissionManifest = toPublishedMediaManifest(id);
+    const submissionSnapshotResolution = repo.resolveReviewSubmissionSnapshot({
+      contentItemId: id,
+      manifest: submissionManifest,
+      manifestHash: hashReleaseManifest(submissionManifest),
+      submittedBy: actorEmail(req),
+    });
+    const submissionSnapshot = submissionSnapshotResolution.snapshot;
     const payload = buildReviewIngestPayload({
       contentItemId: id,
       sourceBaseUrl: resolveCollectorRequestBaseUrl(req) || resolveCollectorPublicBaseUrl(),
+      submissionSnapshot,
     });
-    const multipartPlan = buildAdminReviewMultipartFilePlan(payload, id);
+    const multipartPlan = buildAdminReviewMultipartFilePlan(payload, submissionSnapshot);
     if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
       try {
         console.error("[collector review ingest media_manifest]", JSON.stringify({
@@ -13744,6 +13784,8 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
       source_content_item_id: payload.source_content_item_id,
       content_type: payload.content?.content_type || null,
       review_content_id: Number(ingestBody?.item?.id || 0) || null,
+      submission_id: submissionSnapshot.submission_id,
+      manifest_hash: submissionSnapshot.manifest_hash,
     });
     repo.upsertWorkflowModel(
       id,
@@ -13767,6 +13809,8 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
       backend_ingest: backendResult?.kind === "backend_ingest" ? backendResult : null,
       backend_sync: backendResult?.kind === "backend_sync" ? backendResult : null,
       backend_queue: null,
+      review_submission_snapshot: submissionSnapshot,
+      review_submission_snapshot_action: submissionSnapshotResolution.action,
     });
   } catch (err) {
     const msg = String(err?.message || "Cannot submit admin review");
@@ -13996,6 +14040,28 @@ app.patch("/api/items/:id/assets/:assetId/role", requireRole("owner", "admin", "
     res.json({ ok: true, status, assets: repo.listContentAssetsByItem(id) });
   } catch (err) {
     res.status(400).json({ error: "Update failed" });
+  }
+});
+
+app.patch("/api/items/:id/assets/:assetId/caption", requireRole("owner", "admin", "editor", "user"), (req, res) => {
+  const id = Number(req.params.id || 0);
+  const assetId = Number(req.params.assetId || 0);
+  if (!id || !assetId) {
+    res.status(400).json({ error: "Invalid item or asset id" });
+    return;
+  }
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) return;
+  try {
+    const asset = repo.setContentAssetCaption(id, assetId, req.body?.caption);
+    repo.logAudit(actorEmail(req), "asset.caption", "content_item", String(id), { assetId, caption: asset?.caption || null });
+    res.json({ ok: true, asset, assets: repo.listContentAssetsByItem(id) });
+  } catch (err) {
+    res.status(400).json({ error: String(err?.message || "Update failed") });
   }
 });
 app.delete("/api/items/:id", requireRole("admin", "owner"), (req, res) => {

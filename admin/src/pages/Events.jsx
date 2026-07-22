@@ -233,7 +233,6 @@ export default function Events({ token, role = "user", channel = "normal" }) {
           entity_id: Number(eventId),
           usage_type: usage.usage_type,
           position: i,
-          caption: usage.caption || "",
           apply_legacy_cover: usage.usage_type === "cover",
         },
         { headers: authHeaders(token) }
@@ -342,7 +341,6 @@ export default function Events({ token, role = "user", channel = "normal" }) {
     const nextUsage = {
       asset_id: Number(asset?.id || 0),
       usage_type: usageType || "cover",
-      caption: String(asset?.alt_text || asset?.title || "").trim(),
       public_url: String(asset?.public_url || "").trim(),
     };
 
@@ -361,7 +359,7 @@ export default function Events({ token, role = "user", channel = "normal" }) {
     if (nextUsage.usage_type === "inline") {
       setForm((prev) => ({
         ...prev,
-        description: `${String(prev.description || "").trim()}\n\n![${nextUsage.caption || "Media image"}](${nextUsage.public_url})`,
+        description: `${String(prev.description || "").trim()}\n\n![Media image](${nextUsage.public_url})`,
       }));
       setPendingMediaUsages((prev) => [...prev, nextUsage]);
       setMediaPickerOpen(false);

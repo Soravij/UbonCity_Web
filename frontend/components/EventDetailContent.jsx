@@ -120,6 +120,12 @@ export default function EventDetailContent({ event, activeLang = "th", isReviewM
       .filter((value, index, list) => list.indexOf(value) === index)
       .filter((value) => value !== coverImage)
     : [];
+  const galleryItemByUrl = new Map(
+    (Array.isArray(event?.media_gallery_items) ? event.media_gallery_items : [])
+      .map((item) => ({ ...item, url: cleanMediaUrl(item?.url) }))
+      .filter((item) => item.url)
+      .map((item) => [item.url, item])
+  );
   const rawDescription = galleryImages.length
     ? stripLegacyGalleryMarkup(event?.description || "")
     : String(event?.description || "").trim();
@@ -156,7 +162,11 @@ export default function EventDetailContent({ event, activeLang = "th", isReviewM
       {galleryImages.length ? (
         <MediaGallery
           title={detailCopy.galleryTitle}
-          items={galleryImages.map((imageUrl, index) => ({ url: imageUrl, alt: `${event?.title || "Event"} gallery image ${index + 1}` }))}
+          items={galleryImages.map((imageUrl, index) => ({
+            url: imageUrl,
+            alt: `${event?.title || "Event"} gallery image ${index + 1}`,
+            caption: galleryItemByUrl.get(imageUrl)?.caption || null,
+          }))}
         />
       ) : null}
 

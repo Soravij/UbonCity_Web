@@ -82,6 +82,7 @@ async function loadApprovedEventMediaMap(req, eventIds) {
          ciu.entity_id AS event_id,
          ciu.usage_type,
          ciu.position,
+         ciu.caption,
          ma.source_url,
          ma.storage_disk,
          ma.file_name,
@@ -104,10 +105,18 @@ async function loadApprovedEventMediaMap(req, eventIds) {
       if (!mediaUrl) continue;
 
       const usageType = String(row?.usage_type || "").trim().toLowerCase();
-      const current = out.get(eventId) || { cover: null, gallery: [], inline: [] };
+      const current = out.get(eventId) || { cover: null, gallery: [], galleryItems: [], inline: [] };
 
       if (usageType === "cover" && !current.cover) current.cover = mediaUrl;
-      if (usageType === "gallery") current.gallery.push(mediaUrl);
+      if (usageType === "gallery") {
+        current.gallery.push(mediaUrl);
+        current.galleryItems.push({
+          url: mediaUrl,
+          caption: String(row?.caption || "").trim() || null,
+          width: null,
+          height: null,
+        });
+      }
       if (usageType === "inline") current.inline.push(mediaUrl);
 
       out.set(eventId, current);
@@ -128,7 +137,7 @@ function parseTagList(value) {
     .filter(Boolean);
 }
 
-function normalizeEventDecisionAndMedia(row, media = { cover: null, gallery: [], inline: [] }) {
+function normalizeEventDecisionAndMedia(row, media = { cover: null, gallery: [], galleryItems: [], inline: [] }) {
   const decisionFeaturedScore = Number(row?.decision_featured_score);
   const scenarioList = parseTagList(row?.decision_scenario_tags);
   const trendList = parseTagList(row?.decision_trend_flags);
@@ -137,6 +146,7 @@ function normalizeEventDecisionAndMedia(row, media = { cover: null, gallery: [],
 
   const mediaCoverImage = media?.cover || null;
   const mediaGalleryImages = Array.isArray(media?.gallery) ? media.gallery : [];
+  const mediaGalleryItems = Array.isArray(media?.galleryItems) ? media.galleryItems : [];
   const mediaInlineImages = Array.isArray(media?.inline) ? media.inline : [];
 
   const effectiveCover = row?.decision_cover_image || mediaCoverImage || row?.image || null;
@@ -156,6 +166,7 @@ function normalizeEventDecisionAndMedia(row, media = { cover: null, gallery: [],
     decision_insight_flags_list: insightList,
     media_cover_image: mediaCoverImage,
     media_gallery_images: mediaGalleryImages,
+    media_gallery_items: mediaGalleryItems,
     media_inline_images: mediaInlineImages,
     effective_cover_image: effectiveCover,
     effective_thumbnail_image: effectiveThumb,
@@ -188,6 +199,14 @@ function normalizeEventForResponse(req, row, media) {
     media_gallery_images: (Array.isArray(normalized.media_gallery_images) ? normalized.media_gallery_images : [])
       .map((entry) => rewriteSelfHostedMediaUrl(req, entry))
       .filter(Boolean),
+    media_gallery_items: (Array.isArray(normalized.media_gallery_items) ? normalized.media_gallery_items : [])
+      .map((entry) => ({
+        url: rewriteSelfHostedMediaUrl(req, entry?.url),
+        caption: String(entry?.caption || "").trim() || null,
+        width: null,
+        height: null,
+      }))
+      .filter((entry) => entry.url),
     media_inline_images: (Array.isArray(normalized.media_inline_images) ? normalized.media_inline_images : [])
       .map((entry) => rewriteSelfHostedMediaUrl(req, entry))
       .filter(Boolean),
@@ -376,7 +395,8 @@ export const getEvents = async (req, res) => {
     return res.json({
       items: rows.map((row) => {
         const normalized = normalizeEventForResponse(req, row, mediaMap.get(Number(row.id)));
-        return includeUnapproved ? normalized : serializePublicEventResponse(normalized);
+        const { media_gallery_items: _mediaGalleryItems, ...listRow } = normalized;
+        return includeUnapproved ? listRow : serializePublicEventResponse(listRow);
       }),
     });
   } catch (err) {

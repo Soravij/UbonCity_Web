@@ -289,7 +289,7 @@ test("item-scoped backend sync uses the release snapshot instead of live selecte
   assert.throws(() => buildBackendSyncPayload({ contentItemId: 101 }), /release snapshot is required/);
 });
 
-test("release manifest hash tracks asset identity, checksum, role, position, and source URL", () => {
+test("release manifest hash tracks asset identity, checksum, role, position, source URL, and caption", () => {
   const hashReleaseManifest = loadReleaseManifestHasher();
   const emptyManifest = { authority: "release_main_selected_assets", cover: null, gallery: [], inline: [], video: [] };
   const original = {
@@ -298,10 +298,12 @@ test("release manifest hash tracks asset identity, checksum, role, position, and
   };
   const changedRole = { ...emptyManifest, gallery: [{ source_asset_id: 7, source_checksum: "checksum-a", source_url: "/media/a.jpg" }] };
   const changedChecksum = { ...original, cover: { ...original.cover, source_checksum: "checksum-b" } };
+  const changedCaption = { ...original, cover: { ...original.cover, caption: "Updated caption" } };
 
   assert.match(hashReleaseManifest(emptyManifest), /^[a-f0-9]{64}$/);
   assert.notEqual(hashReleaseManifest(original), hashReleaseManifest(changedRole));
   assert.notEqual(hashReleaseManifest(original), hashReleaseManifest(changedChecksum));
+  assert.notEqual(hashReleaseManifest(original), hashReleaseManifest(changedCaption));
   assert.equal(
     hashReleaseManifest(original),
     hashReleaseManifest({ ...original, authority: "different-authority", video: [] }),

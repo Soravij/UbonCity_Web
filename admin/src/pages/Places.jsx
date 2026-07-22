@@ -449,7 +449,6 @@ export default function Places({ token, role = "user", mode = "create", channel 
           entity_id: Number(placeId),
           usage_type: usage.usage_type,
           position: i,
-          caption: usage.caption || "",
           apply_legacy_cover: usage.usage_type === "cover",
         },
         { headers: authHeaders(token) }
@@ -461,7 +460,6 @@ export default function Places({ token, role = "user", mode = "create", channel 
     const nextUsage = {
       asset_id: Number(asset?.id || 0),
       usage_type: usageType || "cover",
-      caption: String(asset?.alt_text || asset?.title || "").trim(),
       public_url: String(asset?.public_url || "").trim(),
     };
 
@@ -471,7 +469,7 @@ export default function Places({ token, role = "user", mode = "create", channel 
     }
 
     if (nextUsage.usage_type === "inline") {
-      insertTextAtCursor(`\n![${nextUsage.caption || "รูปจากคลังสื่อ"}](${nextUsage.public_url})\n`);
+      insertTextAtCursor(`\n![รูปจากคลังสื่อ](${nextUsage.public_url})\n`);
       setPendingMediaUsages((prev) => [...prev, nextUsage]);
       setMediaPickerOpen(false);
       return;

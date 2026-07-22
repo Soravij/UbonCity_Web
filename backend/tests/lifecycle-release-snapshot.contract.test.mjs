@@ -35,3 +35,9 @@ test("media approval is derived from the validated snapshot boundary, not mirror
   assert.match(controllerSource, /\{ sourceBaseUrl, snapshotApproved: true \}/);
   assert.doesNotMatch(controllerSource, /VALUES \(\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?\)\s*\n\s*\[\s*crypto\.randomUUID\(\),\s*mirrored\.resolved_source_url,\s*mirrored\.checksum,\s*"approved"/);
 });
+
+test("lifecycle persists captions supplied by the release snapshot", () => {
+  assert.match(controllerSource, /field: "media_manifest\.caption"/);
+  assert.match(controllerSource, /content_image_usages \(asset_id, entity_type, entity_id, usage_type, position, caption\)/);
+  assert.match(controllerSource, /\{ snapshotApproved, caption: row\.caption \}/);
+});
