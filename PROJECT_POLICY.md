@@ -749,6 +749,20 @@ Placeholders:
 - นโยบายความครอบคลุมของ automated test: ยังไม่กำหนด (TBD) / ทำภายหลัง
 - checklist สำหรับ browser smoke test: ยังไม่กำหนด (TBD) / ทำภายหลัง
 
+## 10A. MySQL Migration Compatibility
+
+**English**
+
+- MySQL migrations must not use `ADD COLUMN IF NOT EXISTS` or `DROP COLUMN IF EXISTS`; MySQL 8.0.46 rejects those conditional column forms.
+- Every additive or destructive column migration must use dynamic DDL guarded by `information_schema.COLUMNS`, following migrations 019 and 021.
+- This rule is mandatory after two runtime failures: Phase 3 migration 019 and review-submission migration 021.
+
+**ภาษาไทย**
+
+- migration ฝั่ง MySQL ห้ามใช้ `ADD COLUMN IF NOT EXISTS` หรือ `DROP COLUMN IF EXISTS` เพราะ MySQL 8.0.46 ไม่รองรับ syntax conditional column เหล่านี้
+- การเพิ่มหรือลบ column ทุกกรณีต้องใช้ dynamic DDL ที่ guard ด้วย `information_schema.COLUMNS` ตาม pattern ของ migration 019 และ 021
+- กฎนี้เป็นข้อบังคับหลังพบ runtime failure ซ้ำ 2 รอบ: Phase 3 migration 019 และ review-submission migration 021
+
 ## 11. Documentation Policy
 
 **English**
