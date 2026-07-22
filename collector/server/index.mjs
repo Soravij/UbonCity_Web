@@ -5409,6 +5409,12 @@ function parseReleaseSnapshotManifest(snapshot) {
   return manifest;
 }
 
+function projectMediaManifestForBackend(manifest) {
+  const source = manifest && typeof manifest === "object" && !Array.isArray(manifest) ? manifest : {};
+  const { authority: _authority, video: _video, ...projected } = source;
+  return projected;
+}
+
 function buildBackendSyncPayload(options = {}) {
   if (!hasExplicitCollectorPublicBaseUrl()) {
     throw new Error("COLLECTOR_PUBLIC_BASE_URL is required for backend lifecycle sync.");
@@ -5443,10 +5449,10 @@ function buildBackendSyncPayload(options = {}) {
       const sourceContentItemId = Number(row.content_item_id || 0) || 0;
       const sourceItem = repo.getItem(sourceContentItemId) || null;
       const otherTransportMeta = isOtherTransportItem(sourceItem) ? getOtherTransportMetadata(sourceItem) : null;
-      const mediaManifest = contentItemId
+      const snapshotManifest = contentItemId
         ? parseReleaseSnapshotManifest(releaseSnapshot)
         : toPublishedMediaManifest(sourceContentItemId);
-      const coverImage = String(mediaManifest?.cover?.source_url || "").trim();
+      const mediaManifest = projectMediaManifestForBackend(snapshotManifest);
       return {
         source_content_item_id: sourceContentItemId,
         type: row.source_type || "place",
@@ -5464,7 +5470,6 @@ function buildBackendSyncPayload(options = {}) {
         longitude: Number.isFinite(Number(row.longitude)) ? Number(row.longitude) : null,
         map_url: String(row.map_url || "").trim() || null,
         google_place_id: String(row.google_place_id || "").trim() || null,
-        image: coverImage,
         transport_subtype: otherTransportMeta?.subtype || null,
         transport_contact_name: otherTransportMeta?.contact_name || null,
         transport_contact_phone: otherTransportMeta?.phone || null,

@@ -162,6 +162,20 @@ function normalizeEventDecisionAndMedia(row, media = { cover: null, gallery: [],
   };
 }
 
+export function serializePublicEventResponse(row) {
+  const {
+    req_description: _reqDescription,
+    th_description: _thDescription,
+    is_approved: _isApproved,
+    tracking_entity_type: _trackingEntityType,
+    tracking_entity_id: _trackingEntityId,
+    media_cover_image: _mediaCoverImage,
+    media_inline_images: _mediaInlineImages,
+    ...publicRow
+  } = row || {};
+  return publicRow;
+}
+
 function normalizeEventForResponse(req, row, media) {
   const normalized = normalizeEventDecisionAndMedia(row, media);
   return {
@@ -366,7 +380,12 @@ export const getEvents = async (req, res) => {
     );
 
     const mediaMap = await loadApprovedEventMediaMap(req, rows.map((row) => Number(row.id)));
-    return res.json({ items: rows.map((row) => normalizeEventForResponse(req, row, mediaMap.get(Number(row.id)))) });
+    return res.json({
+      items: rows.map((row) => {
+        const normalized = normalizeEventForResponse(req, row, mediaMap.get(Number(row.id)));
+        return includeUnapproved ? normalized : serializePublicEventResponse(normalized);
+      }),
+    });
   } catch (err) {
     if (String(err?.code || "") === "EMER_CONFLICT") {
       return res.status(409).json(err.payload || { error: "emer_conflict" });
@@ -425,7 +444,8 @@ export const getEventDetail = async (req, res) => {
     }
 
     const mediaMap = await loadApprovedEventMediaMap(req, [eventId]);
-    return res.json({ item: normalizeEventForResponse(req, rows[0], mediaMap.get(eventId)) });
+    const item = normalizeEventForResponse(req, rows[0], mediaMap.get(eventId));
+    return res.json({ item: includeUnapproved ? item : serializePublicEventResponse(item) });
   } catch (err) {
     if (String(err?.code || "") === "EMER_CONFLICT") {
       return res.status(409).json(err.payload || { error: "emer_conflict" });

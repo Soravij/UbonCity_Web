@@ -14,6 +14,14 @@ test("lifecycle import requires a release snapshot identity for every published 
   assert.match(controllerSource, /manifest_hash: manifestHash/);
 });
 
+test("lifecycle import derives the cover from the manifest and accepts the projected payload shape", () => {
+  assert.match(controllerSource, /const coverImageFromManifest = String\(mediaManifest\?\.cover\?\.source_url \|\| ""\)\.trim\(\);/);
+  assert.match(controllerSource, /image: coverImageFromManifest \|\| null,/);
+  assert.doesNotMatch(controllerSource, /published\[\$\{index\}\]\.image is required/);
+  assert.doesNotMatch(controllerSource, /media_manifest\.authority is required/);
+  assert.doesNotMatch(controllerSource, /media_manifest\.video is required/);
+});
+
 test("successful release imports are replayed without another media mirror", () => {
   assert.match(migrationSource, /UNIQUE KEY uq_lifecycle_release_manifest \(source_system, source_release_id, manifest_hash\)/);
   assert.match(controllerSource, /async function claimLifecycleReleaseImport/);
