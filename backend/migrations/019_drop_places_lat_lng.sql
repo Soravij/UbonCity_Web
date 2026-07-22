@@ -8,6 +8,8 @@ DELIMITER //
 CREATE PROCEDURE phase3_assert_places_lat_lng_safe()
 BEGIN
   DECLARE legacy_columns_present INT DEFAULT 0;
+  DECLARE lat_present INT DEFAULT 0;
+  DECLARE lng_present INT DEFAULT 0;
 
   SELECT COUNT(*) INTO legacy_columns_present
   FROM information_schema.COLUMNS
@@ -15,13 +17,30 @@ BEGIN
     AND TABLE_NAME = 'places'
     AND COLUMN_NAME IN ('lat', 'lng');
 
-  IF legacy_columns_present = 2 THEN
+  SELECT COUNT(*) INTO lat_present
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @schema_name
+    AND TABLE_NAME = 'places'
+    AND COLUMN_NAME = 'lat';
+
+  SELECT COUNT(*) INTO lng_present
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @schema_name
+    AND TABLE_NAME = 'places'
+    AND COLUMN_NAME = 'lng';
+
+  IF legacy_columns_present >= 1 THEN
     SET @legacy_coordinate_rows = 0;
-    SET @assertion_sql = '
-      SELECT COUNT(*) INTO @legacy_coordinate_rows
-      FROM places
-      WHERE (lat IS NOT NULL OR lng IS NOT NULL)
-        AND (latitude IS NULL OR longitude IS NULL)';
+    SET @legacy_coordinate_presence = IF(
+      lat_present = 1 AND lng_present = 1,
+      '(lat IS NOT NULL OR lng IS NOT NULL)',
+      IF(lat_present = 1, 'lat IS NOT NULL', 'lng IS NOT NULL')
+    );
+    SET @assertion_sql = CONCAT(
+      'SELECT COUNT(*) INTO @legacy_coordinate_rows FROM places WHERE ',
+      @legacy_coordinate_presence,
+      ' AND (latitude IS NULL OR longitude IS NULL)'
+    );
     PREPARE assertion_stmt FROM @assertion_sql;
     EXECUTE assertion_stmt;
     DEALLOCATE PREPARE assertion_stmt;

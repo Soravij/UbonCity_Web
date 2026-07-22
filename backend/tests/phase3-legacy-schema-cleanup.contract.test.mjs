@@ -18,11 +18,15 @@ test("events.is_published drop is guarded and no runtime backfill remains", () =
 
 test("places.lat/lng migration blocks unsafe legacy-only coordinates and is guarded", () => {
   const source = migration("019_drop_places_lat_lng.sql");
-  assert.match(source, /WHERE \(lat IS NOT NULL OR lng IS NOT NULL\)\s*AND \(latitude IS NULL OR longitude IS NULL\)/);
+  assert.match(source, /IF legacy_columns_present >= 1 THEN/);
+  assert.match(source, /lat_present = 1 AND lng_present = 1/);
+  assert.match(source, /IF\(lat_present = 1, 'lat IS NOT NULL', 'lng IS NOT NULL'\)/);
+  assert.match(source, /SET @assertion_sql = CONCAT\(/);
   assert.match(source, /SIGNAL SQLSTATE '45000'/);
   assert.match(source, /ALTER TABLE places DROP COLUMN lat/);
   assert.match(source, /ALTER TABLE places DROP COLUMN lng/);
   assert.match(source, /information_schema\.COLUMNS/);
+  assert.doesNotMatch(source, /DROP COLUMN IF EXISTS/);
 });
 
 test("curated taxonomy cleanup is limited to the places projection", () => {
