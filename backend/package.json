@@ -14,6 +14,7 @@
         "smoke:review-access-token": "node scripts/smoke-review-access-token.mjs",
         "smoke:frontend-review-session-cookie": "node scripts/smoke-frontend-review-session-cookie.mjs",
         "test:collector-admin-final-review": "node --test tests/collector-admin-final-review.smoke.test.mjs",
+        "test:review-ingest-sql": "node --test tests/review-ingest-sql.integration.test.mjs",
         "test:phase56": "node --test --test-isolation=none tests/place.phase56.backend.test.mjs"
     },
     "keywords": [],
