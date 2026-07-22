@@ -76,15 +76,27 @@ function assertDecisionResponseFields(row) {
     "decision_trend_flags_list",
     "decision_moment_tags_list",
     "decision_insight_flags_list",
-    "media_cover_image",
     "media_gallery_images",
-    "media_inline_images",
     "effective_cover_image",
     "effective_thumbnail_image",
   ];
 
   for (const key of required) {
     assert.ok(Object.hasOwn(row, key), `missing field: ${key}`);
+  }
+}
+
+function assertPublicResponseDoesNotLeakInternalFields(row) {
+  for (const key of [
+    "req_description",
+    "th_description",
+    "is_approved",
+    "tracking_entity_type",
+    "tracking_entity_id",
+    "media_cover_image",
+    "media_inline_images",
+  ]) {
+    assert.equal(key in row, false, `public response must not include ${key}`);
   }
 }
 
@@ -565,6 +577,7 @@ test("phase 5-6 backend targeted coverage", async (t) => {
 
       for (const id of [11, 12, 13, 14]) {
         assertDecisionResponseFields(byId.get(id));
+        assertPublicResponseDoesNotLeakInternalFields(byId.get(id));
       }
       assertDecisionListValues(byId.get(11), {
         decision_scenario_tags_list: ["day-trip", "family"],
@@ -579,7 +592,6 @@ test("phase 5-6 backend targeted coverage", async (t) => {
         decision_insight_flags_list: ["planned"],
       });
       assert.deepEqual(byId.get(11).media_gallery_images, ["https://img.example/media-gallery-11.jpg"]);
-      assert.deepEqual(byId.get(11).media_inline_images, ["https://img.example/media-inline-11.jpg"]);
 
       assert.equal(byId.get(11).effective_cover_image, "https://img.example/decision-cover-11.jpg");
       assert.equal(byId.get(11).effective_thumbnail_image, "https://img.example/decision-thumb-11.jpg");
@@ -669,6 +681,7 @@ test("phase 5-6 backend targeted coverage", async (t) => {
 
       const item = res.body.item;
       assertDecisionResponseFields(item);
+      assertPublicResponseDoesNotLeakInternalFields(item);
       assertDecisionListValues(item, {
         decision_scenario_tags_list: ["family", "day-trip"],
         decision_trend_flags_list: ["hot"],
@@ -678,8 +691,6 @@ test("phase 5-6 backend targeted coverage", async (t) => {
       assert.deepEqual(item.media_gallery_images, ["https://img.example/media-gallery-21.jpg"]);
       assert.equal(item.effective_cover_image, "https://img.example/media-cover-21.jpg");
       assert.equal(item.effective_thumbnail_image, "https://img.example/media-gallery-21.jpg");
-      assert.equal(item.media_inline_images.length, 1);
-      assert.equal(item.media_inline_images[0], "https://img.example/media-inline-21.jpg");
       assert.equal("req_description" in item, false);
       assert.equal("th_description" in item, false);
     });
@@ -753,7 +764,7 @@ test("phase 5-6 backend targeted coverage", async (t) => {
       assert.equal(item.effective_cover_image, "https://api.test.local/uploads/published-cover-22.jpg");
       assert.equal(item.effective_thumbnail_image, "https://api.test.local/uploads/published-thumb-22.jpg");
       assert.deepEqual(item.media_gallery_images, ["https://api.test.local/uploads/published/gallery/gallery-22.jpg"]);
-      assert.deepEqual(item.media_inline_images, ["https://api.test.local/uploads/published/inline/inline-usage-22.jpg"]);
+      assertPublicResponseDoesNotLeakInternalFields(item);
       assert.match(item.description, /https:\/\/api\.test\.local\/uploads\/inline-22\.jpg/);
     });
   });

@@ -145,6 +145,7 @@ function loadBackendSyncPayloadBuilder(options = {}) {
   };
   const helperSource = `
 ${extractFunctionBlock("parseReleaseSnapshotManifest")}
+${extractFunctionBlock("projectMediaManifestForBackend")}
 ${extractFunctionBlock("buildBackendSyncPayload")}
 globalThis.__backendSyncHooks = {
   buildBackendSyncPayload,
@@ -277,7 +278,14 @@ test("item-scoped backend sync uses the release snapshot instead of live selecte
 
   assert.equal(payload.published[0].release_id, "release-101");
   assert.equal(payload.published[0].manifest_hash, "a".repeat(64));
-  assert.deepEqual(payload.published[0].media_manifest, snapshot.manifest);
+  assert.equal(JSON.stringify(payload.published[0].media_manifest), JSON.stringify({ cover: null, gallery: [], inline: [] }));
+  assert.equal("image" in payload.published[0], false);
+  assert.equal("authority" in payload.published[0].media_manifest, false);
+  assert.equal("video" in payload.published[0].media_manifest, false);
+  assert.equal(
+    JSON.stringify(snapshot.manifest),
+    JSON.stringify({ authority: "release_main_selected_assets", cover: null, gallery: [], inline: [], video: [] }),
+  );
   assert.throws(() => buildBackendSyncPayload({ contentItemId: 101 }), /release snapshot is required/);
 });
 
@@ -294,6 +302,10 @@ test("release manifest hash tracks asset identity, checksum, role, position, and
   assert.match(hashReleaseManifest(emptyManifest), /^[a-f0-9]{64}$/);
   assert.notEqual(hashReleaseManifest(original), hashReleaseManifest(changedRole));
   assert.notEqual(hashReleaseManifest(original), hashReleaseManifest(changedChecksum));
+  assert.equal(
+    hashReleaseManifest(original),
+    hashReleaseManifest({ ...original, authority: "different-authority", video: [] }),
+  );
 });
 
 test("required locale translation recheck gate allows release only when all required locales passed", () => {

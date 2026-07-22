@@ -355,21 +355,18 @@ async function fetchNearbyCandidates(req, {
 
   const mediaMap = await loadApprovedPlaceMediaMap(req, rows.map((row) => row.id));
   const items = rows.map((row) =>
-    normalizePlaceForResponse(
-      req,
-      {
-        ...row,
-        description: mergeDescriptionWithThaiImages(row?.req_description, row?.th_description, lang),
-        distance_km: Number.isFinite(Number(row?.distance_km)) ? Number(row.distance_km) : null,
-      },
-      mediaMap.get(Number(row.id))
+    serializePublicPlaceResponse(
+      normalizePlaceForResponse(
+        req,
+        {
+          ...row,
+          description: mergeDescriptionWithThaiImages(row?.req_description, row?.th_description, lang),
+          distance_km: Number.isFinite(Number(row?.distance_km)) ? Number(row.distance_km) : null,
+        },
+        mediaMap.get(Number(row.id))
+      )
     )
   );
-
-  for (const item of items) {
-    delete item.req_description;
-    delete item.th_description;
-  }
 
   return items;
 }
@@ -521,6 +518,20 @@ function normalizeDecisionAndMedia(row, media = { cover: null, gallery: [], inli
     transport_contact_details: String(row?.transport_contact_details || "").trim() || null,
     transport_link_url: String(row?.transport_link_url || "").trim() || null,
   };
+}
+
+export function serializePublicPlaceResponse(row) {
+  const {
+    req_description: _reqDescription,
+    th_description: _thDescription,
+    is_approved: _isApproved,
+    tracking_entity_type: _trackingEntityType,
+    tracking_entity_id: _trackingEntityId,
+    media_cover_image: _mediaCoverImage,
+    media_inline_images: _mediaInlineImages,
+    ...publicRow
+  } = row || {};
+  return publicRow;
 }
 
 function normalizePlaceForResponse(req, row, media) {
@@ -777,7 +788,10 @@ export const getPlaces = async (req, res) => {
       queryParams
     );
     const mediaMap = await loadApprovedPlaceMediaMap(req, rows.map((row) => row.id));
-    const items = rows.map((row) => normalizeDecisionAndMedia(row, mediaMap.get(Number(row.id))));
+    const items = rows.map((row) => {
+      const normalized = normalizeDecisionAndMedia(row, mediaMap.get(Number(row.id)));
+      return includeUnapproved ? normalized : serializePublicPlaceResponse(normalized);
+    });
 
     res.json({ items });
   } catch (err) {
@@ -910,9 +924,11 @@ export const getPlaceDetail = async (req, res) => {
             },
             mediaMap.get(Number(fallbackRows[0]?.id))
           );
-          delete item.req_description;
-          delete item.th_description;
-          return res.json({ item });
+          if (!includeUnapproved) {
+            delete item.req_description;
+            delete item.th_description;
+          }
+          return res.json({ item: includeUnapproved ? item : serializePublicPlaceResponse(item) });
         }
       }
 
@@ -928,10 +944,12 @@ export const getPlaceDetail = async (req, res) => {
       },
       mediaMap.get(Number(rows[0]?.id))
     );
-    delete item.req_description;
-    delete item.th_description;
+    if (!includeUnapproved) {
+      delete item.req_description;
+      delete item.th_description;
+    }
 
-    return res.json({ item });
+    return res.json({ item: includeUnapproved ? item : serializePublicPlaceResponse(item) });
   } catch (err) {
     return res.status(500).json({ error: "Internal server error" });
   }
