@@ -12,6 +12,14 @@ const onePixelPng = Buffer.from(
   "base64"
 );
 
+if (runSqlIntegration) {
+  // This is the only test in this file that opens the shared MySQL pool. Register
+  // teardown before the test so a failed connect/query cannot keep Node alive.
+  test.after(async () => {
+    await pool.end();
+  });
+}
+
 function makePayload({ sourceContentItemId, submissionId, manifestHash, caption, sourceAssetId }) {
   return {
     source_system: "review-ingest-sql-integration",
