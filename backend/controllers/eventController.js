@@ -275,13 +275,6 @@ async function ensureEventsTable() {
     await pool.query("ALTER TABLE events ADD COLUMN approved_at TIMESTAMP NULL DEFAULT NULL");
   }
 
-  const [legacyPublishCol] = await pool.query("SHOW COLUMNS FROM events LIKE 'is_published'");
-  if (legacyPublishCol.length) {
-    await pool.query(
-      "UPDATE events SET is_approved=1, approved_at=COALESCE(approved_at, updated_at) WHERE is_published=1"
-    );
-  }
-
   const [metaTitleCol] = await pool.query("SHOW COLUMNS FROM event_translations LIKE 'meta_title'");
   if (!metaTitleCol.length) {
     await pool.query("ALTER TABLE event_translations ADD COLUMN meta_title VARCHAR(255) NULL");

@@ -2,10 +2,10 @@ import { useState } from "react";
 import { api, authHeaders } from "../api/api";
 
 const CSV_HEADER =
-  "type,source_id,category,lang,title,description,meta_title,meta_description,image,address,map_url,phone,website,tags,price_range,rating,review_count,is_published,source_name,source_url";
+  "source_id,category,lang,title,description,meta_title,meta_description,image,address,map_url,phone,website,tags,price_range,rating,review_count,source_name,source_url";
 
 const CSV_EXAMPLE =
-  "place,gmap_123,attractions,th,วัดหนองป่าพง,วัดสายป่าบรรยากาศสงบเหมาะกับการปฏิบัติธรรม,วัดหนองป่าพง,วัดปฏิบัติธรรมในอุบลราชธานี,/uploads/example.jpg,อุบลราชธานี,https://maps.google.com/?q=...,0812345678,https://example.com,วัด|ปฏิบัติธรรม,,4.6,102,1,Google Maps,https://maps.google.com/...";
+  "gmap_123,attractions,th,วัดหนองป่าพง,วัดสายป่าบรรยากาศสงบเหมาะกับการปฏิบัติธรรม,วัดหนองป่าพง,วัดปฏิบัติธรรมในอุบลราชธานี,/uploads/example.jpg,อุบลราชธานี,https://maps.google.com/?q=...,0812345678,https://example.com,วัด|ปฏิบัติธรรม,,4.6,102,Google Maps,https://maps.google.com/...";
 
 export default function ImportCsv({ token, role = "user" }) {
   const [csvText, setCsvText] = useState("");
