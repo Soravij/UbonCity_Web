@@ -50,7 +50,7 @@ function printHelp() {
       "  BACKEND_FINAL_REVIEW_SMOKE_COLLECTOR_SYNC_BASE_URL",
       "  BACKEND_FINAL_REVIEW_SMOKE_COLLECTOR_SYNC_TOKEN",
       "  DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME",
-      "  JWT_SECRET JWT_ISSUER JWT_AUDIENCE_BACKEND LIFECYCLE_SYNC_TOKEN",
+      "  JWT_SECRET JWT_ISSUER JWT_AUDIENCE_BACKEND",
     ].join("\n")
   );
 }
@@ -295,6 +295,14 @@ async function ensureReviewContentDraftFromQueue({
   const reviewContentId = Number(ingestRes.payload?.item?.id || 0) || 0;
   assert(reviewContentId > 0, "review content id missing after ingest");
   return { reviewContentId, detailItem };
+}
+
+async function seedCollectorImportReview(db, importPayload) {
+  return requestJson("/lifecycle/import-published", {
+    method: "POST",
+    headers: { "x-lifecycle-token": LIFECYCLE_SYNC_TOKEN },
+    body: importPayload,
+  });
 }
 
 function buildImportPayload({
@@ -706,11 +714,7 @@ export async function runCollectorAdminFinalReviewSmoke() {
     const health = await requestJson("/health");
     assert(health.response.ok && health.payload?.ok === true, `backend health failed: ${JSON.stringify(health.payload)}`);
 
-    const approveImport = await requestJson("/lifecycle/import-published", {
-      method: "POST",
-      headers: { "x-lifecycle-token": LIFECYCLE_SYNC_TOKEN },
-      body: importPayloads.approveV1,
-    });
+    const approveImport = await seedCollectorImportReview(db, importPayloads.approveV1);
     assert(approveImport.response.ok, `approve import failed: ${JSON.stringify(approveImport.payload)}`);
 
     const pendingAfterApproveImport = await requestJson("/collector-import-reviews", {
@@ -757,11 +761,7 @@ export async function runCollectorAdminFinalReviewSmoke() {
     );
     assert(approvedRow && approvedRow.review_status === "approved", `approved row missing after decision: ${JSON.stringify(approvedQueue.payload)}`);
 
-    const eventImport = await requestJson("/lifecycle/import-published", {
-      method: "POST",
-      headers: { "x-lifecycle-token": LIFECYCLE_SYNC_TOKEN },
-      body: importPayloads.eventV1,
-    });
+    const eventImport = await seedCollectorImportReview(db, importPayloads.eventV1);
     assert(eventImport.response.ok, `event import failed: ${JSON.stringify(eventImport.payload)}`);
 
     const pendingAfterEventImport = await requestJson("/collector-import-reviews?status=pending", {
@@ -807,11 +807,7 @@ export async function runCollectorAdminFinalReviewSmoke() {
     );
     assert(approvedEventRow && approvedEventRow.review_status === "approved", `approved event row missing after decision: ${JSON.stringify(approvedQueueAfterEvent.payload)}`);
 
-    const eventRejectImport = await requestJson("/lifecycle/import-published", {
-      method: "POST",
-      headers: { "x-lifecycle-token": LIFECYCLE_SYNC_TOKEN },
-      body: importPayloads.eventRejectV1,
-    });
+    const eventRejectImport = await seedCollectorImportReview(db, importPayloads.eventRejectV1);
     assert(eventRejectImport.response.ok, `event reject import failed: ${JSON.stringify(eventRejectImport.payload)}`);
 
     const pendingAfterEventRejectImport = await requestJson("/collector-import-reviews?status=pending", {
@@ -869,11 +865,7 @@ export async function runCollectorAdminFinalReviewSmoke() {
       `rejected event row missing after decision: ${JSON.stringify(rejectedQueueAfterEventReject.payload)}`
     );
 
-    const rejectImport = await requestJson("/lifecycle/import-published", {
-      method: "POST",
-      headers: { "x-lifecycle-token": LIFECYCLE_SYNC_TOKEN },
-      body: importPayloads.rejectV1,
-    });
+    const rejectImport = await seedCollectorImportReview(db, importPayloads.rejectV1);
     assert(rejectImport.response.ok, `reject import failed: ${JSON.stringify(rejectImport.payload)}`);
 
     const pendingAfterRejectImport = await requestJson("/collector-import-reviews?status=pending", {
@@ -919,11 +911,7 @@ export async function runCollectorAdminFinalReviewSmoke() {
     );
     assert(rejectedRow && rejectedRow.review_status === "rejected", `rejected row missing after decision: ${JSON.stringify(rejectedQueue.payload)}`);
 
-    const reimportApproved = await requestJson("/lifecycle/import-published", {
-      method: "POST",
-      headers: { "x-lifecycle-token": LIFECYCLE_SYNC_TOKEN },
-      body: importPayloads.approveV2,
-    });
+    const reimportApproved = await seedCollectorImportReview(db, importPayloads.approveV2);
     assert(reimportApproved.response.ok, `re-import failed: ${JSON.stringify(reimportApproved.payload)}`);
     assert(Number(reimportApproved.payload?.review_resets || 0) >= 1, `expected review_resets >= 1: ${JSON.stringify(reimportApproved.payload)}`);
 
@@ -952,11 +940,7 @@ export async function runCollectorAdminFinalReviewSmoke() {
       `expected approved/reimported history entries on approved item: ${JSON.stringify(approvedResetDetail.payload)}`
     );
 
-    const reimportEvent = await requestJson("/lifecycle/import-published", {
-      method: "POST",
-      headers: { "x-lifecycle-token": LIFECYCLE_SYNC_TOKEN },
-      body: importPayloads.eventV2,
-    });
+    const reimportEvent = await seedCollectorImportReview(db, importPayloads.eventV2);
     assert(reimportEvent.response.ok, `event re-import failed: ${JSON.stringify(reimportEvent.payload)}`);
     assert(Number(reimportEvent.payload?.review_resets || 0) >= 1, `expected event review_resets >= 1: ${JSON.stringify(reimportEvent.payload)}`);
 
@@ -985,11 +969,7 @@ export async function runCollectorAdminFinalReviewSmoke() {
       `expected approved/reimported history entries on event item: ${JSON.stringify(eventResetDetail.payload)}`
     );
 
-    const reimportRejectedEvent = await requestJson("/lifecycle/import-published", {
-      method: "POST",
-      headers: { "x-lifecycle-token": LIFECYCLE_SYNC_TOKEN },
-      body: importPayloads.eventRejectV2,
-    });
+    const reimportRejectedEvent = await seedCollectorImportReview(db, importPayloads.eventRejectV2);
     assert(reimportRejectedEvent.response.ok, `event reject re-import failed: ${JSON.stringify(reimportRejectedEvent.payload)}`);
     assert(
       Number(reimportRejectedEvent.payload?.review_resets || 0) >= 1,
@@ -1032,11 +1012,7 @@ export async function runCollectorAdminFinalReviewSmoke() {
       `expected rejected/reimported history entries on rejected event item: ${JSON.stringify(eventRejectedResetDetail.payload)}`
     );
 
-    const reimportRejected = await requestJson("/lifecycle/import-published", {
-      method: "POST",
-      headers: { "x-lifecycle-token": LIFECYCLE_SYNC_TOKEN },
-      body: importPayloads.rejectV2,
-    });
+    const reimportRejected = await seedCollectorImportReview(db, importPayloads.rejectV2);
     assert(reimportRejected.response.ok, `reject re-import failed: ${JSON.stringify(reimportRejected.payload)}`);
     assert(Number(reimportRejected.payload?.review_resets || 0) >= 1, `expected reject review_resets >= 1: ${JSON.stringify(reimportRejected.payload)}`);
 

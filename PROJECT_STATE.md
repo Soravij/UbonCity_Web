@@ -167,6 +167,8 @@ Known open gaps (not fixed in this change set):
 
 ## Pending / Update Later
 
+- 2026-07-23: Step A extracted `/collector-import-reviews*` routes into `backend/routes/importReviewRoutes.js` and handlers into `backend/controllers/importReviewController.js`; paths remain unchanged. Lifecycle import remains active and final-review smoke continues to exercise `/lifecycle/import-published` until Step B removes that endpoint.
+
 - CTA public rendering redesign (all 5 channels, fixed order, drop `primary_cta`) — see 2026-07-15 section above
 - CTA / Curation follow-up work
 - Media Library deduplication
