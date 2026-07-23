@@ -7,7 +7,7 @@ import {
   rejectCollectorImportReviewById,
 } from "../services/collectorImportReviewService.js";
 import { listContentPurgeAudit } from "../services/contentGovernanceService.js";
-import { assertLifecycleInfrastructureReady } from "./lifecycleController.js";
+import { assertLifecycleInfrastructureReady } from "./lifecycleInfra.js";
 
 export async function initializeImportReviewInfrastructure() {
   await ensureCollectorImportReviewTables();

@@ -8,6 +8,7 @@ import {
   upsertCollectorImportReviewFromImport,
 } from "../services/collectorImportReviewService.js";
 import { assertBackendIntegrationReadiness } from "../services/integrationReadinessService.js";
+import { assertLifecycleInfrastructureReady, markLifecycleInfrastructureReady } from "./lifecycleInfra.js";
 
 const LIFECYCLE_SYNC_TOKEN = String(process.env.LIFECYCLE_SYNC_TOKEN || "").trim();
 const LIFECYCLE_PUBLISHED_MAX = LIMITS.IMPORT_ITEMS_MAX;
@@ -17,7 +18,6 @@ const LIFECYCLE_MEDIA_MAX_BYTES = 20 * 1024 * 1024;
 const DEFAULT_COLLECTOR_SOURCE_BASE = String(process.env.COLLECTOR_PUBLIC_BASE_URL || process.env.COLLECTOR_PUBLIC_URL || "").trim();
 const BACKEND_UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
 let ensuredPlaceLocationColumns = false;
-let lifecycleInfrastructureReady = false;
 
 function toPositiveInt(value) {
   const n = Number(value);
@@ -793,15 +793,9 @@ async function ensureLifecycleSyncTables() {
   }
 }
 
-export function assertLifecycleInfrastructureReady() {
-  if (!lifecycleInfrastructureReady) {
-    throw new Error("Lifecycle infrastructure is not initialized");
-  }
-}
-
 export async function initializeLifecycleInfrastructure() {
   await ensureLifecycleSyncTables();
-  lifecycleInfrastructureReady = true;
+  markLifecycleInfrastructureReady();
 }
 
 async function getMappedLocalEntity(sourceSystem, sourceContentType, sourceContentItemId) {
