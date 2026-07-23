@@ -5401,6 +5401,83 @@ function hashReleaseManifest(manifest) {
   return crypto.createHash("sha256").update(JSON.stringify(manifestEntriesForReleaseHash(manifest))).digest("hex");
 }
 
+function normalizeReviewHandoffText(value) {
+  const normalized = String(value ?? "").trim();
+  return normalized || null;
+}
+
+function canonicalizeReviewHandoffValue(value) {
+  if (value == null) return null;
+  if (typeof value === "string") return normalizeReviewHandoffText(value);
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map((entry) => canonicalizeReviewHandoffValue(entry));
+  if (typeof value === "object") {
+    return Object.keys(value)
+      .sort()
+      .reduce((result, key) => {
+        if (value[key] !== undefined) result[key] = canonicalizeReviewHandoffValue(value[key]);
+        return result;
+      }, {});
+  }
+  return null;
+}
+
+function normalizeReviewHandoffTranslation(row, sourceLang) {
+  const lang = String(row?.lang || "").trim().toLowerCase();
+  if (!lang || lang === sourceLang) return null;
+  return {
+    lang,
+    title: normalizeReviewHandoffText(row?.title ?? row?.translated_title),
+    excerpt: normalizeReviewHandoffText(row?.excerpt ?? row?.translated_excerpt),
+    body: normalizeReviewHandoffText(row?.body ?? row?.translated_body),
+    meta_title: normalizeReviewHandoffText(row?.meta_title ?? row?.translated_meta_title),
+    meta_description: normalizeReviewHandoffText(row?.meta_description ?? row?.translated_meta_description),
+  };
+}
+
+function canonicalizeReviewHandoffTranslations(translations, sourceLang) {
+  const byLang = new Map();
+  for (const row of Array.isArray(translations) ? translations : []) {
+    const normalized = normalizeReviewHandoffTranslation(row, sourceLang);
+    if (!normalized) continue;
+    const candidateKey = JSON.stringify(normalized);
+    const existing = byLang.get(normalized.lang);
+    if (!existing || candidateKey.localeCompare(JSON.stringify(existing)) < 0) {
+      byLang.set(normalized.lang, normalized);
+    }
+  }
+  return [...byLang.values()].sort((left, right) => left.lang.localeCompare(right.lang));
+}
+
+function reviewSubmissionHashProjection(manifest) {
+  const normalized = manifest && typeof manifest === "object" && !Array.isArray(manifest) ? manifest : {};
+  const handoff = normalized.handoff && typeof normalized.handoff === "object" && !Array.isArray(normalized.handoff)
+    ? normalized.handoff
+    : {};
+  const content = canonicalizeReviewHandoffValue(handoff.content && typeof handoff.content === "object" ? handoff.content : {});
+  const sourceLang = String(content?.lang || "th").trim().toLowerCase() || "th";
+  return {
+    media: manifestEntriesForReleaseHash(normalized),
+    handoff: {
+      source_system: normalizeReviewHandoffText(handoff.source_system),
+      source_content_item_id: Number.isFinite(Number(handoff.source_content_item_id))
+        ? Number(handoff.source_content_item_id)
+        : null,
+      source_base_url: normalizeReviewHandoffText(handoff.source_base_url),
+      selected_asset_count: Number.isFinite(Number(handoff.selected_asset_count))
+        ? Number(handoff.selected_asset_count)
+        : null,
+      content,
+      translations: canonicalizeReviewHandoffTranslations(handoff.translations, sourceLang),
+    },
+  };
+}
+
+function hashReviewSubmissionHandoff(manifest) {
+  return crypto.createHash("sha256").update(JSON.stringify(reviewSubmissionHashProjection(manifest))).digest("hex");
+}
+
 function parseReleaseSnapshotManifest(snapshot) {
   if (!snapshot || typeof snapshot !== "object") throw new Error("release snapshot is required for backend sync");
   const manifest = snapshot.manifest && typeof snapshot.manifest === "object"
@@ -5534,31 +5611,32 @@ function buildBackendSyncPayload(options = {}) {
   };
 }
 
-function buildReviewIngestPayload(options = {}) {
+function buildCanonicalReviewHandoffCandidate(options = {}) {
   const contentItemId = Number(options?.contentItemId || options?.content_item_id || 0) || 0;
-  if (!contentItemId) {
-    throw new Error("content_item_id is required");
-  }
+  if (!contentItemId) throw new Error("content_item_id is required");
   const item = repo.getItem(contentItemId);
-  if (!item) {
-    throw new Error("Item not found");
-  }
+  if (!item) throw new Error("Item not found");
+
+  const sourceBaseUrl = String(options?.sourceBaseUrl || options?.source_base_url || resolveCollectorPublicBaseUrl()).trim();
   const workflowModel = repo.ensureWorkflowModel(contentItemId);
   const publishableSource = repo.buildPublishableSourceByItem(contentItemId);
   const latestDraft = buildArticleProcessDraftPreview(item, workflowModel, publishableSource) || {};
-  const submissionSnapshot = options?.submissionSnapshot || options?.submission_snapshot || null;
-  const snapshotManifest = parseReviewSubmissionSnapshotManifest(submissionSnapshot);
-  const snapshotAssets = snapshotManifestAssets(snapshotManifest);
-  const sourceBaseUrl = String(options?.sourceBaseUrl || options?.source_base_url || resolveCollectorPublicBaseUrl()).trim();
   const contentType = String(item?.type || "").trim().toLowerCase() === "event" ? "event" : "place";
-  const otherTransportMeta = isOtherTransportItem(item) ? getOtherTransportMetadata(item) : null;
   const sourceLang = String(item?.lang || "th").trim().toLowerCase() || "th";
   const title = String(latestDraft?.draft_title || item?.title || "").trim();
   const excerpt = String(latestDraft?.excerpt || item?.summary || "").trim();
   const body = String(latestDraft?.body || item?.description_clean || item?.description_raw || "").trim();
   const rewrittenBody = rewriteCollectorHtmlMediaUrls(body, sourceBaseUrl);
+  const metaTitle = String(latestDraft?.meta_title || item?.meta_title || title).trim();
+  const metaDescription = String(latestDraft?.meta_description || item?.meta_description || excerpt).trim();
+  if (!title || !excerpt || !rewrittenBody || !metaTitle || !metaDescription) {
+    throw new Error("content fields are incomplete for admin review ingest");
+  }
+
+  const selectedManifest = toPublishedMediaManifest(contentItemId);
+  const snapshotAssets = snapshotManifestAssets(selectedManifest);
   const mergedMediaResult = mergeInlineMediaManifestFromBody({
-    mediaManifest: rewriteMediaManifestForBase(snapshotManifest, sourceBaseUrl),
+    mediaManifest: rewriteMediaManifestForBase(selectedManifest, sourceBaseUrl),
     bodyHtml: rewrittenBody,
     baseUrl: sourceBaseUrl,
     allAssets: snapshotAssets,
@@ -5572,34 +5650,33 @@ function buildReviewIngestPayload(options = {}) {
   }
   const adminReviewMediaResult = sanitizeAdminReviewMediaManifest(mergedMediaResult?.mediaManifest || {}, contentItemId);
   const mediaManifest = adminReviewMediaResult.mediaManifest || {};
-  const coverImage = String(mediaManifest?.cover?.source_url || "").trim();
-  if (!coverImage) {
+  if (!String(mediaManifest?.cover?.source_url || "").trim()) {
     throw new Error("cover image must be selected from uploaded local assets");
   }
-  const metaTitle = String(latestDraft?.meta_title || item?.meta_title || title).trim();
-  const metaDescription = String(latestDraft?.meta_description || item?.meta_description || excerpt).trim();
-  if (!title || !excerpt || !rewrittenBody || !metaTitle || !metaDescription) {
-    throw new Error("content fields are incomplete for admin review ingest");
-  }
 
-  const currentSourceFingerprint = contentItemId ? getCurrentTranslationSourceFingerprint(repo, contentItemId) : "";
-  const translationLangs = repo
-    .listTranslations(contentItemId)
-    .filter((t) => isTranslationRecheckPassed(t, currentSourceFingerprint))
-    .map((t) => String(t.lang || "").trim().toLowerCase())
-    .filter(Boolean);
+  const currentSourceFingerprint = getCurrentTranslationSourceFingerprint(repo, contentItemId);
+  const translations = canonicalizeReviewHandoffTranslations(
+    repo.listTranslations(contentItemId).filter((row) => isTranslationRecheckPassed(row, currentSourceFingerprint)),
+    sourceLang
+  );
+  const content = canonicalizeReviewHandoffValue(buildReviewIngestContentPayload({
+    contentType,
+    sourceLang,
+    item: {
+      ...item,
+      slug: normalizeCollectorSlug(item?.slug || "", `item-${contentItemId}`),
+    },
+    latestDraft,
+    title,
+    excerpt,
+    rewrittenBody,
+    metaTitle,
+    metaDescription,
+    otherTransportMeta: isOtherTransportItem(item) ? getOtherTransportMetadata(item) : null,
+    translationLangs: translations.map((row) => row.lang),
+  }));
 
   if (String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production") {
-    if (unresolvedCollectorUploadUrls.length > 0) {
-      try {
-        console.error("[admin-review media eligibility skipped body images]", JSON.stringify({
-          content_item_id: contentItemId,
-          unresolved_collector_upload_urls: unresolvedCollectorUploadUrls,
-        }));
-      } catch {
-        console.error("[admin-review media eligibility skipped body images]");
-      }
-    }
     const excludedExternalMedia = Array.isArray(adminReviewMediaResult?.diagnostics) ? adminReviewMediaResult.diagnostics : [];
     if (excludedExternalMedia.length > 0) {
       try {
@@ -5611,35 +5688,53 @@ function buildReviewIngestPayload(options = {}) {
   }
 
   return {
-    source_system: "collector-app",
-    source_content_item_id: contentItemId,
+    ...mediaManifest,
+    gallery: Array.isArray(mediaManifest?.gallery) ? mediaManifest.gallery : [],
+    inline: Array.isArray(mediaManifest?.inline) ? mediaManifest.inline : [],
+    handoff: {
+      source_system: "collector-app",
+      source_content_item_id: contentItemId,
+      source_base_url: sourceBaseUrl,
+      selected_asset_count: snapshotManifestAssets(mediaManifest).length,
+      content,
+      translations,
+    },
+  };
+}
+
+function reviewSubmissionHandoffFromSnapshot(submissionSnapshot) {
+  const snapshotManifest = parseReviewSubmissionSnapshotManifest(submissionSnapshot);
+  const handoff = snapshotManifest?.handoff;
+  if (!handoff || typeof handoff !== "object" || Array.isArray(handoff)) {
+    throw new Error("review submission handoff is missing");
+  }
+  const content = handoff.content && typeof handoff.content === "object" && !Array.isArray(handoff.content)
+    ? handoff.content
+    : null;
+  const sourceContentItemId = Number(handoff.source_content_item_id || 0) || 0;
+  if (!content || !sourceContentItemId) throw new Error("review submission handoff is invalid");
+  return { snapshotManifest, handoff, content, sourceContentItemId };
+}
+
+function buildReviewIngestPayload(options = {}) {
+  const submissionSnapshot = options?.submissionSnapshot || options?.submission_snapshot || null;
+  const { snapshotManifest, handoff, content, sourceContentItemId } = reviewSubmissionHandoffFromSnapshot(submissionSnapshot);
+  const mediaManifest = {
+    cover: snapshotManifest?.cover || null,
+    gallery: Array.isArray(snapshotManifest?.gallery) ? snapshotManifest.gallery : [],
+    inline: Array.isArray(snapshotManifest?.inline) ? snapshotManifest.inline : [],
+  };
+  return {
+    source_system: String(handoff.source_system || "collector-app").trim().toLowerCase() || "collector-app",
+    source_content_item_id: sourceContentItemId,
     source_submission_id: String(submissionSnapshot.submission_id || "").trim(),
     source_manifest_hash: String(submissionSnapshot.manifest_hash || "").trim().toLowerCase(),
-    source_base_url: sourceBaseUrl,
-    content: {
-      ...buildReviewIngestContentPayload({
-        contentType,
-        sourceLang,
-        item: {
-          ...item,
-          // Confirmed CTA/contact remains place-first and draft-owned only.
-          slug: normalizeCollectorSlug(item?.slug || "", `item-${contentItemId}`),
-        },
-        latestDraft,
-        title,
-        excerpt,
-        rewrittenBody,
-        metaTitle,
-        metaDescription,
-        otherTransportMeta,
-        translationLangs,
-      }),
-    },
+    source_base_url: String(handoff.source_base_url || "").trim() || undefined,
+    content: canonicalizeReviewHandoffValue(content),
+    translations: canonicalizeReviewHandoffTranslations(handoff.translations, String(content?.lang || "th").trim().toLowerCase() || "th"),
     media_manifest: {
       ...mediaManifest,
-      gallery: Array.isArray(mediaManifest?.gallery) ? mediaManifest.gallery : [],
-      inline: Array.isArray(mediaManifest?.inline) ? mediaManifest.inline : [],
-      selected_asset_count: snapshotAssets.length,
+      selected_asset_count: Number(handoff.selected_asset_count || 0) || 0,
     },
   };
 }
@@ -5662,7 +5757,10 @@ function buildEventAdminQueuePayload(options = {}) {
   const content = reviewPayload?.content || {};
   const sourceBaseUrl = String(reviewPayload?.source_base_url || options?.sourceBaseUrl || resolveCollectorPublicBaseUrl()).trim();
   const mediaManifest = rewriteMediaManifestForBase(reviewPayload?.media_manifest || {}, sourceBaseUrl);
-  const currentSourceFingerprint = contentItemId ? getCurrentTranslationSourceFingerprint(repo, contentItemId) : "";
+  const translations = canonicalizeReviewHandoffTranslations(
+    reviewPayload?.translations,
+    String(content?.lang || "th").trim().toLowerCase() || "th"
+  );
 
   return {
     source_system: String(reviewPayload?.source_system || "collector-app").trim().toLowerCase() || "collector-app",
@@ -5692,21 +5790,14 @@ function buildEventAdminQueuePayload(options = {}) {
         inline: Array.isArray(mediaManifest?.inline) ? mediaManifest.inline : [],
       },
     },
-    translations_snapshot: repo
-      .listTranslations(contentItemId)
-      .filter((t) => isTranslationRecheckPassed(t, currentSourceFingerprint))
-      .map((t) => ({
-        lang: String(t.lang || "").trim().toLowerCase(),
-        title: t.translated_title,
-        description: t.translated_body,
-        meta_title: t.translated_meta_title,
-        meta_description: t.translated_meta_description,
-      })),
-    translation_langs: repo
-      .listTranslations(contentItemId)
-      .filter((t) => isTranslationRecheckPassed(t, currentSourceFingerprint))
-      .map((t) => String(t.lang || "").trim().toLowerCase())
-      .filter(Boolean),
+    translations_snapshot: translations.map((row) => ({
+      lang: row.lang,
+      title: row.title,
+      description: row.body,
+      meta_title: row.meta_title,
+      meta_description: row.meta_description,
+    })),
+    translation_langs: translations.map((row) => row.lang),
   };
 }
 
@@ -13709,17 +13800,18 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
       res.status(409).json({ error: "COLLECTOR_REVIEW_SYNC_TOKEN is required before admin review ingest." });
       return;
     }
-    const submissionManifest = toPublishedMediaManifest(id);
+    const submissionManifest = buildCanonicalReviewHandoffCandidate({
+      contentItemId: id,
+      sourceBaseUrl: resolveCollectorPublicBaseUrl(),
+    });
     const submissionSnapshotResolution = repo.resolveReviewSubmissionSnapshot({
       contentItemId: id,
       manifest: submissionManifest,
-      manifestHash: hashReleaseManifest(submissionManifest),
+      manifestHash: hashReviewSubmissionHandoff(submissionManifest),
       submittedBy: actorEmail(req),
     });
     const submissionSnapshot = submissionSnapshotResolution.snapshot;
     const payload = buildReviewIngestPayload({
-      contentItemId: id,
-      sourceBaseUrl: resolveCollectorRequestBaseUrl(req) || resolveCollectorPublicBaseUrl(),
       submissionSnapshot,
     });
     const multipartPlan = buildAdminReviewMultipartFilePlan(payload, submissionSnapshot);
