@@ -53,6 +53,7 @@ tmp-thai-test.txt
 # Local helper and editor artifacts
 .continue/
 .vscode/
+scratch/
 collector/server/public/_fix.mjs
 collector/tmp-tests.ps1
 frontend/tmp-playwright-preview.cjs
