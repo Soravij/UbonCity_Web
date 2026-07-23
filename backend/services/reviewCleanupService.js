@@ -42,6 +42,15 @@ export async function cleanupUnpublishedBatchAssets(reviewContentId, batchUid, e
   return Array.from(new Set(cleanupFilePaths));
 }
 
+export async function cleanupUnpublishedBatchTranslations(reviewContentId, batchUid, executor = pool) {
+  await executor.query(
+    `UPDATE review_content_translations
+     SET status='deleted', updated_at=CURRENT_TIMESTAMP
+     WHERE review_content_id=? AND batch_uid=? AND status='review_ready'`,
+    [Number(reviewContentId), String(batchUid || "").trim()]
+  );
+}
+
 export async function cleanupReviewAssetFilesBestEffort(filePaths = []) {
   for (const filePath of Array.isArray(filePaths) ? filePaths : []) {
     const normalizedPath = String(filePath || "").trim();

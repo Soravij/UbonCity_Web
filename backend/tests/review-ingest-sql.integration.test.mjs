@@ -20,7 +20,7 @@ if (runSqlIntegration) {
   });
 }
 
-function makePayload({ sourceContentItemId, submissionId, manifestHash, caption, sourceAssetId }) {
+function makePayload({ sourceContentItemId, submissionId, manifestHash, caption, sourceAssetId, translationTitle }) {
   return {
     source_system: "review-ingest-sql-integration",
     source_content_item_id: sourceContentItemId,
@@ -34,6 +34,14 @@ function makePayload({ sourceContentItemId, submissionId, manifestHash, caption,
       title: `SQL ingest ${manifestHash.slice(0, 8)}`,
       body: "<p>SQL integration fixture</p>",
     },
+    translations: [{
+      lang: "en",
+      title: translationTitle,
+      excerpt: "SQL translation excerpt",
+      body: `<p>${translationTitle} body</p>`,
+      meta_title: `${translationTitle} meta`,
+      meta_description: `${translationTitle} description`,
+    }],
     media_manifest: {
       cover: {
         source_url: "/uploads/review-ingest-sql.png",
@@ -72,6 +80,7 @@ test("review ingest executes provenance insert, retry, and revision against MySQ
         manifestHash: firstManifestHash,
         caption: "first caption",
         sourceAssetId: 701,
+        translationTitle: "First translation",
       }),
       { multipart: true, uploadedFiles: [makeUpload()] }
     );
@@ -100,6 +109,18 @@ test("review ingest executes provenance insert, retry, and revision against MySQ
     assert.equal(Number(firstAssets[0].source_asset_id), 701);
     assert.equal(firstAssets[0].source_submission_id, firstSubmissionId);
     cleanupPaths.add(String(firstAssets[0].storage_path || ""));
+    const [firstTranslations] = await pool.query(
+      `SELECT lang, title, source_submission_id, status
+       FROM review_content_translations
+       WHERE review_content_id=? AND batch_uid=?`,
+      [first.id, first.current_batch_uid]
+    );
+    assert.deepEqual(firstTranslations, [{
+      lang: "en",
+      title: "First translation",
+      source_submission_id: firstSubmissionId,
+      status: "review_ready",
+    }]);
 
     const retry = await ingestReviewContent(
       makePayload({
@@ -108,6 +129,7 @@ test("review ingest executes provenance insert, retry, and revision against MySQ
         manifestHash: firstManifestHash,
         caption: "first caption",
         sourceAssetId: 701,
+        translationTitle: "First translation",
       }),
       { multipart: true, uploadedFiles: [makeUpload()] }
     );
@@ -121,6 +143,7 @@ test("review ingest executes provenance insert, retry, and revision against MySQ
         manifestHash: revisionManifestHash,
         caption: "revision caption",
         sourceAssetId: 702,
+        translationTitle: "Revision translation",
       }),
       { multipart: true, uploadedFiles: [makeUpload()] }
     );
@@ -148,6 +171,25 @@ test("review ingest executes provenance insert, retry, and revision against MySQ
     assert.equal(Number(revisionAssets[0].source_asset_id), 702);
     assert.equal(revisionAssets[0].source_submission_id, revisionSubmissionId);
     cleanupPaths.add(String(revisionAssets[0].storage_path || ""));
+    const [supersededTranslations] = await pool.query(
+      `SELECT status
+       FROM review_content_translations
+       WHERE review_content_id=? AND batch_uid=? AND lang='en'`,
+      [first.id, first.current_batch_uid]
+    );
+    assert.deepEqual(supersededTranslations, [{ status: "deleted" }]);
+    const [revisionTranslations] = await pool.query(
+      `SELECT lang, title, source_submission_id, status
+       FROM review_content_translations
+       WHERE review_content_id=? AND batch_uid=?`,
+      [first.id, revision.current_batch_uid]
+    );
+    assert.deepEqual(revisionTranslations, [{
+      lang: "en",
+      title: "Revision translation",
+      source_submission_id: revisionSubmissionId,
+      status: "review_ready",
+    }]);
   } finally {
     const [assetRows] = await pool.query(
       `SELECT storage_path

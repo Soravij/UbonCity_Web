@@ -1,7 +1,11 @@
 import crypto from "crypto";
 import pool from "../config/db.js";
 import { appendReviewAction } from "./reviewContentService.js";
-import { cleanupReviewAssetFilesBestEffort, cleanupUnpublishedBatchAssets } from "./reviewCleanupService.js";
+import {
+  cleanupReviewAssetFilesBestEffort,
+  cleanupUnpublishedBatchAssets,
+  cleanupUnpublishedBatchTranslations,
+} from "./reviewCleanupService.js";
 import { cleanupPublishedMediaFilesBestEffort, replaceEntityMediaWithReviewBatch } from "./publishedMediaService.js";
 import {
   getCollectorImportReviewById,
@@ -220,6 +224,109 @@ async function upsertPublishedEvent(connection, content) {
   return eventId;
 }
 
+async function loadReviewReadyTranslations(connection, reviewContentId, batchUid) {
+  const [rows] = await connection.query(
+    `SELECT lang, title, excerpt, body, meta_title, meta_description
+     FROM review_content_translations
+     WHERE review_content_id=? AND batch_uid=? AND status='review_ready'
+     ORDER BY lang ASC`,
+    [Number(reviewContentId), String(batchUid || "").trim()]
+  );
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function upsertPublishedReviewTranslations(connection, contentType, entityId, translations = []) {
+  for (const translation of Array.isArray(translations) ? translations : []) {
+    if (contentType === "place") {
+      await connection.query(
+        `INSERT INTO place_translations (place_id, lang, title, description, meta_title, meta_description)
+         VALUES (?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), meta_title=VALUES(meta_title), meta_description=VALUES(meta_description)`,
+        [
+          Number(entityId),
+          translation.lang,
+          translation.title,
+          translation.body,
+          translation.meta_title,
+          translation.meta_description,
+        ]
+      );
+      continue;
+    }
+    await connection.query(
+      `INSERT INTO event_translations (event_id, lang, title, description, meta_title, meta_description)
+       VALUES (?,?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE title=VALUES(title), description=VALUES(description), meta_title=VALUES(meta_title), meta_description=VALUES(meta_description)`,
+      [
+        Number(entityId),
+        translation.lang,
+        translation.title,
+        translation.body,
+        translation.meta_title,
+        translation.meta_description,
+      ]
+    );
+  }
+}
+
+// Invariant: every path that deletes public place_translations/event_translations
+// must also delete its paired review_contents row (purgeContentService does this).
+// Otherwise a historical pipeline ledger can outlive its public entity and this
+// strict affectedRows check will correctly surface the divergence.
+async function deleteRemovedPipelineTranslations(connection, {
+  reviewContentId,
+  contentType,
+  entityId,
+  sourceLang,
+  currentTranslations,
+}) {
+  const [historicalRows] = await connection.query(
+    `SELECT DISTINCT lang
+     FROM review_content_translations
+     WHERE review_content_id=? AND status='published'`,
+    [Number(reviewContentId)]
+  );
+  const currentLangs = new Set((Array.isArray(currentTranslations) ? currentTranslations : [])
+    .map((row) => String(row?.lang || "").trim().toLowerCase())
+    .filter(Boolean));
+  const normalizedSourceLang = String(sourceLang || "th").trim().toLowerCase() || "th";
+  const removedLangs = [...new Set((Array.isArray(historicalRows) ? historicalRows : [])
+    .map((row) => String(row?.lang || "").trim().toLowerCase())
+    .filter((lang) => lang && lang !== normalizedSourceLang && !currentLangs.has(lang)))];
+  if (!removedLangs.length) return [];
+
+  const placeholders = removedLangs.map(() => "?").join(",");
+  const table = contentType === "place" ? "place_translations" : "event_translations";
+  const entityColumn = contentType === "place" ? "place_id" : "event_id";
+  const [deleteResult] = await connection.query(
+    `DELETE FROM ${table}
+     WHERE ${entityColumn}=? AND lang IN (${placeholders})`,
+    [Number(entityId), ...removedLangs]
+  );
+  const affectedRows = Number(deleteResult?.affectedRows || 0) || 0;
+  if (affectedRows !== removedLangs.length) {
+    throw new Error(
+      `pipeline translation delete mismatch for ${contentType} ${Number(entityId)}: expected ${removedLangs.length}, deleted ${affectedRows} (${removedLangs.join(",")})`
+    );
+  }
+  await connection.query(
+    `UPDATE review_content_translations
+     SET status='deleted', updated_at=CURRENT_TIMESTAMP
+     WHERE review_content_id=? AND status='published' AND lang IN (${placeholders})`,
+    [Number(reviewContentId), ...removedLangs]
+  );
+  return removedLangs;
+}
+
+async function markReviewBatchTranslationsPublished(connection, reviewContentId, batchUid) {
+  await connection.query(
+    `UPDATE review_content_translations
+     SET status='published', updated_at=CURRENT_TIMESTAMP
+     WHERE review_content_id=? AND batch_uid=? AND status='review_ready'`,
+    [Number(reviewContentId), String(batchUid || "").trim()]
+  );
+}
+
 async function updateEntityPublishedImages(connection, contentType, entityId, coverUrl, thumbnailUrl) {
   if (contentType === "place") {
     await connection.query(
@@ -317,6 +424,9 @@ export async function approveReviewContent({ reviewContent, actorUserId, reviewN
       publicEntityId = await upsertPublishedEvent(connection, content);
     }
 
+    const reviewTranslations = await loadReviewReadyTranslations(connection, content.id, content.current_batch_uid);
+    await upsertPublishedReviewTranslations(connection, contentType, publicEntityId, reviewTranslations);
+
     const mediaResult = await replaceEntityMediaWithReviewBatch(connection, {
       entityType: contentType,
       entityId: publicEntityId,
@@ -328,6 +438,14 @@ export async function approveReviewContent({ reviewContent, actorUserId, reviewN
     promotedFilePaths = Array.isArray(mediaResult?.promoted_file_paths) ? mediaResult.promoted_file_paths : [];
     await updateEntityPublishedImages(connection, contentType, publicEntityId, mediaResult.cover_url, mediaResult.thumbnail_url);
     await rewritePublishedEntityContent(connection, content, publicEntityId, mediaResult);
+    await deleteRemovedPipelineTranslations(connection, {
+      reviewContentId: content.id,
+      contentType,
+      entityId: publicEntityId,
+      sourceLang: content.lang,
+      currentTranslations: reviewTranslations,
+    });
+    await markReviewBatchTranslationsPublished(connection, content.id, content.current_batch_uid);
 
     await connection.query(
       `UPDATE review_contents
@@ -481,6 +599,7 @@ export async function markLegacyNeedsRevisionFromQueue({
       if (currentBatchUid) {
         const filePaths = await cleanupUnpublishedBatchAssets(reviewContentId, currentBatchUid, connection);
         assetCleanupFilePaths.push(...(Array.isArray(filePaths) ? filePaths : []));
+        await cleanupUnpublishedBatchTranslations(reviewContentId, currentBatchUid, connection);
       }
       await connection.query(
         "UPDATE review_contents SET status='needs_revision', updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -544,6 +663,7 @@ export async function markNeedsRevision({ reviewContent, actorUserId, reviewNote
 
     await syncNeedsRevisionToCollector(content, reviewNote, actorUserId);
     assetCleanupFilePaths = await cleanupUnpublishedBatchAssets(content.id, content.current_batch_uid, connection);
+    await cleanupUnpublishedBatchTranslations(content.id, content.current_batch_uid, connection);
     await connection.query(
       "UPDATE review_contents SET status='needs_revision', updated_at=CURRENT_TIMESTAMP WHERE id=?",
       [content.id]
@@ -594,6 +714,7 @@ export async function markRejected({ reviewContent, actorUserId, reviewNote = nu
     }
 
     assetCleanupFilePaths = await cleanupUnpublishedBatchAssets(content.id, content.current_batch_uid, connection);
+    await cleanupUnpublishedBatchTranslations(content.id, content.current_batch_uid, connection);
     await connection.query(
       "UPDATE review_contents SET status='rejected', updated_at=CURRENT_TIMESTAMP WHERE id=?",
       [content.id]
@@ -672,6 +793,7 @@ export async function markLegacyRejectedFromQueue({
       if (currentBatchUid) {
         const filePaths = await cleanupUnpublishedBatchAssets(reviewContentId, currentBatchUid, connection);
         assetCleanupFilePaths.push(...(Array.isArray(filePaths) ? filePaths : []));
+        await cleanupUnpublishedBatchTranslations(reviewContentId, currentBatchUid, connection);
       }
       await connection.query(
         "UPDATE review_contents SET status='rejected', updated_at=CURRENT_TIMESTAMP WHERE id=?",

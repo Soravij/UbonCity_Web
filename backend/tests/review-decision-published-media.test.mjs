@@ -92,6 +92,11 @@ function createApproveHarness() {
       { id: 901, review_status: "pending" },
     ],
     reviewContentAssetStatusUpdates: [],
+    reviewTranslations: [],
+    historicalReviewTranslationLangs: [],
+    reviewTranslationStatusUpdates: [],
+    deletedPlaceTranslationLangs: [],
+    publicTranslationDeleteAffectedRows: null,
     reviewContentUpdates: [],
     transaction: [],
   };
@@ -135,7 +140,27 @@ function createApproveHarness() {
       if (normalized.startsWith("insert into places (")) {
         return [{ insertId: state.placeInsertId }];
       }
+      if (normalized.startsWith("select lang, title, excerpt, body, meta_title, meta_description from review_content_translations")) {
+        return [state.reviewTranslations
+          .filter((row) => row.review_content_id === params[0] && row.batch_uid === params[1] && row.status === "review_ready")
+          .map((row) => ({ ...row }))];
+      }
+      if (normalized.startsWith("select distinct lang from review_content_translations")) {
+        return [[...new Set([
+          ...state.reviewTranslations.filter((row) => row.status === "published").map((row) => row.lang),
+          ...state.historicalReviewTranslationLangs,
+        ])].map((lang) => ({ lang }))];
+      }
       if (normalized.startsWith("insert into place_translations")) {
+        state.placeTranslationUpserts = state.placeTranslationUpserts || [];
+        state.placeTranslationUpserts.push({
+          place_id: params[0],
+          lang: params[1],
+          title: params[2],
+          description: params[3],
+          meta_title: params[4],
+          meta_description: params[5],
+        });
         state.placeTranslationUpsert = {
           place_id: params[0],
           lang: params[1],
@@ -144,7 +169,21 @@ function createApproveHarness() {
           meta_title: params[4],
           meta_description: params[5],
         };
+        const index = state.placeTranslationRows.findIndex((row) => row.lang === params[1]);
+        const nextRow = { lang: params[1], description: params[3] };
+        if (index >= 0) state.placeTranslationRows[index] = { ...state.placeTranslationRows[index], ...nextRow };
+        else state.placeTranslationRows.push(nextRow);
         return [{ affectedRows: 1 }];
+      }
+      if (normalized.startsWith("delete from place_translations where place_id=? and lang in (")) {
+        const removedLangs = params.slice(1);
+        state.deletedPlaceTranslationLangs.push(...removedLangs);
+        state.placeTranslationRows = state.placeTranslationRows.filter((row) => !removedLangs.includes(row.lang));
+        return [{
+          affectedRows: Number.isInteger(state.publicTranslationDeleteAffectedRows)
+            ? state.publicTranslationDeleteAffectedRows
+            : removedLangs.length,
+        }];
       }
       if (normalized === "select lang, description from place_translations where place_id=?") {
         return [state.placeTranslationRows.map((row) => ({ ...row }))];
@@ -235,6 +274,24 @@ function createApproveHarness() {
           batch_uid: params[1],
         });
         return [{ affectedRows: state.reviewAssets.length }];
+      }
+      if (normalized.startsWith("update review_content_translations set status='published'")) {
+        state.reviewTranslationStatusUpdates.push({ review_content_id: params[0], batch_uid: params[1] });
+        state.reviewTranslations = state.reviewTranslations.map((row) =>
+          row.review_content_id === params[0] && row.batch_uid === params[1] && row.status === "review_ready"
+            ? { ...row, status: "published" }
+            : row
+        );
+        return [{ affectedRows: state.reviewTranslations.length }];
+      }
+      if (normalized.startsWith("update review_content_translations set status='deleted'")) {
+        const removedLangs = params.slice(1);
+        state.reviewTranslations = state.reviewTranslations.map((row) =>
+          row.review_content_id === params[0] && row.status === "published" && removedLangs.includes(row.lang)
+            ? { ...row, status: "deleted" }
+            : row
+        );
+        return [{ affectedRows: removedLangs.length }];
       }
       if (normalized.startsWith("insert into review_actions")) {
         state.reviewActions.push({
@@ -334,6 +391,10 @@ function createEventApproveHarness() {
     eventDescriptionUpdates: [],
     eventTranslationRewrites: [],
     reviewContentAssetStatusUpdates: [],
+    reviewTranslations: [],
+    historicalReviewTranslationLangs: [],
+    reviewTranslationStatusUpdates: [],
+    deletedEventTranslationLangs: [],
     reviewContentUpdates: [],
     reviewActions: [],
     collectorActions: [],
@@ -384,14 +445,44 @@ function createEventApproveHarness() {
         };
         return [{ affectedRows: 1 }];
       }
+      if (normalized.startsWith("select lang, title, excerpt, body, meta_title, meta_description from review_content_translations")) {
+        return [state.reviewTranslations
+          .filter((row) => row.review_content_id === params[0] && row.batch_uid === params[1] && row.status === "review_ready")
+          .map((row) => ({ ...row }))];
+      }
+      if (normalized.startsWith("select distinct lang from review_content_translations")) {
+        return [[...new Set([
+          ...state.reviewTranslations.filter((row) => row.status === "published").map((row) => row.lang),
+          ...state.historicalReviewTranslationLangs,
+        ])].map((lang) => ({ lang }))];
+      }
       if (normalized.startsWith("insert into event_translations")) {
+        state.eventTranslationUpserts = state.eventTranslationUpserts || [];
+        state.eventTranslationUpserts.push({
+          event_id: params[0],
+          lang: params[1],
+          title: params[2],
+          description: params[3],
+          meta_title: params[4],
+          meta_description: params[5],
+        });
         state.eventTranslationUpsert = {
           event_id: params[0],
           lang: params[1],
           title: params[2],
           description: params[3],
         };
+        const index = state.eventTranslationRows.findIndex((row) => row.lang === params[1]);
+        const nextRow = { lang: params[1], description: params[3] };
+        if (index >= 0) state.eventTranslationRows[index] = { ...state.eventTranslationRows[index], ...nextRow };
+        else state.eventTranslationRows.push(nextRow);
         return [{ affectedRows: 1 }];
+      }
+      if (normalized.startsWith("delete from event_translations where event_id=? and lang in (")) {
+        const removedLangs = params.slice(1);
+        state.deletedEventTranslationLangs.push(...removedLangs);
+        state.eventTranslationRows = state.eventTranslationRows.filter((row) => !removedLangs.includes(row.lang));
+        return [{ affectedRows: removedLangs.length }];
       }
       if (normalized.includes("from review_content_assets")) {
         return [state.reviewAssets];
@@ -464,6 +555,15 @@ function createEventApproveHarness() {
       if (normalized.startsWith("update review_content_assets set status='published'")) {
         state.reviewContentAssetStatusUpdates.push({ review_content_id: params[0], batch_uid: params[1] });
         return [{ affectedRows: state.reviewAssets.length }];
+      }
+      if (normalized.startsWith("update review_content_translations set status='published'")) {
+        state.reviewTranslationStatusUpdates.push({ review_content_id: params[0], batch_uid: params[1] });
+        state.reviewTranslations = state.reviewTranslations.map((row) =>
+          row.review_content_id === params[0] && row.batch_uid === params[1] && row.status === "review_ready"
+            ? { ...row, status: "published" }
+            : row
+        );
+        return [{ affectedRows: state.reviewTranslations.length }];
       }
       if (normalized.startsWith("insert into review_actions")) {
         state.reviewActions.push({ review_content_id: params[0], action_type: params[2] });
@@ -545,6 +645,153 @@ test("approveReviewContent updates published place image fields from storage_pat
     assert.equal(harness.state.reviewContent.public_entity_type, "place");
     assert.equal(harness.state.reviewContent.public_entity_id, 99);
     assert.equal(harness.state.reviewContentAssetStatusUpdates.length, 1);
+  } finally {
+    await removeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+    await removeUploadFixture("uploads/published/places/99/501-batch-99-cover-0-1.jpg");
+    pool.getConnection = originalGetConnection;
+    pool.query = originalPoolQuery;
+    process.env.BACKEND_PUBLIC_URL = originalBackendPublicUrl;
+  }
+});
+
+test("approveReviewContent promotes the current translation batch and deletes only historical pipeline languages", async () => {
+  const originalGetConnection = pool.getConnection;
+  const originalPoolQuery = pool.query;
+  const originalBackendPublicUrl = process.env.BACKEND_PUBLIC_URL;
+  const harness = createApproveHarness();
+  harness.state.reviewTranslations = [
+    {
+      review_content_id: 501,
+      batch_uid: "previous-batch",
+      status: "published",
+      lang: "en",
+      title: "Previous English",
+      excerpt: null,
+      body: "<p>Previous</p>",
+      meta_title: null,
+      meta_description: null,
+    },
+    {
+      review_content_id: 501,
+      batch_uid: "previous-batch",
+      status: "published",
+      lang: "zh",
+      title: "Previous Chinese",
+      excerpt: null,
+      body: "<p>Previous</p>",
+      meta_title: null,
+      meta_description: null,
+    },
+    {
+      review_content_id: 501,
+      batch_uid: "batch-99",
+      status: "review_ready",
+      lang: "en",
+      title: "Current English",
+      excerpt: "English excerpt",
+      body: '<p>English <img src="https://api-test.uboncity.com/uploads/review-item-32-asset-cover.jpg"></p>',
+      meta_title: "English meta",
+      meta_description: "English description",
+    },
+    {
+      review_content_id: 501,
+      batch_uid: "batch-99",
+      status: "review_ready",
+      lang: "lo",
+      title: "Current Lao",
+      excerpt: null,
+      body: "<p>Lao</p>",
+      meta_title: null,
+      meta_description: null,
+    },
+  ];
+  harness.state.historicalReviewTranslationLangs = ["th"];
+  harness.state.placeTranslationRows.push(
+    { lang: "zh", description: "<p>Pipeline Chinese</p>" },
+    { lang: "fr", description: "<p>Lifecycle French</p>" },
+  );
+
+  pool.getConnection = async () => harness.connection;
+  pool.query = harness.poolQuery;
+  process.env.BACKEND_PUBLIC_URL = "https://api-test.uboncity.com";
+  await writeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+
+  try {
+    const result = await approveReviewContent({
+      reviewContent: { id: harness.state.reviewContent.id },
+      actorUserId: 7,
+      reviewNote: "approve translations",
+    });
+
+    assert.equal(result.status, "published");
+    assert.deepEqual(harness.state.placeTranslationUpserts.map((row) => row.lang), ["th", "en", "lo"]);
+    assert.deepEqual(harness.state.deletedPlaceTranslationLangs, ["zh"]);
+    assert.equal(harness.state.placeTranslationRows.some((row) => row.lang === "zh"), false);
+    assert.equal(harness.state.placeTranslationRows.some((row) => row.lang === "fr"), true);
+    assert.equal(harness.state.placeTranslationRows.some((row) => row.lang === "th"), true);
+    assert.deepEqual(
+      harness.state.reviewTranslations
+        .filter((row) => row.batch_uid === "batch-99")
+        .map((row) => row.status),
+      ["published", "published"]
+    );
+    assert.deepEqual(
+      harness.state.reviewTranslations
+        .filter((row) => row.batch_uid === "previous-batch")
+        .map((row) => row.status),
+      ["published", "deleted"]
+    );
+  } finally {
+    await removeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+    await removeUploadFixture("uploads/published/places/99/501-batch-99-cover-0-1.jpg");
+    pool.getConnection = originalGetConnection;
+    pool.query = originalPoolQuery;
+    process.env.BACKEND_PUBLIC_URL = originalBackendPublicUrl;
+  }
+});
+
+test("approveReviewContent rolls back when a required public translation delete is incomplete", async () => {
+  const originalGetConnection = pool.getConnection;
+  const originalPoolQuery = pool.query;
+  const originalBackendPublicUrl = process.env.BACKEND_PUBLIC_URL;
+  const harness = createApproveHarness();
+  harness.state.reviewTranslations = [
+    {
+      review_content_id: 501,
+      batch_uid: "previous-batch",
+      status: "published",
+      lang: "zh",
+      title: "Previous Chinese",
+      excerpt: null,
+      body: "<p>Previous</p>",
+      meta_title: null,
+      meta_description: null,
+    },
+  ];
+  harness.state.placeTranslationRows.push({ lang: "zh", description: "<p>Pipeline Chinese</p>" });
+  harness.state.publicTranslationDeleteAffectedRows = 0;
+
+  pool.getConnection = async () => harness.connection;
+  pool.query = harness.poolQuery;
+  process.env.BACKEND_PUBLIC_URL = "https://api-test.uboncity.com";
+  await writeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+
+  try {
+    await assert.rejects(
+      () => approveReviewContent({
+        reviewContent: { id: harness.state.reviewContent.id },
+        actorUserId: 7,
+        reviewNote: "force translation delete mismatch",
+      }),
+      /pipeline translation delete mismatch for place 99: expected 1, deleted 0 \(zh\)/
+    );
+    assert.ok(harness.state.transaction.includes("rollback"));
+    assert.equal(harness.state.transaction.includes("commit"), false);
+    assert.deepEqual(
+      harness.state.reviewTranslations.map((row) => row.status),
+      ["published"],
+      "staging ledger must not advance when its paired public delete failed"
+    );
   } finally {
     await removeUploadFixture("uploads/review-item-32-asset-cover.jpg");
     await removeUploadFixture("uploads/published/places/99/501-batch-99-cover-0-1.jpg");

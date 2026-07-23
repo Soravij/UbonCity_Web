@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 
 import { mapReviewContentCtaFieldsToPlaceRecord } from "../services/reviewDecisionService.js";
 import {
   buildReviewContentInsertParams,
   buildReviewContentUpdateParams,
+  mergeExistingReviewContentPublicEntityIdentity,
   sanitizeContentPayload,
 } from "../services/reviewIngestService.js";
+
+const reviewIngestSource = fs.readFileSync(
+  path.join(import.meta.dirname, "..", "services", "reviewIngestService.js"),
+  "utf8"
+);
 
 function createSanitizedContent(overrides = {}) {
   return sanitizeContentPayload({
@@ -224,6 +232,51 @@ test("review ingest update params overwrite confirmed taxonomy checks when the p
   });
 
   assert.deepEqual(JSON.parse(params.at(-2)).confirmed_taxonomy_checks, { parking: false, wifi_available: true });
+});
+
+test("review ingest update params preserve the existing public entity identity when collector handoff omits it", () => {
+  const existing = { public_entity_type: "place", public_entity_id: 321 };
+  const rawPayload = {
+    content_type: "place",
+    lang: "th",
+    category: "attractions",
+    title: "Test place",
+    body: "<p>Body</p>",
+  };
+  const params = buildReviewContentUpdateParams({
+    existing,
+    content: sanitizeContentPayload(rawPayload),
+    rawContentPayload: rawPayload,
+    currentBatchUid: "batch-identity",
+    reviewContentId: 99,
+  });
+
+  assert.deepEqual(params.slice(29, 31), ["place", 321]);
+});
+
+test("re-ingest existing-row query selects every field used by preservation merges", () => {
+  const start = reviewIngestSource.indexOf("const [existingRows] = await pool.query(");
+  const end = reviewIngestSource.indexOf("const existing = existingRows", start);
+  const selector = reviewIngestSource.slice(start, end);
+  for (const column of [
+    "public_entity_type",
+    "public_entity_id",
+    "phone",
+    "line_url",
+    "facebook_url",
+    "website_url",
+    "primary_cta",
+  ]) {
+    assert.match(selector, new RegExp(`\\b${column}\\b`));
+  }
+});
+
+test("review ingest update params allow an explicit valid public entity identity to replace the old one", () => {
+  const content = createSanitizedContent({ public_entity_type: "place", public_entity_id: 654 });
+  assert.deepEqual(
+    mergeExistingReviewContentPublicEntityIdentity({ public_entity_type: "place", public_entity_id: 321 }, content),
+    { public_entity_type: "place", public_entity_id: 654 }
+  );
 });
 
 test("approve mapping passes CTA/contact from review content to place fields", () => {
