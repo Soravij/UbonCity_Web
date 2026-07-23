@@ -5,6 +5,7 @@ import path from "node:path";
 
 const backendRoot = path.resolve(import.meta.dirname, "..");
 const controllerSource = fs.readFileSync(path.join(backendRoot, "controllers", "lifecycleController.js"), "utf8");
+const sharedBootstrapSource = fs.readFileSync(path.join(backendRoot, "config", "sharedSchemaBootstrap.js"), "utf8");
 const migrationSource = fs.readFileSync(path.join(backendRoot, "migrations", "017_lifecycle_release_imports.sql"), "utf8");
 
 test("lifecycle import requires a release snapshot identity for every published item", () => {
@@ -40,4 +41,10 @@ test("lifecycle persists captions supplied by the release snapshot", () => {
   assert.match(controllerSource, /field: "media_manifest\.caption"/);
   assert.match(controllerSource, /content_image_usages \(asset_id, entity_type, entity_id, usage_type, position, caption\)/);
   assert.match(controllerSource, /\{ snapshotApproved, caption: row\.caption \}/);
+});
+
+test("shared bootstrap owns the media schema used by lifecycle imports", () => {
+  assert.match(sharedBootstrapSource, /CREATE TABLE IF NOT EXISTS media_assets/);
+  assert.match(sharedBootstrapSource, /CREATE TABLE IF NOT EXISTS content_image_usages/);
+  assert.match(sharedBootstrapSource, /FOREIGN KEY \(asset_id\) REFERENCES media_assets\(id\) ON DELETE CASCADE/);
 });
