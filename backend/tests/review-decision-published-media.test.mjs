@@ -96,6 +96,7 @@ function createApproveHarness() {
     historicalReviewTranslationLangs: [],
     reviewTranslationStatusUpdates: [],
     deletedPlaceTranslationLangs: [],
+    publicTranslationDeleteAffectedRows: null,
     reviewContentUpdates: [],
     transaction: [],
   };
@@ -178,7 +179,11 @@ function createApproveHarness() {
         const removedLangs = params.slice(1);
         state.deletedPlaceTranslationLangs.push(...removedLangs);
         state.placeTranslationRows = state.placeTranslationRows.filter((row) => !removedLangs.includes(row.lang));
-        return [{ affectedRows: removedLangs.length }];
+        return [{
+          affectedRows: Number.isInteger(state.publicTranslationDeleteAffectedRows)
+            ? state.publicTranslationDeleteAffectedRows
+            : removedLangs.length,
+        }];
       }
       if (normalized === "select lang, description from place_translations where place_id=?") {
         return [state.placeTranslationRows.map((row) => ({ ...row }))];
@@ -278,6 +283,15 @@ function createApproveHarness() {
             : row
         );
         return [{ affectedRows: state.reviewTranslations.length }];
+      }
+      if (normalized.startsWith("update review_content_translations set status='deleted'")) {
+        const removedLangs = params.slice(1);
+        state.reviewTranslations = state.reviewTranslations.map((row) =>
+          row.review_content_id === params[0] && row.status === "published" && removedLangs.includes(row.lang)
+            ? { ...row, status: "deleted" }
+            : row
+        );
+        return [{ affectedRows: removedLangs.length }];
       }
       if (normalized.startsWith("insert into review_actions")) {
         state.reviewActions.push({
@@ -725,7 +739,58 @@ test("approveReviewContent promotes the current translation batch and deletes on
       harness.state.reviewTranslations
         .filter((row) => row.batch_uid === "previous-batch")
         .map((row) => row.status),
-      ["published", "published"]
+      ["published", "deleted"]
+    );
+  } finally {
+    await removeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+    await removeUploadFixture("uploads/published/places/99/501-batch-99-cover-0-1.jpg");
+    pool.getConnection = originalGetConnection;
+    pool.query = originalPoolQuery;
+    process.env.BACKEND_PUBLIC_URL = originalBackendPublicUrl;
+  }
+});
+
+test("approveReviewContent rolls back when a required public translation delete is incomplete", async () => {
+  const originalGetConnection = pool.getConnection;
+  const originalPoolQuery = pool.query;
+  const originalBackendPublicUrl = process.env.BACKEND_PUBLIC_URL;
+  const harness = createApproveHarness();
+  harness.state.reviewTranslations = [
+    {
+      review_content_id: 501,
+      batch_uid: "previous-batch",
+      status: "published",
+      lang: "zh",
+      title: "Previous Chinese",
+      excerpt: null,
+      body: "<p>Previous</p>",
+      meta_title: null,
+      meta_description: null,
+    },
+  ];
+  harness.state.placeTranslationRows.push({ lang: "zh", description: "<p>Pipeline Chinese</p>" });
+  harness.state.publicTranslationDeleteAffectedRows = 0;
+
+  pool.getConnection = async () => harness.connection;
+  pool.query = harness.poolQuery;
+  process.env.BACKEND_PUBLIC_URL = "https://api-test.uboncity.com";
+  await writeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+
+  try {
+    await assert.rejects(
+      () => approveReviewContent({
+        reviewContent: { id: harness.state.reviewContent.id },
+        actorUserId: 7,
+        reviewNote: "force translation delete mismatch",
+      }),
+      /pipeline translation delete mismatch for place 99: expected 1, deleted 0 \(zh\)/
+    );
+    assert.ok(harness.state.transaction.includes("rollback"));
+    assert.equal(harness.state.transaction.includes("commit"), false);
+    assert.deepEqual(
+      harness.state.reviewTranslations.map((row) => row.status),
+      ["published"],
+      "staging ledger must not advance when its paired public delete failed"
     );
   } finally {
     await removeUploadFixture("uploads/review-item-32-asset-cover.jpg");

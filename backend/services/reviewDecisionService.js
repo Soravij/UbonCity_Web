@@ -269,6 +269,10 @@ async function upsertPublishedReviewTranslations(connection, contentType, entity
   }
 }
 
+// Invariant: every path that deletes public place_translations/event_translations
+// must also delete its paired review_contents row (purgeContentService does this).
+// Otherwise a historical pipeline ledger can outlive its public entity and this
+// strict affectedRows check will correctly surface the divergence.
 async function deleteRemovedPipelineTranslations(connection, {
   reviewContentId,
   contentType,
@@ -294,10 +298,22 @@ async function deleteRemovedPipelineTranslations(connection, {
   const placeholders = removedLangs.map(() => "?").join(",");
   const table = contentType === "place" ? "place_translations" : "event_translations";
   const entityColumn = contentType === "place" ? "place_id" : "event_id";
-  await connection.query(
+  const [deleteResult] = await connection.query(
     `DELETE FROM ${table}
      WHERE ${entityColumn}=? AND lang IN (${placeholders})`,
     [Number(entityId), ...removedLangs]
+  );
+  const affectedRows = Number(deleteResult?.affectedRows || 0) || 0;
+  if (affectedRows !== removedLangs.length) {
+    throw new Error(
+      `pipeline translation delete mismatch for ${contentType} ${Number(entityId)}: expected ${removedLangs.length}, deleted ${affectedRows} (${removedLangs.join(",")})`
+    );
+  }
+  await connection.query(
+    `UPDATE review_content_translations
+     SET status='deleted', updated_at=CURRENT_TIMESTAMP
+     WHERE review_content_id=? AND status='published' AND lang IN (${placeholders})`,
+    [Number(reviewContentId), ...removedLangs]
   );
   return removedLangs;
 }

@@ -370,6 +370,22 @@ export function mergeExistingReviewContentCtaFields(existingRow = {}, content = 
   };
 }
 
+export function mergeExistingReviewContentPublicEntityIdentity(existingRow = {}, content = {}) {
+  const nextType = String(content?.public_entity_type || "").trim().toLowerCase();
+  const nextId = Number(content?.public_entity_id || 0) || 0;
+  if (nextType === content?.content_type && nextId > 0) {
+    return { public_entity_type: nextType, public_entity_id: nextId };
+  }
+
+  const existingType = String(existingRow?.public_entity_type || "").trim().toLowerCase();
+  const existingId = Number(existingRow?.public_entity_id || 0) || 0;
+  if (existingType === content?.content_type && existingId > 0) {
+    return { public_entity_type: existingType, public_entity_id: existingId };
+  }
+
+  return { public_entity_type: null, public_entity_id: null };
+}
+
 function parseExistingReviewPayload(reviewPayloadJson) {
   try {
     const parsed = JSON.parse(reviewPayloadJson || "{}");
@@ -434,12 +450,13 @@ export function buildReviewContentUpdateParams({
 } = {}) {
   const preservedCtaFields = mergeExistingReviewContentCtaFields(existing, content, rawContentPayload);
   const confirmedTaxonomyChecks = mergeExistingReviewContentTaxonomyChecks(existing, content, rawContentPayload);
+  const publicEntityIdentity = mergeExistingReviewContentPublicEntityIdentity(existing, content);
   return [
     sourceSubmissionId, sourceManifestHash, content.lang, content.category, content.title, content.body, content.excerpt, content.meta_title, content.meta_description,
     content.event_period_text, content.location_text, content.latitude, content.longitude, content.map_url, content.google_place_id,
     content.transport_subtype, content.transport_contact_name, content.transport_contact_phone, preservedCtaFields.phone, preservedCtaFields.line_url, preservedCtaFields.facebook_url, preservedCtaFields.website_url,
     preservedCtaFields.primary_cta, content.tracking_entity_type, content.tracking_entity_id, content.transport_contact_details,
-    content.transport_link_url, content.slug, content.slug ? 1 : 0, content.public_entity_type, content.public_entity_id,
+    content.transport_link_url, content.slug, content.slug ? 1 : 0, publicEntityIdentity.public_entity_type, publicEntityIdentity.public_entity_id,
     currentBatchUid, buildReviewPayloadJson(content, confirmedTaxonomyChecks),
     reviewContentId,
   ];
@@ -616,7 +633,9 @@ export async function ingestReviewContent(payload, options = {}) {
   const currentBatchUid = crypto.randomUUID();
 
   const [existingRows] = await pool.query(
-    `SELECT id, status, current_batch_uid, review_payload_json, source_submission_id, source_manifest_hash
+    `SELECT id, status, current_batch_uid, review_payload_json, source_submission_id, source_manifest_hash,
+            public_entity_type, public_entity_id,
+            phone, line_url, facebook_url, website_url, primary_cta
      FROM review_contents
      WHERE source_system=? AND source_content_item_id=? AND content_type=?
      LIMIT 1`,
