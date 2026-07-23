@@ -10,7 +10,7 @@
         "ai": "node scripts/ask.js",
         "migrate:utf8mb4": "node scripts/migrate-utf8mb4.js",
         "migrate:lifecycle-sync": "node scripts/migrate-lifecycle-sync.js",
-        "smoke:collector-admin-final-review": "node scripts/smoke-collector-admin-final-review.mjs --spawn",
+        "smoke:collector-admin-final-review": "node scripts/smoke-collector-admin-final-review.mjs",
         "smoke:review-access-token": "node scripts/smoke-review-access-token.mjs",
         "smoke:frontend-review-session-cookie": "node scripts/smoke-frontend-review-session-cookie.mjs",
         "test:collector-admin-final-review": "node --test tests/collector-admin-final-review.smoke.test.mjs",

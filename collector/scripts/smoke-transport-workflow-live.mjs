@@ -209,7 +209,6 @@ async function main() {
   let backendOwnerToken = "";
   let collectorOwnerToken = "";
   let backendRouteId = 0;
-  let backendPlaceId = 0;
 
   try {
     await waitForHealth(collectorBaseUrl, collectorHandle);
@@ -340,82 +339,9 @@ async function main() {
       `backend route number mismatch: ${JSON.stringify(backendRoute.payload)}`
     );
 
-    const otherTransportSourceId = 910000 + Math.floor(Math.random() * 100000);
-    const otherTransportSlug = `smoke-other-transport-${runId}`;
-    const otherTransportImport = await requestJson(`${BACKEND_BASE_URL}/lifecycle/import-published`, {
-      method: "POST",
-      headers: {
-        "x-lifecycle-token": LIFECYCLE_SYNC_TOKEN,
-      },
-      body: {
-        source_system: "collector-app",
-        source_base_url: collectorBaseUrl,
-        content_item_id: otherTransportSourceId,
-        published: [
-          {
-            source_content_item_id: otherTransportSourceId,
-            type: "place",
-            category: "transport",
-            source_lang: "th",
-            slug: otherTransportSlug,
-            title: "Smoke Other Transport",
-            excerpt: "smoke other transport excerpt",
-            body: "smoke other transport body",
-            meta_title: "Smoke Other Transport",
-            meta_description: "smoke other transport description",
-            image: DEFAULT_TRANSPORT_THUMBNAIL,
-            transport_subtype: "taxi",
-            transport_contact_name: "Smoke Contact",
-            transport_contact_phone: "0812345678",
-            transport_contact_details: "Open 24 hours",
-            transport_link_url: "https://example.com/smoke-transport",
-            published_at: new Date().toISOString(),
-          },
-        ],
-        translations: [],
-      },
-    });
-    assert(otherTransportImport.response.ok, `other transport import failed: ${JSON.stringify(otherTransportImport.payload)}`);
-    assert(Number(otherTransportImport.payload?.synced || 0) === 1, `other transport import sync count mismatch: ${JSON.stringify(otherTransportImport.payload)}`);
-
-    const reviewQueue = await requestJson(
-      `${BACKEND_BASE_URL}/collector-import-reviews?status=pending&source_system=collector-app&source_content_type=place&search=${encodeURIComponent("Smoke Other Transport")}&limit=20&offset=0`,
-      {
-        token: backendOwnerToken,
-      }
-    );
-    assert(reviewQueue.response.ok, `collector import review queue failed: ${JSON.stringify(reviewQueue.payload)}`);
-    const reviewItem = (Array.isArray(reviewQueue.payload?.items) ? reviewQueue.payload.items : []).find(
-      (item) => Number(item?.source_content_item_id || 0) === otherTransportSourceId
-    );
-    assert(reviewItem, `other transport review item not found: ${JSON.stringify(reviewQueue.payload)}`);
-    const reviewId = Number(reviewItem.id || 0) || 0;
-    backendPlaceId = Number(reviewItem.local_entity_id || 0) || 0;
-    assert(reviewId > 0 && backendPlaceId > 0, `invalid review/place ids: ${JSON.stringify(reviewItem)}`);
-
-    const beforePublic = await requestJson(`${BACKEND_BASE_URL}/places?category=transport&lang=th`);
-    assert(beforePublic.response.ok, `transport public list before approve failed: ${JSON.stringify(beforePublic.payload)}`);
-    const visibleBeforeApprove = (Array.isArray(beforePublic.payload?.items) ? beforePublic.payload.items : []).some(
-      (item) => String(item?.slug || "").trim() === otherTransportSlug
-    );
-    assert(visibleBeforeApprove === false, `other transport should not be public before approve: ${JSON.stringify(beforePublic.payload)}`);
-
-    const approvePlace = await requestJson(`${BACKEND_BASE_URL}/places/${backendPlaceId}/approve`, {
-      method: "PATCH",
-      token: backendOwnerToken,
-      body: {
-        review_id: reviewId,
-        review_note: "transport smoke approve",
-      },
-    });
-    assert(approvePlace.response.ok, `approve place failed: ${JSON.stringify(approvePlace.payload)}`);
-
-    const afterPublic = await requestJson(`${BACKEND_BASE_URL}/places?category=transport&lang=th`);
-    assert(afterPublic.response.ok, `transport public list after approve failed: ${JSON.stringify(afterPublic.payload)}`);
-    const visibleAfterApprove = (Array.isArray(afterPublic.payload?.items) ? afterPublic.payload.items : []).some(
-      (item) => String(item?.slug || "").trim() === otherTransportSlug
-    );
-    assert(visibleAfterApprove === true, `other transport should be public after approve: ${JSON.stringify(afterPublic.payload)}`);
+    // Step B1 retired the legacy "other transport" lifecycle subtest (old assertions 1-10):
+    // /lifecycle/import-published, pre-approve place creation, and PATCH /places/:id/approve.
+    // Its public review-content visibility coverage is N1-N4 in backend/scripts/smoke-collector-admin-final-review.mjs.
 
     console.log(JSON.stringify({
       ok: true,
@@ -423,29 +349,16 @@ async function main() {
       collector_base_url: collectorBaseUrl,
       assertions: [
         "public transport map can be created, approved, and synced into backend transport routes",
-        "other transport import lands in admin review queue before public visibility",
-        "other transport becomes public only after admin approval",
       ],
       transport_map: {
         collector_item_id: collectorRouteId,
         backend_route_id: backendRouteId,
         route_number: routeNumber,
       },
-      other_transport: {
-        review_id: reviewId,
-        place_id: backendPlaceId,
-        slug: otherTransportSlug,
-      },
     }, null, 2));
   } finally {
     if (backendRouteId > 0 && backendOwnerToken) {
       await requestJson(`${BACKEND_BASE_URL}/transport-routes/${backendRouteId}`, {
-        method: "DELETE",
-        token: backendOwnerToken,
-      }).catch(() => null);
-    }
-    if (backendPlaceId > 0 && backendOwnerToken) {
-      await requestJson(`${BACKEND_BASE_URL}/places/${backendPlaceId}`, {
         method: "DELETE",
         token: backendOwnerToken,
       }).catch(() => null);
