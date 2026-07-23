@@ -3,14 +3,17 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import pool from "../config/db.js";
+import { SUPPORTED_CONTENT_LANGS } from "../constants/languages.js";
 import { cleanPlainText, cleanRichText, cleanSlug, cleanUrl } from "../validators/inputSanitizer.js";
 import { appendReviewAction } from "./reviewContentService.js";
-import { cleanupUnpublishedBatchAssets } from "./reviewCleanupService.js";
+import { cleanupUnpublishedBatchAssets, cleanupUnpublishedBatchTranslations } from "./reviewCleanupService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const BACKEND_UPLOADS_DIR = path.resolve(__dirname, "..", "uploads");
 const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
+const PUBLIC_TRANSLATION_TEXT_MAX_BYTES = 65535;
+const PUBLIC_TRANSLATION_META_DESCRIPTION_MAX_BYTES = 320 * 4;
 
 function isDebugDiagnosticsEnabled() {
   return String(process.env.NODE_ENV || "").trim().toLowerCase() !== "production";
@@ -302,6 +305,55 @@ export function sanitizeContentPayload(payload = {}) {
   };
 }
 
+function assertUtf8ByteLength(value, maxBytes, field) {
+  const byteLength = Buffer.byteLength(String(value || ""), "utf8");
+  if (byteLength > maxBytes) {
+    throw new Error(`${field} is too large (${byteLength} bytes; max ${maxBytes})`);
+  }
+}
+
+export function sanitizeReviewTranslations(rawTranslations, sourceLang) {
+  if (rawTranslations == null) return [];
+  if (!Array.isArray(rawTranslations)) throw new Error("translations must be an array");
+
+  const normalizedSourceLang = String(sourceLang || "th").trim().toLowerCase() || "th";
+  const seenLangs = new Set();
+  return rawTranslations.map((rawRow, index) => {
+    if (!rawRow || typeof rawRow !== "object" || Array.isArray(rawRow)) {
+      throw new Error(`translations[${index}] must be an object`);
+    }
+    const lang = String(rawRow.lang || "").trim().toLowerCase();
+    if (!SUPPORTED_CONTENT_LANGS.includes(lang)) {
+      throw new Error(`translations[${index}].lang must be one of: ${SUPPORTED_CONTENT_LANGS.join(", ")}`);
+    }
+    if (lang === normalizedSourceLang) {
+      throw new Error(`translations[${index}].lang must not match content.lang (${normalizedSourceLang})`);
+    }
+    if (seenLangs.has(lang)) throw new Error(`translations contains duplicate lang: ${lang}`);
+    seenLangs.add(lang);
+
+    const fieldPrefix = `translations[${lang}]`;
+    const title = cleanPlainText(rawRow.title, { required: true, max: 255, field: `${fieldPrefix}.title` });
+    const excerpt = cleanPlainText(rawRow.excerpt, { required: false, max: 40000, field: `${fieldPrefix}.excerpt` }) || null;
+    const body = cleanRichText(rawRow.body, { required: true, max: 40000, field: `${fieldPrefix}.body` });
+    const metaTitle = cleanPlainText(rawRow.meta_title, { required: false, max: 255, field: `${fieldPrefix}.meta_title` }) || null;
+    const metaDescription = cleanPlainText(rawRow.meta_description, { required: false, max: 320, field: `${fieldPrefix}.meta_description` }) || null;
+
+    assertUtf8ByteLength(excerpt, PUBLIC_TRANSLATION_TEXT_MAX_BYTES, `${fieldPrefix}.excerpt`);
+    assertUtf8ByteLength(body, PUBLIC_TRANSLATION_TEXT_MAX_BYTES, `${fieldPrefix}.body`);
+    assertUtf8ByteLength(metaDescription, PUBLIC_TRANSLATION_META_DESCRIPTION_MAX_BYTES, `${fieldPrefix}.meta_description`);
+
+    return {
+      lang,
+      title,
+      excerpt,
+      body,
+      meta_title: metaTitle,
+      meta_description: metaDescription,
+    };
+  });
+}
+
 function hasOwnContentField(source, key) {
   return Boolean(source) && Object.prototype.hasOwnProperty.call(source, key);
 }
@@ -403,15 +455,29 @@ function flattenMediaManifest(manifest = {}) {
   return queue;
 }
 
-export function isRetryableReviewSubmission(existing = {}, sourceSubmissionId = null, sourceManifestHash = null, reviewReadyAssetCount = 0) {
+export function isRetryableReviewSubmission(
+  existing = {},
+  sourceSubmissionId = null,
+  sourceManifestHash = null,
+  reviewReadyAssetCount = 0,
+  expectedTranslations = [],
+  reviewReadyTranslations = [],
+) {
   const currentSubmissionId = String(existing?.source_submission_id || "").trim();
   const currentManifestHash = String(existing?.source_manifest_hash || "").trim().toLowerCase();
+  const expectedLangs = [...new Set((Array.isArray(expectedTranslations) ? expectedTranslations : [])
+    .map((row) => String(row?.lang || row || "").trim().toLowerCase())
+    .filter(Boolean))].sort();
+  const readyLangs = [...new Set((Array.isArray(reviewReadyTranslations) ? reviewReadyTranslations : [])
+    .map((row) => String(row?.lang || row || "").trim().toLowerCase())
+    .filter(Boolean))].sort();
   return Boolean(
     sourceSubmissionId
     && sourceManifestHash
     && currentSubmissionId === String(sourceSubmissionId).trim()
     && currentManifestHash === String(sourceManifestHash).trim().toLowerCase()
     && Number(reviewReadyAssetCount || 0) > 0
+    && JSON.stringify(expectedLangs) === JSON.stringify(readyLangs)
   );
 }
 
@@ -542,6 +608,7 @@ export async function ingestReviewContent(payload, options = {}) {
   }
   const rawContentPayload = payload?.content && typeof payload.content === "object" ? payload.content : {};
   const content = sanitizeContentPayload(rawContentPayload);
+  const translations = sanitizeReviewTranslations(payload?.translations, content.lang);
   const mediaQueue = flattenMediaManifest(payload?.media_manifest || {});
   const uploadedFiles = Array.isArray(options?.uploadedFiles) ? options.uploadedFiles : [];
   const uploadedFileMap = buildUploadedFileMap(uploadedFiles, options?.mediaIndex || null);
@@ -567,7 +634,20 @@ export async function ingestReviewContent(payload, options = {}) {
     );
     const readyAssetCount = (Array.isArray(readyAssetRows) ? readyAssetRows : [])
       .reduce((total, row) => total + (Number(row?.count || 0) || 0), 0);
-    if (isRetryableReviewSubmission(existing, sourceSubmissionId, sourceManifestHash, readyAssetCount)) {
+    const [readyTranslationRows] = await pool.query(
+      `SELECT lang
+       FROM review_content_translations
+       WHERE review_content_id=? AND batch_uid=? AND status='review_ready'`,
+      [Number(existing.id || 0), String(existing.current_batch_uid || "").trim()]
+    );
+    if (isRetryableReviewSubmission(
+      existing,
+      sourceSubmissionId,
+      sourceManifestHash,
+      readyAssetCount,
+      translations,
+      readyTranslationRows,
+    )) {
       const counts = { cover: 0, gallery: 0, inline: 0 };
       for (const row of readyAssetRows) {
         const usageType = normalizeRole(row?.usage_type, "gallery");
@@ -615,6 +695,7 @@ export async function ingestReviewContent(payload, options = {}) {
     } else {
       reviewContentId = Number(existing.id || 0) || 0;
       await cleanupUnpublishedBatchAssets(reviewContentId, existing.current_batch_uid, connection);
+      await cleanupUnpublishedBatchTranslations(reviewContentId, existing.current_batch_uid, connection);
       await connection.query(
         `UPDATE review_contents
           SET status='pending_review', source_submission_id=?, source_manifest_hash=?, lang=?, category=?, title=?, body=?, excerpt=?, meta_title=?, meta_description=?,
@@ -685,6 +766,27 @@ export async function ingestReviewContent(payload, options = {}) {
           mirrored.storage_disk, mirrored.storage_path, mirrored.file_name, mirrored.mime_type,
           mirrored.size_bytes, mirrored.checksum, String(mediaRow?.entry?.caption || "").trim() || null,
           mirrored.source_asset_id, sourceSubmissionId, "review_ready", "collector_import",
+        ]
+      );
+    }
+
+    for (const translation of translations) {
+      await connection.query(
+        `INSERT INTO review_content_translations (
+          review_content_id, batch_uid, lang, title, excerpt, body, meta_title, meta_description,
+          source_submission_id, status
+        ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [
+          reviewContentId,
+          currentBatchUid,
+          translation.lang,
+          translation.title,
+          translation.excerpt,
+          translation.body,
+          translation.meta_title,
+          translation.meta_description,
+          sourceSubmissionId,
+          "review_ready",
         ]
       );
     }

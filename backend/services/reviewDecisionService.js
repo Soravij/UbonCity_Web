@@ -1,7 +1,11 @@
 import crypto from "crypto";
 import pool from "../config/db.js";
 import { appendReviewAction } from "./reviewContentService.js";
-import { cleanupReviewAssetFilesBestEffort, cleanupUnpublishedBatchAssets } from "./reviewCleanupService.js";
+import {
+  cleanupReviewAssetFilesBestEffort,
+  cleanupUnpublishedBatchAssets,
+  cleanupUnpublishedBatchTranslations,
+} from "./reviewCleanupService.js";
 import { cleanupPublishedMediaFilesBestEffort, replaceEntityMediaWithReviewBatch } from "./publishedMediaService.js";
 import {
   getCollectorImportReviewById,
@@ -481,6 +485,7 @@ export async function markLegacyNeedsRevisionFromQueue({
       if (currentBatchUid) {
         const filePaths = await cleanupUnpublishedBatchAssets(reviewContentId, currentBatchUid, connection);
         assetCleanupFilePaths.push(...(Array.isArray(filePaths) ? filePaths : []));
+        await cleanupUnpublishedBatchTranslations(reviewContentId, currentBatchUid, connection);
       }
       await connection.query(
         "UPDATE review_contents SET status='needs_revision', updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -544,6 +549,7 @@ export async function markNeedsRevision({ reviewContent, actorUserId, reviewNote
 
     await syncNeedsRevisionToCollector(content, reviewNote, actorUserId);
     assetCleanupFilePaths = await cleanupUnpublishedBatchAssets(content.id, content.current_batch_uid, connection);
+    await cleanupUnpublishedBatchTranslations(content.id, content.current_batch_uid, connection);
     await connection.query(
       "UPDATE review_contents SET status='needs_revision', updated_at=CURRENT_TIMESTAMP WHERE id=?",
       [content.id]
@@ -594,6 +600,7 @@ export async function markRejected({ reviewContent, actorUserId, reviewNote = nu
     }
 
     assetCleanupFilePaths = await cleanupUnpublishedBatchAssets(content.id, content.current_batch_uid, connection);
+    await cleanupUnpublishedBatchTranslations(content.id, content.current_batch_uid, connection);
     await connection.query(
       "UPDATE review_contents SET status='rejected', updated_at=CURRENT_TIMESTAMP WHERE id=?",
       [content.id]
@@ -672,6 +679,7 @@ export async function markLegacyRejectedFromQueue({
       if (currentBatchUid) {
         const filePaths = await cleanupUnpublishedBatchAssets(reviewContentId, currentBatchUid, connection);
         assetCleanupFilePaths.push(...(Array.isArray(filePaths) ? filePaths : []));
+        await cleanupUnpublishedBatchTranslations(reviewContentId, currentBatchUid, connection);
       }
       await connection.query(
         "UPDATE review_contents SET status='rejected', updated_at=CURRENT_TIMESTAMP WHERE id=?",
