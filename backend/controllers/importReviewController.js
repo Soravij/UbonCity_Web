@@ -7,15 +7,16 @@ import {
   rejectCollectorImportReviewById,
 } from "../services/collectorImportReviewService.js";
 import { listContentPurgeAudit } from "../services/contentGovernanceService.js";
-import { assertLifecycleInfrastructureReady } from "./lifecycleInfra.js";
+import { assertImportReviewInfrastructureReady, markImportReviewInfrastructureReady } from "./importReviewInfra.js";
 
 export async function initializeImportReviewInfrastructure() {
   await ensureCollectorImportReviewTables();
+  markImportReviewInfrastructureReady();
 }
 
 export const getCollectorImportReviewQueue = async (req, res) => {
   try {
-    assertLifecycleInfrastructureReady();
+    assertImportReviewInfrastructureReady();
     const status = String(req.query?.status || "pending").trim().toLowerCase();
     const sourceSystem = String(req.query?.source_system || "collector-app").trim().toLowerCase();
     const sourceContentType = String(req.query?.source_content_type || "all").trim().toLowerCase();
@@ -49,8 +50,8 @@ export const getCollectorImportReviewQueue = async (req, res) => {
       },
     });
   } catch (err) {
-    if (String(err?.message || "").includes("Lifecycle infrastructure is not initialized")) {
-      return res.status(503).json({ error: "Lifecycle infrastructure is not initialized" });
+    if (String(err?.message || "").includes("Import review infrastructure is not initialized")) {
+      return res.status(503).json({ error: "Import review infrastructure is not initialized" });
     }
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -58,15 +59,15 @@ export const getCollectorImportReviewQueue = async (req, res) => {
 
 export const getCollectorImportReviewQueueDetail = async (req, res) => {
   try {
-    assertLifecycleInfrastructureReady();
+    assertImportReviewInfrastructureReady();
     const id = Number(req.params.id || 0);
     if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid review id" });
     const item = await getCollectorImportReviewById(id);
     if (!item) return res.status(404).json({ error: "Review record not found" });
     return res.json({ item });
   } catch (err) {
-    if (String(err?.message || "").includes("Lifecycle infrastructure is not initialized")) {
-      return res.status(503).json({ error: "Lifecycle infrastructure is not initialized" });
+    if (String(err?.message || "").includes("Import review infrastructure is not initialized")) {
+      return res.status(503).json({ error: "Import review infrastructure is not initialized" });
     }
     return res.status(500).json({ error: "Internal server error" });
   }
@@ -74,7 +75,7 @@ export const getCollectorImportReviewQueueDetail = async (req, res) => {
 
 export const rejectCollectorImportReview = async (req, res) => {
   try {
-    assertLifecycleInfrastructureReady();
+    assertImportReviewInfrastructureReady();
     const id = Number(req.params.id || 0);
     if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid review id" });
     const reviewerId = Number(req.user?.id || 0) || null;
@@ -85,8 +86,8 @@ export const rejectCollectorImportReview = async (req, res) => {
     if (!affectedRows) return res.status(404).json({ error: "Review record not found" });
     return res.json({ message: "Rejected", item: await getCollectorImportReviewById(id) });
   } catch (err) {
-    if (String(err?.message || "").includes("Lifecycle infrastructure is not initialized")) {
-      return res.status(503).json({ error: "Lifecycle infrastructure is not initialized" });
+    if (String(err?.message || "").includes("Import review infrastructure is not initialized")) {
+      return res.status(503).json({ error: "Import review infrastructure is not initialized" });
     }
     return res.status(500).json({ error: "Internal server error" });
   }

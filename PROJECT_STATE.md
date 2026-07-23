@@ -168,6 +168,7 @@ Known open gaps (not fixed in this change set):
 ## Pending / Update Later
 
 - 2026-07-23: Step A extracted `/collector-import-reviews*` routes into `backend/routes/importReviewRoutes.js` and handlers into `backend/controllers/importReviewController.js`; paths remain unchanged. Lifecycle import remains active and final-review smoke continues to exercise `/lifecycle/import-published` until Step B removes that endpoint.
+- 2026-07-23: Extracted lifecycle readiness state into the leaf `backend/controllers/lifecycleInfra.js`. Queue/detail/reject then received separate collector-import-review readiness in leaf `backend/controllers/importReviewInfra.js`: only successful `ensureCollectorImportReviewTables()` marks that infrastructure ready, so those handlers return 503 until its own tables are ready rather than inheriting lifecycle readiness.
 
 - CTA public rendering redesign (all 5 channels, fixed order, drop `primary_cta`) — see 2026-07-15 section above
 - CTA / Curation follow-up work
