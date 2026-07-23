@@ -209,9 +209,9 @@ test("release-main and admin-review use required locale translation recheck gate
 });
 
 test("outbound payload builders use fingerprint-aware translation recheck filtering", () => {
-  assert.match(source, /\.filter\(\(t\) => isTranslationRecheckPassed\(t, currentSourceFingerprint\)\)/);
+  assert.match(source, /\.filter\(\(row\) => isTranslationRecheckPassed\(row, currentSourceFingerprint\)\)/);
   assert.doesNotMatch(source, /\.filter\(\(t\) => isTranslationRecheckPassed\(t\)\)/);
-  assert.match(source, /const currentSourceFingerprint = contentItemId \? getCurrentTranslationSourceFingerprint\(repo, contentItemId\) : "";/);
+  assert.match(source, /const currentSourceFingerprint = getCurrentTranslationSourceFingerprint\(repo, contentItemId\);/);
 });
 
 test("bulk backend sync excludes passed translations whose source fingerprint mismatches current live source", () => {
