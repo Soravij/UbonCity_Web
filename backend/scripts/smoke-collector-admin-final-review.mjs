@@ -69,6 +69,7 @@ async function cleanupPublishedMediaArtifacts(entityType, entityIds = []) {
 }
 
 function withRepo(fn) { const db = openDatabase(collectorDbPath, COLLECTOR_SCHEMA); try { return fn(createRepository(db), db); } finally { db.close(); } }
+function translationLangs(fixture, version) { return fixture[version].translation_langs; }
 function prepareFixture(fixture, version) {
   withRepo((repo, db) => {
     if (!fixture.itemId) {
@@ -88,7 +89,7 @@ function prepareFixture(fixture, version) {
     repo.upsertWorkflowModel(fixture.itemId, { production_state: "ready_for_publish", publication_state: "approved", current_draft_id: draft.id, current_review_report_id: review.id }, "final-review-smoke@local.test", { actor_role: "owner", reason_code: "smoke_prepare", skip_production_transition_validation: true, skip_publication_transition_validation: true });
     db.prepare("DELETE FROM content_translations WHERE source_content_item_id=?").run(fixture.itemId);
     const fingerprint = getCurrentTranslationSourceFingerprint(repo, fixture.itemId);
-    for (const lang of ["en"]) repo.upsertTranslation({ source_content_item_id: fixture.itemId, source_published_article_id: null, source_draft_id: draft.id, source_review_report_id: review.id, source_fingerprint: fingerprint, lang, translated_title: `${content.title} EN`, translated_excerpt: `${content.excerpt} EN`, translated_body: `<p>${content.body} EN</p>`, translated_meta_title: `${content.title} EN`, translated_meta_description: `${content.meta_description} EN`, translation_status: "ready", automatic_check_status: "passed", translation_recheck_status: "passed", translation_recheck_score: 100, rechecked_at: new Date().toISOString() });
+    for (const lang of translationLangs(fixture, version)) { const label = lang.toUpperCase(); repo.upsertTranslation({ source_content_item_id: fixture.itemId, source_published_article_id: null, source_draft_id: draft.id, source_review_report_id: review.id, source_fingerprint: fingerprint, lang, translated_title: `${content.title} ${label}`, translated_excerpt: `${content.excerpt} ${label}`, translated_body: `<p>${content.body} ${label}</p>`, translated_meta_title: `${content.title} ${label}`, translated_meta_description: `${content.meta_description} ${label}`, translation_status: "ready", automatic_check_status: "passed", translation_recheck_status: "passed", translation_recheck_score: 100, rechecked_at: new Date().toISOString() }); }
   });
 }
 
@@ -110,7 +111,13 @@ async function submitAdminReview(fixture, version, prepare = true) {
 async function reviewQueue() { const result = await http(`${BACKEND_BASE_URL}/collector-import-reviews?status=all`, { headers: auth(backendToken(), false) }); assertOk(result.response.ok, `review queue failed: ${JSON.stringify(result.payload)}`); return result.payload?.items || []; }
 async function detail(id) { const result = await http(`${BACKEND_BASE_URL}/review-content/${id}`, { headers: auth(backendToken(), false) }); assertOk(result.response.ok, `review detail failed: ${JSON.stringify(result.payload)}`); return result.payload?.item || result.payload; }
 async function decide(id, action) { const result = await http(`${BACKEND_BASE_URL}/review-content/${id}/${action}`, { method: "POST", headers: auth(backendToken()), body: JSON.stringify({ review_note: `smoke ${action}` }) }); assertOk(result.response.ok, `${action} failed: ${JSON.stringify(result.payload)}`); return result.payload; }
-async function publicList(fixture) { const result = await http(`${BACKEND_BASE_URL}/${fixture.type === "event" ? "events" : "places"}?category=${fixture.type === "event" ? "events" : "attractions"}&lang=th`); assertOk(result.response.ok, `public list failed: ${JSON.stringify(result.payload)}`); return result.payload?.items || []; }
+async function publicList(fixture, lang = "th") { const result = await http(`${BACKEND_BASE_URL}/${fixture.type === "event" ? "events" : "places"}?category=${fixture.type === "event" ? "events" : "attractions"}&lang=${encodeURIComponent(lang)}`); assertOk(result.response.ok, `public list failed: ${JSON.stringify(result.payload)}`); return result.payload?.items || []; }
+async function assertPublicTranslation(fixture, lang, expectedTitle) { const entry = (await publicList(fixture, lang)).find((item) => item.slug === fixture.slug); assertOk(entry, `${fixture.key}: public ${lang} entry missing`); assert.equal(entry.title, expectedTitle, `${fixture.key}: public ${lang} title`); }
+async function startCollector(langs) {
+  stopCollector();
+  collectorProcess = spawn(process.execPath, ["server/index.mjs"], { cwd: COLLECTOR_DIR, env: { ...process.env, PORT: String(COLLECTOR_PORT), DB_PATH: collectorDbPath, RAW_DIR: path.join(tempDir, "raw"), MEDIA_DIR: path.join(tempDir, "media"), STAGING_DIR: path.join(tempDir, "staging"), EXPORT_DIR: path.join(tempDir, "staging"), COLLECTOR_SYNC_BACKEND_API: BACKEND_BASE_URL, COLLECTOR_PUBLIC_BASE_URL: COLLECTOR_BASE_URL, COLLECTOR_REVIEW_SYNC_TOKEN: process.env.COLLECTOR_REVIEW_SYNC_TOKEN, TRANSLATION_TARGET_LANGS: langs.join(",") }, stdio: "ignore" });
+  await waitFor(`${COLLECTOR_BASE_URL}/api/health`);
+}
 async function expectDetail(item, fixture, version) {
   const expected = fixture[version];
   assertOk(item && typeof item === "object", `${fixture.key} ${version}: detail item missing`); // old row 5
@@ -137,13 +144,12 @@ export async function runCollectorAdminFinalReviewSmoke() {
   const runId = `${Date.now()}`;
   const fixtures = ["approve", "reject", "eventApprove", "eventReject"].map((key, index) => {
     const type = key.startsWith("event") ? "event" : "place"; const label = `${key}-${runId}`;
-    return { key, type, itemId: 0, slug: `final-review-${label}`, coverV1: `${label}-v1.png`, coverV2: `${label}-v2.png`, v1: { title: `${label} V1`, body: `<p>${label} body V1</p>`, excerpt: `${label} excerpt V1`, meta_title: `${label} meta V1`, meta_description: `${label} description V1` }, v2: { title: `${label} V2`, body: `<p>${label} body V2</p>`, excerpt: `${label} excerpt V2`, meta_title: `${label} meta V2`, meta_description: `${label} description V2` } };
+    return { key, type, itemId: 0, slug: `final-review-${label}`, coverV1: `${label}-v1.png`, coverV2: `${label}-v2.png`, v1: { title: `${label} V1`, body: `<p>${label} body V1</p>`, excerpt: `${label} excerpt V1`, meta_title: `${label} meta V1`, meta_description: `${label} description V1`, translation_langs: ["en", "lo"] }, v2: { title: `${label} V2`, body: `<p>${label} body V2</p>`, excerpt: `${label} excerpt V2`, meta_title: `${label} meta V2`, meta_description: `${label} description V2`, translation_langs: ["en"] } };
   });
   const [approve, reject, eventApprove, eventReject] = fixtures;
   try {
     await assertBackendHealthy();
-    collectorProcess = spawn(process.execPath, ["server/index.mjs"], { cwd: COLLECTOR_DIR, env: { ...process.env, PORT: String(COLLECTOR_PORT), DB_PATH: collectorDbPath, RAW_DIR: path.join(tempDir, "raw"), MEDIA_DIR: path.join(tempDir, "media"), STAGING_DIR: path.join(tempDir, "staging"), EXPORT_DIR: path.join(tempDir, "staging"), COLLECTOR_SYNC_BACKEND_API: BACKEND_BASE_URL, COLLECTOR_PUBLIC_BASE_URL: COLLECTOR_BASE_URL, COLLECTOR_REVIEW_SYNC_TOKEN: process.env.COLLECTOR_REVIEW_SYNC_TOKEN }, stdio: "ignore" });
-    await waitFor(`${COLLECTOR_BASE_URL}/api/health`);
+    await startCollector(translationLangs(approve, "v1"));
     const ids = {};
     // Retired old rows 4/29/52/66/78/87/95/103: queue-detail rejects synthetic negative IDs.
     // Their detail coverage is ported below through GET /review-content/:id.
@@ -154,8 +160,11 @@ export async function runCollectorAdminFinalReviewSmoke() {
     for (const fixture of [approve, eventApprove]) { const queue = await reviewQueue(); assertOk(queue.some((entry) => Number(entry.source_content_item_id) === fixture.itemId && entry.review_status === "approved"), `${fixture.key}: approved queue status`); }
     for (const fixture of [reject, eventReject]) { const queue = await reviewQueue(); assertOk(queue.some((entry) => Number(entry.source_content_item_id) === fixture.itemId && entry.review_status === "rejected"), `${fixture.key}: rejected queue status`); }
     // N3/N4: public list stays HTTP-only and confirms visibility only after RDEC approve.
-    for (const fixture of [approve, eventApprove]) { const items = await publicList(fixture); assertOk(items.some((entry) => entry.slug === fixture.slug), `${fixture.key}: public after approve`); }
+    const v1PublicEntityIds = {};
+    for (const fixture of [approve, eventApprove]) { const items = await publicList(fixture); assertOk(items.some((entry) => entry.slug === fixture.slug), `${fixture.key}: public after approve`); const item = await detail(ids[fixture.key]); v1PublicEntityIds[fixture.key] = Number(item.public_entity_id || 0); assertOk(v1PublicEntityIds[fixture.key] > 0, `${fixture.key}: V1 public entity id missing`); await assertPublicTranslation(fixture, "th", fixture.v1.title); await assertPublicTranslation(fixture, "en", `${fixture.v1.title} EN`); await assertPublicTranslation(fixture, "lo", `${fixture.v1.title} LO`); }
+    await startCollector(translationLangs(approve, "v2"));
     for (const fixture of fixtures) { ids[fixture.key] = await submitAdminReview(fixture, "v2"); const queue = await reviewQueue(); assertOk(queue.some((entry) => Number(entry.source_content_item_id) === fixture.itemId && Number(entry.id) === -ids[fixture.key] && entry.review_status === "pending"), `${fixture.key}: V2 pending synthetic queue`); const item = await detail(ids[fixture.key]); await expectDetail(item, fixture, "v2"); assertHistory(item, fixture === approve || fixture === eventApprove ? "published" : "rejected"); }
+    for (const fixture of [approve, eventApprove]) { await decide(ids[fixture.key], "approve"); const item = await detail(ids[fixture.key]); assert.equal(Number(item.public_entity_id || 0), v1PublicEntityIds[fixture.key], `${fixture.key}: V2 public entity identity`); await assertPublicTranslation(fixture, "th", fixture.v2.title); await assertPublicTranslation(fixture, "en", `${fixture.v2.title} EN`); await assertPublicTranslation(fixture, "lo", fixture.v2.title); }
     // Retired old rows 75/84/92/100: lifecycle review_resets counter no longer exists; history checks above are the user-visible revision proof.
     // Retired old rows 108-117: collector_import_reviews search belonged only to the deleted lifecycle queue table.
     // Accepted loss: old other-transport row 8 PATCH /places/:id/approve is a retained dead-endpoint candidate, not review-content coverage.
