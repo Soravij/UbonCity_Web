@@ -5626,56 +5626,6 @@ function buildAdminReviewMultipartFilePlan(payload, submissionSnapshot) {
   });
 }
 
-function buildEventAdminQueuePayload(options = {}) {
-  const reviewPayload = buildReviewIngestPayload(options);
-  const contentItemId = Number(reviewPayload?.source_content_item_id || 0) || 0;
-  const content = reviewPayload?.content || {};
-  const sourceBaseUrl = String(reviewPayload?.source_base_url || options?.sourceBaseUrl || resolveCollectorPublicBaseUrl()).trim();
-  const mediaManifest = rewriteMediaManifestForBase(reviewPayload?.media_manifest || {}, sourceBaseUrl);
-  const translations = canonicalizeReviewHandoffTranslations(
-    reviewPayload?.translations,
-    String(content?.lang || "th").trim().toLowerCase() || "th"
-  );
-
-  return {
-    source_system: String(reviewPayload?.source_system || "collector-app").trim().toLowerCase() || "collector-app",
-    source_content_type: "event",
-    source_content_item_id: contentItemId,
-    source_base_url: sourceBaseUrl || null,
-    published_at: new Date().toISOString(),
-    article_snapshot: {
-      category: String(content?.category || "").trim().toLowerCase() || "event",
-      slug: String(content?.slug || "").trim() || null,
-      title: String(content?.title || "").trim() || null,
-      description: String(content?.body || "").trim() || null,
-      excerpt: String(content?.excerpt || "").trim() || null,
-      meta_title: String(content?.meta_title || "").trim() || null,
-      meta_description: String(content?.meta_description || "").trim() || null,
-      source_base_url: sourceBaseUrl || null,
-      event_period_text: content?.event_period_text || null,
-      location_text: content?.location_text || null,
-      latitude: Number.isFinite(Number(content?.latitude)) ? Number(content.latitude) : null,
-      longitude: Number.isFinite(Number(content?.longitude)) ? Number(content.longitude) : null,
-      map_url: String(content?.map_url || "").trim() || null,
-      google_place_id: String(content?.google_place_id || "").trim() || null,
-      image: String(mediaManifest?.cover?.source_url || "").trim() || null,
-      media_manifest: {
-        ...mediaManifest,
-        gallery: Array.isArray(mediaManifest?.gallery) ? mediaManifest.gallery : [],
-        inline: Array.isArray(mediaManifest?.inline) ? mediaManifest.inline : [],
-      },
-    },
-    translations_snapshot: translations.map((row) => ({
-      lang: row.lang,
-      title: row.title,
-      description: row.body,
-      meta_title: row.meta_title,
-      meta_description: row.meta_description,
-    })),
-    translation_langs: translations.map((row) => row.lang),
-  };
-}
-
 function respondBatchReleaseDisabled(req, res, routePath) {
   repo.logAudit(actorEmail(req), "release.batch_route_blocked", "api_route", routePath, {
     route: routePath,

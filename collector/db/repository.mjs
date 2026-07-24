@@ -4685,36 +4685,6 @@ export function createRepository(db) {
     SET status=?, published_at=CASE WHEN ?='published' THEN CURRENT_TIMESTAMP ELSE published_at END
     WHERE content_item_id=?
   `);
-  const deletePublishedArticleByItemStmt = db.prepare(`
-    DELETE FROM published_articles
-    WHERE content_item_id=?
-  `);
-  const restorePublishedArticleByItemStmt = db.prepare(`
-    INSERT INTO published_articles (
-      content_item_id, draft_id, review_report_id, slug, title, excerpt, body,
-      meta_title, meta_description, event_period_text, location_text, latitude, longitude, map_url, google_place_id,
-      related_json, internal_links_json, status, published_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(content_item_id) DO UPDATE SET
-      draft_id=excluded.draft_id,
-      review_report_id=excluded.review_report_id,
-      slug=excluded.slug,
-      title=excluded.title,
-      excerpt=excluded.excerpt,
-      body=excluded.body,
-      meta_title=excluded.meta_title,
-      meta_description=excluded.meta_description,
-      event_period_text=excluded.event_period_text,
-      location_text=excluded.location_text,
-      latitude=excluded.latitude,
-      longitude=excluded.longitude,
-      map_url=excluded.map_url,
-      google_place_id=excluded.google_place_id,
-      related_json=excluded.related_json,
-      internal_links_json=excluded.internal_links_json,
-      status=excluded.status,
-      published_at=excluded.published_at
-  `);
 
   const upsertWorkflowModelStmt = db.prepare(`
     INSERT INTO content_workflow_models (
@@ -11442,40 +11412,6 @@ function normalizeStateValue(value, stateGroup) {
     return getPublishedArticleByItem(id);
   }
 
-  function deletePublishedArticleByItem(contentItemId) {
-    const id = Number(contentItemId || 0);
-    if (!id) throw new Error("content_item_id is required");
-    deletePublishedArticleByItemStmt.run(id);
-    return { ok: true, content_item_id: id };
-  }
-
-  function restorePublishedArticleByItem(snapshot) {
-    const contentItemId = Number(snapshot?.content_item_id || 0) || 0;
-    if (!contentItemId) throw new Error("published article snapshot content_item_id is required");
-    restorePublishedArticleByItemStmt.run(
-      contentItemId,
-      snapshot?.draft_id ?? null,
-      snapshot?.review_report_id ?? null,
-      String(snapshot?.slug || "").trim(),
-      String(snapshot?.title || "").trim(),
-      String(snapshot?.excerpt || "").trim() || null,
-      String(snapshot?.body || "").trim(),
-      String(snapshot?.meta_title || "").trim() || null,
-      String(snapshot?.meta_description || "").trim() || null,
-      String(snapshot?.event_period_text || "").trim() || null,
-      String(snapshot?.location_text || "").trim() || null,
-      Number.isFinite(Number(snapshot?.latitude)) ? Number(snapshot.latitude) : null,
-      Number.isFinite(Number(snapshot?.longitude)) ? Number(snapshot.longitude) : null,
-      String(snapshot?.map_url || "").trim() || null,
-      String(snapshot?.google_place_id || "").trim() || null,
-      JSON.stringify(Array.isArray(snapshot?.related) ? snapshot.related : []),
-      JSON.stringify(Array.isArray(snapshot?.internal_links) ? snapshot.internal_links : []),
-      String(snapshot?.status || "published").trim().toLowerCase() || "published",
-      String(snapshot?.published_at || "").trim() || new Date().toISOString()
-    );
-    return getPublishedArticleByItem(contentItemId);
-  }
-
   function getTranslation(sourceContentItemId, lang) {
     const row = getTranslationStmt.get(sourceContentItemId, lang);
     if (!row) return null;
@@ -13825,8 +13761,6 @@ function normalizeStateValue(value, stateGroup) {
     getActiveReviewSubmissionSnapshotByItem,
     resolveReviewSubmissionSnapshot,
     setPublishedArticleStatusByItem,
-    deletePublishedArticleByItem,
-    restorePublishedArticleByItem,
     getTranslation,
     upsertTranslation,
     listTranslations,
