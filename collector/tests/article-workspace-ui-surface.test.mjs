@@ -81,11 +81,6 @@ test("dashboard routes article workflow statuses to article workspace", () => {
   assert.match(source, /\/article-intake\.html\?id=\$\{id\}/);
 });
 
-test("export screen returns to article review", () => {
-  const source = read("server/public/export-item.js");
-  assert.match(source, /window\.location\.href = `\/article-review\.html\?id=\$\{state\.itemId\}`;/);
-});
-
 test("article workspace uses article-process payload field names", () => {
   const source = read("server/public/article-workspace.js");
   assert.match(source, /editorial_assignments/);

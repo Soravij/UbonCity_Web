@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 import { resolvePaths } from "../config/paths.mjs";
-import { releaseItemToMainSite, rerunProblemTranslations } from "../services/workflow.mjs";
+import { rerunProblemTranslations } from "../services/workflow.mjs";
 import { readCliOption } from "./lib/smoke-helpers.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -165,36 +165,12 @@ async function main() {
       );
     }
 
-    const release = await releaseItemToMainSite(repo, dirs, actorEmail, {
-      contentItemId: candidate.content_item_id,
-      actor_role: "owner",
-      aiConfig: null,
-      skipTranslationStage: false,
-      approval_notes: "smoke publish from assignment source",
-    });
-
-    const afterPublished = repo.getPublishedArticleByItem(candidate.content_item_id);
-    assert(afterPublished, `item ${candidate.content_item_id} did not create/find published article after release`);
-    if (!beforePublished) {
-      assert(
-        !afterPublished.draft_id && !afterPublished.review_report_id,
-        `item ${candidate.content_item_id} publish still depended on legacy draft/review ids`
-      );
-    }
-
-    const afterFinalTranslations = repo.listTranslations(candidate.content_item_id);
-    assert(afterFinalTranslations.length > 0, `item ${candidate.content_item_id} produced no translations after release`);
-    assert(
-      afterFinalTranslations.some((row) => row.source_kind === "published_article"),
-      `item ${candidate.content_item_id} final translations did not switch to published_article source`
-    );
-
     console.log(JSON.stringify({
       ok: true,
       db_path: dirs.dbPath,
       content_item_id: candidate.content_item_id,
       title: candidate.title,
-      mode: beforePublished ? "published-translation-refresh" : "release-and-publish",
+      mode: beforePublished ? "published-translation-refresh" : "assignment-source-translation-refresh",
       candidate,
       before: {
         published_article_id: Number(beforePublished?.id || 0) || null,
@@ -202,26 +178,6 @@ async function main() {
       },
       pre_sync_translation: preSyncTranslation,
       after_pre_sync: summarizeTranslations(afterPreSyncTranslations),
-      release: {
-        quality: release?.quality || null,
-        review: release?.review || null,
-        publish: release?.publish || null,
-        staging: release?.staging || null,
-        exported: release?.exported
-          ? {
-            itemCount: release.exported.itemCount,
-            publishedCount: release.exported.publishedCount,
-            translationCount: release.exported.translationCount,
-            translationSummary: release.exported.translationSummary,
-          }
-          : null,
-      },
-      after: {
-        published_article_id: Number(afterPublished?.id || 0) || null,
-        published_draft_id: Number(afterPublished?.draft_id || 0) || null,
-        published_review_report_id: Number(afterPublished?.review_report_id || 0) || null,
-        translations: summarizeTranslations(afterFinalTranslations),
-      },
     }, null, 2));
   } finally {
     db.close();

@@ -1379,7 +1379,6 @@ test("assignment routes use management-line scope helpers instead of global admi
     'app.put("/api/items/:id/workflow-model", requireRole("owner", "admin", "user"), (req, res) => {',
     'app.get("/api/items/:id/assets/cleanup-eligibility", requireRole("admin", "owner"), (req, res) => {',
     'app.post("/api/items/:id/recheck-export-readiness", requireRole("admin", "owner"), (req, res) => {',
-    'app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowRateLimit, async (req, res) => {',
     'app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), workflowRateLimit, async (req, res) => {',
     'app.post("/api/items/:id/recover-problem-translations", requireRole("admin", "owner"), async (req, res) => {',
     'app.post("/api/items/:id/generate-translations", requireRole("admin", "owner"), async (req, res) => {',
@@ -1787,7 +1786,7 @@ test("assignment routes use management-line scope helpers instead of global admi
     indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
       < indexServer.indexOf('const readiness = buildExportReadiness(id);'),
     true,
-    "release-main must guard subtree mutation access before release logic"
+    "item mutation must guard subtree access before route logic"
   );
   assert.equal(
     indexServer.indexOf('if (!ensureItemMutationAccess(req, res, item)) {')
