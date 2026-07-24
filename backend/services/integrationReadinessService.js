@@ -48,7 +48,6 @@ function getLifecycleImportReadiness() {
 function withRequiredFlags(readinessMap) {
   const requiredByPolicy = {
     review_feedback_to_collector: isTruthyEnv(process.env.REQUIRE_REVIEW_COLLECTOR_SYNC, false),
-    collector_lifecycle_import: isTruthyEnv(process.env.REQUIRE_COLLECTOR_LIFECYCLE_SYNC, false),
     collector_transport_import: isTruthyEnv(process.env.REQUIRE_COLLECTOR_TRANSPORT_SYNC, false),
   };
 
@@ -64,7 +63,6 @@ function withRequiredFlags(readinessMap) {
 export function getBackendIntegrationReadiness() {
   const integrations = withRequiredFlags({
     review_feedback_to_collector: getReviewFeedbackReadiness(),
-    collector_lifecycle_import: getLifecycleImportReadiness(),
     collector_transport_import: getLifecycleImportReadiness(),
   });
 
