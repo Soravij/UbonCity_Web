@@ -277,6 +277,15 @@ export function shapeAdminReviewContent(item) {
   const confirmedTaxonomyChecks = item?.review_payload?.confirmed_taxonomy_checks;
   return {
     ...shaped,
+    history: (Array.isArray(item?.history) ? item.history : []).map((entry) => ({
+      id: Number(entry?.id || 0) || 0,
+      batch_uid: String(entry?.batch_uid || "").trim(),
+      action_type: String(entry?.action_type || "").trim().toLowerCase(),
+      previous_status: entry?.previous_status == null ? null : String(entry.previous_status).trim().toLowerCase(),
+      next_status: entry?.next_status == null ? null : String(entry.next_status).trim().toLowerCase(),
+      review_note: entry?.review_note == null ? null : String(entry.review_note),
+      created_at: entry?.created_at || null,
+    })),
     confirmed_taxonomy_checks: confirmedTaxonomyChecks && typeof confirmedTaxonomyChecks === "object" && !Array.isArray(confirmedTaxonomyChecks)
       ? confirmedTaxonomyChecks
       : {},

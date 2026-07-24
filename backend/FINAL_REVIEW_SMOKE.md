@@ -3,18 +3,24 @@
 Script: `backend/scripts/smoke-collector-admin-final-review.mjs`
 
 What it verifies:
-- collector import creates pending review rows for place and event
-- admin review detail returns the imported snapshot, not stale entity content
-- place approve, place reject, event approve, and event reject move rows into the correct review status
-- re-import resets approved and rejected rows back to pending and refreshes review detail
-- review history records decision and re-import actions
-- queue search works by title, source item id, and review id across place and event
 
-Default run:
+- Collector `POST /api/items/:id/submit-admin-review` creates review-content submissions for place and event fixtures.
+- Admin queue list exposes synthetic review-content rows; detail and decisions use `/review-content/:id`.
+- Approve/reject transitions, V2 re-ingest history, backend-owned multipart media, and pre/post-approval public visibility.
+
+Before running, start a backend instance yourself. The smoke does not spawn one.
+
+```bash
+npm run start
+```
+
+Then run the smoke from `backend/`:
 
 ```bash
 npm run smoke:collector-admin-final-review
 ```
+
+The script uses `BACKEND_FINAL_REVIEW_SMOKE_BASE_URL` when set, otherwise `BACKEND_PUBLIC_URL`, otherwise `http://127.0.0.1:5000`. It fails before creating fixtures if `${base}/api/health` is unavailable.
 
 Node test wrapper:
 
@@ -22,39 +28,19 @@ Node test wrapper:
 npm run test:collector-admin-final-review
 ```
 
-Local spawned backend:
+Required environment:
 
-```bash
-node scripts/smoke-collector-admin-final-review.mjs --spawn --port=5098
-```
-
-Against an already running backend:
-
-```bash
-node scripts/smoke-collector-admin-final-review.mjs --external-base-url=http://127.0.0.1:5000/api
-```
-
-Write JSON artifact:
-
-```bash
-node scripts/smoke-collector-admin-final-review.mjs --report-file=runtime/final-review-smoke.json
-```
-
-Required env:
 - `DB_HOST`
 - `DB_PORT`
 - `DB_USER`
 - `DB_PASSWORD`
 - `DB_NAME`
 - `JWT_SECRET`
-- `JWT_ISSUER`
-- `JWT_AUDIENCE_BACKEND`
-- `LIFECYCLE_SYNC_TOKEN`
-- `BACKEND_FINAL_REVIEW_SMOKE_REPORT_FILE` (optional)
+- `BACKEND_JWT_SECRET` — fallback ของ `JWT_SECRET`; ใช้เมื่อ `JWT_SECRET` ว่าง
+- `BACKEND_FINAL_REVIEW_SMOKE_COLLECTOR_PORT` — default `5698`
+- `COLLECTOR_PUBLIC_BASE_URL` — default `http://127.0.0.1:${BACKEND_FINAL_REVIEW_SMOKE_COLLECTOR_PORT}`; ต้องเป็นค่าคงที่ตลอด run ห้าม random ต่อรอบ เพราะเป็น input ของ submission hash; ถ้าเปลี่ยน retry จะกลายเป็น revision
+- `JWT_ISSUER` — default `uboncity-backend`
+- `JWT_AUDIENCE_BACKEND` — default `uboncity-backend`
+- backend `COLLECTOR_REVIEW_SYNC_TOKEN` must be configured for Collector-to-backend multipart ingest
 
-Notes:
-- The script creates temporary lifecycle/import review rows and cleans them up at the end.
-- The local mode starts a temporary backend process unless `--external-base-url` is provided.
-- The node test wrapper reuses the same smoke runner and is suitable for CI-style execution.
-- When `--report-file` or `BACKEND_FINAL_REVIEW_SMOKE_REPORT_FILE` is set, the runner writes a JSON artifact for pass/fail reporting.
-- Artifact fields include `ok`, `scope`, `base_url`, `used_external_backend`, `started_at`, `finished_at`, `duration_ms`, and either `assertions` or `error`.
+The smoke creates a temporary Collector database and Collector process, then cleans its backend fixtures after the run. It does not accept CLI flags, does not spawn a backend, and does not write a report artifact.
