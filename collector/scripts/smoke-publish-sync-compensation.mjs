@@ -149,8 +149,6 @@ async function main() {
 
   let revisionFixture = null;
   let webFeedbackFixture = null;
-  let publishSuccessFixture = null;
-  let publishCompFixture = null;
 
   try {
     logStep("auth.me");
@@ -169,17 +167,6 @@ async function main() {
       productionState: "submitted_for_admin_review",
       publicationState: "approved",
     });
-    publishSuccessFixture = createFixtureItem(db, {
-      titleSuffix: "PublishSyncSuccess",
-      productionState: "ready_for_publish",
-      publicationState: "approved",
-    });
-    publishCompFixture = createFixtureItem(db, {
-      titleSuffix: "PublishSyncComp",
-      productionState: "ready_for_publish",
-      publicationState: "approved",
-    });
-
     logStep("revision.ready_for_publish_to_needs_revision");
     const revisionRes = await client.post(`/api/items/${revisionFixture.itemId}/article-process/transition`, {
       status: "revision_requested",
@@ -211,74 +198,19 @@ async function main() {
     assert(String(webWorkflow?.production_state || "") === "needs_revision", "web feedback fixture should be needs_revision");
     assert(String(webWorkflow?.publication_state || "") === "draft", "web feedback fixture publication should be draft");
 
-    logStep("publish.sync_success");
-    const releaseSuccessRes = await client.post(`/api/items/${publishSuccessFixture.itemId}/release-main?simulate_sync_success=1`, {
-      notes: "smoke release sync success",
-    });
-    assert(releaseSuccessRes.ok, `release-main sync success failed: ${JSON.stringify(releaseSuccessRes.body)}`);
-    const successWorkflow = readWorkflow(db, publishSuccessFixture.itemId);
-    assert(String(successWorkflow?.production_state || "") === "completed", "publish success should set production_state=completed");
-    assert(String(successWorkflow?.publication_state || "") === "published", "publish success should set publication_state=published");
-    const successArticle = db.prepare(`
-      SELECT status FROM published_articles WHERE content_item_id=?
-    `).get(publishSuccessFixture.itemId);
-    assert(String(successArticle?.status || "") === "published", "published article status should be published on sync success");
-
-    logStep("publish.sync_fail_compensate");
-    const releaseFailRes = await client.post(`/api/items/${publishCompFixture.itemId}/release-main?simulate_sync_failure=1`, {
-      notes: "smoke release sync fail compensation",
-    });
-    assert(
-      releaseFailRes.status === 502,
-      `expected 502 for simulated sync failure, got=${releaseFailRes.status} body=${JSON.stringify(releaseFailRes.body)}`
-    );
-    assert(releaseFailRes.body?.compensation?.ok === true, `compensation should succeed: ${JSON.stringify(releaseFailRes.body)}`);
-    const compWorkflow = readWorkflow(db, publishCompFixture.itemId);
-    assert(String(compWorkflow?.production_state || "") === "ready_for_publish", "compensation should restore production_state");
-    assert(String(compWorkflow?.publication_state || "") === "approved", "compensation should restore publication_state");
-    const compArticle = db.prepare(`
-      SELECT status FROM published_articles WHERE content_item_id=?
-    `).get(publishCompFixture.itemId);
-    assert(!compArticle, "compensation should delete newly-created published article row");
-
-    const syncFailedAudit = readAuditByAction(db, publishCompFixture.itemId, "publish.sync_backend.failed");
-    assert(syncFailedAudit?.id, "missing audit publish.sync_backend.failed");
-    const compSuccessAudit = readAuditByAction(db, publishCompFixture.itemId, "publish.compensation.success");
-    assert(compSuccessAudit?.id, "missing audit publish.compensation.success");
-
-    logStep("publish.retry_after_compensation");
-    const releaseRetryRes = await client.post(`/api/items/${publishCompFixture.itemId}/release-main?simulate_sync_success=1`, {
-      notes: "smoke release retry after compensation",
-    });
-    assert(releaseRetryRes.ok, `release retry after compensation failed: ${JSON.stringify(releaseRetryRes.body)}`);
-    const retryWorkflow = readWorkflow(db, publishCompFixture.itemId);
-    assert(String(retryWorkflow?.production_state || "") === "completed", "retry publish should set production_state=completed");
-    assert(String(retryWorkflow?.publication_state || "") === "published", "retry publish should set publication_state=published");
-    const retryArticle = db.prepare(`
-      SELECT status FROM published_articles WHERE content_item_id=?
-    `).get(publishCompFixture.itemId);
-    assert(String(retryArticle?.status || "") === "published", "retry publish should recreate published article row");
-
     console.log(JSON.stringify({
       ok: true,
       checks: {
         revision_ready_for_publish_to_needs_revision: true,
         revision_web_review_feedback_to_needs_revision: true,
-        publish_success_sync_success: true,
-        publish_success_sync_fail_compensation_success: true,
-        publish_retry_after_compensation_success: true,
       },
       fixtures: {
         revision_item_id: revisionFixture.itemId,
         web_feedback_item_id: webFeedbackFixture.itemId,
-        publish_success_item_id: publishSuccessFixture.itemId,
-        publish_comp_item_id: publishCompFixture.itemId,
       },
     }, null, 2));
   } finally {
     try {
-      cleanupFixture(db, publishCompFixture);
-      cleanupFixture(db, publishSuccessFixture);
       cleanupFixture(db, webFeedbackFixture);
       cleanupFixture(db, revisionFixture);
     } finally {

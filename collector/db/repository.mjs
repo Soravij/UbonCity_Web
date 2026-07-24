@@ -3876,20 +3876,6 @@ export function createRepository(db) {
   ensureAssignmentSubmissionDraftTableSupport(db);
   ensureFieldPackAssignmentForeignKeySupport(db);
   ensureReviewSubmissionSnapshotTable(db);
-  const getActiveReleaseSnapshotByItemStmt = db.prepare(`
-    SELECT * FROM release_snapshots
-    WHERE content_item_id=? AND superseded_at IS NULL
-    LIMIT 1
-  `);
-  const insertReleaseSnapshotStmt = db.prepare(`
-    INSERT INTO release_snapshots (
-      release_id, content_item_id, manifest_json, manifest_hash, approved_by, approved_at
-    ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-  `);
-  const supersedeActiveReleaseSnapshotStmt = db.prepare(`
-    UPDATE release_snapshots SET superseded_at=CURRENT_TIMESTAMP
-    WHERE content_item_id=? AND superseded_at IS NULL
-  `);
   const getActiveReviewSubmissionSnapshotByItemStmt = db.prepare(`
     SELECT * FROM review_submission_snapshots
     WHERE content_item_id=? AND superseded_at IS NULL
@@ -11445,41 +11431,6 @@ function normalizeStateValue(value, stateGroup) {
     };
   }
 
-  function normalizeReleaseSnapshot(row) {
-    if (!row) return null;
-    return { ...row, manifest: parseJson(row.manifest_json, {}) };
-  }
-
-  function getActiveReleaseSnapshotByItem(contentItemId) {
-    return normalizeReleaseSnapshot(getActiveReleaseSnapshotByItemStmt.get(Number(contentItemId || 0)));
-  }
-
-  function resolveReleaseSnapshot({ contentItemId, manifest, manifestHash, approvedBy, forceRetry = false } = {}) {
-    const itemId = Number(contentItemId || 0) || 0;
-    const hash = String(manifestHash || "").trim().toLowerCase();
-    const actor = String(approvedBy || "").trim();
-    if (!itemId) throw new Error("content_item_id is required for release snapshot");
-    if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error("manifest_hash must be a SHA-256 hex digest");
-    if (!actor) throw new Error("approved_by is required for release snapshot");
-
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const active = normalizeReleaseSnapshot(getActiveReleaseSnapshotByItemStmt.get(itemId));
-      if (active && (forceRetry || active.manifest_hash === hash)) {
-        db.exec("COMMIT");
-        return { snapshot: active, action: "retry" };
-      }
-      if (active) supersedeActiveReleaseSnapshotStmt.run(itemId);
-      const releaseId = randomUUID();
-      insertReleaseSnapshotStmt.run(releaseId, itemId, JSON.stringify(manifest || {}), hash, actor);
-      const snapshot = normalizeReleaseSnapshot(getActiveReleaseSnapshotByItemStmt.get(itemId));
-      db.exec("COMMIT");
-      return { snapshot, action: active ? "revision" : "created" };
-    } catch (err) {
-      try { db.exec("ROLLBACK"); } catch {}
-      throw err;
-    }
-  }
   function setPublishedArticleStatusByItem(contentItemId, status) {
     const nextStatus = normalizeStateValue(status, "publication");
     if (!nextStatus) throw new Error("invalid publication status");
@@ -13871,8 +13822,6 @@ function normalizeStateValue(value, stateGroup) {
     backfillInvalidSlugs,
     listPublishedArticles,
     getPublishedArticleByItem,
-    getActiveReleaseSnapshotByItem,
-    resolveReleaseSnapshot,
     getActiveReviewSubmissionSnapshotByItem,
     resolveReviewSubmissionSnapshot,
     setPublishedArticleStatusByItem,

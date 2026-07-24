@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -94,80 +93,6 @@ globalThis.__translationGateHooks = {
   return context.__translationGateHooks.getRequiredTranslationRecheckBlockers;
 }
 
-function loadBackendSyncPayloadBuilder(options = {}) {
-  const translations = options.translations || [];
-  const published = options.published || [];
-  const fingerprintByItemId = new Map(Object.entries(options.fingerprintByItemId || {}).map(([key, value]) => [Number(key), value]));
-  const context = {
-    hasExplicitCollectorPublicBaseUrl() {
-      return true;
-    },
-    resolveCollectorPublicBaseUrl() {
-      return "https://collector.example";
-    },
-    repo: {
-      listPublishedArticles() {
-        return published;
-      },
-      getItem(id) {
-        return { id };
-      },
-      listTranslations(requestedId) {
-        if (requestedId) {
-          return translations.filter((row) => Number(row.source_content_item_id || 0) === Number(requestedId));
-        }
-        return translations;
-      },
-    },
-    getCurrentTranslationSourceFingerprint(_repo, id) {
-      return fingerprintByItemId.get(Number(id)) || "";
-    },
-    isTranslationRecheckPassed(row, fingerprint) {
-      return String(row?.translation_status || "").trim().toLowerCase() === "ready"
-        && String(row?.automatic_check_status || "").trim().toLowerCase() === "passed"
-        && String(row?.translation_recheck_status || "").trim().toLowerCase() === "passed"
-        && Number(row?.stale_flag || 0) === 0
-        && String(row?.source_fingerprint || "") === String(fingerprint || "");
-    },
-    isOtherTransportItem() {
-      return false;
-    },
-    getOtherTransportMetadata() {
-      return null;
-    },
-    toPublishedMediaManifest() {
-      return {};
-    },
-    toBackendSafeSlug(value, fallback) {
-      return String(value || "").trim() || fallback;
-    },
-    console,
-  };
-  const helperSource = `
-${extractFunctionBlock("parseReleaseSnapshotManifest")}
-${extractFunctionBlock("projectMediaManifestForBackend")}
-${extractFunctionBlock("buildBackendSyncPayload")}
-globalThis.__backendSyncHooks = {
-  buildBackendSyncPayload,
-};
-`;
-  context.globalThis = context;
-  vm.runInNewContext(helperSource, context, { filename: "backend-sync-payload.js" });
-  return context.__backendSyncHooks.buildBackendSyncPayload;
-}
-
-function loadReleaseManifestHasher() {
-  const context = { crypto };
-  const helperSource = `
-${extractFunctionBlock("manifestEntriesForReleaseHash")}
-${extractFunctionBlock("hashReleaseManifest")}
-globalThis.__releaseSnapshotHooks = { hashReleaseManifest };
-`;
-  context.globalThis = context;
-  vm.runInNewContext(helperSource, context, { filename: "release-manifest-hash.js" });
-  return context.__releaseSnapshotHooks.hashReleaseManifest;
-}
-
 test("article process routes exist with dedicated surface area", () => {
   assert.match(source, /app\.get\("\/api\/items\/:id\/article-process", requireRole\("owner", "admin", "editor", "user"\)/);
   assert.match(source, /app\.post\("\/api\/items\/:id\/article-process\/transition", requireRole\("owner", "admin", "editor", "user"\)/);
@@ -198,116 +123,19 @@ test("article process uses semantic status helpers without mutating legacy assig
   assert.match(source, /app\.post\("\/api\/items\/:id\/assignments", requireRole\("admin", "user"\),/);
 });
 
-test("release-main and admin-review use required locale translation recheck gate", () => {
+test("admin-review uses required locale translation recheck gate", () => {
   assert.match(source, /function getRequiredTranslationRecheckBlockers\(contentItemId, readiness = null\)/);
   assert.match(source, /const translationRecheckGate = getRequiredTranslationRecheckBlockers\(id, readiness\);/);
-  assert.match(source, /if \(translationRecheckGate\.blocking\) \{\s*res\.status\(409\)\.json\(\{\s*error: "คำแปลยังไม่ผ่าน translation recheck สำหรับส่งออก",/);
   assert.match(source, /if \(translationRecheckGate\.blocking\) \{\s*res\.status\(409\)\.json\(\{\s*error: "คำแปลยังไม่ผ่าน translation recheck สำหรับส่งเข้า admin review",/);
   assert.match(source, /missing translation/);
   assert.match(source, /technical QA must pass first/);
   assert.match(source, /translation recheck is not passed/);
 });
 
-test("outbound payload builders use fingerprint-aware translation recheck filtering", () => {
+test("canonical review handoff filters translations by the current source fingerprint", () => {
   assert.match(source, /\.filter\(\(row\) => isTranslationRecheckPassed\(row, currentSourceFingerprint\)\)/);
   assert.doesNotMatch(source, /\.filter\(\(t\) => isTranslationRecheckPassed\(t\)\)/);
   assert.match(source, /const currentSourceFingerprint = getCurrentTranslationSourceFingerprint\(repo, contentItemId\);/);
-});
-
-test("bulk backend sync excludes passed translations whose source fingerprint mismatches current live source", () => {
-  const buildBackendSyncPayload = loadBackendSyncPayloadBuilder({
-    translations: [
-      {
-        source_content_item_id: 101,
-        lang: "en",
-        translated_title: "Keep me",
-        translated_excerpt: "Keep me",
-        translated_body: "Keep me",
-        translated_meta_title: "Keep me",
-        translated_meta_description: "Keep me",
-        translation_status: "ready",
-        automatic_check_status: "passed",
-        translation_recheck_status: "passed",
-        stale_flag: 0,
-        source_fingerprint: "fp-101-current",
-      },
-      {
-        source_content_item_id: 202,
-        lang: "lo",
-        translated_title: "Drop me",
-        translated_excerpt: "Drop me",
-        translated_body: "Drop me",
-        translated_meta_title: "Drop me",
-        translated_meta_description: "Drop me",
-        translation_status: "ready",
-        automatic_check_status: "passed",
-        translation_recheck_status: "passed",
-        stale_flag: 0,
-        source_fingerprint: "fp-202-old",
-      },
-    ],
-    published: [
-      { content_item_id: 101, slug: "item-101" },
-      { content_item_id: 202, slug: "item-202" },
-    ],
-    fingerprintByItemId: {
-      101: "fp-101-current",
-      202: "fp-202-current",
-    },
-  });
-
-  const payload = buildBackendSyncPayload({});
-
-  assert.deepEqual(
-    payload.translations.map((row) => ({ id: row.source_content_item_id, lang: row.lang })),
-    [{ id: 101, lang: "en" }],
-  );
-});
-
-test("item-scoped backend sync uses the release snapshot instead of live selected assets", () => {
-  const buildBackendSyncPayload = loadBackendSyncPayloadBuilder({
-    published: [{ content_item_id: 101, slug: "snapshot-item", title: "Snapshot item" }],
-    fingerprintByItemId: { 101: "fp-101-current" },
-  });
-  const snapshot = {
-    release_id: "release-101",
-    manifest_hash: "a".repeat(64),
-    manifest: { authority: "release_main_selected_assets", cover: null, gallery: [], inline: [], video: [] },
-  };
-  const payload = buildBackendSyncPayload({ contentItemId: 101, releaseSnapshot: snapshot });
-
-  assert.equal(payload.published[0].release_id, "release-101");
-  assert.equal(payload.published[0].manifest_hash, "a".repeat(64));
-  assert.equal(JSON.stringify(payload.published[0].media_manifest), JSON.stringify({ cover: null, gallery: [], inline: [] }));
-  assert.equal("image" in payload.published[0], false);
-  assert.equal("authority" in payload.published[0].media_manifest, false);
-  assert.equal("video" in payload.published[0].media_manifest, false);
-  assert.equal(
-    JSON.stringify(snapshot.manifest),
-    JSON.stringify({ authority: "release_main_selected_assets", cover: null, gallery: [], inline: [], video: [] }),
-  );
-  assert.throws(() => buildBackendSyncPayload({ contentItemId: 101 }), /release snapshot is required/);
-});
-
-test("release manifest hash tracks asset identity, checksum, role, position, source URL, and caption", () => {
-  const hashReleaseManifest = loadReleaseManifestHasher();
-  const emptyManifest = { authority: "release_main_selected_assets", cover: null, gallery: [], inline: [], video: [] };
-  const original = {
-    ...emptyManifest,
-    cover: { source_asset_id: 7, source_checksum: "checksum-a", source_url: "/media/a.jpg" },
-  };
-  const changedRole = { ...emptyManifest, gallery: [{ source_asset_id: 7, source_checksum: "checksum-a", source_url: "/media/a.jpg" }] };
-  const changedChecksum = { ...original, cover: { ...original.cover, source_checksum: "checksum-b" } };
-  const changedCaption = { ...original, cover: { ...original.cover, caption: "Updated caption" } };
-
-  assert.match(hashReleaseManifest(emptyManifest), /^[a-f0-9]{64}$/);
-  assert.notEqual(hashReleaseManifest(original), hashReleaseManifest(changedRole));
-  assert.notEqual(hashReleaseManifest(original), hashReleaseManifest(changedChecksum));
-  assert.notEqual(hashReleaseManifest(original), hashReleaseManifest(changedCaption));
-  assert.equal(
-    hashReleaseManifest(original),
-    hashReleaseManifest({ ...original, authority: "different-authority", video: [] }),
-  );
 });
 
 test("required locale translation recheck gate allows release only when all required locales passed", () => {

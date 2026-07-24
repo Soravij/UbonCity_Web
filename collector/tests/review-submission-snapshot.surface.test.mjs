@@ -18,7 +18,7 @@ function functionSource(name, nextName) {
 
 function loadReviewSubmissionHasher() {
   const start = source.indexOf("function manifestEntriesForReleaseHash(");
-  const end = source.indexOf("function parseReleaseSnapshotManifest(", start);
+  const end = source.indexOf("function parseReviewSubmissionSnapshotManifest(", start);
   assert.ok(start >= 0 && end > start, "review submission hash helpers must exist");
   const context = { crypto };
   vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.hooks = { hashReviewSubmissionHandoff, reviewSubmissionHashProjection };`, context);

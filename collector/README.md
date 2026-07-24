@@ -31,10 +31,6 @@ Required env before login will work:
 - `BACKEND_JWT_ISSUER=uboncity-backend`
 - `COLLECTOR_BACKEND_JWT_AUDIENCE=uboncity-collector`
 
-Required env before `release-main` with backend sync will work:
-- `COLLECTOR_PUBLIC_BASE_URL` must be the real externally reachable collector URL
-- do not rely on loopback/private NAS URL if backend must mirror media from collector
-
 Open: `http://127.0.0.1:5070` (or your configured `PORT`)
 
 One-command backend bring-up:
@@ -105,9 +101,9 @@ Backend sync hardening:
 npm run build-export
 ```
 
-UI release policy:
-- release ไปเว็บไซต์หลักใช้แบบทีละ content ผ่าน `POST /api/items/:id/release-main`
-- batch HTTP routes เดิม (`/api/run/publish`, `/api/run/stage`, `/api/run/approve`, `/api/run/export`, `/api/run/sync-backend`) ถูกปิดแล้วเพื่อกันการปล่อยข้ามหลาย content โดยไม่ตั้งใจ
+UI submission policy:
+- ส่งเข้า final review ใช้ `POST /api/items/:id/submit-admin-review`
+- batch HTTP routes เดิม (`/api/run/publish`, `/api/run/stage`, `/api/run/approve`, `/api/run/export`, `/api/run/sync-backend`) ถูกปิดแล้วเพื่อกันการส่งข้ามหลาย content โดยไม่ตั้งใจ
 
 ## Storage config (future NAS-ready)
 Optional env vars:

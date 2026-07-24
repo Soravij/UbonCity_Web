@@ -34,9 +34,7 @@ import {
   isTranslationTechnicalReady as isWorkflowTranslationTechnicalReady,
   isTranslationRecheckPassed as isWorkflowTranslationRecheckPassed,
   applyReviewAction,
-  compensateReleaseAfterSyncFailure,
   parseImportText,
-  releaseItemToMainSite,
   reopenReviewDecision,
   returnFieldPackToClean,
   reviewInternalLink,
@@ -423,19 +421,6 @@ function collectorIntegrationConfig() {
     webReviewSyncToken,
     collectorPublicBaseUrl,
   };
-}
-
-function canUseLocalReleaseSyncSimulation() {
-  if (String(process.env.COLLECTOR_ALLOW_RELEASE_SYNC_SIMULATION || "").trim() === "1") {
-    return true;
-  }
-  try {
-    const url = new URL(String(backendApiBase || "").trim());
-    const host = String(url.hostname || "").trim().toLowerCase();
-    return host === "127.0.0.1" || host === "localhost" || host === "::1";
-  } catch {
-    return false;
-  }
 }
 
 function isValidWebReviewSyncToken(candidate) {
@@ -5397,10 +5382,6 @@ function manifestEntriesForReleaseHash(manifest) {
   return entries;
 }
 
-function hashReleaseManifest(manifest) {
-  return crypto.createHash("sha256").update(JSON.stringify(manifestEntriesForReleaseHash(manifest))).digest("hex");
-}
-
 function normalizeReviewHandoffText(value) {
   const normalized = String(value ?? "").trim();
   return normalized || null;
@@ -5478,17 +5459,6 @@ function hashReviewSubmissionHandoff(manifest) {
   return crypto.createHash("sha256").update(JSON.stringify(reviewSubmissionHashProjection(manifest))).digest("hex");
 }
 
-function parseReleaseSnapshotManifest(snapshot) {
-  if (!snapshot || typeof snapshot !== "object") throw new Error("release snapshot is required for backend sync");
-  const manifest = snapshot.manifest && typeof snapshot.manifest === "object"
-    ? snapshot.manifest
-    : JSON.parse(String(snapshot.manifest_json || "{}"));
-  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
-    throw new Error("release snapshot manifest is invalid");
-  }
-  return manifest;
-}
-
 function parseReviewSubmissionSnapshotManifest(snapshot) {
   if (!snapshot || typeof snapshot !== "object") throw new Error("review submission snapshot is required");
   const manifest = snapshot.manifest && typeof snapshot.manifest === "object"
@@ -5514,101 +5484,6 @@ function snapshotManifestAssets(manifest) {
       checksum: String(entry.source_checksum || entry.checksum || "").trim().toLowerCase() || null,
       caption: String(entry.caption || "").trim() || null,
     }));
-}
-
-function projectMediaManifestForBackend(manifest) {
-  const source = manifest && typeof manifest === "object" && !Array.isArray(manifest) ? manifest : {};
-  const { authority: _authority, video: _video, ...projected } = source;
-  return projected;
-}
-
-function buildBackendSyncPayload(options = {}) {
-  if (!hasExplicitCollectorPublicBaseUrl()) {
-    throw new Error("COLLECTOR_PUBLIC_BASE_URL is required for backend lifecycle sync.");
-  }
-  const contentItemId = Number(options?.contentItemId || options?.content_item_id || 0) || null;
-  const releaseSnapshot = options?.releaseSnapshot || options?.release_snapshot || null;
-  if (contentItemId && !releaseSnapshot) {
-    throw new Error("release snapshot is required for item-scoped backend sync");
-  }
-  const currentSourceFingerprint = contentItemId ? getCurrentTranslationSourceFingerprint(repo, contentItemId) : "";
-  const fingerprintByItemId = new Map();
-  function getFingerprintForTranslation(row) {
-    if (contentItemId) {
-      return currentSourceFingerprint;
-    }
-    const sourceContentItemId = Number(row?.source_content_item_id || 0) || 0;
-    if (!sourceContentItemId) {
-      return "";
-    }
-    if (!fingerprintByItemId.has(sourceContentItemId)) {
-      fingerprintByItemId.set(
-        sourceContentItemId,
-        getCurrentTranslationSourceFingerprint(repo, sourceContentItemId),
-      );
-    }
-    return fingerprintByItemId.get(sourceContentItemId) || "";
-  }
-  const published = repo
-    .listPublishedArticles()
-    .filter((row) => !contentItemId || Number(row.content_item_id || 0) === contentItemId)
-    .map((row) => {
-      const sourceContentItemId = Number(row.content_item_id || 0) || 0;
-      const sourceItem = repo.getItem(sourceContentItemId) || null;
-      const otherTransportMeta = isOtherTransportItem(sourceItem) ? getOtherTransportMetadata(sourceItem) : null;
-      const snapshotManifest = contentItemId
-        ? parseReleaseSnapshotManifest(releaseSnapshot)
-        : toPublishedMediaManifest(sourceContentItemId);
-      const mediaManifest = projectMediaManifestForBackend(snapshotManifest);
-      return {
-        source_content_item_id: sourceContentItemId,
-        type: row.source_type || "place",
-        category: row.source_category || "attractions",
-        source_lang: row.source_lang || "th",
-        slug: toBackendSafeSlug(row.slug, `item-${sourceContentItemId || "sync"}`),
-        title: row.title,
-        excerpt: row.excerpt,
-        body: row.body,
-        meta_title: row.meta_title,
-        meta_description: row.meta_description,
-        event_period_text: row.event_period_text,
-        location_text: row.location_text,
-        latitude: Number.isFinite(Number(row.latitude)) ? Number(row.latitude) : null,
-        longitude: Number.isFinite(Number(row.longitude)) ? Number(row.longitude) : null,
-        map_url: String(row.map_url || "").trim() || null,
-        google_place_id: String(row.google_place_id || "").trim() || null,
-        transport_subtype: otherTransportMeta?.subtype || null,
-        transport_contact_name: otherTransportMeta?.contact_name || null,
-        transport_contact_phone: otherTransportMeta?.phone || null,
-        transport_contact_details: otherTransportMeta?.contact_details || null,
-        transport_link_url: otherTransportMeta?.link_url || null,
-        published_at: row.published_at,
-        media_manifest: mediaManifest,
-        release_id: contentItemId ? String(releaseSnapshot.release_id || "").trim() || null : null,
-        manifest_hash: contentItemId ? String(releaseSnapshot.manifest_hash || "").trim() || null : null,
-      };
-    });
-
-  const translations = repo
-    .listTranslations(contentItemId)
-    .filter((t) => isTranslationRecheckPassed(t, getFingerprintForTranslation(t)))
-    .map((t) => ({
-      source_content_item_id: t.source_content_item_id,
-      lang: t.lang,
-      title: t.translated_title,
-      excerpt: t.translated_excerpt,
-      body: t.translated_body,
-      meta_title: t.translated_meta_title,
-      meta_description: t.translated_meta_description,
-    }));
-
-  return {
-    source_system: "collector-app",
-    source_base_url: resolveCollectorPublicBaseUrl(),
-    content_item_id: contentItemId,
-    published,
-    translations,
-  };
 }
 
 function buildCanonicalReviewHandoffCandidate(options = {}) {
@@ -5804,12 +5679,12 @@ function buildEventAdminQueuePayload(options = {}) {
 function respondBatchReleaseDisabled(req, res, routePath) {
   repo.logAudit(actorEmail(req), "release.batch_route_blocked", "api_route", routePath, {
     route: routePath,
-    replacement: "/api/items/:id/release-main",
+    replacement: "/api/items/:id/submit-admin-review",
   });
   res.status(410).json({
-    error: "Batch release routes are disabled. Use POST /api/items/:id/release-main for item-scoped release.",
+    error: "Batch release routes are disabled. Use POST /api/items/:id/submit-admin-review for final review submission.",
     route: routePath,
-    replacement: "/api/items/:id/release-main",
+    replacement: "/api/items/:id/submit-admin-review",
   });
 }
 
@@ -13504,228 +13379,6 @@ app.post("/api/items/:id/recheck-export-readiness", requireRole("admin", "owner"
     translation_counts: readiness.translation_counts,
   });
   res.json({ ok: true, readiness });
-});
-
-app.post("/api/items/:id/release-main", requireRole("admin", "owner"), workflowRateLimit, async (req, res) => {
-  const id = Number(req.params.id || 0);
-  if (!id) {
-    res.status(400).json({ error: "Invalid item id" });
-    return;
-  }
-
-  const item = repo.getItem(id);
-  if (!item) {
-    res.status(404).json({ error: "Item not found" });
-    return;
-  }
-  if (!ensureItemMutationAccess(req, res, item)) {
-    return;
-  }
-
-  const readiness = buildExportReadiness(id);
-  if (!readiness?.source_ready) {
-    res.status(409).json({
-      error: "ข้อมูลต้นทางยังไม่พร้อมสำหรับส่งออก",
-      readiness,
-    });
-    return;
-  }
-  if (!readiness?.editorial_ready && !readiness?.field_flow_ready) {
-    res.status(409).json({
-      error: "ข้อมูลยังไม่ผ่าน publish gate สำหรับส่งออก",
-      readiness,
-    });
-    return;
-  }
-  const translationRecheckGate = getRequiredTranslationRecheckBlockers(id, readiness);
-  if (translationRecheckGate.blocking) {
-    res.status(409).json({
-      error: "คำแปลยังไม่ผ่าน translation recheck สำหรับส่งออก",
-      reason: `Blocked locales: ${translationRecheckGate.blocking_langs.join(", ")}`,
-      locales: translationRecheckGate.blocking_langs,
-      translation_recheck_gate: translationRecheckGate,
-      readiness,
-    });
-    return;
-  }
-
-  try {
-    const aiConfig = getEffectiveAiConfig();
-    const workflowBeforeRelease = repo.ensureWorkflowModel(id);
-    const publishedArticleBefore = repo.getPublishedArticleByItem(id);
-    const autoSync = String(req.query?.sync_backend || "1") !== "0";
-    if (autoSync && !hasExplicitCollectorPublicBaseUrl()) {
-      res.status(409).json({
-        error: "COLLECTOR_PUBLIC_BASE_URL is required before backend sync/release.",
-        readiness,
-      });
-      return;
-    }
-
-    const result = await releaseItemToMainSite(repo, dirs, actorEmail(req), {
-      contentItemId: id,
-      actor_role: actorPolicyRole(req),
-      aiConfig,
-      skipTranslationStage: true,
-      approval_notes: "อนุมัติจากขั้นตอนส่งออกไปเว็บไซต์หลัก",
-    });
-
-    // A compensated first release has no published article but retains its approved
-    // snapshot. Retry that exact release; do not reread selected assets.
-    const activeReleaseSnapshot = repo.getActiveReleaseSnapshotByItem(id);
-    const releaseSnapshotResolution = activeReleaseSnapshot && !publishedArticleBefore
-      ? repo.resolveReleaseSnapshot({
-        contentItemId: id,
-        manifest: activeReleaseSnapshot.manifest,
-        manifestHash: activeReleaseSnapshot.manifest_hash,
-        approvedBy: actorEmail(req),
-        forceRetry: true,
-      })
-      : (() => {
-        const manifest = toPublishedMediaManifest(id);
-        return repo.resolveReleaseSnapshot({
-          contentItemId: id,
-          manifest,
-          manifestHash: hashReleaseManifest(manifest),
-          approvedBy: actorEmail(req),
-        });
-      })();
-    const releaseSnapshot = releaseSnapshotResolution.snapshot;
-
-    let backendSync = null;
-    if (autoSync) {
-      assertCollectorIntegrationReadiness(collectorIntegrationConfig(), ["publish_sync_to_backend"]);
-      const payload = buildBackendSyncPayload({ contentItemId: id, releaseSnapshot });
-      const simulateSyncFailure = String(req.query?.simulate_sync_failure || "0") === "1";
-      const simulateSyncSuccess = String(req.query?.simulate_sync_success || "0") === "1";
-      if ((simulateSyncFailure || simulateSyncSuccess) && !canUseLocalReleaseSyncSimulation()) {
-        res.status(403).json({ error: "release sync simulation is not allowed in this environment" });
-        return;
-      }
-      let syncStatus = 0;
-      let syncOk = false;
-      let body = { error: "Invalid backend sync response" };
-
-      if (simulateSyncFailure) {
-        syncStatus = 502;
-        syncOk = false;
-        body = { error: "Simulated backend sync failure" };
-      } else if (simulateSyncSuccess) {
-        syncStatus = 200;
-        syncOk = true;
-        body = { ok: true, simulated: true, message: "Simulated backend sync success" };
-      } else {
-        const syncRes = await fetch(`${backendApiBase}/lifecycle/import-published`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-lifecycle-token": backendSyncToken,
-          },
-          body: JSON.stringify(payload),
-        });
-        syncStatus = Number(syncRes.status || 0) || 500;
-        syncOk = Boolean(syncRes.ok);
-        body = await syncRes.json().catch(() => ({ error: "Invalid backend sync response" }));
-      }
-
-      backendSync = {
-        ok: syncOk,
-        status: syncStatus,
-        result: body,
-        payload_summary: {
-          published: payload.published.length,
-          translations: payload.translations.length,
-        },
-      };
-
-      if (!syncOk) {
-        repo.logAudit(actorEmail(req), "publish.sync_backend.failed", "content_item", String(id), {
-          content_item_id: id,
-          status: syncStatus,
-          error: body?.error || "Backend sync failed",
-          payload_summary: backendSync.payload_summary,
-          release_id: releaseSnapshot.release_id,
-          manifest_hash: releaseSnapshot.manifest_hash,
-        });
-
-        let compensationResult = null;
-        try {
-          compensationResult = compensateReleaseAfterSyncFailure(repo, actorEmail(req), {
-            content_item_id: id,
-            workflow_before: workflowBeforeRelease,
-            published_article_before: publishedArticleBefore,
-            actor_role: actorPolicyRole(req),
-            reason_code: "publish_sync_compensation",
-            note: `compensate release-main after backend sync failed (status=${syncStatus})`,
-          });
-          repo.logAudit(actorEmail(req), "publish.compensation.success", "content_item", String(id), {
-            content_item_id: id,
-            sync_status: syncStatus,
-            workflow_after: compensationResult?.workflow_after || null,
-            published_article_status: compensationResult?.published_article_status || null,
-          });
-        } catch (compErr) {
-          const compensationError = String(compErr?.message || "publish compensation failed");
-          repo.logAudit(actorEmail(req), "publish.compensation.failed", "content_item", String(id), {
-            content_item_id: id,
-            sync_status: syncStatus,
-            sync_error: body?.error || "Backend sync failed",
-            compensation_error: compensationError,
-          });
-          res.status(500).json({
-            error: "Backend sync failed and compensation failed",
-            backend_sync: backendSync,
-            compensation: {
-              ok: false,
-              error: compensationError,
-            },
-            result,
-            readiness: buildExportReadiness(id),
-          });
-          return;
-        }
-
-        res.status(syncStatus).json({
-          error: body?.error || "Backend sync failed",
-          backend_sync: backendSync,
-          compensation: {
-            ok: true,
-            result: compensationResult,
-          },
-          result,
-          readiness: buildExportReadiness(id),
-        });
-        return;
-      }
-
-      repo.logAudit(actorEmail(req), "publish.sync_backend", "lifecycle_sync", "backend", {
-        trigger: "item_release_main",
-        content_item_id: id,
-        published: payload.published.length,
-        translations: payload.translations.length,
-        release_id: releaseSnapshot.release_id,
-        manifest_hash: releaseSnapshot.manifest_hash,
-        result: body,
-      });
-    }
-
-    res.json({
-      ok: true,
-      ...result,
-      backend_sync: backendSync,
-      release_snapshot: releaseSnapshot,
-      release_snapshot_action: releaseSnapshotResolution.action,
-      readiness: buildExportReadiness(id),
-    });
-  } catch (err) {
-    const msg = String(err?.message || "Cannot release item to main site");
-    const status = /publish prerequisite conflict|missing_approved_review|stale_approved_review|approved_review_not_for_latest_draft|missing_quality_report|missing_latest_draft/i.test(msg)
-      ? 409
-      : /item not found/i.test(msg)
-        ? 404
-        : 400;
-    res.status(status).json({ error: msg });
-  }
 });
 
 app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), workflowRateLimit, async (req, res) => {
