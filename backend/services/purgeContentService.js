@@ -77,7 +77,6 @@ async function deleteFilesBestEffort(paths = []) {
 
 async function cleanupCommonMappings(executor, entityType, entityId) {
   await executor.query("DELETE FROM collector_import_reviews WHERE local_entity_type=? AND local_entity_id=?", [entityType, Number(entityId)]);
-  await executor.query("DELETE FROM lifecycle_content_map WHERE local_entity_type=? AND local_entity_id=?", [entityType, Number(entityId)]);
   await executor.query("DELETE FROM review_contents WHERE public_entity_type=? AND public_entity_id=?", [entityType, Number(entityId)]);
 }
 
