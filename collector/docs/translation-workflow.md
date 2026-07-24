@@ -3,7 +3,7 @@
 ## Trigger point
 Translations run only in final pre-frontend export:
 - `POST /api/run/export`
-- implementation in `collector-app/services/workflow.mjs` (`exportStaging` -> `runFinalTranslationStage`)
+- implementation in `collector-app/services/workflow.mjs` (`runFinalTranslationStage`)
 
 Translations are **not** generated in:
 - draft stage
