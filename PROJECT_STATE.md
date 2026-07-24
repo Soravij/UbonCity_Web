@@ -178,6 +178,7 @@ Known open gaps (not fixed in this change set):
 - 2026-07-24: `GET /review-content/:id` had never returned `history` because the response shaper set it to `undefined`; no test caught this because the B0 harness queried `review_actions` directly. The final-review smoke is the first response-layer coverage for this endpoint.
 - 2026-07-24: After Phase 5 Step B commit 2, deliberately retained cleanup debt: `publishApproved` / `approveToStaging` / `exportStaging` in `collector/services/workflow.mjs`, plus `deletePublishedArticleByItem` / `restorePublishedArticleByItem`, their statements, and repository exports. Remove them together after Step B/C completes rather than widening this commit.
 - 2026-07-23: `backend/scripts/runtime-smoke-review-translation-promotion.mjs` covers only place fixtures (`type: "place"` at line 38 and place identity assertion at line 92); the event submit path has no equivalent end-to-end coverage until `smoke-collector-admin-final-review.mjs` passes.
+- 2026-07-24: `smoke-field-flow-publish-translation.mjs` cannot run as a Runtime gate because no approved/published candidate has complete field-flow readiness. The identical failure reproduces on `main` at `8b70cda`, so it is Runtime fixture/data debt, not a Step B regression; create a complete field-flow fixture before using this smoke as a gate.
 
 - CTA public rendering redesign (all 5 channels, fixed order, drop `primary_cta`) — see 2026-07-15 section above
 - CTA / Curation follow-up work
