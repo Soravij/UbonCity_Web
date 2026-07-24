@@ -37,7 +37,7 @@ test("submit-admin-review resolves a submission snapshot only after the readines
 
 test("review payload and multipart plan use the submission snapshot rather than fresh content_assets", () => {
   const payload = functionSource("buildReviewIngestPayload", "buildAdminReviewMultipartFilePlan");
-  const plan = functionSource("buildAdminReviewMultipartFilePlan", "buildEventAdminQueuePayload");
+  const plan = functionSource("buildAdminReviewMultipartFilePlan", "respondBatchReleaseDisabled");
   assert.match(payload, /reviewSubmissionHandoffFromSnapshot\(submissionSnapshot\)/);
   assert.doesNotMatch(payload, /repo\.listContentAssetsByItem/);
   assert.doesNotMatch(payload, /repo\.getItem|repo\.listTranslations|buildArticleProcessDraftPreview/);

@@ -1,18 +1,13 @@
-﻿import fs from "fs/promises";
 import crypto from "crypto";
-import path from "path";
 import { cleanReviewsAndContent } from "../cleaner/review-cleaner.mjs";
 import { generateContentDrafts } from "../ai/generate-content.mjs";
 import { runQualityChecks } from "../quality/checks.mjs";
-import { writeCsv, writeJson, writeMarkdown } from "../publisher/exporters.mjs";
 
 const GOVERNANCE_REASON_CODES = Object.freeze({
   review_approve: "review_approved",
   review_reject: "review_rejected",
   review_request_changes: "review_changes_requested",
   workflow_reopen: "workflow_reopened",
-  publish_success: "publish_success",
-  publish_prerequisite_conflict: "publish_prerequisite_conflict",
 });
 import { FIELD_PACK_AGENT_KEY, createAgentGenerationEngine } from "./agent-generation.mjs";
 import { createTranslationGenerator } from "../translation/service.mjs";
@@ -79,17 +74,6 @@ function slugify(value) {
   return text || "item";
 }
 
-function dedupeSlug(baseSlug, usedSet) {
-  let candidate = baseSlug || "item";
-  let idx = 2;
-  while (usedSet.has(candidate)) {
-    candidate = `${baseSlug}-${idx}`;
-    idx += 1;
-  }
-  usedSet.add(candidate);
-  return candidate;
-}
-
 function normalizePublishSlug(rawValue, fallbackKey = "item") {
   const candidate = slugify(rawValue);
   if (candidate && candidate !== "item" && candidate.length >= 3 && !/^\d+$/.test(candidate)) return candidate;
@@ -122,22 +106,6 @@ function filterRowsByScopedItemIds(rows, options = {}, key = "id") {
   }
   const scopedSet = new Set(scopedIds);
   return (Array.isArray(rows) ? rows : []).filter((row) => scopedSet.has(Number(row?.[key] || 0)));
-}
-
-function resolveScopedExportDirs(dirs, options = {}) {
-  const scopedIds = normalizeScopedItemIds(options);
-  if (scopedIds.length !== 1) {
-    return {
-      stagingDir: dirs.stagingDir,
-      exportDir: dirs.exportDir,
-    };
-  }
-
-  const scopedKey = String(scopedIds[0]);
-  return {
-    stagingDir: path.join(dirs.stagingDir, "items", scopedKey),
-    exportDir: path.join(dirs.exportDir, "items", scopedKey),
-  };
 }
 
 export function parseImportText(format, text) {
@@ -190,36 +158,6 @@ function mapFromDb(item, rowNo) {
     meta_title: item.meta_title || "",
     meta_description: item.meta_description || "",
     summary: item.summary || "",
-  };
-}
-
-function mapToStagingPayload(item, imageContext = null, officialReference = null) {
-  const cover = imageContext?.cover_url || item.image_url || "";
-  return {
-    type: item.type,
-    category: item.category || "",
-    lang: item.lang || "th",
-    title: item.title || "",
-    summary: item.summary || "",
-    description: item.description_clean || item.description_raw || "",
-    image: cover,
-    image_context: {
-      cover,
-      inline: Array.isArray(imageContext?.inline_urls) ? imageContext.inline_urls : [],
-      gallery: Array.isArray(imageContext?.gallery_urls) ? imageContext.gallery_urls : [],
-      selected: Array.isArray(imageContext?.selected_urls) ? imageContext.selected_urls : [],
-    },
-    slug: item.slug || "",
-    meta_title: item.meta_title || "",
-    meta_description: item.meta_description || "",
-    latitude: item.latitude,
-    longitude: item.longitude,
-    google_place_id: item.google_place_id || "",
-    map_url: item.map_url || "",
-    source_name: item.source_name || "",
-    source_url: item.source_url || "",
-    official_reference: officialReference || null,
-    tags: Array.isArray(item.tags) ? item.tags : [],
   };
 }
 
@@ -1593,10 +1531,6 @@ async function runTranslationStageForSources(repo, translationSources, aiConfig,
   return { run_uid: runUid, generated_count: generatedCount, failed_count: failedCount, languages: languageResults };
 }
 
-async function runFinalTranslationStage(repo, publishedArticles, aiConfig, actorEmail = "system@local") {
-  return runTranslationStageForSources(repo, publishedArticles, aiConfig, actorEmail, "final-prefrontend");
-}
-
 function buildTranslationSourceForItem(repo, contentItemId) {
   const publishedArticle = typeof repo.getPublishedArticleByItem === "function"
     ? repo.getPublishedArticleByItem(contentItemId)
@@ -2821,208 +2755,6 @@ export function reopenReviewDecision(repo, actorEmail, payload) {
   return { ok: true, content_item_id: contentItemId, action: "reopen" };
 }
 
-export async function publishApproved(repo, actorEmail, options = {}) {
-  const actorRole = String(options?.actor_role || "admin").trim().toLowerCase() || "admin";
-  const runUid = repo.startPublishRun("Publish approved items");
-  const approved = filterRowsByScopedItemIds(
-    repo.listItemsByWorkflowHead({ publication_states: ["approved"] }),
-    options
-  );
-  const published = repo.listPublishedArticles();
-  const usedSlugs = new Set(published.map((p) => String(p.slug || "").trim()).filter(Boolean));
-
-  let count = 0;
-  const skipped = [];
-  let prerequisiteConflictCount = 0;
-
-  for (const item of approved) {
-    const draft = repo.latestDraftByItem(item.id);
-    const latestReview = repo.latestReviewByItem(item.id);
-    const latestApprovedReview = repo.latestApprovedReviewByItem(item.id);
-    const publishableSource = repo.buildPublishableSourceByItem(item.id);
-    const workflowBefore = repo.getWorkflowModelByItem(item.id) || null;
-    const useFieldFlowPublishSource = Boolean(publishableSource?.ready_for_publish_source);
-    const baseSkipDetails = {
-      content_item_id: item.id,
-      reason_code: GOVERNANCE_REASON_CODES.publish_prerequisite_conflict,
-      draft_id: draft?.id || null,
-      review_report_id: latestApprovedReview?.id || null,
-      publish_source_kind: useFieldFlowPublishSource ? publishableSource?.source?.source_kind || "assignment_submission_article_draft" : "legacy_draft_review",
-      latest_review_id: latestReview?.id || null,
-      from_production_state: workflowBefore?.production_state || null,
-      to_production_state: workflowBefore?.production_state || null,
-      from_publication_state: workflowBefore?.publication_state || null,
-      to_publication_state: workflowBefore?.publication_state || null,
-    };
-
-    if (!useFieldFlowPublishSource && !draft) {
-      skipped.push({ id: item.id, reason: "missing_latest_draft" });
-      prerequisiteConflictCount += 1;
-      repo.logAudit(actorEmail, "publish.skip", "content_item", String(item.id), {
-        ...baseSkipDetails,
-        reason: "missing_latest_draft",
-      });
-      continue;
-    }
-
-    if (!useFieldFlowPublishSource && !latestReview) {
-      skipped.push({ id: item.id, reason: "missing_quality_report" });
-      prerequisiteConflictCount += 1;
-      repo.logAudit(actorEmail, "publish.skip", "content_item", String(item.id), {
-        ...baseSkipDetails,
-        reason: "missing_quality_report",
-      });
-      continue;
-    }
-
-    if (!useFieldFlowPublishSource && !latestApprovedReview) {
-      skipped.push({ id: item.id, reason: "missing_approved_review" });
-      prerequisiteConflictCount += 1;
-      repo.logAudit(actorEmail, "publish.skip", "content_item", String(item.id), {
-        ...baseSkipDetails,
-        reason: "missing_approved_review",
-      });
-      continue;
-    }
-
-    if (!useFieldFlowPublishSource && latestReview.id !== latestApprovedReview.id) {
-      skipped.push({ id: item.id, reason: "stale_approved_review" });
-      prerequisiteConflictCount += 1;
-      repo.logAudit(actorEmail, "publish.skip", "content_item", String(item.id), {
-        ...baseSkipDetails,
-        reason: "stale_approved_review",
-        approved_review_id: latestApprovedReview.id,
-      });
-      continue;
-    }
-
-    if (!useFieldFlowPublishSource && Number(latestApprovedReview.draft_id || 0) !== Number(draft.id)) {
-      skipped.push({ id: item.id, reason: "approved_review_not_for_latest_draft" });
-      prerequisiteConflictCount += 1;
-      repo.logAudit(actorEmail, "publish.skip", "content_item", String(item.id), {
-        ...baseSkipDetails,
-        reason: "approved_review_not_for_latest_draft",
-        approved_review_draft_id: latestApprovedReview.draft_id,
-      });
-      continue;
-    }
-
-    if (!useFieldFlowPublishSource && String(workflowBefore?.production_state || "").trim().toLowerCase() !== "ready_for_publish") {
-      skipped.push({ id: item.id, reason: "production_state_not_ready_for_publish" });
-      prerequisiteConflictCount += 1;
-      repo.logAudit(actorEmail, "publish.skip", "content_item", String(item.id), {
-        ...baseSkipDetails,
-        reason: "production_state_not_ready_for_publish",
-      });
-      continue;
-    }
-
-    const links = repo
-      .listInternalLinkSuggestions(item.id, "accepted")
-      .map((x) => ({ target_content_item_id: x.target_content_item_id, anchor_text: x.anchor_text, target_slug: x.target_slug }));
-
-    const resolvedArticle = publishableSource?.resolved_article || null;
-    const publishTitle = useFieldFlowPublishSource
-      ? String(resolvedArticle?.title || item.title || "").trim() || item.title
-      : draft?.draft_title || item.title;
-    const publishExcerpt = useFieldFlowPublishSource
-      ? String(resolvedArticle?.excerpt || item.summary || "").trim()
-      : draft?.excerpt || item.summary || "";
-    const publishBody = useFieldFlowPublishSource
-      ? String(resolvedArticle?.body || item.description_clean || item.description_raw || "").trim()
-      : draft?.body || item.description_clean || item.description_raw || "";
-    const publishMetaTitle = useFieldFlowPublishSource
-      ? String(resolvedArticle?.meta_title || item.meta_title || publishTitle || item.title || "").trim()
-      : draft?.meta_title || item.meta_title || item.title;
-    const publishMetaDescription = useFieldFlowPublishSource
-      ? String(resolvedArticle?.meta_description || item.meta_description || publishExcerpt || item.summary || "").trim()
-      : draft?.meta_description || item.meta_description || item.summary || "";
-
-    const baseSlug = normalizePublishSlug(
-      useFieldFlowPublishSource
-        ? publishTitle || item.slug || item.title
-        : draft?.slug || draft?.draft_title || item.slug || item.title,
-      `item-${Number(item.id || 0) || "published"}`
-    );
-    const slug = dedupeSlug(baseSlug, usedSlugs);
-
-    repo.savePublishedArticle({
-      content_item_id: item.id,
-      draft_id: useFieldFlowPublishSource ? null : draft.id,
-      review_report_id: useFieldFlowPublishSource ? null : latestApprovedReview.id,
-      slug,
-      title: publishTitle,
-      excerpt: publishExcerpt,
-      body: publishBody,
-      meta_title: publishMetaTitle,
-      meta_description: publishMetaDescription,
-      event_period_text: item.event_period_text || "",
-      location_text: item.location_text || "",
-      latitude: item.latitude,
-      longitude: item.longitude,
-      map_url: item.map_url || "",
-      google_place_id: item.google_place_id || "",
-      related: useFieldFlowPublishSource ? [] : draft?.suggested_related || [],
-      internal_links: links,
-      status: "published",
-    });
-
-    const workflowAfter = repo.upsertWorkflowModel(
-      item.id,
-      {
-        production_state: "completed",
-        publication_state: "published",
-        last_transition_note: `published slug=${slug}`,
-      },
-      actorEmail,
-      {
-        actor_role: actorRole,
-        reason_code: GOVERNANCE_REASON_CODES.publish_success,
-        bump_state_version: true,
-      }
-    );
-    repo.logAudit(actorEmail, "publish.success", "content_item", String(item.id), {
-      content_item_id: item.id,
-      slug,
-      links: links.length,
-      draft_id: useFieldFlowPublishSource ? null : draft.id,
-      review_report_id: useFieldFlowPublishSource ? null : latestApprovedReview?.id || null,
-      publish_source_kind: useFieldFlowPublishSource ? publishableSource?.source?.source_kind || "assignment_submission_article_draft" : "legacy_draft_review",
-      assignment_id: useFieldFlowPublishSource ? publishableSource?.source?.assignment_id || null : null,
-      submission_id: useFieldFlowPublishSource ? publishableSource?.source?.latest_submission_id || null : null,
-      reason_code: GOVERNANCE_REASON_CODES.publish_success,
-      from_production_state: workflowBefore?.production_state || null,
-      to_production_state: workflowAfter?.production_state || null,
-      from_publication_state: workflowBefore?.publication_state || null,
-      to_publication_state: workflowAfter?.publication_state || null,
-    });
-    count += 1;
-  }
-
-  if (prerequisiteConflictCount > 0) {
-    const summary = {
-      published_count: count,
-      skipped_count: skipped.length,
-      conflicted_count: prerequisiteConflictCount,
-      skipped,
-      run_uid: runUid,
-    };
-    const runStatus = count > 0 ? "done_with_conflict" : "failed";
-    repo.finishPublishRun(
-      runUid,
-      runStatus,
-      count,
-      `Publish prerequisite conflict for ${prerequisiteConflictCount} item(s); published ${count}`
-    );
-    const err = new Error(`publish prerequisite conflict: ${prerequisiteConflictCount} item(s)`);
-    err.code = "publish_prerequisite_conflict";
-    err.summary = summary;
-    throw err;
-  }
-  repo.finishPublishRun(runUid, "done", count, `Published ${count} items, skipped ${skipped.length}`);
-  return { count, skipped, run_uid: runUid };
-}
-
 export function reviewInternalLink(repo, actorEmail, suggestionId, action) {
   const id = Number(suggestionId || 0);
   const normalizedAction = String(action || "").trim().toLowerCase();
@@ -3037,115 +2769,6 @@ export function reviewInternalLink(repo, actorEmail, suggestionId, action) {
 
   return { ok: true, id, status: nextStatus };
 }
-
-export async function approveToStaging(repo, actorEmail, options = {}) {
-  const runUid = repo.createPipelineRun("staging", "running", 0, 0, "Staging approval started");
-  const items = filterRowsByScopedItemIds(
-    repo.listItemsByWorkflowHead({ publication_states: ["approved", "published"] }),
-    options
-  );
-
-  for (const item of items) {
-    const imageContext = repo.listApprovedImageContext(item.id);
-    const officialReference = repo.getOfficialReferenceByItem(item.id);
-    repo.stageItem(item.id, mapToStagingPayload(item, imageContext, officialReference));
-    repo.logAudit(actorEmail, "staging.approve", "content_item", String(item.id), null);
-  }
-
-  repo.finishPipelineRun(runUid, "done", items.length, "Staging approval done");
-  return { count: items.length };
-}
-
-export async function exportStaging(repo, dirs, options = {}) {
-  const scopedIds = normalizeScopedItemIds(options);
-  const exportDirs = resolveScopedExportDirs(dirs, options);
-  const items = filterRowsByScopedItemIds(repo.listStaging(), options).map((item) => {
-    if (item.staged_payload) return item.staged_payload;
-    const imageContext = repo.listApprovedImageContext(item.id);
-    const officialReference = repo.getOfficialReferenceByItem(item.id);
-    return mapToStagingPayload(item, imageContext, officialReference);
-  });
-  const publishedArticles = filterRowsByScopedItemIds(repo.listPublishedArticles(), options, "content_item_id");
-  const translationSummary = options.skipTranslationStage === true
-    ? { run_uid: null, generated_count: 0, failed_count: 0, skipped: true }
-    : await runFinalTranslationStage(
-      repo,
-      publishedArticles,
-      options.aiConfig || null,
-      options.actorEmail || "system@local"
-    );
-
-  const validTranslations = repo
-    .listTranslations()
-    .filter((row) => {
-      if (!scopedIds.length) return true;
-      return scopedIds.includes(Number(row.source_content_item_id || 0));
-    })
-    .filter((row) =>
-      row.translation_status === "ready"
-      && row.automatic_check_status === "passed"
-      && Number(row.stale_flag || 0) === 0
-      && String(row.translation_recheck_status || "").trim().toLowerCase() === "passed"
-    )
-    .map((row) => ({
-      source_content_item_id: row.source_content_item_id,
-      source_published_article_id: row.source_published_article_id,
-      source_draft_id: row.source_draft_id,
-      source_review_report_id: row.source_review_report_id,
-      source_fingerprint: row.source_fingerprint,
-      source_lang: row.source_lang || "th",
-      lang: row.lang,
-      title: row.translated_title,
-      excerpt: row.translated_excerpt,
-      body: row.translated_body,
-      meta_title: row.translated_meta_title,
-      meta_description: row.translated_meta_description,
-      translation_status: row.translation_status,
-      automatic_check_status: row.automatic_check_status,
-      stale_flag: row.stale_flag,
-      updated_at: row.updated_at,
-    }));
-
-  await fs.mkdir(exportDirs.stagingDir, { recursive: true });
-  await fs.mkdir(exportDirs.exportDir, { recursive: true });
-
-  const rejectedPath = path.join(exportDirs.stagingDir, "rejected-items.json");
-  await fs.writeFile(rejectedPath, "[]", "utf8");
-
-  const jsonJobUid = repo.createExportJob("json", path.join(exportDirs.exportDir, "content-import.json"), items.length, "running");
-  const jsonPath = await writeJson(exportDirs.exportDir, items);
-  repo.finishExportJob(jsonJobUid, "done");
-
-  const csvJobUid = repo.createExportJob("csv", path.join(exportDirs.exportDir, "content-import.csv"), items.length, "running");
-  const csvPath = await writeCsv(exportDirs.exportDir, items);
-  repo.finishExportJob(csvJobUid, "done");
-
-  const mdJobUid = repo.createExportJob("markdown", path.join(exportDirs.exportDir, "content-import.md"), items.length, "running");
-  const mdPath = await writeMarkdown(exportDirs.exportDir, items);
-  repo.finishExportJob(mdJobUid, "done");
-
-  const publishedPath = path.join(exportDirs.exportDir, "published-articles.json");
-  await fs.writeFile(publishedPath, JSON.stringify(publishedArticles, null, 2), "utf8");
-
-  const translationsPath = path.join(exportDirs.exportDir, "published-articles-translations.json");
-  await fs.writeFile(translationsPath, JSON.stringify(validTranslations, null, 2), "utf8");
-
-  return {
-    itemCount: items.length,
-    publishedCount: publishedArticles.length,
-    translationCount: validTranslations.length,
-    translationSummary,
-    jsonPath,
-    csvPath,
-    mdPath,
-    publishedPath,
-    translationsPath,
-    rejectedPath,
-  };
-}
-
-
-
 
 
 
