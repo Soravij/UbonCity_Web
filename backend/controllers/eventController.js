@@ -86,7 +86,9 @@ async function loadApprovedEventMediaMap(req, eventIds) {
          ma.source_url,
          ma.storage_disk,
          ma.file_name,
-         ma.storage_path
+         ma.storage_path,
+         ma.width,
+         ma.height
        FROM content_image_usages ciu
        JOIN media_assets ma ON ma.id=ciu.asset_id
        WHERE ciu.entity_type='event'
@@ -113,8 +115,8 @@ async function loadApprovedEventMediaMap(req, eventIds) {
         current.galleryItems.push({
           url: mediaUrl,
           caption: String(row?.caption || "").trim() || null,
-          width: null,
-          height: null,
+          width: row?.width == null ? null : Number(row.width) || null,
+          height: row?.height == null ? null : Number(row.height) || null,
         });
       }
       if (usageType === "inline") current.inline.push(mediaUrl);
@@ -203,8 +205,8 @@ function normalizeEventForResponse(req, row, media) {
       .map((entry) => ({
         url: rewriteSelfHostedMediaUrl(req, entry?.url),
         caption: String(entry?.caption || "").trim() || null,
-        width: null,
-        height: null,
+        width: entry?.width == null ? null : Number(entry.width) || null,
+        height: entry?.height == null ? null : Number(entry.height) || null,
       }))
       .filter((entry) => entry.url),
     media_inline_images: (Array.isArray(normalized.media_inline_images) ? normalized.media_inline_images : [])

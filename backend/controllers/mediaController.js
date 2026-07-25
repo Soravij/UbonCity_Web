@@ -11,6 +11,7 @@ import {
   sanitizeFileName,
   validateBase64ImageInput,
 } from "../validators/inputSanitizer.js";
+import { readImageDimensionsFromBuffer } from "../services/imageDimensionsService.js";
 
 const MAX_FILE_SIZE_BYTES = LIMITS.BASE64_MAX_BYTES_8MB;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -488,6 +489,7 @@ export const uploadMediaAsset = async (req, res) => {
 
     const checksum = crypto.createHash("sha256").update(buffer).digest("hex");
     const assetUid = crypto.randomUUID();
+    const { width: measuredWidth, height: measuredHeight } = readImageDimensionsFromBuffer(buffer);
 
     const payload = sanitizeAssetWriteBody(
       {
@@ -500,6 +502,8 @@ export const uploadMediaAsset = async (req, res) => {
         size_bytes: buffer.length,
         checksum,
         status: "pending",
+        width: measuredWidth,
+        height: measuredHeight,
       },
       { requireAssetLocation: true }
     );
