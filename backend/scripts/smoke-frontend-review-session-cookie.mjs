@@ -1,6 +1,7 @@
 import "dotenv/config";
 import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
+import { assertSmokeDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -118,6 +119,7 @@ async function stopProcess(child) {
 }
 
 async function run() {
+  assertSmokeDatabaseAllowed(DB_NAME);
   assert(JWT_SECRET, "JWT_SECRET is required");
   assert(DB_USER && DB_NAME, "DB_USER and DB_NAME are required");
   const ownerToken = createOwnerToken();

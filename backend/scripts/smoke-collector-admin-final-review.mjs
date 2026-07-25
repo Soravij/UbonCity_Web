@@ -10,6 +10,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
+import { assertSmokeDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const COLLECTOR_DIR = path.join(ROOT, "collector");
@@ -69,10 +70,43 @@ async function cleanupPublishedMediaArtifacts(entityType, entityIds = []) {
 }
 
 function withRepo(fn) { const db = openDatabase(collectorDbPath, COLLECTOR_SCHEMA); try { return fn(createRepository(db), db); } finally { db.close(); } }
+function reserveFixtureItemId(db) { const fixtureItemId = Number(`9${Date.now()}${crypto.randomInt(100, 999)}`); db.prepare("INSERT OR REPLACE INTO sqlite_sequence(name,seq) VALUES('content_items',?)").run(fixtureItemId - 1); }
+export function isFixtureReviewRow(row, fixture) { return String(row?.slug || "") === String(fixture?.slug || "") && String(row?.slug || "").startsWith("final-review-"); }
+export async function cleanupFixtureReviewContent(executor, fixture) {
+  const reviewContentIds = [...new Set((fixture?.reviewContentIds || []).map((id) => Number(id || 0)).filter(Boolean))];
+  for (const reviewContentId of reviewContentIds) {
+    const [rows] = await executor.query(
+      "SELECT id, public_entity_type, public_entity_id, slug FROM review_contents WHERE id=? AND slug LIKE 'final-review-%'",
+      [reviewContentId]
+    );
+    if (!rows.length) {
+      console.warn(`[final-review-smoke] skip teardown review_content_id=${reviewContentId}: fixture marker missing`);
+      continue;
+    }
+    for (const row of rows) {
+      if (!isFixtureReviewRow(row, fixture)) {
+        console.warn(`[final-review-smoke] skip teardown review_content_id=${reviewContentId}: slug marker mismatch`);
+        continue;
+      }
+      if (row.public_entity_type === "place" && row.public_entity_id) {
+        await executor.query("DELETE FROM place_translations WHERE place_id=?", [row.public_entity_id]);
+        await cleanupPublishedMediaArtifacts("place", [row.public_entity_id]);
+        await executor.query("DELETE FROM places WHERE id=?", [row.public_entity_id]);
+      }
+      if (row.public_entity_type === "event" && row.public_entity_id) {
+        await executor.query("DELETE FROM event_translations WHERE event_id=?", [row.public_entity_id]);
+        await cleanupPublishedMediaArtifacts("event", [row.public_entity_id]);
+        await executor.query("DELETE FROM events WHERE id=?", [row.public_entity_id]);
+      }
+      await executor.query("DELETE FROM review_contents WHERE id=?", [row.id]);
+    }
+  }
+}
 function translationLangs(fixture, version) { return fixture[version].translation_langs; }
 function prepareFixture(fixture, version) {
   withRepo((repo, db) => {
     if (!fixture.itemId) {
+      reserveFixtureItemId(db);
       const item = repo.createItemWithWorkflowHead({ type: fixture.type, category: fixture.type === "event" ? "events" : "attractions", lang: "th", title: fixture.v1.title, slug: fixture.slug, description_raw: fixture.v1.body, description_clean: fixture.v1.body, summary: fixture.v1.excerpt, meta_title: fixture.v1.title, meta_description: fixture.v1.meta_description, source_type: "manual", source_name: "final review smoke", source_url: "https://example.test/final-review-smoke", ...(fixture.type === "event" ? { event_period_text: fixture.v1.event_period_text, location_text: fixture.v1.location_text } : {}) }, { production_state: "ready_for_publish", publication_state: "approved" }, "final-review-smoke@local.test", { actor_role: "owner", reason_code: "smoke_fixture" }).item;
       fixture.itemId = Number(item.id);
       const mediaDir = path.join(tempDir, "media", "uploads"); fs.mkdirSync(mediaDir, { recursive: true });
@@ -107,6 +141,8 @@ async function submitAdminReview(fixture, version, prepare = true) {
   assertOk(result.response.ok, `${fixture.key} ${version} submit-admin-review failed: ${JSON.stringify(result.payload)}`); // old rows 1/26/49/63/74/83/91/99; 18 and 21
   const id = Number(result.payload?.backend_ingest?.result?.item?.id || 0);
   assertOk(id > 0, `${fixture.key} ${version} review content id missing`); // old rows 19 and 22
+  if (!fixture.reviewContentIds) fixture.reviewContentIds = [];
+  fixture.reviewContentIds.push(id);
   return id;
 }
 async function reviewQueue() { const result = await http(`${BACKEND_BASE_URL}/collector-import-reviews?status=all`, { headers: auth(backendToken(), false) }); assertOk(result.response.ok, `review queue failed: ${JSON.stringify(result.payload)}`); return result.payload?.items || []; }
@@ -142,6 +178,7 @@ async function expectDetail(item, fixture, version) {
 function assertHistory(item, previousStatus) { assertOk((item.history || []).some((row) => row.action_type === "reingested" && row.previous_status === previousStatus && row.next_status === "pending_review"), `missing reingested from ${previousStatus}`); }
 
 export async function runCollectorAdminFinalReviewSmoke() {
+  assertSmokeDatabaseAllowed(DB_CONFIG.database);
   assertOk(JWT_SECRET, "JWT_SECRET is required"); assertOk(DB_CONFIG.user && DB_CONFIG.database, "DB_USER and DB_NAME are required");
   pool = mysql.createPool(DB_CONFIG);
   const runId = `${Date.now()}`;
@@ -178,7 +215,7 @@ export async function runCollectorAdminFinalReviewSmoke() {
     stopCollector();
     try {
       // Cleanup is fixture teardown only; smoke assertions above use HTTP exclusively. Translations precede entities for FK safety.
-      for (const fixture of fixtures) { const [rows] = await pool.query("SELECT id, public_entity_type, public_entity_id FROM review_contents WHERE source_system='collector-app' AND source_content_item_id=?", [fixture.itemId]); for (const row of rows) { if (row.public_entity_type === "place" && row.public_entity_id) { await pool.query("DELETE FROM place_translations WHERE place_id=?", [row.public_entity_id]); await cleanupPublishedMediaArtifacts("place", [row.public_entity_id]); await pool.query("DELETE FROM places WHERE id=?", [row.public_entity_id]); } if (row.public_entity_type === "event" && row.public_entity_id) { await pool.query("DELETE FROM event_translations WHERE event_id=?", [row.public_entity_id]); await cleanupPublishedMediaArtifacts("event", [row.public_entity_id]); await pool.query("DELETE FROM events WHERE id=?", [row.public_entity_id]); } } await pool.query("DELETE FROM review_contents WHERE source_system='collector-app' AND source_content_item_id=?", [fixture.itemId]); }
+      for (const fixture of fixtures) await cleanupFixtureReviewContent(pool, fixture);
     } finally { if (pool) { await pool.end(); pool = null; } await fsp.rm(tempDir, { recursive: true, force: true }); }
   }
 }

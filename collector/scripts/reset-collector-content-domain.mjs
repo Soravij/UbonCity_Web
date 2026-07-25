@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolvePaths } from "../config/paths.mjs";
 import { openDatabase } from "../db/client.mjs";
+import { assertSmokeSqliteDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(SCRIPT_DIR, "..");
@@ -311,6 +312,7 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   const dirs = resolvePaths(ROOT_DIR);
   const schemaPath = path.join(dirs.rootDir, "database", "schema.sql");
+  assertSmokeSqliteDatabaseAllowed(dirs.dbPath);
   const db = openDatabase(dirs.dbPath, schemaPath);
 
   const avatarAssetIds = collectUserAvatarAssetIds(db);

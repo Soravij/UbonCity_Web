@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolvePaths } from "../config/paths.mjs";
 import { openDatabase } from "../db/client.mjs";
+import { assertSmokeSqliteDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 function nowIso() {
   return new Date().toISOString();
@@ -63,6 +64,7 @@ function cleanupItemGraph(db, itemId) {
 function main() {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const dirs = resolvePaths(path.resolve(scriptDir, ".."));
+  assertSmokeSqliteDatabaseAllowed(dirs.dbPath);
   const db = openDatabase(dirs.dbPath, path.join(dirs.rootDir, "database", "schema.sql"));
 
   try {

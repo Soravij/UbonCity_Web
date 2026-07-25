@@ -7,6 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { resolvePaths } from "../config/paths.mjs";
 import { openDatabase } from "../db/client.mjs";
 import { resolveSmokeCredentials } from "./shared-smoke-auth.mjs";
+import { assertSmokeSqliteDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 function readCliOption(name) {
   const idx = process.argv.indexOf(name);
@@ -356,6 +357,7 @@ async function main() {
   resolveVerifyAuth();
 
   const dirs = resolvePaths(path.resolve(CWD));
+  assertSmokeSqliteDatabaseAllowed(dirs.dbPath);
   const db = openDatabase(dirs.dbPath, path.join(dirs.rootDir, "database", "schema.sql"));
   const resolvedAssignmentId = resolveAssignmentId(db, ASSIGNMENT_ID);
 

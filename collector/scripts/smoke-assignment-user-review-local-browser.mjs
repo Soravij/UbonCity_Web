@@ -9,11 +9,13 @@ import { resolvePaths } from "../config/paths.mjs";
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 import { resolveSmokeActor, assertLoginRole } from "./shared-smoke-auth.mjs";
+import { assertSmokeSqliteDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CWD = path.resolve(SCRIPT_DIR, "..");
 const dirs = resolvePaths(CWD);
 const schemaPath = path.join(dirs.rootDir, "database", "schema.sql");
+assertSmokeSqliteDatabaseAllowed(dirs.dbPath);
 const BASE_URL = String(process.env.SMOKE_LOCAL_BASE_URL || "http://127.0.0.1:5062").replace(/\/+$/, "");
 const DEBUG_PORT = Number(process.env.SMOKE_BROWSER_DEBUG_PORT || 9235);
 const BROWSER_PATHS = [

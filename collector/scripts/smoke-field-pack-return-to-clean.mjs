@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { resolvePaths } from "../config/paths.mjs";
 import { openDatabase } from "../db/client.mjs";
 import { createTestClient } from "./lib/test-client.mjs";
+import { assertSmokeSqliteDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -94,6 +95,7 @@ function cleanupFixture(db, itemId) {
 async function main() {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const dirs = resolvePaths(path.resolve(scriptDir, ".."));
+  assertSmokeSqliteDatabaseAllowed(dirs.dbPath);
   const db = openDatabase(dirs.dbPath, path.join(dirs.rootDir, "database", "schema.sql"));
   const client = createTestClient();
 

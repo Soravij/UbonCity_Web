@@ -2,6 +2,7 @@ import "dotenv/config";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
+import { assertSmokeDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 const BASE_URL = String(process.env.BACKEND_PHASEF_SMOKE_BASE_URL || "http://127.0.0.1:5000").trim();
 const DB_HOST = String(process.env.DB_HOST || "127.0.0.1");
@@ -39,6 +40,7 @@ async function requestJson(pathname, { method = "GET", token = "", body } = {}) 
 }
 
 async function main() {
+  assertSmokeDatabaseAllowed(DB_NAME);
   assert(DB_USER && DB_NAME, "DB_USER and DB_NAME must be set for backend phaseF smoke");
   assert(JWT_SECRET, "JWT_SECRET must be set for backend phaseF smoke");
 

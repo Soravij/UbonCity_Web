@@ -6,6 +6,7 @@ import { createRepository } from "../db/repository.mjs";
 import { resolvePaths } from "../config/paths.mjs";
 import { rerunProblemTranslations } from "../services/workflow.mjs";
 import { readCliOption } from "./lib/smoke-helpers.mjs";
+import { assertSmokeSqliteDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const COLLECTOR_DIR = path.resolve(SCRIPT_DIR, "..");
@@ -129,6 +130,7 @@ async function main() {
   const requestedItemId = Number(readCliOption("--item") || process.env.COLLECTOR_TEST_ITEM_ID || 0) || 0;
   const actorEmail = String(process.env.COLLECTOR_SMOKE_ACTOR_EMAIL || "smoke@local").trim().toLowerCase();
   const dirs = resolvePaths(COLLECTOR_DIR);
+  assertSmokeSqliteDatabaseAllowed(dirs.dbPath);
   const db = openDatabase(dirs.dbPath);
   const repo = createRepository(db);
 
