@@ -2,12 +2,13 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
+import { readImageDimensionsFromDiskPath } from "./imageDimensionsService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const BACKEND_UPLOADS_DIR = path.resolve(__dirname, "..", "uploads");
 
-function toUploadDiskPath(relativePath) {
+export function toUploadDiskPath(relativePath) {
   const normalized = String(relativePath || "").trim().replace(/\\/g, "/");
   if (!normalized || !normalized.startsWith("uploads/")) return "";
   return path.join(BACKEND_UPLOADS_DIR, normalized.slice("uploads/".length));
@@ -231,12 +232,16 @@ export async function replaceEntityMediaWithReviewBatch(executor, {
       const copiedAsset = await promoteReviewAssetFile(asset, promotedAsset);
       published.promoted_storage_paths.push(copiedAsset.storage_path);
       published.promoted_file_paths.push(copiedAsset.disk_path);
+      const { width: measuredWidth, height: measuredHeight } = await readImageDimensionsFromDiskPath(
+        copiedAsset.disk_path
+      );
 
       const [assetInsert] = await executor.query(
         `INSERT INTO media_assets (
            asset_uid, source_url, checksum, status, related_type, related_id,
-           mime_type, size_bytes, storage_disk, storage_path, file_name, created_by, reviewed_by, reviewed_at
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`,
+           mime_type, size_bytes, storage_disk, storage_path, file_name, width, height,
+           created_by, reviewed_by, reviewed_at
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`,
         [
           crypto.randomUUID(),
           String(asset?.resolved_source_url || asset?.source_url || "").trim() || null,
@@ -249,6 +254,8 @@ export async function replaceEntityMediaWithReviewBatch(executor, {
           "local",
           copiedAsset.storage_path,
           copiedAsset.file_name,
+          measuredWidth,
+          measuredHeight,
           actorUserId == null ? null : Number(actorUserId) || null,
           actorUserId == null ? null : Number(actorUserId) || null,
         ]
