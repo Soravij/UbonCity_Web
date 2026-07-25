@@ -12,6 +12,7 @@ import {
   validateBase64ImageInput,
 } from "../validators/inputSanitizer.js";
 import { readImageDimensionsFromBuffer } from "../services/imageDimensionsService.js";
+import { cleanupUnreferencedMediaAssets } from "../services/mediaAssetCleanupService.js";
 
 const MAX_FILE_SIZE_BYTES = LIMITS.BASE64_MAX_BYTES_8MB;
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -778,19 +779,46 @@ export const createMediaUsage = async (req, res) => {
   }
 };
 
+export async function deleteMediaUsageAndCleanup(executor, usageId) {
+  const [usageRows] = await executor.query("SELECT asset_id FROM content_image_usages WHERE id=? LIMIT 1", [usageId]);
+  if (!Array.isArray(usageRows) || !usageRows.length) return { found: false, cleanupFilePaths: [] };
+
+  const assetId = Number(usageRows[0]?.asset_id || 0) || 0;
+  await executor.query("DELETE FROM content_image_usages WHERE id=?", [usageId]);
+  const cleanupFilePaths = assetId ? await cleanupUnreferencedMediaAssets(executor, [assetId]) : [];
+  return { found: true, cleanupFilePaths };
+}
+
 export const deleteMediaUsage = async (req, res) => {
+  let connection;
   try {
     await ensureMediaTables();
 
     const id = asInt(req.params?.id);
     if (!id) return res.status(400).json({ error: "Invalid media usage id" });
 
-    const [result] = await pool.query("DELETE FROM content_image_usages WHERE id=?", [id]);
-    if (!result.affectedRows) return res.status(404).json({ error: "Media usage not found" });
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const result = await deleteMediaUsageAndCleanup(connection, id);
+    if (!result.found) {
+      await connection.rollback();
+      return res.status(404).json({ error: "Media usage not found" });
+    }
+    await connection.commit();
+    for (const filePath of result.cleanupFilePaths) {
+      await fs.promises.unlink(filePath).catch(() => {});
+    }
 
     return res.json({ message: "Usage deleted" });
   } catch (err) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch {}
+    }
     console.error("mediaController failure", err);
     return res.status(500).json({ error: "Internal server error" });
+  } finally {
+    connection?.release();
   }
 };
