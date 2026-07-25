@@ -1,20 +1,8 @@
 import bcrypt from "bcryptjs";
 import fs from "fs/promises";
-import path from "path";
 import pool from "../config/db.js";
 import { appendContentPurgeAudit } from "./contentGovernanceService.js";
-
-const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
-
-function toUploadDiskPath(storagePath, fileName) {
-  const rawPath = String(storagePath || "").trim().replace(/\\/g, "/");
-  if (rawPath && rawPath.startsWith("uploads/")) {
-    return path.join(UPLOADS_DIR, rawPath.slice("uploads/".length));
-  }
-  const safeName = String(fileName || "").trim();
-  if (safeName) return path.join(UPLOADS_DIR, safeName);
-  return "";
-}
+import { cleanupUnreferencedMediaAssets, toMediaUploadDiskPath } from "./mediaAssetCleanupService.js";
 
 async function verifyOwnerPassword(actorUserId, password, executor) {
   const userId = Number(actorUserId || 0) || 0;
@@ -38,33 +26,6 @@ async function listEntityMediaRows(executor, entityType, entityId) {
   return Array.isArray(rows) ? rows : [];
 }
 
-async function cleanupOrphanMediaAssets(executor, assetIds = []) {
-  const uniqueAssetIds = Array.from(new Set((assetIds || []).map((v) => Number(v || 0)).filter(Boolean)));
-  if (!uniqueAssetIds.length) return [];
-  const placeholders = uniqueAssetIds.map(() => "?").join(",");
-  const [usageRows] = await executor.query(
-    `SELECT asset_id, COUNT(*) AS refs
-     FROM content_image_usages
-     WHERE asset_id IN (${placeholders})
-     GROUP BY asset_id`,
-    uniqueAssetIds
-  );
-  const inUse = new Set((Array.isArray(usageRows) ? usageRows : []).map((r) => Number(r.asset_id || 0)).filter(Boolean));
-  const removable = uniqueAssetIds.filter((id) => !inUse.has(id));
-  if (!removable.length) return [];
-
-  const [assetRows] = await executor.query(
-    `SELECT storage_path, file_name
-     FROM media_assets
-     WHERE id IN (${removable.map(() => "?").join(",")})`,
-    removable
-  );
-  await executor.query(`DELETE FROM media_assets WHERE id IN (${removable.map(() => "?").join(",")})`, removable);
-  return (Array.isArray(assetRows) ? assetRows : [])
-    .map((r) => toUploadDiskPath(r.storage_path, r.file_name))
-    .filter(Boolean);
-}
-
 async function deleteFilesBestEffort(paths = []) {
   for (const target of Array.isArray(paths) ? paths : []) {
     const normalized = String(target || "").trim();
@@ -75,9 +36,24 @@ async function deleteFilesBestEffort(paths = []) {
   }
 }
 
-async function cleanupCommonMappings(executor, entityType, entityId) {
+export async function listReviewAssetFilePathsForEntity(executor, entityType, entityId) {
+  const [reviewAssetRows] = await executor.query(
+    `SELECT rca.storage_path
+     FROM review_content_assets rca
+     JOIN review_contents rc ON rc.id=rca.review_content_id
+     WHERE rc.public_entity_type=? AND rc.public_entity_id=?`,
+    [entityType, Number(entityId)]
+  );
+  return Array.from(new Set((Array.isArray(reviewAssetRows) ? reviewAssetRows : [])
+    .map((row) => toMediaUploadDiskPath(row.storage_path))
+    .filter(Boolean)));
+}
+
+export async function cleanupCommonMappings(executor, entityType, entityId) {
+  const reviewAssetFilePaths = await listReviewAssetFilePathsForEntity(executor, entityType, entityId);
   await executor.query("DELETE FROM collector_import_reviews WHERE local_entity_type=? AND local_entity_id=?", [entityType, Number(entityId)]);
   await executor.query("DELETE FROM review_contents WHERE public_entity_type=? AND public_entity_id=?", [entityType, Number(entityId)]);
+  return reviewAssetFilePaths;
 }
 
 async function loadPlaceSnapshot(executor, placeId) {
@@ -124,11 +100,11 @@ export async function purgePlace({
     const mediaRows = await listEntityMediaRows(connection, "place", targetId);
     const assetIds = mediaRows.map((row) => Number(row.asset_id || 0)).filter(Boolean);
     await connection.query("DELETE FROM content_image_usages WHERE entity_type='place' AND entity_id=?", [targetId]);
-    const orphanPaths = await cleanupOrphanMediaAssets(connection, assetIds);
+    const orphanPaths = await cleanupUnreferencedMediaAssets(connection, assetIds);
     filePaths = [...filePaths, ...orphanPaths];
 
     await connection.query("DELETE FROM place_translations WHERE place_id=?", [targetId]);
-    await cleanupCommonMappings(connection, "place", targetId);
+    filePaths.push(...await cleanupCommonMappings(connection, "place", targetId));
     await connection.query("DELETE FROM places WHERE id=?", [targetId]);
 
     await appendContentPurgeAudit({
@@ -180,11 +156,11 @@ export async function purgeEvent({
     const mediaRows = await listEntityMediaRows(connection, "event", targetId);
     const assetIds = mediaRows.map((row) => Number(row.asset_id || 0)).filter(Boolean);
     await connection.query("DELETE FROM content_image_usages WHERE entity_type='event' AND entity_id=?", [targetId]);
-    const orphanPaths = await cleanupOrphanMediaAssets(connection, assetIds);
+    const orphanPaths = await cleanupUnreferencedMediaAssets(connection, assetIds);
     filePaths = [...filePaths, ...orphanPaths];
 
     await connection.query("DELETE FROM event_translations WHERE event_id=?", [targetId]);
-    await cleanupCommonMappings(connection, "event", targetId);
+    filePaths.push(...await cleanupCommonMappings(connection, "event", targetId));
     await connection.query("DELETE FROM events WHERE id=?", [targetId]);
 
     await appendContentPurgeAudit({
