@@ -197,6 +197,23 @@ export async function replaceEntityMediaWithReviewBatch(executor, {
   );
 
   const rows = Array.isArray(reviewAssets) ? reviewAssets : [];
+  if (!rows.length) {
+    console.warn(
+      `[published-media] keeping existing ${normalizedEntityType} media: no review_ready assets for review_content_id=${Number(reviewContentId)} batch_uid=${String(batchUid || "").trim()}`
+    );
+    return {
+      cover_url: null,
+      thumbnail_url: null,
+      gallery_urls: [],
+      inline_urls: [],
+      cleanup_file_paths: [],
+      url_rewrites: [],
+      promoted_storage_paths: [],
+      promoted_file_paths: [],
+      media_unchanged: true,
+    };
+  }
+
   const oldRows = await listExistingMediaUsageRows(executor, normalizedEntityType, entityId);
   await executor.query(
     `DELETE FROM content_image_usages
@@ -214,6 +231,7 @@ export async function replaceEntityMediaWithReviewBatch(executor, {
     url_rewrites: [],
     promoted_storage_paths: [],
     promoted_file_paths: [],
+    media_unchanged: false,
   };
 
   try {

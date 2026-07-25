@@ -246,10 +246,81 @@ test("replaceEntityMediaWithReviewBatch always creates a unique published path a
   assert.ok(mediaAssetInsert, "expected media_assets insert");
   assert.equal(mediaAssetInsert.params[9], "uploads/published/places/44/59-batch-collision-cover-0-5.jpg");
   assert.notEqual(mediaAssetInsert.params[9], "uploads/published/places/44/old-cover.jpg");
+  assert.equal(result.media_unchanged, false);
+  assert.equal(
+    executor.calls.filter((call) => String(call.sql).replace(/\s+/g, " ").trim().toLowerCase().startsWith("delete from content_image_usages")).length,
+    1,
+    "a non-empty review-ready batch must still replace existing usage"
+  );
+  assert.equal(
+    executor.calls.filter((call) => String(call.sql).replace(/\s+/g, " ").trim().toLowerCase().startsWith("delete from media_assets")).length,
+    1,
+    "a non-empty review-ready batch must still clean up orphaned replaced assets"
+  );
   assert.deepEqual(result.cleanup_file_paths, [path.join(BACKEND_UPLOADS_DIR, "published", "places", "44", "old-cover.jpg")]);
   assert.doesNotMatch(String(result.cleanup_file_paths[0] || ""), /59-batch-collision-cover-0-5\.jpg/);
 
   await removeUploadFixture("uploads/published/places/44/old-cover.jpg");
   await removeUploadFixture("uploads/review-item-44-cover.jpg");
   await removeUploadFixture("uploads/published/places/44/59-batch-collision-cover-0-5.jpg");
+});
+
+test("replaceEntityMediaWithReviewBatch keeps existing usage and skips cleanup when the review-ready batch is empty", async () => {
+  const oldUsageRows = [
+    {
+      id: 20,
+      asset_id: 901,
+      usage_type: "cover",
+      storage_path: "uploads/published/places/501/existing-cover.jpg",
+      file_name: "existing-cover.jpg",
+    },
+  ];
+  const executor = createExecutor([], oldUsageRows);
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+
+  try {
+    const result = await replaceEntityMediaWithReviewBatch(executor, {
+      entityType: "place",
+      entityId: 501,
+      reviewContentId: 601,
+      batchUid: "empty-batch",
+      actorUserId: 7,
+    });
+
+    assert.equal(result.media_unchanged, true);
+    assert.deepEqual(result.cleanup_file_paths, []);
+    assert.equal(
+      executor.calls.filter((call) => String(call.sql).replace(/\s+/g, " ").trim().toLowerCase().startsWith("delete from content_image_usages")).length,
+      0
+    );
+    assert.equal(executor.calls.some((call) => String(call.sql).toLowerCase().includes("from content_image_usages ciu")), false);
+    assert.equal(executor.calls.some((call) => String(call.sql).replace(/\s+/g, " ").trim().toLowerCase().startsWith("delete from media_assets")), false);
+    assert.match(warnings[0], /no review_ready assets.*empty-batch/i);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("replaceEntityMediaWithReviewBatch is a no-op when the review-ready batch and existing usage are both empty", async () => {
+  const executor = createExecutor([]);
+  const originalWarn = console.warn;
+  console.warn = () => {};
+
+  try {
+    const result = await replaceEntityMediaWithReviewBatch(executor, {
+      entityType: "event",
+      entityId: 502,
+      reviewContentId: 602,
+      batchUid: "empty-no-usage",
+    });
+
+    assert.equal(result.media_unchanged, true);
+    assert.equal(executor.calls.length, 1);
+    assert.equal(executor.calls[0].params[0], 602);
+    assert.equal(executor.calls[0].params[1], "empty-no-usage");
+  } finally {
+    console.warn = originalWarn;
+  }
 });
