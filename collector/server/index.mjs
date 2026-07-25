@@ -10,6 +10,7 @@ import jwt from "jsonwebtoken";
 import { createCollectorAuthIntegration } from "./auth-integration.mjs";
 import { createCollectorMcpPublicTestRouter, createCollectorMcpRouter } from "./mcp/index.mjs";
 import { createTransportV2Router } from "./transport-v2-router.mjs";
+import { allocateAssignmentAssetSequence, formatAssignmentAssetFileName } from "./assignment-asset-naming.mjs";
 import {
   assertCollectorIntegrationReadiness,
   getCollectorIntegrationReadiness,
@@ -14959,14 +14960,30 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   }
 
   const now = new Date();
+  const contentItemId = Number(assignment.content_item_id || 0) || 0;
+  let storedFileName;
+  try {
+    const assignedSequence = allocateAssignmentAssetSequence(db, contentItemId);
+    storedFileName = formatAssignmentAssetFileName({
+      originalName: manifest.file_name,
+      mimeType: manifest.mime_type,
+      contentItemId,
+      sequence: assignedSequence,
+      now,
+    });
+  } catch (err) {
+    await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
+    res.status(500).json({ error: "Cannot allocate upload asset name" });
+    return;
+  }
   const finalRelativeDir = normalizeRelativeStoragePath(path.join(
     "assignment-originals",
     String(now.getFullYear()),
     String(now.getMonth() + 1).padStart(2, "0"),
     `assignment-${assignmentId}`
   ));
-  const safeName = sanitizeStoredUploadName(manifest.file_name, "upload.bin");
-  const finalRelativePath = normalizeRelativeStoragePath(path.join(finalRelativeDir, `${Date.now()}-${safeName}`));
+  const safeName = storedFileName;
+  const finalRelativePath = normalizeRelativeStoragePath(path.join(finalRelativeDir, safeName));
   const finalDirPath = resolveStoragePath(finalRelativeDir);
   const finalAbsolutePath = resolveStoragePath(finalRelativePath);
   const assemblingAbsolutePath = `${finalAbsolutePath}.assembling`;
@@ -15036,7 +15053,6 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
     return;
   }
 
-  const contentItemId = Number(assignment.content_item_id || 0) || 0;
   // One batch must never span rounds: keep the round captured at /uploads/start
   // even if a revision request lands while the chunks are still uploading.
   const assignmentRound = Number(manifest?.assignment_round || 0) || resolveAssignmentCurrentRound(assignment);
@@ -15229,33 +15245,66 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
     }
 
     const checksum = crypto.createHash("sha256").update(fileBuffer).digest("hex");
-    const relativePath = path.relative(dirs.mediaDir, file.path);
+    let storedFileName;
+    let finalAbsolutePath;
+    try {
+      const sequence = allocateAssignmentAssetSequence(db, contentItemId);
+      storedFileName = formatAssignmentAssetFileName({
+        originalName: file.originalname,
+        mimeType: normalizedMime,
+        contentItemId,
+        sequence,
+      });
+      finalAbsolutePath = path.join(path.dirname(file.path), storedFileName);
+      await fs.rename(file.path, finalAbsolutePath);
+    } catch (err) {
+      await fs.unlink(file.path).catch(() => {});
+      res.status(500).json({ error: "Cannot allocate upload asset name" });
+      return;
+    }
+    const relativePath = path.relative(dirs.mediaDir, finalAbsolutePath);
     const assetUid = crypto.randomUUID();
-    removeAssignmentWorkReplacementLinksBeforeInsert({
-      assignmentId,
-      assignmentRound,
-      contentItemId,
-      fileName: file.originalname,
-      mediaType,
-      assignmentSyncBatchId: syncBatchId,
-    });
-    const result = insert.run(assetUid, "local", relativePath, file.originalname, file.mimetype, file.size, checksum);
-    const assetId = Number(result.lastInsertRowid);
+    let assetId = 0;
+    let transactionBegun = false;
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      transactionBegun = true;
+      removeAssignmentWorkReplacementLinksBeforeInsert({
+        assignmentId,
+        assignmentRound,
+        contentItemId,
+        fileName: storedFileName,
+        mediaType,
+        assignmentSyncBatchId: syncBatchId,
+      });
+      const result = insert.run(assetUid, "local", relativePath, storedFileName, normalizedMime, file.size, checksum);
+      assetId = Number(result.lastInsertRowid);
+      const assetRole = "unused";
+      const placementType = "unused";
+      linkAsset.run(
+        contentItemId,
+        assetId,
+        assetRole,
+        0,
+        0,
+        placementType,
+        assignmentId,
+        assignmentRound,
+        mediaType,
+        "assignment_work",
+        syncBatchId
+      );
+      db.exec("COMMIT");
+      transactionBegun = false;
+    } catch (err) {
+      if (transactionBegun) {
+        try { db.exec("ROLLBACK"); } catch {}
+      }
+      await fs.unlink(finalAbsolutePath).catch(() => {});
+      res.status(500).json({ error: "Cannot register finalized upload" });
+      return;
+    }
     const assetRole = "unused";
-    const placementType = "unused";
-    linkAsset.run(
-      contentItemId,
-      assetId,
-      assetRole,
-      0,
-      0,
-      placementType,
-      assignmentId,
-      assignmentRound,
-      mediaType,
-      "assignment_work",
-      syncBatchId
-    );
     repo.logAudit(actorEmail(req), "assignment.asset.upload", "assignment", String(assignmentId), {
       assignment_id: assignmentId,
       assignment_round: assignmentRound,
@@ -15272,7 +15321,7 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
       asset_uid: assetUid,
       storage_path: relativePath,
       public_url: parseAssetPathForUrl(relativePath),
-      file_name: file.originalname,
+      file_name: storedFileName,
       mime_type: file.mimetype,
       role: assetRole,
     });

@@ -156,6 +156,13 @@ CREATE TABLE IF NOT EXISTS content_assets (
   FOREIGN KEY(asset_id) REFERENCES assets(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS content_asset_name_sequences (
+  content_item_id INTEGER PRIMARY KEY,
+  next_sequence INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS content_reference_media_selections (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   content_item_id INTEGER NOT NULL,
