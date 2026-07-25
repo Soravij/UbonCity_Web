@@ -436,8 +436,10 @@ export async function approveReviewContent({ reviewContent, actorUserId, reviewN
     });
     mediaCleanupFilePaths = Array.isArray(mediaResult?.cleanup_file_paths) ? mediaResult.cleanup_file_paths : [];
     promotedFilePaths = Array.isArray(mediaResult?.promoted_file_paths) ? mediaResult.promoted_file_paths : [];
-    await updateEntityPublishedImages(connection, contentType, publicEntityId, mediaResult.cover_url, mediaResult.thumbnail_url);
-    await rewritePublishedEntityContent(connection, content, publicEntityId, mediaResult);
+    if (!mediaResult?.media_unchanged) {
+      await updateEntityPublishedImages(connection, contentType, publicEntityId, mediaResult.cover_url, mediaResult.thumbnail_url);
+      await rewritePublishedEntityContent(connection, content, publicEntityId, mediaResult);
+    }
     await deleteRemovedPipelineTranslations(connection, {
       reviewContentId: content.id,
       contentType,
