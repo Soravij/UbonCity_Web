@@ -15,6 +15,7 @@ import { resolveAiConfig } from "../config/ai.mjs";
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 import { FIELD_PACK_AGENT_KEY, createAgentGenerationEngine } from "../services/agent-generation.mjs";
+import { assertSmokeSqliteDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 // ── parse args ──────────────────────────────────────────────────────────────
 function parseArgs() {
@@ -45,6 +46,7 @@ async function main() {
   // 1. resolve paths, ai config, database, repository
   console.log("\n[1/5] Initializing dependencies...");
   const dirs = resolvePaths(path.resolve(process.cwd()));
+  assertSmokeSqliteDatabaseAllowed(dirs.dbPath);
   console.log(`   dbPath: ${dirs.dbPath}`);
   console.log(`   mediaDir: ${dirs.mediaDir}`);
 

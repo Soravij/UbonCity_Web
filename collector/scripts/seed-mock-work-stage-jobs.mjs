@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { resolvePaths } from "../config/paths.mjs";
 import { openDatabase } from "../db/client.mjs";
+import { assertSmokeSqliteDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 import { createRepository } from "../db/repository.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -12,6 +13,7 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 const dirs = resolvePaths(rootDir);
 const schemaPath = path.join(dirs.rootDir, "database", "schema.sql");
+assertSmokeSqliteDatabaseAllowed(dirs.dbPath);
 const db = openDatabase(dirs.dbPath, schemaPath);
 const repo = createRepository(db);
 

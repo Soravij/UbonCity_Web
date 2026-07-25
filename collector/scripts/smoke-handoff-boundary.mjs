@@ -3,11 +3,13 @@ import { fileURLToPath } from "node:url";
 
 import { resolvePaths } from "../config/paths.mjs";
 import { openDatabase } from "../db/client.mjs";
+import { assertSmokeSqliteDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const collectorRoot = path.resolve(scriptDir, "..");
 const dirs = resolvePaths(collectorRoot);
 const schemaPath = path.join(dirs.rootDir, "database", "schema.sql");
+assertSmokeSqliteDatabaseAllowed(dirs.dbPath);
 const db = openDatabase(dirs.dbPath, schemaPath);
 
 function hasGeneratedOutput(row) {

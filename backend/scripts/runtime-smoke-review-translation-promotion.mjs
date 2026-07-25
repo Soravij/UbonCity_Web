@@ -10,6 +10,7 @@ import { spawn, spawnSync } from "node:child_process";
 import mysql from "mysql2/promise";
 import jwt from "jsonwebtoken";
 import { createRequire } from "node:module";
+import { assertSmokeDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const { openDatabase } = await import(new URL("../../collector/db/client.mjs", import.meta.url));
@@ -22,6 +23,7 @@ const backendBase = String(process.env.BACKEND_PUBLIC_URL || "http://127.0.0.1:5
 const secret = String(process.env.JWT_SECRET || process.env.BACKEND_JWT_SECRET || "");
 const fixtureId = Number(`77${Date.now().toString().slice(-10)}`);
 const collectorPort = 5699;
+assertSmokeDatabaseAllowed(process.env.DB_NAME);
 const pool = mysql.createPool({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASSWORD, database: process.env.DB_NAME, waitForConnections: true, connectionLimit: 2 });
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "runtime-promote-translations-"));
 let child = null; let itemId = 0; const report = [];
