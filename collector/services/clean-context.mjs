@@ -63,7 +63,7 @@ function hasApprovedContextContent(block) {
   return Boolean(String(block?.selected_text || "").trim()) || block?.selected_numeric != null || list.length > 0;
 }
 
-function computeCompleteness(item, approvedBlocks, imageContext) {
+export function computeCompleteness(item, approvedBlocks, imageContext) {
   const hasTitle = Boolean(String(item?.title || "").trim());
   const hasReference = hasTraceableReference(item);
   const hasApprovedContext = approvedBlocks.some((row) => hasApprovedContextContent(row));

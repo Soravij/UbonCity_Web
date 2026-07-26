@@ -47,7 +47,7 @@ import {
   runQualityStage,
 } from "../services/workflow.mjs";
 import { generateExecutionChannelForItem } from "../services/execution-generation.mjs";
-import { buildCleanStructuredContext, validateCleanMinimum } from "../services/clean-context.mjs";
+import { buildCleanStructuredContext, computeCompleteness, validateCleanMinimum } from "../services/clean-context.mjs";
 import {
   DEFAULT_FIELD_PACK_AGENT_PROFILE,
   FIELD_PACK_AGENT_KEY,
@@ -1294,7 +1294,8 @@ function scorePlaceInterestingness(item = {}, sourceRecords = []) {
 
 function attachItemMatchFields(items = [], options = {}) {
   const includeBulkPreview = options?.includeBulkPreview === true;
-  return (Array.isArray(items) ? items : []).map((item) => {
+  const manualRawItemIds = new Set();
+  const matchedItems = (Array.isArray(items) ? items : []).map((item) => {
     const itemId = Number(item?.id || 0);
     const sourceRecords = repo.listSourceRecordsByItem(itemId);
     const currentFieldPack = repo.getCurrentFieldPackByItem(itemId);
@@ -1337,7 +1338,25 @@ function attachItemMatchFields(items = [], options = {}) {
     if (includeBulkPreview) {
       next.bulk_preview = getItemBulkPreview(itemId);
     }
+    const hasSourceUrl = sourceRecords.some((record) => Boolean(String(record?.source_url || "").trim()));
+    if (!hasSourceUrl && next.production_state === "collected") {
+      manualRawItemIds.add(itemId);
+    }
     return next;
+  });
+  // Only hand-entered raw items need this pre-Clean hint: every source record must have a null or
+  // empty source_url. `source_url` belongs to source_records, so manual URL/Facebook/TikTok entries
+  // remain excluded even though they share the manual adapter. Load the two inputs once per response.
+  const manualRawIds = Array.from(manualRawItemIds).filter((id) => id > 0);
+  const completenessInputs = repo.listCleanCompletenessInputsByItemIds(manualRawIds);
+  return matchedItems.map((item) => {
+    const itemId = Number(item?.id || 0);
+    const input = completenessInputs.get(itemId);
+    if (!input) return item;
+    return {
+      ...item,
+      manual_completeness: computeCompleteness(item, input.approved_blocks, input.image_context),
+    };
   });
 }
 

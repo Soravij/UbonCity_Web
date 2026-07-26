@@ -11694,6 +11694,76 @@ function normalizeStateValue(value, stateGroup) {
     return rows.filter((row) => String(row.status || "") === "active");
   }
 
+  // Read-only batch inputs for the raw-table completeness hint. Keep this separate from the
+  // single-item Clean builders: it deliberately performs two page-wide queries, then groups in
+  // memory, so a page of manual rows cannot introduce an N+1 query pattern.
+  function listCleanCompletenessInputsByItemIds(contentItemIds = []) {
+    const ids = Array.from(new Set(
+      (Array.isArray(contentItemIds) ? contentItemIds : [])
+        .map((value) => Number(value || 0) || 0)
+        .filter((id) => id > 0),
+    ));
+    const inputs = new Map(ids.map((id) => [id, {
+      approved_blocks: [],
+      image_context: { cover_url: null, selected_urls: [], gallery_urls: [], inline_urls: [], assets: [] },
+    }]));
+    if (!ids.length) return inputs;
+
+    const placeholders = ids.map(() => "?").join(",");
+    const contextRows = db.prepare(`
+      SELECT content_item_id, selected_text, selected_numeric, selected_list_json, editor_note
+      FROM approved_context_blocks
+      WHERE status='active' AND content_item_id IN (${placeholders})
+    `).all(...ids);
+    const assetRows = db.prepare(`
+      SELECT ca.content_item_id, ca.asset_id, ca.role, ca.selected_in_clean, ca.is_cover,
+             a.storage_disk, a.storage_path, a.mime_type
+      FROM content_assets ca
+      JOIN assets a ON a.id = ca.asset_id
+      WHERE ca.content_item_id IN (${placeholders})
+        AND ca.selected_in_clean=1
+        AND ca.role IN ('cover', 'gallery', 'inline')
+        AND lower(a.storage_disk) IN ('local', 'nas')
+        AND trim(coalesce(a.storage_path, '')) <> ''
+        AND lower(a.storage_path) NOT LIKE 'http:%'
+        AND lower(a.storage_path) NOT LIKE 'https:%'
+        AND (trim(coalesce(a.mime_type, '')) = '' OR lower(a.mime_type) LIKE 'image/%')
+    `).all(...ids);
+
+    for (const row of contextRows) {
+      const input = inputs.get(Number(row.content_item_id || 0));
+      if (!input) continue;
+      input.approved_blocks.push({
+        selected_text: row.selected_text || null,
+        selected_numeric: row.selected_numeric ?? null,
+        selected_list: parseJson(row.selected_list_json, []),
+        editor_note: row.editor_note || null,
+      });
+    }
+    for (const row of assetRows) {
+      const input = inputs.get(Number(row.content_item_id || 0));
+      if (!input) continue;
+      const publicUrl = parseAssetPublicUrl(row.storage_path);
+      if (!publicUrl) continue;
+      const asset = {
+        asset_id: Number(row.asset_id || 0) || null,
+        role: row.role || "gallery",
+        selected_in_clean: Number(row.selected_in_clean || 0),
+        is_cover: Number(row.is_cover || 0),
+        public_url: publicUrl,
+        storage_disk: row.storage_disk || "",
+        storage_path: row.storage_path || "",
+        mime_type: row.mime_type || "",
+      };
+      input.image_context.assets.push(asset);
+      input.image_context.selected_urls.push(publicUrl);
+      if (asset.role === "gallery") input.image_context.gallery_urls.push(publicUrl);
+      if (asset.role === "inline") input.image_context.inline_urls.push(publicUrl);
+      if (asset.is_cover === 1 || asset.role === "cover") input.image_context.cover_url ||= publicUrl;
+    }
+    return inputs;
+  }
+
   function updateApprovedContextBlock(contentItemId, contextId, patch = {}) {
     const id = Number(contextId || 0);
     if (!id) throw new Error("invalid context id");
@@ -13774,6 +13844,7 @@ function normalizeStateValue(value, stateGroup) {
     listEvidenceBlocks,
     addApprovedContextBlock,
     listApprovedContextBlocks,
+    listCleanCompletenessInputsByItemIds,
     updateApprovedContextBlock,
     buildDraftInputPreview,
     createDraftInputSnapshot,

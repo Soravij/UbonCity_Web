@@ -1993,6 +1993,40 @@ function interestingnessBadgeClass(label) {
   return "priority-low";
 }
 
+function buildManualCompletenessBadge(item, isRawRow) {
+  if (!isRawRow) return "";
+  const completeness = item?.manual_completeness;
+  if (!completeness || typeof completeness !== "object") return "";
+
+  const labels = {
+    item_title: "ชื่อสถานที่",
+    place_reference: "แหล่งอ้างอิงที่ตรวจสอบได้",
+    approved_context: "ข้อมูลที่อนุมัติใน Clean",
+    image_context: "รูปที่เลือกสำหรับสร้างร่างด้วย AI",
+    editor_note_richness: "หมายเหตุจากบรรณาธิการ",
+    context_depth: "จำนวนข้อมูลใน Clean",
+  };
+  const minimumMissing = Array.isArray(completeness.minimum_missing) ? completeness.minimum_missing : [];
+  const qualityGaps = Array.isArray(completeness.quality_gaps) ? completeness.quality_gaps : [];
+  const missing = Array.isArray(completeness.missing_sections) ? completeness.missing_sections : [];
+  if (!missing.length) return "";
+
+  const labelFor = (key) => labels[key] || "ข้อมูลที่จำเป็น";
+  const tooltipSections = [];
+  if (minimumMissing.length) {
+    tooltipSections.push(`ติดตั้งแต่ Clean:\n${minimumMissing.map((key) => `• ${labelFor(key)}`).join("\n")}`);
+  }
+  if (qualityGaps.includes("image_context")) {
+    tooltipSections.push("ต้องมีก่อนสร้างร่างด้วย AI:\n• รูปที่เลือกสำหรับสร้างร่างด้วย AI");
+  }
+  const otherQualityGaps = qualityGaps.filter((key) => key !== "image_context");
+  if (otherQualityGaps.length) {
+    tooltipSections.push(`คุณภาพข้อมูลที่ควรเพิ่ม:\n${otherQualityGaps.map((key) => `• ${labelFor(key)}`).join("\n")}`);
+  }
+  const title = `ข้อมูลที่ยังขาด:\n${tooltipSections.join("\n\n")}`;
+  return `<span class="delete-blocker-badge is-confirm" title="${escapeHtml(title)}">⚠ ขาดข้อมูล ${missing.length} ส่วน</span>`;
+}
+
 function sortRawItems(items = []) {
   const list = Array.isArray(items) ? [...items] : [];
   const mode = String(state.dashboard.rawSort || "interestingness").trim().toLowerCase();
@@ -5143,6 +5177,7 @@ function renderRawQueueTable({
       <td>${escapeHtml(item.category || "-")}</td>
       <td class="raw-title-cell">
         <div class="raw-main-text">${escapeHtml(item.title || "")}</div>
+        ${buildManualCompletenessBadge(item, isRawRow)}
       </td>
       ${showInterestingness ? `
       <td>
@@ -5500,11 +5535,12 @@ function applyBlockerBadge(itemId, summary, { root = document, cellSelector = ".
   if (!row) return;
   const cell = row.querySelector(cellSelector);
   if (!cell) return;
-  const existing = cell.querySelector(".delete-blocker-badge");
+  const existing = cell.querySelector('[data-badge="blocker-summary"]');
   if (existing) existing.remove();
   const badge = buildBlockerBadge(summary);
   if (!badge) return;
   const span = document.createElement("span");
+  span.dataset.badge = "blocker-summary";
   span.className = `delete-blocker-badge ${badge.className}`;
   span.textContent = badge.label;
   span.title = badge.title;
