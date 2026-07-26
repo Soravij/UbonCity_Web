@@ -1903,11 +1903,15 @@ function syncManualPlaceCategoryOptions() {
   if (!select) return;
 
   const currentValue = String(select.value || "").trim();
-  select.innerHTML = CONTENT_CATEGORY_OPTIONS
-    .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+  select.innerHTML = [
+    '<option value="" disabled>เลือกหมวดหมู่</option>',
+    ...CONTENT_CATEGORY_OPTIONS.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`),
+  ]
     .join("");
   if (CONTENT_CATEGORY_OPTIONS.some((option) => option.value === currentValue)) {
     select.value = currentValue;
+  } else {
+    select.value = "";
   }
 }
 
@@ -1918,7 +1922,7 @@ function normalizeManualPlacePayload() {
   const longitudeText = String(qs("source-manual-place-longitude")?.value || "").trim();
   const descriptionRaw = String(qs("source-manual-place-description")?.value || "").trim();
 
-  if (!title) {
+  if (!title.replace(/[\u200B\u200C\u200D\u2060]/g, "").trim()) {
     throw new Error("กรุณากรอกชื่อสถานที่");
   }
   if (!CONTENT_CATEGORY_OPTIONS.some((option) => option.value === category)) {
