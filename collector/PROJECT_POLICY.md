@@ -32,6 +32,22 @@ enforces them; these are the collector-side facts that contract depends on:
   (`REFERENCE_CLEANUP_CANDIDATE_KEYS`, `REFERENCE_CONFIRM_REQUIRED_KEYS`). It must be updated in the
   same change whenever the server defs change — there is no runtime check that they agree.
   - TH: สอง Set นี้เป็นสำเนาที่ต้อง sync มือ ถ้า server defs เปลี่ยนต้องแก้ที่นี่ด้วยในครั้งเดียวกัน
+- Manual-place category vocabulary is also hand-mirrored: client
+  `CONTENT_CATEGORY_OPTIONS` (`server/public/app.js`) and server `CONTENT_ITEM_CATEGORIES`
+  (`server/index.mjs`) must be changed together. Their six values currently agree
+  (`attractions`, `activities`, `hotels`, `cafes`, `restaurants`, `transport`), but neither is derived
+  from the other and there is no runtime agreement check. The client list is a user-visible hard gate
+  for manual places (it throws during validation), not merely a label source; changing only one side
+  can reject a category that is otherwise valid.
+  - TH: รายการ category ของ manual place เป็นสำเนาที่ต้อง sync มือสองจุดเสมอ เพราะฝั่ง client
+    ใช้เป็น validation gate จริง ถ้าแก้เพียงฝั่งเดียวอาจปฏิเสธค่าที่ server รับได้
+- Manual-place deduplication does not compare against pending intake rows. `findCandidateMatches` only
+  compares `state.items` from `GET /api/items` (imported `content_items`, filtered by visibility scope),
+  not queued `source_raw_items`. This is a known limitation shared by all adapters: two people can enter
+  the same place before either confirms it without being flagged as a duplicate. Manual place makes it
+  more likely because it is the path where people independently type the same data.
+  - TH: Dedupe ยังไม่เทียบกับ raw item ที่รออยู่ในคิว intake จึงอาจไม่พบรายการซ้ำเมื่อมีคนกรอก
+    สถานที่เดียวกันก่อนมีใคร confirm; เป็น known limitation ของทุก adapter
 - The reference-cleanup UI panel is reachable from the Data Cleanup table after the owner clicks
   `ตรวจ`: `#reference-cleanup-panel`, `#reference-cleanup-item-id`, and
   `#btn-reference-cleanup-execute` let the owner sweep eligible candidates before confirmation and Purge.
