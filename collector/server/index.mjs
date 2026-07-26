@@ -1294,6 +1294,7 @@ function scorePlaceInterestingness(item = {}, sourceRecords = []) {
 
 function attachItemMatchFields(items = [], options = {}) {
   const includeBulkPreview = options?.includeBulkPreview === true;
+  const manualRawItemIds = new Set();
   const matchedItems = (Array.isArray(items) ? items : []).map((item) => {
     const itemId = Number(item?.id || 0);
     const sourceRecords = repo.listSourceRecordsByItem(itemId);
@@ -1337,15 +1338,16 @@ function attachItemMatchFields(items = [], options = {}) {
     if (includeBulkPreview) {
       next.bulk_preview = getItemBulkPreview(itemId);
     }
+    const hasSourceUrl = sourceRecords.some((record) => Boolean(String(record?.source_url || "").trim()));
+    if (!hasSourceUrl && next.production_state === "collected") {
+      manualRawItemIds.add(itemId);
+    }
     return next;
   });
-  // Only hand-entered raw items (source_url IS NULL) need this pre-Clean hint. Load their two
-  // completeness inputs once for the whole response; do not add to this endpoint's existing per-item
-  // match-field reads. Items from manual URL/social adapters carry a source_url and stay unchanged.
-  const manualRawIds = matchedItems
-    .filter((item) => item?.source_url == null && String(item?.production_state || "").toLowerCase() === "collected")
-    .map((item) => Number(item?.id || 0))
-    .filter((id) => id > 0);
+  // Only hand-entered raw items need this pre-Clean hint: every source record must have a null or
+  // empty source_url. `source_url` belongs to source_records, so manual URL/Facebook/TikTok entries
+  // remain excluded even though they share the manual adapter. Load the two inputs once per response.
+  const manualRawIds = Array.from(manualRawItemIds).filter((id) => id > 0);
   const completenessInputs = repo.listCleanCompletenessInputsByItemIds(manualRawIds);
   return matchedItems.map((item) => {
     const itemId = Number(item?.id || 0);

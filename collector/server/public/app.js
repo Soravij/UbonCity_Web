@@ -1994,7 +1994,7 @@ function interestingnessBadgeClass(label) {
 }
 
 function buildManualCompletenessBadge(item, isRawRow) {
-  if (!isRawRow || item?.source_url != null) return "";
+  if (!isRawRow) return "";
   const completeness = item?.manual_completeness;
   if (!completeness || typeof completeness !== "object") return "";
 
