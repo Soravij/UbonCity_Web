@@ -10682,6 +10682,18 @@ function wireSourceCollect() {
       });
       syncSourceQueryValue("");
       resetSourceLocationPanelState();
+      if (selectedAdapter === "manual_place") {
+        [
+          "source-manual-place-title",
+          "source-manual-place-category",
+          "source-manual-place-latitude",
+          "source-manual-place-longitude",
+          "source-manual-place-description",
+        ].forEach((id) => {
+          const field = qs(id);
+          if (field) field.value = "";
+        });
+      }
 
       const rawCount = Number(result.raw_count ?? result.count ?? 0) || 0;
       if (!rawCount) {
