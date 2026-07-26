@@ -47,7 +47,7 @@ import {
   runQualityStage,
 } from "../services/workflow.mjs";
 import { generateExecutionChannelForItem } from "../services/execution-generation.mjs";
-import { buildCleanStructuredContext, validateCleanMinimum } from "../services/clean-context.mjs";
+import { buildCleanStructuredContext, computeCompleteness, validateCleanMinimum } from "../services/clean-context.mjs";
 import {
   DEFAULT_FIELD_PACK_AGENT_PROFILE,
   FIELD_PACK_AGENT_KEY,
@@ -1294,7 +1294,7 @@ function scorePlaceInterestingness(item = {}, sourceRecords = []) {
 
 function attachItemMatchFields(items = [], options = {}) {
   const includeBulkPreview = options?.includeBulkPreview === true;
-  return (Array.isArray(items) ? items : []).map((item) => {
+  const matchedItems = (Array.isArray(items) ? items : []).map((item) => {
     const itemId = Number(item?.id || 0);
     const sourceRecords = repo.listSourceRecordsByItem(itemId);
     const currentFieldPack = repo.getCurrentFieldPackByItem(itemId);
@@ -1338,6 +1338,23 @@ function attachItemMatchFields(items = [], options = {}) {
       next.bulk_preview = getItemBulkPreview(itemId);
     }
     return next;
+  });
+  // Only hand-entered raw items (source_url IS NULL) need this pre-Clean hint. Load their two
+  // completeness inputs once for the whole response; do not add to this endpoint's existing per-item
+  // match-field reads. Items from manual URL/social adapters carry a source_url and stay unchanged.
+  const manualRawIds = matchedItems
+    .filter((item) => item?.source_url == null && String(item?.production_state || "").toLowerCase() === "collected")
+    .map((item) => Number(item?.id || 0))
+    .filter((id) => id > 0);
+  const completenessInputs = repo.listCleanCompletenessInputsByItemIds(manualRawIds);
+  return matchedItems.map((item) => {
+    const itemId = Number(item?.id || 0);
+    const input = completenessInputs.get(itemId);
+    if (!input) return item;
+    return {
+      ...item,
+      manual_completeness: computeCompleteness(item, input.approved_blocks, input.image_context),
+    };
   });
 }
 
