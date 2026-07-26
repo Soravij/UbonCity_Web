@@ -5535,11 +5535,12 @@ function applyBlockerBadge(itemId, summary, { root = document, cellSelector = ".
   if (!row) return;
   const cell = row.querySelector(cellSelector);
   if (!cell) return;
-  const existing = cell.querySelector(".delete-blocker-badge");
+  const existing = cell.querySelector('[data-badge="blocker-summary"]');
   if (existing) existing.remove();
   const badge = buildBlockerBadge(summary);
   if (!badge) return;
   const span = document.createElement("span");
+  span.dataset.badge = "blocker-summary";
   span.className = `delete-blocker-badge ${badge.className}`;
   span.textContent = badge.label;
   span.title = badge.title;
