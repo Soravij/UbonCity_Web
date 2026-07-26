@@ -1521,6 +1521,12 @@ const SOURCE_INPUT_CONFIG = Object.freeze({
     placeholder: "https://example.com/place-1\nhttps://example.com/place-2",
     multiline: true,
   }),
+  manual_place: Object.freeze({
+    label: "เพิ่มสถานที่ใหม่",
+    help: "กรอกข้อมูลสถานที่โดยตรง ระบบจะเปิดหน้าต่างคัดรับเข้า raw ตามกระบวนการเดิม",
+    placeholder: "",
+    multiline: false,
+  }),
   facebook: Object.freeze({
     label: "วาง URL แหล่งข้อมูล",
     help: "ใช้สำหรับวาง URL ที่ต้องการนำเข้าแบบ manual_url",
@@ -1538,9 +1544,9 @@ const SOURCE_INPUT_CONFIG = Object.freeze({
 function getAllowedSourceAdaptersForRole(role = currentRole()) {
   const normalizedRole = String(role || "").trim().toLowerCase();
   if (normalizedRole === "owner") {
-    return ["google_maps", "manual", "facebook", "tiktok"];
+    return ["google_maps", "manual", "manual_place", "facebook", "tiktok"];
   }
-  return ["manual", "facebook", "tiktok"];
+  return ["manual", "manual_place", "facebook", "tiktok"];
 }
 
 function syncSourceAdapterOptionsForRole() {
@@ -1868,24 +1874,80 @@ function updateSourceInputUI() {
   const help = qs("source-input-help");
   const input = qs("source-query-input");
   const textarea = qs("source-query-textarea");
+  const manualPlaceForm = qs("source-manual-place-form");
   const currentValue = getSourceQueryValue();
+  const isManualPlace = adapter === "manual_place";
 
   if (label) label.textContent = config.label;
   if (help) help.textContent = config.help;
   if (input) {
     input.placeholder = config.placeholder;
-    input.classList.toggle("hidden", Boolean(config.multiline));
+    input.classList.toggle("hidden", Boolean(config.multiline) || isManualPlace);
   }
   if (textarea) {
     textarea.placeholder = config.placeholder;
-    textarea.classList.toggle("hidden", !config.multiline);
+    textarea.classList.toggle("hidden", !config.multiline || isManualPlace);
   }
+  if (manualPlaceForm) manualPlaceForm.classList.toggle("hidden", !isManualPlace);
+  syncManualPlaceCategoryOptions();
   syncSourceQueryValue(currentValue);
   updateSourceLocationPanelVisibility(adapter);
   syncSourceLocationPanelSummary();
   if (adapter !== "google_maps") {
     clearSourceLocationPanelError();
   }
+}
+
+function syncManualPlaceCategoryOptions() {
+  const select = qs("source-manual-place-category");
+  if (!select) return;
+
+  const currentValue = String(select.value || "").trim();
+  select.innerHTML = CONTENT_CATEGORY_OPTIONS
+    .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+    .join("");
+  if (CONTENT_CATEGORY_OPTIONS.some((option) => option.value === currentValue)) {
+    select.value = currentValue;
+  }
+}
+
+function normalizeManualPlacePayload() {
+  const title = String(qs("source-manual-place-title")?.value || "").trim();
+  const category = String(qs("source-manual-place-category")?.value || "").trim();
+  const latitudeText = String(qs("source-manual-place-latitude")?.value || "").trim();
+  const longitudeText = String(qs("source-manual-place-longitude")?.value || "").trim();
+  const descriptionRaw = String(qs("source-manual-place-description")?.value || "").trim();
+
+  if (!title) {
+    throw new Error("กรุณากรอกชื่อสถานที่");
+  }
+  if (!CONTENT_CATEGORY_OPTIONS.some((option) => option.value === category)) {
+    throw new Error("กรุณาเลือกหมวดหมู่");
+  }
+  if (!latitudeText || !longitudeText) {
+    throw new Error("กรุณากรอกละติจูดและลองจิจูดให้ครบทั้งคู่");
+  }
+
+  const latitude = toFiniteNumberOrNull(latitudeText);
+  const longitude = toFiniteNumberOrNull(longitudeText);
+  if (latitude == null || latitude < -90 || latitude > 90) {
+    throw new Error("ละติจูดต้องเป็นตัวเลขระหว่าง -90 ถึง 90");
+  }
+  if (longitude == null || longitude < -180 || longitude > 180) {
+    throw new Error("ลองจิจูดต้องเป็นตัวเลขระหว่าง -180 ถึง 180");
+  }
+
+  return [{
+    type: "place",
+    lang: "th",
+    title,
+    category,
+    latitude,
+    longitude,
+    description: descriptionRaw,
+    description_raw: descriptionRaw,
+    source_name: "manual",
+  }];
 }
 
 function toFiniteNumberOrNull(value) {
@@ -5971,6 +6033,9 @@ function renderUsersTable(rows) {
 }
 
 function normalizeCollectPayload(adapter) {
+  if (adapter === "manual_place") {
+    return normalizeManualPlacePayload();
+  }
   if (adapter !== "google_maps" && adapter !== "manual") return [];
 
   const query = getSourceQueryValue();
@@ -10582,7 +10647,9 @@ function wireSourceCollect() {
       const selectedAdapter = syncSourceAdapterOptionsForRole();
       const query = getSourceQueryValue();
       const adapter =
-        selectedAdapter === "google_maps" && looksLikeUrlInput(query)
+        selectedAdapter === "manual_place"
+          ? "manual"
+          : selectedAdapter === "google_maps" && looksLikeUrlInput(query)
           ? "manual"
           : selectedAdapter === "facebook" || selectedAdapter === "tiktok"
             ? "manual"
@@ -10594,8 +10661,9 @@ function wireSourceCollect() {
           return;
         }
       }
-      const sourceLabel = String(qs("source-label")?.value || "").trim() || selectedAdapter || adapter;
-      const payload = normalizeCollectPayload(adapter);
+      const sourceLabel = String(qs("source-label")?.value || "").trim()
+        || (selectedAdapter === "manual_place" ? "เพิ่มสถานที่ใหม่" : selectedAdapter || adapter);
+      const payload = normalizeCollectPayload(selectedAdapter === "manual_place" ? "manual_place" : adapter);
 
       if (selectedAdapter !== adapter && selectedAdapter === "google_maps" && adapter === "manual") {
         setStatus("source-status", "ตรวจพบลิงก์ในช่องกรอก ระบบจะนำเข้าแบบ manual_url อัตโนมัติ");

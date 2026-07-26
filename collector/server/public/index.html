@@ -197,6 +197,7 @@
               <select id="source-adapter">
                 <option value="google_maps" hidden>google_maps</option>
                 <option value="manual" selected>manual_url (วาง URL)</option>
+                <option value="manual_place">เพิ่มสถานที่ใหม่ (กรอกเอง)</option>
                 <option value="facebook">facebook</option>
                 <option value="tiktok">tiktok</option>
               </select>
@@ -209,6 +210,28 @@
               <label id="source-input-label">คำค้นหาสถานที่</label>
               <input id="source-query-input" placeholder="เช่น วัดหนองบัว อุบลราชธานี" />
               <textarea id="source-query-textarea" class="hidden" rows="4" placeholder="1 URL ต่อ 1 บรรทัด&#10;https://example.com/place-1&#10;https://example.com/place-2"></textarea>
+              <div id="source-manual-place-form" class="grid hidden" style="margin-top:8px;">
+                <div style="grid-column: 1 / -1;">
+                  <label>ชื่อสถานที่</label>
+                  <input id="source-manual-place-title" placeholder="เช่น วัดหนองบัว" />
+                </div>
+                <div>
+                  <label>หมวดหมู่</label>
+                  <select id="source-manual-place-category"></select>
+                </div>
+                <div>
+                  <label>ละติจูด</label>
+                  <input id="source-manual-place-latitude" type="number" step="any" inputmode="decimal" placeholder="เช่น 15.2447" />
+                </div>
+                <div>
+                  <label>ลองจิจูด</label>
+                  <input id="source-manual-place-longitude" type="number" step="any" inputmode="decimal" placeholder="เช่น 104.8472" />
+                </div>
+                <div style="grid-column: 1 / -1;">
+                  <label>คำอธิบายสั้น</label>
+                  <textarea id="source-manual-place-description" rows="3" placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)"></textarea>
+                </div>
+              </div>
               <p id="source-input-help" class="muted">ใช้สำหรับค้นหาสถานที่จาก Google Maps</p>
               <div class="toolbar" style="margin-top:8px; margin-bottom:0;">
                 <button id="btn-source-location-panel-toggle" type="button">Advanced location filter</button>
