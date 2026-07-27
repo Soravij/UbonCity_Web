@@ -19,6 +19,7 @@ import analyticsRoutes from "./routes/analyticsRoutes.js";
 import { initializeImportReviewInfrastructure } from "./controllers/importReviewController.js";
 import { ensureUtf8mb4 } from "./config/ensureUtf8mb4.js";
 import { ensureSharedSchemaBootstrap } from "./config/sharedSchemaBootstrap.js";
+import { ensureEventsTable } from "./controllers/eventController.js";
 import { ensureBootstrapOwner } from "./services/bootstrapOwnerService.js";
 import { ensureReviewInfrastructure } from "./services/reviewContentService.js";
 import { ensureContentGovernanceInfrastructure } from "./services/contentGovernanceService.js";
@@ -93,6 +94,7 @@ async function startServer() {
     assertBackendIntegrationReadiness(getBackendRequiredIntegrationKeys());
     await ensureUtf8mb4();
     await ensureSharedSchemaBootstrap();
+    await ensureEventsTable();
     await initializeImportReviewInfrastructure();
     await ensureReviewInfrastructure();
     await ensureContentGovernanceInfrastructure();

@@ -250,7 +250,7 @@ async function upsertEventTranslation(eventId, lang, title, description, metaTit
     ]
   );
 }
-async function ensureEventsTable() {
+export async function ensureEventsTable() {
   if (ensuredEventsTable) return;
 
   await pool.query(`
