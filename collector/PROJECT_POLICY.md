@@ -48,6 +48,25 @@ enforces them; these are the collector-side facts that contract depends on:
   more likely because it is the path where people independently type the same data.
   - TH: Dedupe ยังไม่เทียบกับ raw item ที่รออยู่ในคิว intake จึงอาจไม่พบรายการซ้ำเมื่อมีคนกรอก
     สถานที่เดียวกันก่อนมีใคร confirm; เป็น known limitation ของทุก adapter
+- `hasTraceableReference()` in `services/clean-context.mjs` reads `item.source_url`, but
+  `content_items` has no such column; source URLs live in `source_records`. Keep this behavior: a
+  place passes the reference part of the Clean gate only through `map_url`, `google_place_id`, or a
+  complete coordinate pair, making the gate stricter than the apparent source-URL branch. Do not make
+  it read `source_records` alone: a URL-only place could then reach public output without coordinates
+  and be placed incorrectly on the map. If this is changed in future, add a required-coordinate gate
+  for `type=place` at the same time; never change only this reference check.
+  - TH: ห้ามแก้ `hasTraceableReference()` ให้ใช้ source_records เพียงอย่างเดียว แม้ `source_url` ไม่ได้
+    อยู่ใน content_items เพราะพฤติกรรมปัจจุบันบังคับให้ place มี map reference หรือพิกัดครบคู่; หาก
+    จะแก้ในอนาคตต้องเพิ่มกฎบังคับพิกัดสำหรับ type=place ใน Clean gate พร้อมกันเสมอ
+- `applyBlockerBadge()` owns its `delete-blocker-badge` element in a raw-title cell. Its post-render
+  `annotateRawTableBlockers()` pass removes only `[data-badge="blocker-summary"]` before appending a
+  replacement. Any new badge in the same cell must use and remove its own marker; never remove every
+  `.delete-blocker-badge`, which would delete another feature's badge. Reusing a CSS class to avoid a
+  new class can still collide with selector-based cleanup that is not obvious from markup, so grep for
+  queries that remove or mutate that class before reusing it.
+  - TH: `delete-blocker-badge` มีเจ้าของคือ applyBlockerBadge; badge อื่นในเซลล์เดียวกันต้องมี marker
+    และ cleanup ของตัวเอง ห้ามลบด้วย class รวมทั้งหมด และต้อง grep หา selector ที่ลบหรือแก้ class นั้น
+    ก่อน reuse เสมอ
 - The reference-cleanup UI panel is reachable from the Data Cleanup table after the owner clicks
   `ตรวจ`: `#reference-cleanup-panel`, `#reference-cleanup-item-id`, and
   `#btn-reference-cleanup-execute` let the owner sweep eligible candidates before confirmation and Purge.
