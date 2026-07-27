@@ -1915,6 +1915,26 @@ function syncManualPlaceCategoryOptions() {
   }
 }
 
+function parseManualPlaceCoordinatePair(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*,\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))$/);
+  if (!match) return null;
+  const latitude = Number(match[1]);
+  const longitude = Number(match[2]);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return { latitudeText: match[1], longitudeText: match[2] };
+}
+
+function splitManualPlaceCoordinatePair(sourceField) {
+  const latitudeField = qs("source-manual-place-latitude");
+  const longitudeField = qs("source-manual-place-longitude");
+  if (!sourceField || !latitudeField || !longitudeField) return;
+  const pair = parseManualPlaceCoordinatePair(sourceField.value);
+  if (!pair) return;
+  latitudeField.value = pair.latitudeText;
+  longitudeField.value = pair.longitudeText;
+}
+
 function normalizeManualPlacePayload() {
   const title = String(qs("source-manual-place-title")?.value || "").trim();
   const category = String(qs("source-manual-place-category")?.value || "").trim();
@@ -10668,6 +10688,12 @@ function wireSourceCollect() {
     normalizeSourceLocationPairInputs();
     clearSourceLocationPanelError();
     syncSourceLocationPanelSummary();
+  });
+  qs("source-manual-place-latitude")?.addEventListener("input", (event) => {
+    splitManualPlaceCoordinatePair(event.currentTarget);
+  });
+  qs("source-manual-place-longitude")?.addEventListener("input", (event) => {
+    splitManualPlaceCoordinatePair(event.currentTarget);
   });
   qs("source-location-radius-m")?.addEventListener("input", () => {
     clearSourceLocationPanelError();
