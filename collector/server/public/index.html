@@ -195,11 +195,11 @@
             <div>
               <label>ตัวเชื่อมแหล่งข้อมูล</label>
               <select id="source-adapter">
-                <option value="google_maps" hidden>google_maps</option>
-                <option value="manual" selected>manual_url (วาง URL)</option>
+                <option value="google_maps" hidden>ค้นหาสถานที่จาก Google Maps</option>
+                <option value="manual" selected>วางลิงก์แหล่งข้อมูล (รวมลิงก์ Google Maps)</option>
                 <option value="manual_place">เพิ่มสถานที่ใหม่ (กรอกเอง)</option>
-                <option value="facebook">facebook</option>
-                <option value="tiktok">tiktok</option>
+                <option value="facebook">วางลิงก์จาก Facebook</option>
+                <option value="tiktok">วางลิงก์จาก TikTok</option>
               </select>
             </div>
             <div>
@@ -221,12 +221,13 @@
                 </div>
                 <div>
                   <label>ละติจูด</label>
-                  <input id="source-manual-place-latitude" type="number" step="any" inputmode="decimal" placeholder="เช่น 15.2447" />
+                  <input id="source-manual-place-latitude" type="text" inputmode="decimal" placeholder="เช่น 15.2447" />
                 </div>
                 <div>
                   <label>ลองจิจูด</label>
-                  <input id="source-manual-place-longitude" type="number" step="any" inputmode="decimal" placeholder="เช่น 104.8472" />
+                  <input id="source-manual-place-longitude" type="text" inputmode="decimal" placeholder="เช่น 104.8472" />
                 </div>
+                <p class="muted" style="grid-column: 1 / -1; margin:0;">วางพิกัดจาก Google Maps ได้เลย เช่น 15.291954606298944, 104.87791477931604</p>
                 <div style="grid-column: 1 / -1;">
                   <label>คำอธิบายสั้น</label>
                   <textarea id="source-manual-place-description" rows="3" placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)"></textarea>
