@@ -1,18 +1,9 @@
--- Baseline schema for a blank MySQL 8.0 database.
---
--- Scope: full fresh-install backend schema. This file creates all tables required
--- by the golden fresh-install reference in foreign-key dependency order.
---
--- This baseline is for a blank database. Migrations 001-023 are upgrade patches
--- for existing databases and must not run after this file.
---
--- DDL is copied from migrations/reference/golden-fresh-install-schema.sql, except
--- every statement uses CREATE TABLE IF NOT EXISTS and runtime AUTO_INCREMENT=N
--- table options are omitted. Do not use ADD COLUMN IF NOT EXISTS: MySQL 8.0.46
--- rejects it.
+-- Fresh-install golden schema reference.
+-- Generated from MySQL SHOW CREATE TABLE on 2026-07-27 for uboncity_golden.
+-- Reference only: do not run as a migration.
 
 -- Table: analytics_events
-CREATE TABLE IF NOT EXISTS `analytics_events` (
+CREATE TABLE `analytics_events` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `event_type` enum('MAP_CLICK','PHONE_CLICK','LINE_CLICK','FACEBOOK_CLICK','WEBSITE_CLICK') COLLATE utf8mb4_unicode_ci NOT NULL,
   `source_path` varchar(1024) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -28,7 +19,7 @@ CREATE TABLE IF NOT EXISTS `analytics_events` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: categories
-CREATE TABLE IF NOT EXISTS `categories` (
+CREATE TABLE `categories` (
   `id` int NOT NULL AUTO_INCREMENT,
   `slug` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -37,7 +28,7 @@ CREATE TABLE IF NOT EXISTS `categories` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: category_translations
-CREATE TABLE IF NOT EXISTS `category_translations` (
+CREATE TABLE `category_translations` (
   `id` int NOT NULL AUTO_INCREMENT,
   `category_id` int NOT NULL,
   `lang` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -49,8 +40,22 @@ CREATE TABLE IF NOT EXISTS `category_translations` (
   UNIQUE KEY `uq_category_lang` (`category_id`,`lang`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Table: collector_import_review_actions
+CREATE TABLE `collector_import_review_actions` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `review_id` bigint NOT NULL,
+  `action_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `previous_status` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `next_status` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `actor_user_id` bigint DEFAULT NULL,
+  `review_note` text COLLATE utf8mb4_unicode_ci,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_collector_review_actions_review_id` (`review_id`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Table: collector_import_reviews
-CREATE TABLE IF NOT EXISTS `collector_import_reviews` (
+CREATE TABLE `collector_import_reviews` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `source_system` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `source_content_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -76,22 +81,27 @@ CREATE TABLE IF NOT EXISTS `collector_import_reviews` (
   KEY `idx_collector_import_local_entity` (`local_entity_type`,`local_entity_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table: collector_import_review_actions
-CREATE TABLE IF NOT EXISTS `collector_import_review_actions` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
-  `review_id` bigint NOT NULL,
-  `action_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `previous_status` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `next_status` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `actor_user_id` bigint DEFAULT NULL,
-  `review_note` text COLLATE utf8mb4_unicode_ci,
+-- Table: content_image_usages
+CREATE TABLE `content_image_usages` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `asset_id` int NOT NULL,
+  `entity_type` enum('place','event','article') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `entity_id` int NOT NULL,
+  `usage_type` enum('cover','gallery','inline') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'gallery',
+  `position` int NOT NULL DEFAULT '0',
+  `caption` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_by` int DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `idx_collector_review_actions_review_id` (`review_id`,`created_at`)
+  KEY `idx_content_image_usages_entity` (`entity_type`,`entity_id`),
+  KEY `idx_content_image_usages_asset` (`asset_id`),
+  KEY `idx_content_image_usages_usage` (`usage_type`),
+  CONSTRAINT `fk_content_image_usages_asset` FOREIGN KEY (`asset_id`) REFERENCES `media_assets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: content_purge_audit
-CREATE TABLE IF NOT EXISTS `content_purge_audit` (
+CREATE TABLE `content_purge_audit` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `entity_type` enum('place','event') COLLATE utf8mb4_unicode_ci NOT NULL,
   `entity_id` bigint NOT NULL,
@@ -108,7 +118,7 @@ CREATE TABLE IF NOT EXISTS `content_purge_audit` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: events
-CREATE TABLE IF NOT EXISTS `events` (
+CREATE TABLE `events` (
   `id` int NOT NULL AUTO_INCREMENT,
   `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
@@ -133,7 +143,7 @@ CREATE TABLE IF NOT EXISTS `events` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: event_translations
-CREATE TABLE IF NOT EXISTS `event_translations` (
+CREATE TABLE `event_translations` (
   `id` int NOT NULL AUTO_INCREMENT,
   `event_id` int NOT NULL,
   `lang` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -148,7 +158,7 @@ CREATE TABLE IF NOT EXISTS `event_translations` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: homepage_curation_layouts
-CREATE TABLE IF NOT EXISTS `homepage_curation_layouts` (
+CREATE TABLE `homepage_curation_layouts` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `layout_key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `lang` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -161,10 +171,10 @@ CREATE TABLE IF NOT EXISTS `homepage_curation_layouts` (
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_homepage_curation_layout` (`layout_key`,`lang`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: media_assets
-CREATE TABLE IF NOT EXISTS `media_assets` (
+CREATE TABLE `media_assets` (
   `id` int NOT NULL AUTO_INCREMENT,
   `asset_uid` char(36) COLLATE utf8mb4_unicode_ci NOT NULL,
   `source_url` varchar(1200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -195,27 +205,8 @@ CREATE TABLE IF NOT EXISTS `media_assets` (
   KEY `idx_media_assets_checksum` (`checksum`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table: content_image_usages
-CREATE TABLE IF NOT EXISTS `content_image_usages` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `asset_id` int NOT NULL,
-  `entity_type` enum('place','event','article') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `entity_id` int NOT NULL,
-  `usage_type` enum('cover','gallery','inline') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'gallery',
-  `position` int NOT NULL DEFAULT '0',
-  `caption` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `created_by` int DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_content_image_usages_entity` (`entity_type`,`entity_id`),
-  KEY `idx_content_image_usages_asset` (`asset_id`),
-  KEY `idx_content_image_usages_usage` (`usage_type`),
-  CONSTRAINT `fk_content_image_usages_asset` FOREIGN KEY (`asset_id`) REFERENCES `media_assets` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- Table: places
-CREATE TABLE IF NOT EXISTS `places` (
+CREATE TABLE `places` (
   `id` int NOT NULL AUTO_INCREMENT,
   `category_id` int DEFAULT NULL,
   `slug` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -257,7 +248,7 @@ CREATE TABLE IF NOT EXISTS `places` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: place_translations
-CREATE TABLE IF NOT EXISTS `place_translations` (
+CREATE TABLE `place_translations` (
   `id` int NOT NULL AUTO_INCREMENT,
   `place_id` int NOT NULL,
   `lang` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -271,8 +262,56 @@ CREATE TABLE IF NOT EXISTS `place_translations` (
   UNIQUE KEY `uq_place_lang` (`place_id`,`lang`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Table: review_actions
+CREATE TABLE `review_actions` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `review_content_id` bigint NOT NULL,
+  `batch_uid` char(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `action_type` enum('ingested','approved','needs_revision','rejected','reingested') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `previous_status` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `next_status` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `actor_user_id` bigint DEFAULT NULL,
+  `review_note` text COLLATE utf8mb4_unicode_ci,
+  `payload_snapshot_json` longtext COLLATE utf8mb4_unicode_ci,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_review_actions_content` (`review_content_id`,`created_at`),
+  KEY `idx_review_actions_batch` (`batch_uid`),
+  CONSTRAINT `fk_review_actions_content` FOREIGN KEY (`review_content_id`) REFERENCES `review_contents` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: review_content_assets
+CREATE TABLE `review_content_assets` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `review_content_id` bigint NOT NULL,
+  `batch_uid` char(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `usage_type` enum('cover','gallery','inline') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `position` int NOT NULL DEFAULT '0',
+  `source_url` varchar(1200) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `resolved_source_url` varchar(1200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `backend_url` varchar(1200) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `storage_disk` enum('local') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'local',
+  `storage_path` varchar(1200) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `file_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `mime_type` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `size_bytes` bigint DEFAULT NULL,
+  `checksum` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `caption` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `source_asset_id` bigint DEFAULT NULL,
+  `source_submission_id` char(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `status` enum('review_ready','published','deleted') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'review_ready',
+  `asset_origin` enum('collector_import') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'collector_import',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_review_content_assets_batch` (`review_content_id`,`batch_uid`),
+  KEY `idx_review_content_assets_status` (`status`),
+  KEY `idx_review_content_assets_checksum` (`checksum`),
+  CONSTRAINT `fk_review_content_assets_content` FOREIGN KEY (`review_content_id`) REFERENCES `review_contents` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Table: review_contents
-CREATE TABLE IF NOT EXISTS `review_contents` (
+CREATE TABLE `review_contents` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `source_system` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `source_content_item_id` bigint NOT NULL,
@@ -320,56 +359,8 @@ CREATE TABLE IF NOT EXISTS `review_contents` (
   KEY `idx_review_contents_public_entity` (`public_entity_type`,`public_entity_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table: review_actions
-CREATE TABLE IF NOT EXISTS `review_actions` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
-  `review_content_id` bigint NOT NULL,
-  `batch_uid` char(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `action_type` enum('ingested','approved','needs_revision','rejected','reingested') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `previous_status` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `next_status` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `actor_user_id` bigint DEFAULT NULL,
-  `review_note` text COLLATE utf8mb4_unicode_ci,
-  `payload_snapshot_json` longtext COLLATE utf8mb4_unicode_ci,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_review_actions_content` (`review_content_id`,`created_at`),
-  KEY `idx_review_actions_batch` (`batch_uid`),
-  CONSTRAINT `fk_review_actions_content` FOREIGN KEY (`review_content_id`) REFERENCES `review_contents` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Table: review_content_assets
-CREATE TABLE IF NOT EXISTS `review_content_assets` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
-  `review_content_id` bigint NOT NULL,
-  `batch_uid` char(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `usage_type` enum('cover','gallery','inline') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `position` int NOT NULL DEFAULT '0',
-  `source_url` varchar(1200) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `resolved_source_url` varchar(1200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `backend_url` varchar(1200) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `storage_disk` enum('local') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'local',
-  `storage_path` varchar(1200) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `file_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `mime_type` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `size_bytes` bigint DEFAULT NULL,
-  `checksum` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `caption` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `source_asset_id` bigint DEFAULT NULL,
-  `source_submission_id` char(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `status` enum('review_ready','published','deleted') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'review_ready',
-  `asset_origin` enum('collector_import') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'collector_import',
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_review_content_assets_batch` (`review_content_id`,`batch_uid`),
-  KEY `idx_review_content_assets_status` (`status`),
-  KEY `idx_review_content_assets_checksum` (`checksum`),
-  CONSTRAINT `fk_review_content_assets_content` FOREIGN KEY (`review_content_id`) REFERENCES `review_contents` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- Table: review_content_translations
-CREATE TABLE IF NOT EXISTS `review_content_translations` (
+CREATE TABLE `review_content_translations` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `review_content_id` bigint NOT NULL,
   `batch_uid` char(36) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -389,8 +380,24 @@ CREATE TABLE IF NOT EXISTS `review_content_translations` (
   CONSTRAINT `fk_review_content_translations_content` FOREIGN KEY (`review_content_id`) REFERENCES `review_contents` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Table: transport_add_line_request_audit_logs
+CREATE TABLE `transport_add_line_request_audit_logs` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `request_id` bigint unsigned NOT NULL,
+  `action` enum('submit','approve','reject','apply') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor_user_id` bigint unsigned DEFAULT NULL,
+  `actor_email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `ip_address` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `user_agent` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `metadata` json DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_transport_add_line_audit_request` (`request_id`),
+  KEY `idx_transport_add_line_audit_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Table: transport_add_line_requests
-CREATE TABLE IF NOT EXISTS `transport_add_line_requests` (
+CREATE TABLE `transport_add_line_requests` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
   `payload_json` json NOT NULL,
@@ -409,24 +416,8 @@ CREATE TABLE IF NOT EXISTS `transport_add_line_requests` (
   KEY `idx_transport_add_line_submitted_by` (`submitted_by_user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table: transport_add_line_request_audit_logs
-CREATE TABLE IF NOT EXISTS `transport_add_line_request_audit_logs` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `request_id` bigint unsigned NOT NULL,
-  `action` enum('submit','approve','reject','apply') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `actor_user_id` bigint unsigned DEFAULT NULL,
-  `actor_email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `ip_address` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `user_agent` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `metadata` json DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_transport_add_line_audit_request` (`request_id`),
-  KEY `idx_transport_add_line_audit_created` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- Table: transport_route_audit_logs
-CREATE TABLE IF NOT EXISTS `transport_route_audit_logs` (
+CREATE TABLE `transport_route_audit_logs` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `route_id` bigint unsigned DEFAULT NULL,
   `action` enum('create','update','delete','import_geojson','export') COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -444,8 +435,21 @@ CREATE TABLE IF NOT EXISTS `transport_route_audit_logs` (
   KEY `idx_transport_audit_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Table: transport_route_points
+CREATE TABLE `transport_route_points` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `route_id` bigint unsigned NOT NULL,
+  `lat` decimal(10,7) NOT NULL,
+  `lng` decimal(10,7) NOT NULL,
+  `point_order` int NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_transport_points_order` (`route_id`,`point_order`),
+  CONSTRAINT `fk_transport_points_route` FOREIGN KEY (`route_id`) REFERENCES `transport_routes` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Table: transport_routes
-CREATE TABLE IF NOT EXISTS `transport_routes` (
+CREATE TABLE `transport_routes` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `route_code` varchar(120) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -471,21 +475,8 @@ CREATE TABLE IF NOT EXISTS `transport_routes` (
   KEY `idx_transport_route_type_created` (`route_type`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table: transport_route_points
-CREATE TABLE IF NOT EXISTS `transport_route_points` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `route_id` bigint unsigned NOT NULL,
-  `lat` decimal(10,7) NOT NULL,
-  `lng` decimal(10,7) NOT NULL,
-  `point_order` int NOT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_transport_points_order` (`route_id`,`point_order`),
-  CONSTRAINT `fk_transport_points_route` FOREIGN KEY (`route_id`) REFERENCES `transport_routes` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- Table: transport_route_stops
-CREATE TABLE IF NOT EXISTS `transport_route_stops` (
+CREATE TABLE `transport_route_stops` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `route_id` bigint unsigned NOT NULL,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -499,7 +490,7 @@ CREATE TABLE IF NOT EXISTS `transport_route_stops` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: users
-CREATE TABLE IF NOT EXISTS `users` (
+CREATE TABLE `users` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `password` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -513,4 +504,4 @@ CREATE TABLE IF NOT EXISTS `users` (
   UNIQUE KEY `uq_users_email` (`email`),
   KEY `idx_users_managed_by_user_id` (`managed_by_user_id`),
   CONSTRAINT `fk_users_managed_by_user` FOREIGN KEY (`managed_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
