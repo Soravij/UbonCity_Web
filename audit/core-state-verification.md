@@ -54,6 +54,8 @@ All entries below use the canonical repository function `upsertWorkflowModel`, e
 
 `content_items.workflow_status` is separately mutable: `saveItem` writes the item's legacy column (`collector/db/repository.mjs:5286-5310`) and `setWorkflowStatus` runs direct SQL against that column (`:5722-5726`). The only production caller of `setWorkflowStatus` found is `reconcileLegacyWorkflowStatusMirror`, after canonical head create/update (`:5852-5868`). This is a mirror, not a `production_state`/`publication_state` writer.
 
+Outside production paths, four smoke scripts directly `INSERT INTO content_workflow_models` to build fixtures: `collector/scripts/smoke-ai-input-cleanup-post-assignment.mjs:42-44`, `collector/scripts/smoke-field-pack-return-to-clean.mjs:51-53`, `collector/scripts/smoke-publish-sync-compensation.mjs:98-100`, and `collector/scripts/smoke-reference-cleanup.mjs:79-81`. These are direct-SQL test/script writers, not runtime workflow paths. The repository's other direct SQL updates to this table clear only pointer columns during reference cleanup (`collector/db/repository.mjs:13612-13635`); they do not write production/publication state.
+
 ### Skip flags
 
 - The repository supports three bypass flags: assignment, production, and publication transition validation (`collector/db/repository.mjs:5968-5979`).
@@ -108,11 +110,11 @@ Concrete divergence is possible: update a current field pack from `ready_for_fie
 
 There is a live generic writer for every validated enum: `PUT /api/items/:id/workflow-model` normalizes both enum sets and passes its patch to `upsertWorkflowModel` (`collector/server/index.mjs:9751-9805`; enum sets `collector/db/repository.mjs:430-445`). Consequently, no enum value is a dead value in the strict sense of “cannot be written by checked production code.”
 
-There are, however, values with **no dedicated named transition writer found**:
+There are, however, values with **no normal dedicated named transition writer found**:
 
-- `brief_generated`: no dedicated writer found; generic endpoint can write it. It is present in transition rules and acceptance checks (`collector/db/repository.mjs:433,467-468`; `collector/server/index.mjs:11321`).
-- `ready_for_content`: no dedicated named writer found; the generic endpoint expressly permits a `user` actor only this production target (`collector/server/index.mjs:9785-9792`).
-- `completed`: no dedicated named writer found; generic endpoint can write it, and the transition table permits it from `ready_for_publish` or `submitted_for_admin_review` (`collector/db/repository.mjs:474-477`).
+- `brief_generated`: no normal dedicated transition writer found; generic endpoint can write it. It is also a legacy-repair seed when `workflow_status` has that value (`collector/db/repository.mjs:568-580,5933-5945`). It is present in transition rules and acceptance checks (`:433,467-468`; `collector/server/index.mjs:11321`).
+- `ready_for_content`: no normal dedicated named writer found; the generic endpoint expressly permits a `user` actor only this production target (`collector/server/index.mjs:9785-9792`). It too can be seeded by legacy repair (`collector/db/repository.mjs:568-580,5933-5945`).
+- `completed`: no normal dedicated transition writer found; generic endpoint can write it, the transition table permits it from `ready_for_publish` or `submitted_for_admin_review`, and legacy `workflow_status=published` seeds `completed/published` during repair (`collector/db/repository.mjs:474-477,568-580,5933-5945`).
 - `archived` and `deleted` publication values: no dedicated named writer found; generic endpoint can write validated publication enum values (`collector/server/index.mjs:9767-9805`; `collector/db/repository.mjs:444,480-485`).
 
 The remaining production enum values have a dedicated writer listed in section 2. This is a source finding only; runtime database contents were not inspected.
