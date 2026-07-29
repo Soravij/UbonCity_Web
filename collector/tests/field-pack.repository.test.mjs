@@ -721,6 +721,68 @@ test("field pack metadata defaults stay safe on legacy-style null or invalid val
   }
 });
 
+test("field pack regeneration preserves the previous pack and return-to-clean archives the current pack", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Field Pack Archive Lifecycle");
+    const original = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      ai_summary: "original pack",
+    });
+    ctx.db.prepare("INSERT INTO field_pack_checklists (field_pack_id, checklist_type, item_text) VALUES (?, 'must_verify_fact', 'verify original')").run(original.id);
+    ctx.db.prepare("INSERT INTO field_pack_references (field_pack_id, label, url) VALUES (?, 'original reference', 'https://example.com/original')").run(original.id);
+    ctx.db.prepare("INSERT INTO field_pack_media_hints (field_pack_id, url) VALUES (?, 'https://example.com/original.jpg')").run(original.id);
+    ctx.db.prepare("INSERT INTO field_pack_assignments (field_pack_id, assignment_scope) VALUES (?, 'field')").run(original.id);
+
+    const countPacks = () => Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_packs WHERE content_item_id=?").get(item.id)?.c || 0);
+    const countChildren = (fieldPackId) => ({
+      checklists: Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_pack_checklists WHERE field_pack_id=?").get(fieldPackId)?.c || 0),
+      references: Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_pack_references WHERE field_pack_id=?").get(fieldPackId)?.c || 0),
+      media_hints: Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_pack_media_hints WHERE field_pack_id=?").get(fieldPackId)?.c || 0),
+      assignments: Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_pack_assignments WHERE field_pack_id=?").get(fieldPackId)?.c || 0),
+    });
+
+    assert.equal(countPacks(), 1);
+    assert.equal(ctx.repo.getCurrentFieldPackByItem(item.id)?.id, original.id);
+    assert.deepEqual(countChildren(original.id), { checklists: 1, references: 1, media_hints: 1, assignments: 1 });
+
+    const regenerated = ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      ai_summary: "regenerated pack",
+    });
+    ctx.db.prepare("INSERT INTO field_pack_checklists (field_pack_id, checklist_type, item_text) VALUES (?, 'must_verify_fact', 'verify regenerated')").run(regenerated.id);
+    ctx.db.prepare("INSERT INTO field_pack_references (field_pack_id, label, url) VALUES (?, 'regenerated reference', 'https://example.com/regenerated')").run(regenerated.id);
+    ctx.db.prepare("INSERT INTO field_pack_media_hints (field_pack_id, url) VALUES (?, 'https://example.com/regenerated.jpg')").run(regenerated.id);
+    ctx.db.prepare("INSERT INTO field_pack_assignments (field_pack_id, assignment_scope) VALUES (?, 'field')").run(regenerated.id);
+    assert.equal(countPacks(), 2);
+    assert.equal(ctx.db.prepare("SELECT is_current FROM field_packs WHERE id=?").get(original.id)?.is_current, 0);
+    assert.equal(ctx.repo.getCurrentFieldPackByItem(item.id)?.id, regenerated.id);
+    assert.deepEqual(countChildren(original.id), { checklists: 1, references: 1, media_hints: 1, assignments: 1 });
+    assert.deepEqual(countChildren(regenerated.id), { checklists: 1, references: 1, media_hints: 1, assignments: 1 });
+
+    ctx.db.prepare("UPDATE content_workflow_models SET production_state='analyzed', current_field_pack_id=? WHERE content_item_id=?").run(regenerated.id, item.id);
+    ctx.db.prepare("INSERT INTO content_assignments (assignment_uid, content_item_id, assignment_kind, state) VALUES (?, ?, 'field', 'assigned')").run(`active-${item.id}`, item.id);
+    const returned = ctx.repo.returnFieldPackToCleanAtomic(item.id, "archive current pack", "tester@local");
+    assert.equal(returned.ok, true);
+    assert.equal(countPacks(), 2);
+    const archived = ctx.db.prepare("SELECT is_current, archived_at FROM field_packs WHERE id=?").get(regenerated.id);
+    assert.equal(archived?.is_current, 0);
+    assert.ok(archived?.archived_at);
+    assert.deepEqual(countChildren(regenerated.id), { checklists: 1, references: 1, media_hints: 1, assignments: 1 });
+    assert.equal(ctx.repo.getCurrentFieldPackByItem(item.id), null);
+    assert.equal(ctx.db.prepare("SELECT current_field_pack_id FROM content_workflow_models WHERE content_item_id=?").get(item.id)?.current_field_pack_id, null);
+
+    const replacement = ctx.repo.createFieldPack({ content_item_id: item.id, status: "ready_for_field", ai_summary: "replacement pack" });
+    assert.equal(countPacks(), 3);
+    assert.equal(ctx.repo.getCurrentFieldPackByItem(item.id)?.id, replacement.id);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_packs WHERE content_item_id=? AND is_current=1 AND archived_at IS NULL").get(item.id)?.c, 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("raw-only item with automatic import dependencies can be hard deleted safely", () => {
   const ctx = createTestContext();
   try {
