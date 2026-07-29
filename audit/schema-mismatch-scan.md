@@ -1,3 +1,5 @@
+# หมายเหตุ: ฐานข้อมูล `uboncity` ที่รายงานฉบับนี้บรรยายถูก retire แล้ว
+
 # Backend Schema and Error Handling Audit Report
 
 **Audit Date:** 2026-07-28  
@@ -132,5 +134,3 @@ Files with console.error(label, err):
 - Catch blocks: 127 total
 - Proper error logging: 48 (38%)
 - Missing error logging: 79 (62%)
-
-# หมายเหตุ: ฐานข้อมูล `uboncity` ที่รายงานฉบับนี้บรรยายถูก retire แล้ว
