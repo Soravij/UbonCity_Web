@@ -1,6 +1,6 @@
 # Place Content Workflow Policy
 
-**สถานะ:** ร่าง v0.2 — 29 ก.ค. 2026
+**สถานะ:** ร่าง v0.3 — 29 ก.ค. 2026
 **ขอบเขต:** workflow ของ content ประเภท `place` ฝั่ง Collector เท่านั้น
 
 ---
@@ -68,6 +68,8 @@ item หนึ่งตัวอยู่บนบันไดตำแหน่
 | **5** | ขึ้น public | `completed` | `published` |
 
 🆕 = ค่าใหม่ที่ต้องเพิ่มเข้า enum
+
+**หมายเหตุขั้น 1.3:** จากการตรวจฐาน Collector จริง (29 ก.ค. 2026) ไม่มี item ใดเคยอยู่สถานะ `generated` เลย — เส้นทาง deterministic AI draft ที่เขียนสถานะนี้ไม่เคยถูกเดินในการใช้งานจริง งานจริงข้ามจาก `analyzed` ไป `content_in_progress` โดยตรง ขั้นนี้จึงเป็นขั้นที่ออกแบบไว้แต่ยังไม่มีการใช้งาน ต้องตัดสินว่าจะ wire ให้ใช้จริงหรือตัดออกจาก map (ดูหมวด 9.5)
 
 ### 2.2 ค่าที่ place ไม่ใช้
 
@@ -207,14 +209,47 @@ item หนึ่งตัวอยู่บนบันไดตำแหน่
 
 รายการนี้คืองานที่ต้องทำเพื่อให้ระบบตรงกับเอกสาร
 
+### 9.0 สภาพฐานจริง ณ 29 ก.ค. 2026
+
+ตัวเลขมาจากสำเนา `collector.db` บน Runtime ลงวันที่ 29 ก.ค. 2026 16:58 ICT
+
+#### การกระจายสถานะ (52 item: place 51, event 1)
+
+| `production_state` | จำนวน |
+|---|---:|
+| `collected` | 27 |
+| `analyzed` | 12 |
+| `content_in_progress` | 6 |
+| `ready_for_publish` | 1 |
+| `submitted_for_admin_review` | 6 |
+| `generated` | 0 |
+| `completed` | 0 |
+
+#### ตัวชี้บน workflow head
+
+| ตัวชี้ | ตั้งค่าแล้ว | สอดคล้องกับ artifact จริง |
+|---|---:|---|
+| `current_field_pack_id` | 22 | ตรงทั้งหมด |
+| `current_review_report_id` | 6 | ตรงทั้งหมด |
+| `current_draft_id` | 0 จาก 52 | มี draft จริง 8 item แต่ไม่มีตัวชี้เลย |
+
+ข้อสังเกตประกอบ:
+
+- `current_draft_id` ไม่ใช่ของที่พัง แต่เป็นของที่ไม่เคยถูกใช้ — ตัวเขียนเดียวของมันคือ deterministic draft flow ซึ่งไม่เคยรัน draft จริงมาจาก manual editor และ accepted-assignment metadata ซึ่งไม่เซ็ตตัวชี้
+- mirror ระหว่าง `content_workflow_models.assignment_state` กับ `content_assignments.state` แตกจริง 3 item: item 20 (head `closed` / จริง `assigned`), item 51 และ 52 (head `accepted` / จริง `assigned`)
+- assignment ที่ `closed` มีเพียง 1 อันในทั้งฐาน (id 5, item 20, editorial) มาจาก `article_editorial_assignment_replaced` — คือ `replace_active` ไม่ใช่ `return-to-field`
+- item ที่ค้างที่ `submitted_for_admin_review` 6 ตัว นานสุด 45.75 วัน
+- item ทุกตัวมี workflow head ครบ ไม่มี orphan
+- `workflow_status` legacy ไม่ตรงกับ head 34 จาก 52 (65%)
+
 ### 9.1 บั๊กที่ต้องแก้ไม่ว่าจะทำบันไดหรือไม่
 
-| # | อาการ | รายละเอียด |
-|---|---|---|
-| A | **enum สองชุดไม่ตรงกัน** | `generated` มีใน `repository.mjs` แต่ไม่มีใน `index.mjs` — service เขียนค่านี้ได้ แต่ API ปฏิเสธ item ที่ติดตรงนี้จึงกู้ผ่าน API ไม่ได้ |
-| B | **place ไปไม่ถึง `published`** | writer เดียวของ `published` คือ transport-map sync — งาน place ที่ขึ้นเว็บแล้ว Collector ไม่เคยรู้ ค้างที่ `submitted_for_admin_review` ตลอดไป |
-| C | **catch กลืน error ตอนสร้าง deliverable** | ทำให้ item ผ่านเกณฑ์ publishable source ไม่ได้ตลอดกาล โดยไม่มีสาเหตุปรากฏ |
-| D | **สร้าง item ไม่อยู่ใน transaction** | item เกิดขึ้นโดยไม่มี workflow head ได้ แล้วทุกอย่างหลังจากนั้น throw |
+| # | อาการ | รายละเอียด | หลักฐานจากฐานจริง |
+|---|---|---|---|
+| A | **enum สองชุดไม่ตรงกัน** | `generated` มีใน `repository.mjs` แต่ไม่มีใน `index.mjs` — service เขียนค่านี้ได้ แต่ API ปฏิเสธ item ที่ติดตรงนี้จึงกู้ผ่าน API ไม่ได้ | ยังไม่พบผลกระทบในฐาน เพราะไม่มี item ใดอยู่ `generated` |
+| B | **place ไปไม่ถึง `published`** | writer เดียวของ `published` คือ transport-map sync — งาน place ที่ขึ้นเว็บแล้ว Collector ไม่เคยรู้ ค้างที่ `submitted_for_admin_review` ตลอดไป | ยืนยันแล้ว — 6 item ค้าง `submitted_for_admin_review` นานสุด 45.75 วัน และ 0 item ที่ `completed` |
+| C | **catch กลืน error ตอนสร้าง deliverable** | ทำให้ item ผ่านเกณฑ์ publishable source ไม่ได้ตลอดกาล โดยไม่มีสาเหตุปรากฏ | ยังไม่ได้ตรวจกับฐาน |
+| D | **สร้าง item ไม่อยู่ใน transaction** | item เกิดขึ้นโดยไม่มี workflow head ได้ แล้วทุกอย่างหลังจากนั้น throw | ยังไม่เกิด — 0 orphan ในฐานปัจจุบัน |
 
 ### 9.2 ขั้นที่ยังไม่มีที่ยืน
 
@@ -242,6 +277,8 @@ item หนึ่งตัวอยู่บนบันไดตำแหน่
 | `workflow_status` legacy | ตัดสินว่าตายได้หรือยัง |
 | batch endpoint 5 ตัวที่ปิดตาย | `respondBatchReleaseDisabled` |
 | assignment state `closed` | ถ้าใช้วงจร revision แทน `closed` จะไม่ถูกสร้างเลย ปัญหาทางตันหายไปโดยไม่ต้องแก้ state machine |
+| `current_draft_id` | ไม่เคยถูกเซ็ตเลย (0/52) และตัวอ่านทุกตัว fallback ไป `latestDraftByItem` อยู่แล้ว — เป็นตัวชี้ที่ไม่มีใครดูแล ขัดกับกฎ "แหล่งความจริงมีแหล่งเดียว" หมวด 7.2 หมายเหตุ: `current_field_pack_id` และ `current_review_report_id` ทำงานถูกต้อง ห้ามลบ |
+| `repairWorkflowHeadFromLegacy` | seed สถานะจาก `workflow_status` ซึ่งผิด 65% ในฐานจริง — ถ้าถูกเรียกจะทำให้สถานะ item ส่วนใหญ่ผิด ต้องปิดหรือใส่คำเตือนก่อนมีคนเรียกโดยไม่รู้ |
 
 ### 9.5 ยังไม่ตัดสิน
 
@@ -250,6 +287,7 @@ item หนึ่งตัวอยู่บนบันไดตำแหน่
 | 1 | article-process | เก็บเป็นคอลัมน์จริง / เลิกมี (ตอนนี้เป็น derived ไม่มีคอลัมน์) |
 | 2 | `field_packs.status` | ยกเป็นขั้น / เป็นสถานะย่อยในขั้นเดียว |
 | 3 | ใครบอก Collector ว่า item ขึ้น public แล้ว | backend แจ้งกลับ / Collector ถาม / ยอมรับว่าไม่รู้ |
+| 4 | ขั้น 1.3 `generated` | wire deterministic draft ให้ใช้จริง / ตัดขั้นนี้ออกจาก map แล้วให้ `analyzed` ต่อ `brief_generated` ตรงๆ |
 
 ---
 
@@ -274,13 +312,6 @@ item หนึ่งตัวอยู่บนบันไดตำแหน่
 
 ข้อ 5 ต้องอยู่ท้ายสุดเสมอ — ปิดประตูก่อนบันไดครบ จะเปลี่ยนจาก "ข้ามขั้นได้" เป็น "ติดถาวรกู้ไม่ได้" ซึ่งแย่กว่า
 
-### 10.4 การจัดเก็บเอกสาร
-- `audit/` = ผลสำรวจชั่วคราว ลบได้เมื่อข้อค้นพบถูกแก้แล้ว หรือสาระถูกย้ายเข้า `docs/`
-- `docs/` = เอกสารกำกับที่อยู่ถาวร
-- `docs/archive/` = เอกสารเก่าที่ยังไม่ยืนยันว่าหมดอายุ
-- ห้ามวางรายงานที่ root ของ repo
-- เมื่อรายงานใดถูกอ้างอิงจาก `docs/` ต้องอยู่บน `main` ไม่ใช่บน branch
-
 ---
 
 ## 11. ที่มาของข้อมูล
@@ -293,6 +324,7 @@ item หนึ่งตัวอยู่บนบันไดตำแหน่
 | `audit/core-state-verification.md` | workflow head เป็นแหล่งความจริงเดียวหรือไม่ |
 | `audit/workflow-gap-to-map.md` | ช่องว่างระหว่าง workflow จริงกับแผนที่ขั้นตอนของ place |
 | `audit/audit-crosscheck.md` | ตรวจทานความสอดคล้องของรายงานทั้งห้าฉบับกับโค้ด |
+| ผลตรวจฐาน Collector จริงบน Runtime (สำเนา 29 ก.ค. 2026 16:58 ICT) | สภาพฐานจริง ณ 29 ก.ค. 2026 |
 
 พร้อมผลสำรวจ state แยกตาม content type (29 ก.ค. 2026) และภาพหน้าจอ UI จริงของกระบวนการ 1-3
 
@@ -304,3 +336,4 @@ item หนึ่งตัวอยู่บนบันไดตำแหน่
 |---|---|---|
 | 29 ก.ค. 2026 | v0.1 | ร่างแรก จากผลสำรวจสี่ฉบับและภาพหน้าจอ UI |
 | 29 ก.ค. 2026 | v0.2 | เพิ่มตารางบันไดเต็มพร้อม state ทุกขั้น · เพิ่มค่าใหม่ 4 ค่า · กำหนด `needs_revision`/`rejected` เป็น flag · ยืนยันกฎแยกตาม content type · เพิ่มหมวด 9 ระยะห่างจากสภาพปัจจุบัน · เพิ่มลำดับการลงมือ |
+| 29 ก.ค. 2026 | v0.3 | เพิ่มหมวด 9.0 สภาพฐานจริง · บันทึกว่า `current_draft_id` ไม่เคยถูกใช้ · ยืนยันบั๊ก B ด้วยข้อมูลจริง · เพิ่มรายการลบ 2 รายการ · เพิ่มข้อยังไม่ตัดสินเรื่องขั้น 1.3 |
