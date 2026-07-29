@@ -101,7 +101,7 @@ async function main() {
 
   let successFixture = null;
   let legacySuccessFixture = null;
-  let blockedByAssignmentFixture = null;
+  let activeAssignmentFixture = null;
   let blockedByPublishFixture = null;
 
   try {
@@ -127,8 +127,8 @@ async function main() {
       withActiveAssignment: false,
       claimedByUserId: actorUserId,
     });
-    blockedByAssignmentFixture = createItemWithFieldPack(db, {
-      titleSuffix: "Blocked Assignment",
+    activeAssignmentFixture = createItemWithFieldPack(db, {
+      titleSuffix: "Active Assignment",
       productionState: "analyzed",
       publicationState: "draft",
       withActiveAssignment: true,
@@ -160,8 +160,10 @@ async function main() {
     `).get(successFixture.itemId);
     assert(String(successWorkflow?.production_state || "") === "analyzed", "workflow production_state not analyzed");
     assert((Number(successWorkflow?.current_field_pack_id || 0) || 0) === 0, "current_field_pack_id should be null/0");
-    const successFieldPack = db.prepare("SELECT id FROM field_packs WHERE id=?").get(successFixture.fieldPackId);
-    assert(!successFieldPack, "field pack should be deleted after return-to-clean");
+    const successFieldPack = db.prepare("SELECT id, is_current, archived_at FROM field_packs WHERE id=?").get(successFixture.fieldPackId);
+    assert(successFieldPack, "field pack should remain as archived history after return-to-clean");
+    assert(Number(successFieldPack.is_current || 0) === 0, "archived field pack should not be current");
+    assert(String(successFieldPack.archived_at || "").trim(), "archived field pack should have archived_at");
 
     logStep("return.legacy_brief_generated");
     const legacyRes = await client.post(`/api/items/${legacySuccessFixture.itemId}/field-pack/return-to-clean`, {
@@ -176,15 +178,11 @@ async function main() {
     assert(String(legacyWorkflow?.production_state || "") === "analyzed", "legacy workflow production_state not analyzed");
     assert((Number(legacyWorkflow?.current_field_pack_id || 0) || 0) === 0, "legacy current_field_pack_id should be null/0");
 
-    logStep("return.blocked_assignment");
-    const assignmentRes = await client.post(`/api/items/${blockedByAssignmentFixture.itemId}/field-pack/return-to-clean`, {
-      comment: "smoke block assignment",
+    logStep("return.active_assignment");
+    const assignmentRes = await client.post(`/api/items/${activeAssignmentFixture.itemId}/field-pack/return-to-clean`, {
+      comment: "smoke return with active assignment",
     });
-    assert(assignmentRes.status === 409, `expected 409 for assignment blocker, got ${assignmentRes.status}`);
-    assert(
-      /active assignment|handoff/i.test(String(assignmentRes.body?.error || "")),
-      `unexpected assignment blocker error: ${JSON.stringify(assignmentRes.body)}`
-    );
+    assert(assignmentRes.ok, `active-assignment return-to-clean failed: ${JSON.stringify(assignmentRes.body)}`);
 
     logStep("return.blocked_publish_ready");
     const publishRes = await client.post(`/api/items/${blockedByPublishFixture.itemId}/field-pack/return-to-clean`, {
@@ -201,22 +199,22 @@ async function main() {
       fixtures: {
         success_item_id: successFixture.itemId,
         legacy_brief_generated_item_id: legacySuccessFixture.itemId,
-        blocked_assignment_item_id: blockedByAssignmentFixture.itemId,
+        active_assignment_item_id: activeAssignmentFixture.itemId,
         blocked_publish_ready_item_id: blockedByPublishFixture.itemId,
       },
       checks: {
         return_success_transitioned_to_analyzed: true,
-        return_success_removed_current_field_pack: true,
+        return_success_archived_current_field_pack: true,
         return_success_redirect_url_clean_page: true,
         return_legacy_brief_generated_supported: true,
-        return_blocked_when_active_assignment_exists: true,
+        return_succeeds_when_active_assignment_exists: true,
         return_blocked_when_publish_ready_or_published: true,
       },
     }, null, 2));
   } finally {
     try {
       if (blockedByPublishFixture?.itemId) cleanupFixture(db, blockedByPublishFixture.itemId);
-      if (blockedByAssignmentFixture?.itemId) cleanupFixture(db, blockedByAssignmentFixture.itemId);
+      if (activeAssignmentFixture?.itemId) cleanupFixture(db, activeAssignmentFixture.itemId);
       if (legacySuccessFixture?.itemId) cleanupFixture(db, legacySuccessFixture.itemId);
       if (successFixture?.itemId) cleanupFixture(db, successFixture.itemId);
     } finally {
