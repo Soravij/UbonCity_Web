@@ -93,3 +93,4 @@ None. All 24 tables from the baseline are present in the runtime snapshot, and v
 ## Migration-002 naming caveat (raw observation, not a conclusion)
 
 `migrations/002_safe_constraints_if_missing.sql`'s check for the `category_translations` FK looks for a constraint named exactly `fk_category_translations_category` via `information_schema.key_column_usage`. Runtime's existing FK on that column is auto-named `category_translations_ibfk_1`. If migration 002 runs against the current runtime shape, its existence check would find zero matching rows (wrong name, not "no FK") and would attempt to add a second FK constraint on the same column. Not verified against a live database — noted here as raw evidence only.
+# หมายเหตุ: ฐานข้อมูล `uboncity` ที่รายงานฉบับนี้บรรยายถูก retire แล้ว

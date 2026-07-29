@@ -61,3 +61,4 @@ Re-checking column references against this real snapshot (rather than the ideali
 ## Open questions
 
 - If `runtime-schema-2026-07-27.sql` is stale by the time this is acted on, item A.1's live-break status should be re-verified with a fresh `SHOW CREATE TABLE category_translations` on the runtime DB.
+# หมายเหตุ: ฐานข้อมูล `uboncity` ที่รายงานฉบับนี้บรรยายถูก retire แล้ว

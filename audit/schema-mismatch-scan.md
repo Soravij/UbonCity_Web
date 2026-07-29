@@ -133,3 +133,4 @@ Files with console.error(label, err):
 - Proper error logging: 48 (38%)
 - Missing error logging: 79 (62%)
 
+# หมายเหตุ: ฐานข้อมูล `uboncity` ที่รายงานฉบับนี้บรรยายถูก retire แล้ว
