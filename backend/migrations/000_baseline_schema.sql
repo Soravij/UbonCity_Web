@@ -40,13 +40,14 @@ CREATE TABLE IF NOT EXISTS `categories` (
 CREATE TABLE IF NOT EXISTS `category_translations` (
   `id` int NOT NULL AUTO_INCREMENT,
   `category_id` int NOT NULL,
-  `lang` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lang` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_category_lang` (`category_id`,`lang`)
+  UNIQUE KEY `uq_category_lang` (`category_id`,`lang`),
+  CONSTRAINT `fk_category_translations_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: collector_import_reviews
@@ -136,7 +137,7 @@ CREATE TABLE IF NOT EXISTS `events` (
 CREATE TABLE IF NOT EXISTS `event_translations` (
   `id` int NOT NULL AUTO_INCREMENT,
   `event_id` int NOT NULL,
-  `lang` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lang` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
   `meta_title` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -151,7 +152,7 @@ CREATE TABLE IF NOT EXISTS `event_translations` (
 CREATE TABLE IF NOT EXISTS `homepage_curation_layouts` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `layout_key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `lang` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lang` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
   `draft_blocks_json` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
   `published_blocks_json` longtext COLLATE utf8mb4_unicode_ci,
   `updated_by` bigint DEFAULT NULL,
@@ -260,7 +261,7 @@ CREATE TABLE IF NOT EXISTS `places` (
 CREATE TABLE IF NOT EXISTS `place_translations` (
   `id` int NOT NULL AUTO_INCREMENT,
   `place_id` int NOT NULL,
-  `lang` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lang` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
   `meta_title` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -268,7 +269,8 @@ CREATE TABLE IF NOT EXISTS `place_translations` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_place_lang` (`place_id`,`lang`)
+  UNIQUE KEY `uq_place_lang` (`place_id`,`lang`),
+  CONSTRAINT `fk_place_translations_place` FOREIGN KEY (`place_id`) REFERENCES `places` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: review_contents
@@ -280,7 +282,7 @@ CREATE TABLE IF NOT EXISTS `review_contents` (
   `source_manifest_hash` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `content_type` enum('place','event') COLLATE utf8mb4_unicode_ci NOT NULL,
   `status` enum('draft','pending_review','needs_revision','rejected','published') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'draft',
-  `lang` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'th',
+  `lang` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'th',
   `category` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `body` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -373,7 +375,7 @@ CREATE TABLE IF NOT EXISTS `review_content_translations` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `review_content_id` bigint NOT NULL,
   `batch_uid` char(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `lang` varchar(8) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `lang` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `excerpt` text COLLATE utf8mb4_unicode_ci,
   `body` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
