@@ -5497,7 +5497,7 @@ export function createRepository(db) {
     const downstreamChecks = [
       ["content_drafts", "SELECT COUNT(*) AS c FROM content_drafts WHERE content_item_id=?"],
       ["review_reports", "SELECT COUNT(*) AS c FROM review_reports WHERE content_item_id=?"],
-      ["field_packs", "SELECT COUNT(*) AS c FROM field_packs WHERE content_item_id=?"],
+      ["field_packs", "SELECT COUNT(*) AS c FROM field_packs WHERE content_item_id=? AND archived_at IS NULL"],
       ["published_articles", "SELECT COUNT(*) AS c FROM published_articles WHERE content_item_id=?"],
       ["reviews_raw", "SELECT COUNT(*) AS c FROM reviews_raw WHERE content_item_id=?"],
       ["quality_checks", "SELECT COUNT(*) AS c FROM quality_checks WHERE content_item_id=?"],
