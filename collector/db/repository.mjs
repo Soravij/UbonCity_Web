@@ -4467,11 +4467,6 @@ export function createRepository(db) {
     WHERE field_pack_id=?
   `);
 
-  const deleteFieldPackByIdStmt = db.prepare(`
-    DELETE FROM field_packs
-    WHERE id=?
-  `);
-
   const insertFieldPackAssignmentStmt = db.prepare(`
     INSERT INTO field_pack_assignments (
       field_pack_id, assignment_scope, linked_assignment_id, assigned_user_id,
@@ -10959,22 +10954,6 @@ function normalizeStateValue(value, stateGroup) {
     return getFieldPackBundleById(fieldPackId);
   }
 
-  function deleteFieldPackById(fieldPackId) {
-    const id = Number(fieldPackId || 0);
-    if (!id) throw new Error("field_pack_id is required");
-    const pack = getFieldPackByIdStmt.get(id);
-    if (!pack) throw new Error("field pack not found");
-    const result = runInTransaction(db, () => {
-      deleteFieldPackChecklistsByPackStmt.run(id);
-      deleteFieldPackReferencesByPackStmt.run(id);
-      deleteFieldPackMediaHintsByPackStmt.run(id);
-      deleteFieldPackAssignmentsByPackStmt.run(id);
-      deleteFieldPackByIdStmt.run(id);
-      return { deleted: true, field_pack_id: id, content_item_id: Number(pack.content_item_id || 0) || null };
-    });
-    return result;
-  }
-
   function returnFieldPackToCleanAtomic(contentItemId, notes, actorEmail = "system@local", metadata = {}) {
     const itemId = Number(contentItemId || 0) || 0;
     const reasonNote = String(notes || "").trim() || null;
@@ -13799,7 +13778,6 @@ function normalizeStateValue(value, stateGroup) {
     getFieldPackBundleById,
     getCurrentFieldPackByItem,
     listFieldPacksByItem,
-    deleteFieldPackById,
     returnFieldPackToCleanAtomic,
     listAgentProfiles,
     getAgentProfile,
