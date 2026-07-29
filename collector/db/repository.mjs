@@ -4319,6 +4319,12 @@ export function createRepository(db) {
     WHERE content_item_id=? AND archived_at IS NULL
   `);
 
+  const archiveFieldPackByIdStmt = db.prepare(`
+    UPDATE field_packs
+    SET is_current=0, archived_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+    WHERE id=?
+  `);
+
   const listAgentProfilesStmt = db.prepare(`
     SELECT *
     FROM agent_profiles
@@ -5491,7 +5497,7 @@ export function createRepository(db) {
     const downstreamChecks = [
       ["content_drafts", "SELECT COUNT(*) AS c FROM content_drafts WHERE content_item_id=?"],
       ["review_reports", "SELECT COUNT(*) AS c FROM review_reports WHERE content_item_id=?"],
-      ["field_packs", "SELECT COUNT(*) AS c FROM field_packs WHERE content_item_id=?"],
+      ["field_packs", "SELECT COUNT(*) AS c FROM field_packs WHERE content_item_id=? AND archived_at IS NULL"],
       ["published_articles", "SELECT COUNT(*) AS c FROM published_articles WHERE content_item_id=?"],
       ["reviews_raw", "SELECT COUNT(*) AS c FROM reviews_raw WHERE content_item_id=?"],
       ["quality_checks", "SELECT COUNT(*) AS c FROM quality_checks WHERE content_item_id=?"],
@@ -10990,24 +10996,13 @@ function normalizeStateValue(value, stateGroup) {
         throw new Error("cannot return to clean from publish-ready or published state");
       }
 
-      const activeAssignmentStates = new Set(["assigned", "in_progress", "submitted", "resubmitted", "revision_requested", "accepted"]);
-      const activeAssignments = listAssignmentsByItem(itemId)
-        .filter((assignment) => activeAssignmentStates.has(String(assignment?.state || "").trim().toLowerCase()));
-      if (activeAssignments.length > 0) {
-        throw new Error("cannot return to clean: item has active assignment or handoff");
-      }
-
-      // Validate the transition before deleting the field pack so business-rule failures
-      // are caught before we mutate child data, while the whole operation still stays atomic.
+      // Validate the transition before archiving the field pack so business-rule failures
+      // are caught before we mutate data, while the whole operation still stays atomic.
       if (productionStateBefore !== "analyzed") {
         assertValidTransition("production", workflowBefore?.production_state, "analyzed");
       }
 
-      deleteFieldPackChecklistsByPackStmt.run(Number(currentFieldPack.id || 0) || 0);
-      deleteFieldPackReferencesByPackStmt.run(Number(currentFieldPack.id || 0) || 0);
-      deleteFieldPackMediaHintsByPackStmt.run(Number(currentFieldPack.id || 0) || 0);
-      deleteFieldPackAssignmentsByPackStmt.run(Number(currentFieldPack.id || 0) || 0);
-      deleteFieldPackByIdStmt.run(Number(currentFieldPack.id || 0) || 0);
+      archiveFieldPackByIdStmt.run(Number(currentFieldPack.id || 0) || 0);
 
       const workflowAfter = upsertWorkflowModel(
         itemId,

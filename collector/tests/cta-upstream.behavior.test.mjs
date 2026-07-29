@@ -156,21 +156,20 @@ test("CTA is place-only: a non-place item generates no suggestions and keeps leg
   assert.equal(saved.ai_cta_contact_json.phone, "0804415224");
 });
 
-test("revision save path updates the repository with the resolved CTA", () => {
-  let updateCall = null;
+test("revision save path creates a new field pack with the resolved CTA", () => {
+  let createCall = null;
   const existing = { id: 9, ai_cta_contact_json: { website_url: "https://existing.example" } };
   const repo = {
     getItem: () => ({ id: 1 }),
     getCurrentFieldPackByItem: () => existing,
-    updateFieldPack: (id, payload) => {
-      updateCall = { id, payload };
-      return { id, ...payload };
+    updateFieldPack: () => { throw new Error("regenerate must not update the current field pack"); },
+    createFieldPack: (payload) => {
+      createCall = payload;
+      return { id: 10, ...payload };
     },
-    createFieldPack: () => { throw new Error("expected update path"); },
   };
   saveAgentFieldPack(repo, item(), pack(), "tester@example.com");
-  assert.equal(updateCall.id, 9);
-  assert.equal(updateCall.payload.ai_cta_contact_json.website_url, "https://ubon.example/contact");
+  assert.equal(createCall.ai_cta_contact_json.website_url, "https://ubon.example/contact");
 });
 
 function requestedChecksWithPhone(phone) {
@@ -201,7 +200,7 @@ function saveWithRequestedChecks(repo, itemValue, fieldPack) {
 }
 
 test("clearing a suggestion also clears it in requested_checks_json, which is what the handoff reads", () => {
-  let updateCall = null;
+  let createCall = null;
   const existing = {
     id: 9,
     ai_cta_contact_json: { phone: "0804415224" },
@@ -211,12 +210,11 @@ test("clearing a suggestion also clears it in requested_checks_json, which is wh
   const repo = {
     getItem: () => ({ id: 1 }),
     getCurrentFieldPackByItem: () => existing,
-    updateFieldPack: (id, payload) => { updateCall = { id, payload }; return { id, ...payload }; },
-    createFieldPack: () => { throw new Error("expected update path"); },
+    createFieldPack: (payload) => { createCall = payload; return { id: 10, ...payload }; },
   };
   // AI ran, and the phone is gone from the approved context
   saveWithRequestedChecks(repo, item({ structured_context: { approved_context: [] } }), pack());
-  const phoneCheck = updateCall.payload.requested_checks_json.groups[0].checks[0];
+  const phoneCheck = createCall.requested_checks_json.groups[0].checks[0];
   assert.equal(phoneCheck.suggested_value, null);
   assert.equal(phoneCheck.source, null);
   // the curator's own configuration of the row survives
@@ -226,7 +224,7 @@ test("clearing a suggestion also clears it in requested_checks_json, which is wh
 });
 
 test("a still-supported suggestion is re-pointed into requested_checks_json", () => {
-  let updateCall = null;
+  let createCall = null;
   const existing = {
     id: 9,
     ai_cta_contact_json: { phone: "0804415224" },
@@ -235,17 +233,16 @@ test("a still-supported suggestion is re-pointed into requested_checks_json", ()
   const repo = {
     getItem: () => ({ id: 1 }),
     getCurrentFieldPackByItem: () => existing,
-    updateFieldPack: (id, payload) => { updateCall = { id, payload }; return { id, ...payload }; },
-    createFieldPack: () => { throw new Error("expected update path"); },
+    createFieldPack: (payload) => { createCall = payload; return { id: 10, ...payload }; },
   };
   saveWithRequestedChecks(repo, item(), pack());
-  const phoneCheck = updateCall.payload.requested_checks_json.groups[0].checks[0];
+  const phoneCheck = createCall.requested_checks_json.groups[0].checks[0];
   assert.equal(phoneCheck.suggested_value, "0822222222");
   assert.equal(phoneCheck.source.kind, "ai");
 });
 
 test("a run with no AI pack leaves requested_checks_json untouched", () => {
-  let updateCall = null;
+  let createCall = null;
   const existing = {
     id: 9,
     ai_cta_contact_json: { phone: "0804415224" },
@@ -254,11 +251,10 @@ test("a run with no AI pack leaves requested_checks_json untouched", () => {
   const repo = {
     getItem: () => ({ id: 1 }),
     getCurrentFieldPackByItem: () => existing,
-    updateFieldPack: (id, payload) => { updateCall = { id, payload }; return { id, ...payload }; },
-    createFieldPack: () => { throw new Error("expected update path"); },
+    createFieldPack: (payload) => { createCall = payload; return { id: 10, ...payload }; },
   };
   saveWithRequestedChecks(repo, item({ structured_context: { approved_context: [] } }), null);
-  assert.equal(Object.hasOwn(updateCall.payload, "requested_checks_json"), false);
+  assert.equal(Object.hasOwn(createCall, "requested_checks_json"), false);
 });
 
 test("external engine initial and revision generation keep deterministic CTA and approved provenance", async () => {

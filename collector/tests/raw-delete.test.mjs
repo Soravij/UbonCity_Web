@@ -192,6 +192,69 @@ test("bulkDeleteItems succeeds when all selected items are safe raw-only", () =>
   }
 });
 
+test("raw hard delete ignores archived field packs but still blocks current packs and cascades archived pack children", () => {
+  const ctx = createTestContext();
+  try {
+    const noPack = ctx.makeItemRawOnly(ctx.createRawItem("Raw No Field Pack"));
+    assert.equal(ctx.repo.getRawOnlyHardDeleteEligibility(noPack.id).eligible, true, "raw item without a field pack remains eligible");
+
+    const currentPackItem = ctx.makeItemRawOnly(ctx.createRawItem("Raw Current Field Pack"));
+    const currentPack = ctx.repo.createFieldPack({ content_item_id: currentPackItem.id, status: "ready_for_field", ai_summary: "current" });
+    const currentEligibility = ctx.repo.getRawOnlyHardDeleteEligibility(currentPackItem.id);
+    assert.equal(currentEligibility.eligible, false, "current field pack blocks raw hard delete");
+    assert.equal(currentEligibility.blockers.find((blocker) => blocker.key === "field_packs")?.count, 1);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_packs WHERE id=? AND archived_at IS NULL").get(currentPack.id)?.c, 1);
+
+    const archivedPackItem = ctx.makeItemRawOnly(ctx.createRawItem("Raw Archived Field Pack"));
+    const archivedPack = ctx.repo.createFieldPack({ content_item_id: archivedPackItem.id, status: "ready_for_field", ai_summary: "archive me" });
+    ctx.db.prepare("INSERT INTO field_pack_checklists (field_pack_id, checklist_type, item_text) VALUES (?, 'must_verify_fact', 'check')").run(archivedPack.id);
+    ctx.db.prepare("INSERT INTO field_pack_references (field_pack_id, label, url) VALUES (?, 'reference', 'https://example.com/reference')").run(archivedPack.id);
+    ctx.db.prepare("INSERT INTO field_pack_media_hints (field_pack_id, url) VALUES (?, 'https://example.com/reference.jpg')").run(archivedPack.id);
+    ctx.db.prepare("INSERT INTO field_pack_assignments (field_pack_id, assignment_scope) VALUES (?, 'field')").run(archivedPack.id);
+    const childCountsBefore = ["field_pack_checklists", "field_pack_references", "field_pack_media_hints", "field_pack_assignments"]
+      .map((table) => Number(ctx.db.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE field_pack_id=?`).get(archivedPack.id)?.c || 0));
+    assert.deepEqual(childCountsBefore, [1, 1, 1, 1]);
+
+    ctx.db.prepare("UPDATE content_workflow_models SET production_state='analyzed', current_field_pack_id=? WHERE content_item_id=?").run(archivedPack.id, archivedPackItem.id);
+    ctx.repo.returnFieldPackToCleanAtomic(archivedPackItem.id, "archive for raw hard delete", "test@local");
+    ctx.db.prepare("UPDATE content_items SET workflow_status='raw' WHERE id=?").run(archivedPackItem.id);
+    ctx.db.prepare("UPDATE content_workflow_models SET production_state='collected', publication_state='draft', current_field_pack_id=NULL WHERE content_item_id=?").run(archivedPackItem.id);
+
+    const archivedEligibility = ctx.repo.getRawOnlyHardDeleteEligibility(archivedPackItem.id);
+    assert.equal(archivedEligibility.eligible, true, "archived field pack does not block raw hard delete");
+    assert.equal(archivedEligibility.blockers.some((blocker) => blocker.key === "field_packs"), false);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_packs WHERE content_item_id=?").get(archivedPackItem.id)?.c, 1);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_packs WHERE id=? AND archived_at IS NOT NULL").get(archivedPack.id)?.c, 1);
+
+    ctx.repo.hardDeleteRawOnlyItem(archivedPackItem.id, "test@local");
+    const allArchivedRowsAfterDelete = ["field_packs", "field_pack_checklists", "field_pack_references", "field_pack_media_hints", "field_pack_assignments"]
+      .map((table) => Number(ctx.db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get()?.c || 0));
+    assert.deepEqual(allArchivedRowsAfterDelete, [1, 0, 0, 0, 0]);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_packs WHERE id=?").get(archivedPack.id)?.c, 0);
+
+    const purgeItem = ctx.makeItemRawOnly(ctx.createRawItem("Archived Field Pack Purge"));
+    const purgePack = ctx.repo.createFieldPack({ content_item_id: purgeItem.id, status: "ready_for_field", ai_summary: "purge me" });
+    ctx.db.prepare("INSERT INTO field_pack_checklists (field_pack_id, checklist_type, item_text) VALUES (?, 'must_verify_fact', 'purge check')").run(purgePack.id);
+    ctx.db.prepare("UPDATE content_workflow_models SET production_state='analyzed', current_field_pack_id=? WHERE content_item_id=?").run(purgePack.id, purgeItem.id);
+    ctx.repo.returnFieldPackToCleanAtomic(purgeItem.id, "archive for purge", "test@local");
+    ctx.repo.deleteItem(purgeItem.id, "test@local");
+    const archivedGroup = ctx.repo.getDeletedItemReferenceGroups(purgeItem.id).groups.find((group) => group.key === "field_packs");
+    assert.equal(archivedGroup?.count, 1, "soft-delete reports archived pack for confirmed cleanup");
+    assert.equal(archivedGroup?.category, "confirm_required");
+    ctx.repo.cleanupDeletedItemReferenceGroups({
+      itemId: purgeItem.id,
+      groups: ["field_packs"],
+      confirmedOverrides: ["field_packs"],
+      actorEmail: "test@local",
+      reason: "purge archived field pack",
+    });
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_packs WHERE id=?").get(purgePack.id)?.c, 0);
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM field_pack_checklists WHERE field_pack_id=?").get(purgePack.id)?.c, 0);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("bulkDeleteItems is all-or-nothing when one item is not eligible (rollback)", () => {
   const ctx = createTestContext();
   try {

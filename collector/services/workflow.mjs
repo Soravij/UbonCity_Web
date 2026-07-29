@@ -1976,7 +1976,6 @@ function resolveAgentTaxonomySuggestions(aiFieldPack, existingFieldPack) {
 
 export function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = null, options = {}) {
   const source = fieldPack && typeof fieldPack === "object" ? fieldPack : {};
-  const existingId = Number(existingFieldPack?.id || 0) || 0;
   const requestedStatus = String(source.status || "").trim().toLowerCase();
   let normalizedStatus = requestedStatus || "draft";
   if (normalizedStatus === "ready_for_handoff" || normalizedStatus === "ready_for_field") {
@@ -1986,7 +1985,6 @@ export function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = nu
     normalizedStatus = "draft";
   }
   return {
-    ...(existingId ? { id: existingId } : {}),
     status: normalizedStatus,
     writer_ready: Boolean(source.writer_ready),
     ai_summary: String(source.ai_summary || "").trim(),
@@ -2006,6 +2004,12 @@ export function buildFieldPackPayloadFromAgent(fieldPack, existingFieldPack = nu
     field_pack_media_hints: normalizeAgentFieldPackMediaHints(source.field_pack_media_hints),
     ai_cta_contact_json: resolveAgentCtaSuggestions(fieldPack, existingFieldPack, options?.item || null),
     ai_taxonomy_json: resolveAgentTaxonomySuggestions(fieldPack, existingFieldPack),
+    curated_cta_contact_json: existingFieldPack?.curated_cta_contact_json,
+    curated_taxonomy_json: existingFieldPack?.curated_taxonomy_json,
+    curation_status: existingFieldPack?.curation_status,
+    curated_by_user_id: existingFieldPack?.curated_by_user_id,
+    curated_at: existingFieldPack?.curated_at,
+    curation_note: existingFieldPack?.curation_note,
   };
 }
 
@@ -2185,9 +2189,7 @@ export function saveAgentFieldPack(repo, item, fieldPack, actorEmail, options = 
     content_item_id: item.id,
     updated_by: actorEmail,
   };
-  const savedFieldPack = existingFieldPack?.id
-    ? repo.updateFieldPack(existingFieldPack.id, payload)
-    : repo.createFieldPack(payload);
+  const savedFieldPack = repo.createFieldPack(payload);
 
   return savedFieldPack;
 }

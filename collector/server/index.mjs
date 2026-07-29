@@ -1299,7 +1299,7 @@ function attachItemMatchFields(items = [], options = {}) {
     const itemId = Number(item?.id || 0);
     const sourceRecords = repo.listSourceRecordsByItem(itemId);
     const currentFieldPack = repo.getCurrentFieldPackByItem(itemId);
-    const latestFieldPack = currentFieldPack || (Array.isArray(repo.listFieldPacksByItem(itemId)) ? repo.listFieldPacksByItem(itemId)[0] : null);
+    const latestFieldPack = currentFieldPack;
     const workflow = repo.getWorkflowModelByItem(itemId);
     let matchPhone = "";
     for (const record of sourceRecords) {
@@ -1373,7 +1373,7 @@ function attachWorkflowHeadFields(item) {
   const itemId = Number(item?.id || 0);
   const workflow = repo.getWorkflowHeadByItem(itemId) || null;
   const currentFieldPack = repo.getCurrentFieldPackByItem(itemId) || null;
-  const latestFieldPack = currentFieldPack || (Array.isArray(repo.listFieldPacksByItem(itemId)) ? repo.listFieldPacksByItem(itemId)[0] : null);
+  const latestFieldPack = currentFieldPack;
   return {
     ...item,
     production_state: String(workflow?.production_state || "").trim().toLowerCase() || null,
@@ -13016,10 +13016,6 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
         throw new Error("Agent engine does not support field pack revision");
       }
       agentFieldPack = await agentEngine.reviseFieldPack(agentInput, currentFieldPack, revisionNote);
-      fieldPack = repo.updateFieldPack(currentFieldPack.id, {
-        ...buildFieldPackUpdatePayloadFromAgent(agentFieldPack),
-        updated_by: actorEmail(req),
-      });
     } else {
       if (agentEngine?.reviseFieldPack) {
         agentFieldPack = await agentEngine.reviseFieldPack(agentInput, {}, revisionNote);
@@ -13028,12 +13024,13 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
       } else {
         throw new Error("Agent engine does not support field pack generation");
       }
-      fieldPack = repo.createFieldPack({
-        ...buildFieldPackUpdatePayloadFromAgent(agentFieldPack),
-        content_item_id: id,
-        updated_by: actorEmail(req),
-      });
     }
+    fieldPack = repo.createFieldPack({
+      ...(currentFieldPack || {}),
+      ...buildFieldPackUpdatePayloadFromAgent(agentFieldPack),
+      content_item_id: id,
+      updated_by: actorEmail(req),
+    });
 
     repo.logAudit(actorEmail(req), "field_pack.regenerate", "content_item", String(id), {
       field_pack_id: fieldPack?.id || null,
