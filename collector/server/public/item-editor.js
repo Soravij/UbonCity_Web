@@ -1,8 +1,11 @@
 const token = sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "";
 const AUTH_RETURN_TO_KEY = "collector_return_to";
+import { reportUnknownWorkflowState } from "./workflow-state-catalog.js";
 const state = {
   token,
   user: null,
+  workflowStates: null,
+  workflowStateLogKeys: new Set(),
   itemId: Number(new URLSearchParams(window.location.search).get("id") || 0),
   item: null,
   imageWorkflow: null,
@@ -24,7 +27,13 @@ const state = {
 
 const isCleanMode = /\/clean-item\.html$/i.test(String(window.location.pathname || ""));
 
+function getItemWorkflowAnomaly(item) {
+  return reportUnknownWorkflowState(item, state.workflowStates, state.workflowStateLogKeys, "item-editor");
+}
+
 function getItemWorkflowCompatStatus(item) {
+  const anomaly = getItemWorkflowAnomaly(item);
+  if (anomaly) return anomaly.state;
   const productionState = String(item?.production_state || "").trim().toLowerCase();
   const publicationState = String(item?.publication_state || "").trim().toLowerCase();
   if (publicationState === "published") return "published";
@@ -139,25 +148,6 @@ function getEditPermissionGuard() {
     };
   }
   return { allowed: true, reason: "" };
-}
-
-function normalizeEditorWorkflowStage(workflowStatus) {
-  const status = String(workflowStatus || "").trim().toLowerCase();
-  if (status === "published") return "published";
-  if (status === "generated" || status === "approved" || status === "unpublished") return "generated";
-  if (
-    status === "cleaned"
-    || status === "ready_for_content"
-    || status === "brief_generated"
-    || status === "analyzed"
-    || status === "content_in_progress"
-    || status === "in_review"
-    || status === "needs_revision"
-    || status === "rejected"
-  ) {
-    return "cleaned";
-  }
-  return "raw";
 }
 
 function getEditorAssignmentGuard() {
@@ -6003,8 +5993,9 @@ function wire() {
 }
 (async () => {
   try {
-    const me = await api("/api/auth/me");
+    const [me, workflowStates] = await Promise.all([api("/api/auth/me"), api("/api/workflow-states").catch(() => null)]);
     state.user = me.user;
+    state.workflowStates = workflowStates;
     qs("editor-auth-status").textContent = "";
 
     if (!state.itemId) throw new Error("Missing item id");
@@ -6017,6 +6008,7 @@ function wire() {
     wire();
     const item = await api(`/api/items/${state.itemId}`);
     state.item = item;
+    const anomaly = getItemWorkflowAnomaly(item);
     const workflowStatus = getItemWorkflowCompatStatus(item);
     if (!isCleanMode && (workflowStatus === "cleaned" || workflowStatus === "raw") && !isStepFourEligibleItem(item)) {
       window.location.replace(`/clean-item.html?id=${state.itemId}`);
@@ -6032,7 +6024,10 @@ function wire() {
       await loadEvidenceContextAndPreview();
     }
     renderStepFourGuides();
-    setStatus(`เปิด item ${state.itemId} สำเร็จ`);
+    setStatus(anomaly
+      ? `⚠ เปิด item ${state.itemId}: สถานะ workflow ผิดปกติ (${anomaly.state})`
+      : `เปิด item ${state.itemId} สำเร็จ`,
+    Boolean(anomaly));
   } catch (err) {
     setStatus(err.message, true);
   }

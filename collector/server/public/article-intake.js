@@ -5,6 +5,7 @@
 ];
 
 const ARTICLE_FLOW_STATUSES = ["content_in_progress", "needs_revision", "in_review", "approved", "unpublished", "published"];
+import { reportUnknownWorkflowState } from "./workflow-state-catalog.js";
 const ASSIGNMENT_REQUIRED_STATUSES = ["content_in_progress", "needs_revision"];
 const DIRECTORY_SYNC_TTL_MS = 5 * 60 * 1000;
 const DIRECTORY_SYNC_CACHE_KEY = "collector_users_last_directory_sync_at";
@@ -19,6 +20,8 @@ const INTAKE_GROUPS = [
 const state = {
   token: sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "",
   user: null,
+  workflowStates: null,
+  workflowStateLogKeys: new Set(),
   items: [],
   processByItemId: {},
   editorAssignmentByItemId: {},
@@ -34,6 +37,10 @@ const state = {
 
 function normalizedValue(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function getArticleWorkflowAnomaly(item) {
+  return reportUnknownWorkflowState(item, state.workflowStates, state.workflowStateLogKeys, "article-intake");
 }
 
 function qs(id) {
@@ -178,6 +185,8 @@ function workflowTransitions() {
 }
 
 function articleStatus() {
+  const anomaly = getArticleWorkflowAnomaly(state.item);
+  if (anomaly) return "unknown_workflow";
   const status = String(state.articleProcess?.status || "").trim().toLowerCase();
   if (status) return status;
   const productionState = normalizedValue(state.item?.production_state);
@@ -195,6 +204,8 @@ function articleStatus() {
 }
 
 function articleStatusLabel(status = articleStatus()) {
+  const anomaly = getArticleWorkflowAnomaly(state.item);
+  if (anomaly) return `⚠ สถานะผิดปกติ: ${anomaly.state}`;
   if (status === "ready_for_review") return "รอตรวจและอนุมัติ";
   if (status === "ready_for_sync") return "พร้อมส่งเข้า Admin Review";
   if (status === "submitted_for_admin_review") return "ส่งเข้า Admin Review แล้ว";
@@ -360,6 +371,7 @@ function renderActivityLog() {
 }
 
 function derivedArticleWorkflowStatus(item, process = processForItem(item?.id)) {
+  if (getArticleWorkflowAnomaly(item)) return "unknown_workflow";
   const processStatus = normalizedValue(process?.status);
   if (processStatus === "synced_to_admin") return "published";
   if (processStatus === "submitted_for_admin_review") return "approved";
@@ -387,6 +399,7 @@ function derivedArticleWorkflowStatus(item, process = processForItem(item?.id)) 
 }
 
 function isArticleQueueCandidate(item) {
+  if (getArticleWorkflowAnomaly(item)) return true;
   const workflowStatus = derivedArticleWorkflowStatus(item);
   const assignmentState = normalizedValue(item?.assignment_state);
   if (assignmentState === "accepted") return true;
@@ -401,6 +414,8 @@ function needsProcessPrefetch(item) {
 }
 
 function queueStageMeta(item) {
+  const anomaly = getArticleWorkflowAnomaly(item);
+  if (anomaly) return { stageLabel: `⚠ ${anomaly.state}`, note: "สถานะ workflow ที่ระบบไม่รู้จัก" };
   const workflowStatus = derivedArticleWorkflowStatus(item);
   const assignmentState = normalizedValue(item?.assignment_state);
   if (assignmentState === "accepted" && !ARTICLE_FLOW_STATUSES.includes(workflowStatus)) {
@@ -441,6 +456,7 @@ function queueRows() {
 }
 
 function queueGroupKey(item) {
+  if (getArticleWorkflowAnomaly(item)) return "needs_attention";
   const workflowStatus = derivedArticleWorkflowStatus(item);
   const assignmentState = normalizedValue(item?.assignment_state);
 
@@ -716,8 +732,9 @@ async function prefetchProcessSummaries() {
 }
 
 async function loadIntake() {
-  const me = await api("/api/auth/me");
+  const [me, workflowStates] = await Promise.all([api("/api/auth/me"), api("/api/workflow-states").catch(() => null)]);
   state.user = me?.user || null;
+  state.workflowStates = workflowStates;
   state.editorAssignmentByItemId = {};
   if (state.scope === "event" && !isEditorUser()) {
     window.location.replace("/events-manager.html");

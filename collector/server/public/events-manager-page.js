@@ -5,7 +5,11 @@ const state = {
   processByItemId: {},
   users: [],
   busy: false,
+  workflowStates: null,
+  workflowStateLogKeys: new Set(),
 };
+
+import { reportUnknownWorkflowState } from "./workflow-state-catalog.js";
 
 function qs(id) {
   return document.getElementById(id);
@@ -91,7 +95,12 @@ function normalizedValue(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function getWorkflowAnomaly(item) {
+  return reportUnknownWorkflowState(item, state.workflowStates, state.workflowStateLogKeys, "events-manager");
+}
+
 function derivedArticleWorkflowStatus(item, process = processForItem(item?.id)) {
+  if (getWorkflowAnomaly(item)) return "unknown_workflow";
   const processStatus = normalizedValue(process?.status);
   if (processStatus === "synced_to_admin") return "published";
   if (processStatus === "submitted_for_admin_review") return "approved";
@@ -131,6 +140,7 @@ function writerOptionsHtml(selectedId = 0) {
 }
 
 function routeForItem(item) {
+  if (getWorkflowAnomaly(item)) return `/item-editor.html?id=${Number(item?.id || 0) || 0}`;
   const status = derivedArticleWorkflowStatus(item);
   const id = Number(item?.id || 0) || 0;
   if (status === "in_review" || status === "approved" || status === "unpublished" || status === "published") {
@@ -164,7 +174,8 @@ function renderEventsTable() {
   tbody.innerHTML = rows.map((item) => {
     const id = Number(item?.id || 0) || 0;
     const assignment = primaryAssignmentForItem(id);
-    const workflowStatus = derivedArticleWorkflowStatus(item) || "draft";
+    const anomaly = getWorkflowAnomaly(item);
+    const workflowStatus = anomaly ? `⚠ ${anomaly.state}` : (derivedArticleWorkflowStatus(item) || "draft");
     const statusClass = workflowStatusPillClass(workflowStatus);
     const assigneeName = assignment?.assignee_display_name || assignment?.assignee_email || assignment?.assignee_name || "-";
     return `
@@ -199,10 +210,12 @@ async function loadPage() {
     window.location.replace("/");
     return;
   }
-  const [items, assignableUsers] = await Promise.all([
+  const [items, assignableUsers, workflowStates] = await Promise.all([
     api("/api/items"),
     api("/api/users/assignable?kind=editorial"),
+    api("/api/workflow-states").catch(() => null),
   ]);
+  state.workflowStates = workflowStates;
   state.items = Array.isArray(items) ? items : [];
   state.users = (Array.isArray(assignableUsers?.items) ? assignableUsers.items : []).filter((row) => {
     const role = String(row?.role || "").trim().toLowerCase();
