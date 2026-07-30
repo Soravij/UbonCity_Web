@@ -8243,6 +8243,16 @@ app.get("/api/config", requireRole("owner"), (_req, res) => {
   });
 });
 
+// The browser cannot import the repository module. Keep its workflow-state validation tied to the
+// same canonical Sets used by the server rather than duplicating an enum in each page bundle.
+app.get("/api/workflow-states", requireRole("owner", "admin", "editor", "user", "freelance"), (_req, res) => {
+  res.json({
+    production_states: [...PRODUCTION_STATES],
+    publication_states: [...PUBLICATION_STATES],
+    assignment_states: [...ASSIGNMENT_STATES],
+  });
+});
+
 app.get("/api/ai-feature-policies", requireRole("owner"), (_req, res) => {
   const items = listAiFeaturePolicyRowsForOwner();
   res.json({

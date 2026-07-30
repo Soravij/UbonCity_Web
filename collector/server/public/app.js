@@ -175,6 +175,8 @@ const state = {
   token: sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "",
   loginAt: sessionStorage.getItem("collector_login_at") || localStorage.getItem("collector_login_at") || "",
   user: null,
+  workflowStates: null,
+  workflowStateLogKeys: new Set(),
   visibleUsers: [],
   freelanceUsers: [],
   agentProfiles: [],
@@ -715,6 +717,28 @@ function getItemWorkflowSnapshot(item) {
   };
 }
 
+function getUnknownWorkflowState(item) {
+  const catalog = state.workflowStates;
+  if (!catalog) return null;
+  const itemId = Number(item?.id || 0) || 0;
+  const candidates = [
+    ["production", item?.production_state ?? item?.productionState, catalog.production_states],
+    ["publication", item?.publication_state ?? item?.publicationState, catalog.publication_states],
+    ["assignment", item?.assignment_state ?? item?.assignmentState, catalog.assignment_states],
+  ];
+  for (const [kind, value, knownStates] of candidates) {
+    const rawState = String(value || "").trim().toLowerCase();
+    if (!rawState || (Array.isArray(knownStates) && knownStates.includes(rawState))) continue;
+    const key = `${itemId}:${kind}:${rawState}`;
+    if (!state.workflowStateLogKeys.has(key)) {
+      state.workflowStateLogKeys.add(key);
+      console.error("Unknown workflow state in dashboard", { item_id: itemId, state: rawState, kind });
+    }
+    return { kind, state: rawState };
+  }
+  return null;
+}
+
 function resolveQueueBucket(itemSnapshot) {
   const source = itemSnapshot && typeof itemSnapshot === "object" ? itemSnapshot : {};
   const snapshot = source && Object.prototype.hasOwnProperty.call(source, "productionState")
@@ -726,6 +750,8 @@ function resolveQueueBucket(itemSnapshot) {
   const fieldPackStatus = String(source?.current_field_pack_status || source?.field_pack_status || snapshot?.current_field_pack_status || snapshot?.field_pack_status || "").trim().toLowerCase();
   const hasFieldPackPointer = Number(source?.current_field_pack_id || source?.field_pack_id || snapshot?.current_field_pack_id || snapshot?.field_pack_id || 0) > 0;
   const hasFieldPack = hasFieldPackPointer || Boolean(fieldPackStatus);
+
+  if (getUnknownWorkflowState(source)) return "unknown_workflow";
 
   if (publicationState === "published" || productionState === "completed") {
     return "published";
@@ -2931,6 +2957,8 @@ const IN_FLIGHT_STATUS_LABELS = Object.freeze({
 // precedence getItemWorkflowSnapshot already applied — approved/unpublished outrank the production
 // state, and that grouping is left as-is here (tracked separately as its own finding).
 function buildInFlightStatusLabel(item) {
+  const anomaly = getUnknownWorkflowState(item);
+  if (anomaly) return `⚠ สถานะผิดปกติ: ${anomaly.state}`;
   const snapshot = getItemWorkflowSnapshot(item);
   if (snapshot.assignmentState) return "ส่งงานให้ทีมแล้ว";
   if (snapshot.publicationState === "approved" || snapshot.publicationState === "unpublished") {
@@ -4867,6 +4895,11 @@ function renderSourceIngestions(rows) {
 }
 
 function workflowBadge(item) {
+  const anomaly = getUnknownWorkflowState(item);
+  if (anomaly) {
+    const rawState = escapeHtml(anomaly.state);
+    return `<span class="workflow-badge workflow-badge-raw" title="unknown ${escapeHtml(anomaly.kind)} state: ${rawState}">⚠ ${rawState}</span>`;
+  }
   const snapshot = getItemWorkflowSnapshot(item);
   const status = snapshot.compatibilityStatus;
   if (status === "content_in_progress" || status === "needs_revision") {
@@ -5047,7 +5080,7 @@ function getPreparationQueueItems(items = state.items) {
   const list = Array.isArray(items) ? items : [];
   return list.filter((item) => {
     const bucket = resolveQueueBucket(item);
-    return bucket === "raw_prep" || bucket === "field_pack_review";
+    return bucket === "raw_prep" || bucket === "field_pack_review" || bucket === "unknown_workflow";
   });
 }
 
@@ -5082,6 +5115,9 @@ function getDashboardPrimaryEntryAction(item) {
   if (!id) return null;
 
   const bucket = resolveQueueBucket(item);
+  if (bucket === "unknown_workflow") {
+    return { label: "⚠ ตรวจสถานะผิดปกติ", url: `/item-editor.html?id=${id}` };
+  }
   if (bucket === "published") {
     return getArticleSurfaceEntry(item);
   }
@@ -5106,18 +5142,23 @@ function getDashboardPrimaryEntryAction(item) {
 function splitRawQueueByFieldPack(items = []) {
   const intake = [];
   const review = [];
+  const unknown = [];
   for (const item of Array.isArray(items) ? items : []) {
     const bucket = resolveQueueBucket(item);
     if (bucket === "field_pack_review") {
       review.push(item);
     } else if (bucket === "raw_prep") {
       intake.push(item);
+    } else if (bucket === "unknown_workflow") {
+      unknown.push(item);
     }
   }
-  return { intake, review };
+  return { intake, review, unknown };
 }
 
 function buildRawQueueStatusLabel(item, queueType) {
+  const anomaly = getUnknownWorkflowState(item);
+  if (anomaly) return `⚠ สถานะผิดปกติ: ${anomaly.state}`;
   const bucket = resolveQueueBucket(item);
   if (queueType === "review") {
     return bucket === "handoff" ? "พร้อมส่งต่อ" : "รอตรวจชุดสั่งงาน";
@@ -5126,6 +5167,7 @@ function buildRawQueueStatusLabel(item, queueType) {
 }
 
 function buildRawQueueStatusBadgeClass(item, queueType) {
+  if (getUnknownWorkflowState(item)) return "workflow-badge-raw";
   const bucket = resolveQueueBucket(item);
   if (queueType === "review") {
     return bucket === "handoff" ? "workflow-badge-sent" : "workflow-badge-generated";
@@ -5181,10 +5223,12 @@ function renderRawQueueTable({
     const statusLabel = buildRawQueueStatusLabel(item, queueType);
     const statusBadgeClass = buildRawQueueStatusBadgeClass(item, queueType);
     const readyForHandoff = isHandoffEligibleItem(item);
-    const primaryUrl = queueType === "review"
+    const primaryUrl = queueType === "review" || queueType === "unknown"
       ? `/item-editor.html?id=${id}`
       : `/clean-item.html?id=${id}`;
-    const primaryLabel = queueType === "review"
+    const primaryLabel = queueType === "unknown"
+      ? "ตรวจสถานะผิดปกติ"
+      : queueType === "review"
       ? (readyForHandoff ? "พร้อมส่งต่อ" : "ตรวจชุดสั่งงาน")
       : "คัดข้อมูล";
 
@@ -5680,6 +5724,17 @@ function renderRawTable(items) {
         </table>
       </div>
     </div>
+    <div class="card" style="margin-top:16px;">
+      <div class="toolbar compact-toolbar">
+        <h3 class="section-title" style="margin:0;">⚠ Workflow state ผิดปกติ</h3>
+      </div>
+      <div class="table-wrap">
+        <table id="table-raw-workflow-unknown">
+          <thead><tr></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
   `;
 
   renderRawQueueTable({
@@ -5698,6 +5753,14 @@ function renderRawTable(items) {
     queueType: "review",
     emptyText: "ยังไม่มีรายการรอตรวจชุดสั่งงาน",
   });
+  renderRawQueueTable({
+    tableId: "table-raw-workflow-unknown",
+    items: split.unknown,
+    canManage,
+    showInterestingness: false,
+    queueType: "unknown",
+    emptyText: "ยังไม่มี workflow state ผิดปกติ",
+  });
 
   const summaryNode = qs("raw-summary");
   if (summaryNode) {
@@ -5705,7 +5768,7 @@ function renderRawTable(items) {
       ? ""
       : ` | กำลังแสดง intake ${visibleIntake.length}/${filteredIntake.length}`;
     const loadedCount = Array.isArray(state.items) ? state.items.length : 0;
-    summaryNode.textContent = `loaded=${loadedCount} | intake=${filteredIntake.length} | review=${filteredReview.length}${suffix}`;
+    summaryNode.textContent = `loaded=${loadedCount} | intake=${filteredIntake.length} | review=${filteredReview.length} | unknown=${split.unknown.length}${suffix}`;
   }
 
   const showAllBtn = qs("btn-show-all-raw");
@@ -10191,6 +10254,7 @@ async function evaluateAssignmentSubmissionDecision() {
 async function refreshAll() {
   if (!state.user) return;
 
+  const workflowStatesPromise = api("/api/workflow-states").catch(() => null);
   const itemsPromise = isExternalContributorUser() ? Promise.resolve([]) : api("/api/items");
   const ingestionsPromise = isExternalContributorUser() ? Promise.resolve([]) : api("/api/source-ingestions");
   const usersPromise = canAccessUserManagement() ? api("/api/users") : Promise.resolve({ items: [] });
@@ -10217,11 +10281,13 @@ async function refreshAll() {
     rawSummaryNode.textContent = "กำลังโหลดรายการเตรียมคอนเทนต์...";
   }
 
-  const [items, ingestions] = await Promise.all([
+  const [items, ingestions, workflowStates] = await Promise.all([
     itemsPromise.catch(() => []),
     ingestionsPromise.catch(() => []),
+    workflowStatesPromise,
   ]);
 
+  state.workflowStates = workflowStates;
   state.items = Array.isArray(items) ? items : [];
   renderRawTable(state.items);
   if (state.dashboard.rawMergeOpen) {

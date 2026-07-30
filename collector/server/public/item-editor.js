@@ -3,6 +3,8 @@ const AUTH_RETURN_TO_KEY = "collector_return_to";
 const state = {
   token,
   user: null,
+  workflowStates: null,
+  workflowStateLogKeys: new Set(),
   itemId: Number(new URLSearchParams(window.location.search).get("id") || 0),
   item: null,
   imageWorkflow: null,
@@ -24,7 +26,31 @@ const state = {
 
 const isCleanMode = /\/clean-item\.html$/i.test(String(window.location.pathname || ""));
 
+function getItemWorkflowAnomaly(item) {
+  const catalog = state.workflowStates;
+  if (!catalog) return null;
+  const itemId = Number(item?.id || 0) || 0;
+  const candidates = [
+    ["production", item?.production_state, catalog.production_states],
+    ["publication", item?.publication_state, catalog.publication_states],
+    ["assignment", item?.assignment_state, catalog.assignment_states],
+  ];
+  for (const [kind, value, knownStates] of candidates) {
+    const rawState = String(value || "").trim().toLowerCase();
+    if (!rawState || (Array.isArray(knownStates) && knownStates.includes(rawState))) continue;
+    const key = `${itemId}:${kind}:${rawState}`;
+    if (!state.workflowStateLogKeys.has(key)) {
+      state.workflowStateLogKeys.add(key);
+      console.error("Unknown workflow state in item editor", { item_id: itemId, state: rawState, kind });
+    }
+    return { kind, state: rawState };
+  }
+  return null;
+}
+
 function getItemWorkflowCompatStatus(item) {
+  const anomaly = getItemWorkflowAnomaly(item);
+  if (anomaly) return anomaly.state;
   const productionState = String(item?.production_state || "").trim().toLowerCase();
   const publicationState = String(item?.publication_state || "").trim().toLowerCase();
   if (publicationState === "published") return "published";
@@ -154,9 +180,11 @@ function normalizeEditorWorkflowStage(workflowStatus) {
     || status === "in_review"
     || status === "needs_revision"
     || status === "rejected"
+    || status === "collected"
   ) {
     return "cleaned";
   }
+  if (status && state.workflowStates) return "unknown_workflow";
   return "raw";
 }
 
@@ -6003,8 +6031,9 @@ function wire() {
 }
 (async () => {
   try {
-    const me = await api("/api/auth/me");
+    const [me, workflowStates] = await Promise.all([api("/api/auth/me"), api("/api/workflow-states")]);
     state.user = me.user;
+    state.workflowStates = workflowStates;
     qs("editor-auth-status").textContent = "";
 
     if (!state.itemId) throw new Error("Missing item id");
@@ -6017,6 +6046,7 @@ function wire() {
     wire();
     const item = await api(`/api/items/${state.itemId}`);
     state.item = item;
+    const anomaly = getItemWorkflowAnomaly(item);
     const workflowStatus = getItemWorkflowCompatStatus(item);
     if (!isCleanMode && (workflowStatus === "cleaned" || workflowStatus === "raw") && !isStepFourEligibleItem(item)) {
       window.location.replace(`/clean-item.html?id=${state.itemId}`);
@@ -6032,7 +6062,10 @@ function wire() {
       await loadEvidenceContextAndPreview();
     }
     renderStepFourGuides();
-    setStatus(`เปิด item ${state.itemId} สำเร็จ`);
+    setStatus(anomaly
+      ? `⚠ เปิด item ${state.itemId}: สถานะ workflow ผิดปกติ (${anomaly.state})`
+      : `เปิด item ${state.itemId} สำเร็จ`,
+    Boolean(anomaly));
   } catch (err) {
     setStatus(err.message, true);
   }

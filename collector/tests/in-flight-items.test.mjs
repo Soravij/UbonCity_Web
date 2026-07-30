@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDatabase } from "../db/client.mjs";
-import { createRepository } from "../db/repository.mjs";
+import { ASSIGNMENT_STATES, createRepository, PRODUCTION_STATES, PUBLICATION_STATES } from "../db/repository.mjs";
 
 process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "InFlight!Test1";
 
@@ -207,11 +207,17 @@ function loadAppHelpers() {
 
   const names = [
     "getItemWorkflowSnapshot",
+    "getUnknownWorkflowState",
     "parseServerTimestamp",
     "formatInFlightStalledAge",
     "buildInFlightStatusLabel",
   ];
-  const body = `${labelsSrc}\n${names.map(extractFunction).join("\n\n")}`;
+  const catalog = {
+    production_states: [...PRODUCTION_STATES],
+    publication_states: [...PUBLICATION_STATES],
+    assignment_states: [...ASSIGNMENT_STATES],
+  };
+  const body = `${labelsSrc}\nconst state = { workflowStates: ${JSON.stringify(catalog)}, workflowStateLogKeys: new Set() };\n${names.map(extractFunction).join("\n\n")}`;
   return new Function(`${body}\nreturn { ${names.join(", ")} };`)();
 }
 
