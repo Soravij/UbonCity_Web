@@ -49,28 +49,31 @@ const LEGACY_RULES = Object.freeze({
   }),
 });
 
-const PLACE_LADDER_EDGES = Object.freeze([
-  ["generated", "brief_generated"],
-  ["brief_generated", "generated"],
-  ["ready_for_content", "field_working"],
-  ["field_working", "ready_for_content"],
-  ["field_working", "field_review"],
-  ["field_review", "brief_generated"],
-  ["field_review", "field_working"],
-  ["field_review", "writing_assigned"],
-  ["writing_assigned", "writing"],
-  ["writing", "writing_assigned"],
-  ["writing", "in_review"],
-  ["in_review", "writing"],
-  ["in_review", "field_review"],
-  ["ready_for_publish", "in_review"],
-  ["submitted_for_admin_review", "in_review"],
-]);
+const PLACE_PRODUCTION_RULES = Object.freeze({
+  collected: ["analyzed", "needs_revision", "rejected"],
+  analyzed: ["generated", "needs_revision", "rejected"],
+  generated: ["ready_for_content", "analyzed", "needs_revision", "rejected"],
+  ready_for_content: ["field_working", "generated", "rejected"],
+  field_working: ["ready_for_content", "field_review"],
+  field_review: ["generated", "field_working", "writing_assigned"],
+  writing_assigned: ["writing", "field_review"],
+  writing: ["writing_assigned", "in_review"],
+  in_review: ["ready_for_publish", "writing", "field_review", "needs_revision", "rejected"],
+  ready_for_publish: ["submitted_for_admin_review", "in_review", "needs_revision", "rejected"],
+  submitted_for_admin_review: ["completed", "in_review", "needs_revision", "rejected"],
+  completed: ["needs_revision"],
+  needs_revision: ["generated", "in_review", "rejected"],
+  rejected: ["analyzed", "ready_for_content"],
+  brief_generated: [],
+  content_in_progress: [],
+});
 
 const PLACE_BACKWARD_EDGES = Object.freeze({
-  brief_generated: Object.freeze({ generated: "in_process" }),
+  generated: Object.freeze({ analyzed: "in_process" }),
   field_working: Object.freeze({ ready_for_content: "in_process" }),
-  field_review: Object.freeze({ field_working: "in_process", brief_generated: "cross_process" }),
+  field_review: Object.freeze({ field_working: "in_process", generated: "cross_process" }),
+  ready_for_content: Object.freeze({ generated: "cross_process" }),
+  writing_assigned: Object.freeze({ field_review: "cross_process" }),
   writing: Object.freeze({ writing_assigned: "in_process" }),
   in_review: Object.freeze({ writing: "in_process", field_review: "cross_process" }),
   ready_for_publish: Object.freeze({ in_review: "in_process" }),
@@ -78,10 +81,12 @@ const PLACE_BACKWARD_EDGES = Object.freeze({
 });
 
 const FORWARD_REPLAY_PATHS = Object.freeze({
-  "brief_generated:generated": ["brief_generated"],
+  "generated:analyzed": ["generated"],
   "field_working:ready_for_content": ["field_working"],
   "field_review:field_working": ["field_review"],
-  "field_review:brief_generated": ["ready_for_content", "field_working", "field_review"],
+  "field_review:generated": ["ready_for_content", "field_working", "field_review"],
+  "ready_for_content:generated": ["ready_for_content"],
+  "writing_assigned:field_review": ["writing_assigned"],
   "writing:writing_assigned": ["writing"],
   "in_review:writing": ["in_review"],
   "in_review:field_review": ["writing_assigned", "writing", "in_review"],
@@ -123,15 +128,7 @@ function createContext() {
 }
 
 function expectedPlaceRules() {
-  const expectedContentRules = serializeRules({ production: LEGACY_RULES.production, publication: LEGACY_RULES.publication });
-  for (const [from, to] of PLACE_LADDER_EDGES) {
-    expectedContentRules.production[from] ||= [];
-    if (!expectedContentRules.production[from].includes(to)) {
-      expectedContentRules.production[from].push(to);
-    }
-    expectedContentRules.production[from].sort();
-  }
-  return expectedContentRules;
+  return serializeRules({ production: PLACE_PRODUCTION_RULES, publication: LEGACY_RULES.publication });
 }
 
 function assertAllTypeRulesMatchExpectedGraph() {
@@ -141,12 +138,12 @@ function assertAllTypeRulesMatchExpectedGraph() {
     assert.deepEqual(
       serializeRules(TRANSITION_RULES[type]),
       type === "place" ? expectedPlace : expectedLegacyRules,
-      type === "place" ? "place must contain exactly the legacy graph plus the approved ladder edges" : `${type} must retain the complete legacy production/publication graph`
+      type === "place" ? "place must contain exactly its final ladder and permitted parking graph" : `${type} must retain the complete legacy production/publication graph`
     );
   }
 }
 
-test("place adds exactly the approved ladder edges while non-place types retain the complete legacy graph", () => {
+test("place contains only its final ladder and permitted parking edges while non-place types retain the complete legacy graph", () => {
   assertAllTypeRulesMatchExpectedGraph();
   assert.notStrictEqual(TRANSITION_RULES.place, TRANSITION_RULES.event, "content types must be independently mutable for 4b");
 
@@ -156,6 +153,13 @@ test("place adds exactly the approved ladder edges while non-place types retain 
     assert.throws(() => assertAllTypeRulesMatchExpectedGraph(), /place must contain exactly/);
   } finally {
     mutatedSet.add("in_review");
+  }
+  const restoredSkip = TRANSITION_RULES.place.production.collected;
+  restoredSkip.add("generated");
+  try {
+    assert.throws(() => assertAllTypeRulesMatchExpectedGraph(), /place must contain exactly/);
+  } finally {
+    restoredSkip.delete("generated");
   }
   assertAllTypeRulesMatchExpectedGraph();
 });
@@ -291,7 +295,7 @@ test("each content type accepts exactly its expected transition graph", () => {
     assert.doesNotThrow(() => ctx.repo.updateAssignmentState(assignment.id, "submitted", "test@local"));
     assert.equal(ctx.repo.ensureWorkflowModel(assignmentItem.id).production_state, "field_review");
 
-    const returnItem = ctx.createItem("place", { production_state: "brief_generated" });
+    const returnItem = ctx.createItem("place", { production_state: "generated" });
     ctx.repo.createFieldPack({ content_item_id: returnItem.id, status: "ready_for_field", ai_summary: "test pack" });
     assert.doesNotThrow(() => ctx.repo.returnFieldPackToCleanAtomic(returnItem.id, "test return", "test@local"));
     assert.deepEqual(fallbackLogs, [], "known-type workflow, assignment, and transition paths must never use fallback");
@@ -300,6 +304,48 @@ test("each content type accepts exactly its expected transition graph", () => {
     ctx.cleanup();
   }
 }, { concurrency: false });
+
+test("place return-to-clean walks every legal backward hop to analyzed without a shortcut", () => {
+  const ctx = createContext();
+  const paths = {
+    generated: ["generated", "analyzed"],
+    ready_for_content: ["ready_for_content", "generated", "analyzed"],
+    field_working: ["field_working", "ready_for_content", "generated", "analyzed"],
+    field_review: ["field_review", "generated", "analyzed"],
+    writing_assigned: ["writing_assigned", "field_review", "generated", "analyzed"],
+    writing: ["writing", "writing_assigned", "field_review", "generated", "analyzed"],
+    in_review: ["in_review", "field_review", "generated", "analyzed"],
+    submitted_for_admin_review: ["submitted_for_admin_review", "in_review", "field_review", "generated", "analyzed"],
+  };
+  try {
+    for (const [fromState, states] of Object.entries(paths)) {
+      const item = ctx.createItem("place", {
+        production_state: fromState,
+        publication_state: fromState === "submitted_for_admin_review" ? "approved" : "draft",
+      });
+      const pack = ctx.repo.createFieldPack({ content_item_id: item.id, status: "ready_for_field", ai_summary: `pack at ${fromState}` });
+      const result = ctx.repo.returnFieldPackToCleanAtomic(item.id, "return through legal hops", "test@local", { actor_role: "admin" });
+      assert.equal(result.next_state, "analyzed", `${fromState} must return to analyzed`);
+      assert.equal(ctx.repo.ensureWorkflowModel(item.id).current_field_pack_id, null);
+      const productionTransitions = ctx.repo
+        .listWorkflowTransitionsByItem(item.id, 20)
+        .filter((row) => row.state_group === "production" && row.reason_code === "field_pack_return_to_clean")
+        .reverse();
+      assert.deepEqual(
+        productionTransitions.map((row) => [row.from_state, row.to_state]),
+        states.slice(0, -1).map((state, index) => [state, states[index + 1]]),
+        `${fromState} must record every return-to-clean hop`
+      );
+      assert.equal(
+        ctx.db.prepare("SELECT archived_at FROM field_packs WHERE id=?").get(pack.id)?.archived_at != null,
+        true,
+        "return-to-clean archives rather than deletes the field pack"
+      );
+    }
+  } finally {
+    ctx.cleanup();
+  }
+});
 
 test("field assignment state changes advance only place through the new field ladder", () => {
   const ctx = createContext();

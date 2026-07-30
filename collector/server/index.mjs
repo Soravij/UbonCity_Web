@@ -9277,6 +9277,55 @@ app.put("/api/items/:id", requireRole("admin", "user"), (req, res) => {
   res.json(attachSingleItemClaimUser(attachWorkflowHeadFields(updated)));
 });
 
+app.post("/api/items/:id/place-ready-for-content", requireRole("owner", "admin", "user"), (req, res) => {
+  const id = Number(req.params.id || 0);
+  if (!id) {
+    res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (String(item?.type || "").trim().toLowerCase() !== "place") {
+    res.status(409).json({ error: "place-ready-for-content is available for place items only" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item) || !ensurePrepItemEditAccess(req, res, item)) {
+    return;
+  }
+  const workflowBefore = repo.ensureWorkflowModel(id);
+  if (String(workflowBefore?.production_state || "").trim().toLowerCase() !== "generated") {
+    res.status(409).json({ error: "place item must be at generated before it can move to ready_for_content" });
+    return;
+  }
+  const fieldPack = repo.getCurrentFieldPackByItem(id);
+  const prerequisites = validateAssignmentCreateFieldPackPrerequisites("field", fieldPack);
+  if (!prerequisites.ok) {
+    res.status(409).json({ error: prerequisites.error });
+    return;
+  }
+  try {
+    const model = repo.upsertWorkflowModel(
+      id,
+      { production_state: "ready_for_content", last_transition_note: "P1 review approved for field handoff" },
+      actorEmail(req),
+      { actor_role: actorPolicyRole(req), reason_code: "place_p1_review_approved" }
+    );
+    const updated = repo.getItem(id) || item;
+    repo.logAudit(actorEmail(req), "workflow.place_ready_for_content", "content_item", String(id), {
+      from_production_state: workflowBefore.production_state,
+      to_production_state: model.production_state,
+      field_pack_id: Number(fieldPack?.id || 0) || null,
+    });
+    res.json({ ok: true, item: attachSingleItemClaimUser(attachWorkflowHeadFields(updated)), model });
+  } catch (err) {
+    const msg = String(err?.message || "Cannot move place item to ready_for_content");
+    res.status(/invalid .*transition/i.test(msg) ? 409 : 400).json({ error: msg });
+  }
+});
+
 app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
