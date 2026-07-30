@@ -461,38 +461,52 @@ const WORKFLOW_REASON_CODES = Object.freeze({
   ASSIGNMENT_STATE_SYNC: "assignment_state_sync",
   ASSIGNMENT_STATE_RECONCILE_SYNC: "assignment_state_reconcile_sync",
 });
-const TRANSITION_RULES = Object.freeze({
-  production: Object.freeze({
-    collected: new Set(["analyzed", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "rejected"]),
-    analyzed: new Set(["brief_generated", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "rejected"]),
-    brief_generated: new Set(["analyzed", "ready_for_content", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "rejected"]),
-    ready_for_content: new Set(["content_in_progress", "generated", "rejected"]),
-    content_in_progress: new Set(["generated", "in_review", "needs_revision", "rejected"]),
-    generated: new Set(["content_in_progress", "in_review", "needs_revision", "rejected"]),
-    in_review: new Set(["needs_revision", "ready_for_publish", "rejected"]),
-    needs_revision: new Set(["content_in_progress", "generated", "in_review", "rejected"]),
-    ready_for_publish: new Set(["submitted_for_admin_review", "completed", "needs_revision", "rejected"]),
-    submitted_for_admin_review: new Set(["needs_revision", "rejected", "completed"]),
-    rejected: new Set(["analyzed", "brief_generated", "ready_for_content"]),
-    completed: new Set(["needs_revision"]),
-  }),
-  publication: Object.freeze({
-    draft: new Set(["approved", "archived"]),
-    approved: new Set(["published", "draft", "archived"]),
-    published: new Set(["unpublished", "archived"]),
-    unpublished: new Set(["approved", "archived"]),
-    archived: new Set(["approved"]),
-    deleted: new Set([]),
-  }),
-  assignment: Object.freeze({
-    assigned: new Set(["in_progress", "submitted", "closed"]),
-    in_progress: new Set(["submitted", "revision_requested", "closed"]),
-    submitted: new Set(["revision_requested", "accepted", "closed"]),
-    revision_requested: new Set(["resubmitted", "in_progress", "closed"]),
-    resubmitted: new Set(["accepted", "revision_requested", "closed"]),
-    accepted: new Set(["closed", "revision_requested"]),
-    closed: new Set([]),
-  }),
+function buildContentTypeTransitionRules() {
+  return Object.freeze({
+    production: Object.freeze({
+      collected: new Set(["analyzed", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "rejected"]),
+      analyzed: new Set(["brief_generated", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "rejected"]),
+      brief_generated: new Set(["analyzed", "ready_for_content", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "rejected"]),
+      ready_for_content: new Set(["content_in_progress", "generated", "rejected"]),
+      content_in_progress: new Set(["generated", "in_review", "needs_revision", "rejected"]),
+      generated: new Set(["content_in_progress", "in_review", "needs_revision", "rejected"]),
+      in_review: new Set(["needs_revision", "ready_for_publish", "rejected"]),
+      needs_revision: new Set(["content_in_progress", "generated", "in_review", "rejected"]),
+      ready_for_publish: new Set(["submitted_for_admin_review", "completed", "needs_revision", "rejected"]),
+      submitted_for_admin_review: new Set(["needs_revision", "rejected", "completed"]),
+      rejected: new Set(["analyzed", "brief_generated", "ready_for_content"]),
+      completed: new Set(["needs_revision"]),
+    }),
+    publication: Object.freeze({
+      draft: new Set(["approved", "archived"]),
+      approved: new Set(["published", "draft", "archived"]),
+      published: new Set(["unpublished", "archived"]),
+      unpublished: new Set(["approved", "archived"]),
+      archived: new Set(["approved"]),
+      deleted: new Set([]),
+    }),
+  });
+}
+
+// Each content type deliberately starts with an independent copy of the legacy production and
+// publication graph. 4b changes place only; event/transport remain the fallback graph.
+export const TRANSITION_RULES = Object.freeze({
+  place: buildContentTypeTransitionRules(),
+  event: buildContentTypeTransitionRules(),
+  other_transport: buildContentTypeTransitionRules(),
+  public_transport_map: buildContentTypeTransitionRules(),
+});
+
+// Assignment lifecycle is shared intentionally: assignment_kind changes the work record, not this
+// state graph. There is no evidence today for type-specific assignment transitions.
+const ASSIGNMENT_TRANSITION_RULES = Object.freeze({
+  assigned: new Set(["in_progress", "submitted", "closed"]),
+  in_progress: new Set(["submitted", "revision_requested", "closed"]),
+  submitted: new Set(["revision_requested", "accepted", "closed"]),
+  revision_requested: new Set(["resubmitted", "in_progress", "closed"]),
+  resubmitted: new Set(["accepted", "revision_requested", "closed"]),
+  accepted: new Set(["closed", "revision_requested"]),
+  closed: new Set([]),
 });
 
 function parseJsonInputStrict(value, fieldName, expected = "any") {
@@ -5768,19 +5782,34 @@ export function createRepository(db) {
     throw new Error(`unknown ${stateGroup} state '${state}' for content item ${itemId ?? "unknown"}`);
   }
 
-  function canTransition(stateGroup, fromState, toState) {
+  function contentTypeTransitionRules(contentType, contentItemId = null) {
+    const normalizedType = String(contentType || "").trim().toLowerCase();
+    const rules = TRANSITION_RULES[normalizedType];
+    if (rules) return rules;
+    // In 4b this must continue to follow event/transport as place receives its own ladder; do not
+    // add a second legacy graph here.
+    console.error("[workflow-transition] unknown content type fallback", {
+      item_id: Number(contentItemId || 0) || null,
+      content_type: normalizedType || null,
+      fallback_content_type: "event",
+    });
+    return TRANSITION_RULES.event;
+  }
+
+  function canTransition(contentType, stateGroup, fromState, toState, contentItemId = null) {
     if (!STATE_GROUPS.has(stateGroup)) return false;
     if (!toState) return false;
     if (!fromState) return true;
     if (fromState === toState) return true;
-    const rulesForGroup = TRANSITION_RULES[stateGroup];
+    const typeRules = contentTypeTransitionRules(contentType, contentItemId);
+    const rulesForGroup = stateGroup === "assignment" ? ASSIGNMENT_TRANSITION_RULES : typeRules[stateGroup];
     const allowed = rulesForGroup?.[fromState];
     if (!allowed) return false;
     return allowed.has(toState);
   }
 
-  function assertValidTransition(stateGroup, fromState, toState) {
-    if (!canTransition(stateGroup, fromState, toState)) {
+  function assertValidTransition(contentType, stateGroup, fromState, toState, contentItemId = null) {
+    if (!canTransition(contentType, stateGroup, fromState, toState, contentItemId)) {
       throw new Error(`invalid ${stateGroup} transition: ${String(fromState || "null")} -> ${String(toState || "null")}`);
     }
   }
@@ -5957,6 +5986,8 @@ export function createRepository(db) {
     if (!previous) {
       throw new Error(`workflow head missing for item ${id}`);
     }
+    const item = getItem(id);
+    const contentType = String(item?.type || "").trim().toLowerCase();
     const productionState = normalizeStateValue(payload.production_state || previous.production_state, "production");
     const publicationState = normalizeStateValue(payload.publication_state || previous.publication_state, "publication");
     const assignmentStateRaw = payload.assignment_state ?? previous.assignment_state ?? null;
@@ -5975,13 +6006,13 @@ export function createRepository(db) {
     const skipPublicationTransitionValidation = metadata?.skip_publication_transition_validation === true;
 
     if (productionState !== previous.production_state && !skipProductionTransitionValidation) {
-      assertValidTransition("production", previous.production_state, productionState);
+      assertValidTransition(contentType, "production", previous.production_state, productionState, id);
     }
     if (publicationState !== previous.publication_state && !skipPublicationTransitionValidation) {
-      assertValidTransition("publication", previous.publication_state, publicationState);
+      assertValidTransition(contentType, "publication", previous.publication_state, publicationState, id);
     }
     if ((assignmentState || null) !== (previous.assignment_state || null) && assignmentState != null && !skipAssignmentTransitionValidation) {
-      assertValidTransition("assignment", previous.assignment_state || null, assignmentState);
+      assertValidTransition(contentType, "assignment", previous.assignment_state || null, assignmentState, id);
     }
 
     const stateChanged = productionState !== previous.production_state
@@ -6605,6 +6636,8 @@ export function createRepository(db) {
     if (!normalizedState) throw new Error("invalid assignment state");
     const existing = getAssignmentByIdStmt.get(id);
     if (!existing) throw new Error("assignment not found");
+    const item = getItem(Number(existing.content_item_id));
+    const contentType = String(item?.type || "").trim().toLowerCase();
     const contributorNote = payload.contributor_note == null ? null : String(payload.contributor_note || "").trim() || null;
     const internalNote = payload.internal_note == null ? null : String(payload.internal_note || "").trim() || null;
     const actorRole = normalizeWorkflowActorRole(payload.actor_role);
@@ -6613,11 +6646,13 @@ export function createRepository(db) {
     if (existingAssignmentState === normalizedState) {
       return normalizeAssignmentRow(existing);
     }
-    assertValidTransition("assignment", existingAssignmentState, normalizedState);
+    assertValidTransition(contentType, "assignment", existingAssignmentState, normalizedState, existing.content_item_id);
     const workflow = ensureWorkflowModel(Number(existing.content_item_id));
     const workflowAssignmentState = normalizeStateValue(workflow?.assignment_state, "assignment") || null;
     const shouldSyncWorkflow = workflowAssignmentState !== normalizedState;
-    const canSyncViaTransition = shouldSyncWorkflow ? canTransition("assignment", workflowAssignmentState, normalizedState) : true;
+    const canSyncViaTransition = shouldSyncWorkflow
+      ? canTransition(contentType, "assignment", workflowAssignmentState, normalizedState, existing.content_item_id)
+      : true;
     const shouldIncrementRevision = normalizedState === "revision_requested" ? 1 : 0;
     const shouldSetAcceptedAt = normalizedState === "accepted" ? 1 : 0;
     const wasAcceptedLifecycle = existingAssignmentState === "accepted" || existingAssignmentState === "closed";
@@ -10927,6 +10962,8 @@ export function createRepository(db) {
     if (!reasonNote) throw new Error("notes/reason is required");
 
     return runInTransaction(db, () => {
+      const item = getItem(itemId);
+      const contentType = String(item?.type || "").trim().toLowerCase();
       const currentFieldPack = normalizeFieldPackRow(getCurrentFieldPackByItemStmt.get(itemId));
       if (!currentFieldPack?.id) {
         throw new Error("current field pack not found");
@@ -10942,7 +10979,7 @@ export function createRepository(db) {
       // Validate the transition before archiving the field pack so business-rule failures
       // are caught before we mutate data, while the whole operation still stays atomic.
       if (productionStateBefore !== "analyzed") {
-        assertValidTransition("production", workflowBefore?.production_state, "analyzed");
+        assertValidTransition(contentType, "production", workflowBefore?.production_state, "analyzed", itemId);
       }
 
       archiveFieldPackByIdStmt.run(Number(currentFieldPack.id || 0) || 0);
