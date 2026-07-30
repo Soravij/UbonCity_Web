@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
-import { ASSIGNMENT_STATES, PRODUCTION_STATES, PUBLICATION_STATES } from "../db/repository.mjs";
+import { ASSIGNMENT_STATES, PLACE_REVIEW_FLAGS, PRODUCTION_STATES, PUBLICATION_STATES } from "../db/repository.mjs";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const indexHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "index.html"), "utf8");
@@ -308,11 +308,13 @@ function loadItemOwnershipScopeHooks(users = [], options = {}) {
     __productionStates: PRODUCTION_STATES,
     __publicationStates: PUBLICATION_STATES,
     __assignmentStates: ASSIGNMENT_STATES,
+    __placeReviewFlags: PLACE_REVIEW_FLAGS,
   };
   const source = `
 const PRODUCTION_STATES = globalThis.__productionStates;
 const PUBLICATION_STATES = globalThis.__publicationStates;
 const ASSIGNMENT_STATES = globalThis.__assignmentStates;
+const PLACE_REVIEW_FLAGS = globalThis.__placeReviewFlags;
 ${extractNamedFunctionSource(indexServer, "findUnknownWorkflowModelState")}
 ${extractNamedFunctionSource(indexServer, "logUnknownWorkflowModelState")}
 ${extractNamedFunctionSource(indexServer, "assertKnownWorkflowModelStates")}
@@ -336,6 +338,7 @@ ${extractNamedFunctionSource(indexServer, "buildItemAssignmentOwner")}
 ${extractNamedFunctionSource(indexServer, "resolveItemScopeContext")}
 ${extractNamedFunctionSource(indexServer, "attachItemScopeMetadata")}
 globalThis.__itemScopeHooks = {
+  placeReviewFlags: PLACE_REVIEW_FLAGS,
   buildItemWorkScopeState,
   isItemVisibleToActor,
   buildViewerScopeReason,
@@ -348,6 +351,12 @@ globalThis.__itemScopeHooks = {
   vm.runInNewContext(source, context, { filename: "item-scope-hooks.js" });
   return context.__itemScopeHooks;
 }
+
+test("item ownership scope VM harness receives place review flags from repository", () => {
+  const hooks = loadItemOwnershipScopeHooks();
+  assert.equal(hooks.placeReviewFlags, PLACE_REVIEW_FLAGS);
+  assert.equal(hooks.placeReviewFlags.has("revision_requested"), true);
+});
 
 test("assignment HTML removes readiness-only controls and keeps execution-only controls", () => {
   const forbiddenSnippets = [
