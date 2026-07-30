@@ -2486,6 +2486,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
         finalItem.id,
         {
           production_state: "generated",
+          ...(String(finalItem?.type || "").trim().toLowerCase() === "place" ? { place_review_flag: "none" } : {}),
           current_field_pack_id: Number(savedFieldPack?.id || 0) || null,
           current_draft_id: Number(latestDraft?.id || 0) || null,
           last_transition_note: "draft generated",
@@ -2566,6 +2567,14 @@ export async function runQualityStage(repo, actorEmail, options = {}) {
     const item = row.item;
     const report = row.report;
     const draft = repo.latestDraftByItem(item.id);
+    const workflowBefore = repo.ensureWorkflowModel(item.id);
+    const isPlace = String(item?.type || "").trim().toLowerCase() === "place";
+    const productionState = isPlace && String(workflowBefore?.production_state || "").trim().toLowerCase() === "generated"
+      ? "ready_for_content"
+      : "in_review";
+    if (!repo.canTransition(item?.type, "production", workflowBefore?.production_state, productionState, item.id)) {
+      throw new Error(`invalid quality pass transition: ${String(workflowBefore?.production_state || "null")} -> ${productionState}`);
+    }
 
     repo.replaceQualityChecks(item.id, [{ check_name: "review_gate", status: "passed", reason: null }]);
     const reportId = repo.addReviewReport(item.id, draft?.id || null, { ...report, status: "pending" });
@@ -2573,7 +2582,7 @@ export async function runQualityStage(repo, actorEmail, options = {}) {
     repo.upsertWorkflowModel(
       item.id,
       {
-        production_state: "in_review",
+        production_state: productionState,
         current_review_report_id: Number(reportId || 0) || null,
         last_transition_note: "quality reviewed and queued",
       },
@@ -2599,10 +2608,12 @@ export async function runQualityStage(repo, actorEmail, options = {}) {
     repo.replaceQualityChecks(item.id, [{ check_name: "review_gate", status: "failed", reason: report.issues.join("; ") }]);
     const reportId = repo.addReviewReport(item.id, draft?.id || null, { ...report, status: "needs_revision" });
     repo.addReviewAction(item.id, reportId, "needs_revision", actorEmail, report.issues.join("; "));
+    const workflowBefore = repo.ensureWorkflowModel(item.id);
+    const placeRevisionTarget = resolvePlaceRevisionTarget(item, workflowBefore, "quality failed");
     repo.upsertWorkflowModel(
       item.id,
       {
-        production_state: "needs_revision",
+        ...(placeRevisionTarget || { production_state: "needs_revision" }),
         current_review_report_id: Number(reportId || 0) || null,
         last_transition_note: "quality failed",
       },
@@ -2636,11 +2647,14 @@ export function applyReviewAction(repo, actorEmail, payload) {
     throw new Error("review prerequisite missing: latest review report is required");
   }
   const workflowBefore = repo.getWorkflowModelByItem(contentItemId) || null;
+  const item = repo.getItem(contentItemId);
+  const isPlace = String(item?.type || "").trim().toLowerCase() === "place";
   const currentProductionState = String(workflowBefore?.production_state || "").toLowerCase();
-  if (action === "reject" && currentProductionState === "rejected") {
+  const placeReviewFlag = String(workflowBefore?.place_review_flag || "none").toLowerCase();
+  if (action === "reject" && (isPlace ? placeReviewFlag === "rejected" : currentProductionState === "rejected")) {
     throw new Error("review governance conflict: item is already rejected");
   }
-  if (action === "request_changes" && currentProductionState === "needs_revision") {
+  if (action === "request_changes" && (isPlace ? placeReviewFlag === "revision_requested" : currentProductionState === "needs_revision")) {
     throw new Error("review governance conflict: item is already in needs_revision");
   }
   const reasonCode = action === "approve"
@@ -2670,7 +2684,8 @@ export function applyReviewAction(repo, actorEmail, payload) {
     workflowAfter = repo.upsertWorkflowModel(
       contentItemId,
       {
-        production_state: "rejected",
+        ...(isPlace ? {} : { production_state: "rejected" }),
+        ...(isPlace ? { place_review_flag: "rejected" } : {}),
         publication_state: "draft",
         current_review_report_id: Number(reportId || 0) || null,
         last_transition_note: notes || "rejected by admin",
@@ -2681,10 +2696,11 @@ export function applyReviewAction(repo, actorEmail, payload) {
     nextReviewStatus = "rejected";
   } else {
     if (reportId) repo.setReviewStatus(reportId, "needs_revision");
+    const placeRevisionTarget = resolvePlaceRevisionTarget(item, workflowBefore, "changes requested");
     workflowAfter = repo.upsertWorkflowModel(
       contentItemId,
       {
-        production_state: "needs_revision",
+        ...(placeRevisionTarget || { production_state: "needs_revision" }),
         publication_state: "draft",
         current_review_report_id: Number(reportId || 0) || null,
         last_transition_note: notes || "changes requested",
@@ -2736,8 +2752,11 @@ export function reopenReviewDecision(repo, actorEmail, payload) {
   }
 
   const workflowBefore = repo.ensureWorkflowModel(contentItemId);
+  const item = repo.getItem(contentItemId);
+  const isPlace = String(item?.type || "").trim().toLowerCase() === "place";
   const currentProductionState = String(workflowBefore?.production_state || "").toLowerCase();
-  if (currentProductionState !== "rejected") {
+  const placeReviewFlag = String(workflowBefore?.place_review_flag || "none").toLowerCase();
+  if (isPlace ? placeReviewFlag !== "rejected" : currentProductionState !== "rejected") {
     throw new Error("workflow reopen conflict: only rejected items can be reopened");
   }
 
@@ -2748,7 +2767,7 @@ export function reopenReviewDecision(repo, actorEmail, payload) {
   const workflowAfter = repo.upsertWorkflowModel(
     contentItemId,
     {
-      production_state: "analyzed",
+      ...(isPlace ? { place_review_flag: "none" } : { production_state: "analyzed" }),
       publication_state: "draft",
       last_transition_note: notes || "reopened from rejected decision",
     },
@@ -2772,6 +2791,23 @@ export function reopenReviewDecision(repo, actorEmail, payload) {
   });
 
   return { ok: true, content_item_id: contentItemId, action: "reopen" };
+}
+
+function resolvePlaceRevisionTarget(item, workflow, source) {
+  if (String(item?.type || "").trim().toLowerCase() !== "place") return null;
+  const current = String(workflow?.production_state || "").trim().toLowerCase();
+  const targets = {
+    generated: "analyzed",
+    field_review: "field_working",
+    in_review: "writing",
+    ready_for_publish: "in_review",
+    submitted_for_admin_review: "in_review",
+  };
+  const productionState = targets[current];
+  if (!productionState) {
+    throw new Error(`cannot set place revision flag from ${current || "unknown"} during ${source}`);
+  }
+  return { production_state: productionState, place_review_flag: "revision_requested" };
 }
 
 export function reviewInternalLink(repo, actorEmail, suggestionId, action) {

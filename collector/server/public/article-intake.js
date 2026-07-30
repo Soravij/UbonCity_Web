@@ -199,6 +199,7 @@ function articleStatus() {
   if (workflowStatus === "approved" || workflowStatus === "unpublished") return "ready_for_sync";
   if (workflowStatus === "in_review") return "ready_for_review";
   if (workflowStatus === "needs_revision") return "revision_requested";
+  if (workflowStatus === "rejected") return "rejected";
   if (workflowStatus === "content_in_progress") return "drafting";
   return "drafting";
 }
@@ -211,6 +212,7 @@ function articleStatusLabel(status = articleStatus()) {
   if (status === "submitted_for_admin_review") return "ส่งเข้า Admin Review แล้ว";
   if (status === "synced_to_admin") return "เผยแพร่แล้ว";
   if (status === "revision_requested") return "ต้องแก้ไข";
+  if (status === "rejected") return "ถูกปฏิเสธ รอผู้ดูแลตัดสินใจ";
   return "กำลังเขียนบทความ";
 }
 
@@ -383,6 +385,10 @@ function derivedArticleWorkflowStatus(item, process = processForItem(item?.id)) 
   const publicationState = normalizedValue(item?.publication_state);
   if (publicationState === "published") return "published";
   if (publicationState === "ready_for_sync" || publicationState === "approved") return "approved";
+
+  const placeReviewFlag = normalizedValue(item?.place_review_flag);
+  if (placeReviewFlag === "revision_requested") return "needs_revision";
+  if (placeReviewFlag === "rejected") return "rejected";
 
   const productionState = normalizedValue(item?.production_state);
   if (productionState === "in_review" || productionState === "review") return "in_review";

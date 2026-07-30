@@ -170,7 +170,7 @@ test("article drafting maps to the place writing step while non-place content ke
   assert.equal(mapArticleProcessStatusToWorkflowPatch("drafting", "event").production_state, "content_in_progress");
   assert.deepEqual(
     JSON.parse(JSON.stringify(mapArticleProcessStatusToWorkflowPatch("ready_for_review", "place"))),
-    { production_state: "in_review", publication_state: "draft" }
+    { production_state: "in_review", publication_state: "draft", place_review_flag: "none" }
   );
 });
 

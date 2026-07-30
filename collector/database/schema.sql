@@ -953,6 +953,8 @@ CREATE TABLE IF NOT EXISTS content_workflow_models (
   production_state TEXT NOT NULL DEFAULT 'collected',
   publication_state TEXT NOT NULL DEFAULT 'draft',
   assignment_state TEXT,
+  place_review_flag TEXT NOT NULL DEFAULT 'none'
+    CHECK (place_review_flag IN ('none', 'revision_requested', 'rejected')),
   current_draft_id INTEGER,
   current_review_report_id INTEGER,
   current_field_pack_id INTEGER,

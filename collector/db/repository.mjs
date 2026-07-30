@@ -454,7 +454,8 @@ const ASSIGNMENT_FULFILLED_DELIVERABLE_STATUSES = new Set(["submitted", "reviewe
 const ASSIGNMENT_TEXT_LIKE_DELIVERABLE_TYPES = new Set(["raw_notes", "caption_draft", "script_draft", "article_draft"]);
 const ASSIGNMENT_ASSET_BACKED_DELIVERABLE_TYPES = new Set(["photos", "videos"]);
 const ASSIGNMENT_KINDS = new Set(["field", "editorial"]);
-const STATE_GROUPS = new Set(["production", "publication", "assignment"]);
+const STATE_GROUPS = new Set(["production", "publication", "assignment", "place_review_flag"]);
+export const PLACE_REVIEW_FLAGS = new Set(["none", "revision_requested", "rejected"]);
 const WORKFLOW_ACTOR_ROLES = new Set(["owner", "admin", "editor", "user", "freelance", "system"]);
 const EXECUTION_CHANNELS = new Set(["facebook", "tiktok"]);
 const EXECUTION_STATUSES = new Set(["draft", "generated", "validated", "ready", "blocked", "superseded"]);
@@ -465,6 +466,11 @@ const WORKFLOW_REASON_CODES = Object.freeze({
   ASSIGNMENT_STATE_SYNC: "assignment_state_sync",
   ASSIGNMENT_STATE_RECONCILE_SYNC: "assignment_state_reconcile_sync",
 });
+
+function normalizePlaceReviewFlag(value) {
+  const normalized = String(value == null ? "none" : value).trim().toLowerCase() || "none";
+  return PLACE_REVIEW_FLAGS.has(normalized) ? normalized : null;
+}
 function buildContentTypeTransitionRules() {
   return Object.freeze({
     production: Object.freeze({
@@ -494,25 +500,25 @@ function buildContentTypeTransitionRules() {
 
 function buildPlaceTransitionRules() {
   const legacyRules = buildContentTypeTransitionRules();
-  // Place owns this complete graph: its 22 ladder edges and only parking edges that do not
-  // touch retired brief_generated/content_in_progress. Non-place types retain legacy rules.
+  // Place owns only its positional ladder. Review outcomes are flags on that position;
+  // non-place types retain their legacy parking-state graph.
   return Object.freeze({
     ...legacyRules,
     production: Object.freeze({
-      collected: new Set(["analyzed", "needs_revision", "rejected"]),
-      analyzed: new Set(["generated", "needs_revision", "rejected"]),
-      generated: new Set(["ready_for_content", "analyzed", "needs_revision", "rejected"]),
-      ready_for_content: new Set(["field_working", "generated", "rejected"]),
+      collected: new Set(["analyzed"]),
+      analyzed: new Set(["generated"]),
+      generated: new Set(["ready_for_content", "analyzed"]),
+      ready_for_content: new Set(["field_working", "generated"]),
       field_working: new Set(["ready_for_content", "field_review"]),
       field_review: new Set(["generated", "field_working", "writing_assigned"]),
       writing_assigned: new Set(["writing", "field_review"]),
       writing: new Set(["writing_assigned", "in_review"]),
-      in_review: new Set(["ready_for_publish", "writing", "field_review", "needs_revision", "rejected"]),
-      ready_for_publish: new Set(["submitted_for_admin_review", "in_review", "needs_revision", "rejected"]),
-      submitted_for_admin_review: new Set(["completed", "in_review", "needs_revision", "rejected"]),
-      completed: new Set(["needs_revision"]),
-      needs_revision: new Set(["generated", "in_review", "rejected"]),
-      rejected: new Set(["analyzed", "ready_for_content"]),
+      in_review: new Set(["ready_for_publish", "writing", "field_review"]),
+      ready_for_publish: new Set(["submitted_for_admin_review", "in_review"]),
+      submitted_for_admin_review: new Set(["completed", "in_review"]),
+      completed: new Set([]),
+      needs_revision: new Set([]),
+      rejected: new Set([]),
       // Kept in the shared enum for non-place and legacy data, but isolated for place.
       brief_generated: new Set([]),
       content_in_progress: new Set([]),
@@ -1819,6 +1825,7 @@ function normalizeWorkflowModelRow(row) {
   if (!row) return null;
   return {
     ...row,
+    place_review_flag: String(row.place_review_flag || "none").trim().toLowerCase() || "none",
     current_draft_id: Number(row.current_draft_id || 0) || null,
     current_review_report_id: Number(row.current_review_report_id || 0) || null,
     current_field_pack_id: Number(row.current_field_pack_id || 0) || null,
@@ -3412,6 +3419,9 @@ function ensureWorkflowHeadColumns(db) {
   if (!names.has("last_transition_at")) {
     db.exec("ALTER TABLE content_workflow_models ADD COLUMN last_transition_at TEXT;");
   }
+  if (!names.has("place_review_flag")) {
+    db.exec("ALTER TABLE content_workflow_models ADD COLUMN place_review_flag TEXT NOT NULL DEFAULT 'none';");
+  }
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_content_workflow_models_current_draft
       ON content_workflow_models(current_draft_id);
@@ -4771,14 +4781,16 @@ export function createRepository(db) {
   const upsertWorkflowModelStmt = db.prepare(`
     INSERT INTO content_workflow_models (
       content_item_id, production_state, publication_state, assignment_state,
+      place_review_flag,
       current_draft_id, current_review_report_id, current_field_pack_id,
       state_version, content_version, last_actor_email, last_transition_at,
       last_transition_note, updated_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(content_item_id) DO UPDATE SET
       production_state=excluded.production_state,
       publication_state=excluded.publication_state,
       assignment_state=excluded.assignment_state,
+      place_review_flag=excluded.place_review_flag,
       current_draft_id=excluded.current_draft_id,
       current_review_report_id=excluded.current_review_report_id,
       current_field_pack_id=excluded.current_field_pack_id,
@@ -5827,6 +5839,7 @@ export function createRepository(db) {
     if (stateGroup === "production") return PRODUCTION_STATES.has(normalized) ? normalized : "";
     if (stateGroup === "publication") return PUBLICATION_STATES.has(normalized) ? normalized : "";
     if (stateGroup === "assignment") return ASSIGNMENT_STATES.has(normalized) ? normalized : "";
+    if (stateGroup === "place_review_flag") return PLACE_REVIEW_FLAGS.has(normalized) ? normalized : "";
     return "";
   }
 
@@ -5837,7 +5850,9 @@ export function createRepository(db) {
       ? PRODUCTION_STATES
       : stateGroup === "publication"
         ? PUBLICATION_STATES
-        : ASSIGNMENT_STATES;
+        : stateGroup === "assignment"
+          ? ASSIGNMENT_STATES
+          : PLACE_REVIEW_FLAGS;
     if (knownStates.has(state)) return;
     const itemId = Number(contentItemId || 0) || null;
     console.error("[workflow-reader] unknown workflow state", {
@@ -5865,6 +5880,7 @@ export function createRepository(db) {
 
   function canTransition(contentType, stateGroup, fromState, toState, contentItemId = null) {
     if (!STATE_GROUPS.has(stateGroup)) return false;
+    if (stateGroup === "place_review_flag") return false;
     if (!toState) return false;
     if (!fromState) return true;
     if (fromState === toState) return true;
@@ -5935,6 +5951,7 @@ export function createRepository(db) {
       production_state: legacyStates.production_state,
       publication_state: legacyStates.publication_state,
       assignment_state: null,
+      place_review_flag: "none",
       current_draft_id: Number(latestDraft?.id || 0) || null,
       current_review_report_id: Number(latestReview?.id || 0) || null,
       current_field_pack_id: Number(currentFieldPack?.id || 0) || null,
@@ -5971,6 +5988,7 @@ export function createRepository(db) {
       production_state: payload.production_state,
       publication_state: payload.publication_state,
       assignment_state: payload.assignment_state,
+      place_review_flag: payload.place_review_flag,
       current_draft_id: resolvePointer("current_draft_id", previous?.current_draft_id),
       current_review_report_id: resolvePointer("current_review_report_id", previous?.current_review_report_id),
       current_field_pack_id: resolvePointer("current_field_pack_id", previous?.current_field_pack_id),
@@ -6020,9 +6038,15 @@ export function createRepository(db) {
     const assignmentState = assignmentStateRaw == null || assignmentStateRaw === ""
       ? null
       : normalizeStateValue(assignmentStateRaw, "assignment");
+    const placeReviewFlagRaw = payload.place_review_flag ?? seed.place_review_flag ?? "none";
+    const placeReviewFlag = normalizePlaceReviewFlag(placeReviewFlagRaw);
     if (!productionState) throw new Error("invalid production_state");
     if (!publicationState) throw new Error("invalid publication_state");
     if (assignmentStateRaw != null && assignmentStateRaw !== "" && !assignmentState) throw new Error("invalid assignment_state");
+    if (!placeReviewFlag) throw new Error("invalid place_review_flag");
+    if (String(item?.type || "").trim().toLowerCase() !== "place" && placeReviewFlag !== "none") {
+      throw new Error("place_review_flag is supported only for place items");
+    }
     const nextPayload = buildWorkflowHeadPayload(seed, payload, actor, metadata);
     const actorRole = normalizeWorkflowActorRole(metadata.actor_role);
     const reasonCode = String(metadata.reason_code || "").trim().toLowerCase() || null;
@@ -6032,6 +6056,7 @@ export function createRepository(db) {
       productionState,
       publicationState,
       assignmentState,
+      placeReviewFlag,
       nextPayload.current_draft_id,
       nextPayload.current_review_report_id,
       nextPayload.current_field_pack_id,
@@ -6052,6 +6077,9 @@ export function createRepository(db) {
       recordWorkflowTransition(id, "assignment", null, assignmentState, actor, actorRole, reasonCode, nextPayload.last_transition_note, {
         assignment_id: metadata?.assignment_id ?? null,
       });
+    }
+    if (placeReviewFlag !== "none") {
+      recordWorkflowTransition(id, "place_review_flag", null, placeReviewFlag, actor, actorRole, reasonCode, nextPayload.last_transition_note);
     }
     const nextModel = normalizeWorkflowModelRow(getWorkflowModelByItemStmt.get(id));
     reconcileLegacyWorkflowStatusMirror(id, nextModel, actor, { reason_code: reasonCode });
@@ -6083,9 +6111,15 @@ export function createRepository(db) {
     const assignmentState = assignmentStateRaw == null || assignmentStateRaw === ""
       ? null
       : normalizeStateValue(assignmentStateRaw, "assignment");
+    const placeReviewFlagRaw = payload.place_review_flag ?? previous.place_review_flag ?? "none";
+    const placeReviewFlag = normalizePlaceReviewFlag(placeReviewFlagRaw);
     if (!productionState) throw new Error("invalid production_state");
     if (!publicationState) throw new Error("invalid publication_state");
     if (assignmentStateRaw != null && assignmentStateRaw !== "" && !assignmentState) throw new Error("invalid assignment_state");
+    if (!placeReviewFlag) throw new Error("invalid place_review_flag");
+    if (contentType !== "place" && placeReviewFlag !== "none") {
+      throw new Error("place_review_flag is supported only for place items");
+    }
     const nextPayload = buildWorkflowHeadPayload(previous, payload, actor, metadata);
     const note = nextPayload.last_transition_note;
     const actorRole = normalizeWorkflowActorRole(metadata.actor_role);
@@ -6103,10 +6137,17 @@ export function createRepository(db) {
     if ((assignmentState || null) !== (previous.assignment_state || null) && assignmentState != null && !skipAssignmentTransitionValidation) {
       assertValidTransition(contentType, "assignment", previous.assignment_state || null, assignmentState, id);
     }
+    if (contentType === "place"
+      && previous.place_review_flag === "rejected"
+      && placeReviewFlag === "rejected"
+      && (productionState !== previous.production_state || publicationState !== previous.publication_state)) {
+      throw new Error("place workflow is rejected; clear place_review_flag before continuing");
+    }
 
     const stateChanged = productionState !== previous.production_state
       || publicationState !== previous.publication_state
-      || (assignmentState || null) !== (previous.assignment_state || null);
+      || (assignmentState || null) !== (previous.assignment_state || null)
+      || placeReviewFlag !== (previous.place_review_flag || "none");
     const stateVersion = nextPayload.should_bump_state_version
       ? Math.max(1, Number(previous?.state_version || 0) || 1) + 1
       : Math.max(1, Number(nextPayload.state_version || previous?.state_version || 1) || 1);
@@ -6126,6 +6167,7 @@ export function createRepository(db) {
       productionState,
       publicationState,
       assignmentState,
+      placeReviewFlag,
       nextPayload.current_draft_id,
       nextPayload.current_review_report_id,
       nextPayload.current_field_pack_id,
@@ -6147,6 +6189,9 @@ export function createRepository(db) {
       recordWorkflowTransition(id, "assignment", previous.assignment_state || null, assignmentState, actor, actorRole, reasonCode, note, {
         assignment_id: metadata?.assignment_id ?? null,
       });
+    }
+    if (placeReviewFlag !== (previous.place_review_flag || "none")) {
+      recordWorkflowTransition(id, "place_review_flag", previous.place_review_flag || "none", placeReviewFlag, actor, actorRole, reasonCode, note);
     }
     const nextModel = normalizeWorkflowModelRow(getWorkflowModelByItemStmt.get(id));
     reconcileLegacyWorkflowStatusMirror(id, nextModel, actor, { reason_code: reasonCode });
@@ -6209,6 +6254,7 @@ export function createRepository(db) {
       assertKnownWorkflowHeadState(head?.production_state, "production", item.id, "listItemsByWorkflowHead");
       assertKnownWorkflowHeadState(head?.publication_state, "publication", item.id, "listItemsByWorkflowHead");
       assertKnownWorkflowHeadState(head?.assignment_state, "assignment", item.id, "listItemsByWorkflowHead");
+      assertKnownWorkflowHeadState(head?.place_review_flag, "place_review_flag", item.id, "listItemsByWorkflowHead");
       return true;
     });
   }
@@ -6790,6 +6836,8 @@ export function createRepository(db) {
         ? "field_working"
         : ["submitted", "resubmitted"].includes(normalizedState)
           ? "field_review"
+          : normalizedState === "revision_requested"
+            ? "field_working"
           : null
       : null;
     // Historical place work can still be on a legacy skip state (for example collected). Keep
@@ -6814,6 +6862,11 @@ export function createRepository(db) {
         {
           assignment_state: normalizedState,
           ...(placeFieldProductionState ? { production_state: placeFieldProductionState } : {}),
+          ...(placeFieldProductionState && normalizedState === "revision_requested"
+            ? { place_review_flag: "revision_requested" }
+            : placeFieldProductionState && ["submitted", "resubmitted"].includes(normalizedState)
+              ? { place_review_flag: "none" }
+              : {}),
           last_transition_note: internalNote || contributorNote || workflow?.last_transition_note || null,
         },
         actorEmail,

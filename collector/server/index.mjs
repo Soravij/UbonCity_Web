@@ -28,6 +28,7 @@ import {
 import { openDatabase } from "../db/client.mjs";
 import {
   ASSIGNMENT_STATES,
+  PLACE_REVIEW_FLAGS,
   PRODUCTION_STATES,
   PUBLICATION_STATES,
   createRepository,
@@ -2841,6 +2842,7 @@ function findUnknownWorkflowModelState(workflowModel = null) {
     ["production", workflowModel?.production_state, PRODUCTION_STATES],
     ["publication", workflowModel?.publication_state, PUBLICATION_STATES],
     ["assignment", workflowModel?.assignment_state, ASSIGNMENT_STATES],
+    ["place_review_flag", workflowModel?.place_review_flag, PLACE_REVIEW_FLAGS],
   ];
   for (const [stateGroup, value, knownStates] of states) {
     const state = String(value || "").trim().toLowerCase();
@@ -4463,36 +4465,15 @@ function ensureArticleProcessTransitionAccess(req, res, item, nextStatus) {
 function transitionArticleProcessState(req, item, currentStatus, nextStatus, note, reasonCode) {
   const itemId = Number(item?.id || 0) || 0;
   if (!itemId) throw new Error("Invalid item id");
-  const patch = resolvePlaceLadderWorkflowPatch(
-    item,
-    repo.ensureWorkflowModel(itemId),
-    mapArticleProcessStatusToWorkflowPatch(nextStatus, item?.type),
-    "article_process_transition"
-  );
-  if (!patch) {
-    throw new Error("article process patch is not supported for this status");
-  }
-
-  const primaryAssignment = getPrimaryEditorialAssignment(itemId);
-  if (primaryAssignment?.id) {
-    const assignmentState = String(primaryAssignment.state || "").trim().toLowerCase();
-    if (nextStatus === "revision_requested" && assignmentState !== "revision_requested") {
+  if (nextStatus === "revision_requested") {
+    const primaryAssignment = getPrimaryEditorialAssignment(itemId);
+    if (primaryAssignment?.id && String(primaryAssignment.state || "").trim().toLowerCase() !== "revision_requested") {
       repo.updateAssignmentState(primaryAssignment.id, "revision_requested", actorEmail(req), {
         actor_role: actorPolicyRole(req),
         reason_code: `${reasonCode}_assignment`,
         internal_note: note || "returned from article process review",
       });
     }
-    if (nextStatus === "drafting" && assignmentState === "revision_requested") {
-      repo.updateAssignmentState(primaryAssignment.id, "in_progress", actorEmail(req), {
-        actor_role: actorPolicyRole(req),
-        reason_code: `${reasonCode}_assignment`,
-        internal_note: note || "editor resumed article work",
-      });
-    }
-  }
-
-  if (nextStatus === "revision_requested") {
     const model = applyArticleNeedsRevisionWorkflowTransition(itemId, {
       actor: actorEmail(req),
       actorRole: actorPolicyRole(req),
@@ -4507,6 +4488,27 @@ function transitionArticleProcessState(req, item, currentStatus, nextStatus, not
       reason_code: reasonCode,
     });
     return model;
+  }
+  const patch = resolvePlaceLadderWorkflowPatch(
+    item,
+    repo.ensureWorkflowModel(itemId),
+    mapArticleProcessStatusToWorkflowPatch(nextStatus, item?.type),
+    "article_process_transition"
+  );
+  if (!patch) {
+    throw new Error("article process patch is not supported for this status");
+  }
+
+  const primaryAssignment = getPrimaryEditorialAssignment(itemId);
+  if (primaryAssignment?.id) {
+    const assignmentState = String(primaryAssignment.state || "").trim().toLowerCase();
+    if (nextStatus === "drafting" && assignmentState === "revision_requested") {
+      repo.updateAssignmentState(primaryAssignment.id, "in_progress", actorEmail(req), {
+        actor_role: actorPolicyRole(req),
+        reason_code: `${reasonCode}_assignment`,
+        internal_note: note || "editor resumed article work",
+      });
+    }
   }
 
   const model = repo.upsertWorkflowModel(
@@ -4556,11 +4558,24 @@ function applyArticleNeedsRevisionWorkflowTransition(contentItemId, options = {}
   const reasonCode = String(options.reasonCode || "").trim().toLowerCase() || "article_revision_requested";
   const note = String(options.note || "").trim() || null;
   const workflowBefore = repo.ensureWorkflowModel(itemId);
+  const item = repo.getItem(itemId);
+  const isPlace = String(item?.type || "").trim().toLowerCase() === "place";
+  const placeTargets = {
+    in_review: "writing",
+    ready_for_publish: "in_review",
+    submitted_for_admin_review: "in_review",
+  };
+  const currentProductionState = String(workflowBefore?.production_state || "").trim().toLowerCase();
+  const placeTarget = isPlace ? placeTargets[currentProductionState] : null;
+  if (isPlace && !placeTarget) {
+    throw new Error(`cannot set place revision flag from ${currentProductionState || "unknown"} during article process`);
+  }
 
   return repo.upsertWorkflowModel(
     itemId,
     {
-      production_state: "needs_revision",
+      production_state: placeTarget || "needs_revision",
+      ...(isPlace ? { place_review_flag: "revision_requested" } : {}),
       publication_state: "draft",
       last_transition_note: note,
     },
@@ -4694,9 +4709,12 @@ function deriveArticleProcessStatus(item, workflowModel = null, publishableSourc
   assertKnownWorkflowModelStates("deriveArticleProcessStatus", item?.id, workflowModel);
   const productionState = String(workflowModel?.production_state || "").trim().toLowerCase();
   const publicationState = String(workflowModel?.publication_state || "").trim().toLowerCase();
+  const placeReviewFlag = String(workflowModel?.place_review_flag || "none").trim().toLowerCase();
   if (publicationState === "published") return "synced_to_admin";
   if (productionState === "submitted_for_admin_review") return "submitted_for_admin_review";
   if (publicationState === "approved" || productionState === "ready_for_publish") return "ready_for_sync";
+  if (placeReviewFlag === "rejected") return "rejected";
+  if (placeReviewFlag === "revision_requested") return "revision_requested";
   if (productionState === "needs_revision") return "revision_requested";
   if (productionState === "in_review" || publishableSource?.ready_for_publish_source) return "ready_for_review";
   if (
@@ -4777,11 +4795,12 @@ function mapArticleProcessStatusToWorkflowPatch(status, contentType = "") {
     return {
       production_state: "in_review",
       publication_state: "draft",
+      ...(String(contentType || "").trim().toLowerCase() === "place" ? { place_review_flag: "none" } : {}),
     };
   }
   if (normalized === "revision_requested") {
     return {
-      production_state: "needs_revision",
+      ...(String(contentType || "").trim().toLowerCase() === "place" ? {} : { production_state: "needs_revision" }),
       publication_state: "draft",
     };
   }
@@ -8310,6 +8329,7 @@ app.get("/api/workflow-states", requireRole("owner", "admin", "editor", "user", 
     production_states: [...PRODUCTION_STATES],
     publication_states: [...PUBLICATION_STATES],
     assignment_states: [...ASSIGNMENT_STATES],
+    place_review_flags: [...PLACE_REVIEW_FLAGS],
   });
 });
 
@@ -14733,11 +14753,21 @@ app.post("/api/web-review-feedback", async (req, res) => {
       String(workflowBefore?.publication_state || "").trim().toLowerCase() === "published"
         ? "unpublished"
         : "draft";
-    const nextProductionState = "needs_revision";
-    repo.upsertWorkflowModel(
+    const isPlace = String(item?.type || "").trim().toLowerCase() === "place";
+    const placeTargets = {
+      in_review: "writing",
+      ready_for_publish: "in_review",
+      submitted_for_admin_review: "in_review",
+    };
+    const placeTarget = isPlace ? placeTargets[String(workflowBefore?.production_state || "").trim().toLowerCase()] : null;
+    if (isPlace && !placeTarget) {
+      throw new Error(`cannot set place revision flag from ${String(workflowBefore?.production_state || "unknown")} during web review feedback`);
+    }
+    const model = repo.upsertWorkflowModel(
       sourceContentItemId,
       {
-        production_state: nextProductionState,
+        production_state: placeTarget || "needs_revision",
+        ...(isPlace ? { place_review_flag: "revision_requested" } : {}),
         publication_state: nextPublicationState,
         last_transition_note: reviewNote,
       },
@@ -14751,7 +14781,7 @@ app.post("/api/web-review-feedback", async (req, res) => {
       source_system: sourceSystem,
       content_type: contentType,
       previous_production_state: workflowBefore?.production_state || null,
-      next_production_state: nextProductionState,
+      next_production_state: model?.production_state || null,
       review_note: reviewNote,
       reviewed_by: reviewedBy,
       reviewed_at: new Date().toISOString(),

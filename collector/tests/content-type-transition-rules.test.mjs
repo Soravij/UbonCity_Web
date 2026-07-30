@@ -13,6 +13,7 @@ import {
   PUBLICATION_STATES,
   TRANSITION_RULES,
 } from "../db/repository.mjs";
+import { applyReviewAction, reopenReviewDecision, runQualityStage } from "../services/workflow.mjs";
 
 const CONTENT_TYPES = ["place", "event", "other_transport", "public_transport_map"];
 const LEGACY_RULES = Object.freeze({
@@ -50,20 +51,20 @@ const LEGACY_RULES = Object.freeze({
 });
 
 const PLACE_PRODUCTION_RULES = Object.freeze({
-  collected: ["analyzed", "needs_revision", "rejected"],
-  analyzed: ["generated", "needs_revision", "rejected"],
-  generated: ["ready_for_content", "analyzed", "needs_revision", "rejected"],
-  ready_for_content: ["field_working", "generated", "rejected"],
+  collected: ["analyzed"],
+  analyzed: ["generated"],
+  generated: ["ready_for_content", "analyzed"],
+  ready_for_content: ["field_working", "generated"],
   field_working: ["ready_for_content", "field_review"],
   field_review: ["generated", "field_working", "writing_assigned"],
   writing_assigned: ["writing", "field_review"],
   writing: ["writing_assigned", "in_review"],
-  in_review: ["ready_for_publish", "writing", "field_review", "needs_revision", "rejected"],
-  ready_for_publish: ["submitted_for_admin_review", "in_review", "needs_revision", "rejected"],
-  submitted_for_admin_review: ["completed", "in_review", "needs_revision", "rejected"],
-  completed: ["needs_revision"],
-  needs_revision: ["generated", "in_review", "rejected"],
-  rejected: ["analyzed", "ready_for_content"],
+  in_review: ["ready_for_publish", "writing", "field_review"],
+  ready_for_publish: ["submitted_for_admin_review", "in_review"],
+  submitted_for_admin_review: ["completed", "in_review"],
+  completed: [],
+  needs_revision: [],
+  rejected: [],
   brief_generated: [],
   content_in_progress: [],
 });
@@ -138,12 +139,12 @@ function assertAllTypeRulesMatchExpectedGraph() {
     assert.deepEqual(
       serializeRules(TRANSITION_RULES[type]),
       type === "place" ? expectedPlace : expectedLegacyRules,
-      type === "place" ? "place must contain exactly its final ladder and permitted parking graph" : `${type} must retain the complete legacy production/publication graph`
+      type === "place" ? "place must contain exactly its positional ladder without parking edges" : `${type} must retain the complete legacy production/publication graph`
     );
   }
 }
 
-test("place contains only its final ladder and permitted parking edges while non-place types retain the complete legacy graph", () => {
+test("place contains only its final positional ladder while non-place types retain the complete legacy graph", () => {
   assertAllTypeRulesMatchExpectedGraph();
   assert.notStrictEqual(TRANSITION_RULES.place, TRANSITION_RULES.event, "content types must be independently mutable for 4b");
 
@@ -373,6 +374,94 @@ test("field assignment state changes advance only place through the new field la
     });
     ctx.repo.updateAssignmentState(eventAssignment.id, "in_progress", "test@local");
     assert.equal(ctx.repo.ensureWorkflowModel(event.id).production_state, "ready_for_content");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("place review flags preserve the production position, log every set or clear, and block a rejected item", () => {
+  const ctx = createContext();
+  try {
+    const fieldItem = ctx.createItem("place", { production_state: "field_review" });
+    const fieldAssignment = ctx.repo.createAssignment({
+      content_item_id: fieldItem.id,
+      assignment_kind: "field",
+      state: "in_progress",
+      assignee_name: "field worker",
+      assignee_contact: "field@example.com",
+    });
+    ctx.repo.requestAssignmentRevisionWithReset(fieldAssignment.id, "test@local", { internal_note: "fix missing evidence" });
+    let head = ctx.repo.ensureWorkflowModel(fieldItem.id);
+    assert.equal(head.production_state, "field_working");
+    assert.equal(head.place_review_flag, "revision_requested");
+    ctx.repo.updateAssignmentState(fieldAssignment.id, "resubmitted", "test@local");
+    head = ctx.repo.ensureWorkflowModel(fieldItem.id);
+    assert.equal(head.production_state, "field_review");
+    assert.equal(head.place_review_flag, "none");
+
+    const governanceItem = ctx.createItem("place", { production_state: "in_review" });
+    ctx.repo.upsertWorkflowModel(governanceItem.id, { place_review_flag: "rejected" }, "test@local", {
+      actor_role: "admin",
+      reason_code: "test_reject_flag",
+    });
+    assert.throws(
+      () => ctx.repo.upsertWorkflowModel(governanceItem.id, { production_state: "ready_for_publish" }, "test@local"),
+      /rejected; clear place_review_flag/
+    );
+    ctx.repo.upsertWorkflowModel(governanceItem.id, { place_review_flag: "none" }, "test@local", {
+      actor_role: "admin",
+      reason_code: "test_reopen_flag",
+    });
+    assert.doesNotThrow(() => ctx.repo.upsertWorkflowModel(governanceItem.id, { production_state: "ready_for_publish" }, "test@local"));
+
+    const flagTransitions = ctx.repo.listWorkflowTransitionsByItem(fieldItem.id, 20)
+      .filter((row) => row.state_group === "place_review_flag")
+      .map((row) => `${row.from_state}->${row.to_state}`);
+    assert.deepEqual(flagTransitions, ["revision_requested->none", "none->revision_requested"]);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("governance review writes place flags on the legal backward step while non-place keeps its legacy state", () => {
+  const ctx = createContext();
+  try {
+    const place = ctx.createItem("place", { production_state: "in_review" });
+    ctx.repo.addReviewReport(place.id, null, { status: "pending", score: 0, issues: [] });
+    applyReviewAction(ctx.repo, "admin@local", { content_item_id: place.id, action: "request_changes", notes: "rewrite" });
+    let head = ctx.repo.ensureWorkflowModel(place.id);
+    assert.equal(head.production_state, "writing");
+    assert.equal(head.place_review_flag, "revision_requested");
+    ctx.repo.upsertWorkflowModel(place.id, { production_state: "in_review", place_review_flag: "none" }, "admin@local");
+    applyReviewAction(ctx.repo, "admin@local", { content_item_id: place.id, action: "reject", notes: "declined" });
+    head = ctx.repo.ensureWorkflowModel(place.id);
+    assert.equal(head.production_state, "in_review");
+    assert.equal(head.place_review_flag, "rejected");
+    reopenReviewDecision(ctx.repo, "admin@local", { content_item_id: place.id, notes: "reopen" });
+    assert.equal(ctx.repo.ensureWorkflowModel(place.id).place_review_flag, "none");
+
+    const event = ctx.createItem("event", { production_state: "in_review" });
+    ctx.repo.addReviewReport(event.id, null, { status: "pending", score: 0, issues: [] });
+    applyReviewAction(ctx.repo, "admin@local", { content_item_id: event.id, action: "request_changes", notes: "legacy" });
+    assert.equal(ctx.repo.ensureWorkflowModel(event.id).production_state, "needs_revision");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("quality pass moves place from the P1 gate to ready_for_content before recording review artifacts", async () => {
+  const ctx = createContext();
+  try {
+    const item = ctx.createItem("place", { production_state: "generated" });
+    ctx.db.prepare(`
+      UPDATE content_items
+      SET category='attractions', description_raw=?, meta_title=?, meta_description=?, slug=?, latitude=?, longitude=?
+      WHERE id=?
+    `).run("A sufficiently detailed place description. ".repeat(8), "Quality place", "A useful description for quality review that is long enough to satisfy the metadata score.", "quality-place", 15.2, 104.8, item.id);
+    const result = await runQualityStage(ctx.repo, "quality@local", { contentItemId: item.id });
+    assert.equal(result.reviewed, 1);
+    assert.equal(ctx.repo.ensureWorkflowModel(item.id).production_state, "ready_for_content");
+    assert.equal(ctx.db.prepare("SELECT COUNT(*) AS c FROM review_reports WHERE content_item_id=?").get(item.id).c, 1);
   } finally {
     ctx.cleanup();
   }

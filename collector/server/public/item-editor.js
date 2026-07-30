@@ -41,8 +41,11 @@ function getItemWorkflowCompatStatus(item) {
   if (anomaly) return anomaly.state;
   const productionState = String(item?.production_state || "").trim().toLowerCase();
   const publicationState = String(item?.publication_state || "").trim().toLowerCase();
+  const placeReviewFlag = String(item?.place_review_flag || "none").trim().toLowerCase();
   if (publicationState === "published") return "published";
   if (publicationState === "approved" || publicationState === "unpublished" || productionState === "ready_for_publish") return "approved";
+  if (placeReviewFlag === "revision_requested") return "needs_revision";
+  if (placeReviewFlag === "rejected") return "rejected";
   if (productionState === "in_review") return "in_review";
   if (productionState === "needs_revision") return "needs_revision";
   if (productionState === "rejected") return "rejected";

@@ -248,6 +248,9 @@ function ensureWorkflowHeadBootstrapColumns(db) {
   if (!names.has("last_transition_at")) {
     db.exec("ALTER TABLE content_workflow_models ADD COLUMN last_transition_at TEXT;");
   }
+  if (!names.has("place_review_flag")) {
+    db.exec("ALTER TABLE content_workflow_models ADD COLUMN place_review_flag TEXT NOT NULL DEFAULT 'none';");
+  }
 }
 
 function ensureAuditColumns(db) {

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDatabase } from "../db/client.mjs";
-import { ASSIGNMENT_STATES, createRepository, PRODUCTION_STATES, PUBLICATION_STATES } from "../db/repository.mjs";
+import { ASSIGNMENT_STATES, createRepository, PLACE_REVIEW_FLAGS, PRODUCTION_STATES, PUBLICATION_STATES } from "../db/repository.mjs";
 import { reportUnknownWorkflowState } from "../server/public/workflow-state-catalog.js";
 
 process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "InFlight!Test1";
@@ -217,6 +217,7 @@ function loadAppHelpers() {
     production_states: [...PRODUCTION_STATES],
     publication_states: [...PUBLICATION_STATES],
     assignment_states: [...ASSIGNMENT_STATES],
+    place_review_flags: [...PLACE_REVIEW_FLAGS],
   };
   const body = `${labelsSrc}\nconst state = { workflowStates: ${JSON.stringify(catalog)}, workflowStateLogKeys: new Set() };\n${names.map(extractFunction).join("\n\n")}`;
   return new Function("reportUnknownWorkflowState", `${body}\nreturn { ${names.join(", ")} };`)(reportUnknownWorkflowState);

@@ -703,9 +703,12 @@ function getItemWorkflowSnapshot(item) {
   const productionState = String(item?.production_state || "").trim().toLowerCase();
   const publicationState = String(item?.publication_state || "").trim().toLowerCase();
   const assignmentState = String(item?.assignment_state || "").trim().toLowerCase();
+  const placeReviewFlag = String(item?.place_review_flag || "none").trim().toLowerCase();
   let compatibilityStatus = "";
   if (publicationState === "published") compatibilityStatus = "published";
   else if (publicationState === "approved" || publicationState === "unpublished" || productionState === "ready_for_publish") compatibilityStatus = "approved";
+  else if (placeReviewFlag === "revision_requested") compatibilityStatus = "needs_revision";
+  else if (placeReviewFlag === "rejected") compatibilityStatus = "rejected";
   else if (productionState === "in_review") compatibilityStatus = "in_review";
   else if (productionState === "needs_revision") compatibilityStatus = "needs_revision";
   else if (productionState === "rejected") compatibilityStatus = "rejected";
@@ -720,6 +723,7 @@ function getItemWorkflowSnapshot(item) {
     productionState,
     publicationState,
     assignmentState,
+    placeReviewFlag,
     compatibilityStatus,
   };
 }

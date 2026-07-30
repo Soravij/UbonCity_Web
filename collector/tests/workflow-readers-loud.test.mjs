@@ -8,6 +8,7 @@ import vm from "node:vm";
 import { openDatabase } from "../db/client.mjs";
 import {
   ASSIGNMENT_STATES,
+  PLACE_REVIEW_FLAGS,
   PRODUCTION_STATES,
   PUBLICATION_STATES,
   createRepository,
@@ -46,11 +47,13 @@ function loadServerReaderHooks(logs) {
     __productionStates: PRODUCTION_STATES,
     __publicationStates: PUBLICATION_STATES,
     __assignmentStates: ASSIGNMENT_STATES,
+    __placeReviewFlags: PLACE_REVIEW_FLAGS,
   };
   const source = `
 const PRODUCTION_STATES = globalThis.__productionStates;
 const PUBLICATION_STATES = globalThis.__publicationStates;
 const ASSIGNMENT_STATES = globalThis.__assignmentStates;
+const PLACE_REVIEW_FLAGS = globalThis.__placeReviewFlags;
 ${extractFunctionSource(serverSource, "findUnknownWorkflowModelState")}
 ${extractFunctionSource(serverSource, "logUnknownWorkflowModelState")}
 ${extractFunctionSource(serverSource, "assertKnownWorkflowModelStates")}
@@ -116,6 +119,10 @@ test("workflow readers log and reject unknown states", async () => {
     db.prepare("UPDATE content_workflow_models SET production_state='future_state' WHERE content_item_id=?").run(itemId);
     assert.doesNotThrow(() => repo.listItemsByWorkflowHead({ production_states: ["generated"] }));
     assert.throws(() => repo.listItemsByWorkflowHead(), /unknown production state 'future_state'/);
+    db.exec("PRAGMA ignore_check_constraints = ON;");
+    db.prepare("UPDATE content_workflow_models SET production_state='generated', place_review_flag='future_flag' WHERE content_item_id=?").run(itemId);
+    db.exec("PRAGMA ignore_check_constraints = OFF;");
+    assert.throws(() => repo.listItemsByWorkflowHead(), /unknown place_review_flag state 'future_flag'/);
 
     await assert.rejects(
       runQualityStage({
@@ -130,6 +137,7 @@ test("workflow readers log and reject unknown states", async () => {
     const serverLogs = [];
     const hooks = loadServerReaderHooks(serverLogs);
     const unknownModel = { production_state: "future_state", publication_state: "draft" };
+    const unknownFlagModel = { production_state: "generated", publication_state: "draft", place_review_flag: "future_flag" };
     const generatedModel = { production_state: "generated", publication_state: "draft" };
     assert.doesNotThrow(() => hooks.isClaimableRawPoolItem({ id: 302, ...generatedModel }));
     assert.doesNotThrow(() => hooks.buildItemWorkScopeState({ id: 302, ...generatedModel }, null));
@@ -137,6 +145,7 @@ test("workflow readers log and reject unknown states", async () => {
     assert.throws(() => hooks.isClaimableRawPoolItem({ id: 303, ...unknownModel }), /unknown production state 'future_state'/);
     assert.throws(() => hooks.buildItemWorkScopeState({ id: 304, ...unknownModel }, null), /unknown production state 'future_state'/);
     assert.throws(() => hooks.deriveArticleProcessStatus({ id: 305 }, unknownModel), /unknown production state 'future_state'/);
+    assert.throws(() => hooks.deriveArticleProcessStatus({ id: 306 }, unknownFlagModel), /unknown place_review_flag state 'future_flag'/);
     const response = {
       statusCode: null,
       body: null,
@@ -174,7 +183,7 @@ test("workflow readers log and reject unknown states", async () => {
     assert.equal(logs.some((args) => args[0] === "[workflow-reader] unknown workflow state" && args[1]?.item_id === null), true);
     assert.equal(logs.some((args) => args[0] === "[workflow-reader] unknown workflow state" && args[1]?.item_id === itemId), true);
     assert.equal(logs.some((args) => args[0] === "[workflow-reader] unknown workflow state" && args[1]?.item_id === 202), true);
-    assert.equal(serverLogs.filter((args) => args[0] === "[workflow-reader] unknown workflow state").length, 4);
+    assert.equal(serverLogs.filter((args) => args[0] === "[workflow-reader] unknown workflow state").length, 5);
   } finally {
     console.error = originalError;
     try { db.close(); } catch {}
@@ -192,9 +201,9 @@ test("UI workflow readers preserve and flag unknown states using the canonical s
 
   const generated = { id: 401, production_state: "generated", publication_state: "draft", assignment_state: "" };
   const future = { id: 402, production_state: "future_state", publication_state: "draft", assignment_state: "" };
-  const catalog = { production_states: [...PRODUCTION_STATES], publication_states: [...PUBLICATION_STATES], assignment_states: [...ASSIGNMENT_STATES] };
+  const catalog = { production_states: [...PRODUCTION_STATES], publication_states: [...PUBLICATION_STATES], assignment_states: [...ASSIGNMENT_STATES], place_review_flags: [...PLACE_REVIEW_FLAGS] };
   assert.equal(isUsableWorkflowStateCatalog(catalog), true);
-  for (const invalidCatalog of [null, {}, [], { production_states: [], publication_states: [], assignment_states: [] }]) {
+  for (const invalidCatalog of [null, {}, [], { production_states: [], publication_states: [], assignment_states: [], place_review_flags: [] }]) {
     assert.equal(isUsableWorkflowStateCatalog(invalidCatalog), false);
     assert.equal(reportUnknownWorkflowState(future, invalidCatalog, new Set(), "test"), null);
   }

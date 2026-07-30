@@ -1,6 +1,6 @@
 # Place Content Workflow Policy
 
-**สถานะ:** ร่าง v0.3 — 29 ก.ค. 2026
+**สถานะ:** ร่าง v0.5 — 30 ก.ค. 2026
 **ขอบเขต:** workflow ของ content ประเภท `place` ฝั่ง Collector เท่านั้น
 
 ---
@@ -92,6 +92,8 @@ item หนึ่งตัวอยู่บนบันไดตำแหน่
 ตัวอย่าง: item ที่ไม่ผ่านด่าน 2.3 จะอยู่ที่ **ขั้น 2.2 + flag `revision_requested`** ไม่ใช่ "ขั้น needs_revision"
 
 ผลคือรู้ตำแหน่งเสมอ และเดินขึ้นใหม่ได้โดยไม่ต้องเดาว่าเคยอยู่ไหน
+
+**ที่เก็บ:** flag อยู่ใน `content_workflow_models.place_review_flag` (`none`, `revision_requested`, `rejected`) และบันทึกการตั้ง/ล้างใน `content_workflow_transitions.state_group='place_review_flag'`. ด่าน 2.3 ใช้เหตุการณ์ field assignment ขอแก้เพื่อพา `field_review → field_working + revision_requested`; เมื่อส่งกลับตรวจจะกลับ `field_review` และล้าง flag.
 
 ### 2.4 รูปแบบที่ต้องรักษาไว้
 
@@ -337,3 +339,4 @@ item หนึ่งตัวอยู่บนบันไดตำแหน่
 | 29 ก.ค. 2026 | v0.2 | เพิ่มตารางบันไดเต็มพร้อม state ทุกขั้น · เพิ่มค่าใหม่ 4 ค่า · กำหนด `needs_revision`/`rejected` เป็น flag · ยืนยันกฎแยกตาม content type · เพิ่มหมวด 9 ระยะห่างจากสภาพปัจจุบัน · เพิ่มลำดับการลงมือ |
 | 29 ก.ค. 2026 | v0.3 | เพิ่มหมวด 9.0 สภาพฐานจริง · บันทึกว่า `current_draft_id` ไม่เคยถูกใช้ · ยืนยันบั๊ก B ด้วยข้อมูลจริง · เพิ่มรายการลบ 2 รายการ · เพิ่มข้อยังไม่ตัดสินเรื่องขั้น 1.3 |
 | 30 ก.ค. 2026 | v0.4 | รวม 1.3 สร้างร่างด้วย AI และตรวจแก้เนื้อหาไว้ที่ `generated` · ย้าย `brief_generated` ไปเป็นค่าที่ place ไม่ใช้ · กำหนดกราฟบันได place โดยไม่มี skip edge |
+| 30 ก.ค. 2026 | v0.5 | วาง `place_review_flag` บน workflow head สำหรับ place · เปลี่ยน P1/P2/P3 และ web feedback ให้ถอยหนึ่งขั้นพร้อมตั้ง flag · `needs_revision`/`rejected` ไม่เป็น parking edge ของ place อีกต่อไป |
