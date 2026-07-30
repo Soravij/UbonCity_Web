@@ -526,6 +526,36 @@ test("saveItemWithFieldPack rejects field pack id from another item", () => {
   }
 });
 
+test("saveItemWithFieldPack creates a workflow head with the new field pack", () => {
+  const ctx = createTestContext();
+  try {
+    const saved = ctx.repo.saveItemWithFieldPack(
+      {
+        type: "place",
+        category: "attractions",
+        title: "Workflow Head Field Pack Place",
+        description_raw: "Workflow head field pack raw",
+        source_type: "manual",
+        source_name: "manual",
+      },
+      {
+        status: "ready_for_field",
+        ai_summary: "Field pack created with item",
+      },
+      "tester@local"
+    );
+
+    const itemId = Number(saved?.item?.id || 0);
+    const fieldPackId = Number(saved?.field_pack?.id || 0);
+    const workflow = ctx.repo.ensureWorkflowModel(itemId);
+    assert.ok(itemId > 0);
+    assert.ok(fieldPackId > 0);
+    assert.equal(Number(workflow.current_field_pack_id), fieldPackId);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("saveDraft preserves intentionally cleared string fields", () => {
   const ctx = createTestContext();
   try {
