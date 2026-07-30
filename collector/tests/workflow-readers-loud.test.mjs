@@ -13,6 +13,7 @@ import {
   createRepository,
 } from "../db/repository.mjs";
 import { runQualityStage } from "../services/workflow.mjs";
+import { isUsableWorkflowStateCatalog, reportUnknownWorkflowState } from "../server/public/workflow-state-catalog.js";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const serverSource = fs.readFileSync(path.join(collectorRoot, "server", "index.mjs"), "utf8");
@@ -20,6 +21,8 @@ const workflowSource = fs.readFileSync(path.join(collectorRoot, "services", "wor
 const dashboardSource = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.js"), "utf8");
 const editorSource = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.js"), "utf8");
 const intakeSource = fs.readFileSync(path.join(collectorRoot, "server", "public", "article-intake.js"), "utf8");
+const eventsSource = fs.readFileSync(path.join(collectorRoot, "server", "public", "events-manager-page.js"), "utf8");
+const transportSource = fs.readFileSync(path.join(collectorRoot, "server", "public", "other-transport-page.js"), "utf8");
 
 function extractFunctionSource(sourceText, name) {
   const start = sourceText.indexOf(`function ${name}`);
@@ -179,49 +182,41 @@ test("workflow readers log and reject unknown states", async () => {
   }
 }, { concurrency: false });
 
-function loadUiWorkflowGuard(sourceText, name, { needsNormalizedValue = false } = {}) {
-  const logs = [];
-  const context = {
-    console: { error: (...args) => logs.push(args) },
-    state: {
-      workflowStates: {
-        production_states: [...PRODUCTION_STATES],
-        publication_states: [...PUBLICATION_STATES],
-        assignment_states: [...ASSIGNMENT_STATES],
-      },
-      workflowStateLogKeys: new Set(),
-    },
-    Set,
-  };
-  const prefix = needsNormalizedValue ? `${extractFunctionSource(sourceText, "normalizedValue")}\n` : "";
-  context.globalThis = context;
-  vm.runInNewContext(`${prefix}${extractFunctionSource(sourceText, name)}\nglobalThis.__guard = ${name};`, context, { filename: `${name}.js` });
-  return { guard: context.__guard, logs };
-}
-
 test("UI workflow readers preserve and flag unknown states using the canonical server enum", () => {
-  for (const source of [dashboardSource, editorSource, intakeSource]) {
+  for (const source of [dashboardSource, editorSource, intakeSource, eventsSource, transportSource]) {
     assert.match(source, /api\("\/api\/workflow-states"\)/);
     assert.doesNotMatch(source, /const\s+(?:PRODUCTION|PUBLICATION|ASSIGNMENT)_STATES\s*=/);
+    assert.match(source, /reportUnknownWorkflowState/);
   }
   assert.match(serverSource, /app\.get\("\/api\/workflow-states"[\s\S]*?\.\.\.PRODUCTION_STATES[\s\S]*?\.\.\.PUBLICATION_STATES[\s\S]*?\.\.\.ASSIGNMENT_STATES/);
 
   const generated = { id: 401, production_state: "generated", publication_state: "draft", assignment_state: "" };
   const future = { id: 402, production_state: "future_state", publication_state: "draft", assignment_state: "" };
-  const dashboard = loadUiWorkflowGuard(dashboardSource, "getUnknownWorkflowState");
-  const editor = loadUiWorkflowGuard(editorSource, "getItemWorkflowAnomaly");
-  const intake = loadUiWorkflowGuard(intakeSource, "getArticleWorkflowAnomaly", { needsNormalizedValue: true });
-  for (const hook of [dashboard, editor, intake]) {
-    assert.equal(hook.guard(generated), null);
-    const anomaly = hook.guard(future);
+  const catalog = { production_states: [...PRODUCTION_STATES], publication_states: [...PUBLICATION_STATES], assignment_states: [...ASSIGNMENT_STATES] };
+  assert.equal(isUsableWorkflowStateCatalog(catalog), true);
+  for (const invalidCatalog of [null, {}, [], { production_states: [], publication_states: [], assignment_states: [] }]) {
+    assert.equal(isUsableWorkflowStateCatalog(invalidCatalog), false);
+    assert.equal(reportUnknownWorkflowState(future, invalidCatalog, new Set(), "test"), null);
+  }
+  const logs = [];
+  const originalError = console.error;
+  console.error = (...args) => logs.push(args);
+  try {
+    assert.equal(reportUnknownWorkflowState(generated, catalog, new Set(), "test"), null);
+    const anomaly = reportUnknownWorkflowState(future, catalog, new Set(), "test");
     assert.equal(anomaly?.kind, "production");
     assert.equal(anomaly?.state, "future_state");
-    assert.equal(hook.logs.length, 1);
-    assert.equal(hook.logs[0][1].item_id, 402);
-    assert.equal(hook.logs[0][1].state, "future_state");
+    assert.equal(logs[0][1].item_id, 402);
+    assert.equal(logs[0][1].state, "future_state");
+  } finally {
+    console.error = originalError;
   }
   assert.match(dashboardSource, /return bucket === "raw_prep" \|\| bucket === "field_pack_review" \|\| bucket === "unknown_workflow"/);
   assert.match(dashboardSource, /Workflow state ผิดปกติ/);
   assert.match(editorSource, /⚠ เปิด item .*สถานะ workflow ผิดปกติ/);
   assert.match(intakeSource, /return \{ stageLabel: `⚠ \$\{anomaly\.state\}`/);
+  assert.match(eventsSource, /return "unknown_workflow"/);
+  assert.match(transportSource, /return "unknown_workflow"/);
+  assert.match(editorSource, /api\("\/api\/workflow-states"\)\.catch\(\(\) => null\)/);
+  assert.match(intakeSource, /api\("\/api\/workflow-states"\)\.catch\(\(\) => null\)/);
 });

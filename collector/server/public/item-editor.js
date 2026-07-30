@@ -1,5 +1,6 @@
 const token = sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "";
 const AUTH_RETURN_TO_KEY = "collector_return_to";
+import { reportUnknownWorkflowState } from "./workflow-state-catalog.js";
 const state = {
   token,
   user: null,
@@ -27,25 +28,7 @@ const state = {
 const isCleanMode = /\/clean-item\.html$/i.test(String(window.location.pathname || ""));
 
 function getItemWorkflowAnomaly(item) {
-  const catalog = state.workflowStates;
-  if (!catalog) return null;
-  const itemId = Number(item?.id || 0) || 0;
-  const candidates = [
-    ["production", item?.production_state, catalog.production_states],
-    ["publication", item?.publication_state, catalog.publication_states],
-    ["assignment", item?.assignment_state, catalog.assignment_states],
-  ];
-  for (const [kind, value, knownStates] of candidates) {
-    const rawState = String(value || "").trim().toLowerCase();
-    if (!rawState || (Array.isArray(knownStates) && knownStates.includes(rawState))) continue;
-    const key = `${itemId}:${kind}:${rawState}`;
-    if (!state.workflowStateLogKeys.has(key)) {
-      state.workflowStateLogKeys.add(key);
-      console.error("Unknown workflow state in item editor", { item_id: itemId, state: rawState, kind });
-    }
-    return { kind, state: rawState };
-  }
-  return null;
+  return reportUnknownWorkflowState(item, state.workflowStates, state.workflowStateLogKeys, "item-editor");
 }
 
 function getItemWorkflowCompatStatus(item) {
@@ -165,27 +148,6 @@ function getEditPermissionGuard() {
     };
   }
   return { allowed: true, reason: "" };
-}
-
-function normalizeEditorWorkflowStage(workflowStatus) {
-  const status = String(workflowStatus || "").trim().toLowerCase();
-  if (status === "published") return "published";
-  if (status === "generated" || status === "approved" || status === "unpublished") return "generated";
-  if (
-    status === "cleaned"
-    || status === "ready_for_content"
-    || status === "brief_generated"
-    || status === "analyzed"
-    || status === "content_in_progress"
-    || status === "in_review"
-    || status === "needs_revision"
-    || status === "rejected"
-    || status === "collected"
-  ) {
-    return "cleaned";
-  }
-  if (status && state.workflowStates) return "unknown_workflow";
-  return "raw";
 }
 
 function getEditorAssignmentGuard() {
@@ -6031,7 +5993,7 @@ function wire() {
 }
 (async () => {
   try {
-    const [me, workflowStates] = await Promise.all([api("/api/auth/me"), api("/api/workflow-states")]);
+    const [me, workflowStates] = await Promise.all([api("/api/auth/me"), api("/api/workflow-states").catch(() => null)]);
     state.user = me.user;
     state.workflowStates = workflowStates;
     qs("editor-auth-status").textContent = "";

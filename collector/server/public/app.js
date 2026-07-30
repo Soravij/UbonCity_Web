@@ -5,6 +5,8 @@
   "close_assignment",
 ]);
 
+import { reportUnknownWorkflowState } from "./workflow-state-catalog.js";
+
 const ASSIGNMENT_PROCESS_GUIDE = Object.freeze({
   assigned: Object.freeze({
     step: 2,
@@ -718,25 +720,7 @@ function getItemWorkflowSnapshot(item) {
 }
 
 function getUnknownWorkflowState(item) {
-  const catalog = state.workflowStates;
-  if (!catalog) return null;
-  const itemId = Number(item?.id || 0) || 0;
-  const candidates = [
-    ["production", item?.production_state ?? item?.productionState, catalog.production_states],
-    ["publication", item?.publication_state ?? item?.publicationState, catalog.publication_states],
-    ["assignment", item?.assignment_state ?? item?.assignmentState, catalog.assignment_states],
-  ];
-  for (const [kind, value, knownStates] of candidates) {
-    const rawState = String(value || "").trim().toLowerCase();
-    if (!rawState || (Array.isArray(knownStates) && knownStates.includes(rawState))) continue;
-    const key = `${itemId}:${kind}:${rawState}`;
-    if (!state.workflowStateLogKeys.has(key)) {
-      state.workflowStateLogKeys.add(key);
-      console.error("Unknown workflow state in dashboard", { item_id: itemId, state: rawState, kind });
-    }
-    return { kind, state: rawState };
-  }
-  return null;
+  return reportUnknownWorkflowState(item, state.workflowStates, state.workflowStateLogKeys, "dashboard");
 }
 
 function resolveQueueBucket(itemSnapshot) {

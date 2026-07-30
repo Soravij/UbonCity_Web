@@ -5,6 +5,7 @@
 ];
 
 const ARTICLE_FLOW_STATUSES = ["content_in_progress", "needs_revision", "in_review", "approved", "unpublished", "published"];
+import { reportUnknownWorkflowState } from "./workflow-state-catalog.js";
 const ASSIGNMENT_REQUIRED_STATUSES = ["content_in_progress", "needs_revision"];
 const DIRECTORY_SYNC_TTL_MS = 5 * 60 * 1000;
 const DIRECTORY_SYNC_CACHE_KEY = "collector_users_last_directory_sync_at";
@@ -39,25 +40,7 @@ function normalizedValue(value) {
 }
 
 function getArticleWorkflowAnomaly(item) {
-  const catalog = state.workflowStates;
-  if (!catalog) return null;
-  const itemId = Number(item?.id || 0) || 0;
-  const candidates = [
-    ["production", item?.production_state, catalog.production_states],
-    ["publication", item?.publication_state, catalog.publication_states],
-    ["assignment", item?.assignment_state, catalog.assignment_states],
-  ];
-  for (const [kind, value, knownStates] of candidates) {
-    const rawState = normalizedValue(value);
-    if (!rawState || (Array.isArray(knownStates) && knownStates.includes(rawState))) continue;
-    const key = `${itemId}:${kind}:${rawState}`;
-    if (!state.workflowStateLogKeys.has(key)) {
-      state.workflowStateLogKeys.add(key);
-      console.error("Unknown workflow state in article intake", { item_id: itemId, state: rawState, kind });
-    }
-    return { kind, state: rawState };
-  }
-  return null;
+  return reportUnknownWorkflowState(item, state.workflowStates, state.workflowStateLogKeys, "article-intake");
 }
 
 function qs(id) {
@@ -749,7 +732,7 @@ async function prefetchProcessSummaries() {
 }
 
 async function loadIntake() {
-  const [me, workflowStates] = await Promise.all([api("/api/auth/me"), api("/api/workflow-states")]);
+  const [me, workflowStates] = await Promise.all([api("/api/auth/me"), api("/api/workflow-states").catch(() => null)]);
   state.user = me?.user || null;
   state.workflowStates = workflowStates;
   state.editorAssignmentByItemId = {};

@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { openDatabase } from "../db/client.mjs";
 import { ASSIGNMENT_STATES, createRepository, PRODUCTION_STATES, PUBLICATION_STATES } from "../db/repository.mjs";
+import { reportUnknownWorkflowState } from "../server/public/workflow-state-catalog.js";
 
 process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "InFlight!Test1";
 
@@ -218,7 +219,7 @@ function loadAppHelpers() {
     assignment_states: [...ASSIGNMENT_STATES],
   };
   const body = `${labelsSrc}\nconst state = { workflowStates: ${JSON.stringify(catalog)}, workflowStateLogKeys: new Set() };\n${names.map(extractFunction).join("\n\n")}`;
-  return new Function(`${body}\nreturn { ${names.join(", ")} };`)();
+  return new Function("reportUnknownWorkflowState", `${body}\nreturn { ${names.join(", ")} };`)(reportUnknownWorkflowState);
 }
 
 const DAY_MS = 86400000;
