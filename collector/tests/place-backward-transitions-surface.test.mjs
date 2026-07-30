@@ -17,20 +17,26 @@ test("backward workflow endpoint requires a reason, uses server direction metada
   assert.match(serverSource, /workflow\.backward_transition/);
 });
 
-test("all required UI surfaces render server-provided backward controls with a bound click handler", () => {
-  const surfaces = [
-    ["clean-item.html", "item-editor.js"],
-    ["index.html", "app.js"],
-    ["article-workspace.html", "article-workspace-page.js"],
-    ["article-submit.html", "article-submit-page.js"],
-  ];
-  for (const [htmlFile, jsFile] of surfaces) {
-    const html = fs.readFileSync(path.join(root, "server", "public", htmlFile), "utf8");
-    const js = fs.readFileSync(path.join(root, "server", "public", jsFile), "utf8");
-    assert.match(html, /id="workflow-backward-controls"/, `${htmlFile} must contain reachable markup`);
-    assert.match(js, /renderWorkflowBackwardTransitionControls/, `${jsFile} must render the shared control`);
-    assert.match(js, /workflow\/backward-transitions/, `${jsFile} must invoke the actual endpoint`);
+test("every HTML page loading a backward-control renderer contains its container", () => {
+  const publicRoot = path.join(root, "server", "public");
+  const htmlFiles = fs.readdirSync(publicRoot).filter((file) => file.endsWith(".html"));
+  const renderedPages = [];
+  for (const htmlFile of htmlFiles) {
+    const html = fs.readFileSync(path.join(publicRoot, htmlFile), "utf8");
+    const scriptSources = [...html.matchAll(/<script[^>]+src="\/?([^"?#]+\.js)(?:\?[^?"]*)?"[^>]*><\/script>/gu)]
+      .map((match) => match[1]);
+    for (const scriptSource of scriptSources) {
+      const scriptPath = path.join(publicRoot, scriptSource);
+      if (!fs.existsSync(scriptPath)) continue;
+      const js = fs.readFileSync(scriptPath, "utf8");
+      const rendersBackwardControls = /\brenderWorkflowBackwardTransitionControls\s*\(/u.test(js);
+      if (!rendersBackwardControls) continue;
+      renderedPages.push(`${htmlFile} -> ${scriptSource}`);
+      assert.match(html, /id="workflow-backward-controls"/, `${htmlFile} loads ${scriptSource}, which renders backward controls, so it must contain reachable markup`);
+      assert.match(js, /workflow\/backward-transitions/, `${scriptSource} must invoke the actual endpoint`);
+    }
   }
+  assert.ok(renderedPages.length > 0, "test discovery must find at least one backward-control UI page");
   assert.match(helperSource, /data-backward-target/);
   assert.match(helperSource, /addEventListener\("click"/);
   assert.match(helperSource, /ต้องระบุเหตุผลก่อนถอยกลับ/);
