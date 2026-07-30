@@ -93,6 +93,47 @@ globalThis.__translationGateHooks = {
   return context.__translationGateHooks.getRequiredTranslationRecheckBlockers;
 }
 
+function loadArticleProcessWorkflowMapper() {
+  const context = {
+    ARTICLE_PROCESS_STATUSES: new Set([
+      "drafting",
+      "ready_for_review",
+      "revision_requested",
+      "ready_for_sync",
+      "submitted_for_admin_review",
+      "synced_to_admin",
+    ]),
+  };
+  context.globalThis = context;
+  vm.runInNewContext(`
+${extractFunctionBlock("normalizeArticleProcessStatus")}
+${extractFunctionBlock("mapArticleProcessStatusToWorkflowPatch")}
+globalThis.__mapArticleProcessStatusToWorkflowPatch = mapArticleProcessStatusToWorkflowPatch;
+`, context, { filename: "article-process-workflow-map.js" });
+  return context.__mapArticleProcessStatusToWorkflowPatch;
+}
+
+function loadPlaceLadderPatchResolver(logs, transitionAllowed) {
+  const context = {
+    repo: {
+      canTransition() {
+        return transitionAllowed;
+      },
+    },
+    console: {
+      error(...args) {
+        logs.push(args);
+      },
+    },
+  };
+  context.globalThis = context;
+  vm.runInNewContext(`
+${extractFunctionBlock("resolvePlaceLadderWorkflowPatch")}
+globalThis.__resolvePlaceLadderWorkflowPatch = resolvePlaceLadderWorkflowPatch;
+`, context, { filename: "place-ladder-workflow-patch.js" });
+  return context.__resolvePlaceLadderWorkflowPatch;
+}
+
 test("article process routes exist with dedicated surface area", () => {
   assert.match(source, /app\.get\("\/api\/items\/:id\/article-process", requireRole\("owner", "admin", "editor", "user"\)/);
   assert.match(source, /app\.post\("\/api\/items\/:id\/article-process\/transition", requireRole\("owner", "admin", "editor", "user"\)/);
@@ -118,9 +159,43 @@ test("article process routes exist with dedicated surface area", () => {
 test("article process uses semantic status helpers without mutating legacy assignment routes", () => {
   assert.match(source, /function normalizeArticleProcessStatus\(value, fallback = ""\)/);
   assert.match(source, /function deriveArticleProcessStatus\(item, workflowModel = null, publishableSource = null\)/);
-  assert.match(source, /function mapArticleProcessStatusToWorkflowPatch\(status\)/);
+  assert.match(source, /function mapArticleProcessStatusToWorkflowPatch\(status, contentType = ""\)/);
   assert.match(source, /function buildArticleProcessPayload\(req, item\)/);
   assert.match(source, /app\.post\("\/api\/items\/:id\/assignments", requireRole\("admin", "user"\),/);
+});
+
+test("article drafting maps to the place writing step while non-place content keeps its legacy state", () => {
+  const mapArticleProcessStatusToWorkflowPatch = loadArticleProcessWorkflowMapper();
+  assert.equal(mapArticleProcessStatusToWorkflowPatch("drafting", "place").production_state, "writing");
+  assert.equal(mapArticleProcessStatusToWorkflowPatch("drafting", "event").production_state, "content_in_progress");
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(mapArticleProcessStatusToWorkflowPatch("ready_for_review", "place"))),
+    { production_state: "in_review", publication_state: "draft" }
+  );
+});
+
+test("legacy place article paths preserve production state and log when the ladder transition is unavailable", () => {
+  const logs = [];
+  const resolvePlaceLadderWorkflowPatch = loadPlaceLadderPatchResolver(logs, false);
+  const result = resolvePlaceLadderWorkflowPatch(
+    { id: 44, type: "place" },
+    { production_state: "collected" },
+    { production_state: "writing", publication_state: "draft" },
+    "article_process_transition"
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { publication_state: "draft" });
+  assert.deepEqual(JSON.parse(JSON.stringify(logs)), [[
+    "[workflow-transition] skipped production sync",
+    {
+      source: "article_process_transition",
+      item_id: 44,
+      content_type: "place",
+      current_production_state: "collected",
+      attempted_production_state: "writing",
+    },
+  ]]);
+  assert.match(source, /"editorial_assignment_created"/);
+  assert.match(source, /repo\.createAssignmentWithWorkflow\(/);
 });
 
 test("admin-review uses required locale translation recheck gate", () => {

@@ -432,6 +432,10 @@ export const PRODUCTION_STATES = new Set([
   "analyzed",
   "brief_generated",
   "ready_for_content",
+  "field_working",
+  "field_review",
+  "writing_assigned",
+  "writing",
   "content_in_progress",
   "generated",
   "in_review",
@@ -488,10 +492,33 @@ function buildContentTypeTransitionRules() {
   });
 }
 
+function buildPlaceTransitionRules() {
+  const legacyRules = buildContentTypeTransitionRules();
+  const legacyProduction = legacyRules.production;
+  // 4b-1 deliberately adds only the place ladder edges.  The legacy skip and parking edges
+  // remain until 4b-2; non-place content types keep the unmodified legacy graph.
+  return Object.freeze({
+    ...legacyRules,
+    production: Object.freeze({
+      ...legacyProduction,
+      generated: new Set([...legacyProduction.generated, "brief_generated"]),
+      ready_for_content: new Set([...legacyProduction.ready_for_content, "field_working"]),
+      field_working: new Set(["ready_for_content", "field_review"]),
+      field_review: new Set(["brief_generated", "field_working", "writing_assigned"]),
+      writing_assigned: new Set(["writing"]),
+      writing: new Set(["writing_assigned", "in_review"]),
+      in_review: new Set([...legacyProduction.in_review, "writing", "field_review"]),
+      ready_for_publish: new Set([...legacyProduction.ready_for_publish, "in_review"]),
+      submitted_for_admin_review: new Set([...legacyProduction.submitted_for_admin_review, "in_review"]),
+      brief_generated: new Set([...legacyProduction.brief_generated, "generated"]),
+    }),
+  });
+}
+
 // Each content type deliberately starts with an independent copy of the legacy production and
 // publication graph. 4b changes place only; event/transport remain the fallback graph.
 export const TRANSITION_RULES = Object.freeze({
-  place: buildContentTypeTransitionRules(),
+  place: buildPlaceTransitionRules(),
   event: buildContentTypeTransitionRules(),
   other_transport: buildContentTypeTransitionRules(),
   public_transport_map: buildContentTypeTransitionRules(),
@@ -5801,8 +5828,11 @@ export function createRepository(db) {
     if (!toState) return false;
     if (!fromState) return true;
     if (fromState === toState) return true;
-    const typeRules = contentTypeTransitionRules(contentType, contentItemId);
-    const rulesForGroup = stateGroup === "assignment" ? ASSIGNMENT_TRANSITION_RULES : typeRules[stateGroup];
+    // Assignment transitions are intentionally shared. Do not resolve a content-type fallback
+    // (and emit its diagnostic) when the content graph is not being read.
+    const rulesForGroup = stateGroup === "assignment"
+      ? ASSIGNMENT_TRANSITION_RULES
+      : contentTypeTransitionRules(contentType, contentItemId)[stateGroup];
     const allowed = rulesForGroup?.[fromState];
     if (!allowed) return false;
     return allowed.has(toState);
@@ -6433,6 +6463,29 @@ export function createRepository(db) {
     };
   }
 
+  function createAssignmentWithWorkflow(
+    payload = {},
+    actorUserId = null,
+    assignmentMetadata = {},
+    workflowPayload = {},
+    workflowActor = "system@local",
+    workflowMetadata = {}
+  ) {
+    return runInTransaction(db, () => {
+      const assignment = createAssignment(payload, actorUserId, assignmentMetadata);
+      const workflow = upsertWorkflowModel(
+        Number(payload?.content_item_id || 0),
+        workflowPayload,
+        workflowActor,
+        {
+          ...workflowMetadata,
+          assignment_id: Number(assignment?.id || 0) || null,
+        }
+      );
+      return { assignment, workflow };
+    });
+  }
+
   function getAssignmentById(assignmentId) {
     return normalizeAssignmentRow(getAssignmentByIdStmt.get(Number(assignmentId || 0)));
   }
@@ -6673,11 +6726,35 @@ export function createRepository(db) {
         payload.actor_user_id
       );
     }
+    const requestedPlaceFieldProductionState = contentType === "place" && String(existing.assignment_kind || "").trim().toLowerCase() === "field"
+      ? normalizedState === "in_progress"
+        ? "field_working"
+        : ["submitted", "resubmitted"].includes(normalizedState)
+          ? "field_review"
+          : null
+      : null;
+    // Historical place work can still be on a legacy skip state (for example collected). Keep
+    // that path working in 4b-1; the assignment trigger advances only when it follows a real
+    // place-ladder edge from the current production state.
+    const placeFieldProductionState = requestedPlaceFieldProductionState
+      && canTransition(contentType, "production", workflow?.production_state, requestedPlaceFieldProductionState, existing.content_item_id)
+      ? requestedPlaceFieldProductionState
+      : null;
+    if (requestedPlaceFieldProductionState && !placeFieldProductionState) {
+      console.error("[workflow-transition] skipped production sync", {
+        source: "field_assignment_state",
+        item_id: Number(existing.content_item_id || 0) || null,
+        content_type: contentType || null,
+        current_production_state: String(workflow?.production_state || "").trim().toLowerCase() || null,
+        attempted_production_state: requestedPlaceFieldProductionState,
+      });
+    }
     if (shouldSyncWorkflow) {
       upsertWorkflowModel(
         Number(existing.content_item_id),
         {
           assignment_state: normalizedState,
+          ...(placeFieldProductionState ? { production_state: placeFieldProductionState } : {}),
           last_transition_note: internalNote || contributorNote || workflow?.last_transition_note || null,
         },
         actorEmail,
@@ -13698,8 +13775,10 @@ export function createRepository(db) {
     getWorkflowStateDriftByItem,
     listWorkflowTransitionsByItem,
     listWorkflowTransitionsByAssignment,
+    canTransition,
     listAuditByTarget,
     createAssignment,
+    createAssignmentWithWorkflow,
     createAssignmentFromReadiness,
     returnFieldAssignmentForRework,
     repairAssignmentHandoffSnapshotForAssignment,

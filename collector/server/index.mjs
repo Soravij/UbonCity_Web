@@ -4427,7 +4427,12 @@ function ensureArticleProcessTransitionAccess(req, res, item, nextStatus) {
 function transitionArticleProcessState(req, item, currentStatus, nextStatus, note, reasonCode) {
   const itemId = Number(item?.id || 0) || 0;
   if (!itemId) throw new Error("Invalid item id");
-  const patch = mapArticleProcessStatusToWorkflowPatch(nextStatus);
+  const patch = resolvePlaceLadderWorkflowPatch(
+    item,
+    repo.ensureWorkflowModel(itemId),
+    mapArticleProcessStatusToWorkflowPatch(nextStatus, item?.type),
+    "article_process_transition"
+  );
   if (!patch) {
     throw new Error("article process patch is not supported for this status");
   }
@@ -4488,6 +4493,23 @@ function transitionArticleProcessState(req, item, currentStatus, nextStatus, not
     reason_code: reasonCode,
   });
   return model;
+}
+
+function resolvePlaceLadderWorkflowPatch(item, workflowModel, patch, source) {
+  if (!patch?.production_state || String(item?.type || "").trim().toLowerCase() !== "place") return patch;
+  const itemId = Number(item?.id || 0) || 0;
+  const currentProductionState = String(workflowModel?.production_state || "").trim().toLowerCase();
+  const attemptedProductionState = String(patch.production_state || "").trim().toLowerCase();
+  if (repo.canTransition("place", "production", currentProductionState, attemptedProductionState, itemId)) return patch;
+  console.error("[workflow-transition] skipped production sync", {
+    source,
+    item_id: itemId || null,
+    content_type: "place",
+    current_production_state: currentProductionState || null,
+    attempted_production_state: attemptedProductionState || null,
+  });
+  const { production_state: _ignoredProductionState, ...patchWithoutProductionState } = patch;
+  return patchWithoutProductionState;
 }
 
 function applyArticleNeedsRevisionWorkflowTransition(contentItemId, options = {}) {
@@ -4700,7 +4722,7 @@ function buildArticleProcessDraftPreview(item, workflowModel = null, publishable
   };
 }
 
-function mapArticleProcessStatusToWorkflowPatch(status) {
+function mapArticleProcessStatusToWorkflowPatch(status, contentType = "") {
   const normalized = normalizeArticleProcessStatus(status, "");
   if (!normalized || normalized === "synced_to_admin") return null;
   if (normalized === "ready_for_sync") {
@@ -4728,7 +4750,9 @@ function mapArticleProcessStatusToWorkflowPatch(status) {
     };
   }
   return {
-    production_state: "content_in_progress",
+    production_state: String(contentType || "").trim().toLowerCase() === "place"
+      ? "writing"
+      : "content_in_progress",
     publication_state: "draft",
   };
 }
@@ -10702,7 +10726,19 @@ app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "a
       });
     }
 
-    const assignment = repo.createAssignment(
+    const workflowPatch = resolvePlaceLadderWorkflowPatch(
+      item,
+      workflowModel,
+      {
+        production_state: String(item?.type || "").trim().toLowerCase() === "place"
+          ? "writing_assigned"
+          : "content_in_progress",
+        publication_state: "draft",
+        last_transition_note: String(req.body?.internal_note || "").trim() || "editorial assignment created",
+      },
+      "editorial_assignment_created"
+    );
+    const assignmentResult = repo.createAssignmentWithWorkflow(
       {
         content_item_id: id,
         assignee_user_id: assigneeId || null,
@@ -10735,21 +10771,15 @@ app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "a
         actor_role: role,
         reason_code: "article_editorial_assignment_created",
         note: "editorial assignment created via article process route",
-      }
-    );
-    repo.upsertWorkflowModel(
-      id,
-      {
-        production_state: "content_in_progress",
-        publication_state: "draft",
-        last_transition_note: String(req.body?.internal_note || "").trim() || "editorial assignment created",
       },
+      workflowPatch,
       actorEmail(req),
       {
         actor_role: role,
         reason_code: "article_process_assignment_created",
       }
     );
+    const assignment = assignmentResult.assignment;
     repo.logAudit(actorEmail(req), "article_assignment.create", "content_item", String(id), {
       assignment_id: assignment?.id || null,
       assignee_user_id: assigneeId || null,
@@ -11368,24 +11398,30 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
     const contentItemId = Number(assignment?.content_item_id || 0) || 0;
     if (assignmentKind === "field" && nextState === "accepted" && contentItemId) {
       clearExternalUsableMediaAtHandoff(contentItemId, { req });
-      const workflowModel = repo.ensureWorkflowModel(contentItemId);
-      const productionState = String(workflowModel?.production_state || "").trim().toLowerCase();
-      const publicationState = String(workflowModel?.publication_state || "").trim().toLowerCase() || "draft";
-      if (["collected", "analyzed", "brief_generated", "ready_for_content"].includes(productionState)) {
-        repo.upsertWorkflowModel(
-          contentItemId,
-          {
-            production_state: "content_in_progress",
-            publication_state: publicationState === "published" ? "published" : "draft",
-            last_transition_note: String(req.body?.internal_note || "").trim() || "field assignment accepted and promoted to article drafting",
-          },
-          actorEmail(req),
-          {
-            actor_role: role,
-            reason_code: "field_assignment_accepted_promote_article",
-            assignment_id: assignmentId,
-          }
-        );
+      const item = repo.getItem(contentItemId);
+      if (String(item?.type || "").trim().toLowerCase() === "place") {
+        // A place remains in field_review after acceptance. Editorial assignment creation is the
+        // explicit handoff that advances it to writing_assigned.
+      } else {
+        const workflowModel = repo.ensureWorkflowModel(contentItemId);
+        const productionState = String(workflowModel?.production_state || "").trim().toLowerCase();
+        const publicationState = String(workflowModel?.publication_state || "").trim().toLowerCase() || "draft";
+        if (["collected", "analyzed", "brief_generated", "ready_for_content"].includes(productionState)) {
+          repo.upsertWorkflowModel(
+            contentItemId,
+            {
+              production_state: "content_in_progress",
+              publication_state: publicationState === "published" ? "published" : "draft",
+              last_transition_note: String(req.body?.internal_note || "").trim() || "field assignment accepted and promoted to article drafting",
+            },
+            actorEmail(req),
+            {
+              actor_role: role,
+              reason_code: "field_assignment_accepted_promote_article",
+              assignment_id: assignmentId,
+            }
+          );
+        }
       }
     }
     repo.logAudit(actorEmail(req), "assignment.state.update", "content_item", String(assignment?.content_item_id || ""), {
