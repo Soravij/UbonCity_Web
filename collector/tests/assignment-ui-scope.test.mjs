@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import { ASSIGNMENT_STATES, PRODUCTION_STATES, PUBLICATION_STATES } from "../db/repository.mjs";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const indexHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "index.html"), "utf8");
@@ -304,8 +305,17 @@ function loadItemOwnershipScopeHooks(users = [], options = {}) {
       return normalized || fallback;
     },
     console,
+    __productionStates: PRODUCTION_STATES,
+    __publicationStates: PUBLICATION_STATES,
+    __assignmentStates: ASSIGNMENT_STATES,
   };
   const source = `
+const PRODUCTION_STATES = globalThis.__productionStates;
+const PUBLICATION_STATES = globalThis.__publicationStates;
+const ASSIGNMENT_STATES = globalThis.__assignmentStates;
+${extractNamedFunctionSource(indexServer, "findUnknownWorkflowModelState")}
+${extractNamedFunctionSource(indexServer, "logUnknownWorkflowModelState")}
+${extractNamedFunctionSource(indexServer, "assertKnownWorkflowModelStates")}
 ${extractNamedFunctionSource(indexServer, "actorPolicyRole")}
 ${extractNamedFunctionSource(indexServer, "isManagedContributorByUser")}
 ${extractNamedFunctionSource(indexServer, "getUserAssignmentRole")}

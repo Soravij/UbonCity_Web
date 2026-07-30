@@ -26,7 +26,14 @@ import {
   resolveAiConfig,
 } from "../config/ai.mjs";
 import { openDatabase } from "../db/client.mjs";
-import { createRepository, hasRecognizedEvaluationOverrideInput, resolveActiveAssignmentWorkBatchRows } from "../db/repository.mjs";
+import {
+  ASSIGNMENT_STATES,
+  PRODUCTION_STATES,
+  PUBLICATION_STATES,
+  createRepository,
+  hasRecognizedEvaluationOverrideInput,
+  resolveActiveAssignmentWorkBatchRows,
+} from "../db/repository.mjs";
 import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/index.mjs";
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import {
@@ -2802,21 +2809,6 @@ function safeAsync(handler) {
 const ALLOWED_USER_ROLES = new Set(["owner", "admin", "editor", "user", "freelance"]);
 const MANAGED_CONTRIBUTOR_ROLES = new Set(["freelance", "editor"]);
 const ASSIGNMENT_KINDS = new Set(["field", "editorial"]);
-const PRODUCTION_STATES = new Set([
-  "collected",
-  "analyzed",
-  "brief_generated",
-  "ready_for_content",
-  "content_in_progress",
-  "in_review",
-  "needs_revision",
-  "ready_for_publish",
-  "submitted_for_admin_review",
-  "rejected",
-  "completed",
-]);
-const PUBLICATION_STATES = new Set(["draft", "approved", "published", "unpublished", "archived", "deleted"]);
-const ASSIGNMENT_STATES = new Set(["assigned", "in_progress", "submitted", "revision_requested", "resubmitted", "accepted", "closed"]);
 const ASSIGNMENT_SUBMISSION_STATES = new Set(["submitted", "resubmitted"]);
 const ASSIGNMENT_DELIVERABLE_TYPES = new Set(["photos", "videos", "raw_notes", "caption_draft", "script_draft", "article_draft"]);
 const EXECUTION_CHANNELS = new Set(["facebook", "tiktok"]);
@@ -2843,6 +2835,47 @@ const ARTICLE_PROCESS_TRANSITIONS = Object.freeze({
   submitted_for_admin_review: new Set(["revision_requested"]),
   synced_to_admin: new Set(["revision_requested", "submitted_for_admin_review"]),
 });
+
+function findUnknownWorkflowModelState(workflowModel = null) {
+  const states = [
+    ["production", workflowModel?.production_state, PRODUCTION_STATES],
+    ["publication", workflowModel?.publication_state, PUBLICATION_STATES],
+    ["assignment", workflowModel?.assignment_state, ASSIGNMENT_STATES],
+  ];
+  for (const [stateGroup, value, knownStates] of states) {
+    const state = String(value || "").trim().toLowerCase();
+    if (state && !knownStates.has(state)) return { state_group: stateGroup, state };
+  }
+  return null;
+}
+
+function logUnknownWorkflowModelState(reader, contentItemId, unknownState) {
+  console.error("[workflow-reader] unknown workflow state", {
+    reader,
+    item_id: Number(contentItemId || 0) || null,
+    state_group: unknownState?.state_group || null,
+    state: unknownState?.state || null,
+  });
+}
+
+function assertKnownWorkflowModelStates(reader, contentItemId, workflowModel = null) {
+  const unknownState = findUnknownWorkflowModelState(workflowModel);
+  if (!unknownState) return;
+  logUnknownWorkflowModelState(reader, contentItemId, unknownState);
+  throw new Error(`unknown ${unknownState.state_group} state '${unknownState.state}' for content item ${Number(contentItemId || 0) || "unknown"}`);
+}
+
+function rejectUnknownWorkflowModelState(res, reader, contentItemId, workflowModel = null) {
+  const unknownState = findUnknownWorkflowModelState(workflowModel);
+  if (!unknownState) return false;
+  logUnknownWorkflowModelState(reader, contentItemId, unknownState);
+  res.status(409).json({
+    error: "unknown workflow state",
+    content_item_id: Number(contentItemId || 0) || null,
+    ...unknownState,
+  });
+  return true;
+}
 const ASSIGNMENT_STATE_AUDIT_ACTIONS = Object.freeze({
   request_revision: "assignment.state.request_revision",
   accept_submission: "assignment.state.accept_submission",
@@ -4003,6 +4036,10 @@ function isClaimableRawPoolItem(item) {
   const publicationState = String(item.publication_state || "").trim().toLowerCase();
   const productionState = String(item.production_state || "").trim().toLowerCase();
   const workflowStatus = String(item.workflow_status || "").trim().toLowerCase();
+  assertKnownWorkflowModelStates("isClaimableRawPoolItem", item.id, {
+    production_state: productionState,
+    publication_state: publicationState,
+  });
   const allowedPublication = new Set(["", "draft", "raw"]);
   const allowedProduction = new Set(["", "collected", "raw"]);
   const allowedWorkflow = new Set(["", "raw"]);
@@ -4082,9 +4119,14 @@ function listUsersByIds(ids = []) {
 }
 
 function buildItemWorkScopeState(item, assignment) {
-  const publicationState = String(item?.publication_state || item?.workflow_status || "").trim().toLowerCase();
+  const publicationState = String(item?.publication_state || "").trim().toLowerCase();
   const productionState = String(item?.production_state || "").trim().toLowerCase();
-  if (publicationState === "published" || publicationState === "completed" || productionState === "completed" || productionState === "ready_for_publish") {
+  assertKnownWorkflowModelStates("buildItemWorkScopeState", item?.id, {
+    production_state: productionState,
+    publication_state: publicationState,
+  });
+  const effectivePublicationState = publicationState || String(item?.workflow_status || "").trim().toLowerCase();
+  if (effectivePublicationState === "published" || effectivePublicationState === "completed" || productionState === "completed" || productionState === "ready_for_publish") {
     return "published_or_completed";
   }
   const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;
@@ -4591,6 +4633,7 @@ function canTransitionArticleProcess(currentStatus, nextStatus) {
 }
 
 function deriveArticleProcessStatus(item, workflowModel = null, publishableSource = null) {
+  assertKnownWorkflowModelStates("deriveArticleProcessStatus", item?.id, workflowModel);
   const productionState = String(workflowModel?.production_state || "").trim().toLowerCase();
   const publicationState = String(workflowModel?.publication_state || "").trim().toLowerCase();
   if (publicationState === "published") return "synced_to_admin";
@@ -8881,7 +8924,7 @@ app.put("/api/transport-map-routes/:id", requireRole("owner", "admin", "user"), 
   res.json(buildTransportMapRouteResponse(item));
 });
 
-app.post("/api/transport-map-routes/:id/release-main", requireRole("owner", "admin"), workflowRateLimit, async (req, res) => {
+app.post("/api/transport-map-routes/:id/release-main", requireRole("owner", "admin"), workflowRateLimit, safeAsync(async (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid route id" });
@@ -8966,7 +9009,7 @@ app.post("/api/transport-map-routes/:id/release-main", requireRole("owner", "adm
   } catch (err) {
     res.status(500).json({ error: String(err?.message || "Cannot sync transport route to backend") });
   }
-});
+}));
 
 app.post("/api/items/:id/claim", requireRole("owner", "admin", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
@@ -9350,7 +9393,7 @@ app.post("/api/items/:id/seo-suggestion", requireRole("owner", "admin", "editor"
   }
 });
 
-app.post("/api/items/:id/article-suggestion", requireRole("owner", "admin", "editor", "user"), async (req, res) => {
+app.post("/api/items/:id/article-suggestion", requireRole("owner", "admin", "editor", "user"), safeAsync(async (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -9426,7 +9469,7 @@ app.post("/api/items/:id/article-suggestion", requireRole("owner", "admin", "edi
     const status = /configured|required/i.test(msg) ? 409 : /invalid|empty|json/i.test(msg) ? 400 : 500;
     res.status(status).json({ error: msg });
   }
-});
+}));
 
 app.get("/api/items/:id/workflow-model", requireRole("owner", "admin", "editor", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
@@ -9465,7 +9508,7 @@ app.get("/api/items/:id/article-process", requireRole("owner", "admin", "editor"
   res.json(buildArticleProcessPayload(req, item));
 });
 
-app.post("/api/items/:id/article-process/transition", requireRole("owner", "admin", "editor", "user"), async (req, res) => {
+app.post("/api/items/:id/article-process/transition", requireRole("owner", "admin", "editor", "user"), safeAsync(async (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -9517,7 +9560,7 @@ app.post("/api/items/:id/article-process/transition", requireRole("owner", "admi
     const status = /invalid .*transition|cannot transition|latest draft is required|review prerequisite missing|stale review report|quality gate failed/i.test(msg) ? 409 : 400;
     res.status(status).json({ error: msg });
   }
-});
+}));
 
 app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "admin", "editor", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
@@ -14464,6 +14507,9 @@ app.post("/api/web-review-feedback", async (req, res) => {
   try {
     const actor = "web-review-sync";
     const workflowBefore = repo.ensureWorkflowModel(sourceContentItemId);
+    if (rejectUnknownWorkflowModelState(res, "web-review-feedback", sourceContentItemId, workflowBefore)) {
+      return;
+    }
     const nextPublicationState =
       String(workflowBefore?.publication_state || "").trim().toLowerCase() === "published"
         ? "unpublished"

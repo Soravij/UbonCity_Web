@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { cleanReviewsAndContent } from "../cleaner/review-cleaner.mjs";
 import { generateContentDrafts } from "../ai/generate-content.mjs";
 import { runQualityChecks } from "../quality/checks.mjs";
+import { PRODUCTION_STATES } from "../db/repository.mjs";
 
 const GOVERNANCE_REASON_CODES = Object.freeze({
   review_approve: "review_approved",
@@ -33,6 +34,19 @@ function traceTranslationDiagnostics(stage, details = {}) {
   } catch {
     console.error(`[${ts}] translation-debug stage=${stage}`);
   }
+}
+
+function assertKnownQualityCandidateState(item) {
+  const state = String(item?.production_state || "").trim().toLowerCase();
+  if (!state || PRODUCTION_STATES.has(state)) return;
+  const itemId = Number(item?.id || 0) || null;
+  console.error("[workflow-reader] unknown workflow state", {
+    reader: "runQualityStage",
+    item_id: itemId,
+    state_group: "production",
+    state,
+  });
+  throw new Error(`unknown production state '${state}' for content item ${itemId ?? "unknown"}`);
 }
 
 function splitCsvLine(line) {
@@ -2532,6 +2546,9 @@ export async function runQualityStage(repo, actorEmail, options = {}) {
     repo.listItemsByWorkflowHead({ production_states: ["generated", "in_review", "needs_revision"] }),
     options
   );
+  for (const item of candidates) {
+    assertKnownQualityCandidateState(item);
+  }
   const normalized = candidates.map((item, idx) => {
     const mapped = mapFromDb(item, idx + 1);
     const draft = repo.latestDraftByItem(item.id);
