@@ -494,23 +494,28 @@ function buildContentTypeTransitionRules() {
 
 function buildPlaceTransitionRules() {
   const legacyRules = buildContentTypeTransitionRules();
-  const legacyProduction = legacyRules.production;
-  // 4b-1 deliberately adds only the place ladder edges.  The legacy skip and parking edges
-  // remain until 4b-2; non-place content types keep the unmodified legacy graph.
+  // Place owns this complete graph: its 22 ladder edges and only parking edges that do not
+  // touch retired brief_generated/content_in_progress. Non-place types retain legacy rules.
   return Object.freeze({
     ...legacyRules,
     production: Object.freeze({
-      ...legacyProduction,
-      generated: new Set([...legacyProduction.generated, "brief_generated"]),
-      ready_for_content: new Set([...legacyProduction.ready_for_content, "field_working"]),
+      collected: new Set(["analyzed", "needs_revision", "rejected"]),
+      analyzed: new Set(["generated", "needs_revision", "rejected"]),
+      generated: new Set(["ready_for_content", "analyzed", "needs_revision", "rejected"]),
+      ready_for_content: new Set(["field_working", "generated", "rejected"]),
       field_working: new Set(["ready_for_content", "field_review"]),
-      field_review: new Set(["brief_generated", "field_working", "writing_assigned"]),
-      writing_assigned: new Set(["writing"]),
+      field_review: new Set(["generated", "field_working", "writing_assigned"]),
+      writing_assigned: new Set(["writing", "field_review"]),
       writing: new Set(["writing_assigned", "in_review"]),
-      in_review: new Set([...legacyProduction.in_review, "writing", "field_review"]),
-      ready_for_publish: new Set([...legacyProduction.ready_for_publish, "in_review"]),
-      submitted_for_admin_review: new Set([...legacyProduction.submitted_for_admin_review, "in_review"]),
-      brief_generated: new Set([...legacyProduction.brief_generated, "generated"]),
+      in_review: new Set(["ready_for_publish", "writing", "field_review", "needs_revision", "rejected"]),
+      ready_for_publish: new Set(["submitted_for_admin_review", "in_review", "needs_revision", "rejected"]),
+      submitted_for_admin_review: new Set(["completed", "in_review", "needs_revision", "rejected"]),
+      completed: new Set(["needs_revision"]),
+      needs_revision: new Set(["generated", "in_review", "rejected"]),
+      rejected: new Set(["analyzed", "ready_for_content"]),
+      // Kept in the shared enum for non-place and legacy data, but isolated for place.
+      brief_generated: new Set([]),
+      content_in_progress: new Set([]),
     }),
   });
 }
@@ -519,28 +524,34 @@ function buildPlaceTransitionRules() {
 // It stays next to TRANSITION_RULES so the route never has to maintain a second nine-edge allowlist.
 // `direction` is part of the audit contract from place-workflow-policy §4.1, not UI decoration.
 export const PLACE_BACKWARD_PRODUCTION_TRANSITIONS = Object.freeze({
-  brief_generated: Object.freeze({
-    generated: Object.freeze({ direction: "in_process", label_th: "สร้างร่างด้วย AI", surface: "item_editor", publication_state: "draft" }),
+  generated: Object.freeze({
+    analyzed: Object.freeze({ direction: "in_process", label_th: "คัดข้อมูลส่งเข้า AI", surface: "item_editor", publication_state: "draft", return_to_clean: true }),
   }),
   field_working: Object.freeze({
-    ready_for_content: Object.freeze({ direction: "in_process", label_th: "ส่งงานไปทำ", surface: "handoff", publication_state: "draft" }),
+    ready_for_content: Object.freeze({ direction: "in_process", label_th: "ส่งงานไปทำ", surface: "handoff", publication_state: "draft", return_to_clean: true }),
   }),
   field_review: Object.freeze({
     field_working: Object.freeze({ direction: "in_process", label_th: "ลงงาน", surface: "assignment_work", publication_state: "draft" }),
-    brief_generated: Object.freeze({ direction: "cross_process", label_th: "ตรวจแก้เนื้อหา", surface: "item_editor", publication_state: "draft" }),
+    generated: Object.freeze({ direction: "cross_process", label_th: "สร้างร่างด้วย AI และตรวจแก้เนื้อหา", surface: "item_editor", publication_state: "draft", return_to_clean: true }),
+  }),
+  ready_for_content: Object.freeze({
+    generated: Object.freeze({ direction: "cross_process", label_th: "สร้างร่างด้วย AI และตรวจแก้เนื้อหา", surface: "item_editor", publication_state: "draft", return_to_clean: true }),
+  }),
+  writing_assigned: Object.freeze({
+    field_review: Object.freeze({ direction: "cross_process", label_th: "ตรวจงาน", surface: "assignment_review", publication_state: "draft", return_to_clean: true }),
   }),
   writing: Object.freeze({
-    writing_assigned: Object.freeze({ direction: "in_process", label_th: "รับงาน", surface: "article_intake", publication_state: "draft" }),
+    writing_assigned: Object.freeze({ direction: "in_process", label_th: "รับงาน", surface: "article_intake", publication_state: "draft", return_to_clean: true }),
   }),
   in_review: Object.freeze({
     writing: Object.freeze({ direction: "in_process", label_th: "เขียนบทความ", surface: "article_workspace", publication_state: "draft" }),
-    field_review: Object.freeze({ direction: "cross_process", label_th: "ตรวจงาน", surface: "assignment_review", publication_state: "draft" }),
+    field_review: Object.freeze({ direction: "cross_process", label_th: "ตรวจงาน", surface: "assignment_review", publication_state: "draft", return_to_clean: true }),
   }),
   ready_for_publish: Object.freeze({
-    in_review: Object.freeze({ direction: "in_process", label_th: "ตรวจและอนุมัติ", surface: "article_submit", publication_state: "draft" }),
+    in_review: Object.freeze({ direction: "in_process", label_th: "ตรวจและอนุมัติ", surface: "article_submit", publication_state: "draft", return_to_clean: true }),
   }),
   submitted_for_admin_review: Object.freeze({
-    in_review: Object.freeze({ direction: "cross_process", label_th: "ตรวจและอนุมัติ", surface: "article_submit", publication_state: "draft" }),
+    in_review: Object.freeze({ direction: "cross_process", label_th: "ตรวจและอนุมัติ", surface: "article_submit", publication_state: "draft", return_to_clean: true }),
   }),
 });
 
@@ -11101,29 +11112,56 @@ export function createRepository(db) {
         throw new Error("cannot return to clean from publish-ready or published state");
       }
 
-      // Validate the transition before archiving the field pack so business-rule failures
-      // are caught before we mutate data, while the whole operation still stays atomic.
-      if (productionStateBefore !== "analyzed") {
+      // Resolve every legal hop before archiving. Place may only travel through the explicit
+      // backward metadata; it never writes analyzed as a shortcut.
+      const returnPath = [];
+      let nextFromState = productionStateBefore;
+      if (contentType === "place") {
+        while (nextFromState !== "analyzed") {
+          const candidates = Object.entries(PLACE_BACKWARD_PRODUCTION_TRANSITIONS[nextFromState] || {})
+            .filter(([, transition]) => transition?.return_to_clean === true);
+          if (candidates.length !== 1) {
+            throw new Error(`place return-to-clean has no legal backward path from ${nextFromState || "(missing state)"}`);
+          }
+          const [toState, transition] = candidates[0];
+          assertValidTransition("place", "production", nextFromState, toState, itemId);
+          returnPath.push({ from_state: nextFromState, to_state: toState, publication_state: transition.publication_state });
+          nextFromState = toState;
+        }
+      } else if (productionStateBefore !== "analyzed") {
         assertValidTransition(contentType, "production", workflowBefore?.production_state, "analyzed", itemId);
+        returnPath.push({ from_state: productionStateBefore, to_state: "analyzed", publication_state: "draft" });
       }
 
       archiveFieldPackByIdStmt.run(Number(currentFieldPack.id || 0) || 0);
 
-      const workflowAfter = upsertWorkflowModel(
-        itemId,
-        {
-          production_state: "analyzed",
-          current_field_pack_id: null,
-          last_transition_note: reasonNote,
-        },
-        actor,
-        {
-          actor_role: actorRole,
-          reason_code: "field_pack_return_to_clean",
-          bump_state_version: true,
-          bump_content_version: true,
-        }
-      );
+      let workflowAfter = workflowBefore;
+      for (const [index, hop] of returnPath.entries()) {
+        workflowAfter = upsertWorkflowModel(
+          itemId,
+          {
+            production_state: hop.to_state,
+            publication_state: hop.publication_state || "draft",
+            ...(index === returnPath.length - 1 ? { current_field_pack_id: null } : {}),
+            last_transition_note: reasonNote,
+          },
+          actor,
+          {
+            actor_role: actorRole,
+            reason_code: "field_pack_return_to_clean",
+            bump_state_version: true,
+            bump_content_version: true,
+          }
+        );
+      }
+      if (returnPath.length === 0 && Number(workflowBefore?.current_field_pack_id || 0) > 0) {
+        workflowAfter = upsertWorkflowModel(
+          itemId,
+          { current_field_pack_id: null, last_transition_note: reasonNote },
+          actor,
+          { actor_role: actorRole, reason_code: "field_pack_return_to_clean", bump_content_version: true }
+        );
+      }
 
       logAudit(actor, "field_pack.return_to_clean", "content_item", String(itemId), {
         content_item_id: itemId,
@@ -11133,6 +11171,7 @@ export function createRepository(db) {
         to_production_state: workflowAfter?.production_state || null,
         from_publication_state: workflowBefore?.publication_state || null,
         to_publication_state: workflowAfter?.publication_state || null,
+        transition_hops: returnPath,
       });
 
       return {

@@ -17,6 +17,17 @@ test("backward workflow endpoint requires a reason, uses server direction metada
   assert.match(serverSource, /workflow\.backward_transition/);
 });
 
+test("generated place items have a guarded P1-review action before handoff", () => {
+  const itemEditorSource = fs.readFileSync(path.join(root, "server", "public", "item-editor.js"), "utf8");
+  assert.match(serverSource, /app\.post\("\/api\/items\/:id\/place-ready-for-content", requireRole\("owner", "admin", "user"\)/);
+  assert.match(serverSource, /place item must be at generated before it can move to ready_for_content/);
+  assert.match(serverSource, /validateAssignmentCreateFieldPackPrerequisites\("field", fieldPack\)/);
+  assert.match(serverSource, /production_state: "ready_for_content"/);
+  assert.match(itemEditorSource, /isPlaceAtGeneratedStep\(\)/);
+  assert.match(itemEditorSource, /ตรวจแล้ว: พร้อมส่งออกไปทำ/);
+  assert.match(itemEditorSource, /\/place-ready-for-content/);
+});
+
 test("every HTML page loading a backward-control renderer contains its container", () => {
   const publicRoot = path.join(root, "server", "public");
   const htmlFiles = fs.readdirSync(publicRoot).filter((file) => file.endsWith(".html"));

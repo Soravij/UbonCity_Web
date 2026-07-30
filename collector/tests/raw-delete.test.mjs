@@ -267,7 +267,7 @@ test("bulkDeleteItems is all-or-nothing when one item is not eligible (rollback)
 
     // Move progressed item to a non-raw-only state so it won't be eligible
     ctx.repo.upsertWorkflowModel(progressedId, {
-      production_state: "content_in_progress",
+      production_state: "analyzed",
       publication_state: "draft",
     }, "system@local", { actor_role: "system", reason_code: "test" });
 
@@ -307,8 +307,8 @@ test("bulkDeleteItems rollback on simulated runtime failure", () => {
     // Instead, test that mixing a hard-eligible with a hard-non-eligible rolls back.
     // Move item2 to non-eligible state
     ctx.repo.upsertWorkflowModel(id2, {
-      production_state: "content_in_progress",
-      publication_state: "approved",
+      production_state: "analyzed",
+      publication_state: "draft",
     }, "system@local", { actor_role: "system", reason_code: "test" });
 
     const eligibility2After = ctx.repo.getRawOnlyHardDeleteEligibility(id2);
@@ -354,7 +354,7 @@ test("single safe raw-only hard delete throws for ineligible item", () => {
     assert.ok(id > 0, "item created");
     // Move to non-eligible state
     ctx.repo.upsertWorkflowModel(id, {
-      production_state: "content_in_progress",
+      production_state: "analyzed",
       publication_state: "draft",
     }, "system@local", { actor_role: "system", reason_code: "test" });
 
@@ -384,7 +384,7 @@ test("bulkDeleteItems handles mixed hard and soft deletes in one transaction", (
     assert.ok(softId > 0, "soft item created");
     // Move it to a progressed state so it's not raw-only eligible
     ctx.repo.upsertWorkflowModel(softId, {
-      production_state: "content_in_progress",
+      production_state: "analyzed",
       publication_state: "draft",
     }, "system@local", { actor_role: "system", reason_code: "test" });
 

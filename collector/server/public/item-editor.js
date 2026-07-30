@@ -171,6 +171,11 @@ function getEditorAssignmentGuard() {
   };
 }
 
+function isPlaceAtGeneratedStep() {
+  return String(state.item?.type || "").trim().toLowerCase() === "place"
+    && getItemWorkflowCompatStatus(state.item) === "generated";
+}
+
 function applyEditorActionGuards() {
   const editGuard = getEditPermissionGuard();
   setPreparationEditingDisabled(!editGuard.allowed);
@@ -228,6 +233,9 @@ function applyEditorActionGuards() {
     const blockedReason = !editGuard.allowed ? editGuard.reason : guard.reason;
     btn.disabled = !editGuard.allowed || !guard.allowed;
     btn.title = btn.disabled ? blockedReason : "";
+    btn.textContent = isPlaceAtGeneratedStep()
+      ? "ตรวจแล้ว: พร้อมส่งออกไปทำ"
+      : "ไปขั้นส่งต่อ handoff";
   }
   renderFieldProgressControl();
 }
@@ -5573,9 +5581,6 @@ function wire() {
   if (backBtn) backBtn.textContent = "กลับ";
   const nextAiBtn = qs("btn-next-ai");
   if (nextAiBtn) nextAiBtn.textContent = "ถัดไป: ส่งเข้า Agent";
-  const nextExportBtn = qs("btn-next-export");
-  if (nextExportBtn) nextExportBtn.textContent = "ไปขั้นส่งต่อ handoff";
-
   qs("btn-prev-step")?.addEventListener("click", () => {
     window.location.href = getPreviousStepUrl();
   });
@@ -5769,8 +5774,13 @@ function wire() {
         setStatus(guard.reason, true);
         return;
       }
-      setStatus("กำลังบันทึกและส่งต่อไปคิว handoff...");
+      const approvePlaceP1 = isPlaceAtGeneratedStep();
+      setStatus(approvePlaceP1 ? "กำลังบันทึกและยืนยันส่งออกไปทำ..." : "กำลังบันทึกและส่งต่อไปคิว handoff...");
       await saveCurrentWork();
+      if (approvePlaceP1) {
+        const result = await api(`/api/items/${state.itemId}/place-ready-for-content`, { method: "POST" });
+        state.item = result?.item || state.item;
+      }
       window.location.href = `/?tab=handoff&item_id=${state.itemId}`;
     } catch (err) {
       setStatus(`ส่งต่อ handoff ไม่สำเร็จ: ${err.message}`, true);
