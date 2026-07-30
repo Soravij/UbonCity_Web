@@ -30,9 +30,10 @@ test("release tab exposes article queue UI and renders accepted handoff items", 
   assert.equal(appJs.includes("เปิด Article Workspace"), true, "missing release workspace CTA label");
 });
 
-test("field assignment acceptance promotes future items into article drafting", () => {
+test("field assignment acceptance leaves place in field review and retains the legacy promotion for non-place items", () => {
   const requiredServerSnippets = [
     'assignmentKind === "field" && nextState === "accepted"',
+    'String(item?.type || "").trim().toLowerCase() === "place"',
     'production_state: "content_in_progress"',
     'reason_code: "field_assignment_accepted_promote_article"',
   ];
