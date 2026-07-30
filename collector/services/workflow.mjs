@@ -35,6 +35,34 @@ function traceTranslationDiagnostics(stage, details = {}) {
   }
 }
 
+const KNOWN_PRODUCTION_STATES = new Set([
+  "collected",
+  "analyzed",
+  "brief_generated",
+  "ready_for_content",
+  "content_in_progress",
+  "generated",
+  "in_review",
+  "needs_revision",
+  "ready_for_publish",
+  "submitted_for_admin_review",
+  "rejected",
+  "completed",
+]);
+
+function assertKnownQualityCandidateState(item) {
+  const state = String(item?.production_state || "").trim().toLowerCase();
+  if (!state || KNOWN_PRODUCTION_STATES.has(state)) return;
+  const itemId = Number(item?.id || 0) || null;
+  console.error("[workflow-reader] unknown workflow state", {
+    reader: "runQualityStage",
+    item_id: itemId,
+    state_group: "production",
+    state,
+  });
+  throw new Error(`unknown production state '${state}' for content item ${itemId ?? "unknown"}`);
+}
+
 function splitCsvLine(line) {
   const out = [];
   let cur = "";
@@ -2532,6 +2560,9 @@ export async function runQualityStage(repo, actorEmail, options = {}) {
     repo.listItemsByWorkflowHead({ production_states: ["generated", "in_review", "needs_revision"] }),
     options
   );
+  for (const item of candidates) {
+    assertKnownQualityCandidateState(item);
+  }
   const normalized = candidates.map((item, idx) => {
     const mapped = mapFromDb(item, idx + 1);
     const draft = repo.latestDraftByItem(item.id);

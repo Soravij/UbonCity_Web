@@ -5740,13 +5740,32 @@ export function createRepository(db) {
     return payload;
   }
 
-function normalizeStateValue(value, stateGroup) {
+  function normalizeStateValue(value, stateGroup) {
     const normalized = String(value || "").trim().toLowerCase();
     if (!normalized) return "";
     if (stateGroup === "production") return PRODUCTION_STATES.has(normalized) ? normalized : "";
     if (stateGroup === "publication") return PUBLICATION_STATES.has(normalized) ? normalized : "";
     if (stateGroup === "assignment") return ASSIGNMENT_STATES.has(normalized) ? normalized : "";
     return "";
+  }
+
+  function assertKnownWorkflowHeadState(value, stateGroup, contentItemId, reader) {
+    const state = String(value || "").trim().toLowerCase();
+    if (!state) return;
+    const knownStates = stateGroup === "production"
+      ? PRODUCTION_STATES
+      : stateGroup === "publication"
+        ? PUBLICATION_STATES
+        : ASSIGNMENT_STATES;
+    if (knownStates.has(state)) return;
+    const itemId = Number(contentItemId || 0) || null;
+    console.error("[workflow-reader] unknown workflow state", {
+      reader,
+      item_id: itemId,
+      state_group: stateGroup,
+      state,
+    });
+    throw new Error(`unknown ${stateGroup} state '${state}' for content item ${itemId ?? "unknown"}`);
   }
 
   function canTransition(stateGroup, fromState, toState) {
@@ -6046,18 +6065,21 @@ function normalizeStateValue(value, stateGroup) {
   }
 
   function listItemsByWorkflowHead(filters = {}) {
-    const productionStates = Array.isArray(filters?.production_states)
-      ? filters.production_states.map((value) => normalizeStateValue(value, "production")).filter(Boolean)
-      : [];
-    const publicationStates = Array.isArray(filters?.publication_states)
-      ? filters.publication_states.map((value) => normalizeStateValue(value, "publication")).filter(Boolean)
-      : [];
-    const assignmentStates = Array.isArray(filters?.assignment_states)
-      ? filters.assignment_states.map((value) => normalizeStateValue(value, "assignment")).filter(Boolean)
-      : [];
+    const normalizeFilterStates = (values, stateGroup) => (Array.isArray(values) ? values : [])
+      .map((value) => {
+        assertKnownWorkflowHeadState(value, stateGroup, null, "listItemsByWorkflowHead.filter");
+        return normalizeStateValue(value, stateGroup);
+      })
+      .filter(Boolean);
+    const productionStates = normalizeFilterStates(filters?.production_states, "production");
+    const publicationStates = normalizeFilterStates(filters?.publication_states, "publication");
+    const assignmentStates = normalizeFilterStates(filters?.assignment_states, "assignment");
     return listItems().filter((item) => {
       const head = getWorkflowModelByItem(item.id);
       if (!head) return false;
+      assertKnownWorkflowHeadState(head?.production_state, "production", item.id, "listItemsByWorkflowHead");
+      assertKnownWorkflowHeadState(head?.publication_state, "publication", item.id, "listItemsByWorkflowHead");
+      assertKnownWorkflowHeadState(head?.assignment_state, "assignment", item.id, "listItemsByWorkflowHead");
       if (productionStates.length && !productionStates.includes(String(head?.production_state || "").trim().toLowerCase())) {
         return false;
       }

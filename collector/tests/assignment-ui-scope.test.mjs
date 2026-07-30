@@ -306,6 +306,12 @@ function loadItemOwnershipScopeHooks(users = [], options = {}) {
     console,
   };
   const source = `
+const PRODUCTION_STATES = new Set(["collected", "analyzed", "brief_generated", "ready_for_content", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "submitted_for_admin_review", "rejected", "completed"]);
+const PUBLICATION_STATES = new Set(["draft", "approved", "published", "unpublished", "archived", "deleted"]);
+const ASSIGNMENT_STATES = new Set(["assigned", "in_progress", "submitted", "revision_requested", "resubmitted", "accepted", "closed"]);
+${extractNamedFunctionSource(indexServer, "findUnknownWorkflowModelState")}
+${extractNamedFunctionSource(indexServer, "logUnknownWorkflowModelState")}
+${extractNamedFunctionSource(indexServer, "assertKnownWorkflowModelStates")}
 ${extractNamedFunctionSource(indexServer, "actorPolicyRole")}
 ${extractNamedFunctionSource(indexServer, "isManagedContributorByUser")}
 ${extractNamedFunctionSource(indexServer, "getUserAssignmentRole")}
