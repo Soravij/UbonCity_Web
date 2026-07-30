@@ -210,6 +210,110 @@ test("field assignment state changes advance only place through the new field la
   }
 });
 
+test("legacy place field sync logs its skipped ladder write instead of failing the assignment", () => {
+  const ctx = createContext();
+  const originalError = console.error;
+  const skippedLogs = [];
+  console.error = (...args) => {
+    if (args[0] === "[workflow-transition] skipped production sync") skippedLogs.push(args[1]);
+  };
+  try {
+    const place = ctx.createItem("place", { production_state: "collected" });
+    const assignment = ctx.repo.createAssignment({
+      content_item_id: place.id,
+      assignment_kind: "field",
+      state: "assigned",
+      assignee_name: "legacy worker",
+      assignee_contact: "legacy@example.com",
+    });
+    assert.doesNotThrow(() => ctx.repo.updateAssignmentState(assignment.id, "in_progress", "test@local"));
+    assert.equal(ctx.repo.ensureWorkflowModel(place.id).production_state, "collected");
+    assert.deepEqual(skippedLogs, [{
+      source: "field_assignment_state",
+      item_id: place.id,
+      content_type: "place",
+      current_production_state: "collected",
+      attempted_production_state: "field_working",
+    }]);
+  } finally {
+    console.error = originalError;
+    ctx.cleanup();
+  }
+}, { concurrency: false });
+
+test("atomic editorial assignment creation preserves legacy place state and rolls back when workflow write fails", () => {
+  const ctx = createContext();
+  try {
+    for (const productionState of ["collected", "analyzed", "content_in_progress"]) {
+      const item = ctx.createItem("place", { production_state: productionState });
+      const result = ctx.repo.createAssignmentWithWorkflow(
+        {
+          content_item_id: item.id,
+          assignment_kind: "editorial",
+          state: "assigned",
+          assignee_name: `legacy editor ${productionState}`,
+          assignee_contact: `${productionState}@example.com`,
+        },
+        null,
+        { actor_email: "test@local", actor_role: "admin", reason_code: "test_editorial_assignment" },
+        { publication_state: "draft", last_transition_note: "legacy editorial assignment" },
+        "test@local",
+        { actor_role: "admin", reason_code: "test_editorial_assignment" }
+      );
+      assert.ok(result.assignment.id);
+      assert.equal(ctx.repo.ensureWorkflowModel(item.id).production_state, productionState);
+    }
+
+    const ladderItem = ctx.createItem("place", { production_state: "field_review" });
+    ctx.repo.createAssignmentWithWorkflow(
+      {
+        content_item_id: ladderItem.id,
+        assignment_kind: "editorial",
+        state: "assigned",
+        assignee_name: "ladder editor",
+        assignee_contact: "ladder@example.com",
+      },
+      null,
+      { actor_email: "test@local", actor_role: "admin", reason_code: "test_editorial_assignment" },
+      { production_state: "writing_assigned", publication_state: "draft" },
+      "test@local",
+      { actor_role: "admin", reason_code: "test_editorial_assignment" }
+    );
+    assert.equal(ctx.repo.ensureWorkflowModel(ladderItem.id).production_state, "writing_assigned");
+
+    const failingItem = ctx.createItem("place", { production_state: "field_review" });
+    ctx.db.exec(`
+      CREATE TRIGGER fail_editorial_workflow_write
+      BEFORE UPDATE ON content_workflow_models
+      WHEN NEW.content_item_id=${Number(failingItem.id)}
+      BEGIN
+        SELECT RAISE(ABORT, 'forced workflow write failure');
+      END;
+    `);
+    assert.throws(() => ctx.repo.createAssignmentWithWorkflow(
+      {
+        content_item_id: failingItem.id,
+        assignment_kind: "editorial",
+        state: "assigned",
+        assignee_name: "failing editor",
+        assignee_contact: "failing@example.com",
+      },
+      null,
+      { actor_email: "test@local", actor_role: "admin", reason_code: "test_editorial_assignment" },
+      { production_state: "writing_assigned", publication_state: "draft" },
+      "test@local",
+      { actor_role: "admin", reason_code: "test_editorial_assignment" }
+    ), /forced workflow write failure/);
+    assert.equal(
+      ctx.db.prepare("SELECT COUNT(*) AS c FROM content_assignments WHERE content_item_id=?").get(failingItem.id)?.c,
+      0,
+      "the assignment insert must roll back with its workflow write"
+    );
+  } finally {
+    ctx.cleanup();
+  }
+}, { concurrency: false });
+
 test("unknown content types preserve the legacy result but log the fallback", () => {
   const ctx = createContext();
   const originalError = console.error;

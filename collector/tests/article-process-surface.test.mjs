@@ -113,6 +113,27 @@ globalThis.__mapArticleProcessStatusToWorkflowPatch = mapArticleProcessStatusToW
   return context.__mapArticleProcessStatusToWorkflowPatch;
 }
 
+function loadPlaceLadderPatchResolver(logs, transitionAllowed) {
+  const context = {
+    repo: {
+      canTransition() {
+        return transitionAllowed;
+      },
+    },
+    console: {
+      error(...args) {
+        logs.push(args);
+      },
+    },
+  };
+  context.globalThis = context;
+  vm.runInNewContext(`
+${extractFunctionBlock("resolvePlaceLadderWorkflowPatch")}
+globalThis.__resolvePlaceLadderWorkflowPatch = resolvePlaceLadderWorkflowPatch;
+`, context, { filename: "place-ladder-workflow-patch.js" });
+  return context.__resolvePlaceLadderWorkflowPatch;
+}
+
 test("article process routes exist with dedicated surface area", () => {
   assert.match(source, /app\.get\("\/api\/items\/:id\/article-process", requireRole\("owner", "admin", "editor", "user"\)/);
   assert.match(source, /app\.post\("\/api\/items\/:id\/article-process\/transition", requireRole\("owner", "admin", "editor", "user"\)/);
@@ -151,6 +172,30 @@ test("article drafting maps to the place writing step while non-place content ke
     JSON.parse(JSON.stringify(mapArticleProcessStatusToWorkflowPatch("ready_for_review", "place"))),
     { production_state: "in_review", publication_state: "draft" }
   );
+});
+
+test("legacy place article paths preserve production state and log when the ladder transition is unavailable", () => {
+  const logs = [];
+  const resolvePlaceLadderWorkflowPatch = loadPlaceLadderPatchResolver(logs, false);
+  const result = resolvePlaceLadderWorkflowPatch(
+    { id: 44, type: "place" },
+    { production_state: "collected" },
+    { production_state: "writing", publication_state: "draft" },
+    "article_process_transition"
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { publication_state: "draft" });
+  assert.deepEqual(JSON.parse(JSON.stringify(logs)), [[
+    "[workflow-transition] skipped production sync",
+    {
+      source: "article_process_transition",
+      item_id: 44,
+      content_type: "place",
+      current_production_state: "collected",
+      attempted_production_state: "writing",
+    },
+  ]]);
+  assert.match(source, /"editorial_assignment_created"/);
+  assert.match(source, /repo\.createAssignmentWithWorkflow\(/);
 });
 
 test("admin-review uses required locale translation recheck gate", () => {

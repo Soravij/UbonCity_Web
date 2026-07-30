@@ -6463,6 +6463,29 @@ export function createRepository(db) {
     };
   }
 
+  function createAssignmentWithWorkflow(
+    payload = {},
+    actorUserId = null,
+    assignmentMetadata = {},
+    workflowPayload = {},
+    workflowActor = "system@local",
+    workflowMetadata = {}
+  ) {
+    return runInTransaction(db, () => {
+      const assignment = createAssignment(payload, actorUserId, assignmentMetadata);
+      const workflow = upsertWorkflowModel(
+        Number(payload?.content_item_id || 0),
+        workflowPayload,
+        workflowActor,
+        {
+          ...workflowMetadata,
+          assignment_id: Number(assignment?.id || 0) || null,
+        }
+      );
+      return { assignment, workflow };
+    });
+  }
+
   function getAssignmentById(assignmentId) {
     return normalizeAssignmentRow(getAssignmentByIdStmt.get(Number(assignmentId || 0)));
   }
@@ -6717,6 +6740,15 @@ export function createRepository(db) {
       && canTransition(contentType, "production", workflow?.production_state, requestedPlaceFieldProductionState, existing.content_item_id)
       ? requestedPlaceFieldProductionState
       : null;
+    if (requestedPlaceFieldProductionState && !placeFieldProductionState) {
+      console.error("[workflow-transition] skipped production sync", {
+        source: "field_assignment_state",
+        item_id: Number(existing.content_item_id || 0) || null,
+        content_type: contentType || null,
+        current_production_state: String(workflow?.production_state || "").trim().toLowerCase() || null,
+        attempted_production_state: requestedPlaceFieldProductionState,
+      });
+    }
     if (shouldSyncWorkflow) {
       upsertWorkflowModel(
         Number(existing.content_item_id),
@@ -13743,8 +13775,10 @@ export function createRepository(db) {
     getWorkflowStateDriftByItem,
     listWorkflowTransitionsByItem,
     listWorkflowTransitionsByAssignment,
+    canTransition,
     listAuditByTarget,
     createAssignment,
+    createAssignmentWithWorkflow,
     createAssignmentFromReadiness,
     returnFieldAssignmentForRework,
     repairAssignmentHandoffSnapshotForAssignment,
