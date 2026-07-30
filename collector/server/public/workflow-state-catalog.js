@@ -1,3 +1,8 @@
+export {
+  loadWorkflowBackwardTransitions,
+  renderWorkflowBackwardTransitionControls,
+} from "./workflow-backward-transitions.js";
+
 function normalizedValue(value) {
   return String(value || "").trim().toLowerCase();
 }

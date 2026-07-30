@@ -27,10 +27,14 @@
   setBanner,
   setInlineStatus,
   isOtherTransportItem,
+  loadWorkflowBackwardTransitions,
+  renderWorkflowBackwardTransitionControls,
   state,
   validateWorkspace,
   workspaceUrl,
 } from "./article-workflow-core.js";
+
+let backwardTransitions = null;
 
 function setBusy(isBusy) {
   state.busy = Boolean(isBusy);
@@ -963,7 +967,45 @@ function renderAll(options = {}) {
   renderTranslationSummary();
   renderTranslationRecheckPanel();
   renderTranslationReviewSummary();
+  renderBackwardTransitionControls();
   applyActionGuards();
+}
+
+function renderBackwardTransitionControls() {
+  renderWorkflowBackwardTransitionControls(qs("workflow-backward-controls"), backwardTransitions, {
+    busy: state.busy,
+    onTransition: async ({ targetProductionState, reason }) => {
+      setBusy(true);
+      try {
+        const result = await api(`/api/items/${state.itemId}/workflow/backward-transitions`, {
+          method: "POST",
+          body: JSON.stringify({ target_production_state: targetProductionState, reason }),
+        });
+        state.item = result?.item || state.item;
+        backwardTransitions = result?.backward_transitions || null;
+        if (result?.resume_path && result.resume_path !== `${window.location.pathname}${window.location.search}`) {
+          window.location.assign(result.resume_path);
+          return;
+        }
+        await refreshArticleProcess();
+        await reloadCurrentReadinessSoft();
+        renderAll({ syncFields: true });
+        setBanner("ถอยสถานะแล้ว");
+      } finally {
+        setBusy(false);
+        renderBackwardTransitionControls();
+      }
+    },
+  });
+}
+
+async function refreshBackwardTransitions() {
+  try {
+    backwardTransitions = await loadWorkflowBackwardTransitions(api, state.itemId);
+  } catch (err) {
+    console.error("[workflow-backward-transition] cannot load targets", { item_id: state.itemId, error: String(err?.message || err) });
+    backwardTransitions = null;
+  }
 }
 
 async function refreshArticleProcess() {
@@ -1408,6 +1450,7 @@ async function init() {
   }
   try {
     await loadWorkspace();
+    await refreshBackwardTransitions();
     await reloadCurrentReadinessSoft();
     if (!canApproveArticle()) {
       window.location.replace(roleArticleFallbackUrl());

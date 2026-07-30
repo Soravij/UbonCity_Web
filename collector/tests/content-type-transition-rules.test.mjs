@@ -5,7 +5,14 @@ import path from "node:path";
 import test from "node:test";
 
 import { openDatabase } from "../db/client.mjs";
-import { ASSIGNMENT_STATES, createRepository, PRODUCTION_STATES, PUBLICATION_STATES, TRANSITION_RULES } from "../db/repository.mjs";
+import {
+  ASSIGNMENT_STATES,
+  createRepository,
+  PLACE_BACKWARD_PRODUCTION_TRANSITIONS,
+  PRODUCTION_STATES,
+  PUBLICATION_STATES,
+  TRANSITION_RULES,
+} from "../db/repository.mjs";
 
 const CONTENT_TYPES = ["place", "event", "other_transport", "public_transport_map"];
 const LEGACY_RULES = Object.freeze({
@@ -59,6 +66,28 @@ const PLACE_LADDER_EDGES = Object.freeze([
   ["ready_for_publish", "in_review"],
   ["submitted_for_admin_review", "in_review"],
 ]);
+
+const PLACE_BACKWARD_EDGES = Object.freeze({
+  brief_generated: Object.freeze({ generated: "in_process" }),
+  field_working: Object.freeze({ ready_for_content: "in_process" }),
+  field_review: Object.freeze({ field_working: "in_process", brief_generated: "cross_process" }),
+  writing: Object.freeze({ writing_assigned: "in_process" }),
+  in_review: Object.freeze({ writing: "in_process", field_review: "cross_process" }),
+  ready_for_publish: Object.freeze({ in_review: "in_process" }),
+  submitted_for_admin_review: Object.freeze({ in_review: "cross_process" }),
+});
+
+const FORWARD_REPLAY_PATHS = Object.freeze({
+  "brief_generated:generated": ["brief_generated"],
+  "field_working:ready_for_content": ["field_working"],
+  "field_review:field_working": ["field_review"],
+  "field_review:brief_generated": ["ready_for_content", "field_working", "field_review"],
+  "writing:writing_assigned": ["writing"],
+  "in_review:writing": ["in_review"],
+  "in_review:field_review": ["writing_assigned", "writing", "in_review"],
+  "ready_for_publish:in_review": ["ready_for_publish"],
+  "submitted_for_admin_review:in_review": ["ready_for_publish", "submitted_for_admin_review"],
+});
 
 function serializeRules(rules) {
   return Object.fromEntries(Object.entries(rules).map(([group, byFrom]) => [
@@ -129,6 +158,99 @@ test("place adds exactly the approved ladder edges while non-place types retain 
     mutatedSet.add("in_review");
   }
   assertAllTypeRulesMatchExpectedGraph();
+});
+
+test("place backward metadata is the only exposed backward path and remains attached to valid graph edges", () => {
+  const expectedMetadata = Object.fromEntries(
+    Object.entries(PLACE_BACKWARD_EDGES).map(([fromState, targets]) => [
+      fromState,
+      Object.fromEntries(Object.entries(targets).map(([toState, direction]) => [toState, direction])),
+    ])
+  );
+  const actualMetadata = Object.fromEntries(
+    Object.entries(PLACE_BACKWARD_PRODUCTION_TRANSITIONS).map(([fromState, targets]) => [
+      fromState,
+      Object.fromEntries(Object.entries(targets).map(([toState, metadata]) => [toState, metadata.direction])),
+    ])
+  );
+  assert.deepEqual(actualMetadata, expectedMetadata);
+
+  const ctx = createContext();
+  try {
+    for (const [fromState, targets] of Object.entries(PLACE_BACKWARD_EDGES)) {
+      const item = ctx.createItem("place", { production_state: fromState });
+      const expectedTargets = Object.entries(targets).map(([production_state, direction]) => ({
+        production_state,
+        direction,
+        reason_code: direction === "cross_process" ? "place_backward_cross_process" : "place_backward_in_process",
+        publication_state: "draft",
+      }));
+      const actualTargets = ctx.repo
+        .listLegalBackwardProductionTransitions("place", fromState, item.id)
+        .map(({ production_state, direction, reason_code, publication_state }) => ({ production_state, direction, reason_code, publication_state }));
+      assert.deepEqual(actualTargets, expectedTargets, `${fromState} must expose only its policy-approved backward targets`);
+    }
+    assert.deepEqual(ctx.repo.listLegalBackwardProductionTransitions("event", "in_review"), [], "non-place must expose no backward targets");
+
+    const mutatedEdge = TRANSITION_RULES.place.production.in_review;
+    mutatedEdge.delete("writing");
+    try {
+      const item = ctx.createItem("place", { production_state: "in_review" });
+      assert.throws(() => {
+        assert.deepEqual(
+          ctx.repo.listLegalBackwardProductionTransitions("place", "in_review", item.id).map((entry) => entry.production_state),
+          ["writing", "field_review"],
+        );
+      }, "removing a backward graph edge must make this test fail");
+    } finally {
+      mutatedEdge.add("writing");
+    }
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("every place backward transition records its policy reason and can replay forward to its original step", () => {
+  const ctx = createContext();
+  try {
+    for (const [fromState, targets] of Object.entries(PLACE_BACKWARD_EDGES)) {
+      for (const [targetState, direction] of Object.entries(targets)) {
+        const startsApproved = fromState === "ready_for_publish" || fromState === "submitted_for_admin_review";
+        const item = ctx.createItem("place", {
+          production_state: fromState,
+          publication_state: startsApproved ? "approved" : "draft",
+        });
+        const target = ctx.repo
+          .listLegalBackwardProductionTransitions("place", fromState, item.id)
+          .find((entry) => entry.production_state === targetState);
+        assert.ok(target, `${fromState} -> ${targetState} must be offered by the real transition helper`);
+
+        ctx.repo.upsertWorkflowModel(item.id, {
+          production_state: target.production_state,
+          publication_state: target.publication_state,
+          last_transition_note: "กลับไปแก้ตามผลตรวจ",
+        }, "test@local", { actor_role: "admin", reason_code: target.reason_code });
+        assert.equal(ctx.repo.ensureWorkflowModel(item.id).production_state, targetState);
+        assert.equal(ctx.repo.ensureWorkflowModel(item.id).publication_state, "draft");
+        const transitions = ctx.repo.listWorkflowTransitionsByItem(item.id, 10);
+        assert.ok(
+          transitions.some((row) => row.state_group === "production" && row.from_state === fromState && row.to_state === targetState && row.reason_code === target.reason_code),
+          `${fromState} -> ${targetState} must be written to workflow_transitions with its direction-specific reason code`
+        );
+
+        for (const nextState of FORWARD_REPLAY_PATHS[`${fromState}:${targetState}`]) {
+          const publicationState = nextState === "ready_for_publish" || nextState === "submitted_for_admin_review" ? "approved" : "draft";
+          ctx.repo.upsertWorkflowModel(item.id, {
+            production_state: nextState,
+            publication_state: publicationState,
+          }, "test@local", { actor_role: "admin", reason_code: "test_forward_replay" });
+        }
+        assert.equal(ctx.repo.ensureWorkflowModel(item.id).production_state, fromState, `${fromState} must be reachable again after ${targetState}`);
+      }
+    }
+  } finally {
+    ctx.cleanup();
+  }
 });
 
 test("each content type accepts exactly its expected transition graph", () => {

@@ -515,6 +515,35 @@ function buildPlaceTransitionRules() {
   });
 }
 
+// This is metadata for the place-only edges which are intentionally exposed as a backwards action.
+// It stays next to TRANSITION_RULES so the route never has to maintain a second nine-edge allowlist.
+// `direction` is part of the audit contract from place-workflow-policy §4.1, not UI decoration.
+export const PLACE_BACKWARD_PRODUCTION_TRANSITIONS = Object.freeze({
+  brief_generated: Object.freeze({
+    generated: Object.freeze({ direction: "in_process", label_th: "สร้างร่างด้วย AI", surface: "item_editor", publication_state: "draft" }),
+  }),
+  field_working: Object.freeze({
+    ready_for_content: Object.freeze({ direction: "in_process", label_th: "ส่งงานไปทำ", surface: "handoff", publication_state: "draft" }),
+  }),
+  field_review: Object.freeze({
+    field_working: Object.freeze({ direction: "in_process", label_th: "ลงงาน", surface: "assignment_work", publication_state: "draft" }),
+    brief_generated: Object.freeze({ direction: "cross_process", label_th: "ตรวจแก้เนื้อหา", surface: "item_editor", publication_state: "draft" }),
+  }),
+  writing: Object.freeze({
+    writing_assigned: Object.freeze({ direction: "in_process", label_th: "รับงาน", surface: "article_intake", publication_state: "draft" }),
+  }),
+  in_review: Object.freeze({
+    writing: Object.freeze({ direction: "in_process", label_th: "เขียนบทความ", surface: "article_workspace", publication_state: "draft" }),
+    field_review: Object.freeze({ direction: "cross_process", label_th: "ตรวจงาน", surface: "assignment_review", publication_state: "draft" }),
+  }),
+  ready_for_publish: Object.freeze({
+    in_review: Object.freeze({ direction: "in_process", label_th: "ตรวจและอนุมัติ", surface: "article_submit", publication_state: "draft" }),
+  }),
+  submitted_for_admin_review: Object.freeze({
+    in_review: Object.freeze({ direction: "cross_process", label_th: "ตรวจและอนุมัติ", surface: "article_submit", publication_state: "draft" }),
+  }),
+});
+
 // Each content type deliberately starts with an independent copy of the legacy production and
 // publication graph. 4b changes place only; event/transport remain the fallback graph.
 export const TRANSITION_RULES = Object.freeze({
@@ -5836,6 +5865,25 @@ export function createRepository(db) {
     const allowed = rulesForGroup?.[fromState];
     if (!allowed) return false;
     return allowed.has(toState);
+  }
+
+  function listLegalBackwardProductionTransitions(contentType, fromState, contentItemId = null) {
+    const normalizedType = String(contentType || "").trim().toLowerCase();
+    const normalizedFromState = String(fromState || "").trim().toLowerCase();
+    if (normalizedType !== "place" || !normalizedFromState) return [];
+    const targets = PLACE_BACKWARD_PRODUCTION_TRANSITIONS[normalizedFromState] || {};
+    return Object.entries(targets)
+      .filter(([toState]) => canTransition("place", "production", normalizedFromState, toState, contentItemId))
+      .map(([productionState, metadata]) => ({
+        production_state: productionState,
+        direction: metadata.direction,
+        reason_code: metadata.direction === "cross_process"
+          ? "place_backward_cross_process"
+          : "place_backward_in_process",
+        label_th: metadata.label_th,
+        surface: metadata.surface,
+        publication_state: metadata.publication_state,
+      }));
   }
 
   function assertValidTransition(contentType, stateGroup, fromState, toState, contentItemId = null) {
@@ -13776,6 +13824,7 @@ export function createRepository(db) {
     listWorkflowTransitionsByItem,
     listWorkflowTransitionsByAssignment,
     canTransition,
+    listLegalBackwardProductionTransitions,
     listAuditByTarget,
     createAssignment,
     createAssignmentWithWorkflow,

@@ -39,6 +39,8 @@
   slugify,
   isPlaceItem,
   isOtherTransportItem,
+  loadWorkflowBackwardTransitions,
+  renderWorkflowBackwardTransitionControls,
   state,
   validateWorkspace,
 } from "./article-workflow-core.js";
@@ -52,6 +54,7 @@ const workspaceState = {
   dirty: false,
   articleSuggestionBusy: false,
   seoSuggestionBusy: false,
+  backwardTransitions: null,
 };
 
 function nextBlockId() {
@@ -1873,8 +1876,45 @@ function renderAll(options = {}) {
   renderReviewChecklist();
   renderSubmitReadiness();
   renderMetaDescriptionGuidance();
+  renderBackwardTransitionControls();
   applyEditorWorkspaceView();
   applyActionGuards();
+}
+
+function renderBackwardTransitionControls() {
+  renderWorkflowBackwardTransitionControls(qs("workflow-backward-controls"), workspaceState.backwardTransitions, {
+    busy: state.busy,
+    onTransition: async ({ targetProductionState, reason }) => {
+      setBusy(true, "Updating workflow...");
+      try {
+        const result = await api(`/api/items/${state.itemId}/workflow/backward-transitions`, {
+          method: "POST",
+          body: JSON.stringify({ target_production_state: targetProductionState, reason }),
+        });
+        state.item = result?.item || state.item;
+        workspaceState.backwardTransitions = result?.backward_transitions || null;
+        if (result?.resume_path && result.resume_path !== `${window.location.pathname}${window.location.search}`) {
+          window.location.assign(result.resume_path);
+          return;
+        }
+        await refreshArticleProcess();
+        renderAll();
+        setWorkspaceBanner("ถอยสถานะแล้ว");
+      } finally {
+        setBusy(false);
+        renderBackwardTransitionControls();
+      }
+    },
+  });
+}
+
+async function refreshBackwardTransitions() {
+  try {
+    workspaceState.backwardTransitions = await loadWorkflowBackwardTransitions(api, state.itemId);
+  } catch (err) {
+    console.error("[workflow-backward-transition] cannot load targets", { item_id: state.itemId, error: String(err?.message || err) });
+    workspaceState.backwardTransitions = null;
+  }
 }
 
 async function refreshArticleProcess() {
@@ -2361,6 +2401,7 @@ async function init() {
   wire();
   try {
     await loadWorkspace();
+    await refreshBackwardTransitions();
     if (!canEditArticle()) {
       window.location.replace(roleArticleFallbackUrl());
       return;

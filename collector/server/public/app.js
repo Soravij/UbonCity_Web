@@ -5,7 +5,11 @@
   "close_assignment",
 ]);
 
-import { reportUnknownWorkflowState } from "./workflow-state-catalog.js";
+import {
+  reportUnknownWorkflowState,
+  loadWorkflowBackwardTransitions,
+  renderWorkflowBackwardTransitionControls,
+} from "./workflow-state-catalog.js";
 
 const ASSIGNMENT_PROCESS_GUIDE = Object.freeze({
   assigned: Object.freeze({
@@ -269,6 +273,7 @@ const state = {
     contextFieldPackStatus: "",
     contextFieldPack: null,
     contextFieldPackLoadFailed: false,
+    backwardTransitions: null,
     captureUploadDrafts: {},
     captureUploadLoading: {},
     captureUploadSyncState: {},
@@ -3623,12 +3628,47 @@ async function selectAssignmentContextItem(itemId, { syncUrl = true } = {}) {
   renderAssignmentsTable(state.assignments.rows);
 }
 
+function renderAssignmentBackwardTransitionControls() {
+  renderWorkflowBackwardTransitionControls(qs("workflow-backward-controls"), state.assignments.backwardTransitions, {
+    onTransition: async ({ targetProductionState, reason }) => {
+      const itemId = Number(state.assignments.contextItemId || getAssignmentLandingItemId() || 0) || 0;
+      const result = await api(`/api/items/${itemId}/workflow/backward-transitions`, {
+        method: "POST",
+        body: JSON.stringify({ target_production_state: targetProductionState, reason }),
+      });
+      const nextItem = result?.item || null;
+      if (nextItem?.id) {
+        state.items = state.items.map((row) => Number(row?.id || 0) === Number(nextItem.id) ? { ...row, ...nextItem } : row);
+      }
+      state.assignments.backwardTransitions = result?.backward_transitions || null;
+      if (result?.resume_path && result.resume_path !== `${window.location.pathname}${window.location.search}`) {
+        window.location.assign(result.resume_path);
+        return;
+      }
+      renderAssignmentBackwardTransitionControls();
+      setStatus("assignment-status", "ถอยสถานะแล้ว");
+    },
+  });
+}
+
+async function refreshAssignmentBackwardTransitions(itemId) {
+  try {
+    state.assignments.backwardTransitions = await loadWorkflowBackwardTransitions(api, itemId);
+  } catch (err) {
+    console.error("[workflow-backward-transition] cannot load targets", { item_id: Number(itemId || 0) || null, error: String(err?.message || err) });
+    state.assignments.backwardTransitions = null;
+  }
+  renderAssignmentBackwardTransitionControls();
+}
+
 async function loadAssignmentContextFieldPackStatus(itemId) {
   const targetItemId = parsePositiveInt(itemId, 0);
   if (!targetItemId) {
     state.assignments.contextFieldPackStatus = "";
     state.assignments.contextFieldPack = null;
     state.assignments.contextFieldPackLoadFailed = false;
+    state.assignments.backwardTransitions = null;
+    renderAssignmentBackwardTransitionControls();
     renderAssignmentHandoffBrief();
     renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(state.assignments.selectedId)));
     return "";
@@ -3646,6 +3686,7 @@ async function loadAssignmentContextFieldPackStatus(itemId) {
     state.assignments.contextFieldPack = null;
     state.assignments.contextFieldPackLoadFailed = true;
   }
+  await refreshAssignmentBackwardTransitions(targetItemId);
   renderAssignmentHandoffBrief();
   renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(state.assignments.selectedId)));
   return state.assignments.contextFieldPackStatus;

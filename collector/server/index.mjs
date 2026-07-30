@@ -4382,6 +4382,42 @@ function ensureItemMutationAccess(req, res, item, options = {}) {
   return false;
 }
 
+function canTransitionPlaceBackwardByRole(req, item) {
+  const role = actorPolicyRole(req);
+  if (role === "owner") return true;
+  return (role === "admin" || role === "user") && canMutateItemByManagementLine(req.authUser, item);
+}
+
+function placeBackwardTransitionResumePath(itemId, surface) {
+  const id = Number(itemId || 0) || 0;
+  if (!id) return null;
+  if (surface === "handoff") return `/?tab=handoff&item_id=${id}`;
+  if (surface === "assignment_work") return `/?tab=work&item_id=${id}`;
+  if (surface === "assignment_review") return `/?tab=review&item_id=${id}`;
+  if (surface === "article_intake") return `/article-intake.html?id=${id}`;
+  if (surface === "article_workspace") return `/article-workspace.html?id=${id}`;
+  if (surface === "article_submit") return `/article-submit.html?id=${id}`;
+  return `/item-editor.html?id=${id}`;
+}
+
+function buildPlaceBackwardTransitionsPayload(req, item) {
+  const itemId = Number(item?.id || 0) || 0;
+  const contentType = String(item?.type || "").trim().toLowerCase();
+  const workflowModel = repo.ensureWorkflowModel(itemId);
+  const canTransition = contentType === "place" && canTransitionPlaceBackwardByRole(req, item);
+  return {
+    item_id: itemId,
+    production_state: String(workflowModel?.production_state || "").trim().toLowerCase() || null,
+    can_transition: canTransition,
+    targets: canTransition
+      ? repo.listLegalBackwardProductionTransitions(contentType, workflowModel.production_state, itemId).map((target) => ({
+        ...target,
+        resume_path: placeBackwardTransitionResumePath(itemId, target.surface),
+      }))
+      : [],
+  };
+}
+
 function ensureArticleComposerEditAccess(req, res, item) {
   const role = actorPolicyRole(req);
   if (role === "owner") {
@@ -9523,6 +9559,94 @@ app.get("/api/items/:id/workflow-model", requireRole("owner", "admin", "editor",
   const transitions = repo.listWorkflowTransitionsByItem(id, Number(req.query.limit || 30));
   const drift = repo.getWorkflowStateDriftByItem(id);
   res.json({ item_id: id, model, transitions, drift });
+});
+
+app.get("/api/items/:id/workflow/backward-transitions", requireRole("owner", "admin", "editor", "user"), (req, res) => {
+  const id = Number(req.params.id || 0);
+  if (!id) {
+    res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (!ensureItemBriefReadAccess(req, res, item)) {
+    return;
+  }
+  res.json(buildPlaceBackwardTransitionsPayload(req, item));
+});
+
+app.post("/api/items/:id/workflow/backward-transitions", requireRole("owner", "admin", "user"), (req, res) => {
+  const id = Number(req.params.id || 0);
+  if (!id) {
+    res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+  const item = repo.getItem(id);
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (String(item?.type || "").trim().toLowerCase() !== "place") {
+    res.status(409).json({ error: "backward workflow transitions are available for place items only" });
+    return;
+  }
+  if (!ensureItemMutationAccess(req, res, item)) {
+    return;
+  }
+  const reason = String(req.body?.reason || "").trim();
+  if (!reason) {
+    res.status(400).json({ error: "reason is required for a backward workflow transition" });
+    return;
+  }
+  const workflowBefore = repo.ensureWorkflowModel(id);
+  const targetState = String(req.body?.target_production_state || "").trim().toLowerCase();
+  const target = repo
+    .listLegalBackwardProductionTransitions("place", workflowBefore.production_state, id)
+    .find((entry) => entry.production_state === targetState);
+  if (!target) {
+    res.status(409).json({
+      error: `invalid backward workflow transition: ${workflowBefore.production_state} -> ${targetState || "(missing target)"}`,
+    });
+    return;
+  }
+
+  try {
+    const model = repo.upsertWorkflowModel(
+      id,
+      {
+        production_state: target.production_state,
+        publication_state: target.publication_state,
+        last_transition_note: reason,
+      },
+      actorEmail(req),
+      {
+        actor_role: actorPolicyRole(req),
+        reason_code: target.reason_code,
+      }
+    );
+    repo.logAudit(actorEmail(req), "workflow.backward_transition", "content_item", String(id), {
+      from_production_state: workflowBefore.production_state,
+      to_production_state: target.production_state,
+      direction: target.direction,
+      reason_code: target.reason_code,
+      reason,
+    });
+    const nextItem = repo.getItem(id) || item;
+    res.json({
+      ok: true,
+      item: nextItem,
+      model,
+      resume_path: placeBackwardTransitionResumePath(id, target.surface),
+      backward_transitions: buildPlaceBackwardTransitionsPayload(req, nextItem),
+    });
+  } catch (err) {
+    const msg = String(err?.message || "Cannot transition workflow backward");
+    const status = /invalid .*transition/i.test(msg) ? 409 : 400;
+    res.status(status).json({ error: msg });
+  }
 });
 
 app.get("/api/items/:id/article-process", requireRole("owner", "admin", "editor", "user"), (req, res) => {

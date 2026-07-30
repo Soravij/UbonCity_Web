@@ -4,6 +4,11 @@
   { key: "review", label: "ตรวจและอนุมัติ" },
 ];
 
+export {
+  loadWorkflowBackwardTransitions,
+  renderWorkflowBackwardTransitionControls,
+} from "./workflow-backward-transitions.js";
+
 export const state = {
   token: (
     (typeof sessionStorage !== "undefined" && sessionStorage.getItem("collector_token"))

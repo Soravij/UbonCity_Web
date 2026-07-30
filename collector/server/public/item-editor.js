@@ -1,6 +1,10 @@
 const token = sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "";
 const AUTH_RETURN_TO_KEY = "collector_return_to";
-import { reportUnknownWorkflowState } from "./workflow-state-catalog.js";
+import {
+  reportUnknownWorkflowState,
+  loadWorkflowBackwardTransitions,
+  renderWorkflowBackwardTransitionControls,
+} from "./workflow-state-catalog.js";
 const state = {
   token,
   user: null,
@@ -16,6 +20,7 @@ const state = {
   fieldPack: null,
   itemAssignments: [],
   itemAssignmentsLoadFailed: false,
+  backwardTransitions: null,
   evidenceView: {
     blockType: "all",
     sourceFamily: "all",
@@ -5250,6 +5255,43 @@ function renderStepFourGuides() {
   renderGuideCards("field-brief-preview", buildFieldPackCards());
 }
 
+function renderBackwardTransitionControls() {
+  renderWorkflowBackwardTransitionControls(qs("workflow-backward-controls"), state.backwardTransitions, {
+    busy: state.pageBusy,
+    onTransition: async ({ targetProductionState, reason }) => {
+      state.pageBusy = true;
+      try {
+        const result = await api(`/api/items/${state.itemId}/workflow/backward-transitions`, {
+          method: "POST",
+          body: JSON.stringify({ target_production_state: targetProductionState, reason }),
+        });
+        state.item = result?.item || state.item;
+        state.backwardTransitions = result?.backward_transitions || null;
+        if (result?.resume_path && result.resume_path !== `${window.location.pathname}${window.location.search}`) {
+          window.location.assign(result.resume_path);
+          return;
+        }
+        applyEditorActionGuards();
+        renderStepFourGuides();
+        setStatus("ถอยสถานะแล้ว");
+      } finally {
+        state.pageBusy = false;
+        renderBackwardTransitionControls();
+      }
+    },
+  });
+}
+
+async function refreshBackwardTransitions() {
+  try {
+    state.backwardTransitions = await loadWorkflowBackwardTransitions(api, state.itemId);
+  } catch (err) {
+    console.error("[workflow-backward-transition] cannot load targets", { item_id: state.itemId, error: String(err?.message || err) });
+    state.backwardTransitions = null;
+  }
+  renderBackwardTransitionControls();
+}
+
 function roleLabel(row) {
   const role = String(row.role || "unused");
   if (role === "cover") return "cover";
@@ -6008,6 +6050,7 @@ function wire() {
     wire();
     const item = await api(`/api/items/${state.itemId}`);
     state.item = item;
+    await refreshBackwardTransitions();
     const anomaly = getItemWorkflowAnomaly(item);
     const workflowStatus = getItemWorkflowCompatStatus(item);
     if (!isCleanMode && (workflowStatus === "cleaned" || workflowStatus === "raw") && !isStepFourEligibleItem(item)) {

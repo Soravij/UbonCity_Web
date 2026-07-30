@@ -179,6 +179,8 @@ globalThis.__articleSubmitTestHooks = {
       inlineStatuses.push({ id, message, tone });
     },
     isOtherTransportItem: () => false,
+    loadWorkflowBackwardTransitions: async () => null,
+    renderWorkflowBackwardTransitionControls() {},
     validateWorkspace: () => ({ ok: true, missing: [] }),
     workspaceUrl: () => "/article-workspace.html?id=48",
     globalThis: null,
