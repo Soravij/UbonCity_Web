@@ -128,7 +128,6 @@ function ensureSmokeItemAndExternalAssignment(userId, ownerEmail) {
 
     const itemId = Number(saved?.item?.id || 0) || 0;
     assert(itemId > 0, "smoke item id missing");
-    repo.backfillWorkflowHeads(ownerEmail);
     repo.ensureWorkflowModel(itemId);
 
     const assignment = repo.createAssignment(

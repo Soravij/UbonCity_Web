@@ -5931,21 +5931,6 @@ function normalizeStateValue(value, stateGroup) {
     throw new Error(`workflow head missing for item ${id}`);
   }
 
-  function repairWorkflowHeadFromLegacy(contentItemId, actor = "system@local") {
-    const id = Number(contentItemId || 0);
-    if (!id) throw new Error("contentItemId is required");
-    const existing = getWorkflowModelByItem(id);
-    if (existing) return existing;
-    const item = getItem(id);
-    if (!item) throw new Error(`content item not found for workflow head: ${id}`);
-    return createWorkflowHead(
-      id,
-      buildWorkflowHeadDefaults(id, item?.workflow_status || "raw"),
-      actor,
-      { actor_role: "system", reason_code: "workflow_head_repaired_from_legacy" }
-    );
-  }
-
   function upsertWorkflowModel(contentItemId, payload = {}, actor = "system@local", metadata = {}) {
     const id = Number(contentItemId || 0);
     if (!id) throw new Error("contentItemId is required");
@@ -6058,49 +6043,6 @@ function normalizeStateValue(value, stateGroup) {
         bump_content_version: metadata?.bump_content_version === true,
       }
     );
-  }
-
-  function backfillWorkflowHeads(actor = "system@local") {
-    const items = listItems();
-    let count = 0;
-    for (const item of items) {
-      const itemId = Number(item?.id || 0) || 0;
-      if (!itemId) continue;
-      const workflow = repairWorkflowHeadFromLegacy(itemId, actor);
-      const latestDraft = latestDraftByItem(itemId);
-      const latestReview = latestReviewByItem(itemId);
-      const currentFieldPack = getCurrentFieldPackByItem(itemId);
-      const transitionCount = Number(countWorkflowTransitionsByItemStmt.get(itemId)?.c || 0);
-      const draftCount = Number(countDraftsByItemStmt.get(itemId)?.c || 0);
-      const reviewCount = Number(countReviewsByItemStmt.get(itemId)?.c || 0);
-      const fieldPackCount = Number(countFieldPacksByItemStmt.get(itemId)?.c || 0);
-      const latestTransition = latestWorkflowTransitionByItemStmt.get(itemId);
-      const next = upsertWorkflowModel(
-        itemId,
-        {
-          current_draft_id: Number(latestDraft?.id || 0) || null,
-          current_review_report_id: Number(latestReview?.id || 0) || null,
-          current_field_pack_id: Number(currentFieldPack?.id || 0) || null,
-          state_version: Math.max(1, Number(workflow?.state_version || 0) || transitionCount || 1),
-          content_version: Math.max(
-            Number(workflow?.content_version || 0) || 0,
-            draftCount,
-            reviewCount,
-            fieldPackCount
-          ),
-          last_actor_email: String(workflow?.last_actor_email || latestTransition?.actor_email || actor).trim() || actor,
-          last_transition_at: String(workflow?.last_transition_at || latestTransition?.created_at || "").trim() || null,
-          last_transition_note: workflow?.last_transition_note || null,
-        },
-        actor,
-        {
-          actor_role: "system",
-          reason_code: "workflow_head_backfill",
-        }
-      );
-      if (next) count += 1;
-    }
-    return { count };
   }
 
   function listItemsByWorkflowHead(filters = {}) {
@@ -11160,7 +11102,11 @@ function normalizeStateValue(value, stateGroup) {
 
   function saveItemWithFieldPack(itemInput = {}, fieldPackInput = {}, actorEmail = "system@local") {
     return runInTransaction(db, () => {
-      const savedItem = saveItemInternal(normalizeInput(itemInput), actorEmail);
+      const workflowPatch = { publication_state: "draft" };
+      const itemInputWithWorkflowSeed = withCanonicalWorkflowStatusSeed(itemInput, workflowPatch);
+      const itemData = normalizeInput(itemInputWithWorkflowSeed);
+      const isNewItem = !(Number(itemData.id || 0) > 0);
+      const savedItem = saveItemInternal(itemData, actorEmail);
       let fieldPack = null;
       if (fieldPackInput && typeof fieldPackInput === "object") {
         const payload = {
@@ -11179,6 +11125,9 @@ function normalizeStateValue(value, stateGroup) {
         fieldPack = fieldPackId
           ? updateFieldPackInternal(fieldPackId, payload)
           : createFieldPackInternal(payload);
+      }
+      if (isNewItem) {
+        createWorkflowHead(savedItem.id, workflowPatch, actorEmail);
       }
       return { item: savedItem, field_pack: fieldPack };
     });
@@ -13686,7 +13635,6 @@ function normalizeStateValue(value, stateGroup) {
     getWorkflowHeadByItem,
     getWorkflowModelByItem,
     syncWorkflowHeadPointers,
-    backfillWorkflowHeads,
     listItemsByWorkflowHead,
     getWorkflowStateDriftByItem,
     listWorkflowTransitionsByItem,
