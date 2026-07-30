@@ -427,7 +427,7 @@ const REFERENCE_ALL_GROUP_KEYS = new Set([
   ...REFERENCE_HARD_BLOCKER_DEFS.map((entry) => entry.key),
 ]);
 const DIRECTION_NEXT_ACTIONS = new Set(["collect_now", "enrich_search", "watch_social", "hold", "skip"]);
-const PRODUCTION_STATES = new Set([
+export const PRODUCTION_STATES = new Set([
   "collected",
   "analyzed",
   "brief_generated",
@@ -441,8 +441,8 @@ const PRODUCTION_STATES = new Set([
   "rejected",
   "completed",
 ]);
-const PUBLICATION_STATES = new Set(["draft", "approved", "published", "unpublished", "archived", "deleted"]);
-const ASSIGNMENT_STATES = new Set(["assigned", "in_progress", "submitted", "revision_requested", "resubmitted", "accepted", "closed"]);
+export const PUBLICATION_STATES = new Set(["draft", "approved", "published", "unpublished", "archived", "deleted"]);
+export const ASSIGNMENT_STATES = new Set(["assigned", "in_progress", "submitted", "revision_requested", "resubmitted", "accepted", "closed"]);
 const ASSIGNMENT_SUBMISSION_STATES = new Set(["submitted", "resubmitted"]);
 const ASSIGNMENT_DELIVERABLE_TYPES = new Set(["photos", "videos", "raw_notes", "caption_draft", "script_draft", "article_draft"]);
 const ASSIGNMENT_DELIVERABLE_STATUSES = new Set(["draft", "submitted", "reviewed", "accepted", "rejected"]);
@@ -6077,9 +6077,6 @@ export function createRepository(db) {
     return listItems().filter((item) => {
       const head = getWorkflowModelByItem(item.id);
       if (!head) return false;
-      assertKnownWorkflowHeadState(head?.production_state, "production", item.id, "listItemsByWorkflowHead");
-      assertKnownWorkflowHeadState(head?.publication_state, "publication", item.id, "listItemsByWorkflowHead");
-      assertKnownWorkflowHeadState(head?.assignment_state, "assignment", item.id, "listItemsByWorkflowHead");
       if (productionStates.length && !productionStates.includes(String(head?.production_state || "").trim().toLowerCase())) {
         return false;
       }
@@ -6089,6 +6086,9 @@ export function createRepository(db) {
       if (assignmentStates.length && !assignmentStates.includes(String(head?.assignment_state || "").trim().toLowerCase())) {
         return false;
       }
+      assertKnownWorkflowHeadState(head?.production_state, "production", item.id, "listItemsByWorkflowHead");
+      assertKnownWorkflowHeadState(head?.publication_state, "publication", item.id, "listItemsByWorkflowHead");
+      assertKnownWorkflowHeadState(head?.assignment_state, "assignment", item.id, "listItemsByWorkflowHead");
       return true;
     });
   }

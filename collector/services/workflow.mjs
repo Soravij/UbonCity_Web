@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { cleanReviewsAndContent } from "../cleaner/review-cleaner.mjs";
 import { generateContentDrafts } from "../ai/generate-content.mjs";
 import { runQualityChecks } from "../quality/checks.mjs";
+import { PRODUCTION_STATES } from "../db/repository.mjs";
 
 const GOVERNANCE_REASON_CODES = Object.freeze({
   review_approve: "review_approved",
@@ -35,24 +36,9 @@ function traceTranslationDiagnostics(stage, details = {}) {
   }
 }
 
-const KNOWN_PRODUCTION_STATES = new Set([
-  "collected",
-  "analyzed",
-  "brief_generated",
-  "ready_for_content",
-  "content_in_progress",
-  "generated",
-  "in_review",
-  "needs_revision",
-  "ready_for_publish",
-  "submitted_for_admin_review",
-  "rejected",
-  "completed",
-]);
-
 function assertKnownQualityCandidateState(item) {
   const state = String(item?.production_state || "").trim().toLowerCase();
-  if (!state || KNOWN_PRODUCTION_STATES.has(state)) return;
+  if (!state || PRODUCTION_STATES.has(state)) return;
   const itemId = Number(item?.id || 0) || null;
   console.error("[workflow-reader] unknown workflow state", {
     reader: "runQualityStage",

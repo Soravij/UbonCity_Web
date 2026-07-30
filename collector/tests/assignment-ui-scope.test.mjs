@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import { ASSIGNMENT_STATES, PRODUCTION_STATES, PUBLICATION_STATES } from "../db/repository.mjs";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const indexHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "index.html"), "utf8");
@@ -304,11 +305,14 @@ function loadItemOwnershipScopeHooks(users = [], options = {}) {
       return normalized || fallback;
     },
     console,
+    __productionStates: PRODUCTION_STATES,
+    __publicationStates: PUBLICATION_STATES,
+    __assignmentStates: ASSIGNMENT_STATES,
   };
   const source = `
-const PRODUCTION_STATES = new Set(["collected", "analyzed", "brief_generated", "ready_for_content", "content_in_progress", "generated", "in_review", "needs_revision", "ready_for_publish", "submitted_for_admin_review", "rejected", "completed"]);
-const PUBLICATION_STATES = new Set(["draft", "approved", "published", "unpublished", "archived", "deleted"]);
-const ASSIGNMENT_STATES = new Set(["assigned", "in_progress", "submitted", "revision_requested", "resubmitted", "accepted", "closed"]);
+const PRODUCTION_STATES = globalThis.__productionStates;
+const PUBLICATION_STATES = globalThis.__publicationStates;
+const ASSIGNMENT_STATES = globalThis.__assignmentStates;
 ${extractNamedFunctionSource(indexServer, "findUnknownWorkflowModelState")}
 ${extractNamedFunctionSource(indexServer, "logUnknownWorkflowModelState")}
 ${extractNamedFunctionSource(indexServer, "assertKnownWorkflowModelStates")}

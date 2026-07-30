@@ -26,7 +26,14 @@ import {
   resolveAiConfig,
 } from "../config/ai.mjs";
 import { openDatabase } from "../db/client.mjs";
-import { createRepository, hasRecognizedEvaluationOverrideInput, resolveActiveAssignmentWorkBatchRows } from "../db/repository.mjs";
+import {
+  ASSIGNMENT_STATES,
+  PRODUCTION_STATES,
+  PUBLICATION_STATES,
+  createRepository,
+  hasRecognizedEvaluationOverrideInput,
+  resolveActiveAssignmentWorkBatchRows,
+} from "../db/repository.mjs";
 import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/index.mjs";
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import {
@@ -2802,21 +2809,6 @@ function safeAsync(handler) {
 const ALLOWED_USER_ROLES = new Set(["owner", "admin", "editor", "user", "freelance"]);
 const MANAGED_CONTRIBUTOR_ROLES = new Set(["freelance", "editor"]);
 const ASSIGNMENT_KINDS = new Set(["field", "editorial"]);
-const PRODUCTION_STATES = new Set([
-  "collected",
-  "analyzed",
-  "brief_generated",
-  "ready_for_content",
-  "content_in_progress",
-  "in_review",
-  "needs_revision",
-  "ready_for_publish",
-  "submitted_for_admin_review",
-  "rejected",
-  "completed",
-]);
-const PUBLICATION_STATES = new Set(["draft", "approved", "published", "unpublished", "archived", "deleted"]);
-const ASSIGNMENT_STATES = new Set(["assigned", "in_progress", "submitted", "revision_requested", "resubmitted", "accepted", "closed"]);
 const ASSIGNMENT_SUBMISSION_STATES = new Set(["submitted", "resubmitted"]);
 const ASSIGNMENT_DELIVERABLE_TYPES = new Set(["photos", "videos", "raw_notes", "caption_draft", "script_draft", "article_draft"]);
 const EXECUTION_CHANNELS = new Set(["facebook", "tiktok"]);
@@ -8932,7 +8924,7 @@ app.put("/api/transport-map-routes/:id", requireRole("owner", "admin", "user"), 
   res.json(buildTransportMapRouteResponse(item));
 });
 
-app.post("/api/transport-map-routes/:id/release-main", requireRole("owner", "admin"), workflowRateLimit, async (req, res) => {
+app.post("/api/transport-map-routes/:id/release-main", requireRole("owner", "admin"), workflowRateLimit, safeAsync(async (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid route id" });
@@ -9017,7 +9009,7 @@ app.post("/api/transport-map-routes/:id/release-main", requireRole("owner", "adm
   } catch (err) {
     res.status(500).json({ error: String(err?.message || "Cannot sync transport route to backend") });
   }
-});
+}));
 
 app.post("/api/items/:id/claim", requireRole("owner", "admin", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
@@ -9401,7 +9393,7 @@ app.post("/api/items/:id/seo-suggestion", requireRole("owner", "admin", "editor"
   }
 });
 
-app.post("/api/items/:id/article-suggestion", requireRole("owner", "admin", "editor", "user"), async (req, res) => {
+app.post("/api/items/:id/article-suggestion", requireRole("owner", "admin", "editor", "user"), safeAsync(async (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -9477,7 +9469,7 @@ app.post("/api/items/:id/article-suggestion", requireRole("owner", "admin", "edi
     const status = /configured|required/i.test(msg) ? 409 : /invalid|empty|json/i.test(msg) ? 400 : 500;
     res.status(status).json({ error: msg });
   }
-});
+}));
 
 app.get("/api/items/:id/workflow-model", requireRole("owner", "admin", "editor", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
@@ -9516,7 +9508,7 @@ app.get("/api/items/:id/article-process", requireRole("owner", "admin", "editor"
   res.json(buildArticleProcessPayload(req, item));
 });
 
-app.post("/api/items/:id/article-process/transition", requireRole("owner", "admin", "editor", "user"), async (req, res) => {
+app.post("/api/items/:id/article-process/transition", requireRole("owner", "admin", "editor", "user"), safeAsync(async (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
     res.status(400).json({ error: "Invalid item id" });
@@ -9568,7 +9560,7 @@ app.post("/api/items/:id/article-process/transition", requireRole("owner", "admi
     const status = /invalid .*transition|cannot transition|latest draft is required|review prerequisite missing|stale review report|quality gate failed/i.test(msg) ? 409 : 400;
     res.status(status).json({ error: msg });
   }
-});
+}));
 
 app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "admin", "editor", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
