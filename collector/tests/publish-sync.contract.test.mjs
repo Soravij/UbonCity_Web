@@ -4,11 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
+import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 
-const root = path.resolve("D:\\UbonCity_Web\\collector");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
 const source = fs.readFileSync(path.join(root, "server", "index.mjs"), "utf8");
 
 function extractFunction(name) {
