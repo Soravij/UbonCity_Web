@@ -6,7 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import pool from "../config/db.js";
-import { approveReviewContent, markNeedsRevision } from "../services/reviewDecisionService.js";
+import { approveReviewContent, markNeedsRevision, resolveCollectorSyncTimeoutMs } from "../services/reviewDecisionService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -856,6 +856,20 @@ test("markNeedsRevision rolls back within a bounded time when Collector hangs (p
     process.env.COLLECTOR_SYNC_TIMEOUT_MS = originalTimeoutMs;
     await new Promise((resolve) => hungServer.close(resolve));
   }
+});
+
+test("resolveCollectorSyncTimeoutMs rejects negative and decimal values, falling back to the 8000ms default", () => {
+  assert.equal(resolveCollectorSyncTimeoutMs("-100"), 8000, "a negative value must not survive as a near-zero setTimeout delay");
+  assert.equal(resolveCollectorSyncTimeoutMs("-1"), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs("300.5"), 8000, "a decimal value must fall back rather than being passed to setTimeout as-is");
+  assert.equal(resolveCollectorSyncTimeoutMs("0.5"), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs("0"), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs(""), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs(undefined), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs("abc"), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs("  "), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs("300"), 300, "a valid positive integer must be used as-is");
+  assert.equal(resolveCollectorSyncTimeoutMs("8000"), 8000);
 });
 
 test("approveReviewContent promotes the current translation batch and deletes only historical pipeline languages", async () => {

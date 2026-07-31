@@ -517,8 +517,15 @@ export async function approveReviewContent({ reviewContent, actorUserId, reviewN
   return result;
 }
 
+const COLLECTOR_SYNC_TIMEOUT_MS_DEFAULT = 8000;
+
+export function resolveCollectorSyncTimeoutMs(rawValue) {
+  const parsed = Number(rawValue);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : COLLECTOR_SYNC_TIMEOUT_MS_DEFAULT;
+}
+
 async function fetchCollectorSyncWithTimeout(url, options) {
-  const timeoutMs = Number(process.env.COLLECTOR_SYNC_TIMEOUT_MS || 8000) || 8000;
+  const timeoutMs = resolveCollectorSyncTimeoutMs(process.env.COLLECTOR_SYNC_TIMEOUT_MS);
   const controller = new AbortController();
   const timeoutId = setTimeout(
     () => controller.abort(new Error(`collector sync timed out after ${timeoutMs}ms`)),
