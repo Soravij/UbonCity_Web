@@ -69,6 +69,7 @@ function setTranslationGenerateLoading(isLoading) {
 }
 
 function normalizeReviewActionCopy() {
+  const status = getArticleStatus();
   const isOtherTransport = isOtherTransportItem();
   const reviewDescription = document.querySelector(".article-card-review > .article-section-head .muted");
   if (reviewDescription) {
