@@ -37,6 +37,7 @@ function createFixtureItem(db, {
   titleSuffix,
   productionState,
   publicationState,
+  type = "place",
 }) {
   const uid = `smoke-publish-sync-${crypto.randomUUID()}`;
   const slug = `smoke-publish-sync-${titleSuffix.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
@@ -45,9 +46,10 @@ function createFixtureItem(db, {
     INSERT INTO content_items (
       item_uid, type, category, lang, title, normalized_title, slug, summary,
       description_raw, description_clean, meta_title, meta_description, workflow_status
-    ) VALUES (?, 'place', 'attractions', 'th', ?, ?, ?, ?, ?, ?, ?, ?, 'generated')
+    ) VALUES (?, ?, 'attractions', 'th', ?, ?, ?, ?, ?, ?, ?, ?, 'generated')
   `).run(
     uid,
+    type,
     title,
     title.toLowerCase(),
     slug,
@@ -142,6 +144,10 @@ function readAuditByAction(db, itemId, action) {
   `).get(String(itemId), action);
 }
 
+function countWorkflowTransitions(db, itemId) {
+  return Number(db.prepare("SELECT COUNT(*) AS count FROM content_workflow_transitions WHERE content_item_id=?").get(itemId)?.count || 0);
+}
+
 async function main() {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const dirs = resolvePaths(path.resolve(scriptDir, ".."));
@@ -151,6 +157,8 @@ async function main() {
 
   let revisionFixture = null;
   let webFeedbackFixture = null;
+  let publishedPlaceFixture = null;
+  let publishedEventFixture = null;
 
   try {
     logStep("auth.me");
@@ -168,6 +176,17 @@ async function main() {
       titleSuffix: "WebFeedbackDirect",
       productionState: "submitted_for_admin_review",
       publicationState: "approved",
+    });
+    publishedPlaceFixture = createFixtureItem(db, {
+      titleSuffix: "PublishedPlace",
+      productionState: "submitted_for_admin_review",
+      publicationState: "approved",
+    });
+    publishedEventFixture = createFixtureItem(db, {
+      titleSuffix: "PublishedEvent",
+      productionState: "submitted_for_admin_review",
+      publicationState: "approved",
+      type: "event",
     });
     logStep("revision.ready_for_publish_to_needs_revision");
     const revisionRes = await client.post(`/api/items/${revisionFixture.itemId}/article-process/transition`, {
@@ -200,11 +219,47 @@ async function main() {
     assert(String(webWorkflow?.production_state || "") === "needs_revision", "web feedback fixture should be needs_revision");
     assert(String(webWorkflow?.publication_state || "") === "draft", "web feedback fixture publication should be draft");
 
+    for (const fixture of [publishedPlaceFixture, publishedEventFixture]) {
+      const contentType = fixture === publishedEventFixture ? "event" : "place";
+      const beforeTransitions = countWorkflowTransitions(db, fixture.itemId);
+      logStep(`published.web_review_feedback_${contentType}`);
+      const publishedRes = await client.post("/api/web-review-feedback", {
+        source_system: "collector-app",
+        content_type: contentType,
+        source_content_item_id: fixture.itemId,
+        status: "published",
+        review_note: "smoke web review published",
+      }, {
+        auth: false,
+        headers: { "x-review-sync-token": reviewToken },
+      });
+      assert(publishedRes.ok && publishedRes.body?.applied === true, `published feedback failed: ${JSON.stringify(publishedRes.body)}`);
+      const publishedWorkflow = readWorkflow(db, fixture.itemId);
+      assert(String(publishedWorkflow?.production_state || "") === "completed", `${contentType} published feedback should complete production`);
+      assert(String(publishedWorkflow?.publication_state || "") === "published", `${contentType} published feedback should publish`);
+      assert(countWorkflowTransitions(db, fixture.itemId) === beforeTransitions + 2, `${contentType} published feedback should record both transitions`);
+
+      const duplicateRes = await client.post("/api/web-review-feedback", {
+        source_system: "collector-app",
+        content_type: contentType,
+        source_content_item_id: fixture.itemId,
+        status: "published",
+      }, {
+        auth: false,
+        headers: { "x-review-sync-token": reviewToken },
+      });
+      assert(duplicateRes.ok && duplicateRes.body?.applied === false, `duplicate published feedback should be idempotent: ${JSON.stringify(duplicateRes.body)}`);
+      assert(countWorkflowTransitions(db, fixture.itemId) === beforeTransitions + 2, `${contentType} duplicate published feedback must not write transitions`);
+    }
+
     console.log(JSON.stringify({
       ok: true,
       checks: {
         revision_ready_for_publish_to_needs_revision: true,
         revision_web_review_feedback_to_needs_revision: true,
+        published_place_web_review_feedback: true,
+        published_event_web_review_feedback: true,
+        duplicate_published_feedback_is_idempotent: true,
       },
       fixtures: {
         revision_item_id: revisionFixture.itemId,
@@ -215,6 +270,8 @@ async function main() {
     try {
       cleanupFixture(db, webFeedbackFixture);
       cleanupFixture(db, revisionFixture);
+      cleanupFixture(db, publishedPlaceFixture);
+      cleanupFixture(db, publishedEventFixture);
     } finally {
       if (typeof db.close === "function") db.close();
     }

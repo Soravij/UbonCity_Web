@@ -14702,6 +14702,41 @@ app.get("/api/review-queue", (_req, res) => {
   res.json(repo.listReviewQueue());
 });
 
+function applyPublishedWebReviewFeedback({ item, sourceContentItemId, reviewNote, reviewedBy = null, reviewedAt = null }) {
+  const actor = "web-review-sync";
+  const workflowBefore = repo.ensureWorkflowModel(sourceContentItemId);
+  const alreadyPublished = String(workflowBefore?.production_state || "").trim().toLowerCase() === "completed"
+    && String(workflowBefore?.publication_state || "").trim().toLowerCase() === "published";
+  if (alreadyPublished) {
+    return { model: workflowBefore, applied: false };
+  }
+  const model = repo.upsertWorkflowModel(
+    sourceContentItemId,
+    {
+      production_state: "completed",
+      publication_state: "published",
+      last_transition_note: reviewNote || "published by web review",
+    },
+    actor,
+    {
+      actor_role: "admin",
+      reason_code: "web_review_published",
+      bump_state_version: true,
+    }
+  );
+  repo.logAudit(actor, "web_review.feedback.published", "content_item", String(sourceContentItemId), {
+    content_type: String(item?.type || "").trim().toLowerCase() || null,
+    previous_production_state: workflowBefore?.production_state || null,
+    next_production_state: model?.production_state || null,
+    previous_publication_state: workflowBefore?.publication_state || null,
+    next_publication_state: model?.publication_state || null,
+    review_note: reviewNote || null,
+    reviewed_by: reviewedBy,
+    reviewed_at: reviewedAt || new Date().toISOString(),
+  });
+  return { model, applied: true };
+}
+
 app.post("/api/web-review-feedback", async (req, res) => {
   if (!hasConfiguredWebReviewToken()) {
     res.status(503).json({ error: "COLLECTOR_REVIEW_SYNC_TOKEN is not configured" });
@@ -14732,8 +14767,8 @@ app.post("/api/web-review-feedback", async (req, res) => {
     res.status(400).json({ error: "source_content_item_id must be positive" });
     return;
   }
-  if (status !== "needs_revision") {
-    res.status(400).json({ error: "status must be needs_revision" });
+  if (status !== "needs_revision" && status !== "published") {
+    res.status(400).json({ error: "status must be needs_revision or published" });
     return;
   }
 
@@ -14747,6 +14782,22 @@ app.post("/api/web-review-feedback", async (req, res) => {
     const actor = "web-review-sync";
     const workflowBefore = repo.ensureWorkflowModel(sourceContentItemId);
     if (rejectUnknownWorkflowModelState(res, "web-review-feedback", sourceContentItemId, workflowBefore)) {
+      return;
+    }
+    if (status === "published") {
+      const published = applyPublishedWebReviewFeedback({
+        item,
+        sourceContentItemId,
+        reviewNote,
+        reviewedBy,
+        reviewedAt: req.body?.reviewed_at || null,
+      });
+      res.json({
+        ok: true,
+        source_content_item_id: sourceContentItemId,
+        status: "published",
+        applied: published.applied,
+      });
       return;
     }
     const nextPublicationState =
@@ -14789,6 +14840,59 @@ app.post("/api/web-review-feedback", async (req, res) => {
     res.json({ ok: true, source_content_item_id: sourceContentItemId, status: "needs_revision" });
   } catch (err) {
     res.status(500).json({ error: String(err?.message || "cannot persist feedback") });
+  }
+});
+
+app.post("/api/items/:id/pull-web-publication-status", requireRole("admin", "owner"), async (req, res) => {
+  const id = Number(req.params.id || 0);
+  if (!id) return res.status(400).json({ error: "Invalid item id" });
+  const item = repo.getItem(id);
+  if (!item) return res.status(404).json({ error: "Item not found" });
+  if (!ensureItemMutationAccess(req, res, item)) return;
+  const contentType = String(item?.type || "").trim().toLowerCase();
+  if (contentType !== "place" && contentType !== "event") {
+    return res.status(409).json({ error: "web publication pull supports place or event only" });
+  }
+  if (!backendApiBase || !/^https?:\/\//i.test(backendApiBase)) {
+    return res.status(503).json({ error: "Collector backend API is not configured" });
+  }
+  if (isPlaceholderSecret(webReviewSyncToken)) {
+    return res.status(503).json({ error: "COLLECTOR_REVIEW_SYNC_TOKEN is not configured" });
+  }
+  try {
+    const query = new URLSearchParams({
+      source_system: "collector-app",
+      source_content_item_id: String(id),
+      content_type: contentType,
+    });
+    const statusRes = await fetch(`${backendApiBase.replace(/\/+$/, "")}/review-content/source-status?${query.toString()}`, {
+      headers: { "x-review-sync-token": webReviewSyncToken },
+    });
+    const statusBody = await statusRes.json().catch(() => ({ error: "Invalid backend status response" }));
+    if (!statusRes.ok) {
+      return res.status(statusRes.status).json({ error: statusBody?.error || "Backend publication status lookup failed" });
+    }
+    if (String(statusBody?.item?.status || "").trim().toLowerCase() !== "published") {
+      return res.json({ ok: true, item_id: id, status: String(statusBody?.item?.status || "").trim().toLowerCase() || null, applied: false });
+    }
+    const workflowBefore = repo.ensureWorkflowModel(id);
+    if (rejectUnknownWorkflowModelState(res, "pull-web-publication-status", id, workflowBefore)) return;
+    const published = applyPublishedWebReviewFeedback({
+      item,
+      sourceContentItemId: id,
+      reviewNote: "published status pulled from backend",
+      reviewedAt: statusBody?.item?.published_at || null,
+    });
+    const nextItem = repo.getItem(id) || item;
+    return res.json({
+      ok: true,
+      item: nextItem,
+      article_process: buildArticleProcessPayload(req, nextItem),
+      status: "published",
+      applied: published.applied,
+    });
+  } catch (err) {
+    return res.status(502).json({ error: String(err?.message || "Cannot pull web publication status") });
   }
 });
 

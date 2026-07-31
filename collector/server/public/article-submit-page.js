@@ -42,6 +42,7 @@ function setBusy(isBusy) {
     "btn-request-revision",
     "btn-approve-sync",
     "btn-refresh-readiness",
+    "btn-pull-web-publication-status",
     "btn-send-main-site",
     "btn-generate-translations",
   ].forEach((id) => {
@@ -94,6 +95,11 @@ function normalizeReviewActionCopy() {
   const syncBtn = qs("btn-send-main-site");
   if (syncBtn) {
     syncBtn.textContent = "ส่งเข้า Admin Review";
+  }
+
+  const pullPublicationBtn = qs("btn-pull-web-publication-status");
+  if (pullPublicationBtn) {
+    pullPublicationBtn.disabled = state.busy || !canSyncArticle() || status !== "submitted_for_admin_review";
   }
 }
 
@@ -1340,6 +1346,22 @@ async function sendToMainSite() {
   }
 }
 
+async function pullWebPublicationStatus() {
+  setBusy(true);
+  setBanner("กำลังตรวจสถานะเผยแพร่จากเว็บหลัก...", "loading");
+  try {
+    const result = await api(`/api/items/${state.itemId}/pull-web-publication-status`, { method: "POST" });
+    state.item = result?.item || state.item;
+    state.articleProcess = result?.article_process || state.articleProcess;
+    await refreshArticleProcess();
+    renderAll();
+    setBanner(result?.status === "published" ? "อัปเดตสถานะเผยแพร่แล้ว" : "เว็บหลักยังไม่เผยแพร่รายการนี้");
+  } finally {
+    setBusy(false);
+    applyActionGuards();
+  }
+}
+
 function wire() {
   const backHomeBtn = qs("btn-back-home");
   if (backHomeBtn) backHomeBtn.textContent = "\u0e42\u0e2e\u0e21";
@@ -1391,6 +1413,13 @@ function wire() {
   qs("btn-send-main-site")?.addEventListener("click", async () => {
     try {
       await sendToMainSite();
+    } catch (err) {
+      setBanner(err.message, "error");
+    }
+  });
+  qs("btn-pull-web-publication-status")?.addEventListener("click", async () => {
+    try {
+      await pullWebPublicationStatus();
     } catch (err) {
       setBanner(err.message, "error");
     }

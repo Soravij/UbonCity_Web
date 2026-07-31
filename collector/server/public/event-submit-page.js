@@ -100,6 +100,7 @@ function setBusy(isBusy) {
     "btn-request-revision",
     "btn-approve-sync",
     "btn-refresh-readiness",
+    "btn-pull-web-publication-status",
     "btn-send-main-site",
     "btn-generate-translations",
   ].forEach((id) => {
@@ -148,6 +149,11 @@ function normalizeReviewActionCopy() {
   const syncBtn = qs("btn-send-main-site");
   if (syncBtn) {
     syncBtn.textContent = alreadySubmitted ? "ส่งเข้า Admin Review แล้ว" : "ส่งเข้า Admin Review";
+  }
+
+  const pullPublicationBtn = qs("btn-pull-web-publication-status");
+  if (pullPublicationBtn) {
+    pullPublicationBtn.disabled = state.busy || !canSyncArticle() || status !== "submitted_for_admin_review";
   }
 }
 
@@ -744,6 +750,25 @@ async function sendToMainSite() {
   }
 }
 
+async function pullWebPublicationStatus() {
+  setBusy(true);
+  setBanner("กำลังตรวจสถานะเผยแพร่จากเว็บหลัก...", "loading");
+  setInlineStatus("sync-status", "กำลังตรวจสถานะเผยแพร่จากเว็บหลัก...", "loading");
+  try {
+    const result = await api(`/api/items/${state.itemId}/pull-web-publication-status`, { method: "POST" });
+    state.item = result?.item || state.item;
+    state.articleProcess = result?.article_process || state.articleProcess;
+    await refreshArticleProcess();
+    renderAll();
+    const message = result?.status === "published" ? "อัปเดตสถานะเผยแพร่แล้ว" : "เว็บหลักยังไม่เผยแพร่รายการนี้";
+    setBanner(message);
+    setInlineStatus("sync-status", message);
+  } finally {
+    setBusy(false);
+    applyActionGuards();
+  }
+}
+
 function wire() {
   applyStaticCopy();
   qs("btn-back-home")?.addEventListener("click", () => {
@@ -791,7 +816,7 @@ function wire() {
       setInlineStatus("review-status", err.message, "error");
     }
   });
-    qs("btn-send-main-site")?.addEventListener("click", async () => {
+  qs("btn-send-main-site")?.addEventListener("click", async () => {
       try {
         await sendToMainSite();
       } catch (err) {
@@ -805,6 +830,14 @@ function wire() {
       await generateTranslations();
     } catch (err) {
       setInlineStatus("translation-status", err.message, "error");
+    }
+  });
+  qs("btn-pull-web-publication-status")?.addEventListener("click", async () => {
+    try {
+      await pullWebPublicationStatus();
+    } catch (err) {
+      setInlineStatus("sync-status", err.message, "error");
+      setBanner(err.message, "error");
     }
   });
   const openTranslationDetailHandler = (event) => {

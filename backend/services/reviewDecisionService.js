@@ -485,6 +485,17 @@ export async function approveReviewContent({ reviewContent, actorUserId, reviewN
     });
 
     await connection.commit();
+    try {
+      await syncPublishedToCollector(content, reviewNote, actorUserId);
+    } catch (err) {
+      console.error("[collector publish sync failed]", JSON.stringify({
+        backend_review_content_id: Number(content.id || reviewContent.id || 0) || null,
+        collector_source_content_item_id: Number(content.source_content_item_id || 0) || null,
+        source_system: content.source_system || null,
+        content_type: content.content_type || null,
+        error: String(err?.message || err),
+      }));
+    }
     result = {
       id: reviewContent.id,
       status: "published",
@@ -530,6 +541,33 @@ async function syncNeedsRevisionToCollector(reviewContent, reviewNote, actorUser
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     throw new Error(`collector sync failed (${response.status})${body ? `: ${body.slice(0, 200)}` : ""}`);
+  }
+  return true;
+}
+
+async function syncPublishedToCollector(reviewContent, reviewNote, actorUserId) {
+  assertBackendIntegrationReadiness(["review_feedback_to_collector"]);
+  const collectorBase = String(process.env.COLLECTOR_SYNC_BASE_URL || "").trim().replace(/\/+$/, "");
+  const syncToken = String(process.env.COLLECTOR_REVIEW_SYNC_TOKEN || "").trim();
+  const response = await fetch(`${collectorBase}/api/web-review-feedback`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-review-sync-token": syncToken,
+    },
+    body: JSON.stringify({
+      source_system: reviewContent.source_system,
+      source_content_item_id: reviewContent.source_content_item_id,
+      content_type: reviewContent.content_type,
+      status: "published",
+      review_note: reviewNote || null,
+      reviewed_by: actorUserId || null,
+      reviewed_at: new Date().toISOString(),
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`collector publish sync failed (${response.status})${body ? `: ${body.slice(0, 200)}` : ""}`);
   }
   return true;
 }
