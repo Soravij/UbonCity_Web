@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
+import { assertPlaceReviewFlagMigrationApplied } from "./workflow-head-schema.mjs";
 
 function ensureUsersAuthColumns(db) {
   const cols = db.prepare("PRAGMA table_info(users)").all();
@@ -248,9 +249,7 @@ function ensureWorkflowHeadBootstrapColumns(db) {
   if (!names.has("last_transition_at")) {
     db.exec("ALTER TABLE content_workflow_models ADD COLUMN last_transition_at TEXT;");
   }
-  if (!names.has("place_review_flag")) {
-    db.exec("ALTER TABLE content_workflow_models ADD COLUMN place_review_flag TEXT NOT NULL DEFAULT 'none';");
-  }
+  assertPlaceReviewFlagMigrationApplied(db, "booting Collector");
 }
 
 function ensureAuditColumns(db) {
@@ -297,24 +296,29 @@ export function validateStrongPassword(candidate) {
 export function openDatabase(dbPath, schemaPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
-  db.exec("PRAGMA foreign_keys = ON;");
+  try {
+    db.exec("PRAGMA foreign_keys = ON;");
 
-  if (schemaPath) {
-    ensureApprovedContextActiveUniqueness(db);
-    ensureWorkflowHeadBootstrapColumns(db);
-    const schemaSql = fs.readFileSync(schemaPath, "utf8").replace(/^\uFEFF/, "");
-    db.exec(schemaSql);
+    if (schemaPath) {
+      ensureApprovedContextActiveUniqueness(db);
+      ensureWorkflowHeadBootstrapColumns(db);
+      const schemaSql = fs.readFileSync(schemaPath, "utf8").replace(/^\uFEFF/, "");
+      db.exec(schemaSql);
+    }
+
+    ensureUsersAuthColumns(db);
+    ensureEvidenceContextColumns(db);
+    ensureSearchIntelligenceTables(db);
+    ensureSocialMomentumTables(db);
+    ensureContentDirectionTables(db);
+    ensureWorkflowTransitionColumns(db);
+    ensureAuditColumns(db);
+    removeLegacyLocalAuthData(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
   }
-
-  ensureUsersAuthColumns(db);
-  ensureEvidenceContextColumns(db);
-  ensureSearchIntelligenceTables(db);
-  ensureSocialMomentumTables(db);
-  ensureContentDirectionTables(db);
-  ensureWorkflowTransitionColumns(db);
-  ensureAuditColumns(db);
-  removeLegacyLocalAuthData(db);
-  return db;
 }
 
 

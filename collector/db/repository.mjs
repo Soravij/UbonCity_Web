@@ -4,6 +4,7 @@ import path from "path";
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
 import { getTaxonomyCheckLabel, resolveTaxonomyRequestedChecksGroup } from "../server/taxonomy-resolver.mjs";
 import { decodeUrlEntities } from "../lib/decode-url-entities.mjs";
+import { assertPlaceReviewFlagMigrationApplied } from "./workflow-head-schema.mjs";
 
 function parseTags(raw) {
   if (!raw) return [];
@@ -3419,9 +3420,7 @@ function ensureWorkflowHeadColumns(db) {
   if (!names.has("last_transition_at")) {
     db.exec("ALTER TABLE content_workflow_models ADD COLUMN last_transition_at TEXT;");
   }
-  if (!names.has("place_review_flag")) {
-    db.exec("ALTER TABLE content_workflow_models ADD COLUMN place_review_flag TEXT NOT NULL DEFAULT 'none';");
-  }
+  assertPlaceReviewFlagMigrationApplied(db, "creating a repository");
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_content_workflow_models_current_draft
       ON content_workflow_models(current_draft_id);
