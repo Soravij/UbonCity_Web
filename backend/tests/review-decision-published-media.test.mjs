@@ -654,6 +654,88 @@ test("approveReviewContent updates published place image fields from storage_pat
   }
 });
 
+test("approveReviewContent commits publication when Collector publish feedback succeeds or fails", async () => {
+  const originalGetConnection = pool.getConnection;
+  const originalPoolQuery = pool.query;
+  const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+  const originalBackendPublicUrl = process.env.BACKEND_PUBLIC_URL;
+  const originalCollectorBase = process.env.COLLECTOR_SYNC_BASE_URL;
+  const originalCollectorToken = process.env.COLLECTOR_REVIEW_SYNC_TOKEN;
+  const logs = [];
+  const cases = [
+    { name: "success", response: { ok: true, status: 200, text: async () => "" }, logged: false },
+    { name: "500", response: { ok: false, status: 500, text: async () => "collector failed" }, logged: true },
+    { name: "timeout", error: Object.assign(new Error("request timed out"), { name: "AbortError" }), logged: true },
+    { name: "connection refused", error: new Error("connect ECONNREFUSED 127.0.0.1"), logged: true },
+    { name: "wrong token", response: { ok: false, status: 401, text: async () => "Invalid review sync token" }, logged: true },
+  ];
+
+  process.env.BACKEND_PUBLIC_URL = "https://api-test.uboncity.com";
+  process.env.COLLECTOR_SYNC_BASE_URL = "https://collector.test.local";
+  process.env.COLLECTOR_REVIEW_SYNC_TOKEN = "test-sync-token";
+  console.error = (...args) => logs.push(args);
+
+  try {
+    for (const scenario of cases) {
+      const harness = createApproveHarness();
+      const fetchCalls = [];
+      pool.getConnection = async () => harness.connection;
+      pool.query = harness.poolQuery;
+      globalThis.fetch = async (...args) => {
+        fetchCalls.push(args);
+        if (scenario.error) throw scenario.error;
+        return scenario.response;
+      };
+      await writeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+
+      const result = await approveReviewContent({
+        reviewContent: { id: harness.state.reviewContent.id },
+        actorUserId: 7,
+        reviewNote: `publish callback ${scenario.name}`,
+      });
+
+      assert.equal(result.status, "published", `${scenario.name}: publish result`);
+      assert.ok(harness.state.transaction.includes("commit"), `${scenario.name}: committed before callback outcome`);
+      assert.equal(harness.state.transaction.includes("rollback"), false, `${scenario.name}: callback must not roll back publish`);
+      assert.equal(harness.state.reviewContent.status, "published", `${scenario.name}: persisted published status`);
+      assert.equal(fetchCalls.length, 1, `${scenario.name}: callback invoked once`);
+      const [url, options] = fetchCalls[0];
+      assert.equal(url, "https://collector.test.local/api/web-review-feedback");
+      assert.equal(options.headers["x-review-sync-token"], "test-sync-token");
+      assert.deepEqual(JSON.parse(options.body), {
+        source_system: "collector-app",
+        source_content_item_id: 99,
+        content_type: "place",
+        status: "published",
+        review_note: `publish callback ${scenario.name}`,
+        reviewed_by: 7,
+        reviewed_at: JSON.parse(options.body).reviewed_at,
+      });
+      assert.match(JSON.parse(options.body).reviewed_at, /^\d{4}-\d{2}-\d{2}T/);
+
+      const scenarioLogs = logs.splice(0);
+      assert.equal(scenarioLogs.length > 0, scenario.logged, `${scenario.name}: failure log expectation`);
+      if (scenario.logged) {
+        const payload = JSON.parse(String(scenarioLogs[0][1] || ""));
+        assert.equal(scenarioLogs[0][0], "[collector publish sync failed]");
+        assert.equal(payload.backend_review_content_id, 501);
+        assert.equal(payload.collector_source_content_item_id, 99);
+      }
+      await removeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+      await removeUploadFixture("uploads/published/places/99/501-batch-99-cover-0-1.jpg");
+    }
+  } finally {
+    pool.getConnection = originalGetConnection;
+    pool.query = originalPoolQuery;
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
+    process.env.BACKEND_PUBLIC_URL = originalBackendPublicUrl;
+    process.env.COLLECTOR_SYNC_BASE_URL = originalCollectorBase;
+    process.env.COLLECTOR_REVIEW_SYNC_TOKEN = originalCollectorToken;
+  }
+}, { concurrency: false });
+
 test("approveReviewContent promotes the current translation batch and deletes only historical pipeline languages", async () => {
   const originalGetConnection = pool.getConnection;
   const originalPoolQuery = pool.query;
