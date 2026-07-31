@@ -26,6 +26,7 @@ import { ensureContentGovernanceInfrastructure } from "./services/contentGoverna
 import reviewContentRoutes from "./routes/reviewContentRoutes.js";
 import integrationReadinessRoutes from "./routes/integrationReadinessRoutes.js";
 import { assertBackendIntegrationReadiness, getBackendRequiredIntegrationKeys } from "./services/integrationReadinessService.js";
+import pool from "./config/db.js";
 import {
   applyBasicSecurityHeaders,
   corsOptionsDelegate,
@@ -58,8 +59,13 @@ app.use(
 );
 app.use("/transport", express.static(path.resolve(__dirname, "transport"), { index: false }));
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "backend" });
+app.get("/api/health", async (_req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT DATABASE() AS name");
+    res.json({ ok: true, service: "backend", database: { engine: "mysql", name: String(rows?.[0]?.name || "") } });
+  } catch {
+    res.status(503).json({ ok: false, service: "backend", error: "database identity unavailable" });
+  }
 });
 
 // Translate routes

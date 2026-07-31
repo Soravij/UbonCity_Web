@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
 import { assertSmokeDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
+import { assertBackendSmokeTargetAllowed, assertSmokeServerTargetsAllowed } from "../../scripts/smokeServerGuard.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const COLLECTOR_DIR = path.join(ROOT, "collector");
@@ -25,13 +26,23 @@ const COLLECTOR_PORT = Number(process.env.BACKEND_FINAL_REVIEW_SMOKE_COLLECTOR_P
 const COLLECTOR_BASE_URL = String(process.env.COLLECTOR_PUBLIC_BASE_URL || `http://127.0.0.1:${COLLECTOR_PORT}`).replace(/\/+$/, "");
 const DB_CONFIG = { host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASSWORD, database: process.env.DB_NAME, waitForConnections: true, connectionLimit: 2 };
 const FIXTURE_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+nmJ0AAAAASUVORK5CYII=", "base64");
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-final-review-smoke-"));
-const collectorDbPath = path.join(tempDir, "collector.db");
+let tempDir = "";
+let collectorDbPath = "";
 const fixturePrefix = `final-review-smoke-${Date.now()}`;
 let collectorProcess = null;
 let pool = null;
 
 function assertOk(value, message) { assert.ok(value, message); }
+function initializeTemporaryCollector() {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-final-review-smoke-"));
+  collectorDbPath = path.join(tempDir, "collector.db");
+}
+async function cleanupTemporaryCollector() {
+  if (!tempDir) return;
+  await fsp.rm(tempDir, { recursive: true, force: true });
+  tempDir = "";
+  collectorDbPath = "";
+}
 function collectorToken() { return jwt.sign({ id: 1, email: "final-review-smoke@local.test", role: "owner" }, JWT_SECRET, { issuer: process.env.JWT_ISSUER || "uboncity-backend", audience: "uboncity-collector", expiresIn: "10m" }); }
 function backendToken() { return jwt.sign({ id: 1, email: "final-review-smoke@local.test", role: "owner" }, JWT_SECRET, { issuer: process.env.JWT_ISSUER || "uboncity-backend", audience: process.env.JWT_AUDIENCE_BACKEND || "uboncity-backend", expiresIn: "10m" }); }
 function auth(token, json = true) { return { authorization: `Bearer ${token}`, ...(json ? { "content-type": "application/json" } : {}) }; }
@@ -180,7 +191,6 @@ function assertHistory(item, previousStatus) { assertOk((item.history || []).som
 export async function runCollectorAdminFinalReviewSmoke() {
   assertSmokeDatabaseAllowed(DB_CONFIG.database);
   assertOk(JWT_SECRET, "JWT_SECRET is required"); assertOk(DB_CONFIG.user && DB_CONFIG.database, "DB_USER and DB_NAME are required");
-  pool = mysql.createPool(DB_CONFIG);
   const runId = `${Date.now()}`;
   const fixtures = ["approve", "reject", "eventApprove", "eventReject"].map((key, index) => {
     const type = key.startsWith("event") ? "event" : "place"; const label = `${key}-${runId}`;
@@ -190,7 +200,14 @@ export async function runCollectorAdminFinalReviewSmoke() {
   const [approve, reject, eventApprove, eventReject] = fixtures;
   try {
     await assertBackendHealthy();
+    await assertBackendSmokeTargetAllowed({ backendBaseUrl: BACKEND_BASE_URL.replace(/\/api$/, "") });
+    initializeTemporaryCollector();
     await startCollector(translationLangs(approve, "v1"));
+    await assertSmokeServerTargetsAllowed({
+      backendBaseUrl: BACKEND_BASE_URL.replace(/\/api$/, ""),
+      collectorBaseUrl: COLLECTOR_BASE_URL,
+    });
+    pool = mysql.createPool(DB_CONFIG);
     const ids = {};
     // Retired old rows 4/29/52/66/78/87/95/103: queue-detail rejects synthetic negative IDs.
     // Their detail coverage is ported below through GET /review-content/:id.
@@ -216,8 +233,8 @@ export async function runCollectorAdminFinalReviewSmoke() {
     try {
       // Cleanup is fixture teardown only; smoke assertions above use HTTP exclusively. Translations precede entities for FK safety.
       for (const fixture of fixtures) await cleanupFixtureReviewContent(pool, fixture);
-    } finally { if (pool) { await pool.end(); pool = null; } await fsp.rm(tempDir, { recursive: true, force: true }); }
+    } finally { if (pool) { await pool.end(); pool = null; } await cleanupTemporaryCollector(); }
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) runCollectorAdminFinalReviewSmoke().then((result) => console.log(JSON.stringify(result, null, 2))).catch(async (error) => { try { if (pool) await pool.end(); } finally { stopCollector(); await fsp.rm(tempDir, { recursive: true, force: true }); } console.error(error); process.exitCode = 1; });
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) runCollectorAdminFinalReviewSmoke().then((result) => console.log(JSON.stringify(result, null, 2))).catch(async (error) => { try { if (pool) await pool.end(); } finally { stopCollector(); await cleanupTemporaryCollector(); } console.error(error); process.exitCode = 1; });
