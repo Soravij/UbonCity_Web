@@ -4,11 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
+import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 
-const indexSource = fs.readFileSync(path.resolve("D:/UbonCity_Web/collector/server/index.mjs"), "utf8");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
+const indexSource = fs.readFileSync(path.join(root, "server", "index.mjs"), "utf8");
 
 function extractFunctionBlock(source, name) {
   const signature = `function ${name}`;
@@ -43,7 +46,7 @@ function extractFunctionBlock(source, name) {
 function createContext() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-article-process-evidence-"));
   const dbPath = path.join(tempDir, "test.sqlite");
-  const schemaPath = path.resolve("D:/UbonCity_Web/collector/database/schema.sql");
+  const schemaPath = path.join(root, "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   const repo = createRepository(db);
 

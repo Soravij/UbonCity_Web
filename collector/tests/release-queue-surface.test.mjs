@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const collectorRoot = "D:\\UbonCity_Web\\collector";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const collectorRoot = path.dirname(__dirname);
 const appJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.js"), "utf8");
 const indexHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "index.html"), "utf8");
 const indexServer = fs.readFileSync(path.join(collectorRoot, "server", "index.mjs"), "utf8");

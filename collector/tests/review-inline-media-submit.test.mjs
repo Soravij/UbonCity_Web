@@ -75,7 +75,7 @@ test("body-only local image is included in multipart plan without selected_asset
     },
     selectedAssets: [],
     allAssets: [asset],
-    resolveStoragePath: (storagePath) => `D:/collector-media/${storagePath}`,
+    resolveStoragePath: (storagePath) => `D:/collector-media/${storagePath}`, // path-guard-allow: fake storage-disk root, never resolved against this checkout
     fileExists: () => true,
   });
 

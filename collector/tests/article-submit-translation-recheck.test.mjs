@@ -3,8 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve("D:/UbonCity_Web/collector");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
 
 function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), "utf8");

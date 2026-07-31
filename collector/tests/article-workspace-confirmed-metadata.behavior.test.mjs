@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
 
 function createElement(id = "", value = "") {
   return {
@@ -65,7 +68,7 @@ async function loadCoreModule(missingIds = []) {
     }
   };
 
-  const moduleUrl = `${pathToFileURL(path.resolve("D:/UbonCity_Web/collector/server/public/article-workflow-core.js")).href}?t=${Date.now()}`;
+  const moduleUrl = `${pathToFileURL(path.join(root, "server", "public", "article-workflow-core.js")).href}?t=${Date.now()}`;
   const mod = await import(moduleUrl);
   return { mod, elements };
 }

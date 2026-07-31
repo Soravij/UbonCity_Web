@@ -3,14 +3,18 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
+
 function createDbContext(prefix = "collector-schema-foundation-") {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const dbPath = path.join(tempDir, "test.sqlite");
-  const schemaPath = path.resolve("D:\\UbonCity_Web\\collector\\database\\schema.sql");
+  const schemaPath = path.join(root, "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   function cleanup() {
     try {

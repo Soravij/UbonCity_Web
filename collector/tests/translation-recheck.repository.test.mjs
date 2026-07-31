@@ -3,9 +3,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
 
 const REQUIRED_RECHECK_COLUMNS = [
   "translation_recheck_status",
@@ -24,7 +28,7 @@ const REQUIRED_RECHECK_COLUMNS = [
 function createTestContext() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-translation-recheck-repo-"));
   const dbPath = path.join(tempDir, "test.sqlite");
-  const schemaPath = path.resolve("D:\\UbonCity_Web\\collector\\database\\schema.sql");
+  const schemaPath = path.join(root, "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   const repo = createRepository(db);
 
@@ -269,7 +273,7 @@ test("updateTranslationRepairResult persists translated fields and resets rechec
 test("repository migration adds recheck columns to existing nullable-source table that lacks them", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-translation-recheck-migrate-nullable-"));
   const dbPath = path.join(tempDir, "test.sqlite");
-  const schemaPath = path.resolve("D:\\UbonCity_Web\\collector\\database\\schema.sql");
+  const schemaPath = path.join(root, "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   try {
     createLegacyTranslationTable(db, { nullableSource: true, withRecheckColumns: false });
@@ -318,7 +322,7 @@ test("repository migration adds recheck columns to existing nullable-source tabl
 test("repository migration rebuild path does not duplicate columns and leaves recheck columns present", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-translation-recheck-migrate-rebuild-"));
   const dbPath = path.join(tempDir, "test.sqlite");
-  const schemaPath = path.resolve("D:\\UbonCity_Web\\collector\\database\\schema.sql");
+  const schemaPath = path.join(root, "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   try {
     createLegacyTranslationTable(db, { nullableSource: false, withRecheckColumns: false });
@@ -367,7 +371,7 @@ test("repository migration rebuild path does not duplicate columns and leaves re
 test("repository migration is idempotent when all recheck columns already exist", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-translation-recheck-migrate-idempotent-"));
   const dbPath = path.join(tempDir, "test.sqlite");
-  const schemaPath = path.resolve("D:\\UbonCity_Web\\collector\\database\\schema.sql");
+  const schemaPath = path.join(root, "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   try {
     createLegacyTranslationTable(db, { nullableSource: true, withRecheckColumns: true });

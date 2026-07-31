@@ -3,8 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
+import { fileURLToPath } from "node:url";
 
-const appSource = fs.readFileSync(path.resolve("D:/UbonCity_Web/collector/server/public/app.js"), "utf8");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
+const appSource = fs.readFileSync(path.join(root, "server", "public", "app.js"), "utf8");
 
 function extractFunctionBlock(source, name) {
   const start = [`async function ${name}`, `function ${name}`]

@@ -3,16 +3,20 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 
 process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "FieldPack!Test1";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
+
 function createTestContext() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-field-pack-"));
   const dbPath = path.join(tempDir, "test.sqlite");
-  const schemaPath = path.resolve("D:\\UbonCity_Web\\collector\\database\\schema.sql");
+  const schemaPath = path.join(root, "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   const repo = createRepository(db);
 

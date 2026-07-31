@@ -11,11 +11,15 @@ import { createRepository } from "../db/repository.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
 
 function createRepoContext() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-endpoint-schema-"));
   const dbPath = path.join(tempDir, "test.sqlite");
-  const schemaPath = path.resolve("D:\\UbonCity_Web\\collector\\database\\schema.sql");
+  const schemaPath = path.join(root, "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   const repo = createRepository(db);
 

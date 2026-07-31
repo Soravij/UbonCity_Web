@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
+import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
 import {
@@ -16,7 +17,8 @@ import {
 import { runQualityStage } from "../services/workflow.mjs";
 import { isUsableWorkflowStateCatalog, reportUnknownWorkflowState } from "../server/public/workflow-state-catalog.js";
 
-const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const collectorRoot = path.dirname(__dirname);
 const serverSource = fs.readFileSync(path.join(collectorRoot, "server", "index.mjs"), "utf8");
 const workflowSource = fs.readFileSync(path.join(collectorRoot, "services", "workflow.mjs"), "utf8");
 const dashboardSource = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.js"), "utf8");
