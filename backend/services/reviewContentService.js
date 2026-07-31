@@ -389,6 +389,34 @@ export async function getReviewContentById(id) {
   };
 }
 
+export async function getReviewContentStatusBySource({ sourceSystem, sourceContentItemId, contentType }) {
+  const normalizedSourceSystem = String(sourceSystem || "").trim().toLowerCase();
+  const normalizedContentType = String(contentType || "").trim().toLowerCase();
+  const itemId = Number(sourceContentItemId || 0);
+  if (!normalizedSourceSystem || !Number.isFinite(itemId) || itemId <= 0 || !normalizedContentType) return null;
+
+  const [rows] = await pool.query(
+    `SELECT id, source_system, source_content_item_id, content_type, status, published_at, public_entity_type, public_entity_id
+     FROM review_contents
+     WHERE source_system=? AND source_content_item_id=? AND content_type=?
+     ORDER BY id DESC
+     LIMIT 1`,
+    [normalizedSourceSystem, itemId, normalizedContentType]
+  );
+  if (!rows.length) return null;
+  const row = rows[0];
+  return {
+    id: Number(row.id || 0) || 0,
+    source_system: String(row.source_system || "").trim().toLowerCase(),
+    source_content_item_id: Number(row.source_content_item_id || 0) || 0,
+    content_type: String(row.content_type || "").trim().toLowerCase(),
+    status: String(row.status || "").trim().toLowerCase(),
+    published_at: row.published_at || null,
+    public_entity_type: row.public_entity_type || null,
+    public_entity_id: row.public_entity_id == null ? null : Number(row.public_entity_id || 0) || null,
+  };
+}
+
 export async function appendReviewAction({
   reviewContentId,
   batchUid,

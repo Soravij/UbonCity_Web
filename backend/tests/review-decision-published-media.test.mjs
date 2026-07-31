@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "fs/promises";
+import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 
 import pool from "../config/db.js";
-import { approveReviewContent } from "../services/reviewDecisionService.js";
+import { approveReviewContent, markNeedsRevision, resolveCollectorSyncTimeoutMs } from "../services/reviewDecisionService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -652,6 +653,223 @@ test("approveReviewContent updates published place image fields from storage_pat
     pool.query = originalPoolQuery;
     process.env.BACKEND_PUBLIC_URL = originalBackendPublicUrl;
   }
+});
+
+test("approveReviewContent commits publication when Collector publish feedback succeeds or fails", async () => {
+  const originalGetConnection = pool.getConnection;
+  const originalPoolQuery = pool.query;
+  const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+  const originalBackendPublicUrl = process.env.BACKEND_PUBLIC_URL;
+  const originalCollectorBase = process.env.COLLECTOR_SYNC_BASE_URL;
+  const originalCollectorToken = process.env.COLLECTOR_REVIEW_SYNC_TOKEN;
+  const logs = [];
+  const cases = [
+    { name: "success", response: { ok: true, status: 200, text: async () => "" }, logged: false },
+    { name: "500", response: { ok: false, status: 500, text: async () => "collector failed" }, logged: true },
+    { name: "timeout", error: Object.assign(new Error("request timed out"), { name: "AbortError" }), logged: true },
+    { name: "connection refused", error: new Error("connect ECONNREFUSED 127.0.0.1"), logged: true },
+    { name: "wrong token", response: { ok: false, status: 401, text: async () => "Invalid review sync token" }, logged: true },
+  ];
+
+  process.env.BACKEND_PUBLIC_URL = "https://api-test.uboncity.com";
+  process.env.COLLECTOR_SYNC_BASE_URL = "https://collector.test.local";
+  process.env.COLLECTOR_REVIEW_SYNC_TOKEN = "test-sync-token";
+  console.error = (...args) => logs.push(args);
+
+  try {
+    for (const scenario of cases) {
+      const harness = createApproveHarness();
+      const fetchCalls = [];
+      pool.getConnection = async () => harness.connection;
+      pool.query = harness.poolQuery;
+      globalThis.fetch = async (...args) => {
+        fetchCalls.push(args);
+        if (scenario.error) throw scenario.error;
+        return scenario.response;
+      };
+      await writeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+
+      const result = await approveReviewContent({
+        reviewContent: { id: harness.state.reviewContent.id },
+        actorUserId: 7,
+        reviewNote: `publish callback ${scenario.name}`,
+      });
+
+      assert.equal(result.status, "published", `${scenario.name}: publish result`);
+      assert.ok(harness.state.transaction.includes("commit"), `${scenario.name}: committed before callback outcome`);
+      assert.equal(harness.state.transaction.includes("rollback"), false, `${scenario.name}: callback must not roll back publish`);
+      assert.equal(harness.state.reviewContent.status, "published", `${scenario.name}: persisted published status`);
+      assert.equal(fetchCalls.length, 1, `${scenario.name}: callback invoked once`);
+      const [url, options] = fetchCalls[0];
+      assert.equal(url, "https://collector.test.local/api/web-review-feedback");
+      assert.equal(options.headers["x-review-sync-token"], "test-sync-token");
+      assert.deepEqual(JSON.parse(options.body), {
+        source_system: "collector-app",
+        source_content_item_id: 99,
+        content_type: "place",
+        status: "published",
+        review_note: `publish callback ${scenario.name}`,
+        reviewed_by: 7,
+        reviewed_at: JSON.parse(options.body).reviewed_at,
+      });
+      assert.match(JSON.parse(options.body).reviewed_at, /^\d{4}-\d{2}-\d{2}T/);
+
+      const scenarioLogs = logs.splice(0);
+      assert.equal(scenarioLogs.length > 0, scenario.logged, `${scenario.name}: failure log expectation`);
+      if (scenario.logged) {
+        const payload = JSON.parse(String(scenarioLogs[0][1] || ""));
+        assert.equal(scenarioLogs[0][0], "[collector publish sync failed]");
+        assert.equal(payload.backend_review_content_id, 501);
+        assert.equal(payload.collector_source_content_item_id, 99);
+      }
+      await removeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+      await removeUploadFixture("uploads/published/places/99/501-batch-99-cover-0-1.jpg");
+    }
+  } finally {
+    pool.getConnection = originalGetConnection;
+    pool.query = originalPoolQuery;
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
+    process.env.BACKEND_PUBLIC_URL = originalBackendPublicUrl;
+    process.env.COLLECTOR_SYNC_BASE_URL = originalCollectorBase;
+    process.env.COLLECTOR_REVIEW_SYNC_TOKEN = originalCollectorToken;
+  }
+}, { concurrency: false });
+
+test("approveReviewContent still publishes within a bounded time when Collector hangs (real timer, not a mocked AbortError)", async () => {
+  const originalGetConnection = pool.getConnection;
+  const originalPoolQuery = pool.query;
+  const originalConsoleError = console.error;
+  const originalBackendPublicUrl = process.env.BACKEND_PUBLIC_URL;
+  const originalCollectorBase = process.env.COLLECTOR_SYNC_BASE_URL;
+  const originalCollectorToken = process.env.COLLECTOR_REVIEW_SYNC_TOKEN;
+  const originalTimeoutMs = process.env.COLLECTOR_SYNC_TIMEOUT_MS;
+  const logs = [];
+
+  // Accepts the TCP connection but never writes a response — a real stalled Collector, not a mocked AbortError.
+  const hungServer = http.createServer(() => {});
+  await new Promise((resolve) => hungServer.listen(0, "127.0.0.1", resolve));
+  const port = hungServer.address().port;
+
+  const harness = createApproveHarness();
+  pool.getConnection = async () => harness.connection;
+  pool.query = harness.poolQuery;
+  console.error = (...args) => logs.push(args);
+  process.env.BACKEND_PUBLIC_URL = "https://api-test.uboncity.com";
+  process.env.COLLECTOR_SYNC_BASE_URL = `http://127.0.0.1:${port}`;
+  process.env.COLLECTOR_REVIEW_SYNC_TOKEN = "test-sync-token";
+  process.env.COLLECTOR_SYNC_TIMEOUT_MS = "300";
+  await writeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+
+  try {
+    const startedAt = Date.now();
+    const result = await approveReviewContent({
+      reviewContent: { id: harness.state.reviewContent.id },
+      actorUserId: 7,
+      reviewNote: "publish callback real timeout",
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.ok(elapsedMs >= 280, `abort fired too early (${elapsedMs}ms) — timeout isn't actually bounding the wait`);
+    assert.ok(elapsedMs < 5000, `abort never fired — request hung well past the 300ms timeout (${elapsedMs}ms)`);
+    assert.equal(result.status, "published", "publish must still succeed when Collector hangs");
+    assert.ok(harness.state.transaction.includes("commit"), "must have committed before the hung callback resolved");
+    assert.equal(harness.state.transaction.includes("rollback"), false, "a hung callback must not roll back publish");
+    assert.equal(harness.state.reviewContent.status, "published");
+
+    assert.equal(logs.length, 1, "exactly one failure log for the hung callback");
+    assert.equal(logs[0][0], "[collector publish sync failed]");
+    const payload = JSON.parse(String(logs[0][1] || ""));
+    assert.equal(payload.backend_review_content_id, 501);
+    assert.equal(payload.collector_source_content_item_id, 99);
+    assert.match(payload.error, /timed out/);
+  } finally {
+    await removeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+    await removeUploadFixture("uploads/published/places/99/501-batch-99-cover-0-1.jpg");
+    pool.getConnection = originalGetConnection;
+    pool.query = originalPoolQuery;
+    console.error = originalConsoleError;
+    process.env.BACKEND_PUBLIC_URL = originalBackendPublicUrl;
+    process.env.COLLECTOR_SYNC_BASE_URL = originalCollectorBase;
+    process.env.COLLECTOR_REVIEW_SYNC_TOKEN = originalCollectorToken;
+    process.env.COLLECTOR_SYNC_TIMEOUT_MS = originalTimeoutMs;
+    await new Promise((resolve) => hungServer.close(resolve));
+  }
+});
+
+test("markNeedsRevision rolls back within a bounded time when Collector hangs (pre-commit sync, real timer)", async () => {
+  const originalGetConnection = pool.getConnection;
+  const originalCollectorBase = process.env.COLLECTOR_SYNC_BASE_URL;
+  const originalCollectorToken = process.env.COLLECTOR_REVIEW_SYNC_TOKEN;
+  const originalTimeoutMs = process.env.COLLECTOR_SYNC_TIMEOUT_MS;
+
+  const hungServer = http.createServer(() => {});
+  await new Promise((resolve) => hungServer.listen(0, "127.0.0.1", resolve));
+  const port = hungServer.address().port;
+
+  // syncNeedsRevisionToCollector runs before any other write in markNeedsRevision, so once it
+  // throws (real abort) the function must roll back without ever reaching a second query.
+  const state = { transaction: [] };
+  const connection = {
+    async beginTransaction() { state.transaction.push("begin"); },
+    async commit() { state.transaction.push("commit"); },
+    async rollback() { state.transaction.push("rollback"); },
+    release() { state.transaction.push("release"); },
+    async query(sql) {
+      const normalized = normalizeSql(sql);
+      if (normalized === "select * from review_contents where id=? limit 1 for update") {
+        return [[{
+          id: 501,
+          status: "pending_review",
+          current_batch_uid: "batch-99",
+          source_system: "collector-app",
+          source_content_item_id: 99,
+          content_type: "place",
+        }]];
+      }
+      throw new Error(`unexpected query — Collector sync should have thrown before this: ${sql}`);
+    },
+  };
+
+  pool.getConnection = async () => connection;
+  process.env.COLLECTOR_SYNC_BASE_URL = `http://127.0.0.1:${port}`;
+  process.env.COLLECTOR_REVIEW_SYNC_TOKEN = "test-sync-token";
+  process.env.COLLECTOR_SYNC_TIMEOUT_MS = "300";
+
+  try {
+    const startedAt = Date.now();
+    await assert.rejects(
+      markNeedsRevision({ reviewContent: { id: 501 }, actorUserId: 7, reviewNote: "needs revision real timeout" }),
+      /timed out/
+    );
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.ok(elapsedMs >= 280, `abort fired too early (${elapsedMs}ms) — timeout isn't actually bounding the wait`);
+    assert.ok(elapsedMs < 5000, `abort never fired — request hung well past the 300ms timeout (${elapsedMs}ms)`);
+    assert.ok(state.transaction.includes("rollback"), "must roll back when the pre-commit Collector sync times out");
+    assert.equal(state.transaction.includes("commit"), false, "must not commit when the pre-commit Collector sync times out");
+  } finally {
+    pool.getConnection = originalGetConnection;
+    process.env.COLLECTOR_SYNC_BASE_URL = originalCollectorBase;
+    process.env.COLLECTOR_REVIEW_SYNC_TOKEN = originalCollectorToken;
+    process.env.COLLECTOR_SYNC_TIMEOUT_MS = originalTimeoutMs;
+    await new Promise((resolve) => hungServer.close(resolve));
+  }
+});
+
+test("resolveCollectorSyncTimeoutMs rejects negative and decimal values, falling back to the 8000ms default", () => {
+  assert.equal(resolveCollectorSyncTimeoutMs("-100"), 8000, "a negative value must not survive as a near-zero setTimeout delay");
+  assert.equal(resolveCollectorSyncTimeoutMs("-1"), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs("300.5"), 8000, "a decimal value must fall back rather than being passed to setTimeout as-is");
+  assert.equal(resolveCollectorSyncTimeoutMs("0.5"), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs("0"), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs(""), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs(undefined), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs("abc"), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs("  "), 8000);
+  assert.equal(resolveCollectorSyncTimeoutMs("300"), 300, "a valid positive integer must be used as-is");
+  assert.equal(resolveCollectorSyncTimeoutMs("8000"), 8000);
 });
 
 test("approveReviewContent promotes the current translation batch and deletes only historical pipeline languages", async () => {

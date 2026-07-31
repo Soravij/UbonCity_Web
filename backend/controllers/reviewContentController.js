@@ -5,7 +5,7 @@ import {
   markNeedsRevision,
   markRejected,
 } from "../services/reviewDecisionService.js";
-import { getReviewContentById, shapeAdminReviewContent, shapePublicReviewContent } from "../services/reviewContentService.js";
+import { getReviewContentById, getReviewContentStatusBySource, shapeAdminReviewContent, shapePublicReviewContent } from "../services/reviewContentService.js";
 import { ingestReviewContent } from "../services/reviewIngestService.js";
 import { issueReviewAccessToken, REVIEW_CONTENT_INTERNAL_ROLES } from "../middleware/authMiddleware.js";
 
@@ -192,6 +192,24 @@ export async function approveReviewContentAction(req, res) {
     }
     const msg = String(err?.message || "approve failed");
     if (/already published|not found|cannot/i.test(msg)) return res.status(409).json({ error: msg });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function getReviewContentStatusBySourceAction(req, res) {
+  try {
+    const sourceSystem = String(req.query?.source_system || "").trim().toLowerCase();
+    const contentType = String(req.query?.content_type || "").trim().toLowerCase();
+    const sourceContentItemId = Number(req.query?.source_content_item_id || 0);
+    if (sourceSystem !== "collector-app") return res.status(400).json({ error: "source_system must be collector-app" });
+    if (contentType !== "place" && contentType !== "event") return res.status(400).json({ error: "content_type must be place or event" });
+    if (!Number.isFinite(sourceContentItemId) || sourceContentItemId <= 0) {
+      return res.status(400).json({ error: "source_content_item_id must be a positive integer" });
+    }
+    const item = await getReviewContentStatusBySource({ sourceSystem, contentType, sourceContentItemId });
+    if (!item) return res.status(404).json({ error: "Review content not found" });
+    return res.json({ item });
+  } catch {
     return res.status(500).json({ error: "Internal server error" });
   }
 }

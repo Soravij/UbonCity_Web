@@ -6,6 +6,7 @@ import {
   createReviewAccessTokenAction,
   enqueueEventReviewQueueAction,
   getReviewContentDetail,
+  getReviewContentStatusBySourceAction,
   ingestReviewContentAction,
   legacyRejectAction,
   legacyNeedsRevisionAction,
@@ -58,6 +59,7 @@ function parseReviewIngestMultipart(req, res, next) {
 
 router.post("/review-content/ingest", requireCollectorTokenOrPrivilegedUser, parseReviewIngestMultipart, ingestReviewContentAction);
 router.post("/review-content/event-queue/enqueue", requireCollectorIngestToken, enqueueEventReviewQueueAction);
+router.get("/review-content/source-status", requireCollectorIngestToken, getReviewContentStatusBySourceAction);
 router.get("/review-content/:id", protectReviewContentReadAccess, getReviewContentDetail);
 router.post("/review-content/:id/access-token", protect, authorizeEditorOrAdmin, createReviewAccessTokenAction);
 router.post("/review-content/:id/approve", protect, authorizeEditorOrAdmin, approveReviewContentAction);
