@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "fs/promises";
+import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -735,6 +736,67 @@ test("approveReviewContent commits publication when Collector publish feedback s
     process.env.COLLECTOR_REVIEW_SYNC_TOKEN = originalCollectorToken;
   }
 }, { concurrency: false });
+
+test("approveReviewContent still publishes within a bounded time when Collector hangs (real timer, not a mocked AbortError)", async () => {
+  const originalGetConnection = pool.getConnection;
+  const originalPoolQuery = pool.query;
+  const originalConsoleError = console.error;
+  const originalBackendPublicUrl = process.env.BACKEND_PUBLIC_URL;
+  const originalCollectorBase = process.env.COLLECTOR_SYNC_BASE_URL;
+  const originalCollectorToken = process.env.COLLECTOR_REVIEW_SYNC_TOKEN;
+  const originalTimeoutMs = process.env.COLLECTOR_SYNC_TIMEOUT_MS;
+  const logs = [];
+
+  // Accepts the TCP connection but never writes a response — a real stalled Collector, not a mocked AbortError.
+  const hungServer = http.createServer(() => {});
+  await new Promise((resolve) => hungServer.listen(0, "127.0.0.1", resolve));
+  const port = hungServer.address().port;
+
+  const harness = createApproveHarness();
+  pool.getConnection = async () => harness.connection;
+  pool.query = harness.poolQuery;
+  console.error = (...args) => logs.push(args);
+  process.env.BACKEND_PUBLIC_URL = "https://api-test.uboncity.com";
+  process.env.COLLECTOR_SYNC_BASE_URL = `http://127.0.0.1:${port}`;
+  process.env.COLLECTOR_REVIEW_SYNC_TOKEN = "test-sync-token";
+  process.env.COLLECTOR_SYNC_TIMEOUT_MS = "300";
+  await writeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+
+  try {
+    const startedAt = Date.now();
+    const result = await approveReviewContent({
+      reviewContent: { id: harness.state.reviewContent.id },
+      actorUserId: 7,
+      reviewNote: "publish callback real timeout",
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.ok(elapsedMs >= 280, `abort fired too early (${elapsedMs}ms) — timeout isn't actually bounding the wait`);
+    assert.ok(elapsedMs < 5000, `abort never fired — request hung well past the 300ms timeout (${elapsedMs}ms)`);
+    assert.equal(result.status, "published", "publish must still succeed when Collector hangs");
+    assert.ok(harness.state.transaction.includes("commit"), "must have committed before the hung callback resolved");
+    assert.equal(harness.state.transaction.includes("rollback"), false, "a hung callback must not roll back publish");
+    assert.equal(harness.state.reviewContent.status, "published");
+
+    assert.equal(logs.length, 1, "exactly one failure log for the hung callback");
+    assert.equal(logs[0][0], "[collector publish sync failed]");
+    const payload = JSON.parse(String(logs[0][1] || ""));
+    assert.equal(payload.backend_review_content_id, 501);
+    assert.equal(payload.collector_source_content_item_id, 99);
+    assert.match(payload.error, /timed out/);
+  } finally {
+    await removeUploadFixture("uploads/review-item-32-asset-cover.jpg");
+    await removeUploadFixture("uploads/published/places/99/501-batch-99-cover-0-1.jpg");
+    pool.getConnection = originalGetConnection;
+    pool.query = originalPoolQuery;
+    console.error = originalConsoleError;
+    process.env.BACKEND_PUBLIC_URL = originalBackendPublicUrl;
+    process.env.COLLECTOR_SYNC_BASE_URL = originalCollectorBase;
+    process.env.COLLECTOR_REVIEW_SYNC_TOKEN = originalCollectorToken;
+    process.env.COLLECTOR_SYNC_TIMEOUT_MS = originalTimeoutMs;
+    await new Promise((resolve) => hungServer.close(resolve));
+  }
+});
 
 test("approveReviewContent promotes the current translation batch and deletes only historical pipeline languages", async () => {
   const originalGetConnection = pool.getConnection;

@@ -517,6 +517,20 @@ export async function approveReviewContent({ reviewContent, actorUserId, reviewN
   return result;
 }
 
+async function fetchCollectorSyncWithTimeout(url, options) {
+  const timeoutMs = Number(process.env.COLLECTOR_SYNC_TIMEOUT_MS || 8000) || 8000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(new Error(`collector sync timed out after ${timeoutMs}ms`)),
+    timeoutMs
+  );
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function syncNeedsRevisionToCollector(reviewContent, reviewNote, actorUserId) {
   assertBackendIntegrationReadiness(["review_feedback_to_collector"]);
   const collectorBase = String(process.env.COLLECTOR_SYNC_BASE_URL || "").trim().replace(/\/+$/, "");
@@ -549,7 +563,7 @@ async function syncPublishedToCollector(reviewContent, reviewNote, actorUserId) 
   assertBackendIntegrationReadiness(["review_feedback_to_collector"]);
   const collectorBase = String(process.env.COLLECTOR_SYNC_BASE_URL || "").trim().replace(/\/+$/, "");
   const syncToken = String(process.env.COLLECTOR_REVIEW_SYNC_TOKEN || "").trim();
-  const response = await fetch(`${collectorBase}/api/web-review-feedback`, {
+  const response = await fetchCollectorSyncWithTimeout(`${collectorBase}/api/web-review-feedback`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
