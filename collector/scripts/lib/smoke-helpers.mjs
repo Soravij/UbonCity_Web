@@ -1,7 +1,8 @@
 import "dotenv/config";
-import { getTestAuthToken } from "./test-auth.mjs";
+import { getTestAuthToken, resolveTestBaseUrl } from "./test-auth.mjs";
 import { createTestClient } from "./test-client.mjs";
 import { ensureItemClaimed, releaseItemClaim } from "./test-fixtures.mjs";
+import { assertSmokeServerTargetsAllowed } from "../../../scripts/smokeServerGuard.mjs";
 
 export const AI_DRAFT_ALLOWED_STATUSES = ["cleaned", "generated", "needs_revision", "content_in_progress"];
 
@@ -19,6 +20,13 @@ export function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+export async function assertSmokeRuntimeTargets() {
+  return assertSmokeServerTargetsAllowed({
+    backendBaseUrl: String(process.env.COLLECTOR_SYNC_BACKEND_API || "").replace(/\/api\/?$/, ""),
+    collectorBaseUrl: resolveTestBaseUrl(),
+  });
 }
 
 export function formatAiDraftEligibilityFailure(contentItemId, workflowStatus) {
@@ -39,6 +47,7 @@ export function resolveSmokeItemId({ envKey = "COLLECTOR_TEST_ITEM_ID" } = {}) {
 }
 
 export async function loadSmokeAuthContext() {
+  await assertSmokeRuntimeTargets();
   const client = createTestClient();
   const auth = await getTestAuthToken();
   const me = await client.get("/api/auth/me");

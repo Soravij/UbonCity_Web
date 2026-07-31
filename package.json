@@ -1,0 +1,8 @@
+{
+  "name": "uboncity-web",
+  "private": true,
+  "description": "Root-level tooling for the UbonCity_Web monorepo (backend/, collector/, frontend/, admin/). Not a workspace root — backend/ and collector/ keep their own independent package.json/node_modules.",
+  "scripts": {
+    "test:all": "node scripts/testAll.mjs"
+  }
+}

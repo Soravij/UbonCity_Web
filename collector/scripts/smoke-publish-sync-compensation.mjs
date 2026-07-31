@@ -5,6 +5,7 @@ import { resolvePaths } from "../config/paths.mjs";
 import { openDatabase } from "../db/client.mjs";
 import { createTestClient } from "./lib/test-client.mjs";
 import { assertSmokeSqliteDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
+import { assertSmokeServerTargetsAllowed } from "../../scripts/smokeServerGuard.mjs";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -146,6 +147,10 @@ async function main() {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const dirs = resolvePaths(path.resolve(scriptDir, ".."));
   assertSmokeSqliteDatabaseAllowed(dirs.dbPath);
+  await assertSmokeServerTargetsAllowed({
+    backendBaseUrl: String(process.env.COLLECTOR_SYNC_BACKEND_API || "").replace(/\/api\/?$/, ""),
+    collectorBaseUrl: String(process.env.COLLECTOR_TEST_BASE_URL || `http://${process.env.COLLECTOR_BIND_HOST || "127.0.0.1"}:${process.env.PORT || 5062}`),
+  });
   const db = openDatabase(dirs.dbPath, path.join(dirs.rootDir, "database", "schema.sql"));
   const client = createTestClient();
 
