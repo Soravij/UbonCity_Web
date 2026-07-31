@@ -7722,7 +7722,7 @@ const assignmentChunkUploadRateLimit = createRateLimiter({
 });
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "collector-app" });
+  res.json({ ok: true, service: "collector-app", database: { engine: "sqlite", path: dirs.dbPath } });
 });
 
 app.get("/api/integrations/readiness", (_req, res) => {
