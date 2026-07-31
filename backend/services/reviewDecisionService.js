@@ -536,7 +536,7 @@ async function syncNeedsRevisionToCollector(reviewContent, reviewNote, actorUser
   const collectorBase = String(process.env.COLLECTOR_SYNC_BASE_URL || "").trim().replace(/\/+$/, "");
   const syncToken = String(process.env.COLLECTOR_REVIEW_SYNC_TOKEN || "").trim();
 
-  const response = await fetch(`${collectorBase}/api/web-review-feedback`, {
+  const response = await fetchCollectorSyncWithTimeout(`${collectorBase}/api/web-review-feedback`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

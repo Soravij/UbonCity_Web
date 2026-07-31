@@ -6,7 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import pool from "../config/db.js";
-import { approveReviewContent } from "../services/reviewDecisionService.js";
+import { approveReviewContent, markNeedsRevision } from "../services/reviewDecisionService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -791,6 +791,66 @@ test("approveReviewContent still publishes within a bounded time when Collector 
     pool.query = originalPoolQuery;
     console.error = originalConsoleError;
     process.env.BACKEND_PUBLIC_URL = originalBackendPublicUrl;
+    process.env.COLLECTOR_SYNC_BASE_URL = originalCollectorBase;
+    process.env.COLLECTOR_REVIEW_SYNC_TOKEN = originalCollectorToken;
+    process.env.COLLECTOR_SYNC_TIMEOUT_MS = originalTimeoutMs;
+    await new Promise((resolve) => hungServer.close(resolve));
+  }
+});
+
+test("markNeedsRevision rolls back within a bounded time when Collector hangs (pre-commit sync, real timer)", async () => {
+  const originalGetConnection = pool.getConnection;
+  const originalCollectorBase = process.env.COLLECTOR_SYNC_BASE_URL;
+  const originalCollectorToken = process.env.COLLECTOR_REVIEW_SYNC_TOKEN;
+  const originalTimeoutMs = process.env.COLLECTOR_SYNC_TIMEOUT_MS;
+
+  const hungServer = http.createServer(() => {});
+  await new Promise((resolve) => hungServer.listen(0, "127.0.0.1", resolve));
+  const port = hungServer.address().port;
+
+  // syncNeedsRevisionToCollector runs before any other write in markNeedsRevision, so once it
+  // throws (real abort) the function must roll back without ever reaching a second query.
+  const state = { transaction: [] };
+  const connection = {
+    async beginTransaction() { state.transaction.push("begin"); },
+    async commit() { state.transaction.push("commit"); },
+    async rollback() { state.transaction.push("rollback"); },
+    release() { state.transaction.push("release"); },
+    async query(sql) {
+      const normalized = normalizeSql(sql);
+      if (normalized === "select * from review_contents where id=? limit 1 for update") {
+        return [[{
+          id: 501,
+          status: "pending_review",
+          current_batch_uid: "batch-99",
+          source_system: "collector-app",
+          source_content_item_id: 99,
+          content_type: "place",
+        }]];
+      }
+      throw new Error(`unexpected query — Collector sync should have thrown before this: ${sql}`);
+    },
+  };
+
+  pool.getConnection = async () => connection;
+  process.env.COLLECTOR_SYNC_BASE_URL = `http://127.0.0.1:${port}`;
+  process.env.COLLECTOR_REVIEW_SYNC_TOKEN = "test-sync-token";
+  process.env.COLLECTOR_SYNC_TIMEOUT_MS = "300";
+
+  try {
+    const startedAt = Date.now();
+    await assert.rejects(
+      markNeedsRevision({ reviewContent: { id: 501 }, actorUserId: 7, reviewNote: "needs revision real timeout" }),
+      /timed out/
+    );
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.ok(elapsedMs >= 280, `abort fired too early (${elapsedMs}ms) — timeout isn't actually bounding the wait`);
+    assert.ok(elapsedMs < 5000, `abort never fired — request hung well past the 300ms timeout (${elapsedMs}ms)`);
+    assert.ok(state.transaction.includes("rollback"), "must roll back when the pre-commit Collector sync times out");
+    assert.equal(state.transaction.includes("commit"), false, "must not commit when the pre-commit Collector sync times out");
+  } finally {
+    pool.getConnection = originalGetConnection;
     process.env.COLLECTOR_SYNC_BASE_URL = originalCollectorBase;
     process.env.COLLECTOR_REVIEW_SYNC_TOKEN = originalCollectorToken;
     process.env.COLLECTOR_SYNC_TIMEOUT_MS = originalTimeoutMs;
