@@ -3,10 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const pageSource = fs.readFileSync(path.resolve("D:/UbonCity_Web/collector/server/public/article-workspace-page.js"), "utf8");
-const coreModulePath = path.resolve("D:/UbonCity_Web/collector/server/public/article-workflow-core.js");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
+const pageSource = fs.readFileSync(path.join(root, "server", "public", "article-workspace-page.js"), "utf8");
+const coreModulePath = path.join(root, "server", "public", "article-workflow-core.js");
 
 function extractFunctionBlock(source, name) {
   const signature = `function ${name}`;
