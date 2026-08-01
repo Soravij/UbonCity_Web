@@ -407,15 +407,13 @@ function derivedArticleWorkflowStatus(item, process = processForItem(item?.id)) 
 function isArticleQueueCandidate(item) {
   if (getArticleWorkflowAnomaly(item)) return true;
   const workflowStatus = derivedArticleWorkflowStatus(item);
-  const assignmentState = normalizedValue(item?.assignment_state);
-  if (assignmentState === "accepted") return true;
+  if (item?.has_accepted_assignment === true) return true;
   return ARTICLE_FLOW_STATUSES.includes(workflowStatus);
 }
 
 function needsProcessPrefetch(item) {
   const workflowStatus = derivedArticleWorkflowStatus(item);
-  const assignmentState = normalizedValue(item?.assignment_state);
-  if (assignmentState === "accepted" && !ARTICLE_FLOW_STATUSES.includes(workflowStatus)) return true;
+  if (item?.has_accepted_assignment === true && !ARTICLE_FLOW_STATUSES.includes(workflowStatus)) return true;
   return ASSIGNMENT_REQUIRED_STATUSES.includes(workflowStatus);
 }
 
@@ -423,8 +421,7 @@ function queueStageMeta(item) {
   const anomaly = getArticleWorkflowAnomaly(item);
   if (anomaly) return { stageLabel: `⚠ ${anomaly.state}`, note: "สถานะ workflow ที่ระบบไม่รู้จัก" };
   const workflowStatus = derivedArticleWorkflowStatus(item);
-  const assignmentState = normalizedValue(item?.assignment_state);
-  if (assignmentState === "accepted" && !ARTICLE_FLOW_STATUSES.includes(workflowStatus)) {
+  if (item?.has_accepted_assignment === true && !ARTICLE_FLOW_STATUSES.includes(workflowStatus)) {
     return { stageLabel: "รับงาน", note: "ผ่านจากกระบวนการส่งงานไปทำแล้ว" };
   }
   if (needsProcessPrefetch(item) && !hasAssignedWriter(item)) {
@@ -464,9 +461,7 @@ function queueRows() {
 function queueGroupKey(item) {
   if (getArticleWorkflowAnomaly(item)) return "needs_attention";
   const workflowStatus = derivedArticleWorkflowStatus(item);
-  const assignmentState = normalizedValue(item?.assignment_state);
-
-  if (assignmentState === "accepted" && !ARTICLE_FLOW_STATUSES.includes(workflowStatus)) {
+  if (item?.has_accepted_assignment === true && !ARTICLE_FLOW_STATUSES.includes(workflowStatus)) {
     return "needs_attention";
   }
   if (needsProcessPrefetch(item) && !hasAssignedWriter(item)) {

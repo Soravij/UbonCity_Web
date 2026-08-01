@@ -45,7 +45,6 @@ function assertWorkflowModelSchemaPreserved(db, hasPlaceReviewFlag) {
   for (const indexName of [
     "idx_content_workflow_models_production",
     "idx_content_workflow_models_publication",
-    "idx_content_workflow_models_assignment",
     "idx_content_workflow_models_current_draft",
     "idx_content_workflow_models_current_review",
     "idx_content_workflow_models_current_field_pack",

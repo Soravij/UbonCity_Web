@@ -150,7 +150,6 @@ function snapshot(repo, itemId) {
     workflow: workflow ? {
       production_state: workflow.production_state,
       publication_state: workflow.publication_state,
-      assignment_state: workflow.assignment_state,
       state_version: workflow.state_version,
       content_version: workflow.content_version,
       current_field_pack_id: workflow.current_field_pack_id,

@@ -4,7 +4,8 @@ import path from "path";
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
 import { getTaxonomyCheckLabel, resolveTaxonomyRequestedChecksGroup } from "../server/taxonomy-resolver.mjs";
 import { decodeUrlEntities } from "../lib/decode-url-entities.mjs";
-import { assertPlaceReviewFlagMigrationApplied } from "./workflow-head-schema.mjs";
+import { isAcceptedOrClosedAssignmentState } from "../services/assignment-state.mjs";
+import { assertAssignmentStateMigrationApplied, assertPlaceReviewFlagMigrationApplied } from "./workflow-head-schema.mjs";
 
 function parseTags(raw) {
   if (!raw) return [];
@@ -461,11 +462,10 @@ const WORKFLOW_ACTOR_ROLES = new Set(["owner", "admin", "editor", "user", "freel
 const EXECUTION_CHANNELS = new Set(["facebook", "tiktok"]);
 const EXECUTION_STATUSES = new Set(["draft", "generated", "validated", "ready", "blocked", "superseded"]);
 const WORKFLOW_REASON_CODES = Object.freeze({
-  ASSIGNMENT_CREATED_SYNC: "assignment_created_sync",
-  ASSIGNMENT_CREATED_SYNC_FROM_READINESS: "assignment_created_sync_from_readiness",
-  ASSIGNMENT_CREATED_SYNC_FROM_FIELD_PACK: "assignment_created_sync_from_field_pack",
-  ASSIGNMENT_STATE_SYNC: "assignment_state_sync",
-  ASSIGNMENT_STATE_RECONCILE_SYNC: "assignment_state_reconcile_sync",
+  ASSIGNMENT_CREATED: "assignment_created",
+  ASSIGNMENT_CREATED_FROM_READINESS: "assignment_created_from_readiness",
+  ASSIGNMENT_CREATED_FROM_FIELD_PACK: "assignment_created_from_field_pack",
+  ASSIGNMENT_STATE_CHANGED: "assignment_state_changed",
 });
 
 function normalizePlaceReviewFlag(value) {
@@ -3421,6 +3421,7 @@ function ensureWorkflowHeadColumns(db) {
     db.exec("ALTER TABLE content_workflow_models ADD COLUMN last_transition_at TEXT;");
   }
   assertPlaceReviewFlagMigrationApplied(db, "creating a repository");
+  assertAssignmentStateMigrationApplied(db, "creating a repository");
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_content_workflow_models_current_draft
       ON content_workflow_models(current_draft_id);
@@ -4779,16 +4780,14 @@ export function createRepository(db) {
 
   const upsertWorkflowModelStmt = db.prepare(`
     INSERT INTO content_workflow_models (
-      content_item_id, production_state, publication_state, assignment_state,
-      place_review_flag,
+      content_item_id, production_state, publication_state, place_review_flag,
       current_draft_id, current_review_report_id, current_field_pack_id,
       state_version, content_version, last_actor_email, last_transition_at,
       last_transition_note, updated_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(content_item_id) DO UPDATE SET
       production_state=excluded.production_state,
       publication_state=excluded.publication_state,
-      assignment_state=excluded.assignment_state,
       place_review_flag=excluded.place_review_flag,
       current_draft_id=excluded.current_draft_id,
       current_review_report_id=excluded.current_review_report_id,
@@ -5949,7 +5948,6 @@ export function createRepository(db) {
     return {
       production_state: legacyStates.production_state,
       publication_state: legacyStates.publication_state,
-      assignment_state: null,
       place_review_flag: "none",
       current_draft_id: Number(latestDraft?.id || 0) || null,
       current_review_report_id: Number(latestReview?.id || 0) || null,
@@ -5986,7 +5984,6 @@ export function createRepository(db) {
     return {
       production_state: payload.production_state,
       publication_state: payload.publication_state,
-      assignment_state: payload.assignment_state,
       place_review_flag: payload.place_review_flag,
       current_draft_id: resolvePointer("current_draft_id", previous?.current_draft_id),
       current_review_report_id: resolvePointer("current_review_report_id", previous?.current_review_report_id),
@@ -6033,15 +6030,10 @@ export function createRepository(db) {
     const seed = buildWorkflowHeadDefaults(id, item?.workflow_status || "raw");
     const productionState = normalizeStateValue(payload.production_state || seed.production_state, "production");
     const publicationState = normalizeStateValue(payload.publication_state || seed.publication_state, "publication");
-    const assignmentStateRaw = payload.assignment_state ?? seed.assignment_state ?? null;
-    const assignmentState = assignmentStateRaw == null || assignmentStateRaw === ""
-      ? null
-      : normalizeStateValue(assignmentStateRaw, "assignment");
     const placeReviewFlagRaw = payload.place_review_flag ?? seed.place_review_flag ?? "none";
     const placeReviewFlag = normalizePlaceReviewFlag(placeReviewFlagRaw);
     if (!productionState) throw new Error("invalid production_state");
     if (!publicationState) throw new Error("invalid publication_state");
-    if (assignmentStateRaw != null && assignmentStateRaw !== "" && !assignmentState) throw new Error("invalid assignment_state");
     if (!placeReviewFlag) throw new Error("invalid place_review_flag");
     if (String(item?.type || "").trim().toLowerCase() !== "place" && placeReviewFlag !== "none") {
       throw new Error("place_review_flag is supported only for place items");
@@ -6054,7 +6046,6 @@ export function createRepository(db) {
       id,
       productionState,
       publicationState,
-      assignmentState,
       placeReviewFlag,
       nextPayload.current_draft_id,
       nextPayload.current_review_report_id,
@@ -6071,11 +6062,6 @@ export function createRepository(db) {
     }
     if (publicationState) {
       recordWorkflowTransition(id, "publication", null, publicationState, actor, actorRole, reasonCode, nextPayload.last_transition_note);
-    }
-    if (assignmentState != null) {
-      recordWorkflowTransition(id, "assignment", null, assignmentState, actor, actorRole, reasonCode, nextPayload.last_transition_note, {
-        assignment_id: metadata?.assignment_id ?? null,
-      });
     }
     if (placeReviewFlag !== "none") {
       recordWorkflowTransition(id, "place_review_flag", null, placeReviewFlag, actor, actorRole, reasonCode, nextPayload.last_transition_note);
@@ -6106,15 +6092,10 @@ export function createRepository(db) {
     const contentType = String(item?.type || "").trim().toLowerCase();
     const productionState = normalizeStateValue(payload.production_state || previous.production_state, "production");
     const publicationState = normalizeStateValue(payload.publication_state || previous.publication_state, "publication");
-    const assignmentStateRaw = payload.assignment_state ?? previous.assignment_state ?? null;
-    const assignmentState = assignmentStateRaw == null || assignmentStateRaw === ""
-      ? null
-      : normalizeStateValue(assignmentStateRaw, "assignment");
     const placeReviewFlagRaw = payload.place_review_flag ?? previous.place_review_flag ?? "none";
     const placeReviewFlag = normalizePlaceReviewFlag(placeReviewFlagRaw);
     if (!productionState) throw new Error("invalid production_state");
     if (!publicationState) throw new Error("invalid publication_state");
-    if (assignmentStateRaw != null && assignmentStateRaw !== "" && !assignmentState) throw new Error("invalid assignment_state");
     if (!placeReviewFlag) throw new Error("invalid place_review_flag");
     if (contentType !== "place" && placeReviewFlag !== "none") {
       throw new Error("place_review_flag is supported only for place items");
@@ -6123,7 +6104,6 @@ export function createRepository(db) {
     const note = nextPayload.last_transition_note;
     const actorRole = normalizeWorkflowActorRole(metadata.actor_role);
     const reasonCode = String(metadata.reason_code || "").trim().toLowerCase() || null;
-    const skipAssignmentTransitionValidation = metadata?.skip_assignment_transition_validation === true;
     const skipProductionTransitionValidation = metadata?.skip_production_transition_validation === true;
     const skipPublicationTransitionValidation = metadata?.skip_publication_transition_validation === true;
 
@@ -6132,9 +6112,6 @@ export function createRepository(db) {
     }
     if (publicationState !== previous.publication_state && !skipPublicationTransitionValidation) {
       assertValidTransition(contentType, "publication", previous.publication_state, publicationState, id);
-    }
-    if ((assignmentState || null) !== (previous.assignment_state || null) && assignmentState != null && !skipAssignmentTransitionValidation) {
-      assertValidTransition(contentType, "assignment", previous.assignment_state || null, assignmentState, id);
     }
     if (contentType === "place"
       && previous.place_review_flag === "rejected"
@@ -6145,7 +6122,6 @@ export function createRepository(db) {
 
     const stateChanged = productionState !== previous.production_state
       || publicationState !== previous.publication_state
-      || (assignmentState || null) !== (previous.assignment_state || null)
       || placeReviewFlag !== (previous.place_review_flag || "none");
     const stateVersion = nextPayload.should_bump_state_version
       ? Math.max(1, Number(previous?.state_version || 0) || 1) + 1
@@ -6165,7 +6141,6 @@ export function createRepository(db) {
       id,
       productionState,
       publicationState,
-      assignmentState,
       placeReviewFlag,
       nextPayload.current_draft_id,
       nextPayload.current_review_report_id,
@@ -6183,11 +6158,6 @@ export function createRepository(db) {
     }
     if (publicationState !== previous.publication_state) {
       recordWorkflowTransition(id, "publication", previous.publication_state, publicationState, actor, actorRole, reasonCode, note);
-    }
-    if ((assignmentState || null) !== (previous.assignment_state || null) && assignmentState != null) {
-      recordWorkflowTransition(id, "assignment", previous.assignment_state || null, assignmentState, actor, actorRole, reasonCode, note, {
-        assignment_id: metadata?.assignment_id ?? null,
-      });
     }
     if (placeReviewFlag !== (previous.place_review_flag || "none")) {
       recordWorkflowTransition(id, "place_review_flag", previous.place_review_flag || "none", placeReviewFlag, actor, actorRole, reasonCode, note);
@@ -6237,7 +6207,6 @@ export function createRepository(db) {
       .filter(Boolean);
     const productionStates = normalizeFilterStates(filters?.production_states, "production");
     const publicationStates = normalizeFilterStates(filters?.publication_states, "publication");
-    const assignmentStates = normalizeFilterStates(filters?.assignment_states, "assignment");
     return listItems().filter((item) => {
       const head = getWorkflowModelByItem(item.id);
       if (!head) return false;
@@ -6247,12 +6216,8 @@ export function createRepository(db) {
       if (publicationStates.length && !publicationStates.includes(String(head?.publication_state || "").trim().toLowerCase())) {
         return false;
       }
-      if (assignmentStates.length && !assignmentStates.includes(String(head?.assignment_state || "").trim().toLowerCase())) {
-        return false;
-      }
       assertKnownWorkflowHeadState(head?.production_state, "production", item.id, "listItemsByWorkflowHead");
       assertKnownWorkflowHeadState(head?.publication_state, "publication", item.id, "listItemsByWorkflowHead");
-      assertKnownWorkflowHeadState(head?.assignment_state, "assignment", item.id, "listItemsByWorkflowHead");
       assertKnownWorkflowHeadState(head?.place_review_flag, "place_review_flag", item.id, "listItemsByWorkflowHead");
       return true;
     });
@@ -6398,53 +6363,6 @@ export function createRepository(db) {
     }));
   }
 
-  function syncWorkflowAssignmentStateOnCreate(contentItemId, assignmentState, actorEmail = "system@local", metadata = {}) {
-    const itemId = Number(contentItemId || 0);
-    if (!itemId) {
-      return {
-        applied: false,
-        skipped_reason: "invalid_content_item_id",
-      };
-    }
-
-    const workflow = ensureWorkflowModel(itemId);
-    const existingState = normalizeStateValue(workflow?.assignment_state, "assignment");
-    if (existingState) {
-      return {
-        applied: false,
-        skipped_reason: "existing_assignment_state_preserved",
-        from_state: existingState,
-        to_state: existingState,
-      };
-    }
-
-    const targetState = normalizeStateValue(assignmentState || "assigned", "assignment") || "assigned";
-    const reasonCode = String(metadata?.reason_code || "").trim().toLowerCase() || WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC;
-    const actorRole = normalizeWorkflowActorRole(metadata?.actor_role);
-    const note = metadata?.note == null ? null : String(metadata.note || "").trim() || null;
-    const model = upsertWorkflowModel(
-      itemId,
-      {
-        assignment_state: targetState,
-        last_transition_note: note || workflow?.last_transition_note || null,
-      },
-      String(actorEmail || "").trim() || "system@local",
-      {
-        actor_role: actorRole,
-        reason_code: reasonCode,
-        assignment_id: metadata?.assignment_id ?? null,
-      }
-    );
-
-    return {
-      applied: true,
-      skipped_reason: null,
-      from_state: existingState || null,
-      to_state: model?.assignment_state || targetState,
-      reason_code: reasonCode,
-    };
-  }
-
   function normalizeExternalAssigneeProfile(value, fallbackName = "", fallbackContact = "") {
     const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
     const profile = {
@@ -6533,38 +6451,41 @@ export function createRepository(db) {
     const contributorNote = payload.contributor_note == null ? null : String(payload.contributor_note || "").trim() || null;
     const internalNote = payload.internal_note == null ? null : String(payload.internal_note || "").trim() || null;
 
-    insertAssignmentStmt.run(
-      assignmentUid,
-      contentItemId,
-      assignmentKind,
-      assigneeUserId || null,
-      effectiveAssigneeName,
-      effectiveAssigneeContact,
-      externalAssigneeProfile ? JSON.stringify(externalAssigneeProfile) : null,
-      actorUserId == null ? null : Number(actorUserId),
-      state,
-      briefJson ? JSON.stringify(briefJson) : null,
-      requirementsJson ? JSON.stringify(requirementsJson) : null,
-      dueAt,
-      contributorNote,
-      internalNote
-    );
-    const created = normalizeAssignmentRow(getAssignmentByUidStmt.get(assignmentUid));
-    const workflowSync = syncWorkflowAssignmentStateOnCreate(
-      contentItemId,
-      created?.state || state,
-      String(metadata?.actor_email || "").trim() || "system@local",
-      {
-        actor_role: metadata?.actor_role,
-        reason_code: metadata?.reason_code || WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC,
-        note: metadata?.note || null,
-        assignment_id: created?.id || null,
-      }
-    );
-    return {
-      ...created,
-      workflow_sync: workflowSync,
-    };
+    return runInTransaction(db, () => {
+      insertAssignmentStmt.run(
+        assignmentUid,
+        contentItemId,
+        assignmentKind,
+        assigneeUserId || null,
+        effectiveAssigneeName,
+        effectiveAssigneeContact,
+        externalAssigneeProfile ? JSON.stringify(externalAssigneeProfile) : null,
+        actorUserId == null ? null : Number(actorUserId),
+        state,
+        briefJson ? JSON.stringify(briefJson) : null,
+        requirementsJson ? JSON.stringify(requirementsJson) : null,
+        dueAt,
+        contributorNote,
+        internalNote
+      );
+      const created = normalizeAssignmentRow(getAssignmentByUidStmt.get(assignmentUid));
+      const transitionReasonCode = String(metadata?.reason_code || "").trim().toLowerCase() || WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED;
+      const transitionActorEmail = String(metadata?.actor_email || "").trim() || "system@local";
+      const transitionActorRole = normalizeWorkflowActorRole(metadata?.actor_role);
+      const transitionNote = metadata?.note == null ? null : String(metadata.note || "").trim() || null;
+      recordWorkflowTransition(
+        contentItemId,
+        "assignment",
+        null,
+        created?.state || state,
+        transitionActorEmail,
+        transitionActorRole,
+        transitionReasonCode,
+        transitionNote,
+        { assignment_id: created?.id || null }
+      );
+      return created;
+    });
   }
 
   function createAssignmentWithWorkflow(
@@ -6805,11 +6726,6 @@ export function createRepository(db) {
     }
     assertValidTransition(contentType, "assignment", existingAssignmentState, normalizedState, existing.content_item_id);
     const workflow = ensureWorkflowModel(Number(existing.content_item_id));
-    const workflowAssignmentState = normalizeStateValue(workflow?.assignment_state, "assignment") || null;
-    const shouldSyncWorkflow = workflowAssignmentState !== normalizedState;
-    const canSyncViaTransition = shouldSyncWorkflow
-      ? canTransition(contentType, "assignment", workflowAssignmentState, normalizedState, existing.content_item_id)
-      : true;
     const shouldIncrementRevision = normalizedState === "revision_requested" ? 1 : 0;
     const shouldSetAcceptedAt = normalizedState === "accepted" ? 1 : 0;
     const wasAcceptedLifecycle = existingAssignmentState === "accepted" || existingAssignmentState === "closed";
@@ -6823,6 +6739,17 @@ export function createRepository(db) {
       shouldSetAcceptedAt,
       shouldClearAcceptedAt,
       id
+    );
+    recordWorkflowTransition(
+      Number(existing.content_item_id),
+      "assignment",
+      existingAssignmentState,
+      normalizedState,
+      actorEmail,
+      actorRole,
+      reasonCode || WORKFLOW_REASON_CODES.ASSIGNMENT_STATE_CHANGED,
+      internalNote || contributorNote || null,
+      { assignment_id: id }
     );
     if (normalizedState === "accepted") {
       applyAcceptedAssignmentConfirmedMetadata(
@@ -6855,15 +6782,14 @@ export function createRepository(db) {
         attempted_production_state: requestedPlaceFieldProductionState,
       });
     }
-    if (shouldSyncWorkflow) {
+    if (placeFieldProductionState) {
       upsertWorkflowModel(
         Number(existing.content_item_id),
         {
-          assignment_state: normalizedState,
-          ...(placeFieldProductionState ? { production_state: placeFieldProductionState } : {}),
-          ...(placeFieldProductionState && normalizedState === "revision_requested"
+          production_state: placeFieldProductionState,
+          ...(normalizedState === "revision_requested"
             ? { place_review_flag: "revision_requested" }
-            : placeFieldProductionState && ["submitted", "resubmitted"].includes(normalizedState)
+            : ["submitted", "resubmitted"].includes(normalizedState)
               ? { place_review_flag: "none" }
               : {}),
           last_transition_note: internalNote || contributorNote || workflow?.last_transition_note || null,
@@ -6871,11 +6797,8 @@ export function createRepository(db) {
         actorEmail,
         {
           actor_role: actorRole,
-          reason_code: reasonCode || (canSyncViaTransition
-            ? WORKFLOW_REASON_CODES.ASSIGNMENT_STATE_SYNC
-            : WORKFLOW_REASON_CODES.ASSIGNMENT_STATE_RECONCILE_SYNC),
+          reason_code: reasonCode || WORKFLOW_REASON_CODES.ASSIGNMENT_STATE_CHANGED,
           assignment_id: id,
-          skip_assignment_transition_validation: !canSyncViaTransition,
         }
       );
     }
@@ -8720,7 +8643,6 @@ export function createRepository(db) {
       workflow_state: {
         production_state: workflow?.production_state || null,
         publication_state: workflow?.publication_state || null,
-        assignment_state: workflow?.assignment_state || null,
       },
       checks: {},
       explanations: [],
@@ -10080,7 +10002,7 @@ export function createRepository(db) {
           || null;
         const articleText = String(articleDraft?.text_content || "").trim();
         const assignmentState = String(assignment?.state || "").trim().toLowerCase();
-        const assignmentAccepted = assignmentState === "accepted" || assignmentState === "closed";
+        const assignmentAccepted = isAcceptedOrClosedAssignmentState(assignmentState);
         const deliverablesReviewUsable = Boolean(deliverablesUtility?.review_usable);
         const hasArticleDraftDeliverable = Boolean(articleDraft?.id);
         const hasArticleDraftContent = Boolean(articleText || String(articleDraft?.source_url || "").trim());
@@ -10140,7 +10062,7 @@ export function createRepository(db) {
     if (!candidate) {
       issues.push("Missing publishable assignment source");
     } else {
-      if (!(candidate.assignment_state === "accepted" || candidate.assignment_state === "closed")) {
+      if (!isAcceptedOrClosedAssignmentState(candidate.assignment_state)) {
         issues.push("Assignment has not been accepted yet");
       }
       if (!candidate.latest_submission_id) issues.push("Missing latest assignment submission");
@@ -10160,7 +10082,7 @@ export function createRepository(db) {
       checks: {
         has_current_field_pack: Boolean(currentFieldPack?.id),
         has_assignment: assignments.length > 0,
-        assignment_accepted: Boolean(candidate && (candidate.assignment_state === "accepted" || candidate.assignment_state === "closed")),
+        assignment_accepted: Boolean(candidate && isAcceptedOrClosedAssignmentState(candidate.assignment_state)),
         has_latest_submission: Boolean(candidate?.latest_submission_id),
         has_article_draft_deliverable: Boolean(candidate?.article_draft?.id),
         has_article_draft_content: Boolean(articleText || String(candidate?.article_draft?.source_url || "").trim()),
@@ -10338,8 +10260,8 @@ export function createRepository(db) {
           actor_email: actorEmail,
           actor_role: actorRole,
           reason_code: preview.source_of_truth === "field_pack"
-            ? WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC_FROM_FIELD_PACK
-            : WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC_FROM_READINESS,
+            ? WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_FROM_FIELD_PACK
+            : WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_FROM_READINESS,
           note: preview.ready_for_handoff
             ? `assignment created from ${preview.source_of_truth === "field_pack" ? "field pack handoff" : "readiness handoff"}`
             : `assignment created from forced ${preview.source_of_truth === "field_pack" ? "field pack handoff" : "readiness handoff"}`,
@@ -10422,23 +10344,6 @@ export function createRepository(db) {
         actorEmail,
         actorRole,
         { requireReadyForHandoff: false }
-      );
-      // syncWorkflowAssignmentStateOnCreate preserves an existing assignment_state, so without this the
-      // workflow model would still read "closed" while the new round sits in "assigned".
-      // closed -> assigned is not a legal assignment transition, hence the explicit reconcile.
-      upsertWorkflowModel(
-        contentItemId,
-        {
-          assignment_state: String(created.assignment?.state || "assigned"),
-          last_transition_note: note,
-        },
-        actorEmail,
-        {
-          actor_role: actorRole,
-          reason_code: "field_rework_round_opened",
-          assignment_id: Number(created.assignment?.id || 0) || null,
-          skip_assignment_transition_validation: true,
-        }
       );
       return {
         closed_assignment: closedAssignment,

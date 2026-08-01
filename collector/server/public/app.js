@@ -702,7 +702,7 @@ function isTransportMapContentItem(item) {
 function getItemWorkflowSnapshot(item) {
   const productionState = String(item?.production_state || "").trim().toLowerCase();
   const publicationState = String(item?.publication_state || "").trim().toLowerCase();
-  const assignmentState = String(item?.assignment_state || "").trim().toLowerCase();
+  const hasAcceptedAssignment = item?.has_accepted_assignment === true;
   const placeReviewFlag = String(item?.place_review_flag || "none").trim().toLowerCase();
   let compatibilityStatus = "";
   if (publicationState === "published") compatibilityStatus = "published";
@@ -722,7 +722,7 @@ function getItemWorkflowSnapshot(item) {
   return {
     productionState,
     publicationState,
-    assignmentState,
+    hasAcceptedAssignment,
     placeReviewFlag,
     compatibilityStatus,
   };
@@ -739,7 +739,7 @@ function resolveQueueBucket(itemSnapshot) {
     : getItemWorkflowSnapshot(itemSnapshot);
   const productionState = String(snapshot?.productionState || "").trim().toLowerCase();
   const publicationState = String(snapshot?.publicationState || "").trim().toLowerCase();
-  const assignmentState = String(snapshot?.assignmentState || "").trim().toLowerCase();
+  const hasAcceptedAssignment = snapshot?.hasAcceptedAssignment === true;
   const fieldPackStatus = String(source?.current_field_pack_status || source?.field_pack_status || snapshot?.current_field_pack_status || snapshot?.field_pack_status || "").trim().toLowerCase();
   const hasFieldPackPointer = Number(source?.current_field_pack_id || source?.field_pack_id || snapshot?.current_field_pack_id || snapshot?.field_pack_id || 0) > 0;
   const hasFieldPack = hasFieldPackPointer || Boolean(fieldPackStatus);
@@ -749,7 +749,7 @@ function resolveQueueBucket(itemSnapshot) {
   if (publicationState === "published" || productionState === "completed") {
     return "published";
   }
-  if (assignmentState) {
+  if (hasAcceptedAssignment) {
     return "assignment";
   }
   if (
@@ -2945,15 +2945,15 @@ const IN_FLIGHT_STATUS_LABELS = Object.freeze({
   completed: "เสร็จแล้ว",
 });
 
-// Assignment state wins when set: an item held by a freelancer reads as "handed off" regardless of how
-// far production had got. Publication state is checked before production state to preserve the
+// An accepted or closed assignment wins: the handoff has completed regardless of how far production
+// had got. Publication state is checked before production state to preserve the
 // precedence getItemWorkflowSnapshot already applied — approved/unpublished outrank the production
 // state, and that grouping is left as-is here (tracked separately as its own finding).
 function buildInFlightStatusLabel(item) {
   const anomaly = getUnknownWorkflowState(item);
   if (anomaly) return `⚠ สถานะผิดปกติ: ${anomaly.state}`;
   const snapshot = getItemWorkflowSnapshot(item);
-  if (snapshot.assignmentState) return "ส่งงานให้ทีมแล้ว";
+  if (snapshot.hasAcceptedAssignment) return "งานที่มอบหมายถูกรับแล้ว";
   if (snapshot.publicationState === "approved" || snapshot.publicationState === "unpublished") {
     return "อนุมัติแล้ว รอเผยแพร่";
   }

@@ -952,7 +952,6 @@ CREATE TABLE IF NOT EXISTS content_workflow_models (
   content_item_id INTEGER NOT NULL UNIQUE,
   production_state TEXT NOT NULL DEFAULT 'collected',
   publication_state TEXT NOT NULL DEFAULT 'draft',
-  assignment_state TEXT,
   place_review_flag TEXT NOT NULL DEFAULT 'none'
     CHECK (place_review_flag IN ('none', 'revision_requested', 'rejected')),
   current_draft_id INTEGER,
@@ -970,7 +969,6 @@ CREATE TABLE IF NOT EXISTS content_workflow_models (
 );
 CREATE INDEX IF NOT EXISTS idx_content_workflow_models_production ON content_workflow_models(production_state, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_content_workflow_models_publication ON content_workflow_models(publication_state, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_content_workflow_models_assignment ON content_workflow_models(assignment_state, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_content_workflow_models_current_draft ON content_workflow_models(current_draft_id);
 CREATE INDEX IF NOT EXISTS idx_content_workflow_models_current_review ON content_workflow_models(current_review_report_id);
 CREATE INDEX IF NOT EXISTS idx_content_workflow_models_current_field_pack ON content_workflow_models(current_field_pack_id);

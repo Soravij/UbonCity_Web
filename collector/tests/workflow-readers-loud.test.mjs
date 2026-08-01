@@ -199,8 +199,8 @@ test("UI workflow readers preserve and flag unknown states using the canonical s
   }
   assert.match(serverSource, /app\.get\("\/api\/workflow-states"[\s\S]*?\.\.\.PRODUCTION_STATES[\s\S]*?\.\.\.PUBLICATION_STATES[\s\S]*?\.\.\.ASSIGNMENT_STATES/);
 
-  const generated = { id: 401, production_state: "generated", publication_state: "draft", assignment_state: "" };
-  const future = { id: 402, production_state: "future_state", publication_state: "draft", assignment_state: "" };
+  const generated = { id: 401, production_state: "generated", publication_state: "draft" };
+  const future = { id: 402, production_state: "future_state", publication_state: "draft" };
   const catalog = { production_states: [...PRODUCTION_STATES], publication_states: [...PUBLICATION_STATES], assignment_states: [...ASSIGNMENT_STATES], place_review_flags: [...PLACE_REVIEW_FLAGS] };
   assert.equal(isUsableWorkflowStateCatalog(catalog), true);
   for (const invalidCatalog of [null, {}, [], { production_states: [], publication_states: [], assignment_states: [], place_review_flags: [] }]) {

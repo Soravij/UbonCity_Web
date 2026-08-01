@@ -45,12 +45,11 @@ function createTestContext() {
       // without walking a legal path there.
       db.prepare(`
         UPDATE content_workflow_models
-        SET production_state=?, publication_state=?, assignment_state=?
+        SET production_state=?, publication_state=?
         WHERE content_item_id=?
       `).run(
         String(workflowPatch.production_state || "collected"),
         String(workflowPatch.publication_state || "draft"),
-        workflowPatch.assignment_state ? String(workflowPatch.assignment_state) : null,
         itemId
       );
     }
@@ -92,7 +91,7 @@ test("listInFlightItems excludes finished items (published / completed)", (t) =>
   }
 });
 
-test("listInFlightItems keeps every intermediate state, including assignment/handoff", (t) => {
+test("listInFlightItems keeps every intermediate production state", (t) => {
   const ctx = createTestContext();
   t.after(ctx.cleanup);
 
@@ -114,13 +113,6 @@ test("listInFlightItems keeps every intermediate state, including assignment/han
       publication_state: "draft",
     }).id));
   }
-  const assigned = ctx.createItem("assigned", {
-    production_state: "generated",
-    publication_state: "draft",
-    assignment_state: "assigned",
-  });
-  expected.push(Number(assigned.id));
-
   const result = idsOf(ctx.repo.listInFlightItems());
   assert.deepEqual(result, expected.sort((a, b) => a - b));
 });
@@ -229,26 +221,26 @@ test("in-flight status label never leaks a raw snake_case state into the UI", ()
   const { buildInFlightStatusLabel } = loadAppHelpers();
   // Every state the in-flight filter admits, i.e. everything except collected and completed/published.
   const states = [
-    ["analyzed", "draft", null],
-    ["brief_generated", "draft", null],
-    ["ready_for_content", "draft", null],
-    ["generated", "draft", null],
-    ["content_in_progress", "draft", null],
-    ["in_review", "draft", null],
-    ["needs_revision", "draft", null],
-    ["rejected", "draft", null],
-    ["ready_for_publish", "approved", null],
-    ["submitted_for_admin_review", "draft", null],
-    ["in_review", "unpublished", null],
-    ["generated", "draft", "assigned"],
+    ["analyzed", "draft", false],
+    ["brief_generated", "draft", false],
+    ["ready_for_content", "draft", false],
+    ["generated", "draft", false],
+    ["content_in_progress", "draft", false],
+    ["in_review", "draft", false],
+    ["needs_revision", "draft", false],
+    ["rejected", "draft", false],
+    ["ready_for_publish", "approved", false],
+    ["submitted_for_admin_review", "draft", false],
+    ["in_review", "unpublished", false],
+    ["generated", "draft", true],
   ];
   const snakeCase = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
-  for (const [production, publication, assignment] of states) {
+  for (const [production, publication, hasAcceptedAssignment] of states) {
     const label = buildInFlightStatusLabel({
       id: 1,
       production_state: production,
       publication_state: publication,
-      assignment_state: assignment,
+      has_accepted_assignment: hasAcceptedAssignment,
     });
     assert.ok(
       !snakeCase.test(label),

@@ -41,9 +41,9 @@ function createFixture(db) {
 
   db.prepare(`
     INSERT INTO content_workflow_models (
-      content_item_id, production_state, publication_state, assignment_state, current_field_pack_id, updated_by, last_actor_email
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(itemId, "brief_generated", "draft", null, fieldPackId, "smoke-ai-input-cleanup", "smoke-ai-input-cleanup@example.com");
+      content_item_id, production_state, publication_state, current_field_pack_id, updated_by, last_actor_email
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `).run(itemId, "brief_generated", "draft", fieldPackId, "smoke-ai-input-cleanup", "smoke-ai-input-cleanup@example.com");
 
   const createAsset = (name) => Number(db.prepare(`
     INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)

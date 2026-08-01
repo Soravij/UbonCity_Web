@@ -39,6 +39,7 @@
     "build-export": "node scripts/build-export.mjs",
     "db:init": "node scripts/init-db.mjs",
     "migrate:place-review-flags": "node scripts/migrate-place-review-flags.mjs",
+    "migrate:remove-assignment-state": "node scripts/migrate-remove-assignment-state.mjs",
     "seed:mock:work-stage": "node scripts/seed-mock-work-stage-jobs.mjs",
     "verify:evaluate-contract": "node scripts/verify-evaluate-contract.mjs",
     "verify:evaluate-comparator": "node scripts/verify-evaluate-contract.mjs --mode comparator"

@@ -274,11 +274,19 @@ test("each content type accepts exactly its expected transition graph", () => {
         const rules = expectedRules;
         for (const from of Object.keys(rules)) {
           for (const to of states) {
-            const item = ctx.createItem(type, { [`${group}_state`]: from });
             const expectedAllowed = from === to || rules[from].includes(to);
-            const transition = () => ctx.repo.upsertWorkflowModel(item.id, { [`${group}_state`]: to }, "test@local");
-            if (expectedAllowed) assert.doesNotThrow(transition, `${type} ${group} ${from} -> ${to} should remain allowed`);
-            else assert.throws(transition, /invalid .* transition/, `${type} ${group} ${from} -> ${to} should remain rejected`);
+            if (group === "assignment") {
+              assert.equal(
+                ctx.repo.canTransition(type, group, from, to),
+                expectedAllowed,
+                `${type} ${group} ${from} -> ${to} should keep its rule`
+              );
+            } else {
+              const item = ctx.createItem(type, { [`${group}_state`]: from });
+              const transition = () => ctx.repo.upsertWorkflowModel(item.id, { [`${group}_state`]: to }, "test@local");
+              if (expectedAllowed) assert.doesNotThrow(transition, `${type} ${group} ${from} -> ${to} should remain allowed`);
+              else assert.throws(transition, /invalid .* transition/, `${type} ${group} ${from} -> ${to} should remain rejected`);
+            }
           }
         }
       }

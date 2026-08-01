@@ -78,11 +78,11 @@ function createReferenceFixture(db) {
 
   db.prepare(`
     INSERT INTO content_workflow_models (
-      content_item_id, production_state, publication_state, assignment_state,
+      content_item_id, production_state, publication_state,
       current_draft_id, current_review_report_id, current_field_pack_id,
       updated_by, last_actor_email
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(item.id, "brief_generated", "draft", null, draftId, reviewReportId, fieldPackId, "smoke-reference-cleanup", "smoke-reference-cleanup@example.com");
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(item.id, "brief_generated", "draft", draftId, reviewReportId, fieldPackId, "smoke-reference-cleanup", "smoke-reference-cleanup@example.com");
 
   const sharedAssetId = Number(db.prepare(`
     INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum)

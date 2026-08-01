@@ -22,7 +22,6 @@ export function reportUnknownWorkflowState(item, catalog, logKeys, surface) {
   const candidates = [
     ["production", item?.production_state ?? item?.productionState, catalog.production_states],
     ["publication", item?.publication_state ?? item?.publicationState, catalog.publication_states],
-    ["assignment", item?.assignment_state ?? item?.assignmentState, catalog.assignment_states],
     ["place_review_flag", item?.place_review_flag ?? item?.placeReviewFlag, catalog.place_review_flags],
   ];
   for (const [kind, value, knownStates] of candidates) {
