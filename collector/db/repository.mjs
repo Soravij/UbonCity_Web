@@ -10011,6 +10011,7 @@ export function createRepository(db) {
 
         return {
           assignment_id: assignmentId,
+          assignment_kind: String(assignment?.assignment_kind || "field").trim().toLowerCase() || "field",
           assignment_state: assignmentState,
           assignment_rank: getPublishableAssignmentStateRank(assignmentState),
           latest_submission_id: latestSubmissionId,

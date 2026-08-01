@@ -10,15 +10,19 @@ const ASSIGNMENT_STATE_RANK = new Map([
 
 function hasNewerAssignmentRound(candidate, candidates = []) {
   const assignmentId = Number(candidate?.assignment_id || 0) || 0;
+  const assignmentKind = String(candidate?.assignment_kind || "field").trim().toLowerCase() || "field";
   if (!assignmentId) return false;
   return (Array.isArray(candidates) ? candidates : [])
-    .some((other) => (Number(other?.assignment_id || 0) || 0) > assignmentId);
+    .some((other) => {
+      const otherKind = String(other?.assignment_kind || "field").trim().toLowerCase() || "field";
+      return otherKind === assignmentKind && (Number(other?.assignment_id || 0) || 0) > assignmentId;
+    });
 }
 
 // `selectBestPublishableAssignmentCandidate` receives candidates for one content item only.
 // A larger content_assignments.id is a later-created round: the column is SQLite INTEGER PRIMARY
 // KEY AUTOINCREMENT, unlike created_at which has second-level precision. A closed round remains
-// eligible when it is the latest round; only a later assignment supersedes it.
+// eligible when it is the latest round of its kind; only a later same-kind assignment supersedes it.
 export function isActiveAssignmentCandidate(candidate, candidates = []) {
   const state = String(candidate?.assignment_state || "").trim().toLowerCase();
   return state !== "closed" || !hasNewerAssignmentRound(candidate, candidates);

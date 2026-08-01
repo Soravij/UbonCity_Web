@@ -167,10 +167,46 @@ test("a closed normal completion remains an accepted publishable source when no 
   assert.equal(publishableSource.source.assignment_state, "closed");
 });
 
+test("a newer assignment of another kind does not supersede a closed completed round", (t) => {
+  const ctx = createContext();
+  t.after(ctx.cleanup);
+  const item = ctx.createItem("closed field with newer editorial assignment");
+  const assignee = ctx.createUser("cross-kind-round");
+  ctx.createReadinessBrief(item.id);
+  const fieldAssignmentId = ctx.createFieldAssignment(item.id, assignee.id);
+  ctx.submit(fieldAssignmentId, assignee.id);
+  ctx.repo.updateAssignmentState(fieldAssignmentId, "accepted", "reviewer@local", {
+    actor_role: "admin",
+    reason_code: "accepted",
+  });
+  ctx.repo.updateAssignmentState(fieldAssignmentId, "closed", "reviewer@local", {
+    actor_role: "admin",
+    reason_code: "completed",
+  });
+  const editorialAssignment = ctx.repo.createAssignment({
+    content_item_id: item.id,
+    assignment_kind: "editorial",
+    state: "assigned",
+    assignee_user_id: assignee.id,
+  }, assignee.id, {
+    actor_email: "reader-test@local",
+    actor_role: "admin",
+    reason_code: "reader_test_editorial_assignment_created",
+  });
+  assert.ok(Number(editorialAssignment.id) > fieldAssignmentId, "fixture must create the editorial assignment later");
+
+  const publishableSource = ctx.repo.buildPublishableSourceByItem(item.id);
+  // On a6443dc, the later editorial id suppressed the closed field candidate across kinds.
+  assert.equal(publishableSource.checks.assignment_accepted, true);
+  assert.equal(Number(publishableSource.source.assignment_id), fieldAssignmentId);
+  assert.equal(ctx.repo.getAssignmentById(Number(publishableSource.source.assignment_id)).assignment_kind, "field");
+});
+
 test("the publishable selector ignores closed candidates before deciding acceptance", () => {
   const candidates = [
     {
       assignment_id: 1,
+      assignment_kind: "field",
       assignment_state: "closed",
       assignment_rank: getPublishableAssignmentStateRank("closed"),
       ready_for_publish_source: true,
@@ -181,6 +217,7 @@ test("the publishable selector ignores closed candidates before deciding accepta
     },
     {
       assignment_id: 2,
+      assignment_kind: "field",
       assignment_state: "assigned",
       assignment_rank: getPublishableAssignmentStateRank("assigned"),
       ready_for_publish_source: false,
