@@ -8,8 +8,20 @@ const ASSIGNMENT_STATE_RANK = new Map([
   ["assigned", 6],
 ]);
 
-export function isActiveAssignmentCandidate(candidate) {
-  return String(candidate?.assignment_state || "").trim().toLowerCase() !== "closed";
+function hasNewerAssignmentRound(candidate, candidates = []) {
+  const assignmentId = Number(candidate?.assignment_id || 0) || 0;
+  if (!assignmentId) return false;
+  return (Array.isArray(candidates) ? candidates : [])
+    .some((other) => (Number(other?.assignment_id || 0) || 0) > assignmentId);
+}
+
+// `selectBestPublishableAssignmentCandidate` receives candidates for one content item only.
+// A larger content_assignments.id is a later-created round: the column is SQLite INTEGER PRIMARY
+// KEY AUTOINCREMENT, unlike created_at which has second-level precision. A closed round remains
+// eligible when it is the latest round; only a later assignment supersedes it.
+export function isActiveAssignmentCandidate(candidate, candidates = []) {
+  const state = String(candidate?.assignment_state || "").trim().toLowerCase();
+  return state !== "closed" || !hasNewerAssignmentRound(candidate, candidates);
 }
 
 export function getPublishableAssignmentStateRank(value) {
@@ -18,8 +30,9 @@ export function getPublishableAssignmentStateRank(value) {
 }
 
 export function selectBestPublishableAssignmentCandidate(candidates = []) {
-  return (Array.isArray(candidates) ? candidates : [])
-    .filter(isActiveAssignmentCandidate)
+  const candidateList = Array.isArray(candidates) ? candidates : [];
+  return candidateList
+    .filter((candidate) => isActiveAssignmentCandidate(candidate, candidateList))
     .slice()
     .sort((a, b) => {
       if (Number(b.ready_for_publish_source) !== Number(a.ready_for_publish_source)) {
@@ -40,5 +53,6 @@ export function selectBestPublishableAssignmentCandidate(candidates = []) {
 }
 
 export function isSelectedAssignmentAccepted(candidate) {
-  return String(candidate?.assignment_state || "").trim().toLowerCase() === "accepted";
+  const state = String(candidate?.assignment_state || "").trim().toLowerCase();
+  return state === "accepted" || state === "closed";
 }

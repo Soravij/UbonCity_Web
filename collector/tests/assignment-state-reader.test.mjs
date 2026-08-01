@@ -142,6 +142,31 @@ test("a closed historical round cannot make the active assigned round accepted",
   assert.deepEqual(articleIntake.queueRowsFor([apiItem]), []);
 });
 
+test("a closed normal completion remains an accepted publishable source when no newer round exists", (t) => {
+  const ctx = createContext();
+  t.after(ctx.cleanup);
+  const item = ctx.createItem("accepted then normally closed");
+  const assignee = ctx.createUser("normal-close");
+  ctx.createReadinessBrief(item.id);
+  const assignmentId = ctx.createFieldAssignment(item.id, assignee.id);
+  ctx.submit(assignmentId, assignee.id);
+  ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", {
+    actor_role: "admin",
+    reason_code: "accepted",
+  });
+  ctx.repo.updateAssignmentState(assignmentId, "closed", "reviewer@local", {
+    actor_role: "admin",
+    reason_code: "completed",
+  });
+
+  const publishableSource = ctx.repo.buildPublishableSourceByItem(item.id);
+  // On e4b9917, isActiveAssignmentCandidate filtered this only closed candidate, making source null.
+  assert.equal(publishableSource.checks.assignment_accepted, true);
+  assert.ok(publishableSource.source);
+  assert.equal(Number(publishableSource.source.assignment_id), assignmentId);
+  assert.equal(publishableSource.source.assignment_state, "closed");
+});
+
 test("the publishable selector ignores closed candidates before deciding acceptance", () => {
   const candidates = [
     {
