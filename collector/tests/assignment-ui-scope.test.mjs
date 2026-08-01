@@ -218,6 +218,7 @@ ${extractNamedFunctionSource(indexServer, "canMutateItemByManagementLine")}
 ${extractNamedFunctionSource(indexServer, "hasAssignmentAccess")}
 ${extractNamedFunctionSource(indexServer, "hasAssignmentSubmissionAccess")}
 ${extractNamedFunctionSource(indexServer, "listEditorialAssignmentsByItem")}
+${extractNamedFunctionSource(indexServer, "selectPrimaryEditorialAssignment")}
 ${extractNamedFunctionSource(indexServer, "getPrimaryEditorialAssignment")}
 ${extractNamedFunctionSource(indexServer, "hasItemBriefAccess")}
 globalThis.__assignmentScopeHooks = {
@@ -292,6 +293,12 @@ function loadItemOwnershipScopeHooks(users = [], options = {}) {
       listAssignmentsByItem(itemId) {
         return (options.assignmentsByItemId && options.assignmentsByItemId.get(Number(itemId || 0))) || [];
       },
+      buildPublishableSourceByItem(itemId, buildOptions = {}) {
+        if (typeof options.buildPublishableSourceByItem === "function") {
+          return options.buildPublishableSourceByItem(itemId, buildOptions);
+        }
+        return { checks: { assignment_accepted: false } };
+      },
     },
     sanitizeItemForResponse(item) {
       return item;
@@ -335,6 +342,7 @@ ${extractNamedFunctionSource(indexServer, "isItemVisibleToActor")}
 ${extractNamedFunctionSource(indexServer, "buildViewerScopeReason")}
 ${extractNamedFunctionSource(indexServer, "buildItemCurrentHolder")}
 ${extractNamedFunctionSource(indexServer, "buildItemAssignmentOwner")}
+${extractNamedFunctionSource(indexServer, "selectPrimaryEditorialAssignment")}
 ${extractNamedFunctionSource(indexServer, "resolveItemScopeContext")}
 ${extractNamedFunctionSource(indexServer, "attachItemScopeMetadata")}
 globalThis.__itemScopeHooks = {
@@ -2558,7 +2566,7 @@ test("assignment route aliases expose separate handoff, work, and review views o
     'function buildAssignmentsManagedPath() {',
     'function getAssignmentAssignerLabel(assignment) {',
     'Number(item?.current_field_pack_id || item?.field_pack_id || 0) > 0',
-    '!String(item?.assignment_state || "").trim()',
+    'const hasAcceptedAssignment = snapshot?.hasAcceptedAssignment === true;',
     'listTitle.textContent = "กระบวนการ 2 · ขั้น 1: เลือกงานที่พร้อมส่งไปทำ";',
     'listNote.textContent = "รายการในคิวนี้คือ item ที่จบตรวจแก้และจัดชุดสั่งงานแล้ว พร้อมส่งเข้า handoff และยังไม่ถูกส่งออกไปทำ";',
     'loadBtn.classList.add("hidden");',
@@ -2720,21 +2728,22 @@ test("assignment tab switches refresh the current workspace instead of changing 
   }
 });
 
-test("handoff queue uses readiness-aligned item data and excludes items already in assignment flow", () => {
+test("handoff queue reuses scoped assignments and leaves the queue after an assignment is accepted or closed", () => {
   const requiredServerSnippets = [
     "const currentFieldPack = repo.getCurrentFieldPackByItem(itemId);",
-    "const workflow = repo.getWorkflowModelByItem(itemId);",
+    "const assignmentResult = itemId && typeof repo?.listAssignmentsByItem === \"function\"",
     'current_field_pack_status: String(currentFieldPack?.status || "").trim().toLowerCase() || null,',
-    'assignment_state: String(workflow?.assignment_state || "").trim().toLowerCase() || null,',
+    "const publishableSource = itemId && typeof repo?.buildPublishableSourceByItem === \"function\"",
+    "const hasAcceptedAssignment = publishableSource?.checks?.assignment_accepted === true;",
   ];
   for (const snippet of requiredServerSnippets) {
     assert.equal(indexServer.includes(snippet), true, `handoff queue server enrichment should exist: ${snippet}`);
   }
 
   const requiredAppSnippets = [
-    'if (normalizeDashboardWorkflowStage(item?.workflow_status) !== "cleaned") return false;',
-    'if (!isAssignmentContextReady(item?.current_field_pack_status || item?.field_pack_status)) return false;',
-    'return !String(item?.assignment_state || "").trim();',
+    'if (hasAcceptedAssignment) {',
+    'return "assignment";',
+    'return resolveQueueBucket(item) === "handoff";',
     'listTitle.textContent = "กระบวนการ 2 · ขั้น 1: เลือกงานที่พร้อมส่งไปทำ";',
   ];
   for (const snippet of requiredAppSnippets) {
@@ -2949,11 +2958,8 @@ return renderAssignmentAssigneeOptions;`
 test("content preparation queue only shows items that are still in process 1", () => {
   const requiredAppSnippets = [
     "function getPreparationQueueItems(items = state.items) {",
-    'const stage = normalizeDashboardWorkflowStage(item?.workflow_status);',
-    'if (String(item?.assignment_state || "").trim()) return false;',
-    'if (stage === "generated" || stage === "published") return false;',
-    'if (stage === "cleaned" && isAssignmentContextReady(item?.current_field_pack_status || item?.field_pack_status)) {',
-    'return stage === "raw" || stage === "cleaned";',
+    'const bucket = resolveQueueBucket(item);',
+    'return bucket === "raw_prep" || bucket === "field_pack_review" || bucket === "unknown_workflow";',
     "const rows = getPreparationQueueItems(items);",
     "const list = sortRawItems(getPreparationQueueItems(items));",
     'const activeStageFilter = DASHBOARD_STAGE_FILTERS.some((filter) => filter.value === requestedStageFilter)',

@@ -633,7 +633,7 @@ test("an unaccepted rework submission never shadows the accepted round it supers
   }
 });
 
-test("opening a rework round resets the workflow model assignment state to the new round", () => {
+test("opening a rework round records closed and assigned transitions from the real assignment rows", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Rework Workflow State");
@@ -642,11 +642,15 @@ test("opening a rework round resets the workflow model assignment state to the n
     const assignmentId = ctx.createFieldAssignment(item.id, assignee.id);
     ctx.submitWithReturns(assignmentId, assignee.id, { "cta_contact.phone": { checked: true, value: "0810000001" } });
     ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", { actor_role: "admin", reason_code: "accepted" });
-    assert.equal(ctx.repo.ensureWorkflowModel(item.id).assignment_state, "accepted");
 
-    ctx.repo.returnFieldAssignmentForRework(assignmentId, "reviewer@local", { note: "เก็บข้อมูลเพิ่ม", actor_role: "admin" });
+    const result = ctx.repo.returnFieldAssignmentForRework(assignmentId, "reviewer@local", { note: "เก็บข้อมูลเพิ่ม", actor_role: "admin" });
 
-    assert.equal(ctx.repo.ensureWorkflowModel(item.id).assignment_state, "assigned");
+    assert.equal(ctx.repo.getAssignmentById(assignmentId).state, "closed");
+    assert.equal(result.assignment.state, "assigned");
+    const assignmentTransitions = ctx.repo.listWorkflowTransitionsByItem(item.id, 20)
+      .filter((row) => row.state_group === "assignment");
+    assert.ok(assignmentTransitions.some((row) => Number(row.assignment_id) === assignmentId && row.from_state === "accepted" && row.to_state === "closed"));
+    assert.ok(assignmentTransitions.some((row) => Number(row.assignment_id) === Number(result.assignment.id) && row.from_state == null && row.to_state === "assigned"));
   } finally {
     ctx.cleanup();
   }

@@ -43,7 +43,6 @@ function createWorkflowModelIndexes(db) {
   db.exec(`
     CREATE INDEX idx_content_workflow_models_production ON content_workflow_models(production_state, updated_at DESC);
     CREATE INDEX idx_content_workflow_models_publication ON content_workflow_models(publication_state, updated_at DESC);
-    CREATE INDEX idx_content_workflow_models_assignment ON content_workflow_models(assignment_state, updated_at DESC);
     CREATE INDEX idx_content_workflow_models_current_draft ON content_workflow_models(current_draft_id);
     CREATE INDEX idx_content_workflow_models_current_review ON content_workflow_models(current_review_report_id);
     CREATE INDEX idx_content_workflow_models_current_field_pack ON content_workflow_models(current_field_pack_id);
@@ -59,7 +58,6 @@ function rebuildWorkflowModels(db, withPlaceReviewFlag) {
       content_item_id INTEGER NOT NULL UNIQUE,
       production_state TEXT NOT NULL DEFAULT 'collected',
       publication_state TEXT NOT NULL DEFAULT 'draft',
-      assignment_state TEXT,
       ${withPlaceReviewFlag
         ? "place_review_flag TEXT NOT NULL DEFAULT 'none' CHECK (place_review_flag IN ('none', 'revision_requested', 'rejected')),"
         : ""}
@@ -77,14 +75,14 @@ function rebuildWorkflowModels(db, withPlaceReviewFlag) {
       FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE
     );
     INSERT INTO content_workflow_models (
-      id, content_item_id, production_state, publication_state, assignment_state,
+      id, content_item_id, production_state, publication_state,
       ${withPlaceReviewFlag ? "place_review_flag," : ""}
       current_draft_id, current_review_report_id, current_field_pack_id,
       state_version, content_version, last_actor_email, last_transition_at,
       last_transition_note, updated_by, created_at, updated_at
     )
     SELECT
-      id, content_item_id, production_state, publication_state, assignment_state,
+      id, content_item_id, production_state, publication_state,
       ${withPlaceReviewFlag ? (hasColumn(db, "place_review_flag") ? "place_review_flag," : "'none',") : ""}
       current_draft_id, current_review_report_id, current_field_pack_id,
       state_version, content_version, last_actor_email, last_transition_at,

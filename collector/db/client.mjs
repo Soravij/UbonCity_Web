@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
-import { assertPlaceReviewFlagMigrationApplied } from "./workflow-head-schema.mjs";
+import { assertAssignmentStateMigrationApplied, assertPlaceReviewFlagMigrationApplied } from "./workflow-head-schema.mjs";
 
 function ensureUsersAuthColumns(db) {
   const cols = db.prepare("PRAGMA table_info(users)").all();
@@ -250,6 +250,7 @@ function ensureWorkflowHeadBootstrapColumns(db) {
     db.exec("ALTER TABLE content_workflow_models ADD COLUMN last_transition_at TEXT;");
   }
   assertPlaceReviewFlagMigrationApplied(db, "booting Collector");
+  assertAssignmentStateMigrationApplied(db, "booting Collector");
 }
 
 function ensureAuditColumns(db) {

@@ -1387,7 +1387,9 @@ test("createAssignmentFromReadiness uses field pack handoff without readiness sn
     assert.equal(result.guard.source_of_truth, "field_pack");
     assert.equal(result.guard.brief_source, "field_pack");
     assert.equal(result.guard.mode, "field_pack");
-    assert.equal(result.assignment.workflow_sync?.reason_code, "assignment_created_sync_from_field_pack");
+    const creationTransition = ctx.repo.listWorkflowTransitionsByAssignment(result.assignment.id, 10)
+      .find((row) => row.state_group === "assignment" && row.from_state == null && row.to_state === "assigned");
+    assert.equal(creationTransition?.reason_code, "assignment_created_from_field_pack");
     assert.equal(result.assignment.content_item_id, item.id);
     assert.equal(result.assignment.assignee_user_id, assignee.id);
     assert.equal(result.assignment.brief_json?.brief_summary, "พร้อมส่งลงหน้างานจาก field pack");
@@ -1513,7 +1515,7 @@ test("repairAssignmentHandoffSnapshotForAssignment backfills a missing handoff s
       {
         actor_email: "tester@local",
         actor_role: "admin",
-        reason_code: "assignment_created_sync_manual",
+        reason_code: "assignment_created_manual",
         note: "manual assignment without handoff snapshot",
       }
     );
@@ -1690,7 +1692,7 @@ test("createAssignmentFromReadiness rolls back assignment workflow and snapshot 
     const workflowAfter = ctx.repo.ensureWorkflowModel(item.id);
     assert.equal(assignmentCountAfter, assignmentCountBefore);
     assert.equal(snapshotCountAfter, snapshotCountBefore);
-    assert.equal(workflowAfter.assignment_state, workflowBefore.assignment_state);
+    assert.deepEqual(workflowAfter, workflowBefore);
   } finally {
     ctx.cleanup();
   }
@@ -1728,7 +1730,7 @@ test("repairAssignmentHandoffSnapshotForAssignment uses assignment-time readines
       {
         actor_email: "tester@local",
         actor_role: "admin",
-        reason_code: "assignment_created_sync_manual",
+        reason_code: "assignment_created_manual",
         note: "manual assignment without handoff snapshot",
       }
     );
@@ -1796,7 +1798,7 @@ test("repairAssignmentHandoffSnapshotForAssignment keeps historical governance n
       {
         actor_email: "tester@local",
         actor_role: "admin",
-        reason_code: "assignment_created_sync_manual",
+        reason_code: "assignment_created_manual",
         note: "manual assignment without handoff snapshot",
       }
     );
@@ -1883,7 +1885,7 @@ test("repairAssignmentHandoffSnapshotForAssignment matches the normal handoff so
       {
         actor_email: "tester@local",
         actor_role: "admin",
-        reason_code: "assignment_created_sync_manual",
+        reason_code: "assignment_created_manual",
         note: "manual assignment without handoff snapshot",
       }
     );
@@ -1941,7 +1943,7 @@ test("repairAssignmentHandoffSnapshotForAssignment uses the explicit historical 
       {
         actor_email: "tester@local",
         actor_role: "admin",
-        reason_code: "assignment_created_sync_manual",
+        reason_code: "assignment_created_manual",
         note: "manual assignment without handoff snapshot",
       }
     );
@@ -2070,7 +2072,7 @@ test("repairAssignmentHandoffSnapshotForAssignment rejects wrong-item and missin
       {
         actor_email: "tester@local",
         actor_role: "admin",
-        reason_code: "assignment_created_sync_manual",
+        reason_code: "assignment_created_manual",
         note: "manual assignment without handoff snapshot",
       }
     );
@@ -2169,7 +2171,7 @@ test("repairAssignmentHandoffSnapshotForAssignment is a no-op for existing snaps
       {
         actor_email: "tester@local",
         actor_role: "admin",
-        reason_code: "assignment_created_sync_manual",
+        reason_code: "assignment_created_manual",
         note: "editorial assignment",
       }
     );

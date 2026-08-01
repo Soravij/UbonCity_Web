@@ -50,14 +50,13 @@ function createItemWithFieldPack(db, {
 
   db.prepare(`
     INSERT INTO content_workflow_models (
-      content_item_id, production_state, publication_state, assignment_state,
+      content_item_id, production_state, publication_state,
       current_field_pack_id, updated_by, last_actor_email
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?)
   `).run(
     itemId,
     productionState,
     publicationState,
-    withActiveAssignment ? "assigned" : null,
     fieldPackId,
     "smoke-field-pack-return-to-clean",
     "smoke-field-pack-return-to-clean@example.com"

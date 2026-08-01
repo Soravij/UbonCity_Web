@@ -24,17 +24,11 @@ function isFieldPackReady(status) {
   return ["ready_for_field", "ready_for_handoff"].includes(String(status || "").toLowerCase());
 }
 
-function isAssignmentEmpty(value) {
-  if (value == null) return true;
-  const text = String(value).trim();
-  return text.length === 0 || text === "[]";
-}
-
 function isHandoffEligible(row) {
   if (!row) return false;
   if (!isFieldPackReady(row.field_pack_status)) return false;
   if (!hasGeneratedOutput(row)) return false;
-  if (!isAssignmentEmpty(row.assignment_state)) return false;
+  if (Number(row.assignment_count || 0) > 0) return false;
   return true;
 }
 
@@ -45,7 +39,7 @@ function getCaseById(id) {
               cwm.production_state,
               cwm.publication_state,
               cwm.current_draft_id,
-              cwm.assignment_state,
+              (SELECT COUNT(*) FROM content_assignments ca WHERE ca.content_item_id=ci.id) AS assignment_count,
               cwm.current_field_pack_id,
               fp.status AS field_pack_status
          FROM content_items ci
@@ -63,7 +57,7 @@ function findCaseB() {
               cwm.production_state,
               cwm.publication_state,
               cwm.current_draft_id,
-              cwm.assignment_state,
+              (SELECT COUNT(*) FROM content_assignments ca WHERE ca.content_item_id=ci.id) AS assignment_count,
               cwm.current_field_pack_id,
               fp.status AS field_pack_status
          FROM content_items ci
@@ -75,7 +69,7 @@ function findCaseB() {
             OR cwm.production_state IN ('generated', 'in_review', 'ready_for_publish', 'completed')
             OR cwm.publication_state IN ('approved', 'unpublished', 'published')
           )
-          AND (cwm.assignment_state IS NULL OR TRIM(cwm.assignment_state) = '' OR TRIM(cwm.assignment_state) = '[]')
+          AND NOT EXISTS (SELECT 1 FROM content_assignments ca WHERE ca.content_item_id=ci.id)
         ORDER BY ci.id DESC
         LIMIT 1`
     )
@@ -89,15 +83,13 @@ function findCaseC() {
               cwm.production_state,
               cwm.publication_state,
               cwm.current_draft_id,
-              cwm.assignment_state,
+              (SELECT COUNT(*) FROM content_assignments ca WHERE ca.content_item_id=ci.id) AS assignment_count,
               cwm.current_field_pack_id,
               fp.status AS field_pack_status
          FROM content_items ci
          JOIN content_workflow_models cwm ON cwm.content_item_id = ci.id
          LEFT JOIN field_packs fp ON fp.id = cwm.current_field_pack_id
-        WHERE cwm.assignment_state IS NOT NULL
-          AND TRIM(cwm.assignment_state) <> ''
-          AND TRIM(cwm.assignment_state) <> '[]'
+        WHERE EXISTS (SELECT 1 FROM content_assignments ca WHERE ca.content_item_id=ci.id)
         ORDER BY ci.id DESC
         LIMIT 1`
     )

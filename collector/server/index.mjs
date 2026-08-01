@@ -1332,7 +1332,7 @@ function attachItemMatchFields(items = [], options = {}) {
       publication_state: String(workflow?.publication_state || "").trim().toLowerCase() || null,
       current_field_pack_id: Number(currentFieldPack?.id || latestFieldPack?.id || 0) || null,
       current_field_pack_status: String(currentFieldPack?.status || latestFieldPack?.status || "").trim().toLowerCase() || null,
-      assignment_state: String(workflow?.assignment_state || "").trim().toLowerCase() || null,
+      has_accepted_assignment: item?.has_accepted_assignment === true,
       current_draft_id: Number(workflow?.current_draft_id || 0) || null,
       current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
       workflow_state_version: Number(workflow?.state_version || 0) || 0,
@@ -1376,17 +1376,20 @@ function sanitizeItemForResponse(item) {
   };
 }
 
-function attachWorkflowHeadFields(item) {
+function attachWorkflowHeadFields(item, scopeContext = null) {
   if (!item || typeof item !== "object") return item;
   const itemId = Number(item?.id || 0);
   const workflow = repo.getWorkflowHeadByItem(itemId) || null;
   const currentFieldPack = repo.getCurrentFieldPackByItem(itemId) || null;
   const latestFieldPack = currentFieldPack;
+  const resolvedScope = scopeContext && typeof scopeContext === "object"
+    ? scopeContext
+    : resolveItemScopeContext(item);
   return {
     ...item,
     production_state: String(workflow?.production_state || "").trim().toLowerCase() || null,
     publication_state: String(workflow?.publication_state || "").trim().toLowerCase() || null,
-    assignment_state: String(workflow?.assignment_state || "").trim().toLowerCase() || null,
+    has_accepted_assignment: resolvedScope?.hasAcceptedAssignment === true,
     current_draft_id: Number(workflow?.current_draft_id || 0) || null,
     current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
     current_field_pack_id: Number(workflow?.current_field_pack_id || currentFieldPack?.id || latestFieldPack?.id || 0) || null,
@@ -2841,7 +2844,6 @@ function findUnknownWorkflowModelState(workflowModel = null) {
   const states = [
     ["production", workflowModel?.production_state, PRODUCTION_STATES],
     ["publication", workflowModel?.publication_state, PUBLICATION_STATES],
-    ["assignment", workflowModel?.assignment_state, ASSIGNMENT_STATES],
     ["place_review_flag", workflowModel?.place_review_flag, PLACE_REVIEW_FLAGS],
   ];
   for (const [stateGroup, value, knownStates] of states) {
@@ -2885,10 +2887,10 @@ const ASSIGNMENT_STATE_AUDIT_ACTIONS = Object.freeze({
   close_assignment: "assignment.state.close_assignment",
 });
 const WORKFLOW_REASON_CODES = Object.freeze({
-  ASSIGNMENT_CREATED_SYNC: "assignment_created_sync",
-  ASSIGNMENT_CREATED_SYNC_MANUAL: "assignment_created_sync_manual",
-  ASSIGNMENT_CREATED_SYNC_FROM_READINESS: "assignment_created_sync_from_readiness",
-  ASSIGNMENT_CREATED_SYNC_FROM_FIELD_PACK: "assignment_created_sync_from_field_pack",
+  ASSIGNMENT_CREATED: "assignment_created",
+  ASSIGNMENT_CREATED_MANUAL: "assignment_created_manual",
+  ASSIGNMENT_CREATED_FROM_READINESS: "assignment_created_from_readiness",
+  ASSIGNMENT_CREATED_FROM_FIELD_PACK: "assignment_created_from_field_pack",
   READINESS_RECOMPUTED: "readiness_recomputed",
   EXECUTION_CONTROLS_DERIVED: "execution_controls_derived",
   EXECUTION_READINESS_EVALUATED: "execution_readiness_evaluated",
@@ -4241,12 +4243,19 @@ function buildItemAssignmentOwner(assignment, userById = new Map()) {
 function resolveItemScopeContext(item) {
   if (!item || typeof item !== "object") return item;
   const itemId = Number(item?.id || 0) || 0;
-  const listAssignments = itemId && typeof repo?.listAssignmentsByItem === "function"
-    ? (Array.isArray(repo.listAssignmentsByItem(itemId)) ? repo.listAssignmentsByItem(itemId) : [])
+  const assignmentResult = itemId && typeof repo?.listAssignmentsByItem === "function"
+    ? repo.listAssignmentsByItem(itemId)
     : [];
+  const listAssignments = Array.isArray(assignmentResult) ? assignmentResult : [];
+  const editorialAssignments = listAssignments
+    .filter((assignment) => String(assignment?.assignment_kind || "").trim().toLowerCase() === "editorial");
   const primaryAssignment = itemId
-    ? (typeof getPrimaryEditorialAssignment === "function" ? getPrimaryEditorialAssignment(itemId) : null) || listAssignments[0] || null
+    ? selectPrimaryEditorialAssignment(editorialAssignments) || listAssignments[0] || null
     : null;
+  const publishableSource = itemId && typeof repo?.buildPublishableSourceByItem === "function"
+    ? repo.buildPublishableSourceByItem(itemId, { assignments: listAssignments })
+    : null;
+  const hasAcceptedAssignment = publishableSource?.checks?.assignment_accepted === true;
   const assignmentUserIds = [
     Number(primaryAssignment?.assignee_user_id || 0) || 0,
     Number(primaryAssignment?.assigned_by_user_id || 0) || 0,
@@ -4254,6 +4263,7 @@ function resolveItemScopeContext(item) {
   return {
     primaryAssignment,
     assignmentUserIds,
+    hasAcceptedAssignment,
   };
 }
 
@@ -4274,6 +4284,7 @@ function attachItemScopeMetadata(authUser, item, scopeContext = null) {
     viewer_scope_reason: buildViewerScopeReason(authUser, item, primaryAssignment),
     current_holder: buildItemCurrentHolder(item),
     assignment_owner: buildItemAssignmentOwner(primaryAssignment, userById),
+    has_accepted_assignment: resolvedScope?.hasAcceptedAssignment === true,
   });
 }
 
@@ -4863,9 +4874,14 @@ function listEditorialAssignmentsByItem(itemId) {
     .filter((assignment) => String(assignment?.assignment_kind || "").trim().toLowerCase() === "editorial");
 }
 
-function getPrimaryEditorialAssignment(itemId) {
+function selectPrimaryEditorialAssignment(assignments = []) {
   const activeStates = new Set(["assigned", "in_progress", "submitted", "resubmitted", "revision_requested"]);
-  return listEditorialAssignmentsByItem(itemId).find((assignment) => activeStates.has(String(assignment?.state || "").trim().toLowerCase())) || null;
+  return (Array.isArray(assignments) ? assignments : [])
+    .find((assignment) => activeStates.has(String(assignment?.state || "").trim().toLowerCase())) || null;
+}
+
+function getPrimaryEditorialAssignment(itemId) {
+  return selectPrimaryEditorialAssignment(listEditorialAssignmentsByItem(itemId));
 }
 
 function buildArticleProcessPayload(req, item) {
@@ -6901,15 +6917,10 @@ function resolveCreateWorkflowPatch(body, fallbackLegacyStatus = "raw") {
   const legacyMapped = mapLegacyStatusToCanonicalStates(payload.workflow_status || fallbackLegacyStatus);
   const productionState = String(requestedPatch?.production_state || "").trim().toLowerCase() || legacyMapped.production_state;
   const publicationState = String(requestedPatch?.publication_state || "").trim().toLowerCase() || legacyMapped.publication_state;
-  const assignmentState = String(requestedPatch?.assignment_state || "").trim().toLowerCase() || null;
-  const workflowPatch = {
+  return {
     production_state: productionState,
     publication_state: publicationState,
   };
-  if (assignmentState) {
-    workflowPatch.assignment_state = assignmentState;
-  }
-  return workflowPatch;
 }
 
 function attachCollectedSourceRecord(contentItemId, rawItem, adapter) {
@@ -8724,10 +8735,11 @@ app.get("/api/items/:id", requireRole("owner", "admin", "editor", "user", "freel
   }
 
   const officialReference = repo.getOfficialReferenceByItem(id);
+  const scopeContext = resolveItemScopeContext(item);
   const responseItem = attachItemScopeMetadata(req.authUser, attachSingleItemClaimUser({
-    ...attachWorkflowHeadFields(item),
+    ...attachWorkflowHeadFields(item, scopeContext),
     official_reference: officialReference,
-  }));
+  }), scopeContext);
   res.json(isOtherTransportItem(responseItem) ? attachOtherTransportMetadataToItem(responseItem) : responseItem);
 });
 
@@ -8760,7 +8772,6 @@ app.post("/api/events-manager/items", requireRole("owner", "admin", "user"), (re
     {
       production_state: "content_in_progress",
       publication_state: "draft",
-      assignment_state: null,
       last_transition_note: "item created",
     },
     actor,
@@ -8801,7 +8812,6 @@ app.post("/api/other-transport/items", requireRole("owner", "admin", "user"), (r
     {
       production_state: "content_in_progress",
       publication_state: "draft",
-      assignment_state: null,
       last_transition_note: "item created",
     },
     actor,
@@ -8829,7 +8839,6 @@ app.post("/api/items", requireRole("owner", "admin"), (req, res) => {
     {
       production_state: workflowPatch.production_state,
       publication_state: workflowPatch.publication_state,
-      assignment_state: workflowPatch.assignment_state || null,
       last_transition_note: "item created",
     },
     actor,
@@ -10036,27 +10045,16 @@ app.put("/api/items/:id/workflow-model", requireRole("owner", "admin", "user"), 
   const patch = {};
   const productionState = normalizeEnum(req.body?.production_state, PRODUCTION_STATES);
   const publicationState = normalizeEnum(req.body?.publication_state, PUBLICATION_STATES);
-  const assignmentState = req.body?.assignment_state == null
-    ? ""
-    : normalizeEnum(req.body?.assignment_state, ASSIGNMENT_STATES);
   const note = req.body?.last_transition_note == null ? null : String(req.body.last_transition_note || "").trim();
 
   if (productionState) patch.production_state = productionState;
   if (publicationState) patch.publication_state = publicationState;
-  if (req.body?.assignment_state != null) {
-    if (!assignmentState && String(req.body.assignment_state || "").trim() !== "") {
-      res.status(400).json({ error: "invalid assignment_state" });
-      return;
-    }
-    patch.assignment_state = assignmentState || null;
-  }
   if (note != null) patch.last_transition_note = note || null;
 
   if (actorRole === "user") {
     const disallowedPublication = Boolean(patch.publication_state);
-    const disallowedAssignment = req.body?.assignment_state != null;
     const disallowedProduction = patch.production_state && patch.production_state !== "ready_for_content";
-    if (disallowedPublication || disallowedAssignment || disallowedProduction) {
+    if (disallowedPublication || disallowedProduction) {
       res.status(403).json({ error: "user/editor can only set production_state=ready_for_content" });
       return;
     }
@@ -10698,8 +10696,8 @@ app.post("/api/items/:id/assignments/from-readiness", requireRole("owner"), (req
     const effectiveHandoffMissing = Array.isArray(result?.preview?.missing_requirements) ? result.preview.missing_requirements : [];
     const effectiveHandoffReasonCodes = Array.isArray(result?.preview?.reason_codes) ? result.preview.reason_codes : [];
     const workflowReasonCode = sourceOfTruth === "field_pack"
-      ? WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC_FROM_FIELD_PACK
-      : WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC_FROM_READINESS;
+      ? WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_FROM_FIELD_PACK
+      : WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_FROM_READINESS;
     const auditAction = sourceOfTruth === "field_pack"
       ? (mode === "forced" ? "assignment.create.forced_from_field_pack" : "assignment.create.from_field_pack")
       : (mode === "forced" ? "assignment.create.forced_from_readiness" : "assignment.create.from_readiness");
@@ -10751,24 +10749,6 @@ app.post("/api/items/:id/assignments/from-readiness", requireRole("owner"), (req
     }, {
       assignment_id: assignment?.id || null,
     });
-    if (assignment?.workflow_sync?.applied) {
-      repo.logAudit(actorEmail(req), "assignment.workflow_sync.initialized", "content_item", String(id), {
-        assignment_id: assignment?.id || null,
-        from_state: assignment.workflow_sync.from_state || null,
-        to_state: assignment.workflow_sync.to_state || null,
-        reason_code: assignment.workflow_sync.reason_code || WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC,
-      }, {
-        assignment_id: assignment?.id || null,
-      });
-      repo.logAudit(actorEmail(req), "assignment.workflow_sync.initialized", "assignment", String(assignment?.id || ""), {
-        content_item_id: id,
-        from_state: assignment.workflow_sync.from_state || null,
-        to_state: assignment.workflow_sync.to_state || null,
-        reason_code: assignment.workflow_sync.reason_code || WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC,
-      }, {
-        assignment_id: assignment?.id || null,
-      });
-    }
     let aiInputCleanup = null;
     try {
       aiInputCleanup = cleanupAiInputAssetsAfterAssignmentCreated(id);
@@ -11157,7 +11137,7 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
         {
           actor_email: actorEmail(req),
           actor_role: role,
-          reason_code: WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC_MANUAL,
+          reason_code: WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_MANUAL,
           note: "assignment created via direct request payload",
         }
       );
@@ -11197,26 +11177,6 @@ app.post("/api/items/:id/assignments", requireRole("admin", "user"), (req, res) 
     }, {
       assignment_id: assignment?.id || null,
     });
-    if (assignment?.workflow_sync?.applied) {
-      repo.logAudit(actorEmail(req), "assignment.workflow_sync.initialized", "content_item", String(id), {
-        assignment_id: assignment?.id || null,
-        mode,
-        from_state: assignment.workflow_sync.from_state || null,
-        to_state: assignment.workflow_sync.to_state || null,
-        reason_code: assignment.workflow_sync.reason_code || WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC,
-      }, {
-        assignment_id: assignment?.id || null,
-      });
-      repo.logAudit(actorEmail(req), "assignment.workflow_sync.initialized", "assignment", String(assignment?.id || ""), {
-        content_item_id: id,
-        mode,
-        from_state: assignment.workflow_sync.from_state || null,
-        to_state: assignment.workflow_sync.to_state || null,
-        reason_code: assignment.workflow_sync.reason_code || WORKFLOW_REASON_CODES.ASSIGNMENT_CREATED_SYNC,
-      }, {
-        assignment_id: assignment?.id || null,
-      });
-    }
     let aiInputCleanup = null;
     try {
       aiInputCleanup = cleanupAiInputAssetsAfterAssignmentCreated(id);
@@ -11529,7 +11489,6 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
     res.status(404).json({ error: "assignment not found" });
     return;
   }
-  const fromState = String(currentAssignment.state || "").trim().toLowerCase() || null;
   const role = actorPolicyRole(req);
   const action = String(req.body?.action || "").trim().toLowerCase();
   const mappedState = action ? ASSIGNMENT_ACTION_TO_STATE[action] : "";
@@ -11632,21 +11591,6 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
       reason_code: reasonCode,
       role,
     }, {
-      assignment_id: assignmentId,
-    });
-    const sourceAction = action || "state_patch";
-    const workflowSyncDetails = {
-      assignment_id: assignmentId,
-      content_item_id: assignment?.content_item_id || null,
-      from_state: fromState,
-      to_state: String(assignment?.state || "").trim().toLowerCase() || nextState,
-      source_action: sourceAction,
-      reason_code: reasonCode,
-    };
-    repo.logAudit(actorEmail(req), "assignment.workflow_sync.on_state_update", "content_item", String(assignment?.content_item_id || ""), workflowSyncDetails, {
-      assignment_id: assignmentId,
-    });
-    repo.logAudit(actorEmail(req), "assignment.workflow_sync.on_state_update", "assignment", String(assignmentId), workflowSyncDetails, {
       assignment_id: assignmentId,
     });
     res.json({ ok: true, assignment });
@@ -11886,20 +11830,6 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
       submission_state: normalizedSubmissionState,
       role,
     }, {
-      assignment_id: assignmentId,
-    });
-    const workflowSyncDetails = {
-      assignment_id: assignmentId,
-      content_item_id: updatedAssignment?.content_item_id || assignment.content_item_id,
-      from_state: assignmentState || null,
-      to_state: String(updatedAssignment?.state || "").trim().toLowerCase() || nextAssignmentState,
-      source_action: `assignment.submission.${assignmentAction}`,
-      reason_code: reasonCode,
-    };
-    repo.logAudit(actorEmail(req), "assignment.workflow_sync.on_submission", "content_item", String(updatedAssignment?.content_item_id || assignment.content_item_id), workflowSyncDetails, {
-      assignment_id: assignmentId,
-    });
-    repo.logAudit(actorEmail(req), "assignment.workflow_sync.on_submission", "assignment", String(assignmentId), workflowSyncDetails, {
       assignment_id: assignmentId,
     });
     const cleanupResult = cleanupSupersededAssignmentWorkAssetsAfterSubmit(assignmentId, currentRound, keepAssetIds);
@@ -14314,7 +14244,6 @@ app.post("/api/import", requireRole("admin"), workflowRateLimit, (req, res) => {
       {
         production_state: workflowPatch.production_state,
         publication_state: workflowPatch.publication_state,
-        assignment_state: workflowPatch.assignment_state || null,
         last_transition_note: "manual import created",
       },
       actor,

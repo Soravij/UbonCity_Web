@@ -273,8 +273,8 @@ item หนึ่งตัวอยู่บนบันไดตำแหน่
 | รายการ | เหตุผล |
 |---|---|
 | `PUT /api/items/:id/workflow-model` | ประตูข้ามบันได — **ลบเป็นลำดับสุดท้าย** หลังบันไดครบแล้วเท่านั้น ตอนนี้มันอาจเป็นสิ่งเดียวที่กู้ item ที่ติดค้างได้ |
-| `assignment_state` บน workflow head | เก็บซ้ำกับ `content_assignments.state` และแตกกันได้จริง ให้ derive แทน |
-| `skip_assignment_transition_validation` | จำเป็นเพราะ mirror สองตัวขัดกัน — หมดความจำเป็นทันทีที่เลิก mirror |
+| `assignment_state` บน workflow head | ลบแล้วในขั้น 5A; สถานะรับงาน derive จาก assignment รอบ active ที่เลือกจาก `content_assignments.state` |
+| `skip_assignment_transition_validation` | ลบแล้วพร้อม assignment-state mirror ในขั้น 5A |
 | `skip_production_transition_validation` / `skip_publication_transition_validation` | ไม่มี caller เลย ลบได้ทันที |
 | `workflow_status` legacy | ตัดสินว่าตายได้หรือยัง |
 | batch endpoint 5 ตัวที่ปิดตาย | `respondBatchReleaseDisabled` |

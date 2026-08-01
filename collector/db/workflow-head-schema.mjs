@@ -1,4 +1,5 @@
 export const PLACE_REVIEW_FLAG_MIGRATION_COMMAND = "npm run migrate:place-review-flags";
+export const ASSIGNMENT_STATE_MIGRATION_COMMAND = "npm run migrate:remove-assignment-state";
 
 export function hasPlaceReviewFlagCheck(db) {
   const tableSql = String(
@@ -17,5 +18,15 @@ export function assertPlaceReviewFlagMigrationApplied(db, operation) {
   }
   if (!hasPlaceReviewFlagCheck(db)) {
     throw new Error(`content_workflow_models.place_review_flag is missing its CHECK constraint; run ${PLACE_REVIEW_FLAG_MIGRATION_COMMAND} before ${operation}`);
+  }
+}
+
+export function assertAssignmentStateMigrationApplied(db, operation) {
+  const hasAssignmentState = db
+    .prepare("PRAGMA table_info(content_workflow_models)")
+    .all()
+    .some((row) => row.name === "assignment_state");
+  if (hasAssignmentState) {
+    throw new Error(`content_workflow_models.assignment_state still exists; run ${ASSIGNMENT_STATE_MIGRATION_COMMAND} before ${operation}`);
   }
 }
