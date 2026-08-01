@@ -2945,8 +2945,8 @@ const IN_FLIGHT_STATUS_LABELS = Object.freeze({
   completed: "เสร็จแล้ว",
 });
 
-// An accepted or closed assignment wins: the handoff has completed regardless of how far production
-// had got. Publication state is checked before production state to preserve the
+// Only the selected active accepted assignment wins: a closed historical round cannot make the
+// current handoff look complete. Publication state is checked before production state to preserve the
 // precedence getItemWorkflowSnapshot already applied — approved/unpublished outrank the production
 // state, and that grouping is left as-is here (tracked separately as its own finding).
 function buildInFlightStatusLabel(item) {

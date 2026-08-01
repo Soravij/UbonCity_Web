@@ -18,7 +18,6 @@ import {
 } from "./integration-readiness.mjs";
 import { resolvePaths } from "../config/paths.mjs";
 import { decodeUrlEntities } from "../lib/decode-url-entities.mjs";
-import { hasAcceptedOrClosedAssignment } from "../services/assignment-state.mjs";
 import {
   buildFeaturePolicyMap,
   listAiFeatureCatalog,
@@ -4253,7 +4252,10 @@ function resolveItemScopeContext(item) {
   const primaryAssignment = itemId
     ? selectPrimaryEditorialAssignment(editorialAssignments) || listAssignments[0] || null
     : null;
-  const hasAcceptedAssignment = hasAcceptedOrClosedAssignment(listAssignments);
+  const publishableSource = itemId && typeof repo?.buildPublishableSourceByItem === "function"
+    ? repo.buildPublishableSourceByItem(itemId, { assignments: listAssignments })
+    : null;
+  const hasAcceptedAssignment = publishableSource?.checks?.assignment_accepted === true;
   const assignmentUserIds = [
     Number(primaryAssignment?.assignee_user_id || 0) || 0,
     Number(primaryAssignment?.assigned_by_user_id || 0) || 0,

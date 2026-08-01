@@ -4,7 +4,11 @@ import path from "path";
 import { buildCleanStructuredContext as buildCleanStructuredContextFromRepo } from "../services/clean-context.mjs";
 import { getTaxonomyCheckLabel, resolveTaxonomyRequestedChecksGroup } from "../server/taxonomy-resolver.mjs";
 import { decodeUrlEntities } from "../lib/decode-url-entities.mjs";
-import { isAcceptedOrClosedAssignmentState } from "../services/assignment-state.mjs";
+import {
+  getPublishableAssignmentStateRank,
+  isSelectedAssignmentAccepted,
+  selectBestPublishableAssignmentCandidate,
+} from "../services/publishable-assignment-candidate.mjs";
 import { assertAssignmentStateMigrationApplied, assertPlaceReviewFlagMigrationApplied } from "./workflow-head-schema.mjs";
 
 function parseTags(raw) {
@@ -9955,23 +9959,16 @@ export function createRepository(db) {
     };
   }
 
-  function buildPublishableSourceByItem(contentItemId) {
+  function buildPublishableSourceByItem(contentItemId, options = {}) {
     const itemId = Number(contentItemId || 0);
     if (!itemId) throw new Error("content_item_id is required");
     const item = getItem(itemId);
     if (!item) throw new Error("item not found");
 
     const currentFieldPack = getCurrentFieldPackByItem(itemId);
-    const assignments = listAssignmentsByItem(itemId);
-    const assignmentStateRank = new Map([
-      ["accepted", 0],
-      ["closed", 1],
-      ["submitted", 2],
-      ["resubmitted", 3],
-      ["revision_requested", 4],
-      ["in_progress", 5],
-      ["assigned", 6],
-    ]);
+    const assignments = Array.isArray(options?.assignments)
+      ? options.assignments
+      : listAssignmentsByItem(itemId);
 
     const candidates = assignments
       .map((assignment) => {
@@ -10002,7 +9999,7 @@ export function createRepository(db) {
           || null;
         const articleText = String(articleDraft?.text_content || "").trim();
         const assignmentState = String(assignment?.state || "").trim().toLowerCase();
-        const assignmentAccepted = isAcceptedOrClosedAssignmentState(assignmentState);
+        const assignmentAccepted = isSelectedAssignmentAccepted({ assignment_state: assignmentState });
         const deliverablesReviewUsable = Boolean(deliverablesUtility?.review_usable);
         const hasArticleDraftDeliverable = Boolean(articleDraft?.id);
         const hasArticleDraftContent = Boolean(articleText || String(articleDraft?.source_url || "").trim());
@@ -10015,7 +10012,7 @@ export function createRepository(db) {
         return {
           assignment_id: assignmentId,
           assignment_state: assignmentState,
-          assignment_rank: assignmentStateRank.has(assignmentState) ? assignmentStateRank.get(assignmentState) : 99,
+          assignment_rank: getPublishableAssignmentStateRank(assignmentState),
           latest_submission_id: latestSubmissionId,
           latest_submission: latestSubmission,
           deliverables_bundle: deliverablesBundle,
@@ -10032,25 +10029,9 @@ export function createRepository(db) {
             : null,
         };
       })
-      .filter(Boolean)
-      .sort((a, b) => {
-        if (Number(b.ready_for_publish_source) !== Number(a.ready_for_publish_source)) {
-          return Number(b.ready_for_publish_source) - Number(a.ready_for_publish_source);
-        }
-        if (Number(b.has_article_draft_content) !== Number(a.has_article_draft_content)) {
-          return Number(b.has_article_draft_content) - Number(a.has_article_draft_content);
-        }
-        if (Number(b.has_article_draft_deliverable) !== Number(a.has_article_draft_deliverable)) {
-          return Number(b.has_article_draft_deliverable) - Number(a.has_article_draft_deliverable);
-        }
-        if (Number(b.deliverables_utility?.review_usable) !== Number(a.deliverables_utility?.review_usable)) {
-          return Number(b.deliverables_utility?.review_usable) - Number(a.deliverables_utility?.review_usable);
-        }
-        if (a.assignment_rank !== b.assignment_rank) return a.assignment_rank - b.assignment_rank;
-        return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
-      });
+      .filter(Boolean);
 
-    const candidate = candidates[0] || null;
+    const candidate = selectBestPublishableAssignmentCandidate(candidates);
     const articleText = String(candidate?.article_text || "").trim();
     const excerpt = articleText
       ? `${articleText.slice(0, 240)}${articleText.length > 240 ? "..." : ""}`
@@ -10062,7 +10043,7 @@ export function createRepository(db) {
     if (!candidate) {
       issues.push("Missing publishable assignment source");
     } else {
-      if (!isAcceptedOrClosedAssignmentState(candidate.assignment_state)) {
+      if (!isSelectedAssignmentAccepted(candidate)) {
         issues.push("Assignment has not been accepted yet");
       }
       if (!candidate.latest_submission_id) issues.push("Missing latest assignment submission");
@@ -10082,7 +10063,7 @@ export function createRepository(db) {
       checks: {
         has_current_field_pack: Boolean(currentFieldPack?.id),
         has_assignment: assignments.length > 0,
-        assignment_accepted: Boolean(candidate && isAcceptedOrClosedAssignmentState(candidate.assignment_state)),
+        assignment_accepted: isSelectedAssignmentAccepted(candidate),
         has_latest_submission: Boolean(candidate?.latest_submission_id),
         has_article_draft_deliverable: Boolean(candidate?.article_draft?.id),
         has_article_draft_content: Boolean(articleText || String(candidate?.article_draft?.source_url || "").trim()),
@@ -10108,7 +10089,7 @@ export function createRepository(db) {
         candidate_assignment_id: Number(candidate?.assignment_id || 0) || null,
         candidate_assignment_state: String(candidate?.assignment_state || "").trim().toLowerCase() || null,
         candidate_latest_submission_id: Number(candidate?.latest_submission_id || 0) || null,
-        selection_trace: "candidates sorted by ready_for_publish_source desc, has_article_draft_content desc, has_article_draft_deliverable desc, deliverables_review_usable desc, assignment_rank asc, updated_at desc",
+        selection_trace: "closed candidates excluded; active candidates sorted by ready_for_publish_source desc, has_article_draft_content desc, has_article_draft_deliverable desc, deliverables_review_usable desc, assignment_rank asc, updated_at desc",
         has_article_draft_deliverable: Boolean(candidate?.has_article_draft_deliverable),
         article_draft_body_length: String(candidate?.article_text || "").trim().length,
         assignment_rank: Number(candidate?.assignment_rank ?? 99),

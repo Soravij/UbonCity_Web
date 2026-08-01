@@ -293,6 +293,12 @@ function loadItemOwnershipScopeHooks(users = [], options = {}) {
       listAssignmentsByItem(itemId) {
         return (options.assignmentsByItemId && options.assignmentsByItemId.get(Number(itemId || 0))) || [];
       },
+      buildPublishableSourceByItem(itemId, buildOptions = {}) {
+        if (typeof options.buildPublishableSourceByItem === "function") {
+          return options.buildPublishableSourceByItem(itemId, buildOptions);
+        }
+        return { checks: { assignment_accepted: false } };
+      },
     },
     sanitizeItemForResponse(item) {
       return item;
@@ -304,9 +310,6 @@ function loadItemOwnershipScopeHooks(users = [], options = {}) {
     normalizePolicyRole(value, fallback = "user") {
       const normalized = String(value || "").trim().toLowerCase();
       return normalized || fallback;
-    },
-    hasAcceptedOrClosedAssignment(assignments = []) {
-      return assignments.some((assignment) => ["accepted", "closed"].includes(String(assignment?.state || "").trim().toLowerCase()));
     },
     console,
     __productionStates: PRODUCTION_STATES,
@@ -2730,7 +2733,8 @@ test("handoff queue reuses scoped assignments and leaves the queue after an assi
     "const currentFieldPack = repo.getCurrentFieldPackByItem(itemId);",
     "const assignmentResult = itemId && typeof repo?.listAssignmentsByItem === \"function\"",
     'current_field_pack_status: String(currentFieldPack?.status || "").trim().toLowerCase() || null,',
-    "const hasAcceptedAssignment = hasAcceptedOrClosedAssignment(listAssignments);",
+    "const publishableSource = itemId && typeof repo?.buildPublishableSourceByItem === \"function\"",
+    "const hasAcceptedAssignment = publishableSource?.checks?.assignment_accepted === true;",
   ];
   for (const snippet of requiredServerSnippets) {
     assert.equal(indexServer.includes(snippet), true, `handoff queue server enrichment should exist: ${snippet}`);

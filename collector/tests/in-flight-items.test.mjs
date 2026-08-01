@@ -258,6 +258,18 @@ test("in-flight status label covers submitted_for_admin_review specifically", ()
   );
 });
 
+test("a historical accepted round cannot leave the current rework round with the handoff-complete label", () => {
+  const { buildInFlightStatusLabel } = loadAppHelpers();
+  assert.notEqual(
+    buildInFlightStatusLabel({
+      production_state: "collected",
+      publication_state: "draft",
+      has_accepted_assignment: false,
+    }),
+    "งานที่มอบหมายถูกรับแล้ว"
+  );
+});
+
 test("stalled-age tone boundaries: 30 days exactly is still warn, past 30 is fail", () => {
   const { formatInFlightStalledAge } = loadAppHelpers();
   const ageOf = (days) => formatInFlightStalledAge(new Date(Date.now() - days * DAY_MS - 1000).toISOString());
