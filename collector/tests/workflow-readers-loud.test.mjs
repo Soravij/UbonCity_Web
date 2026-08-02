@@ -12,6 +12,7 @@ import {
   PRODUCTION_STATES,
   PUBLICATION_STATES,
   createRepository,
+  mapWorkflowStatusToModelStates,
 } from "../db/repository.mjs";
 import { runQualityStage } from "../services/workflow.mjs";
 import { isUsableWorkflowStateCatalog, reportUnknownWorkflowState } from "../server/public/workflow-state-catalog.js";
@@ -90,6 +91,14 @@ function loadSafeAsync() {
   vm.runInNewContext(source, context, { filename: "safe-async.js" });
   return context.__safeAsync;
 }
+
+test("one shared legacy-to-canonical mapping preserves historical aliases and canonical mirror values", () => {
+  assert.deepEqual(mapWorkflowStatusToModelStates("reviewed"), { production_state: "in_review", publication_state: "draft" });
+  assert.deepEqual(mapWorkflowStatusToModelStates("cleaned"), { production_state: "analyzed", publication_state: "draft" });
+  assert.deepEqual(mapWorkflowStatusToModelStates("in_review"), { production_state: "in_review", publication_state: "draft" });
+  assert.match(serverSource, /mapWorkflowStatusToModelStates\(payload\.workflow_status \|\| fallbackLegacyStatus\)/);
+  assert.doesNotMatch(serverSource, /function mapLegacyStatusToCanonicalStates/);
+});
 
 test("workflow readers log and reject unknown states", async () => {
   const originalError = console.error;

@@ -192,6 +192,20 @@ test("bulkDeleteItems succeeds when all selected items are safe raw-only", () =>
   }
 });
 
+test("raw hard-delete eligibility relies on canonical state when the legacy mirror is stale", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.makeItemRawOnly(ctx.createRawItem("Canonical raw with stale legacy mirror"));
+    ctx.db.prepare("UPDATE content_items SET workflow_status='approved' WHERE id=?").run(item.id);
+
+    const eligibility = ctx.repo.getRawOnlyHardDeleteEligibility(item.id);
+    assert.equal(eligibility.eligible, true);
+    assert.equal(eligibility.blockers.some((blocker) => blocker.key === "workflow_status_not_raw"), false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("raw hard delete ignores archived field packs but still blocks current packs and cascades archived pack children", () => {
   const ctx = createTestContext();
   try {
@@ -217,7 +231,6 @@ test("raw hard delete ignores archived field packs but still blocks current pack
 
     ctx.db.prepare("UPDATE content_workflow_models SET production_state='analyzed', current_field_pack_id=? WHERE content_item_id=?").run(archivedPack.id, archivedPackItem.id);
     ctx.repo.returnFieldPackToCleanAtomic(archivedPackItem.id, "archive for raw hard delete", "test@local");
-    ctx.db.prepare("UPDATE content_items SET workflow_status='raw' WHERE id=?").run(archivedPackItem.id);
     ctx.db.prepare("UPDATE content_workflow_models SET production_state='collected', publication_state='draft', current_field_pack_id=NULL WHERE content_item_id=?").run(archivedPackItem.id);
 
     const archivedEligibility = ctx.repo.getRawOnlyHardDeleteEligibility(archivedPackItem.id);
