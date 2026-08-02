@@ -33,6 +33,7 @@ import {
   PUBLICATION_STATES,
   createRepository,
   hasRecognizedEvaluationOverrideInput,
+  mapWorkflowStatusToModelStates,
   resolveActiveAssignmentWorkBatchRows,
 } from "../db/repository.mjs";
 import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/index.mjs";
@@ -3753,17 +3754,14 @@ function isClaimableRawPoolItem(item) {
   // item_work_scope_state is not available here, so we inspect individual workflow fields.
   const publicationState = String(item.publication_state || "").trim().toLowerCase();
   const productionState = String(item.production_state || "").trim().toLowerCase();
-  const workflowStatus = String(item.workflow_status || "").trim().toLowerCase();
   assertKnownWorkflowModelStates("isClaimableRawPoolItem", item.id, {
     production_state: productionState,
     publication_state: publicationState,
   });
   const allowedPublication = new Set(["", "draft", "raw"]);
   const allowedProduction = new Set(["", "collected", "raw"]);
-  const allowedWorkflow = new Set(["", "raw"]);
   if (!allowedPublication.has(publicationState)) return false;
   if (!allowedProduction.has(productionState)) return false;
-  if (!allowedWorkflow.has(workflowStatus)) return false;
   return true;
 }
 
@@ -3843,8 +3841,7 @@ function buildItemWorkScopeState(item, assignment) {
     production_state: productionState,
     publication_state: publicationState,
   });
-  const effectivePublicationState = publicationState || String(item?.workflow_status || "").trim().toLowerCase();
-  if (effectivePublicationState === "published" || effectivePublicationState === "completed" || productionState === "completed" || productionState === "ready_for_publish") {
+  if (publicationState === "published" || publicationState === "completed" || productionState === "completed" || productionState === "ready_for_publish") {
     return "published_or_completed";
   }
   const claimedByUserId = Number(item?.claimed_by_user_id || 0) || 0;
@@ -6590,45 +6587,12 @@ function buildCollectedImportSeed(rawItem, adapter) {
   };
 }
 
-function normalizeLegacyWorkflowStatus(value) {
-  return String(value || "").trim().toLowerCase() || "raw";
-}
-
-function mapLegacyStatusToCanonicalStates(value) {
-  const status = normalizeLegacyWorkflowStatus(value);
-  if (status === "published") {
-    return { production_state: "completed", publication_state: "published" };
-  }
-  if (status === "approved") {
-    return { production_state: "ready_for_publish", publication_state: "approved" };
-  }
-  if (status === "reviewed") {
-    return { production_state: "in_review", publication_state: "draft" };
-  }
-  if (status === "generated") {
-    return { production_state: "generated", publication_state: "draft" };
-  }
-  if (status === "cleaned" || status === "analyzed") {
-    return { production_state: "analyzed", publication_state: "draft" };
-  }
-  if (status === "needs_revision") {
-    return { production_state: "needs_revision", publication_state: "draft" };
-  }
-  if (status === "rejected") {
-    return { production_state: "rejected", publication_state: "draft" };
-  }
-  if (status === "content_in_progress") {
-    return { production_state: "content_in_progress", publication_state: "draft" };
-  }
-  return { production_state: "collected", publication_state: "draft" };
-}
-
 function resolveCreateWorkflowPatch(body, fallbackLegacyStatus = "raw") {
   const payload = body && typeof body === "object" ? body : {};
   const requestedPatch = payload.workflow_patch && typeof payload.workflow_patch === "object"
     ? payload.workflow_patch
     : null;
-  const legacyMapped = mapLegacyStatusToCanonicalStates(payload.workflow_status || fallbackLegacyStatus);
+  const legacyMapped = mapWorkflowStatusToModelStates(payload.workflow_status || fallbackLegacyStatus);
   const productionState = String(requestedPatch?.production_state || "").trim().toLowerCase() || legacyMapped.production_state;
   const publicationState = String(requestedPatch?.publication_state || "").trim().toLowerCase() || legacyMapped.publication_state;
   return {

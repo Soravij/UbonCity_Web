@@ -657,18 +657,20 @@ function clampScore(value, min = 0, max = 10) {
   return Math.max(min, Math.min(max, n));
 }
 
-function mapWorkflowStatusToModelStates(workflowStatus) {
+// The sole legacy-to-canonical workflow mapping. Keep historical input aliases here
+// so every creation path applies the same rule.
+export function mapWorkflowStatusToModelStates(workflowStatus) {
   const status = String(workflowStatus || "").trim().toLowerCase();
   if (status === "published") return { production_state: "completed", publication_state: "published" };
   if (status === "approved") return { production_state: "ready_for_publish", publication_state: "approved" };
   if (status === "rejected") return { production_state: "rejected", publication_state: "draft" };
   if (status === "needs_revision") return { production_state: "needs_revision", publication_state: "draft" };
-  if (status === "in_review") return { production_state: "in_review", publication_state: "draft" };
+  if (status === "reviewed" || status === "in_review") return { production_state: "in_review", publication_state: "draft" };
   if (status === "generated") return { production_state: "generated", publication_state: "draft" };
   if (status === "content_in_progress") return { production_state: "content_in_progress", publication_state: "draft" };
   if (status === "ready_for_content") return { production_state: "ready_for_content", publication_state: "draft" };
   if (status === "brief_generated") return { production_state: "brief_generated", publication_state: "draft" };
-  if (status === "analyzed") return { production_state: "analyzed", publication_state: "draft" };
+  if (status === "cleaned" || status === "analyzed") return { production_state: "analyzed", publication_state: "draft" };
   return { production_state: "collected", publication_state: "draft" };
 }
 
@@ -2951,8 +2953,21 @@ export function createRepository(db) {
 
   const softDeleteStmt = db.prepare("UPDATE content_items SET is_deleted=1, updated_at=CURRENT_TIMESTAMP WHERE id=?");
   const updateItemCategoryStmt = db.prepare("UPDATE content_items SET category=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND is_deleted=0");
-  const listStmt = db.prepare(`SELECT * FROM content_items WHERE is_deleted=0 ORDER BY id DESC`);
-  const getStmt = db.prepare("SELECT * FROM content_items WHERE id=? AND is_deleted=0");
+  // Claim-pool scope is computed from these returned items. Carry the canonical
+  // workflow state here so every getItem()/listItems() consumer receives it first.
+  const listStmt = db.prepare(`
+    SELECT i.*, w.production_state, w.publication_state
+    FROM content_items i
+    LEFT JOIN content_workflow_models w ON w.content_item_id=i.id
+    WHERE i.is_deleted=0
+    ORDER BY i.id DESC
+  `);
+  const getStmt = db.prepare(`
+    SELECT i.*, w.production_state, w.publication_state
+    FROM content_items i
+    LEFT JOIN content_workflow_models w ON w.content_item_id=i.id
+    WHERE i.id=? AND i.is_deleted=0
+  `);
   const claimItemStmt = db.prepare(`
     UPDATE content_items
     SET

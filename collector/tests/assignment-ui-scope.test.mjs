@@ -338,6 +338,7 @@ ${extractNamedFunctionSource(indexServer, "canSeeManagedWorkForUser")}
 ${extractNamedFunctionSource(indexServer, "canSeeAssignmentByManagementLine")}
 ${extractNamedFunctionSource(indexServer, "filterAssignmentsByManagementLine")}
 ${extractNamedFunctionSource(indexServer, "listUsersByIds")}
+${extractNamedFunctionSource(indexServer, "isClaimableRawPoolItem")}
 ${extractNamedFunctionSource(indexServer, "buildItemWorkScopeState")}
 ${extractNamedFunctionSource(indexServer, "canSeeRawPoolInItemsQueue")}
 ${extractNamedFunctionSource(indexServer, "isItemVisibleToActor")}
@@ -349,6 +350,7 @@ ${extractNamedFunctionSource(indexServer, "resolveItemScopeContext")}
 ${extractNamedFunctionSource(indexServer, "attachItemScopeMetadata")}
 globalThis.__itemScopeHooks = {
   placeReviewFlags: PLACE_REVIEW_FLAGS,
+  isClaimableRawPoolItem,
   buildItemWorkScopeState,
   isItemVisibleToActor,
   buildViewerScopeReason,
@@ -725,6 +727,70 @@ test("item ownership scope metadata distinguishes raw pool, claim, assignment, a
     ),
     "out_of_scope"
   );
+});
+
+test("claim-pool readers preserve all six legacy-lossy workflow state categories on an empty schema DB", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-lossy-workflow-readers-"));
+  const db = new DatabaseSync(path.join(tempDir, "test.sqlite"));
+  try {
+    db.exec(fs.readFileSync(path.join(collectorRoot, "database", "schema.sql"), "utf8").replace(/^\uFEFF/, ""));
+    const repo = createRepository(db);
+    const hooks = loadItemOwnershipScopeHooks();
+    const lossyStateGroups = [
+      { name: "field_working", states: [{ production_state: "field_working", publication_state: "draft" }] },
+      { name: "field_review", states: [{ production_state: "field_review", publication_state: "draft" }] },
+      { name: "writing_assigned", states: [{ production_state: "writing_assigned", publication_state: "draft" }] },
+      { name: "writing", states: [{ production_state: "writing", publication_state: "draft" }] },
+      { name: "completed_unpublished", states: [{ production_state: "completed", publication_state: "draft" }] },
+      {
+        name: "archived_or_deleted",
+        states: [
+          { production_state: "collected", publication_state: "archived" },
+          { production_state: "collected", publication_state: "deleted" },
+        ],
+      },
+    ];
+    const expectedById = new Map();
+
+    for (const group of lossyStateGroups) {
+      for (const state of group.states) {
+        const item = repo.createItemWithWorkflowHead({
+          type: "place",
+          category: "attractions",
+          lang: "th",
+          title: `Lossy reader ${group.name} ${state.publication_state}`,
+          description_raw: "test",
+          source_type: "manual",
+          source_name: "test",
+        }).item;
+        repo.upsertWorkflowModel(item.id, state, "test@local", {
+          skip_production_transition_validation: true,
+          skip_publication_transition_validation: true,
+        });
+        expectedById.set(Number(item.id), state);
+      }
+    }
+
+    const listedById = new Map(repo.listItems().map((item) => [Number(item.id), item]));
+    for (const [itemId, expected] of expectedById) {
+      const fromGet = repo.getItem(itemId);
+      const fromList = listedById.get(itemId);
+      for (const row of [fromGet, fromList]) {
+        assert.deepEqual(
+          { production_state: row?.production_state, publication_state: row?.publication_state },
+          expected,
+          `item #${itemId} must retain its canonical state instead of relying on the lossy raw mirror`
+        );
+        assert.equal(row?.workflow_status, "raw", `item #${itemId} must exercise a legacy mirror value that loses this state`);
+        assert.equal(hooks.isClaimableRawPoolItem(row), false, `item #${itemId} must not become claimable as raw`);
+      }
+    }
+    const completed = [...expectedById.entries()].find(([, state]) => state.production_state === "completed");
+    assert.equal(hooks.buildItemWorkScopeState(repo.getItem(completed[0]), null), "published_or_completed");
+  } finally {
+    try { db.close(); } catch {}
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("item ownership scope metadata exposes holder and assignment owner details without broadening access", () => {
