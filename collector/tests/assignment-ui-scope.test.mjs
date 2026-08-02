@@ -658,14 +658,14 @@ test("item ownership scope metadata distinguishes raw pool, claim, assignment, a
     ]),
   });
 
-  assert.equal(hooks.buildItemWorkScopeState({ workflow_status: "raw", claimed_by_user_id: null }, null), "raw_pool");
+  assert.equal(hooks.buildItemWorkScopeState({ production_state: "collected", publication_state: "draft", claimed_by_user_id: null }, null), "raw_pool");
   assert.equal(hooks.buildItemWorkScopeState({ workflow_status: "cleaned", claimed_by_user_id: 11 }, null), "claimed");
   assert.equal(
     hooks.buildItemWorkScopeState({ workflow_status: "ready_for_content", claimed_by_user_id: 11 }, { assignee_user_id: 12, assigned_by_user_id: 11, state: "assigned" }),
     "claimed_and_assigned"
   );
   assert.equal(
-    hooks.buildItemWorkScopeState({ workflow_status: "ready_for_publish", publication_state: "published", claimed_by_user_id: 11 }, { assignee_user_id: 12, assigned_by_user_id: 11, state: "accepted" }),
+    hooks.buildItemWorkScopeState({ production_state: "ready_for_publish", publication_state: "published", claimed_by_user_id: 11 }, { assignee_user_id: 12, assigned_by_user_id: 11, state: "accepted" }),
     "published_or_completed"
   );
 

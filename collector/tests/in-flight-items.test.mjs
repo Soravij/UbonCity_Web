@@ -75,6 +75,24 @@ test("listInFlightItems excludes raw (collected) items", (t) => {
   assert.ok(!idsOf(result).includes(Number(raw.id)), "collected item must not appear in the in-flight list");
 });
 
+test("getItem and listItems carry canonical workflow state for claim-pool scope", (t) => {
+  const ctx = createTestContext();
+  t.after(ctx.cleanup);
+
+  const created = ctx.createItem("canonical scope item", { production_state: "ready_for_publish", publication_state: "approved" });
+  const fromGet = ctx.repo.getItem(created.id);
+  const fromList = ctx.repo.listItems().find((item) => Number(item.id) === Number(created.id));
+
+  assert.deepEqual(
+    { production_state: fromGet.production_state, publication_state: fromGet.publication_state },
+    { production_state: "ready_for_publish", publication_state: "approved" }
+  );
+  assert.deepEqual(
+    { production_state: fromList.production_state, publication_state: fromList.publication_state },
+    { production_state: "ready_for_publish", publication_state: "approved" }
+  );
+});
+
 test("listInFlightItems excludes finished items (published / completed)", (t) => {
   const ctx = createTestContext();
   t.after(ctx.cleanup);
