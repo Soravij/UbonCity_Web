@@ -1,0 +1,63 @@
+# Failing test-name set: 51796ec
+# Count: 60
+
+admin review shaping keeps the public scrubbing but adds the confirmed taxonomy Curation signal
+/api/assets is filtered to collector-controlled local media
+article intake html loads intake-focused shell
+article intake script supports queue selection and assignment flow
+article review html loads approval-focused shell
+article workspace can insert image blocks directly from media library
+article workspace html loads authoring-focused shell
+article workspace media library supports hover preview
+article workspace separates translation phase from release actions
+article workspace supports structured body blocks while keeping raw body storage
+article workspace uses article-process payload field names
+assignment app logic drops readiness create flow and uses manual item route
+assignment assignee selection summary keeps avatar and name visible even when there is no assignment yet
+assignment brief card no longer renders preparation checklists from legacy assignment context data
+assignment create flow supports external assignees and due presets
+assignment default page mode treats user as a work-capable assignee while owner still starts in handoff
+assignment filter select does not auto-select a lone assignee option
+assignment normalization keeps assignee_email as an email-only field
+assignment route aliases expose separate handoff, work, and review views on the shared panel
+assignment route split keeps direct assignment landing while work-only roles stay out of review lanes
+assignment routes use management-line scope helpers instead of global admin visibility
+assignment state patch permission keeps editor out of assignment workflow
+assignment tabs stay visible for admin and owner flows
+assignment tab switches refresh the current workspace instead of changing mode only
+assignment top tab keeps explicit work or review sub-mode instead of resetting to handoff
+assignment work access allows assigned accounts across roles while assign target policy stays narrow
+assignment workflow layout removes duplicate review actions from submitted states and aligns accepted with close step
+buildRequestedChecksHandoffPayload omits requested_checks when nothing is selected
+claim banner and theme control stay wired to shared theme tokens
+collector admin final review smoke
+composer media helper no longer emits prep-claim errors before article access fallback
+content preparation process ends at review/edit and hands off into process 2
+content preparation queue only shows items that are still in process 1
+dashboard routes article workflow statuses to article workspace
+generate translations action stays available before sync for admins
+handoff detail view can render field-pack context before an assignment exists
+handoff queue reuses scoped assignments and leaves the queue after an assignment is accepted or closed
+index route wiring keeps HEAD route count and replacement helper on assignment upload only
+manual assignment create flow is gated by step 4 prep-ready status in frontend and backend
+nearby candidates always use the public place DTO and retain card fields
+privileged include_unapproved paths retain the normalized admin response
+process-1 UI exposes claim controls in item pages and raw queue
+refreshTranslations preserves missing translation targets as blockers
+release tab exposes article queue UI and renders accepted handoff items
+requested-check section renders condition input on visible taxonomy rows and keeps AI badge tied to main value only
+rerunProblemTranslations can force regenerate ready translations
+rerunProblemTranslations falls back to draft source before publish
+rerunProblemTranslations falls back when translation provider has no api key
+rerunProblemTranslations returns per-language missing_article_draft_body failures without calling translator
+review lane keeps only returned work plus review controls
+review-like assignment APIs no longer allow freelance access
+step 1 handoff view keeps only the six agreed pre-submit blocks and redirects into work after send
+translation detail popup exposes automatic check failure reasons
+user management UI keeps create-role choices aligned with backend permission
+user profile and external assignee contracts are wired end-to-end with minimal schema changes
+user profile picture flow keeps create-form draft isolated from row-level avatar updates
+user role can perform item-editor clean workflow actions
+work-lane article payload prefill keeps only current field-pack prompts and preserves previous answers
+work lane keeps only contributor-facing scope
+work lane submission form renders prompt fields from field pack and uploads media through assignment-scoped endpoint

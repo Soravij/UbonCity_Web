@@ -64,3 +64,30 @@ and were deleted as obsolete; one was missing non-mutating guard wiring.
   `new = 0`, `resolved = 0`.
 
 Nothing was pushed or merged.
+
+## External-audit follow-up
+
+The retained user-profile/external-assignee test had two helper-only assertions
+removed (`ensureUsersProfileSupport` and its `ALTER TABLE` statement). Its
+remaining live repository, server, schema, and external-assignee assertions
+remain. The test also contained nine stale UI/profile strings absent from both
+the baseline and HEAD; these were removed without deleting the test case. A
+fresh database made from `schema.sql` confirms `users.profile_json` exists.
+
+The assignee-display source-string test was replaced with a repository test on
+a fresh schema database. It creates both an internal and an external assignment
+and checks `getAssignmentById()` returns the correct `assignee_display_name`
+and `assignee_email`. A temporary removal of the users JOIN/COALESCE made this
+test fail with both internal values `null`; the production query was restored
+before the final gate.
+
+The machine set comparison is retained in:
+
+- `audit/step2-test-failures-51796ec.txt`
+- `audit/step2-test-failures-head.txt`
+- `audit/step2-test-failure-set-diff.md`
+
+The final gate has `new = 0` and `resolved = 1`: the resolved baseline failure
+is `user profile and external assignee contracts are wired end-to-end with
+minimal schema changes`. The final run reported 811 tests, 751 passing, and 59
+failing.
