@@ -94,7 +94,7 @@ Scope: owner-only runtime pipeline continuation. No migration, schema change, so
 
 This is distinct from the earlier `must_capture` validation failure. In the successful AI branch, `runAiDraftStage` saves the agent field pack and explicitly upserts `production_state: "analyzed"` at `collector/services/workflow.mjs:2400-2433`; it does not call `saveDraft`. The `saveDraft` and transition to `production_state: "generated"` code is in the `else` deterministic branch at `collector/services/workflow.mjs:2434-2507`.
 
-`runQualityStage` selects only workflow heads whose production state is `generated`, `in_review`, or `needs_revision` (`collector/services/workflow.mjs:2540-2546`). Consequently the owner quality call found zero candidates. The canonical final states are:
+`runQualityStage` selects only workflow heads whose production state is `generated`, `in_review`, or `needs_revision` (`collector/services/workflow.mjs:2544-2550`). Consequently the owner quality call found zero candidates. The canonical final states are:
 
 | Item | Field pack | Content draft | `production_state / publication_state / workflow_status` | Result |
 | ---: | ---: | ---: | --- | --- |
