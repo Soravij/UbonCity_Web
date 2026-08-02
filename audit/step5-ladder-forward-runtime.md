@@ -48,3 +48,27 @@ All state triples in this report are read from SQLite, not inferred from HTTP su
 ## Conclusion
 
 The collect and clean sections of the ladder pass on Runtime. The forward path cannot reach `generated` with the supplied minimal manual records: every test item was rejected by the intended AI-draft prerequisites while its canonical database state remained unchanged. This report deliberately does not add synthetic media, references, approved context, or code changes merely to force later states.
+
+---
+
+## Round 2 — synthetic local-cover pipeline attempt
+
+Scope: owner-only pipeline flow. Existing items 3–7 were left unchanged as the earlier gate evidence. A real, valid 12,340-byte PNG was copied outside the repository to `D:\UbonRuntime\tmp\step5-synthetic-cover.png`; it was then uploaded only through the supported multipart endpoint. No direct database write was used.
+
+| Step | API | 3 states before -> after | Pass/fail |
+| --- | --- | --- | --- |
+| Create synthetic items 8–9 | Owner: `POST /api/collect` with `adapter=manual`, `auto_import=true`, title/description and latitude/longitude | n/a -> `collected / draft / raw` for both | Pass — API returned `raw_count: 2`, `imported_count: 2`; SQLite confirmed IDs 8 and 9. |
+| Clean | Owner: direct `POST /api/run/clean` | `collected / draft / raw` -> `analyzed / draft / analyzed` | Pass — SQLite confirmed both items. |
+| Claim | Owner: `POST /api/items/:id/claim` | `analyzed / draft / analyzed` -> unchanged | Pass — claims provide prep-edit access without changing workflow state. |
+| Local-cover upload and selection | Owner: multipart `POST /api/assets/upload` with `content_item_id`, `role=cover`, and the external PNG; then `PATCH /api/items/:id/assets/:assetId/selected` with `{"selected":true}` | `analyzed / draft / analyzed` -> unchanged | Pass — SQLite confirmed one `assets`/`content_assets` relation per item with `storage_disk=local`, `mime_type=image/png`, `selected_in_clean=1`, and `is_cover=1`. |
+| Approved context | Owner: `GET /api/items/:id/evidence-blocks`, then `POST /api/items/:id/approved-context` with an item-owned active fact block, non-empty `selected_text`, and `status=active` | `analyzed / draft / analyzed` -> unchanged | Pass — SQLite confirmed one active approved-context row per item. |
+| AI-draft preflight | Owner: `GET /api/items/:id/draft-input-preview` | n/a | Pass — for both 8 and 9: `has_minimum_required=true`, no `minimum_missing`, `selected_image_count=1`, `cover_count=1`, `approved_context_count=1`. |
+| AI draft, item 8 | Owner: `POST /api/run/ai-draft` with `content_item_id=8` | `analyzed / draft / analyzed` -> unchanged | **Blocked** — HTTP 400. Persisted audit error: `Agent field pack must include at least one must_capture checklist item`. |
+| AI draft, item 9 | Not called after item 8 blocker | `analyzed / draft / analyzed` -> unchanged | Not run — stopped at the same pipeline step as instructed. |
+| generated -> quality -> in_review -> review decision -> ready_for_publish/approved -> submit-admin-review -> Admin Approvals -> published | Not called | n/a | Not run — item 8 did not reach `generated`. |
+
+### Blocker classification
+
+This is **not** an AI-provider-unavailable failure. The persisted AI runtime snapshot records configured feature policies and `backend_proxy_ready=true`; the returned error is specifically a field-pack output validation rule requiring at least one `must_capture` checklist entry. No provider connection/authentication/quota error was recorded. No code, configuration, schema, or direct database change was made to bypass it.
+
+Final state after stop: item 8 = `analyzed / draft / analyzed`; item 9 = `analyzed / draft / analyzed`.
