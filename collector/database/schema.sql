@@ -151,6 +151,11 @@ CREATE TABLE IF NOT EXISTS content_assets (
   placement_type TEXT NOT NULL DEFAULT 'unused',
   sort_order INTEGER NOT NULL DEFAULT 0,
   caption VARCHAR(255),
+  assignment_id INTEGER,
+  assignment_round INTEGER NOT NULL DEFAULT 0,
+  assignment_media_type TEXT,
+  assignment_surface TEXT,
+  assignment_sync_batch_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
   FOREIGN KEY(asset_id) REFERENCES assets(id) ON DELETE CASCADE
@@ -203,6 +208,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_logs_target ON audit_logs(target_type, target_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_email, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_assignment ON audit_logs(assignment_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS collector_sync_state (
   state_key TEXT PRIMARY KEY,
@@ -647,8 +653,10 @@ CREATE TABLE IF NOT EXISTS field_pack_checklists (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   field_pack_id INTEGER NOT NULL,
   checklist_type TEXT NOT NULL
-    CHECK (checklist_type IN ('must_verify_fact', 'must_capture_shot', 'must_ask_question')),
+    CHECK (checklist_type IN ('must_verify_fact', 'must_capture', 'must_ask_question')),
   item_text TEXT NOT NULL,
+  capture_type TEXT
+    CHECK (capture_type IS NULL OR capture_type IN ('photo', 'video', 'both')),
   item_order INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'todo'
     CHECK (status IN ('todo', 'doing', 'done', 'skip')),
@@ -990,6 +998,8 @@ CREATE TABLE IF NOT EXISTS content_workflow_transitions (
 CREATE INDEX IF NOT EXISTS idx_workflow_transitions_item ON content_workflow_transitions(content_item_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_workflow_transitions_group ON content_workflow_transitions(state_group, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_workflow_transitions_actor ON content_workflow_transitions(actor_email, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_transitions_reason ON content_workflow_transitions(reason_code, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_transitions_assignment ON content_workflow_transitions(assignment_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS content_assignments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1008,6 +1018,13 @@ CREATE TABLE IF NOT EXISTS content_assignments (
   latest_submission_id INTEGER,
   latest_submission_at TEXT,
   revision_round INTEGER NOT NULL DEFAULT 0,
+  accepted_at TEXT,
+  image_reset_required INTEGER NOT NULL DEFAULT 0,
+  image_reset_reason TEXT,
+  video_reset_required INTEGER NOT NULL DEFAULT 0,
+  video_reset_reason TEXT,
+  accepted_submission_id INTEGER,
+  accepted_handoff_snapshot_id INTEGER,
   contributor_note TEXT,
   internal_note TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1032,6 +1049,7 @@ CREATE TABLE IF NOT EXISTS content_assignment_submissions (
   contributor_note TEXT,
   reviewer_note TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT,
   reviewed_at TEXT,
   FOREIGN KEY(assignment_id) REFERENCES content_assignments(id) ON DELETE CASCADE,
   FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
@@ -1040,6 +1058,24 @@ CREATE TABLE IF NOT EXISTS content_assignment_submissions (
 CREATE INDEX IF NOT EXISTS idx_assignment_submissions_assignment ON content_assignment_submissions(assignment_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_assignment_submissions_item ON content_assignment_submissions(content_item_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_assignment_submissions_state ON content_assignment_submissions(submission_state, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS content_assignment_submission_drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assignment_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  revision_round INTEGER NOT NULL DEFAULT 1,
+  content_item_id INTEGER NOT NULL,
+  article_payload_json TEXT,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(assignment_id, user_id, revision_round),
+  FOREIGN KEY(assignment_id) REFERENCES content_assignments(id) ON DELETE CASCADE,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_assignment_submission_drafts_expiry ON content_assignment_submission_drafts(expires_at, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_assignment_submission_drafts_assignment ON content_assignment_submission_drafts(assignment_id, user_id, revision_round, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS content_assignment_submission_deliverables (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1202,3 +1238,14 @@ CREATE TABLE IF NOT EXISTS ai_feature_policies (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_ai_feature_policies_updated_at ON ai_feature_policies(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_profiles (
+  agent_key TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  profile_text TEXT NOT NULL DEFAULT '',
+  is_enabled INTEGER NOT NULL DEFAULT 1
+    CHECK (is_enabled IN (0, 1)),
+  updated_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
