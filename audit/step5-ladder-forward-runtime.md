@@ -133,3 +133,31 @@ Only the explicitly authorized manual bridge passed. The remaining genuine endpo
 3. Without the assignments and a saved draft/review report, the review, admin-review, and backend-publish stages are correctly gated and cannot be exercised without an additional manual bypass. None was used.
 
 Final canonical state: item 9 = `generated / draft / generated`; item 8 remains `analyzed / draft / analyzed`.
+
+---
+
+## Round 5 — corrected local-assignee continuation (item 9)
+
+Scope: item 9 only. No code/schema/migration/direct-SQL write and no additional manual workflow-state bridge were used. Before starting, a full SQLite count found 14 collector users (3 owner, 3 admin, 3 user, 2 editor, 3 freelance); collector-local ids used were freelance **14** and editor **10**. Every triple is read from SQLite before/after the endpoint in the order `production_state / publication_state / workflow_status`.
+
+| Step | API / actor | 3 states before -> after | Result |
+| --- | --- | --- | --- |
+| 1. Mark current field pack ready | Owner: `PUT /api/field-packs/1` with `{"status":"ready_for_field"}` | `generated / draft / generated` -> unchanged | **Pass.** Field pack 1 became `ready_for_field`; this is a field-pack sidecar change, not a production-state transition. |
+| 2. P1 ready for content | Owner: `POST /api/items/9/place-ready-for-content` | `generated / draft / generated` -> `ready_for_content / draft / ready_for_content` | **Pass.** |
+| 3. Create field assignment | Owner: `POST /api/items/9/assignments`, `assignment_kind=field`, `assignee_user_id=14` | `ready_for_content / draft / ready_for_content` -> unchanged | **Pass.** Created field assignment 2 for local freelance id 14. Assignment creation itself does not move the workflow head. |
+| 4. Start field work | Owner: `PATCH /api/assignments/2/state` with `state=in_progress` | `ready_for_content / draft / ready_for_content` -> `field_working / draft / raw` | **Pass with finding.** Canonical `production_state` advanced to `field_working`, but SQLite legacy `content_items.workflow_status` became `raw`, not a corresponding field-working value. |
+| 5. Freelance field submission | Freelance: `POST /api/assignments/2/submissions` with `action=submit` | `field_working / draft / raw` -> unchanged | **Blocked — HTTP 409.** The legitimate assignee was accepted, but the endpoint requires at least one assignment-round image/video deliverable: `ต้องแนบผลงานอย่างน้อย 1 รายการก่อนส่ง`. No extra upload was fabricated outside the requested submission step. Therefore no submission/accept action was possible and `field_review` was not reached. |
+| 6. Create editorial assignment | Owner: `POST /api/items/9/article-editorial-assignments`, `assignee_user_id=10` | `field_working / draft / raw` -> unchanged | **Unexpected pass / finding.** Editorial assignment 3 was created for local editor id 10 even while field assignment 2 remains `in_progress`; the head did **not** become the expected `writing_assigned`. |
+| 7a. Begin article process | Editor: `POST /api/items/9/article-process/transition`, `status=drafting` | `field_working / draft / raw` -> unchanged | **Partial pass / finding.** HTTP 200 and article-process status `drafting`, but canonical production state did not advance to `writing`. |
+| 7b. Save real draft body | Editor: `PUT /api/items/9/editor-work` with synthetic HTML body, title, excerpt, meta title and meta description | `field_working / draft / raw` -> unchanged | **Pass.** SQLite `content_drafts` has draft 1 with non-empty 135-character body. |
+| 7c. Submit article review | Editor: `POST /api/items/9/article-process/submit-review` | `field_working / draft / raw` -> unchanged | **Blocked — HTTP 403.** `editor ต้อง submit หรือ resubmit assignment ของตัวเองก่อนส่งบทความเข้าตรวจ`; editorial assignment 3 remains `assigned` and has no submission. No alternate assignment-state mutation was used. |
+| 8a. Review decision | Owner: `POST /api/review/action`, `action=approve` | `field_working / draft / raw` -> unchanged | **Blocked — HTTP 409.** Latest review report is required. |
+| 8b. Submit admin review | Owner: `POST /api/items/9/submit-admin-review` | `field_working / draft / raw` -> unchanged | **Blocked — HTTP 409.** Readiness reports no approved review, wrong production/publication states, field assignment not accepted, no latest submission, and no article-draft deliverable. |
+| 8c. Backend Admin Approvals -> published | Not called | `field_working / draft / raw` -> unchanged | **Not reachable.** No collector admin-review submission exists. |
+
+### Round 5 findings
+
+1. The corrected collector-local ids make both assignment-creation endpoints work; the previous “missing users” explanation was wrong and has been corrected in `step5-fieldpack-status-and-users.md`.
+2. The field path is correctly blocked at submission until an assignment-round deliverable exists. This run did not invent/upload one after the explicit submission request failed.
+3. The editorial endpoint permits assignment creation before the field assignment is submitted/accepted, but does not transition the canonical head from `field_working` to `writing_assigned`; article-process drafting likewise returns 200 without changing it to `writing`.
+4. After the genuine field-work transition, canonical and legacy status diverge: final item 9 is `field_working / draft / raw`. This is database evidence, not an interpretation of the HTTP response.
