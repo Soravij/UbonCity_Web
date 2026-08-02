@@ -1,0 +1,5 @@
+
+> uboncity-collector-app@1.2.0 start
+> node server/index.mjs
+
+Collector app running on http://127.0.0.1:5070

@@ -1,0 +1,24 @@
+{
+  "phase": "after",
+  "non_deleted_content_items": 51,
+  "workflow_status_distribution": [
+    { "workflow_status": "analyzed", "count": 11 },
+    { "workflow_status": "approved", "count": 7 },
+    { "workflow_status": "content_in_progress", "count": 6 },
+    { "workflow_status": "raw", "count": 27 }
+  ],
+  "canonical_state_distribution": [
+    { "production_state": "analyzed", "publication_state": "draft", "count": 11 },
+    { "production_state": "collected", "publication_state": "draft", "count": 27 },
+    { "production_state": "content_in_progress", "publication_state": "draft", "count": 6 },
+    { "production_state": "ready_for_publish", "publication_state": "approved", "count": 1 },
+    { "production_state": "submitted_for_admin_review", "publication_state": "approved", "count": 6 }
+  ],
+  "divergence_count": 0,
+  "divergences": [],
+  "collected_draft_non_raw_count": 0,
+  "collected_draft_non_raw": [],
+  "workflow_transition_count": 475,
+  "workflow_or_canonical_state_change_count": 0,
+  "workflow_or_canonical_state_changes": []
+}
