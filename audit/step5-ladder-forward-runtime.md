@@ -72,3 +72,33 @@ Scope: owner-only pipeline flow. Existing items 3–7 were left unchanged as the
 This is **not** an AI-provider-unavailable failure. The persisted AI runtime snapshot records configured feature policies and `backend_proxy_ready=true`; the returned error is specifically a field-pack output validation rule requiring at least one `must_capture` checklist entry. No provider connection/authentication/quota error was recorded. No code, configuration, schema, or direct database change was made to bypass it.
 
 Final state after stop: item 8 = `analyzed / draft / analyzed`; item 9 = `analyzed / draft / analyzed`.
+
+---
+
+## Round 3 — continue after successful AI field-pack generation
+
+Scope: owner-only runtime pipeline continuation. No migration, schema change, source edit, or direct SQLite write was performed. Every state triple below was read from `content_workflow_models` plus `content_items.workflow_status` after the HTTP action. The order is `production_state / publication_state / workflow_status`.
+
+| Step | API | 3 states before -> after | Pass/fail |
+| --- | --- | --- | --- |
+| Item 9 AI-draft result confirmation | Read-only SQLite verification of the earlier one-request run | `analyzed / draft / analyzed` -> `analyzed / draft / analyzed` | Pass for field-pack generation: run `12c57f58-dc26-4eed-b54a-31c02c9a8b8c` completed `success=1`; field pack 1 contains 5 `must_capture` rows (all `photo` or `video`), 3 verify rows, and 4 ask rows. It did **not** create a content draft or transition to `generated`. |
+| Generated -> quality, item 9 | Owner: `POST /api/run/quality` | `analyzed / draft / analyzed` -> `analyzed / draft / analyzed` | **Blocked** — HTTP 200 with `reviewed: 0`, `needs_revision: 0`; SQLite quality run records `Reviewed: 0, Needs revision: 0`. No `generated` candidate existed. |
+| Item 8 AI-draft retry 1 of maximum 2 | Owner: `POST /api/run/ai-draft` with `content_item_id: 8` | `analyzed / draft / analyzed` -> `analyzed / draft / analyzed` | Pass for field-pack generation. HTTP 200: `count: 1`, `aiSuccessCount: 1`, `errorCount: 0`; pipeline run completed `success=1`. SQLite field pack 2 contains 4 valid `must_capture` rows (3 `photo`, 1 `video`), 1 verify row, and 3 ask rows. Retry 2 was not used because retry 1 succeeded. |
+| Generated -> quality, item 8 | Not sent again | `analyzed / draft / analyzed` -> unchanged | Not applicable — the shared quality request above already established that `analyzed` items are not quality candidates; item 8 has the same state after its successful field-pack generation. |
+| Quality -> in_review | Not called | n/a | **Blocked** — no content draft exists and neither item reached `generated`; review cannot start. |
+| Review decision -> ready_for_publish/approved | Not called | n/a | Not run — prerequisite `in_review` was not reached. |
+| Submit admin review -> submitted_for_admin_review | Not called | n/a | Not run — prerequisite ready-for-publish/approved was not reached. |
+| Backend Admin Approvals -> published | Not called | n/a | Not run — no submission was created. |
+
+### Round 3 blocker: successful AI mode creates only a field pack
+
+This is distinct from the earlier `must_capture` validation failure. In the successful AI branch, `runAiDraftStage` saves the agent field pack and explicitly upserts `production_state: "analyzed"` at `collector/services/workflow.mjs:2400-2433`; it does not call `saveDraft`. The `saveDraft` and transition to `production_state: "generated"` code is in the `else` deterministic branch at `collector/services/workflow.mjs:2434-2507`.
+
+`runQualityStage` selects only workflow heads whose production state is `generated`, `in_review`, or `needs_revision` (`collector/services/workflow.mjs:2540-2546`). Consequently the owner quality call found zero candidates. The canonical final states are:
+
+| Item | Field pack | Content draft | `production_state / publication_state / workflow_status` | Result |
+| ---: | ---: | ---: | --- | --- |
+| 8 | 2, current, `draft`; valid capture rows | none | `analyzed / draft / analyzed` | Field-pack generation passed; later ladder blocked at generated → quality boundary. |
+| 9 | 1, current, `draft`; valid capture rows | none | `analyzed / draft / analyzed` | Field-pack generation passed; later ladder blocked at generated → quality boundary. |
+
+No state was forced and no unsupported API or direct database edit was used to move past this boundary.
