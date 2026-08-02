@@ -1,7 +1,7 @@
 # Step 4 — Fresh Collector DB Runtime Verification
 
-**Runtime machine root:** `D:\UbonRuntime`  
-**Repository worktree:** `D:\UbonRuntime\repos\UbonCity_Web`  
+**Runtime machine root:** `D:\UbonRuntime`
+**Repository worktree:** `D:\UbonRuntime\repos\UbonCity_Web`
 **Run date:** 2026-08-02 (Asia/Bangkok)
 
 ## Git precondition
