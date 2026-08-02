@@ -4510,6 +4510,7 @@ export function createRepository(db) {
     const addBlocker = (key, count = 0) => blockers.push({ key, count: Number(count || 0) || 0 });
 
     if (Number(item.is_deleted || 0) !== 0) addBlocker("already_deleted");
+    if (String(item.workflow_status || "").trim().toLowerCase() !== "raw") addBlocker("workflow_status_not_raw");
     if (Number(item.claimed_by_user_id || 0) > 0) addBlocker("claimed_item");
 
     if (!workflowModel) {

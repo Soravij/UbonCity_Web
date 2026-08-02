@@ -41,6 +41,7 @@ tmp_*/
 collector/media/generated/
 collector/media/published/
 collector/media/uploads/
+uploads/*.gif
 collector/staging/content/items/
 logs/prompt_debug_*.json
 logs/
