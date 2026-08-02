@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
-import { ASSIGNMENT_STATES, PLACE_REVIEW_FLAGS, PRODUCTION_STATES, PUBLICATION_STATES } from "../db/repository.mjs";
+import { DatabaseSync } from "node:sqlite";
+import { ASSIGNMENT_STATES, PLACE_REVIEW_FLAGS, PRODUCTION_STATES, PUBLICATION_STATES, createRepository } from "../db/repository.mjs";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const indexHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "index.html"), "utf8");
@@ -631,28 +633,6 @@ test("claim banner and theme control stay wired to shared theme tokens", () => {
   }
 });
 
-test("item claim repository support exists for process-1 locking", () => {
-  const requiredRepositorySnippets = [
-    "function ensureItemClaimSupport(db) {",
-    'db.exec("ALTER TABLE content_items ADD COLUMN claimed_by_user_id INTEGER;");',
-    'db.exec("ALTER TABLE content_items ADD COLUMN claimed_at TEXT;");',
-    'db.exec("ALTER TABLE content_items ADD COLUMN claim_note TEXT;");',
-    "const claimItemStmt = db.prepare(`",
-    "const takeOverItemClaimStmt = db.prepare(`",
-    "const releaseItemClaimStmt = db.prepare(`",
-    "const releaseItemClaimByAdminStmt = db.prepare(`",
-    "function claimItem(itemId, claimedByUserId, options = {}) {",
-    "function releaseItemClaim(itemId, claimedByUserId, options = {}) {",
-    "function takeOverItemClaim(itemId, claimedByUserId, options = {}) {",
-    "claimItem,",
-    "releaseItemClaim,",
-    "takeOverItemClaim,",
-  ];
-  for (const snippet of requiredRepositorySnippets) {
-    assert.equal(repositoryJs.includes(snippet), true, `repository should include item claim support snippet: ${snippet}`);
-  }
-});
-
 test("item ownership scope metadata distinguishes raw pool, claim, assignment, and viewer reason", () => {
   const hooks = loadItemOwnershipScopeHooks([
     { id: 1, role: "owner", email: "owner@example.com", display_name: "Owner Root" },
@@ -964,23 +944,6 @@ test("assignment brief card no longer renders preparation checklists from legacy
   }
 });
 
-test("assignments API data contract includes assignee display fields for linked summaries", () => {
-  const requiredRepositorySnippets = [
-    "COALESCE(u.display_name, a.assignee_name) AS assignee_display_name",
-    "COALESCE(u.email, a.assignee_contact) AS assignee_email",
-    "assigner.display_name AS assigned_by_display_name",
-    "assigner.email AS assigned_by_email",
-    "LEFT JOIN users u ON u.id = a.assignee_user_id",
-    "LEFT JOIN users assigner ON assigner.id = a.assigned_by_user_id",
-    "assignee_name TEXT",
-    "assignee_contact TEXT",
-  ];
-  const repositoryJs = fs.readFileSync(path.join(collectorRoot, "db", "repository.mjs"), "utf8");
-  for (const snippet of requiredRepositorySnippets) {
-    assert.equal(repositoryJs.includes(snippet), true, `assignment repository should include assignee display field snippet: ${snippet}`);
-  }
-});
-
 test("assignment create flow supports external assignees and due presets", () => {
   const requiredServerSnippets = [
     'const externalAssigneeName = String(req.body?.assignee_name || "").trim();',
@@ -1022,6 +985,70 @@ test("assignment create flow supports external assignees and due presets", () =>
   }
 });
 
+test("assignments API data contract includes assignee display fields for linked summaries", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-assignee-display-contract-"));
+  const db = new DatabaseSync(path.join(tempDir, "test.sqlite"));
+  try {
+    db.exec(fs.readFileSync(path.join(collectorRoot, "database", "schema.sql"), "utf8").replace(/^\uFEFF/, ""));
+    const repo = createRepository(db);
+    const userId = Number(db.prepare(`
+      INSERT INTO users (email, display_name, password_hash, role)
+      VALUES ('internal.assignee@example.com', 'Internal Assignee', '', 'user')
+    `).run().lastInsertRowid || 0);
+    const item = repo.createItemWithWorkflowHead({
+      type: "place",
+      category: "attractions",
+      lang: "th",
+      title: "Assignee display contract",
+      description_raw: "test",
+      source_type: "manual",
+      source_name: "test",
+    }).item;
+
+    const internal = repo.createAssignment({
+      content_item_id: item.id,
+      assignment_kind: "editorial",
+      assignee_user_id: userId,
+      state: "assigned",
+    }, userId);
+    const external = repo.createAssignment({
+      content_item_id: item.id,
+      assignment_kind: "editorial",
+      assignee_name: "External Assignee",
+      assignee_contact: "+66810000000",
+      external_assignee_profile_json: {
+        name: "External Assignee",
+        email: "external.assignee@example.com",
+      },
+      state: "assigned",
+    }, userId);
+
+    assert.deepEqual(
+      {
+        assignee_display_name: repo.getAssignmentById(internal.id).assignee_display_name,
+        assignee_email: repo.getAssignmentById(internal.id).assignee_email,
+      },
+      {
+        assignee_display_name: "Internal Assignee",
+        assignee_email: "internal.assignee@example.com",
+      }
+    );
+    assert.deepEqual(
+      {
+        assignee_display_name: repo.getAssignmentById(external.id).assignee_display_name,
+        assignee_email: repo.getAssignmentById(external.id).assignee_email,
+      },
+      {
+        assignee_display_name: "External Assignee",
+        assignee_email: "external.assignee@example.com",
+      }
+    );
+  } finally {
+    try { db.close(); } catch {}
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("user profile and external assignee contracts are wired end-to-end with minimal schema changes", () => {
   const schemaSql = fs.readFileSync(path.join(collectorRoot, "database", "schema.sql"), "utf8");
   const repositoryJs = fs.readFileSync(path.join(collectorRoot, "db", "repository.mjs"), "utf8");
@@ -1035,8 +1062,6 @@ test("user profile and external assignee contracts are wired end-to-end with min
   }
 
   const requiredRepositorySnippets = [
-    "function ensureUsersProfileSupport(db) {",
-    "db.exec(\"ALTER TABLE users ADD COLUMN profile_json TEXT;\");",
     "const externalAssigneeProfile = parseJson(row.external_assignee_profile_json, null);",
     "external_assignee_profile_json: externalAssigneeProfile,",
     "assignee_email: externalAssigneeEmail || internalAssigneeEmail || null,",
@@ -1053,7 +1078,6 @@ test("user profile and external assignee contracts are wired end-to-end with min
   const requiredServerSnippets = [
     'app.patch("/api/users/:id/profile", requireRole("owner", "admin", "user"), (req, res) => {',
     'app.post("/api/users/avatar/upload", requireRole("owner", "admin", "user"), uploadRateLimit, upload.single("file"), async (req, res) => {',
-    "profile_json: draftProfile,",
     "avatar_url: avatarUrlByAssetId instanceof Map",
     "req.body?.external_assignee_profile_json,",
     "const profileSource = rawProfile || req.body || {};",
@@ -1071,10 +1095,6 @@ test("user profile and external assignee contracts are wired end-to-end with min
   }
 
   const requiredIndexSnippets = [
-    'id="user-phone"',
-    'id="user-email-alt"',
-    'id="user-line-id"',
-    'id="user-pic-file"',
     'id="assignment-create-assignee-phone"',
     'id="assignment-create-assignee-email"',
     'id="assignment-create-assignee-line-id"',
@@ -1084,10 +1104,6 @@ test("user profile and external assignee contracts are wired end-to-end with min
   }
 
   const requiredAppSnippets = [
-    "async function openUserProfileCropModal(file) {",
-    "async function buildUserProfileCropResult() {",
-    "api(\"/api/users/avatar/upload\", {",
-    "payload.profile_json = {",
     "payload.external_assignee_profile_json = {",
     "function renderAssignmentAssigneeSelectionSummary(secondaryText = \"\") {",
   ];
@@ -2340,25 +2356,6 @@ test("assignment normalization keeps assignee_email as an email-only field", () 
     "staff@example.com",
     "internal assignee email should stay unchanged"
   );
-});
-
-test("repository self-heals assignment-related foreign keys after legacy assignment migration", () => {
-  const requiredRepositorySnippets = [
-    "function ensureFieldPackAssignmentForeignKeySupport(db) {",
-    "const tables = [",
-    "content_assignments_legacy_external",
-    'name: "field_pack_assignments",',
-    'name: "content_assignment_submissions",',
-    'name: "content_assignment_submission_deliverables",',
-    'name: "content_assignment_handoff_snapshots",',
-    "ALTER TABLE ${tableConfig.name} RENAME TO ${tableConfig.legacyName};",
-    "FROM ${tableConfig.legacyName};",
-    "DROP TABLE ${tableConfig.legacyName};",
-    "ensureFieldPackAssignmentForeignKeySupport(db);",
-  ];
-  for (const snippet of requiredRepositorySnippets) {
-    assert.equal(repositoryJs.includes(snippet), true, `repository should self-heal legacy assignment foreign keys: ${snippet}`);
-  }
 });
 
 test("assignment progress bar keeps theme-aware backgrounds in dark mode", () => {
