@@ -90,7 +90,7 @@ New/changed assertions:
 | `in-flight-items.test.mjs` — `getItem and listItems carry canonical workflow state for claim-pool scope` | Both repository read paths expose `ready_for_publish/approved` from the workflow head. | Reverting either query to `content_items` alone returns missing canonical states. |
 | `raw-delete.test.mjs` — `raw hard-delete eligibility relies on canonical state when the legacy mirror is stale` | A stale non-raw mirror does not block canonical `collected/draft`. | Restoring `workflow_status_not_raw` makes it ineligible. |
 | `workflow-readers-loud.test.mjs` — `one shared legacy-to-canonical mapping...` | Historical aliases remain supported and the server calls the shared mapper, with no local mapper. | Restoring the split mapper or removing alias handling fails it. |
-| `assignment-ui-scope.test.mjs` fixture update | The raw-pool fixture supplies `collected/draft`, not `workflow_status`. | It no longer masks a reader regression by injecting the mirror. |
+| `assignment-ui-scope.test.mjs` lossy-groups test | The new test preserves canonical workflow state across six legacy-lossy state groups. | Reverting the production readers makes the canonical fields `undefined` and fails this test. The original raw-pool fixture relabel remains unchanged and is not this coverage proof. |
 
 Focused verification:
 
@@ -99,7 +99,7 @@ node --test --test-concurrency=1 collector/tests/in-flight-items.test.mjs collec
 35 pass, 0 fail
 ```
 
-`collector/tests/assignment-ui-scope.test.mjs` retains its pre-existing 33 failure names; the updated scope-metadata assertion passes.
+`collector/tests/assignment-ui-scope.test.mjs` retains its pre-existing 33 failure names; the separate lossy-groups coverage is the reader-regression proof. The original scope-metadata fixture relabel remains unchanged.
 
 Baseline, once from repository root, was redirected to `audit/step5b-round1-baseline-test.log`:
 
@@ -140,7 +140,7 @@ Remaining matches are classified below. `workflow_status` without a `content_ite
 | `scripts/smoke-article-flow-e2e-browser.mjs:776,782,826`; `scripts/smoke-article-workspace-browser.mjs:236,241,831`; `scripts/smoke-external-agent.mjs:140,169`; `scripts/trigger-field-pack.js:81` | Still-to-move: smoke assertions/selection readers. |
 | `scripts/smoke-ai-input-cleanup-post-assignment.mjs:29`; `scripts/smoke-data-cleanup-ui-browser.mjs:168`; `scripts/smoke-data-cleanup.mjs:44`; `scripts/smoke-field-pack-return-to-clean.mjs:36`; `scripts/smoke-reference-cleanup.mjs:30`; `scripts/smoke-publish-sync-compensation.mjs:49` | Still-to-move: smoke SQL projections. |
 | `scripts/seed-mock-work-stage-jobs.mjs:390`; `scripts/smoke-assignment-user-review-local-browser.mjs:111`; `scripts/smoke-transport-workflow-live.mjs:272` | Intentionally kept test/smoke fixtures; transport value is separate-table scope. |
-| `tests/agent-generation-external.test.mjs:19`; `tests/backend-ai-proxy.test.mjs:13`; `tests/schema-foundation.repository.test.mjs:130,171,204`; `tests/manual-import-merge-backfill.behavior.test.mjs:148`; `tests/raw-delete.test.mjs:149,199`; `tests/assignment-ui-scope.test.mjs:682,684,693-743,777,850-897,2559,3283`; `tests/admin-review-status-semantics.test.mjs:16`; `tests/item-editor-packaging-requirements.test.mjs:108` | Intentionally kept tests/fixtures or source-text assertions for the mirror contract. The claim-pool fixture at the former `:681` was moved to canonical fields. |
+| `tests/agent-generation-external.test.mjs:19`; `tests/backend-ai-proxy.test.mjs:13`; `tests/schema-foundation.repository.test.mjs:130,171,204`; `tests/manual-import-merge-backfill.behavior.test.mjs:148`; `tests/raw-delete.test.mjs:149,199`; `tests/assignment-ui-scope.test.mjs:682,684,693-743,777,850-897,2559,3283`; `tests/admin-review-status-semantics.test.mjs:16`; `tests/item-editor-packaging-requirements.test.mjs:108` | Intentionally kept tests/fixtures or source-text assertions for the mirror contract. The original claim-pool fixture relabel remains; real reader coverage in this file comes from the separate lossy-groups test. |
 | `docs/structured-context-agent-v1.md:13,95,224,409`; `server/public/app.js:2891` | Documentation/comment only, not a runtime reader. |
 
 ## Non-goals retained for later rounds
