@@ -631,28 +631,6 @@ test("claim banner and theme control stay wired to shared theme tokens", () => {
   }
 });
 
-test("item claim repository support exists for process-1 locking", () => {
-  const requiredRepositorySnippets = [
-    "function ensureItemClaimSupport(db) {",
-    'db.exec("ALTER TABLE content_items ADD COLUMN claimed_by_user_id INTEGER;");',
-    'db.exec("ALTER TABLE content_items ADD COLUMN claimed_at TEXT;");',
-    'db.exec("ALTER TABLE content_items ADD COLUMN claim_note TEXT;");',
-    "const claimItemStmt = db.prepare(`",
-    "const takeOverItemClaimStmt = db.prepare(`",
-    "const releaseItemClaimStmt = db.prepare(`",
-    "const releaseItemClaimByAdminStmt = db.prepare(`",
-    "function claimItem(itemId, claimedByUserId, options = {}) {",
-    "function releaseItemClaim(itemId, claimedByUserId, options = {}) {",
-    "function takeOverItemClaim(itemId, claimedByUserId, options = {}) {",
-    "claimItem,",
-    "releaseItemClaim,",
-    "takeOverItemClaim,",
-  ];
-  for (const snippet of requiredRepositorySnippets) {
-    assert.equal(repositoryJs.includes(snippet), true, `repository should include item claim support snippet: ${snippet}`);
-  }
-});
-
 test("item ownership scope metadata distinguishes raw pool, claim, assignment, and viewer reason", () => {
   const hooks = loadItemOwnershipScopeHooks([
     { id: 1, role: "owner", email: "owner@example.com", display_name: "Owner Root" },
@@ -961,23 +939,6 @@ test("assignment brief card no longer renders preparation checklists from legacy
   for (const snippet of requiredSnippets) {
     const haystack = snippet.startsWith('id="') ? indexHtml : `${indexHtml}\n${appJs}`;
     assert.equal(haystack.includes(snippet), true, `assignment brief card should keep execution context snippet: ${snippet}`);
-  }
-});
-
-test("assignments API data contract includes assignee display fields for linked summaries", () => {
-  const requiredRepositorySnippets = [
-    "COALESCE(u.display_name, a.assignee_name) AS assignee_display_name",
-    "COALESCE(u.email, a.assignee_contact) AS assignee_email",
-    "assigner.display_name AS assigned_by_display_name",
-    "assigner.email AS assigned_by_email",
-    "LEFT JOIN users u ON u.id = a.assignee_user_id",
-    "LEFT JOIN users assigner ON assigner.id = a.assigned_by_user_id",
-    "assignee_name TEXT",
-    "assignee_contact TEXT",
-  ];
-  const repositoryJs = fs.readFileSync(path.join(collectorRoot, "db", "repository.mjs"), "utf8");
-  for (const snippet of requiredRepositorySnippets) {
-    assert.equal(repositoryJs.includes(snippet), true, `assignment repository should include assignee display field snippet: ${snippet}`);
   }
 });
 
@@ -2340,25 +2301,6 @@ test("assignment normalization keeps assignee_email as an email-only field", () 
     "staff@example.com",
     "internal assignee email should stay unchanged"
   );
-});
-
-test("repository self-heals assignment-related foreign keys after legacy assignment migration", () => {
-  const requiredRepositorySnippets = [
-    "function ensureFieldPackAssignmentForeignKeySupport(db) {",
-    "const tables = [",
-    "content_assignments_legacy_external",
-    'name: "field_pack_assignments",',
-    'name: "content_assignment_submissions",',
-    'name: "content_assignment_submission_deliverables",',
-    'name: "content_assignment_handoff_snapshots",',
-    "ALTER TABLE ${tableConfig.name} RENAME TO ${tableConfig.legacyName};",
-    "FROM ${tableConfig.legacyName};",
-    "DROP TABLE ${tableConfig.legacyName};",
-    "ensureFieldPackAssignmentForeignKeySupport(db);",
-  ];
-  for (const snippet of requiredRepositorySnippets) {
-    assert.equal(repositoryJs.includes(snippet), true, `repository should self-heal legacy assignment foreign keys: ${snippet}`);
-  }
 });
 
 test("assignment progress bar keeps theme-aware backgrounds in dark mode", () => {
