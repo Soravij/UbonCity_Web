@@ -1,4 +1,4 @@
-# Step 5 ladder-forward runtime report
+# Step 5 pipeline-forward runtime report
 
 Run date: 2026-08-02 (Asia/Bangkok)  
 Runtime checkout used: `D:\UbonRuntime\repos\UbonCity_Web` only. The stale `C:\UbonRuntime\repos\UbonCity_Web` checkout was not accessed.
@@ -7,56 +7,44 @@ Runtime checkout used: `D:\UbonRuntime\repos\UbonCity_Web` only. The stale `C:\U
 
 | Check | Result |
 | --- | --- |
-| HEAD | `5a0de7b22a9209ca3e2488d2b6bbe1dbfcfc8f7b` (`merge: step 5B round 1 canonical workflow readers`) |
-| Worktree before test | Clean |
+| Runtime HEAD | `5a0de7b22a9209ca3e2488d2b6bbe1dbfcfc8f7b` |
+| Runtime worktree | Clean before this pipeline run |
 | `GET http://127.0.0.1:5000/api/health` | `200`, `ok: true` |
 | `GET http://127.0.0.1:5070/api/health` | `200`, `ok: true` |
-| Migration/schema action | None. No migration command was run and no schema file/database schema was modified. |
+| Migration/schema/code action | None. No migration was run; no schema or code was changed. |
+| Authentication | Owner token from the supplied Runtime token file was used unchanged as its Authorization header. Its value is not recorded here. |
 
-## Token preflight — STOP
+## Test data
 
-Tokens were read from `D:\UbonRuntime\tmp\step5-tokens.json` without printing, storing, or committing their values. Each already included its required `Bearer ` prefix and was used unchanged as the Authorization header. JWT payloads were decoded locally only to obtain role, email, and expiry. `GET /api/items` was then issued to Collector for every token.
+`POST /api/collect` with the manual adapter and owner authorization created five disposable place items. The API returned `raw_count: 5`, `imported_count: 5`, and SQLite confirmed content-item IDs **3–7**. Existing raw place IDs 1 and 2 were not accessed, changed, or deleted.
 
-| Token key | JWT role | JWT email | Expiry remaining (minutes) | `GET /api/items` | Result |
-| --- | --- | --- | ---: | ---: | --- |
-| owner | owner | soravij88@gmail.com | 10,074 | 200 | Pass |
-| user | user | user@uboncity.com | 10,071 | 200 | Pass |
-| editorA | editor | ked@123 | 10,075 | 403 | **Fail** — must be 200 |
-| editorB | editor | editor@uboncity.com | 10,076 | 403 | **Fail** — must be 200 |
-| freelance | freelance | kfl@123 | 10,073 | 403 | **Fail** — must be 200 |
+All state triples in this report are read from SQLite, not inferred from HTTP success responses. The order is `production_state / publication_state / workflow_status`.
 
-Authentication token TTL in the backend login source is `expiresIn: "7d"` in `backend/controllers/authController.js`. The separate review-access token setting is `REVIEW_ACCESS_TTL_SECONDS`, defaulting to `600` seconds, in `backend/middleware/authMiddleware.js`; it is not the Collector login JWT used here.
+## Pipeline table
 
-The run stopped at token preflight because three required identities returned `403`, contrary to the required all-200 condition. No token was within 30 minutes of expiry, and no `401` occurred.
+| Step | API | 3 states before -> after | Pass/fail |
+| --- | --- | --- | --- |
+| Create five disposable items (IDs 3–7) | Owner: `POST /api/collect` | n/a -> `collected / draft / raw` for each item | Pass |
+| Clean all test items | Owner: direct `POST /api/run/clean` (no UI caller) | `collected / draft / raw` -> `analyzed / draft / analyzed` for IDs 3–7 | Pass — HTTP 200, then SQLite verified all five rows. |
+| Claim for owner processing | Owner: `POST /api/items/:id/claim` | `analyzed / draft / analyzed` -> unchanged for IDs 3–7 | Pass — claims recorded; this does not alter the three workflow values. |
+| AI draft, item 3 | Owner: `POST /api/run/ai-draft` with `content_item_id=3` | `analyzed / draft / analyzed` -> unchanged | **Blocked** — HTTP 400. Clean minimum was met after normal item/context preparation, but the persisted audit record states: an Agent requires at least one reference or local image. No image was fabricated or uploaded to bypass this prerequisite. |
+| AI draft, items 4–7 | Owner: `POST /api/run/ai-draft` with each item ID | `analyzed / draft / analyzed` -> unchanged | **Blocked** — HTTP 400 for every item. The clean preview for each reports missing `place_reference` and `approved_context`. No fake reference/context was inserted to bypass the prerequisite. |
+| Generated -> quality | Not called | n/a | Not run — no item reached `generated`. |
+| Quality -> in_review | Not called | n/a | Not run — no item reached quality. |
+| Review decision -> ready_for_publish/approved | Not called (`POST /api/review/action` would be the API-only reject path) | n/a | Not run — no item reached review. |
+| Submit admin review -> submitted_for_admin_review | Not called | n/a | Not run — no item reached ready-for-publish. |
+| Backend Admin Approvals -> published | Not called | n/a | Not run — no item was submitted for admin review. |
 
-## No-mutation confirmation
+## Per-item final database state
 
-Because the STOP condition occurred before step 1:
+| Item | `production_state / publication_state / workflow_status` | Result |
+| ---: | --- | --- |
+| 3 | `analyzed / draft / analyzed` | Stopped at AI draft: missing reference/local image. |
+| 4 | `analyzed / draft / analyzed` | Stopped at AI draft: missing place reference and approved context. |
+| 5 | `analyzed / draft / analyzed` | Stopped at AI draft: missing place reference and approved context. |
+| 6 | `analyzed / draft / analyzed` | Stopped at AI draft: missing place reference and approved context. |
+| 7 | `analyzed / draft / analyzed` | Stopped at AI draft: missing place reference and approved context. |
 
-- No `POST /api/collect` was sent; none of the five disposable records was created.
-- Raw place IDs 1 and 2 were not read, changed, or deleted.
-- No state transition, review action, admin submission, backend approval, or claim was sent.
-- No code, migration, or schema change was made.
+## Conclusion
 
-## Required ladder and claim-pool matrix
-
-All state triples are `production_state / publication_state / workflow_status` read from the actual database. They are `not read -> not changed` below because no item was created and the run correctly stopped at preflight.
-
-| Step | Role | UI/API | 3 states before -> after | Pass/fail |
-| --- | --- | --- | --- | --- |
-| Create five disposable raw place records | owner/admin | `POST /api/collect` (manual) | Not read -> Not changed | Not run — token preflight STOP. |
-| collected/draft -> clean | admin | Direct `POST /api/run/clean` | Not read -> Not changed | Not run — token preflight STOP. |
-| clean -> analyzed | owner | Workflow UI/API | Not read -> Not changed | Not run — token preflight STOP. |
-| analyzed -> ai-draft -> generated | owner | Generate-with-AI UI / API | Not read -> Not changed | Not run — token preflight STOP. |
-| generated -> quality -> in_review | admin | Quality/review UI/API | Not read -> Not changed | Not run — token preflight STOP. |
-| Review decision -> ready_for_publish/approved | admin | Review UI; reject path would be `POST /api/review/action` | Not read -> Not changed | Not run — token preflight STOP. |
-| Submit admin review -> submitted_for_admin_review | owner | Submit Admin Review UI/API | Not read -> Not changed | Not run — token preflight STOP. |
-| Backend Admin Approvals -> published | backend admin | Backend Admin Approvals UI/API | Not read -> Not changed | Not run — token preflight STOP. |
-| Claim pool: non-raw excluded | owner/user/editor/freelance | `GET /api/items`, `POST /api/items/:id/claim` | Not read -> Not changed | Not run — editorA/editorB/freelance cannot access pool (`403`). |
-| Claim scope: editorA vs editorB | editorA/editorB | `GET /api/items`, `POST /api/items/:id/claim` | Not read -> Not changed | Not run — both receive `403` at required preflight. |
-| Claim scope: user management line | user | `GET /api/items`, `POST /api/items/:id/claim` | Not read -> Not changed | Not run — cross-role matrix cannot be completed while editor identities fail preflight. |
-| Claim scope: freelance assignment-only | freelance | `GET /api/items`, `POST /api/items/:id/claim` | Not read -> Not changed | Not run — freelance receives `403` at required preflight. |
-
-## Resume point
-
-Repair or reissue only the `editorA`, `editorB`, and `freelance` credentials/tokens until each receives `200` from `GET /api/items`. Resume at token preflight; do not create the five disposable records until it passes. No in-progress content item or workflow state exists from this run.
+The collect and clean sections of the ladder pass on Runtime. The forward path cannot reach `generated` with the supplied minimal manual records: every test item was rejected by the intended AI-draft prerequisites while its canonical database state remained unchanged. This report deliberately does not add synthetic media, references, approved context, or code changes merely to force later states.
