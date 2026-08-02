@@ -161,3 +161,29 @@ Scope: item 9 only. No code/schema/migration/direct-SQL write and no additional 
 2. The field path is correctly blocked at submission until an assignment-round deliverable exists. This run did not invent/upload one after the explicit submission request failed.
 3. The editorial endpoint permits assignment creation before the field assignment is submitted/accepted, but does not transition the canonical head from `field_working` to `writing_assigned`; article-process drafting likewise returns 200 without changing it to `writing`.
 4. After the genuine field-work transition, canonical and legacy status diverge: final item 9 is `field_working / draft / raw`. This is database evidence, not an interpretation of the HTTP response.
+
+---
+
+## Round 6 — assignment-round evidence upload and continuation check (item 9)
+
+Scope: item 9 only. No code/schema/migration/direct-SQL write or manual workflow-state update was used. All triples below were read from SQLite before/after the HTTP call in the order `production_state / publication_state / workflow_status`.
+
+| Step | API / actor | 3 states before -> after | Result |
+| --- | --- | --- | --- |
+| 1. Upload field evidence into assignment round | Freelance local id 14: multipart `POST /api/assignments/2/assets/upload` with the existing valid `D:\\UbonRuntime\\tmp\\step5-synthetic-cover.png`, field `file`, and `sync_batch_id=audit-r6-field-1` | `field_working / draft / raw` -> unchanged | **Pass.** Source route is `collector/server/index.mjs:15206-15316`. SQLite confirms one local PNG asset linked to assignment 2, round 1, `assignment_surface=assignment_work`, `assignment_media_type=image`; it is not a cover/clean asset. |
+| 2. Field submission | Freelance: `POST /api/assignments/2/submissions` with complete verify/question/additional-text answers | `field_working / draft / raw` -> unchanged | **Blocked — HTTP 400.** The valid image meets the “at least one deliverable” gate, but the same submission validation additionally requires every structured `must_capture` item. Field pack 1 has 5: two photo and three video. The one PNG filename does not carry a required capture-slot key and cannot satisfy the three video slots. The endpoint listed all five capture prompts as missing. No fake video MIME, payload-only slot claim, or state bypass was used. |
+| 3. Accept field submission | Not called | `field_working / draft / raw` -> unchanged | **Not reachable.** Assignment 2 remains `in_progress`, has no submission id, so an accept would not be acceptance of a real submission. The earlier source conclusion remains: if accepted at `field_review`, a place head intentionally remains there (`collector/server/index.mjs:11229-11235`). |
+| 4a. Recheck existing editorial assignment | Owner: repeat `POST /api/items/9/article-editorial-assignments` with local editor id 10 | `field_working / draft / raw` -> unchanged | **HTTP 200 silent no-op.** It returned existing assignment 3 and created no duplicate. The route explicitly returns early when the active editorial assignment has the same assignee (`collector/server/index.mjs:10548-10555`). |
+| 4b. Drafting / submit-review / review / publish | Not called again | `field_working / draft / raw` -> unchanged | **Not reachable from this round's blocked field submission.** Existing draft 1 remains non-empty, but assignment 3 is still `assigned` and its earlier submit-review result was 403 for missing own assignment submission. |
+
+### Editorial assignment 3 and silent no-op cause
+
+Assignment 3 is not duplicated: the repeat request was idempotent and retained the one active editorial row. It is, however, **out of order**: it was created while the field assignment is still `in_progress`.
+
+That out-of-order record causes the observed misleading 200 responses. The initial editorial-assignment request attempted `writing_assigned`; the drafting request attempted `writing`. For a place whose actual head is `field_working`, `resolvePlaceLadderWorkflowPatch` checks the legal edge and, when invalid, strips only `production_state` from the patch rather than returning an error (`collector/server/index.mjs:4258-4276`). The surrounding caller still upserts the remaining patch and returns 200 (`:4211-4255`). Thus:
+
+- first creation: assignment 3 was persisted but the canonical head stayed `field_working`;
+- drafting: returned 200/process status `drafting`, but `production_state=writing` was stripped;
+- repeat creation in this round: 200 is the explicit same-assignee early return, not a new transition.
+
+Final canonical state is still item 9 = `field_working / draft / raw`; assignment 2 = `in_progress` with one image work asset and no submission; assignment 3 = `assigned`. The remaining physical evidence required for a genuine field submission is five correctly slotted captures, including three real videos; it cannot be supplied from the one PNG without falsifying the workflow.
