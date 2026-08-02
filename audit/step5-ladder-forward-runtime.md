@@ -102,3 +102,34 @@ This is distinct from the earlier `must_capture` validation failure. In the succ
 | 9 | 1, current, `draft`; valid capture rows | none | `analyzed / draft / analyzed` | Field-pack generation passed; later ladder blocked at generated → quality boundary. |
 
 No state was forced and no unsupported API or direct database edit was used to move past this boundary.
+
+---
+
+## Round 4 — remaining place-ladder runtime attempt (item 9 only)
+
+Scope: item 9 only. Item 8 was left at `analyzed / draft / analyzed` and was not read or changed by these requests. No migration, schema change, source edit, or direct database write was performed. All state triples below were read from SQLite (`content_workflow_models` joined to `content_items`) before and after each HTTP request, in the order `production_state / publication_state / workflow_status`.
+
+The requested `PUT /api/items/9/workflow` route does not exist in runtime source. The actual state-model endpoint is `PUT /api/items/:id/workflow-model` at `collector/server/index.mjs:9708`. It was used exactly once as the explicitly authorized manual bridge; it is not a business-path transition and no other state was manually forced.
+
+| Step | API / acting role | 3 states before -> after | Pass/fail |
+| --- | --- | --- | --- |
+| 1. Manual bridge to generated | Owner: `PUT /api/items/9/workflow-model` with `production_state=generated`, audit-only reason/note | `analyzed / draft / analyzed` -> `generated / draft / generated` | **Pass (manual only, not business path).** This is the single allowed bridge because finding `4e7c32a` established there is no public analyzed-to-generated business route. |
+| 2. Place ready for content | Owner: `POST /api/items/9/place-ready-for-content` | `generated / draft / generated` -> unchanged | **Blocked — HTTP 409.** Current field pack is not `ready_for_field`: `item is not ready_for_assignment; complete step "พร้อมส่งเข้า handoff" (stored field pack status must be "ready_for_field")`. No public endpoint was used to force that field-pack status. |
+| 3. Create field assignment for freelance | Owner: `POST /api/items/9/assignments`, `assignee_user_id=61`, `assignment_kind=field` | `generated / draft / generated` -> unchanged | **Blocked — HTTP 400.** The supplied freelance token identifies id 61, but the new collector DB contains only local owner id 1; its local lookup yields no assignee role, so validation returns `assignment_kind=field requires assignee role in [freelance, user, admin, owner]`. No assignment row was created. |
+| 4. Field assignment in progress | Freelance would be assignee; actual PATCH not possible without an assignment id | `generated / draft / generated` -> unchanged | **Blocked by step 3.** There is no field assignment to call `PATCH /api/assignments/:id/state` on. Separately, the route accepts only owner/admin/user (`collector/server/index.mjs:11159`), not freelance, so the stated assignee token cannot perform this PATCH. |
+| 5. Field submission and accept | Freelance submission, then manager acceptance | `generated / draft / generated` -> unchanged | **Blocked by step 3.** No assignment exists. Thus no legitimate `POST /api/assignments/:id/submissions` or accept action can be issued. |
+| 6. Create editorial assignment for editorA | Owner: `POST /api/items/9/article-editorial-assignments`, `assignee_user_id=62` | `generated / draft / generated` -> unchanged | **Blocked — HTTP 400.** EditorA token identifies id 62, also absent from collector's local `users` table. Local role lookup is empty and returns `editorial assignment requires assignee role in [editor, user, admin, owner]`. No editorial assignment row was created. |
+| 7. Editor drafting -> writing -> submit review | EditorA: `POST /api/items/9/article-process/transition` with `status=drafting` | `generated / draft / generated` -> unchanged | **Blocked — HTTP 403.** `editor ต้องมี editorial assignment ที่ยัง active จึงจะแก้บทความได้`. Since step 6 could not create an assignment, no draft body could legitimately be saved and no submit-review request was sent. |
+| 8a. Review decision | Owner: `POST /api/review/action` with `content_item_id=9`, `action=approve` | `generated / draft / generated` -> unchanged | **Blocked — HTTP 409.** `review prerequisite missing: latest review report is required`. |
+| 8b. Submit admin review | Owner: `POST /api/items/9/submit-admin-review` | `generated / draft / generated` -> unchanged | **Blocked — HTTP 409.** Readiness says missing latest draft, review report/approved review, meta title/description, assignment and publishable assignment source; it also requires `ready_for_publish` plus `approved`. |
+| 8c. Backend Admin Approvals -> published | Not called | `generated / draft / generated` -> unchanged | **Not reachable.** No collector admin-review submission was created, so there is no backend approval record to approve/publish. |
+
+### Round 4 conclusion
+
+Only the explicitly authorized manual bridge passed. The remaining genuine endpoints expose three independent holes:
+
+1. A valid AI-generated field pack remains `draft`, while `place-ready-for-content` requires `ready_for_field`; no public business endpoint in this run moves it there.
+2. Runtime authentication tokens for freelance id 61 and editor id 62 are not represented in the fresh collector-local `users` table (which has only owner id 1), so both field and editorial assignment creation reject them before an assignee can work.
+3. Without the assignments and a saved draft/review report, the review, admin-review, and backend-publish stages are correctly gated and cannot be exercised without an additional manual bypass. None was used.
+
+Final canonical state: item 9 = `generated / draft / generated`; item 8 remains `analyzed / draft / analyzed`.
