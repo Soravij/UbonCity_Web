@@ -1,56 +1,62 @@
 # Step 5 ladder-forward runtime report
 
 Run date: 2026-08-02 (Asia/Bangkok)  
-Runtime checkout: `D:\UbonRuntime\repos\UbonCity_Web` only. The stale `C:\UbonRuntime\repos\UbonCity_Web` checkout was not accessed.
+Runtime checkout used: `D:\UbonRuntime\repos\UbonCity_Web` only. The stale `C:\UbonRuntime\repos\UbonCity_Web` checkout was not accessed.
 
-## Deployment confirmation
+## Runtime confirmation
 
 | Check | Result |
 | --- | --- |
-| Runtime branch and HEAD | `dev` at `5a0de7b22a9209ca3e2488d2b6bbe1dbfcfc8f7b` (`merge: step 5B round 1 canonical workflow readers`) |
+| HEAD | `5a0de7b22a9209ca3e2488d2b6bbe1dbfcfc8f7b` (`merge: step 5B round 1 canonical workflow readers`) |
 | Worktree before test | Clean |
-| Runtime stack | Restart completed by operator: backend 6420, collector 11992, frontend 15320, admin 15264, cloudflared 15980 |
-| `GET http://127.0.0.1:5000/api/health` | `200`, `ok: true`, MySQL database `uboncity` |
-| `GET http://127.0.0.1:5070/api/health` | `200`, `ok: true`, SQLite database `D:\UbonRuntime\repos\UbonCity_Web\collector\data\collector.db` |
+| `GET http://127.0.0.1:5000/api/health` | `200`, `ok: true` |
+| `GET http://127.0.0.1:5070/api/health` | `200`, `ok: true` |
 | Migration/schema action | None. No migration command was run and no schema file/database schema was modified. |
 
-## Authentication blocker
+## Token preflight — STOP
 
-The Collector UI at `http://127.0.0.1:5070/` showed the login page with the visible `อีเมล`, `รหัสผ่าน`, and `เข้าสู่ระบบ` controls. No owner/admin/editor/freelance test credentials were present in the Runtime environment. Existing token fixture files were not used because their JWT expiry timestamps pre-date this run.
+Tokens were read from `D:\UbonRuntime\tmp\step5-tokens.json` without printing, storing, or committing their values. Each already included its required `Bearer ` prefix and was used unchanged as the Authorization header. JWT payloads were decoded locally only to obtain role, email, and expiry. `GET /api/items` was then issued to Collector for every token.
 
-Unauthenticated confirmation (no record was created or changed):
+| Token key | JWT role | JWT email | Expiry remaining (minutes) | `GET /api/items` | Result |
+| --- | --- | --- | ---: | ---: | --- |
+| owner | owner | soravij88@gmail.com | 10,074 | 200 | Pass |
+| user | user | user@uboncity.com | 10,071 | 200 | Pass |
+| editorA | editor | ked@123 | 10,075 | 403 | **Fail** — must be 200 |
+| editorB | editor | editor@uboncity.com | 10,076 | 403 | **Fail** — must be 200 |
+| freelance | freelance | kfl@123 | 10,073 | 403 | **Fail** — must be 200 |
 
-| Request | Result |
-| --- | --- |
-| `GET /api/items` | `401` |
-| `POST /api/collect` with an empty manual payload | `401` |
-| `POST /api/run/clean` with `{}` | `401` |
+Authentication token TTL in the backend login source is `expiresIn: "7d"` in `backend/controllers/authController.js`. The separate review-access token setting is `REVIEW_ACCESS_TTL_SECONDS`, defaulting to `600` seconds, in `backend/middleware/authMiddleware.js`; it is not the Collector login JWT used here.
 
-No password was guessed and no repeated login was attempted, to avoid account lockout/rate-limit effects. Because authenticated identities were unavailable, raw places `id=1` and `id=2` were not accessed or deleted, and none of the five disposable records was created.
+The run stopped at token preflight because three required identities returned `403`, contrary to the required all-200 condition. No token was within 30 minutes of expiry, and no `401` occurred.
 
-## Forward ladder
+## No-mutation confirmation
 
-All state triples below are `production_state / publication_state / workflow_status`.
+Because the STOP condition occurred before step 1:
+
+- No `POST /api/collect` was sent; none of the five disposable records was created.
+- Raw place IDs 1 and 2 were not read, changed, or deleted.
+- No state transition, review action, admin submission, backend approval, or claim was sent.
+- No code, migration, or schema change was made.
+
+## Required ladder and claim-pool matrix
+
+All state triples are `production_state / publication_state / workflow_status` read from the actual database. They are `not read -> not changed` below because no item was created and the run correctly stopped at preflight.
 
 | Step | Role | UI/API | 3 states before -> after | Pass/fail |
 | --- | --- | --- | --- | --- |
-| Create five disposable raw place records | owner or admin | `POST /api/collect` (manual) | Not read -> Not changed | Blocked — endpoint requires authenticated owner/admin; returned `401` without credentials. |
-| collected/draft -> clean | admin | Direct `POST /api/run/clean` (no UI caller by design) | Not read -> Not changed | Blocked — authenticated admin required. |
-| clean -> analyzed | authorized workflow actor | Relevant workflow UI/API | Not read -> Not changed | Blocked — no authenticated actor/session. |
-| analyzed -> ai-draft | admin or permitted user | Generate with AI UI / `POST /api/run/ai-draft` | Not read -> Not changed | Blocked — no authenticated actor/session. |
-| ai-draft -> generated | authorized workflow actor | Relevant workflow UI/API | Not read -> Not changed | Blocked — no authenticated actor/session. |
-| generated -> quality | admin | Quality Check UI / `POST /api/run/quality` | Not read -> Not changed | Blocked — no authenticated admin session. |
-| quality -> in_review | authorized workflow actor | Review UI/API | Not read -> Not changed | Blocked — no authenticated actor/session. |
-| Review decision -> ready_for_publish/approved | admin | Review UI; reject route is direct `POST /api/review/action` by design | Not read -> Not changed | Blocked — no authenticated admin session. |
-| Submit admin review -> submitted_for_admin_review | authorized submission role | Submit Admin Review UI / `POST /api/items/:id/submit-admin-review` | Not read -> Not changed | Blocked — no authenticated actor/session. |
-| Backend Admin Approvals -> published | backend admin | Backend Admin Approvals UI/API | Not read -> Not changed | Blocked — no authenticated backend-admin session. |
+| Create five disposable raw place records | owner/admin | `POST /api/collect` (manual) | Not read -> Not changed | Not run — token preflight STOP. |
+| collected/draft -> clean | admin | Direct `POST /api/run/clean` | Not read -> Not changed | Not run — token preflight STOP. |
+| clean -> analyzed | owner | Workflow UI/API | Not read -> Not changed | Not run — token preflight STOP. |
+| analyzed -> ai-draft -> generated | owner | Generate-with-AI UI / API | Not read -> Not changed | Not run — token preflight STOP. |
+| generated -> quality -> in_review | admin | Quality/review UI/API | Not read -> Not changed | Not run — token preflight STOP. |
+| Review decision -> ready_for_publish/approved | admin | Review UI; reject path would be `POST /api/review/action` | Not read -> Not changed | Not run — token preflight STOP. |
+| Submit admin review -> submitted_for_admin_review | owner | Submit Admin Review UI/API | Not read -> Not changed | Not run — token preflight STOP. |
+| Backend Admin Approvals -> published | backend admin | Backend Admin Approvals UI/API | Not read -> Not changed | Not run — token preflight STOP. |
+| Claim pool: non-raw excluded | owner/user/editor/freelance | `GET /api/items`, `POST /api/items/:id/claim` | Not read -> Not changed | Not run — editorA/editorB/freelance cannot access pool (`403`). |
+| Claim scope: editorA vs editorB | editorA/editorB | `GET /api/items`, `POST /api/items/:id/claim` | Not read -> Not changed | Not run — both receive `403` at required preflight. |
+| Claim scope: user management line | user | `GET /api/items`, `POST /api/items/:id/claim` | Not read -> Not changed | Not run — cross-role matrix cannot be completed while editor identities fail preflight. |
+| Claim scope: freelance assignment-only | freelance | `GET /api/items`, `POST /api/items/:id/claim` | Not read -> Not changed | Not run — freelance receives `403` at required preflight. |
 
-## Claim-pool verification
+## Resume point
 
-Required scenario: two editors managed by different administrators, plus one freelance account, must prove that `GET /api/items` and `POST /api/items/:id/claim` exclude non-raw items and enforce management-line scope.
-
-Result: **not executed / blocked by the same authentication prerequisite.** No editor or freelance credentials, user IDs, or existing authenticated browser sessions were available. `GET /api/items` returns `401` before the canonical-reader filtering can be observed, and no claim request was sent. Therefore this run does not assert that the canonical pool filter or management-line scopes pass.
-
-## Required follow-up to complete this report
-
-Provide non-expired credentials (or pre-authenticated sessions) for: one owner/admin, editor A and editor B under different management lines, and one freelance account. Then rerun the ladder using five newly created manual records, read the three states after every transition, and execute the claim-pool matrix. Do not use raw records 1 or 2.
+Repair or reissue only the `editorA`, `editorB`, and `freelance` credentials/tokens until each receives `200` from `GET /api/items`. Resume at token preflight; do not create the five disposable records until it passes. No in-progress content item or workflow state exists from this run.
