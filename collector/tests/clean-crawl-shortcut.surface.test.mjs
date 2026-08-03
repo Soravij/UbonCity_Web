@@ -43,6 +43,47 @@ test("Raw intake context locks merge mode and injects the target independent of 
   assert.match(appSource, /const existingItemId = forcedExistingItemId \|\| Number\(state\.sourceIntake\.selectedExistingItemId \|\| 0\) \|\| 0;/);
 });
 
+test("Crawl merge context is consumed by one batch and expires for the next crawl", () => {
+  const state = { crawlMergePendingExistingItemId: 42 };
+  const historyCalls = [];
+  const fakeWindow = {
+    location: { href: "https://collector.local/?tab=raw&crawl_merge_item_id=42" },
+    history: {
+      state: { page: "raw" },
+      replaceState: (...args) => historyCalls.push(args),
+    },
+  };
+  const consumeContext = Function(
+    "state",
+    "window",
+    `return (${extractFunctionSource(appSource, "consumePendingCrawlMergeContext")});`
+  )(state, fakeWindow);
+  const buildClosedState = Function(`return (${extractFunctionSource(appSource, "buildClosedSourceIntakeState")});`)();
+
+  assert.deepEqual(consumeContext("batch-first"), { batchUid: "batch-first", existingItemId: 42 });
+  assert.equal(state.crawlMergePendingExistingItemId, 0);
+  assert.deepEqual(historyCalls[0], [{ page: "raw" }, "", "/?tab=raw"]);
+  assert.deepEqual(consumeContext("batch-second"), { batchUid: "batch-second", existingItemId: 0 });
+  assert.deepEqual(buildClosedState(), {
+    open: false,
+    batchUid: "",
+    adapter: "",
+    sourceLabel: "",
+    query: "",
+    selectedMode: "new",
+    selectedExistingItemId: 0,
+    forcedBatchUid: "",
+    forcedExistingItemId: 0,
+    candidates: [],
+  });
+});
+
+test("Locked crawl announces its merge target before opening intake review", () => {
+  assert.match(appSource, /กำลังจะรวมเข้า item #\$\{forcedMergeContext\.existingItemId\} ในขั้น review/);
+  assert.match(appSource, /forcedMergeContext,/);
+  assert.match(appSource, /forcedBatchUid: forcedExistingItemId \? forcedBatchUid : ""/);
+});
+
 test("Clean crawl shortcut is absent for role user because it is created only for owner/admin", () => {
   assert.match(editorSource, /if \(!isCleanMode \|\| !isAdminUser\(\) \|\| !state\.itemId\) return;/);
   assert.match(editorSource, /return role === "admin" \|\| role === "owner";/);

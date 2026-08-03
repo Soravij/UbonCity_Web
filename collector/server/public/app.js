@@ -221,6 +221,7 @@ const state = {
     blockerSummaries: new Map(),
   },
   justExportedItemId: Number(new URLSearchParams(window.location.search).get("item_id") || 0),
+  crawlMergePendingExistingItemId: getCrawlMergeExistingItemId(),
   preferredTab: String(new URLSearchParams(window.location.search).get("tab") || "").trim().toLowerCase(),
   items: [],
   dashboard: {
@@ -286,6 +287,7 @@ const state = {
     query: "",
     selectedMode: "new",
     selectedExistingItemId: 0,
+    forcedBatchUid: "",
     forcedExistingItemId: 0,
     candidates: [],
   },
@@ -5984,7 +5986,24 @@ function getCrawlMergeExistingItemId() {
   return parsePositiveInt(new URLSearchParams(window.location.search).get("crawl_merge_item_id"), 0);
 }
 
+function consumePendingCrawlMergeContext(batchUid) {
+  const normalizedBatchUid = String(batchUid || "").trim();
+  if (!normalizedBatchUid) return { batchUid: "", existingItemId: 0 };
+
+  const existingItemId = Number(state.crawlMergePendingExistingItemId || 0) || 0;
+  state.crawlMergePendingExistingItemId = 0;
+  if (existingItemId) {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("crawl_merge_item_id");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+  return { batchUid: normalizedBatchUid, existingItemId };
+}
+
 function getForcedSourceIntakeExistingItemId() {
+  const forcedBatchUid = String(state.sourceIntake.forcedBatchUid || "").trim();
+  const intakeBatchUid = String(state.sourceIntake.batchUid || "").trim();
+  if (!forcedBatchUid || forcedBatchUid !== intakeBatchUid) return 0;
   return Number(state.sourceIntake.forcedExistingItemId || 0) || 0;
 }
 
@@ -6131,8 +6150,11 @@ function renderSourceIntakeModal() {
   });
 }
 
-function openSourceIntakeModal({ batchUid, adapter, sourceLabel, query, rawItems }) {
-  const forcedExistingItemId = getCrawlMergeExistingItemId();
+function openSourceIntakeModal({ batchUid, adapter, sourceLabel, query, rawItems, forcedMergeContext = null }) {
+  const forcedBatchUid = String(forcedMergeContext?.batchUid || "").trim();
+  const forcedExistingItemId = forcedBatchUid === String(batchUid || "").trim()
+    ? Number(forcedMergeContext?.existingItemId || 0) || 0
+    : 0;
   const scoringQuery = adapter === "google_maps" ? query : "";
   const candidates = (Array.isArray(rawItems) ? rawItems : [])
     .map((row) => normalizeRawCandidate(row, scoringQuery))
@@ -6151,6 +6173,7 @@ function openSourceIntakeModal({ batchUid, adapter, sourceLabel, query, rawItems
     query: scoringQuery,
     selectedMode: forcedExistingItemId ? "merge" : chooseDefaultSourceIntakeMode(candidates),
     selectedExistingItemId: forcedExistingItemId || chooseDefaultSourceIntakeExistingItemId(candidates),
+    forcedBatchUid: forcedExistingItemId ? forcedBatchUid : "",
     forcedExistingItemId,
     candidates,
   };
@@ -6158,8 +6181,8 @@ function openSourceIntakeModal({ batchUid, adapter, sourceLabel, query, rawItems
   setSourceIntakeOpen(true);
 }
 
-function closeSourceIntakeModal() {
-  state.sourceIntake = {
+function buildClosedSourceIntakeState() {
+  return {
     open: false,
     batchUid: "",
     adapter: "",
@@ -6167,9 +6190,14 @@ function closeSourceIntakeModal() {
     query: "",
     selectedMode: "new",
     selectedExistingItemId: 0,
+    forcedBatchUid: "",
     forcedExistingItemId: 0,
     candidates: [],
   };
+}
+
+function closeSourceIntakeModal() {
+  state.sourceIntake = buildClosedSourceIntakeState();
   setSourceIntakeOpen(false);
 }
 
@@ -10878,6 +10906,7 @@ function wireSourceCollect() {
         });
       }
 
+      const forcedMergeContext = consumePendingCrawlMergeContext(result.batch_uid);
       const rawCount = Number(result.raw_count ?? result.count ?? 0) || 0;
       if (!rawCount) {
         setStatus("source-status", `ดึงข้อมูล batch ${result.batch_uid} สำเร็จ แต่ไม่พบ candidate สำหรับคัดรับเข้า raw`, true);
@@ -10885,7 +10914,12 @@ function wireSourceCollect() {
         return;
       }
 
-      setStatus("source-status", `ดึงข้อมูล batch ${result.batch_uid} สำเร็จ (พบ ${rawCount} รายการ รอคัดรับเข้า raw)`);
+      setStatus(
+        "source-status",
+        forcedMergeContext.existingItemId
+          ? `ดึงข้อมูล batch ${result.batch_uid} สำเร็จ (พบ ${rawCount} รายการ) กำลังจะรวมเข้า item #${forcedMergeContext.existingItemId} ในขั้น review`
+          : `ดึงข้อมูล batch ${result.batch_uid} สำเร็จ (พบ ${rawCount} รายการ รอคัดรับเข้า raw)`
+      );
 
       const rawItemsResponse = await api(`/api/source-raw-items?batch_uid=${encodeURIComponent(result.batch_uid)}&limit=${Math.max(rawCount, 50)}`);
       openSourceIntakeModal({
@@ -10894,6 +10928,7 @@ function wireSourceCollect() {
         sourceLabel,
         query,
         rawItems: rawItemsResponse?.items || [],
+        forcedMergeContext,
       });
       await refreshAll();
     } catch (err) {

@@ -18,11 +18,11 @@
 
 | File | Change | Lines |
 | --- | --- | ---: |
-| `collector/server/public/clean-item.html` | Remove legacy raw-navigation button | -1 |
+| `collector/server/public/clean-item.html` | Remove legacy raw-navigation button | +0 / -1 |
 | `collector/server/public/item-editor.js` | Add guarded Clean shortcut and item-ID query context; remove legacy handler | +23 / -8 |
-| `collector/server/public/app.js` | Read, force, display, lock, and submit the merge target context | +34 / -8 |
-| `collector/tests/clean-crawl-shortcut.surface.test.mjs` | New source-surface regression tests | +45 |
-| `audit/clean-crawl-shortcut-implementation.md` | This report | new |
+| `collector/server/public/app.js` | Read, force, display, lock, submit, then expire the batch merge context | +73 / -12 |
+| `collector/tests/clean-crawl-shortcut.surface.test.mjs` | Regression and behavioral tests | +91 |
+| `audit/clean-crawl-shortcut-implementation.md` | This report | +66 |
 
 No CSS file changed.  The shortcut reuses `utility-action`, which has existing normal and `:root[data-theme="dark"]` rules in `collector/server/public/styles.css:3925-3927` and `:5705-5719`; the locked controls use the browser's existing disabled state.  This was a source-level light/dark check, not a live-browser visual test.
 
@@ -50,3 +50,17 @@ The required baseline was run on `main`, and the branch was run in the same work
 | Baseline failures missing on branch | None |
 
 `git diff --check` passes.  The gate is not green because the named baseline failures remain; this hotfix introduced no additional `test:all` failure name.
+
+## Round 2: batch-scoped lock
+
+The original URL-scoped lock was corrected after external audit.  `crawl_merge_item_id` is now read once into pending state, consumed only after `/api/collect` returns its `batch_uid`, and removed from the address bar with `history.replaceState`.  That consumed context is passed explicitly into `openSourceIntakeModal`; it is applied only when its batch UID matches the modal batch UID.  Closing the modal (the UI's single cancel/close action) or successfully importing resets both `forcedBatchUid` and `forcedExistingItemId` through the shared closed-modal state.
+
+Before the review modal is opened, the existing `source-status` pattern now says that the resulting batch will merge into the exact item ID.  No CSS class was added: this continues to use the existing status element and theme tokens, so the source-level light/dark assessment remains unchanged.
+
+The test file now has five tests.  In addition to source-text guards, `Crawl merge context is consumed by one batch and expires for the next crawl` executes the real `consumePendingCrawlMergeContext` and `buildClosedSourceIntakeState` functions with a controlled browser-state double.  It verifies one consumption, URL query removal, an unforced second batch, and closed-state reset.  The warning test covers the pre-modal status message and batch hand-off.  For historical clarity: at commit `6051850` the test file was `+50` (not `+45`); the current cumulative comparison to `main` is `+91` because this round adds behavioral coverage.
+
+For this round, restoring `collector/server/public/app.js` from `main` makes the amended test file fail (the new behavioral function and warning path are absent), confirming the test depends on the production implementation.
+
+### Round 2 gate
+
+`npm run test:all` was run once on `main` and once on this branch by switching checkout in the same `D:\UbonCity_Web` directory, with no worktree.  Both runs exit non-zero with the exact same 59 failure names listed in the prior gate table above.  New branch failure names: none.  Baseline failure names missing from the branch: none.
