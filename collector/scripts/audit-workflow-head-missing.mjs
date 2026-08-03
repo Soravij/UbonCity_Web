@@ -21,7 +21,6 @@ try {
       title: String(item?.title || "").trim() || null,
       type: String(item?.type || "").trim() || null,
       category: String(item?.category || "").trim() || null,
-      legacy_workflow_status: String(item?.workflow_status || "").trim().toLowerCase() || "raw",
     }));
 
   console.log(JSON.stringify({

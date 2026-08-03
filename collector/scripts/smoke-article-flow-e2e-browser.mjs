@@ -773,13 +773,13 @@ async function main() {
     await waitForItemMatch(
       editorLogin.token,
       itemId,
-      (currentItem) => String(currentItem?.workflow_status || "").trim().toLowerCase() === "in_review",
-      "item workflow status in_review",
+      (currentItem) => String(currentItem?.production_state || "").trim().toLowerCase() === "in_review",
+      "item production state in_review",
       20000,
     );
 
     const reviewItemBeforeAdmin = await readItem(editorLogin.token, itemId);
-    assert(String(reviewItemBeforeAdmin?.workflow_status || "").trim().toLowerCase() === "in_review", `item should move to in_review after submit review: ${JSON.stringify(reviewItemBeforeAdmin)}`);
+    assert(String(reviewItemBeforeAdmin?.production_state || "").trim().toLowerCase() === "in_review", `item should move to in_review after submit review: ${JSON.stringify(reviewItemBeforeAdmin)}`);
 
     await openPageAs(cdp, adminLogin.token, `/article-submit.html?id=${itemId}`);
     await waitForCondition(cdp, `window.location.pathname.endsWith("/article-submit.html") && Boolean(document.getElementById("btn-generate-translations")) && Boolean(document.getElementById("btn-approve-sync"))`, 15000);
@@ -823,7 +823,7 @@ async function main() {
     await waitForCondition(cdp, `document.getElementById("btn-send-main-site")?.disabled === true`, 10000);
 
     const finalItem = await readItem(adminLogin.token, itemId);
-    assert(String(finalItem?.workflow_status || "").trim().toLowerCase() === "approved", `final workflow_status should remain approved after admin-review submit: ${JSON.stringify(finalItem)}`);
+    assert(String(finalItem?.publication_state || "").trim().toLowerCase() === "approved", `final publication_state should remain approved after admin-review submit: ${JSON.stringify(finalItem)}`);
     assert(String(finalItem?.production_state || "").trim().toLowerCase() === "submitted_for_admin_review", `final production_state should be submitted_for_admin_review: ${JSON.stringify(finalItem)}`);
 
     console.log(JSON.stringify({

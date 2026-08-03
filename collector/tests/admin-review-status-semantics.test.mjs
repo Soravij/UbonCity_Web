@@ -13,7 +13,7 @@ function read(relativePath) {
 test("article flow smoke expects submitted_for_admin_review after submit-admin-review", () => {
   const source = read("scripts/smoke-article-flow-e2e-browser.mjs");
   assert.match(source, /"submitted_for_admin_review"/);
-  assert.match(source, /workflow_status should remain approved after admin-review submit/);
+  assert.match(source, /publication_state should remain approved after admin-review submit/);
   assert.match(source, /production_state should be submitted_for_admin_review/);
 });
 

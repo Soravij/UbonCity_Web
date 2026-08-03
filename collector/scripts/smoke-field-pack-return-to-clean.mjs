@@ -33,9 +33,9 @@ function createItemWithFieldPack(db, {
   const slug = `smoke-return-clean-${titleSuffix.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
   const itemResult = db.prepare(`
     INSERT INTO content_items (
-      item_uid, type, category, lang, title, normalized_title, slug, description_raw, workflow_status, claimed_by_user_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(uid, "place", "attraction", "th", title, title.toLowerCase(), slug, "smoke return-to-clean fixture", "raw", claimedByUserId);
+      item_uid, type, category, lang, title, normalized_title, slug, description_raw, claimed_by_user_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(uid, "place", "attraction", "th", title, title.toLowerCase(), slug, "smoke return-to-clean fixture", claimedByUserId);
   const itemId = Number(itemResult.lastInsertRowid || 0) || 0;
   assert(itemId > 0, `failed to create fixture item ${titleSuffix}`);
 

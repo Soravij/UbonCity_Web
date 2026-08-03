@@ -146,7 +146,7 @@ test("planBulkItemDelete soft-deletes an item whose only dependencies are non-NE
         if (Number(itemId) === 44) {
           return {
             eligible: false,
-            item: { id: 44, title: "Raw Item With Deliverables", workflow_status: "raw" },
+            item: { id: 44, title: "Raw Item With Deliverables" },
             blockers: [{ key: "content_assignment_submission_deliverables", count: 3 }],
           };
         }
@@ -192,6 +192,40 @@ test("bulkDeleteItems succeeds when all selected items are safe raw-only", () =>
   }
 });
 
+test("raw hard-delete eligibility is defined only by canonical collected/draft state", () => {
+  const ctx = createTestContext();
+  try {
+    assert.equal(
+      ctx.db.prepare("PRAGMA table_info(content_items)").all().some((column) => column.name === "workflow_status"),
+      false,
+      "fresh schema must not restore the removed legacy mirror"
+    );
+    const item = ctx.createRawItem("Canonical Raw Delete Gate");
+    const before = ctx.repo.getRawOnlyHardDeleteEligibility(item.id);
+    assert.equal(before.eligible, true, "collected/draft item remains hard-delete eligible");
+
+    ctx.repo.upsertWorkflowModel(item.id, {
+      production_state: "analyzed",
+      publication_state: "draft",
+    }, "test@local", { actor_role: "system", reason_code: "test" });
+    const progressed = ctx.repo.getRawOnlyHardDeleteEligibility(item.id);
+    assert.equal(progressed.eligible, false, "canonical production progress blocks hard delete");
+    assert.equal(progressed.blockers.some((blocker) => blocker.key === "production_state_not_collected"), true);
+
+    ctx.repo.upsertWorkflowModel(item.id, {
+      production_state: "collected",
+      publication_state: "draft",
+    }, "test@local", {
+      actor_role: "system",
+      reason_code: "test",
+      skip_production_transition_validation: true,
+    });
+    assert.equal(ctx.repo.getRawOnlyHardDeleteEligibility(item.id).eligible, true, "restoring canonical collected/draft restores the old raw-only case");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("raw hard delete ignores archived field packs but still blocks current packs and cascades archived pack children", () => {
   const ctx = createTestContext();
   try {
@@ -217,8 +251,15 @@ test("raw hard delete ignores archived field packs but still blocks current pack
 
     ctx.db.prepare("UPDATE content_workflow_models SET production_state='analyzed', current_field_pack_id=? WHERE content_item_id=?").run(archivedPack.id, archivedPackItem.id);
     ctx.repo.returnFieldPackToCleanAtomic(archivedPackItem.id, "archive for raw hard delete", "test@local");
-    ctx.db.prepare("UPDATE content_items SET workflow_status='raw' WHERE id=?").run(archivedPackItem.id);
-    ctx.db.prepare("UPDATE content_workflow_models SET production_state='collected', publication_state='draft', current_field_pack_id=NULL WHERE content_item_id=?").run(archivedPackItem.id);
+    ctx.repo.upsertWorkflowModel(archivedPackItem.id, {
+      production_state: "collected",
+      publication_state: "draft",
+      current_field_pack_id: null,
+    }, "test@local", {
+      actor_role: "system",
+      reason_code: "test",
+      skip_production_transition_validation: true,
+    });
 
     const archivedEligibility = ctx.repo.getRawOnlyHardDeleteEligibility(archivedPackItem.id);
     assert.equal(archivedEligibility.eligible, true, "archived field pack does not block raw hard delete");

@@ -27,7 +27,7 @@ function isTargetSmokeItem(row) {
 
 function listTargetItems(db) {
   const rows = db.prepare(`
-    SELECT id, item_uid, title, slug, workflow_status, is_deleted, created_at
+    SELECT id, item_uid, title, slug, is_deleted, created_at
     FROM content_items
     ORDER BY id ASC
   `).all();

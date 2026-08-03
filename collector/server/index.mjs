@@ -1819,7 +1819,6 @@ function buildItemAuditSnapshot(row) {
     category: row?.category || null,
     title: row?.title || null,
     slug: row?.slug || null,
-    legacy_workflow_status: row?.workflow_status || null,
   };
 }
 
@@ -1835,7 +1834,7 @@ function getDeletedItemCleanupSnapshot(itemId) {
   const id = Number(itemId || 0) || 0;
   if (!id) return null;
   return db.prepare(`
-    SELECT id, item_uid, type, category, title, slug, workflow_status, claimed_by_user_id, is_deleted, created_at, updated_at
+    SELECT id, item_uid, type, category, title, slug, claimed_by_user_id, is_deleted, created_at, updated_at
     FROM content_items
     WHERE id=? AND is_deleted=1
   `).get(id) || null;
@@ -1865,7 +1864,6 @@ function buildDeletedItemCleanupReport(row) {
     category: row.category || null,
     title: row.title || null,
     slug: row.slug || null,
-    legacy_workflow_status: row.workflow_status || null,
     claimed_by_user_id: row.claimed_by_user_id ?? null,
     is_deleted: Number(row.is_deleted || 0) || 0,
     created_at: row.created_at || null,
@@ -1893,7 +1891,7 @@ function buildDeletedItemCleanupReport(row) {
 function listDeletedItemCleanupReports(limit = 100) {
   const safeLimit = Math.max(1, Math.min(500, Number(limit) || 100));
   const rows = db.prepare(`
-    SELECT id, item_uid, type, category, title, slug, workflow_status, claimed_by_user_id, is_deleted, created_at, updated_at
+    SELECT id, item_uid, type, category, title, slug, claimed_by_user_id, is_deleted, created_at, updated_at
     FROM content_items
     WHERE is_deleted=1
     ORDER BY updated_at DESC, id DESC
@@ -1938,7 +1936,6 @@ function purgeDeletedItemTx(itemId, actorEmailValue, reasonText, confirmedOverri
         category: row.category || null,
         title: row.title || null,
         slug: row.slug || null,
-        legacy_workflow_status: row.workflow_status || null,
         created_at: row.created_at || null,
         updated_at: row.updated_at || null,
       },
@@ -1990,7 +1987,6 @@ function buildPurgedDeletedItemResult(row, actorEmailValue, reasonText) {
     category: row.category || null,
     title: row.title || null,
     slug: row.slug || null,
-    legacy_workflow_status: row.workflow_status || null,
     purged: true,
     purged_at: new Date().toISOString(),
     purged_by: String(actorEmailValue || "").trim() || null,
@@ -10054,9 +10050,7 @@ app.post("/api/items/:id/execution-readiness/evaluate", requireRole("admin", "us
         ready_for_content: Boolean(governance?.readiness?.ready_for_content),
         ready_for_publish: Boolean(governance?.readiness?.ready_for_publish),
         ready_for_handoff: Boolean(governance?.handoff?.ready_for_handoff),
-        legacy_workflow_status_mismatch: Boolean(drift?.mismatch_flags?.workflow_status_mismatch),
-        legacy_workflow_status: drift?.source_workflow_status || null,
-        workflow_head_derived_status: drift?.derived_workflow_status || null,
+        workflow_head_missing: Boolean(drift?.mismatch_flags?.workflow_head_missing),
         reason_code: WORKFLOW_REASON_CODES.EXECUTION_READINESS_EVALUATED,
       });
     }

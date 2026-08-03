@@ -108,7 +108,6 @@ function ensureSmokeItemAndExternalAssignment(userId, ownerEmail) {
         description_clean: "manual smoke local app assignment flow",
         meta_title: "Manual Smoke Assignment Flow",
         meta_description: "ใช้ยืนยันว่า user ส่งงานแทน external และรับงานผ่านได้",
-        workflow_status: "content_in_progress",
       },
       {
         status: "ready_for_field",

@@ -2,7 +2,7 @@ import "dotenv/config";
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 import { resolvePaths } from "../config/paths.mjs";
-import { AI_DRAFT_ALLOWED_STATUSES, readCliOption } from "./lib/smoke-helpers.mjs";
+import { AI_DRAFT_ALLOWED_PRODUCTION_STATES, readCliOption } from "./lib/smoke-helpers.mjs";
 
 function toInt(value, fallback) {
   const n = Number(value || 0) || 0;
@@ -11,14 +11,14 @@ function toInt(value, fallback) {
 
 function summarizeCandidate(item, repo) {
   const imageStatus = repo.getImageWorkflowStatus(item.id) || {};
-  const workflowStatus = String(item?.workflow_status || "").trim().toLowerCase();
+  const productionState = String(item?.production_state || "").trim().toLowerCase();
   const selectedCount = Number(imageStatus?.selected_count || 0) || 0;
   const coverCount = Number(imageStatus?.cover_count || 0) || 0;
-  const allowed = AI_DRAFT_ALLOWED_STATUSES.includes(workflowStatus);
+  const allowed = AI_DRAFT_ALLOWED_PRODUCTION_STATES.includes(productionState);
   const imageReady = Boolean(imageStatus?.is_ready_for_ai_draft);
   const reasons = [];
   if (!allowed) {
-    reasons.push(`workflow_status=${workflowStatus || "unknown"} is not in ${AI_DRAFT_ALLOWED_STATUSES.join(",")}`);
+    reasons.push(`production_state=${productionState || "unknown"} is not in ${AI_DRAFT_ALLOWED_PRODUCTION_STATES.join(",")}`);
   }
   if (selectedCount <= 0) {
     reasons.push("selected_count=0");
@@ -29,7 +29,7 @@ function summarizeCandidate(item, repo) {
   return {
     id: Number(item?.id || 0) || null,
     title: String(item?.title || "").trim(),
-    workflow_status: workflowStatus,
+    production_state: productionState,
     claimed_by_user_id: Number(item?.claimed_by_user_id || 0) || null,
     selected_count: selectedCount,
     cover_count: coverCount,
@@ -46,7 +46,7 @@ function rankNearMiss(item) {
   if (item.is_ready_for_ai_draft) score += 80;
   score += Math.min(item.selected_count, 20) * 2;
   score += Math.min(item.cover_count, 5) * 5;
-  if (item.workflow_status === "content_in_progress") score += 20;
+  if (item.production_state === "content_in_progress") score += 20;
   return score;
 }
 
@@ -74,14 +74,14 @@ async function main() {
   }
 
   const eligible = repo
-    .listItemsByStatus(AI_DRAFT_ALLOWED_STATUSES)
+    .listItemsByStatus(AI_DRAFT_ALLOWED_PRODUCTION_STATES)
     .map((item) => summarizeCandidate(item, repo))
     .filter((item) => item.is_smoke_eligible)
     .slice(0, limit);
 
   const nearMisses = [
     ...repo.listItemsByStatus(["raw", "content_in_progress"]).map((item) => summarizeCandidate(item, repo)),
-    ...repo.listItemsByStatus(AI_DRAFT_ALLOWED_STATUSES)
+    ...repo.listItemsByStatus(AI_DRAFT_ALLOWED_PRODUCTION_STATES)
       .map((item) => summarizeCandidate(item, repo))
       .filter((item) => !item.is_smoke_eligible),
   ]
@@ -97,7 +97,7 @@ async function main() {
   console.log(JSON.stringify({
     ok: true,
     route,
-    allowed_statuses: AI_DRAFT_ALLOWED_STATUSES,
+    allowed_production_states: AI_DRAFT_ALLOWED_PRODUCTION_STATES,
     eligible_count: eligible.length,
     recommended_item_id: recommended?.id || null,
     eligible_items: eligible,

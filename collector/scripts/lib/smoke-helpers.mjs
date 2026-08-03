@@ -4,7 +4,7 @@ import { createTestClient } from "./test-client.mjs";
 import { ensureItemClaimed, releaseItemClaim } from "./test-fixtures.mjs";
 import { assertSmokeServerTargetsAllowed } from "../../../scripts/smokeServerGuard.mjs";
 
-export const AI_DRAFT_ALLOWED_STATUSES = ["cleaned", "generated", "needs_revision", "content_in_progress"];
+export const AI_DRAFT_ALLOWED_PRODUCTION_STATES = ["analyzed", "generated", "needs_revision", "content_in_progress"];
 
 export function readCliOption(name) {
   const idx = process.argv.indexOf(name);
@@ -29,11 +29,11 @@ export async function assertSmokeRuntimeTargets() {
   });
 }
 
-export function formatAiDraftEligibilityFailure(contentItemId, workflowStatus) {
-  const normalizedStatus = String(workflowStatus || "").trim().toLowerCase() || "unknown";
+export function formatAiDraftEligibilityFailure(contentItemId, productionState) {
+  const normalizedState = String(productionState || "").trim().toLowerCase() || "unknown";
   return [
-    `item ${contentItemId} is not eligible for ai-draft yet: workflow_status=${normalizedStatus}`,
-    `allowed_statuses=${AI_DRAFT_ALLOWED_STATUSES.join(",")}`,
+    `item ${contentItemId} is not eligible for ai-draft yet: production_state=${normalizedState}`,
+    `allowed_production_states=${AI_DRAFT_ALLOWED_PRODUCTION_STATES.join(",")}`,
     `hint=run "npm run smoke:find-item" to discover a route-eligible item`,
   ].join(" ");
 }
@@ -94,11 +94,11 @@ export async function ensureSmokeItemOwnership(client, contentItemId, authUser, 
 
 export async function assertAiDraftReady(client, contentItemId) {
   const item = await loadSmokeItem(client, contentItemId);
-  const workflowStatus = String(item?.workflow_status || "").trim().toLowerCase();
-  const allowedStatuses = new Set(AI_DRAFT_ALLOWED_STATUSES);
+  const productionState = String(item?.production_state || "").trim().toLowerCase();
+  const allowedStates = new Set(AI_DRAFT_ALLOWED_PRODUCTION_STATES);
   assert(
-    allowedStatuses.has(workflowStatus),
-    formatAiDraftEligibilityFailure(contentItemId, workflowStatus)
+    allowedStates.has(productionState),
+    formatAiDraftEligibilityFailure(contentItemId, productionState)
   );
   const imageWorkflow = await client.get(`/api/items/${contentItemId}/image-workflow`);
   assert(imageWorkflow.ok, `GET /api/items/${contentItemId}/image-workflow failed: ${JSON.stringify(imageWorkflow.body)}`);

@@ -729,11 +729,16 @@ test("item ownership scope metadata distinguishes raw pool, claim, assignment, a
   );
 });
 
-test("claim-pool readers preserve all six legacy-lossy workflow state categories on an empty schema DB", () => {
+test("claim-pool readers preserve all canonical workflow state categories on an empty schema DB", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-lossy-workflow-readers-"));
   const db = new DatabaseSync(path.join(tempDir, "test.sqlite"));
   try {
     db.exec(fs.readFileSync(path.join(collectorRoot, "database", "schema.sql"), "utf8").replace(/^\uFEFF/, ""));
+    assert.equal(
+      db.prepare("PRAGMA table_info(content_items)").all().some((column) => column.name === "workflow_status"),
+      false,
+      "fresh schema must not retain the legacy workflow mirror"
+    );
     const repo = createRepository(db);
     const hooks = loadItemOwnershipScopeHooks();
     const lossyStateGroups = [
@@ -781,7 +786,6 @@ test("claim-pool readers preserve all six legacy-lossy workflow state categories
           expected,
           `item #${itemId} must retain its canonical state instead of relying on the lossy raw mirror`
         );
-        assert.equal(row?.workflow_status, "raw", `item #${itemId} must exercise a legacy mirror value that loses this state`);
         assert.equal(hooks.isClaimableRawPoolItem(row), false, `item #${itemId} must not become claimable as raw`);
       }
     }
