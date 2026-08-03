@@ -1864,6 +1864,8 @@ function buildDeletedItemCleanupReport(row) {
     category: row.category || null,
     title: row.title || null,
     slug: row.slug || null,
+    production_state: row.production_state || null,
+    publication_state: row.publication_state || null,
     claimed_by_user_id: row.claimed_by_user_id ?? null,
     is_deleted: Number(row.is_deleted || 0) || 0,
     created_at: row.created_at || null,
@@ -1891,10 +1893,13 @@ function buildDeletedItemCleanupReport(row) {
 function listDeletedItemCleanupReports(limit = 100) {
   const safeLimit = Math.max(1, Math.min(500, Number(limit) || 100));
   const rows = db.prepare(`
-    SELECT id, item_uid, type, category, title, slug, claimed_by_user_id, is_deleted, created_at, updated_at
-    FROM content_items
-    WHERE is_deleted=1
-    ORDER BY updated_at DESC, id DESC
+    SELECT i.id, i.item_uid, i.type, i.category, i.title, i.slug,
+           i.claimed_by_user_id, i.is_deleted, i.created_at, i.updated_at,
+           wm.production_state, wm.publication_state
+    FROM content_items i
+    LEFT JOIN content_workflow_models wm ON wm.content_item_id=i.id
+    WHERE i.is_deleted=1
+    ORDER BY i.updated_at DESC, i.id DESC
     LIMIT ?
   `).all(safeLimit);
   return rows.map((row) => buildDeletedItemCleanupReport(row)).filter(Boolean);

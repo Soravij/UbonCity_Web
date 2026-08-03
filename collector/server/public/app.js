@@ -3139,8 +3139,8 @@ function renderDataCleanupPanel() {
       const blockerText = blocking.length
         ? blocking.map((entry) => `${entry.label} (${Number(entry.count || 0) || 0})`).join(" | ")
         : "-";
-      const productionState = String(row?.workflow_model?.production_state || "").trim();
-      const publicationState = String(row?.workflow_model?.publication_state || "").trim();
+      const productionState = String(row?.production_state || "").trim();
+      const publicationState = String(row?.publication_state || "").trim();
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${itemId || "-"}</td>

@@ -224,7 +224,7 @@ async function transitionArticle(token, itemId, status, note = "") {
 }
 
 async function waitForItemProductionState(token, itemId, expectedState, timeoutMs = 30000) {
-  const expected = String(expectedStatus || "").trim().toLowerCase();
+  const expected = String(expectedState || "").trim().toLowerCase();
   const startedAt = Date.now();
   let lastPayload = null;
   while (Date.now() - startedAt < timeoutMs) {
