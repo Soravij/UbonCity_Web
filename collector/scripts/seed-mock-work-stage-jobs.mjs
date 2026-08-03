@@ -387,7 +387,6 @@ function ensureItemAndFieldPack(job, coverImageUrl) {
       google_place_id: job.google_place_id,
       image_url: coverImageUrl,
       tags: [...job.tags, "mock-seed", "work-stage"],
-      workflow_status: "content_in_progress",
       source_type: "mock_seed",
       source_name: "mock_work_stage_seed",
       source_url: sourceUrl,

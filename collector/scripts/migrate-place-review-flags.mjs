@@ -1,6 +1,6 @@
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
-import { TRANSITION_RULES } from "../db/repository.mjs";
+import { TRANSITION_RULES, createRepository } from "../db/repository.mjs";
 import { hasPlaceReviewFlagCheck } from "../db/workflow-head-schema.mjs";
 
 const PLACE_REVISION_TARGETS = Object.freeze({
@@ -111,14 +111,6 @@ function assertMigratedPlaceTargetCanContinue(itemId, target) {
   }
 }
 
-function recordTransition(db, contentItemId, stateGroup, fromState, toState, reasonCode) {
-  db.prepare(`
-    INSERT INTO content_workflow_transitions (
-      content_item_id, state_group, from_state, to_state, actor_email, actor_role, reason_code, note, created_at
-    ) VALUES (?, ?, ?, ?, 'system@local', 'system', ?, 'place review flag schema migration', CURRENT_TIMESTAMP)
-  `).run(contentItemId, stateGroup, fromState, toState, reasonCode);
-}
-
 function latestLegacyProductionSource(db, contentItemId, toState) {
   return db.prepare(`
     SELECT from_state
@@ -131,6 +123,7 @@ function latestLegacyProductionSource(db, contentItemId, toState) {
 
 function migrateUp(db) {
   ensurePlaceReviewFlagColumn(db);
+  const repo = createRepository(db);
   const legacyRows = db.prepare(`
     SELECT m.content_item_id, m.production_state
     FROM content_workflow_models m
@@ -151,15 +144,21 @@ function migrateUp(db) {
     }
     assertMigratedPlaceTargetCanContinue(itemId, target);
     const flag = state === "needs_revision" ? "revision_requested" : "rejected";
-    db.prepare("UPDATE content_workflow_models SET production_state=?, place_review_flag=? WHERE content_item_id=?")
-      .run(target, flag, itemId);
-    recordTransition(db, itemId, "production", state, target, "place_review_flag_migration_up");
-    recordTransition(db, itemId, "place_review_flag", "none", flag, "place_review_flag_migration_up");
+    repo.upsertWorkflowModel(itemId, {
+      production_state: target,
+      place_review_flag: flag,
+      last_transition_note: "place review flag schema migration",
+    }, "system@local", {
+      actor_role: "system",
+      reason_code: "place_review_flag_migration_up",
+      skip_production_transition_validation: true,
+    });
   }
 }
 
 function migrateDown(db) {
   if (!hasColumn(db, "place_review_flag")) return;
+  const repo = createRepository(db);
   const rows = db.prepare(`
     SELECT m.content_item_id, m.production_state, m.place_review_flag
     FROM content_workflow_models m
@@ -185,10 +184,15 @@ function migrateDown(db) {
     if (!legacyState) {
       throw new Error(`cannot reverse place ${itemId}: ${oldFlag} was created after the migration`);
     }
-    db.prepare("UPDATE content_workflow_models SET production_state=?, place_review_flag='none' WHERE content_item_id=?")
-      .run(legacyState, itemId);
-    recordTransition(db, itemId, "production", row.production_state, legacyState, "place_review_flag_migration_down");
-    recordTransition(db, itemId, "place_review_flag", oldFlag, "none", "place_review_flag_migration_down");
+    repo.upsertWorkflowModel(itemId, {
+      production_state: legacyState,
+      place_review_flag: "none",
+      last_transition_note: "place review flag schema migration",
+    }, "system@local", {
+      actor_role: "system",
+      reason_code: "place_review_flag_migration_down",
+      skip_production_transition_validation: true,
+    });
   }
   rebuildWorkflowModels(db, false);
 }

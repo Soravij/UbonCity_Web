@@ -34,7 +34,6 @@ CREATE TABLE IF NOT EXISTS content_items (
   google_place_id TEXT,
   image_url TEXT,
   tags TEXT,
-  workflow_status TEXT NOT NULL DEFAULT 'raw',
   claimed_by_user_id INTEGER,
   claimed_at TEXT,
   claim_note TEXT,

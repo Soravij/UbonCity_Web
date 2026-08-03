@@ -137,7 +137,7 @@ async function main() {
       const after = await client.get(`/api/items/${contentItemId}`);
       assert(after.ok, `GET /api/items/${contentItemId} after external ai-draft failed: ${JSON.stringify(after.body)}`);
       const item = after.body || {};
-      assert(String(item.workflow_status || "").trim() === "cleaned", `workflow_status should remain cleaned for handoff queue: ${JSON.stringify(item)}`);
+      assert(String(item.production_state || "").trim() === "analyzed", `production_state should remain analyzed for handoff queue: ${JSON.stringify(item)}`);
       assert(
         String(item.description_clean || "").trim() === beforeDescriptionClean,
         "description_clean changed during external field-pack generation"
@@ -166,7 +166,7 @@ async function main() {
           visualContextErrorCount: Number(run.body?.visualContextErrorCount || 0) || 0,
         },
         saved_contract: {
-          workflow_status: String(item.workflow_status || "").trim(),
+          production_state: String(item.production_state || "").trim(),
           slug: String(item.slug || "").trim(),
           summary: String(item.summary || "").trim(),
           meta_title: String(item.meta_title || "").trim(),

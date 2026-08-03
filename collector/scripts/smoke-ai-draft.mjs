@@ -18,7 +18,8 @@ function summarizeItem(item = {}) {
     meta_title: String(item?.meta_title || "").trim(),
     meta_description: String(item?.meta_description || "").trim(),
     description_clean: String(item?.description_clean || "").trim(),
-    workflow_status: String(item?.workflow_status || "").trim(),
+    production_state: String(item?.production_state || "").trim(),
+    publication_state: String(item?.publication_state || "").trim(),
     claim_status: String(item?.claim_status || "").trim(),
     claimed_by_user_id: Number(item?.claimed_by_user_id || 0) || null,
   };
@@ -70,12 +71,12 @@ async function main() {
     const eligibleItem = readiness.item;
     logStep(
       "readiness.ok",
-      `workflow_status=${String(eligibleItem?.workflow_status || "").trim().toLowerCase() || "unknown"} selected_count=${Number(imageWorkflow?.status?.selected_count || 0) || 0} cover_count=${Number(imageWorkflow?.status?.cover_count || 0) || 0}`
+      `production_state=${String(eligibleItem?.production_state || "").trim().toLowerCase() || "unknown"} selected_count=${Number(imageWorkflow?.status?.selected_count || 0) || 0} cover_count=${Number(imageWorkflow?.status?.cover_count || 0) || 0}`
     );
     const before = await client.get(`/api/items/${contentItemId}`);
     assert(before.ok, `GET /api/items/${contentItemId} before ai-draft failed: ${JSON.stringify(before.body)}`);
     const beforeDescriptionClean = String(before.body?.description_clean || "").trim();
-    const beforeWorkflowStatus = String(before.body?.workflow_status || "").trim();
+    const beforeProductionState = String(before.body?.production_state || "").trim();
 
     logStep("generate.run");
     const run = await client.post("/api/run/ai-draft", { content_item_id: contentItemId });
@@ -108,8 +109,8 @@ async function main() {
       `description_clean changed during field-pack generation: ${JSON.stringify({ before: beforeDescriptionClean, after: afterItem?.description_clean })}`
     );
     assert(
-      contract.workflow_status === beforeWorkflowStatus,
-      `workflow_status changed during field-pack generation: ${JSON.stringify({ before: beforeWorkflowStatus, after: contract.workflow_status, contract })}`
+      contract.production_state === beforeProductionState,
+      `production_state changed during field-pack generation: ${JSON.stringify({ before: beforeProductionState, after: contract.production_state, contract })}`
     );
 
     logStep("field_pack.reload");
@@ -130,7 +131,7 @@ async function main() {
       claimed_this_run: claimedThisRun,
       keep_claimed: keepClaimed,
       item: {
-        workflow_status: String(eligibleItem?.workflow_status || "").trim() || null,
+        production_state: String(eligibleItem?.production_state || "").trim() || null,
       },
       image_workflow: {
         selected_count: Number(imageWorkflow?.status?.selected_count || 0) || 0,

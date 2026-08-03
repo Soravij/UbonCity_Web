@@ -674,49 +674,6 @@ export function mapWorkflowStatusToModelStates(workflowStatus) {
   return { production_state: "collected", publication_state: "draft" };
 }
 
-function deriveWorkflowStatusFromModel(model) {
-  const productionState = String(model?.production_state || "").trim().toLowerCase();
-  const publicationState = String(model?.publication_state || "").trim().toLowerCase();
-  if (publicationState === "published") return "published";
-  if (productionState === "rejected") return "rejected";
-  if (productionState === "needs_revision") return "needs_revision";
-  if (
-    publicationState === "approved"
-    || publicationState === "unpublished"
-    || productionState === "ready_for_publish"
-    || productionState === "submitted_for_admin_review"
-  ) return "approved";
-  if (productionState === "in_review") return "in_review";
-  if (productionState === "generated") return "generated";
-  if (productionState === "content_in_progress") return "content_in_progress";
-  if (productionState === "ready_for_content") return "ready_for_content";
-  if (productionState === "brief_generated") return "brief_generated";
-  if (productionState === "analyzed") return "analyzed";
-  return "raw";
-}
-
-function deriveWorkflowStatusSeedFromPatch(workflowPatch = {}) {
-  const productionState = String(workflowPatch?.production_state || "").trim().toLowerCase();
-  const publicationState = String(workflowPatch?.publication_state || "draft").trim().toLowerCase() || "draft";
-  if (!productionState && !publicationState) return "";
-  return deriveWorkflowStatusFromModel({
-    production_state: productionState || "collected",
-    publication_state: publicationState,
-  });
-}
-
-function deriveWorkflowStatusFromRowStates(row = {}, fallback = "raw") {
-  const productionState = String(row?.production_state || "").trim().toLowerCase();
-  const publicationState = String(row?.publication_state || "").trim().toLowerCase();
-  if (!productionState && !publicationState) {
-    return String(fallback || "raw").trim().toLowerCase() || "raw";
-  }
-  return deriveWorkflowStatusFromModel({
-    production_state: productionState || "collected",
-    publication_state: publicationState || "draft",
-  });
-}
-
 function normalizeHttpUrl(raw, fieldName) {
   const text = decodeUrlEntities(String(raw || "").trim());
   if (!text) return null;
@@ -2787,7 +2744,6 @@ function toItemBaseParams(data) {
     google_place_id: data.google_place_id,
     image_url: data.image_url,
     tags: data.tags,
-    workflow_status: data.workflow_status,
   };
 }
 
@@ -2818,7 +2774,6 @@ function toItemUpdateParams(data) {
     google_place_id: base.google_place_id,
     image_url: base.image_url,
     tags: base.tags,
-    workflow_status: base.workflow_status,
   };
 }
 
@@ -2916,12 +2871,12 @@ export function createRepository(db) {
       item_uid, type, category, lang, title, normalized_title, slug,
       description_raw, description_clean, summary, meta_title, meta_description,
       event_period_text, location_text,
-      latitude, longitude, map_url, google_place_id, image_url, tags, workflow_status
+      latitude, longitude, map_url, google_place_id, image_url, tags
     ) VALUES (
       @item_uid, @type, @category, @lang, @title, @normalized_title, @slug,
       @description_raw, @description_clean, @summary, @meta_title, @meta_description,
       @event_period_text, @location_text,
-      @latitude, @longitude, @map_url, @google_place_id, @image_url, @tags, @workflow_status
+      @latitude, @longitude, @map_url, @google_place_id, @image_url, @tags
     )
   `);
 
@@ -2946,7 +2901,6 @@ export function createRepository(db) {
       google_place_id=@google_place_id,
       image_url=@image_url,
       tags=@tags,
-      workflow_status=@workflow_status,
       updated_at=CURRENT_TIMESTAMP
     WHERE id=@id AND is_deleted=0
   `);
@@ -4293,7 +4247,6 @@ export function createRepository(db) {
       google_place_id: String(input.google_place_id || "").trim(),
       image_url: String(input.image_url || input.image || "").trim(),
       tags: JSON.stringify(tags),
-      workflow_status: String(input.workflow_status || "raw").trim(),
       source_type: String(input.source_type || "manual").trim(),
       source_name: String(input.source_name || "manual").trim(),
       source_url: String(input.source_url || "").trim() || null,
@@ -4336,12 +4289,6 @@ export function createRepository(db) {
 
   function saveItem(input, actorEmail = "system@local") {
     const data = normalizeInput(input);
-    // Temporary compatibility: callers should not need to drive workflow via the
-    // legacy mirror. Preserve the current mirror unless a caller explicitly sends one.
-    if (!Object.prototype.hasOwnProperty.call(input || {}, "workflow_status") && Number(data.id || 0) > 0) {
-      const existing = getItem(Number(data.id || 0));
-      data.workflow_status = String(existing?.workflow_status || "raw").trim() || "raw";
-    }
     return saveItemInternal(data, actorEmail);
   }
 
@@ -4352,14 +4299,15 @@ export function createRepository(db) {
   }
 
   function createItemWithWorkflowHead(itemInput = {}, workflowPatch = {}, actorEmail = "system@local", metadata = {}) {
+    const legacyWorkflowPatch = Object.prototype.hasOwnProperty.call(itemInput || {}, "workflow_status")
+      ? mapWorkflowStatusToModelStates(itemInput.workflow_status)
+      : {};
     const mergedPatch = {
       publication_state: "draft",
+      ...legacyWorkflowPatch,
       ...workflowPatch,
     };
-    const item = saveItem(
-      withCanonicalWorkflowStatusSeed(itemInput, mergedPatch),
-      actorEmail
-    );
+    const item = saveItem(itemInput, actorEmail);
     const itemId = Number(item?.id || 0) || 0;
     if (!itemId) throw new Error("Failed to create content item");
     const model = createWorkflowHead(itemId, mergedPatch, actorEmail, metadata);
@@ -4370,10 +4318,7 @@ export function createRepository(db) {
     const workflowPatch = options?.workflow_patch && typeof options.workflow_patch === "object"
       ? { ...options.workflow_patch }
       : null;
-    const item = saveItem(
-      workflowPatch ? withCanonicalWorkflowStatusSeed(itemInput, workflowPatch) : itemInput,
-      actorEmail
-    );
+    const item = saveItem(itemInput, actorEmail);
     const itemId = Number(item?.id || 0) || 0;
     if (!itemId) throw new Error("Failed to update content item");
     if (!workflowPatch) {
@@ -4406,8 +4351,12 @@ export function createRepository(db) {
     return listItems().filter((item) => {
       const head = getWorkflowModelByItem(item.id);
       if (!head) return false;
-      const workflowStatus = deriveWorkflowStatusFromModel(head);
-      return normalizedStatuses.has(workflowStatus);
+      const productionState = String(head.production_state || "").trim().toLowerCase();
+      const publicationState = String(head.publication_state || "").trim().toLowerCase();
+      return [...normalizedStatuses].some((status) => {
+        const expected = mapWorkflowStatusToModelStates(status);
+        return expected.production_state === productionState && expected.publication_state === publicationState;
+      });
     });
   }
 
@@ -4496,7 +4445,7 @@ export function createRepository(db) {
     }
 
     const item = db.prepare(`
-      SELECT id, item_uid, type, category, title, workflow_status, claimed_by_user_id, is_deleted
+      SELECT id, item_uid, type, category, title, claimed_by_user_id, is_deleted
       FROM content_items
       WHERE id=?
       LIMIT 1
@@ -4510,7 +4459,6 @@ export function createRepository(db) {
     const addBlocker = (key, count = 0) => blockers.push({ key, count: Number(count || 0) || 0 });
 
     if (Number(item.is_deleted || 0) !== 0) addBlocker("already_deleted");
-    if (String(item.workflow_status || "").trim().toLowerCase() !== "raw") addBlocker("workflow_status_not_raw");
     if (Number(item.claimed_by_user_id || 0) > 0) addBlocker("claimed_item");
 
     if (!workflowModel) {
@@ -4588,7 +4536,6 @@ export function createRepository(db) {
         type: item.type || null,
         category: item.category || null,
         title: item.title || null,
-        workflow_status: item.workflow_status || null,
         claimed_by_user_id: Number(item.claimed_by_user_id || 0) || null,
         is_deleted: Number(item.is_deleted || 0) || 0,
       },
@@ -4620,7 +4567,6 @@ export function createRepository(db) {
           title: eligibility.item.title || null,
           type: eligibility.item.type || null,
           category: eligibility.item.category || null,
-          workflow_status: eligibility.item.workflow_status || null,
         },
         workflow_model: eligibility.workflow_model
           ? {
@@ -4686,7 +4632,6 @@ export function createRepository(db) {
             title: eligibility.item.title || null,
             type: eligibility.item.type || null,
             category: eligibility.item.category || null,
-            workflow_status: eligibility.item.workflow_status || null,
           },
           workflow_model: eligibility.workflow_model
             ? {
@@ -4747,31 +4692,7 @@ export function createRepository(db) {
       WHERE c.is_deleted=0
       ORDER BY q.id DESC
     `);
-    return stmt.all().map((row) => ({
-      ...row,
-      workflow_head_derived_status: deriveWorkflowStatusFromRowStates(row),
-      workflow_head_status_source: "workflow_head",
-    }));
-  }
-
-  function setWorkflowStatus(ids = [], status = "raw") {
-    if (!ids.length) return;
-    const placeholders = ids.map(() => "?").join(",");
-    const stmt = db.prepare(`UPDATE content_items SET workflow_status=?, updated_at=CURRENT_TIMESTAMP WHERE id IN (${placeholders}) AND is_deleted=0`);
-    stmt.run(status, ...ids);
-  }
-
-  function withCanonicalWorkflowStatusSeed(itemInput = {}, workflowPatch = {}) {
-    const payload = itemInput && typeof itemInput === "object" ? { ...itemInput } : {};
-    if (Object.prototype.hasOwnProperty.call(payload, "workflow_status")) {
-      return payload;
-    }
-    const derivedWorkflowStatus = deriveWorkflowStatusSeedFromPatch(workflowPatch);
-    if (!derivedWorkflowStatus) {
-      return payload;
-    }
-    payload.workflow_status = derivedWorkflowStatus;
-    return payload;
+    return stmt.all();
   }
 
   function normalizeStateValue(value, stateGroup) {
@@ -4877,9 +4798,8 @@ export function createRepository(db) {
     );
   }
 
-  function buildWorkflowHeadDefaults(contentItemId, workflowStatus = "raw") {
+  function buildWorkflowHeadDefaults(contentItemId) {
     const itemId = Number(contentItemId || 0);
-    const legacyStates = mapWorkflowStatusToModelStates(workflowStatus || "raw");
     const latestDraft = latestDraftByItemStmt.get(itemId);
     const latestReview = latestReviewByItemStmt.get(itemId);
     const currentFieldPack = getCurrentFieldPackByItemStmt.get(itemId);
@@ -4889,8 +4809,8 @@ export function createRepository(db) {
     const fieldPackCount = Number(countFieldPacksByItemStmt.get(itemId)?.c || 0);
     const transitionCount = Number(countWorkflowTransitionsByItemStmt.get(itemId)?.c || 0);
     return {
-      production_state: legacyStates.production_state,
-      publication_state: legacyStates.publication_state,
+      production_state: "collected",
+      publication_state: "draft",
       place_review_flag: "none",
       current_draft_id: Number(latestDraft?.id || 0) || null,
       current_review_report_id: Number(latestReview?.id || 0) || null,
@@ -4944,25 +4864,6 @@ export function createRepository(db) {
     };
   }
 
-  function reconcileLegacyWorkflowStatusMirror(contentItemId, nextModel, actor = "system@local", metadata = {}) {
-    const itemId = Number(contentItemId || 0) || 0;
-    if (!itemId || !nextModel) return;
-    const item = getItem(itemId);
-    if (!item) return;
-    const currentWorkflowStatus = String(item?.workflow_status || "raw").trim().toLowerCase();
-    const derivedWorkflowStatus = deriveWorkflowStatusFromModel(nextModel);
-    if (currentWorkflowStatus === derivedWorkflowStatus) return;
-    setWorkflowStatus([itemId], derivedWorkflowStatus);
-    const reasonCode = String(metadata?.reason_code || "").trim().toLowerCase() || "workflow_status_reconciled";
-    logAudit(actor, "workflow_status.reconcile", "content_item", String(itemId), {
-      reason_code: reasonCode,
-      source_workflow_status: currentWorkflowStatus || null,
-      derived_workflow_status: derivedWorkflowStatus,
-      production_state: nextModel?.production_state || null,
-      publication_state: nextModel?.publication_state || null,
-    });
-  }
-
   function createWorkflowHead(contentItemId, payload = {}, actor = "system@local", metadata = {}) {
     const id = Number(contentItemId || 0);
     if (!id) throw new Error("contentItemId is required");
@@ -4970,7 +4871,7 @@ export function createRepository(db) {
     if (existing) return normalizeWorkflowModelRow(existing);
     const item = getItem(id);
     if (!item) throw new Error(`content item not found for workflow head: ${id}`);
-    const seed = buildWorkflowHeadDefaults(id, item?.workflow_status || "raw");
+    const seed = buildWorkflowHeadDefaults(id);
     const productionState = normalizeStateValue(payload.production_state || seed.production_state, "production");
     const publicationState = normalizeStateValue(payload.publication_state || seed.publication_state, "publication");
     const placeReviewFlagRaw = payload.place_review_flag ?? seed.place_review_flag ?? "none";
@@ -5009,9 +4910,7 @@ export function createRepository(db) {
     if (placeReviewFlag !== "none") {
       recordWorkflowTransition(id, "place_review_flag", null, placeReviewFlag, actor, actorRole, reasonCode, nextPayload.last_transition_note);
     }
-    const nextModel = normalizeWorkflowModelRow(getWorkflowModelByItemStmt.get(id));
-    reconcileLegacyWorkflowStatusMirror(id, nextModel, actor, { reason_code: reasonCode });
-    return nextModel;
+    return normalizeWorkflowModelRow(getWorkflowModelByItemStmt.get(id));
   }
 
   function ensureWorkflowModel(contentItemId) {
@@ -5105,9 +5004,7 @@ export function createRepository(db) {
     if (placeReviewFlag !== (previous.place_review_flag || "none")) {
       recordWorkflowTransition(id, "place_review_flag", previous.place_review_flag || "none", placeReviewFlag, actor, actorRole, reasonCode, note);
     }
-    const nextModel = normalizeWorkflowModelRow(getWorkflowModelByItemStmt.get(id));
-    reconcileLegacyWorkflowStatusMirror(id, nextModel, actor, { reason_code: reasonCode });
-    return nextModel;
+    return normalizeWorkflowModelRow(getWorkflowModelByItemStmt.get(id));
   }
 
   function getWorkflowModelByItem(contentItemId) {
@@ -5169,33 +5066,22 @@ export function createRepository(db) {
   function getWorkflowStateDriftByItem(contentItemId) {
     const itemId = Number(contentItemId || 0);
     if (!itemId) return null;
-    const item = getItem(itemId);
-    if (!item) return null;
     const model = getWorkflowModelByItem(itemId);
     if (!model) {
       return {
-        source_workflow_status: String(item.workflow_status || "raw").trim().toLowerCase() || "raw",
-        derived_workflow_status: null,
         model_production_state: null,
         model_publication_state: null,
         mismatch_flags: {
-          workflow_status_mismatch: true,
           workflow_head_missing: true,
         },
         has_drift: true,
       };
     }
-    const sourceWorkflowStatus = String(item.workflow_status || "raw").trim().toLowerCase() || "raw";
-    const derivedWorkflowStatus = deriveWorkflowStatusFromModel(model);
-    const mismatch = sourceWorkflowStatus !== derivedWorkflowStatus;
     return {
-      source_workflow_status: sourceWorkflowStatus,
-      derived_workflow_status: derivedWorkflowStatus,
       model_production_state: model?.production_state || null,
       model_publication_state: model?.publication_state || null,
-      mismatch_flags: {
-        workflow_status_mismatch: mismatch,
-      },
+      mismatch_flags: {},
+      has_drift: false,
     };
   }
 
@@ -9590,11 +9476,7 @@ export function createRepository(db) {
       ? `SELECT d.*, c.title AS item_title, wm.production_state, wm.publication_state FROM content_drafts d JOIN content_items c ON c.id=d.content_item_id LEFT JOIN content_workflow_models wm ON wm.content_item_id=c.id WHERE d.status=? ORDER BY d.id DESC`
       : `SELECT d.*, c.title AS item_title, wm.production_state, wm.publication_state FROM content_drafts d JOIN content_items c ON c.id=d.content_item_id LEFT JOIN content_workflow_models wm ON wm.content_item_id=c.id ORDER BY d.id DESC`;
     const rows = status ? db.prepare(sql).all(status) : db.prepare(sql).all();
-    return rows.map((row) => ({
-      ...normalizeContentDraftRow(row),
-      workflow_head_derived_status: deriveWorkflowStatusFromRowStates(row),
-      workflow_head_status_source: "workflow_head",
-    }));
+    return rows.map((row) => normalizeContentDraftRow(row));
   }
 
   function addReviewReport(contentItemId, draftId, report) {
@@ -10203,9 +10085,13 @@ export function createRepository(db) {
 
   function saveItemWithFieldPack(itemInput = {}, fieldPackInput = {}, actorEmail = "system@local") {
     return runInTransaction(db, () => {
-      const workflowPatch = { publication_state: "draft" };
-      const itemInputWithWorkflowSeed = withCanonicalWorkflowStatusSeed(itemInput, workflowPatch);
-      const itemData = normalizeInput(itemInputWithWorkflowSeed);
+      const workflowPatch = {
+        publication_state: "draft",
+        ...(Object.prototype.hasOwnProperty.call(itemInput || {}, "workflow_status")
+          ? mapWorkflowStatusToModelStates(itemInput.workflow_status)
+          : {}),
+      };
+      const itemData = normalizeInput(itemInput);
       const isNewItem = !(Number(itemData.id || 0) > 0);
       const savedItem = saveItemInternal(itemData, actorEmail);
       let fieldPack = null;
@@ -10252,8 +10138,6 @@ export function createRepository(db) {
 
     return rows.map((row) => ({
       ...row,
-      workflow_head_derived_status: deriveWorkflowStatusFromRowStates(row),
-      workflow_head_status_source: "workflow_head",
       issues: parseJson(row.issues_json, []),
       report: parseJson(row.report_json, null),
     }));
@@ -12730,7 +12614,6 @@ export function createRepository(db) {
     hardDeleteRawOnlyItem,
     bulkDeleteItems,
     updateItemsCategory,
-    setWorkflowStatus,
     ensureWorkflowModel,
     upsertWorkflowModel,
     getWorkflowHeadByItem,

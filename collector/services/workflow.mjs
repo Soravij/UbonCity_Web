@@ -2327,7 +2327,8 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
     traceAiDraft("item.start", {
       item_id: Number(item?.id || 0) || null,
       title: String(item?.title || "").trim() || null,
-      workflow_status: String(item?.workflow_status || "").trim().toLowerCase() || null,
+      production_state: String(item?.production_state || "").trim().toLowerCase() || null,
+      publication_state: String(item?.publication_state || "").trim().toLowerCase() || null,
       visual_image_count: Array.isArray(item?.visual_image_urls) ? item.visual_image_urls.length : 0,
     });
 

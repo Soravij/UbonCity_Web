@@ -46,8 +46,8 @@ function createFixtureItem(db, {
   const itemResult = db.prepare(`
     INSERT INTO content_items (
       item_uid, type, category, lang, title, normalized_title, slug, summary,
-      description_raw, description_clean, meta_title, meta_description, workflow_status
-    ) VALUES (?, ?, 'attractions', 'th', ?, ?, ?, ?, ?, ?, ?, ?, 'generated')
+      description_raw, description_clean, meta_title, meta_description
+    ) VALUES (?, ?, 'attractions', 'th', ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     uid,
     type,

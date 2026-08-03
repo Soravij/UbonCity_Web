@@ -78,7 +78,7 @@ async function main() {
   console.log(`   title:       ${String(item.title || "").trim() || "(no title)"}`);
   console.log(`   type:        ${String(item.type || "").trim() || "-"}`);
   console.log(`   category:    ${String(item.category || "").trim() || "-"}`);
-  console.log(`   status:      ${String(item.workflow_status || item.production_state || "").trim() || "-"}`);
+  console.log(`   status:      ${String(item.production_state || "").trim() || "-"}`);
 
   // 3. load structured_context (approved_context + evidence_blocks + image_context)
   console.log(`\n[3/5] Loading structured context...`);

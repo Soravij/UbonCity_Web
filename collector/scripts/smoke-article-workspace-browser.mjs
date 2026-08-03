@@ -223,8 +223,8 @@ async function transitionArticle(token, itemId, status, note = "") {
   return result.payload;
 }
 
-async function waitForItemWorkflowStatus(token, itemId, expectedStatus, timeoutMs = 30000) {
-  const expected = String(expectedStatus || "").trim().toLowerCase();
+async function waitForItemProductionState(token, itemId, expectedState, timeoutMs = 30000) {
+  const expected = String(expectedState || "").trim().toLowerCase();
   const startedAt = Date.now();
   let lastPayload = null;
   while (Date.now() - startedAt < timeoutMs) {
@@ -233,12 +233,12 @@ async function waitForItemWorkflowStatus(token, itemId, expectedStatus, timeoutM
       throw new Error(`item fetch failed while waiting for ${expected}: ${JSON.stringify(result.payload)}`);
     }
     lastPayload = result.payload || null;
-    if (String(lastPayload?.workflow_status || "").trim().toLowerCase() === expected) {
+    if (String(lastPayload?.production_state || "").trim().toLowerCase() === expectedState) {
       return lastPayload;
     }
     await delay(500);
   }
-  throw new Error(`item workflow_status timeout for ${expected}: ${JSON.stringify(lastPayload)}`);
+  throw new Error(`item production_state timeout for ${expectedState}: ${JSON.stringify(lastPayload)}`);
 }
 
 async function waitForArticleProcessStatus(token, itemId, expectedStatus, timeoutMs = 30000) {
@@ -770,7 +770,7 @@ async function main() {
       })()`).catch(() => null);
       throw new Error(`workspace submit review did not redirect: ${String(err?.message || err)} snapshot=${JSON.stringify(submitSnapshot)}`);
     }
-    await waitForItemWorkflowStatus(adminLogin.token, itemId, "in_review", 20000);
+    await waitForItemProductionState(adminLogin.token, itemId, "in_review", 20000);
 
     await openReviewAs(cdp, adminLogin.token, itemId);
     await waitForCondition(cdp, 'Boolean(document.getElementById("btn-generate-translations")) && Boolean(document.getElementById("btn-approve-sync"))', 15000);
@@ -828,7 +828,7 @@ async function main() {
 
     const finalItem = await requestJson(`/api/items/${itemId}`, { token: adminLogin.token });
     assert(finalItem.response.ok, `final item fetch failed: ${JSON.stringify(finalItem.payload)}`);
-    assert(String(finalItem.payload?.workflow_status || "").trim().toLowerCase() === "approved", `final workflow_status should remain approved after admin-review submit: ${JSON.stringify(finalItem.payload)}`);
+    assert(String(finalItem.payload?.publication_state || "").trim().toLowerCase() === "approved", `final publication_state should remain approved after admin-review submit: ${JSON.stringify(finalItem.payload)}`);
     assert(String(finalItem.payload?.production_state || "").trim().toLowerCase() === "submitted_for_admin_review", `final production_state should be submitted_for_admin_review: ${JSON.stringify(finalItem.payload)}`);
 
     await waitForCondition(cdp, 'String(document.getElementById("translation-summary")?.textContent || "").length > 0', 10000);

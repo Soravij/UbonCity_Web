@@ -2888,7 +2888,7 @@ function renderCleanupConfirmRequiredCell(row) {
 
 // ---- Data Cleanup: "งานค้างระหว่างทาง" (in-flight items) --------------------------------------
 // Read-only view of items that left raw intake but have not finished. Sourced from
-// GET /api/items?in_flight=1 (canonical workflow states, not the legacy workflow_status column).
+// GET /api/items?in_flight=1 is filtered by canonical workflow-head states.
 // Items here may also appear in the raw queue tables — that overlap is intended; this table exists so
 // the owner has one place that answers "what is stuck, and for how long". The only write it can drive
 // is the pre-existing DELETE /api/items/:id. No purge button: purge stays on the soft-deleted table.
@@ -3139,13 +3139,14 @@ function renderDataCleanupPanel() {
       const blockerText = blocking.length
         ? blocking.map((entry) => `${entry.label} (${Number(entry.count || 0) || 0})`).join(" | ")
         : "-";
-      const legacyWorkflowStatus = String(row?.legacy_workflow_status || "").trim();
+      const productionState = String(row?.production_state || "").trim();
+      const publicationState = String(row?.publication_state || "").trim();
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${itemId || "-"}</td>
         <td>${escapeHtml(String(row?.title || "").trim() || "-")}</td>
         <td>${escapeHtml(String(row?.category || "").trim() || "-")}</td>
-        <td>${escapeHtml(legacyWorkflowStatus ? `legacy:${legacyWorkflowStatus}` : "-")}</td>
+        <td>${escapeHtml([productionState, publicationState].filter(Boolean).join(" / ") || "-")}</td>
         <td>
           <div>${escapeHtml(blockerText)}</div>
           ${renderCleanupConfirmRequiredCell(row)}

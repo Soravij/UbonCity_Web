@@ -731,7 +731,8 @@ function createExternalAgentGenerationEngine(aiConfig) {
         kind: "external_field_pack",
         content_item_id: Number(item?.id || 0) || null,
         title: String(item?.title || "").trim() || null,
-        workflow_status: String(item?.workflow_status || "").trim().toLowerCase() || null,
+        production_state: String(item?.production_state || "").trim().toLowerCase() || null,
+        publication_state: String(item?.publication_state || "").trim().toLowerCase() || null,
       });
 
       if (!response.ok) {
@@ -764,7 +765,8 @@ function createExternalAgentGenerationEngine(aiConfig) {
         kind: "external_field_pack_revision",
         content_item_id: Number(item?.id || 0) || null,
         title: String(item?.title || "").trim() || null,
-        workflow_status: String(item?.workflow_status || "").trim().toLowerCase() || null,
+        production_state: String(item?.production_state || "").trim().toLowerCase() || null,
+        publication_state: String(item?.publication_state || "").trim().toLowerCase() || null,
       });
 
       if (!response.ok) {

@@ -79,8 +79,14 @@ test("place review flag migration converts a traceable legacy revision and rever
 
   runMigration(dbPath);
   db = new DatabaseSync(dbPath);
-  let head = db.prepare("SELECT production_state, place_review_flag FROM content_workflow_models WHERE content_item_id=?").get(item.id);
-  assert.deepEqual({ ...head }, { production_state: "analyzed", place_review_flag: "revision_requested" });
+  let head = db.prepare("SELECT production_state, place_review_flag, last_actor_email, last_transition_note, updated_by FROM content_workflow_models WHERE content_item_id=?").get(item.id);
+  assert.deepEqual({ ...head }, {
+    production_state: "analyzed",
+    place_review_flag: "revision_requested",
+    last_actor_email: "system@local",
+    last_transition_note: "place review flag schema migration",
+    updated_by: "system@local",
+  });
   assertWorkflowModelSchemaPreserved(db, true);
   const transitions = db.prepare("SELECT state_group, from_state, to_state FROM content_workflow_transitions WHERE content_item_id=? ORDER BY id DESC").all(item.id);
   assert.ok(transitions.some((row) => row.state_group === "place_review_flag" && row.from_state === "none" && row.to_state === "revision_requested"));

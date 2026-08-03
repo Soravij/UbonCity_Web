@@ -26,9 +26,9 @@ function createFixture(db) {
   const title = "Smoke AI Input Cleanup";
   const itemResult = db.prepare(`
     INSERT INTO content_items (
-      item_uid, type, category, lang, title, normalized_title, slug, description_raw, description_clean, summary, workflow_status, is_deleted
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-  `).run(uid, "place", "attractions", "th", title, title.toLowerCase(), slug, "smoke fixture", "smoke fixture", "smoke fixture", "cleaned");
+      item_uid, type, category, lang, title, normalized_title, slug, description_raw, description_clean, summary, is_deleted
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+  `).run(uid, "place", "attractions", "th", title, title.toLowerCase(), slug, "smoke fixture", "smoke fixture", "smoke fixture");
   const itemId = Number(itemResult.lastInsertRowid || 0) || 0;
   assert(itemId > 0, "failed to create item fixture");
 

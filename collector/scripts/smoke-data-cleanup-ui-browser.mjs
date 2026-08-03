@@ -165,9 +165,9 @@ function createDeletedItem(db, { titleSuffix, withSourceRecord = false, withFiel
   const slug = `smoke-cleanup-ui-${titleSuffix.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
   const itemResult = db.prepare(`
     INSERT INTO content_items (
-      item_uid, type, category, lang, title, normalized_title, slug, description_raw, workflow_status, is_deleted
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-  `).run(uid, "place", "attraction", "th", title, title.toLowerCase(), slug, "smoke cleanup ui fixture", "raw");
+      item_uid, type, category, lang, title, normalized_title, slug, description_raw, is_deleted
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+  `).run(uid, "place", "attraction", "th", title, title.toLowerCase(), slug, "smoke cleanup ui fixture");
   const itemId = Number(itemResult.lastInsertRowid || 0) || 0;
   assert(itemId > 0, `failed to create deleted item for ${titleSuffix}`);
 
