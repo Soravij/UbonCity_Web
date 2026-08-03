@@ -2017,9 +2017,28 @@ async function runAiDraftFromApprovedContext(saveCurrentItem) {
   }, 350);
 }
 
-function getPreviousStepUrl() {
-  if (isCleanMode) return "/?tab=raw";
-  return "/clean-item.html?id=" + state.itemId;
+function buildCleanCrawlMergeUrl(itemId) {
+  const id = Number(itemId || 0) || 0;
+  if (!id) return "/?tab=raw";
+  return `/?tab=raw&crawl_merge_item_id=${encodeURIComponent(String(id))}`;
+}
+
+function renderCleanCrawlMergeShortcut() {
+  if (!isCleanMode || !isAdminUser() || !state.itemId) return;
+  if (qs("btn-clean-crawl-merge")) return;
+
+  const backBtn = qs("btn-back");
+  if (!backBtn) return;
+
+  const button = document.createElement("button");
+  button.id = "btn-clean-crawl-merge";
+  button.type = "button";
+  button.className = "utility-action";
+  button.textContent = "Crawl ข้อมูลเพิ่มเข้า item นี้";
+  button.addEventListener("click", () => {
+    window.location.assign(buildCleanCrawlMergeUrl(state.itemId));
+  });
+  backBtn.insertAdjacentElement("afterend", button);
 }
 
 function updateSelectedFileSummary() {
@@ -5578,15 +5597,11 @@ function wire() {
     renderEvidenceTable();
   });
 
-  const prevStepBtn = qs("btn-prev-step");
-  if (prevStepBtn) prevStepBtn.textContent = isCleanMode ? "กลับไปขั้นก่อนหน้า (Clean)" : "กลับไปขั้นก่อนหน้า";
   const backBtn = qs("btn-back");
   if (backBtn) backBtn.textContent = "กลับ";
+  renderCleanCrawlMergeShortcut();
   const nextAiBtn = qs("btn-next-ai");
   if (nextAiBtn) nextAiBtn.textContent = "ถัดไป: ส่งเข้า Agent";
-  qs("btn-prev-step")?.addEventListener("click", () => {
-    window.location.href = getPreviousStepUrl();
-  });
 
   qs("btn-back")?.addEventListener("click", async () => {
     const targetUrl = await getBackNavigationUrl();
