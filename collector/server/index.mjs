@@ -1338,6 +1338,7 @@ function attachItemMatchFields(items = [], options = {}) {
       current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
       workflow_state_version: Number(workflow?.state_version || 0) || 0,
       workflow_content_version: Number(workflow?.content_version || 0) || 0,
+      has_active_approved_context: repo.hasActiveApprovedContext(itemId),
       match_phone: matchPhone || null,
       interestingness: scorePlaceInterestingness({
         ...item,

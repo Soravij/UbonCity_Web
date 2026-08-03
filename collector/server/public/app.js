@@ -232,7 +232,6 @@ const state = {
     rawReviewCollapsed: false,
     rawSort: "interestingness",
     rawStageFilter: "all",
-    rawIntakeFilter: "all",
     rawReviewFilter: "all",
     rawSelectedIds: new Set(),
     rawMergeOpen: false,
@@ -5097,12 +5096,6 @@ function normalizeDashboardWorkflowStage(workflowInput) {
   return "raw";
 }
 
-const RAW_INTAKE_FILTERS = Object.freeze([
-  Object.freeze({ value: "all", label: "ทั้งหมด" }),
-  Object.freeze({ value: "raw", label: "รอคัดเข้า AI" }),
-  Object.freeze({ value: "cleaned", label: "กำลังคัดข้อมูล" }),
-]);
-
 const RAW_REVIEW_FILTERS = Object.freeze([
   Object.freeze({ value: "all", label: "ทั้งหมด" }),
   Object.freeze({ value: "review", label: "รอตรวจชุดสั่งงาน" }),
@@ -5117,17 +5110,21 @@ function getPreparationQueueItems(items = state.items) {
   });
 }
 
-function buildRawIntakeFilterHtml(items = []) {
-  const counts = {
-    all: items.length,
-    raw: items.filter((item) => isRawPreparationItem(item)).length,
-    cleaned: items.filter((item) => !isRawPreparationItem(item)).length,
-  };
-  return RAW_INTAKE_FILTERS.map((filter) => {
-    const active = String(state.dashboard.rawIntakeFilter || "all").trim().toLowerCase() === filter.value;
-    const count = Number(counts[filter.value] || 0);
-    return `<button type="button" class="raw-stage-filter${active ? " is-active" : ""}" data-intake-filter="${escapeHtml(filter.value)}">${escapeHtml(filter.label)} <span>${count}</span></button>`;
-  }).join("");
+// This splitter is intentionally local to the Raw Intake panel. It must not reuse workflow bucket
+// routing: a system can advance production_state without a person performing Clean work.
+function splitRawIntakeAndCleanPrep(items = []) {
+  const rawIntake = [];
+  const cleanPrep = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    const claimed = Number(item?.claimed_by_user_id || 0) > 0;
+    const hasActiveApprovedContext = item?.has_active_approved_context === true;
+    if (claimed && hasActiveApprovedContext) {
+      cleanPrep.push(item);
+    } else {
+      rawIntake.push(item);
+    }
+  }
+  return { rawIntake, cleanPrep };
 }
 
 function buildRawReviewFilterHtml(items = []) {
@@ -5190,6 +5187,7 @@ function splitRawQueueByFieldPack(items = []) {
 }
 
 function buildRawQueueStatusLabel(item, queueType) {
+  if (queueType === "clean_prep") return "กำลังทำ Clean";
   const anomaly = getUnknownWorkflowState(item);
   if (anomaly) return `⚠ สถานะผิดปกติ: ${anomaly.state}`;
   const bucket = resolveQueueBucket(item);
@@ -5200,6 +5198,7 @@ function buildRawQueueStatusLabel(item, queueType) {
 }
 
 function buildRawQueueStatusBadgeClass(item, queueType) {
+  if (queueType === "clean_prep") return "workflow-badge-cleaned";
   if (getUnknownWorkflowState(item)) return "workflow-badge-raw";
   const bucket = resolveQueueBucket(item);
   if (queueType === "review") {
@@ -5263,6 +5262,8 @@ function renderRawQueueTable({
       ? "ตรวจสถานะผิดปกติ"
       : queueType === "review"
       ? (readyForHandoff ? "พร้อมส่งต่อ" : "ตรวจชุดสั่งงาน")
+      : queueType === "clean_prep"
+      ? "ทำ Clean ต่อ"
       : "คัดข้อมูล";
 
     tr.dataset.itemId = String(id);
@@ -5278,10 +5279,9 @@ function renderRawQueueTable({
       </td>
       ${showInterestingness ? `
       <td>
-        ${isRawRow ? `
         <div class="raw-interest-wrap" title="${escapeHtml(interestingnessReasons.join(" | "))}">
           <span class="intake-badge ${interestingnessBadgeClass(interestingness.label)}">${escapeHtml((interestingness.label || "ข้อมูลยังบาง") + " #" + Number(interestingness.score || 0))}</span>
-        </div>` : ""}
+        </div>
       </td>` : ""}
       <td><span class="workflow-badge ${escapeHtml(statusBadgeClass)}">${escapeHtml(statusLabel)}</span></td>
       <td>${formatPreparationClaimBadge(item)}</td>
@@ -5687,21 +5687,10 @@ async function annotateRawTableBlockers() {
 function renderRawTable(items) {
   const tableWrap = qs("raw-table-wrap");
   if (!tableWrap) return;
-  const legacyFilterRoot = qs("raw-stage-filters");
-  if (legacyFilterRoot) {
-    legacyFilterRoot.innerHTML = "";
-    legacyFilterRoot.classList.add("hidden");
-  }
   const list = sortRawItems(getPreparationQueueItems(items));
-  const split = splitRawQueueByFieldPack(list);
+  const split = splitRawIntakeAndCleanPrep(list);
+  const workflowSplit = splitRawQueueByFieldPack(list);
   const canManage = canManageBulkContentItems();
-  const requestedIntakeFilter = String(state.dashboard.rawIntakeFilter || "all").trim().toLowerCase() || "all";
-  const activeIntakeFilter = RAW_INTAKE_FILTERS.some((filter) => filter.value === requestedIntakeFilter)
-    ? requestedIntakeFilter
-    : "all";
-  if (activeIntakeFilter !== requestedIntakeFilter) {
-    state.dashboard.rawIntakeFilter = activeIntakeFilter;
-  }
   const requestedReviewFilter = String(state.dashboard.rawReviewFilter || "all").trim().toLowerCase() || "all";
   const activeReviewFilter = RAW_REVIEW_FILTERS.some((filter) => filter.value === requestedReviewFilter)
     ? requestedReviewFilter
@@ -5709,36 +5698,36 @@ function renderRawTable(items) {
   if (activeReviewFilter !== requestedReviewFilter) {
     state.dashboard.rawReviewFilter = activeReviewFilter;
   }
-
-  const filteredIntake = activeIntakeFilter === "all"
-    ? split.intake
-    : split.intake.filter((item) => {
-      const isRaw = isRawPreparationItem(item);
-      if (activeIntakeFilter === "raw") return isRaw;
-      if (activeIntakeFilter === "cleaned") return !isRaw;
-      return true;
-    });
   const filteredReview = activeReviewFilter === "all"
-    ? split.review
-    : split.review.filter((item) => {
+    ? workflowSplit.review
+    : workflowSplit.review.filter((item) => {
       const readyForHandoff = isHandoffEligibleItem(item);
       if (activeReviewFilter === "review") return !readyForHandoff;
       if (activeReviewFilter === "handoff") return readyForHandoff;
       return true;
     });
-  const visibleIntake = state.dashboard.rawShowAll ? filteredIntake : filteredIntake.slice(0, state.dashboard.rawLimit);
-  const visibleReview = filteredReview;
-  pruneRawSelection(filteredIntake);
+  const visibleRawIntake = state.dashboard.rawShowAll ? split.rawIntake : split.rawIntake.slice(0, state.dashboard.rawLimit);
+  pruneRawSelection(split.rawIntake);
 
   tableWrap.innerHTML = `
     <div class="card">
       <div class="toolbar compact-toolbar">
-        <h3 class="section-title" style="margin:0;">Raw Intake / Clean Prep</h3>
+        <h3 class="section-title" style="margin:0;">Raw Intake</h3>
         <button id="btn-toggle-raw-intake" type="button">${state.dashboard.rawIntakeCollapsed ? "แสดงตาราง" : "ซ่อนตาราง"}</button>
       </div>
-      <div class="toolbar compact-toolbar">${buildRawIntakeFilterHtml(split.intake)}</div>
       <div class="table-wrap${state.dashboard.rawIntakeCollapsed ? " hidden" : ""}" id="raw-intake-table-wrap">
         <table id="table-raw-intake">
+          <thead><tr></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <div class="toolbar compact-toolbar">
+        <h3 class="section-title" style="margin:0;">Clean Prep</h3>
+      </div>
+      <div class="table-wrap" id="clean-prep-table-wrap">
+        <table id="table-clean-prep">
           <thead><tr></tr></thead>
           <tbody></tbody>
         </table>
@@ -5749,7 +5738,7 @@ function renderRawTable(items) {
         <h3 class="section-title" style="margin:0;">Field Pack Review</h3>
         <button id="btn-toggle-raw-review" type="button">${state.dashboard.rawReviewCollapsed ? "แสดงตาราง" : "ซ่อนตาราง"}</button>
       </div>
-      <div class="toolbar compact-toolbar">${buildRawReviewFilterHtml(split.review)}</div>
+      <div class="toolbar compact-toolbar">${buildRawReviewFilterHtml(workflowSplit.review)}</div>
       <div class="table-wrap${state.dashboard.rawReviewCollapsed ? " hidden" : ""}" id="raw-review-table-wrap">
         <table id="table-raw-review">
           <thead><tr></tr></thead>
@@ -5772,15 +5761,23 @@ function renderRawTable(items) {
 
   renderRawQueueTable({
     tableId: "table-raw-intake",
-    items: visibleIntake,
+    items: visibleRawIntake,
     canManage,
     showInterestingness: true,
     queueType: "intake",
-    emptyText: "ยังไม่มีรายการในช่วงคัดข้อมูล",
+    emptyText: "ยังไม่มีรายการรอเริ่ม Clean",
+  });
+  renderRawQueueTable({
+    tableId: "table-clean-prep",
+    items: split.cleanPrep,
+    canManage,
+    showInterestingness: false,
+    queueType: "clean_prep",
+    emptyText: "ยังไม่มีรายการที่กำลังทำ Clean",
   });
   renderRawQueueTable({
     tableId: "table-raw-review",
-    items: visibleReview,
+    items: filteredReview,
     canManage,
     showInterestingness: false,
     queueType: "review",
@@ -5788,7 +5785,7 @@ function renderRawTable(items) {
   });
   renderRawQueueTable({
     tableId: "table-raw-workflow-unknown",
-    items: split.unknown,
+    items: workflowSplit.unknown,
     canManage,
     showInterestingness: false,
     queueType: "unknown",
@@ -5797,16 +5794,16 @@ function renderRawTable(items) {
 
   const summaryNode = qs("raw-summary");
   if (summaryNode) {
-    const suffix = state.dashboard.rawShowAll || filteredIntake.length <= state.dashboard.rawLimit
+    const suffix = state.dashboard.rawShowAll || split.rawIntake.length <= state.dashboard.rawLimit
       ? ""
-      : ` | กำลังแสดง intake ${visibleIntake.length}/${filteredIntake.length}`;
+      : ` | กำลังแสดง raw ${visibleRawIntake.length}/${split.rawIntake.length}`;
     const loadedCount = Array.isArray(state.items) ? state.items.length : 0;
-    summaryNode.textContent = `loaded=${loadedCount} | intake=${filteredIntake.length} | review=${filteredReview.length} | unknown=${split.unknown.length}${suffix}`;
+    summaryNode.textContent = `loaded=${loadedCount} | raw intake=${split.rawIntake.length} | clean prep=${split.cleanPrep.length} | review=${filteredReview.length} | unknown=${workflowSplit.unknown.length}${suffix}`;
   }
 
   const showAllBtn = qs("btn-show-all-raw");
   if (showAllBtn) {
-    const canExpand = filteredIntake.length > state.dashboard.rawLimit;
+    const canExpand = split.rawIntake.length > state.dashboard.rawLimit;
     showAllBtn.classList.toggle("hidden", !canExpand);
     showAllBtn.textContent = state.dashboard.rawShowAll ? "แสดงเฉพาะล่าสุด" : "แสดงทั้งหมด";
   }
@@ -5831,20 +5828,20 @@ function renderRawTable(items) {
     };
   }
 
-  renderRawBulkToolbar(filteredIntake);
+  renderRawBulkToolbar(split.rawIntake);
 
   const selectAll = qs("raw-select-all");
   const syncIntakeSelectionUi = () => {
-    const selectableIds = visibleIntake.map((item) => Number(item?.id || 0)).filter(Boolean);
+    const selectableIds = visibleRawIntake.map((item) => Number(item?.id || 0)).filter(Boolean);
     const selectedIds = getRawSelectedIds();
     if (selectAll) {
       selectAll.checked = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
       selectAll.indeterminate = selectableIds.some((id) => selectedIds.has(id)) && !selectAll.checked;
     }
-    renderRawBulkToolbar(filteredIntake);
+    renderRawBulkToolbar(split.rawIntake);
   };
   if (selectAll) {
-    const selectableIds = visibleIntake.map((item) => Number(item?.id || 0)).filter(Boolean);
+    const selectableIds = visibleRawIntake.map((item) => Number(item?.id || 0)).filter(Boolean);
     const selectedIds = getRawSelectedIds();
     syncIntakeSelectionUi();
     selectAll.onchange = (event) => {
@@ -10674,15 +10671,6 @@ function wireRawTableControls() {
   });
 
   qs("raw-table-wrap")?.addEventListener("click", (event) => {
-    const intakeBtn = event.target.closest("button[data-intake-filter]");
-    if (intakeBtn) {
-      const nextFilter = String(intakeBtn.dataset.intakeFilter || "all").trim().toLowerCase() || "all";
-      if (state.dashboard.rawIntakeFilter !== nextFilter) {
-        state.dashboard.rawIntakeFilter = nextFilter;
-        renderRawTable(state.items);
-      }
-      return;
-    }
     const reviewBtn = event.target.closest("button[data-review-filter]");
     if (reviewBtn) {
       const nextFilter = String(reviewBtn.dataset.reviewFilter || "all").trim().toLowerCase() || "all";
