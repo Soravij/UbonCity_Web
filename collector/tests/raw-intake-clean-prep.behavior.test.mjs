@@ -81,6 +81,11 @@ function loadRawIntakeHooks() {
   };
   const renderedTables = [];
   const nodes = new Map();
+  const actionBodies = new Map([
+    ["#table-raw-intake tbody", {}],
+    ["#table-clean-prep tbody", {}],
+    ["#table-raw-review tbody", {}],
+  ]);
   const tableWrap = {
     html: "",
     set innerHTML(value) { this.html = value; },
@@ -123,12 +128,24 @@ function loadRawIntakeHooks() {
     renderRawBulkToolbar,
     () => new Set(),
     () => {},
-    { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] }
+    {
+      getElementById: () => null,
+      querySelector: (selector) => actionBodies.get(selector) || null,
+      querySelectorAll: () => [],
+    }
   );
-  return { ...hooks, renderedTables, tableWrap };
+  return { ...hooks, renderedTables, tableWrap, actionBodies };
 }
 
-function renderQueueTableForTest({ item, showInterestingness, queueType }) {
+function renderQueueTableForTest({
+  item,
+  showInterestingness,
+  queueType,
+  canManage = false,
+  canClaim = false,
+  canRelease = false,
+  canTakeOver = false,
+}) {
   const head = { innerHTML: "" };
   const rows = [];
   const tbody = { innerHTML: "", appendChild: (row) => rows.push(row) };
@@ -162,12 +179,12 @@ function renderQueueTableForTest({ item, showInterestingness, queueType }) {
     () => "",
     () => "priority-good",
     () => "<div>claim detail</div>",
-    () => false,
-    () => false,
-    () => false,
+    () => canClaim,
+    () => canRelease,
+    () => canTakeOver,
     { createElement: () => ({ innerHTML: "", dataset: {}, className: "" }) }
   );
-  render({ tableId: "table", items: [item], showInterestingness, queueType });
+  render({ tableId: "table", items: [item], canManage, showInterestingness, queueType });
   return { head: head.innerHTML, row: rows[0]?.innerHTML || "" };
 }
 
@@ -214,6 +231,42 @@ test("Raw Intake / Clean Prep splitter is exhaustive and its real renderer keeps
   assert.match(cleanRow.head, /สถานะ/, "Clean Prep retains its status column");
   assert.doesNotMatch(cleanRow.head, /น่าสนใจ/);
   assert.doesNotMatch(cleanRow.row, /#55/, "a Clean Prep item does not render an interest score");
+});
+
+test("Raw Intake and Clean Prep action buttons retain handler attributes and delegated containers", () => {
+  const hooks = loadRawIntakeHooks();
+  const item = { id: 77, test_bucket: "raw_prep", claimed_by_user_id: 33, cleaned_at: "2026-08-04 10:00:00" };
+
+  hooks.renderRawTable([item]);
+  const rawActions = renderQueueTableForTest({
+    item,
+    showInterestingness: true,
+    queueType: "intake",
+    canManage: true,
+    canClaim: true,
+    canRelease: true,
+    canTakeOver: true,
+  }).row;
+  const cleanPrepActions = renderQueueTableForTest({
+    item,
+    showInterestingness: false,
+    queueType: "clean_prep",
+    canManage: true,
+    canRelease: true,
+  }).row;
+
+  assert.match(rawActions, /data-action="open-state-entry" data-id="77" data-url="[^"]+">คัดข้อมูล<\//);
+  assert.match(rawActions, /data-action="claim-item" data-id="77">รับงานนี้<\//);
+  assert.match(rawActions, /data-action="release-item" data-id="77"[^>]*>ปล่อยงาน<\//);
+  assert.match(rawActions, /data-action="delete" data-id="77"[^>]*>ลบ<\//);
+  assert.match(cleanPrepActions, /data-action="open-state-entry" data-id="77" data-url="[^"]+">ทำ Clean ต่อ<\//);
+  assert.match(cleanPrepActions, /data-action="release-item" data-id="77"[^>]*>ปล่อยงาน<\//);
+  assert.match(cleanPrepActions, /data-action="delete" data-id="77"[^>]*>ลบ<\//);
+
+  const rawHandler = hooks.actionBodies.get("#table-raw-intake tbody").onclick;
+  const cleanPrepHandler = hooks.actionBodies.get("#table-clean-prep tbody").onclick;
+  assert.equal(typeof rawHandler, "function", "Raw Intake actions have their delegated handler");
+  assert.equal(cleanPrepHandler, rawHandler, "Clean Prep actions use the same delegated handler as Raw Intake");
 });
 
 test("cleaned_at is set only by the user clean marker and not by runCleanStage", async () => {
