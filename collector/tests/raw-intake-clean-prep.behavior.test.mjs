@@ -1,14 +1,40 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import jwt from "jsonwebtoken";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
+import { runCleanStage } from "../services/workflow.mjs";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const appSource = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.js"), "utf8");
+
+async function reservePort() {
+  const probe = net.createServer();
+  probe.listen(0, "127.0.0.1");
+  await once(probe, "listening");
+  const port = Number(probe.address()?.port || 0);
+  await new Promise((resolve) => probe.close(resolve));
+  return port;
+}
+
+async function waitForCollector(baseUrl, child) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (child.exitCode != null) throw new Error(`collector server exited early with ${child.exitCode}`);
+    try {
+      const response = await fetch(`${baseUrl}/api/health`);
+      if (response.ok) return;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("collector server did not become ready");
+}
 
 function extractFunction(name) {
   const start = appSource.indexOf(`function ${name}(`);
@@ -148,11 +174,11 @@ function renderQueueTableForTest({ item, showInterestingness, queueType }) {
 test("Raw Intake / Clean Prep splitter is exhaustive and its real renderer keeps score and chip contracts", () => {
   const hooks = loadRawIntakeHooks();
   const items = [
-    { id: 1, test_bucket: "raw_prep", claimed_by_user_id: null, has_active_approved_context: false, interestingness: { score: 91 } },
-    { id: 2, test_bucket: "raw_prep", claimed_by_user_id: 22, has_active_approved_context: false, interestingness: { score: 72 } },
-    { id: 3, test_bucket: "raw_prep", claimed_by_user_id: 33, has_active_approved_context: true, interestingness: { score: 55 } },
-    { id: 4, test_bucket: "field_pack_review", claimed_by_user_id: null, has_active_approved_context: false, interestingness: { score: 41 } },
-    { id: 5, test_bucket: "unknown_workflow", claimed_by_user_id: null, has_active_approved_context: false, interestingness: { score: 18 } },
+    { id: 1, test_bucket: "raw_prep", claimed_by_user_id: null, cleaned_at: null, interestingness: { score: 91 } },
+    { id: 2, test_bucket: "raw_prep", claimed_by_user_id: 22, cleaned_at: null, interestingness: { score: 72 } },
+    { id: 3, test_bucket: "raw_prep", claimed_by_user_id: 33, cleaned_at: "2026-08-04 10:00:00", interestingness: { score: 55 } },
+    { id: 4, test_bucket: "field_pack_review", claimed_by_user_id: null, cleaned_at: null, interestingness: { score: 41 } },
+    { id: 5, test_bucket: "unknown_workflow", claimed_by_user_id: null, cleaned_at: null, interestingness: { score: 18 } },
   ];
 
   const buckets = hooks.splitRawQueueByFieldPack(items);
@@ -181,35 +207,121 @@ test("Raw Intake / Clean Prep splitter is exhaustive and its real renderer keeps
 
   const rawRow = renderQueueTableForTest({ item: items[0], showInterestingness: true, queueType: "intake" });
   assert.match(rawRow.head, /น่าสนใจ/);
+  assert.doesNotMatch(rawRow.head, /สถานะ/, "Raw Intake has no status column");
+  assert.equal((rawRow.head.match(/<th/g) || []).length, (rawRow.row.match(/<td/g) || []).length, "Raw Intake header/body column counts match");
   assert.match(rawRow.row, /#91/, "an unclaimed Raw Intake item renders its actual interest score");
   const cleanRow = renderQueueTableForTest({ item: items[2], showInterestingness: false, queueType: "clean_prep" });
+  assert.match(cleanRow.head, /สถานะ/, "Clean Prep retains its status column");
   assert.doesNotMatch(cleanRow.head, /น่าสนใจ/);
   assert.doesNotMatch(cleanRow.row, /#55/, "a Clean Prep item does not render an interest score");
 });
 
-test("repository reports active approved context as a smallest boolean list signal", () => {
+test("cleaned_at is set only by the user clean marker and not by runCleanStage", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-raw-intake-split-"));
   const dbPath = path.join(tempDir, "test.sqlite");
   const schemaPath = path.join(collectorRoot, "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   try {
     const repo = createRepository(db);
-    const item = repo.createItemWithWorkflowHead({
+    const userCleanedItem = repo.createItemWithWorkflowHead({
       type: "place",
       category: "attractions",
-      title: "Approved context signal",
+      title: "User clean signal",
       description_raw: "raw",
       source_type: "manual",
       source_name: "manual",
-      source_url: "https://approved-context.example",
+      source_url: "https://user-clean.example",
     }).item;
-    const evidence = repo.addEvidenceBlock(item.id, { block_type: "fact", text_value: "verified fact" });
+    assert.equal(repo.getWorkflowHeadByItem(userCleanedItem.id).cleaned_at, null);
+    repo.upsertWorkflowModel(userCleanedItem.id, { cleaned_at: true }, "user@local", { actor_role: "user", reason_code: "clean_step_saved" });
+    assert.ok(repo.getWorkflowHeadByItem(userCleanedItem.id).cleaned_at, "the user clean marker persists a timestamp");
 
-    assert.equal(repo.hasActiveApprovedContext(item.id), false);
-    repo.addApprovedContextBlock(item.id, { evidence_block_id: evidence.id, selected_text: "verified fact" }, "tester@local");
-    assert.equal(repo.hasActiveApprovedContext(item.id), true);
+    const systemCleanedItem = repo.createItemWithWorkflowHead({
+      type: "place",
+      category: "attractions",
+      title: "System clean signal",
+      description_raw: "raw",
+      source_type: "manual",
+      source_name: "manual",
+      source_url: "https://system-clean.example",
+    }).item;
+    await runCleanStage(repo, "system@local");
+    assert.equal(repo.getWorkflowHeadByItem(systemCleanedItem.id).production_state, "analyzed");
+    assert.equal(repo.getWorkflowHeadByItem(systemCleanedItem.id).cleaned_at, null, "runCleanStage must not mark a user Clean save");
   } finally {
     db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("mark_cleaned HTTP route persists cleaned_at", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-mark-cleaned-route-"));
+  const dbPath = path.join(tempDir, "test.sqlite");
+  const schemaPath = path.join(collectorRoot, "database", "schema.sql");
+  const authSecret = "test-cleaned-at-route-secret";
+  const port = await reservePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const db = openDatabase(dbPath, schemaPath);
+  let child = null;
+  try {
+    const repo = createRepository(db);
+    const user = db.prepare(`
+      INSERT INTO users (email, display_name, profile_json, password_hash, role)
+      VALUES (?, ?, ?, '', 'user')
+    `).run("cleaner@example.test", "Clean Editor", "{}");
+    const item = repo.createItemWithWorkflowHead({
+      type: "place",
+      category: "attractions",
+      title: "HTTP clean signal",
+      description_raw: "raw",
+      source_type: "manual",
+      source_name: "manual",
+      source_url: "https://http-clean.example",
+    }).item;
+    repo.claimItem(item.id, Number(user.lastInsertRowid), { note: "test claim" });
+    db.close();
+
+    const token = jwt.sign(
+      { id: 901, email: "cleaner@example.test", display_name: "Clean Editor", role: "user" },
+      authSecret,
+      { issuer: "uboncity-backend", audience: "uboncity-collector" }
+    );
+    child = spawn(process.execPath, [path.join(collectorRoot, "server", "index.mjs")], {
+      cwd: collectorRoot,
+      env: {
+        ...process.env,
+        COLLECTOR_ROOT: collectorRoot,
+        DB_PATH: dbPath,
+        PORT: String(port),
+        BACKEND_JWT_SECRET: authSecret,
+      },
+      stdio: "ignore",
+    });
+    await waitForCollector(baseUrl, child);
+
+    const response = await fetch(`${baseUrl}/api/items/${item.id}`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ workflow_action: "mark_cleaned" }),
+    });
+    assert.equal(response.status, 200);
+    const updated = await response.json();
+    assert.ok(updated.cleaned_at, "mark_cleaned response exposes the persisted timestamp");
+
+    const verifyDb = openDatabase(dbPath, schemaPath);
+    try {
+      assert.ok(verifyDb.prepare("SELECT cleaned_at FROM content_workflow_models WHERE content_item_id=?").get(item.id)?.cleaned_at);
+    } finally {
+      verifyDb.close();
+    }
+  } finally {
+    if (child && child.exitCode == null) {
+      child.kill();
+      await once(child, "exit");
+    }
+    try {
+      db.close();
+    } catch {}
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });

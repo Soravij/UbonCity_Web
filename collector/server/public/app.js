@@ -5110,15 +5110,15 @@ function getPreparationQueueItems(items = state.items) {
   });
 }
 
-// This splitter is intentionally local to the Raw Intake panel. It must not reuse workflow bucket
-// routing: a system can advance production_state without a person performing Clean work.
+// This splitter is intentionally local to the Raw Intake panel. A user Clean save, not the workflow
+// state, is the persisted signal because system jobs can advance production_state independently.
 function splitRawIntakeAndCleanPrep(items = []) {
   const rawIntake = [];
   const cleanPrep = [];
   for (const item of Array.isArray(items) ? items : []) {
     const claimed = Number(item?.claimed_by_user_id || 0) > 0;
-    const hasActiveApprovedContext = item?.has_active_approved_context === true;
-    if (claimed && hasActiveApprovedContext) {
+    const cleanedAt = String(item?.cleaned_at || "").trim();
+    if (claimed && cleanedAt) {
       cleanPrep.push(item);
     } else {
       rawIntake.push(item);
@@ -5221,6 +5221,7 @@ function renderRawQueueTable({
   const headRow = table.querySelector("thead tr");
   if (!tbody || !headRow) return;
 
+  const showStatus = queueType !== "intake";
   headRow.innerHTML = `
     ${canManage && queueType === "intake" ? '<th class="raw-select-cell"><input type="checkbox" id="raw-select-all" aria-label="เลือกทั้งหมดในตาราง" /></th>' : ""}
     <th>ID</th>
@@ -5228,7 +5229,7 @@ function renderRawQueueTable({
     <th>หมวดหมู่</th>
     <th class="raw-title-column">ชื่อเรื่อง</th>
     ${showInterestingness ? "<th>น่าสนใจ</th>" : ""}
-    <th>สถานะ</th>
+    ${showStatus ? "<th>สถานะ</th>" : ""}
     <th>ผู้รับงาน</th>
     <th>การทำงาน</th>
   `;
@@ -5236,9 +5237,10 @@ function renderRawQueueTable({
 
   if (!items.length) {
     const tr = document.createElement("tr");
-    const colspan = (canManage && queueType === "intake")
-      ? (showInterestingness ? 9 : 8)
-      : (showInterestingness ? 8 : 7);
+    const colspan = 6
+      + (canManage && queueType === "intake" ? 1 : 0)
+      + (showInterestingness ? 1 : 0)
+      + (showStatus ? 1 : 0);
     tr.innerHTML = `<td colspan="${colspan}" class="muted">${emptyText}</td>`;
     tbody.appendChild(tr);
     return;
@@ -5283,7 +5285,7 @@ function renderRawQueueTable({
           <span class="intake-badge ${interestingnessBadgeClass(interestingness.label)}">${escapeHtml((interestingness.label || "ข้อมูลยังบาง") + " #" + Number(interestingness.score || 0))}</span>
         </div>
       </td>` : ""}
-      <td><span class="workflow-badge ${escapeHtml(statusBadgeClass)}">${escapeHtml(statusLabel)}</span></td>
+      ${showStatus ? `<td><span class="workflow-badge ${escapeHtml(statusBadgeClass)}">${escapeHtml(statusLabel)}</span></td>` : ""}
       <td>${formatPreparationClaimBadge(item)}</td>
       <td class="raw-actions-cell">
         <button type="button" data-action="open-state-entry" data-id="${id}" data-url="${escapeHtml(primaryUrl)}">${escapeHtml(primaryLabel)}</button>

@@ -3125,13 +3125,6 @@ export function createRepository(db) {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const hasActiveApprovedContextStmt = db.prepare(`
-    SELECT 1
-    FROM approved_context_blocks
-    WHERE content_item_id=? AND status='active'
-    LIMIT 1
-  `);
-
   const findActiveApprovedContextByEvidenceStmt = db.prepare(`
     SELECT id
     FROM approved_context_blocks
@@ -3682,13 +3675,18 @@ export function createRepository(db) {
     WHERE content_item_id=?
   `);
 
+  // Existing local/migration fixtures can predate this additive Runtime column.  The live marker
+  // is used whenever the schema contains it; old fixtures remain readable until their explicit DDL.
+  const workflowModelHasCleanedAt = db.prepare("PRAGMA table_info(content_workflow_models)")
+    .all()
+    .some((column) => String(column?.name || "").trim() === "cleaned_at");
   const upsertWorkflowModelStmt = db.prepare(`
     INSERT INTO content_workflow_models (
       content_item_id, production_state, publication_state, place_review_flag,
       current_draft_id, current_review_report_id, current_field_pack_id,
       state_version, content_version, last_actor_email, last_transition_at,
-      last_transition_note, updated_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      last_transition_note${workflowModelHasCleanedAt ? ", cleaned_at" : ""}, updated_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${workflowModelHasCleanedAt ? ", ?" : ""}, ?)
     ON CONFLICT(content_item_id) DO UPDATE SET
       production_state=excluded.production_state,
       publication_state=excluded.publication_state,
@@ -3701,6 +3699,7 @@ export function createRepository(db) {
       last_actor_email=excluded.last_actor_email,
       last_transition_at=excluded.last_transition_at,
       last_transition_note=excluded.last_transition_note,
+      ${workflowModelHasCleanedAt ? "cleaned_at=excluded.cleaned_at," : ""}
       updated_by=excluded.updated_by,
       updated_at=CURRENT_TIMESTAMP
   `);
@@ -4346,10 +4345,6 @@ export function createRepository(db) {
     return listStmt.all().map(mapItem);
   }
 
-  function hasActiveApprovedContext(contentItemId) {
-    return Boolean(hasActiveApprovedContextStmt.get(Number(contentItemId || 0)));
-  }
-
   function listItemsByStatus(statuses = []) {
     if (!Array.isArray(statuses) || statuses.length === 0) {
       return listItems();
@@ -4831,6 +4826,7 @@ export function createRepository(db) {
       last_actor_email: String(latestTransition?.actor_email || "").trim() || null,
       last_transition_at: String(latestTransition?.created_at || "").trim() || null,
       last_transition_note: null,
+      cleaned_at: null,
       updated_by: "system@local",
     };
   }
@@ -4855,6 +4851,11 @@ export function createRepository(db) {
     const explicitTransitionTime = payload.last_transition_at == null
       ? null
       : (String(payload.last_transition_at || "").trim() || null);
+    const cleanedAt = payload.cleaned_at === true
+      ? toBangkokSqlTimestamp()
+      : payload.cleaned_at == null
+        ? (previous?.cleaned_at || null)
+        : (String(payload.cleaned_at || "").trim() || null);
     return {
       production_state: payload.production_state,
       publication_state: payload.publication_state,
@@ -4869,6 +4870,7 @@ export function createRepository(db) {
       last_transition_note: payload.last_transition_note == null
         ? (previous?.last_transition_note || null)
         : (String(payload.last_transition_note || "").trim() || null),
+      cleaned_at: cleanedAt,
       updated_by: String(actor || "").trim() || "system@local",
       should_bump_state_version: metadata?.bump_state_version === true,
       should_bump_content_version: metadata?.bump_content_version === true,
@@ -4910,6 +4912,7 @@ export function createRepository(db) {
       nextPayload.last_actor_email,
       createdAt,
       nextPayload.last_transition_note,
+      ...(workflowModelHasCleanedAt ? [nextPayload.cleaned_at] : []),
       nextPayload.updated_by
     );
     if (productionState) {
@@ -5003,6 +5006,7 @@ export function createRepository(db) {
       nextPayload.last_actor_email,
       transitionTime,
       note,
+      ...(workflowModelHasCleanedAt ? [nextPayload.cleaned_at] : []),
       nextPayload.updated_by
     );
 
@@ -12617,7 +12621,6 @@ export function createRepository(db) {
     advanceWorkflowHead,
     saveItemWithFieldPack,
     listItems,
-    hasActiveApprovedContext,
     listItemsByStatus,
     listInFlightItems,
     getItem,

@@ -969,6 +969,7 @@ CREATE TABLE IF NOT EXISTS content_workflow_models (
   last_actor_email TEXT,
   last_transition_at TEXT,
   last_transition_note TEXT,
+  cleaned_at TEXT,
   updated_by TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
