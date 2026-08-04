@@ -1956,6 +1956,7 @@ label {
 }
 
 #raw-intake-table-wrap,
+#clean-prep-table-wrap,
 #raw-review-table-wrap {
   max-height: 62vh;
   overflow-y: auto;
@@ -1963,6 +1964,7 @@ label {
 
 #raw-table-wrap thead th,
 #raw-intake-table-wrap thead th,
+#clean-prep-table-wrap thead th,
 #raw-review-table-wrap thead th {
   position: sticky;
   top: 0;
@@ -1971,6 +1973,7 @@ label {
 
 #table-raw,
 #table-raw-intake,
+#table-clean-prep,
 #table-raw-review {
   font-size: 12px;
 }
@@ -1987,6 +1990,8 @@ label {
 #table-raw td,
 #table-raw-intake th,
 #table-raw-intake td,
+#table-clean-prep th,
+#table-clean-prep td,
 #table-raw-review th,
 #table-raw-review td {
   padding: 6px 8px;
@@ -2061,6 +2066,8 @@ label {
 #table-raw .raw-title-cell,
 #table-raw-intake .raw-title-column,
 #table-raw-intake .raw-title-cell,
+#table-clean-prep .raw-title-column,
+#table-clean-prep .raw-title-cell,
 #table-raw-review .raw-title-column,
 #table-raw-review .raw-title-cell {
   width: 220px;
@@ -2070,6 +2077,7 @@ label {
 
 #table-raw .raw-main-text,
 #table-raw-intake .raw-main-text,
+#table-clean-prep .raw-main-text,
 #table-raw-review .raw-main-text {
   display: inline-block;
   max-width: 220px;
@@ -2081,12 +2089,14 @@ label {
 
 #table-raw .raw-title-cell,
 #table-raw-intake .raw-title-cell,
+#table-clean-prep .raw-title-cell,
 #table-raw-review .raw-title-cell {
   white-space: normal;
 }
 
 #table-raw .raw-title-cell .raw-main-text,
 #table-raw-intake .raw-title-cell .raw-main-text,
+#table-clean-prep .raw-title-cell .raw-main-text,
 #table-raw-review .raw-title-cell .raw-main-text {
   display: -webkit-box;
   max-width: 100%;
@@ -2134,6 +2144,29 @@ label {
   line-height: 1.2;
   border-radius: 6px;
   margin-right: 6px;
+}
+
+/* Clean Prep has the same ownership chips/actions as the raw table, but it lacked the raw table's
+   narrow-cell treatment. Keep each group on one line and allow the existing table wrapper to scroll
+   horizontally on narrow screens instead of making a row taller. */
+#table-clean-prep .intake-chip-row {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+#table-clean-prep .raw-actions-cell {
+  white-space: nowrap;
+}
+
+#table-clean-prep .raw-actions-cell button {
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.2;
+  border-radius: 6px;
+  margin-right: 6px;
+  white-space: nowrap;
 }
 
 table {

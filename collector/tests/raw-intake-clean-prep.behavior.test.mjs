@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
+import { runCleanStage } from "../services/workflow.mjs";
 
 const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
 const appSource = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.js"), "utf8");
@@ -148,11 +149,11 @@ function renderQueueTableForTest({ item, showInterestingness, queueType }) {
 test("Raw Intake / Clean Prep splitter is exhaustive and its real renderer keeps score and chip contracts", () => {
   const hooks = loadRawIntakeHooks();
   const items = [
-    { id: 1, test_bucket: "raw_prep", claimed_by_user_id: null, has_active_approved_context: false, interestingness: { score: 91 } },
-    { id: 2, test_bucket: "raw_prep", claimed_by_user_id: 22, has_active_approved_context: false, interestingness: { score: 72 } },
-    { id: 3, test_bucket: "raw_prep", claimed_by_user_id: 33, has_active_approved_context: true, interestingness: { score: 55 } },
-    { id: 4, test_bucket: "field_pack_review", claimed_by_user_id: null, has_active_approved_context: false, interestingness: { score: 41 } },
-    { id: 5, test_bucket: "unknown_workflow", claimed_by_user_id: null, has_active_approved_context: false, interestingness: { score: 18 } },
+    { id: 1, test_bucket: "raw_prep", claimed_by_user_id: null, cleaned_at: null, interestingness: { score: 91 } },
+    { id: 2, test_bucket: "raw_prep", claimed_by_user_id: 22, cleaned_at: null, interestingness: { score: 72 } },
+    { id: 3, test_bucket: "raw_prep", claimed_by_user_id: 33, cleaned_at: "2026-08-04 10:00:00", interestingness: { score: 55 } },
+    { id: 4, test_bucket: "field_pack_review", claimed_by_user_id: null, cleaned_at: null, interestingness: { score: 41 } },
+    { id: 5, test_bucket: "unknown_workflow", claimed_by_user_id: null, cleaned_at: null, interestingness: { score: 18 } },
   ];
 
   const buckets = hooks.splitRawQueueByFieldPack(items);
@@ -181,33 +182,47 @@ test("Raw Intake / Clean Prep splitter is exhaustive and its real renderer keeps
 
   const rawRow = renderQueueTableForTest({ item: items[0], showInterestingness: true, queueType: "intake" });
   assert.match(rawRow.head, /น่าสนใจ/);
+  assert.doesNotMatch(rawRow.head, /สถานะ/, "Raw Intake has no status column");
+  assert.equal((rawRow.head.match(/<th/g) || []).length, (rawRow.row.match(/<td/g) || []).length, "Raw Intake header/body column counts match");
   assert.match(rawRow.row, /#91/, "an unclaimed Raw Intake item renders its actual interest score");
   const cleanRow = renderQueueTableForTest({ item: items[2], showInterestingness: false, queueType: "clean_prep" });
+  assert.match(cleanRow.head, /สถานะ/, "Clean Prep retains its status column");
   assert.doesNotMatch(cleanRow.head, /น่าสนใจ/);
   assert.doesNotMatch(cleanRow.row, /#55/, "a Clean Prep item does not render an interest score");
 });
 
-test("repository reports active approved context as a smallest boolean list signal", () => {
+test("cleaned_at is set only by the user clean marker and not by runCleanStage", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-raw-intake-split-"));
   const dbPath = path.join(tempDir, "test.sqlite");
   const schemaPath = path.join(collectorRoot, "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   try {
     const repo = createRepository(db);
-    const item = repo.createItemWithWorkflowHead({
+    const userCleanedItem = repo.createItemWithWorkflowHead({
       type: "place",
       category: "attractions",
-      title: "Approved context signal",
+      title: "User clean signal",
       description_raw: "raw",
       source_type: "manual",
       source_name: "manual",
-      source_url: "https://approved-context.example",
+      source_url: "https://user-clean.example",
     }).item;
-    const evidence = repo.addEvidenceBlock(item.id, { block_type: "fact", text_value: "verified fact" });
+    assert.equal(repo.getWorkflowHeadByItem(userCleanedItem.id).cleaned_at, null);
+    repo.upsertWorkflowModel(userCleanedItem.id, { cleaned_at: true }, "user@local", { actor_role: "user", reason_code: "clean_step_saved" });
+    assert.ok(repo.getWorkflowHeadByItem(userCleanedItem.id).cleaned_at, "the user clean marker persists a timestamp");
 
-    assert.equal(repo.hasActiveApprovedContext(item.id), false);
-    repo.addApprovedContextBlock(item.id, { evidence_block_id: evidence.id, selected_text: "verified fact" }, "tester@local");
-    assert.equal(repo.hasActiveApprovedContext(item.id), true);
+    const systemCleanedItem = repo.createItemWithWorkflowHead({
+      type: "place",
+      category: "attractions",
+      title: "System clean signal",
+      description_raw: "raw",
+      source_type: "manual",
+      source_name: "manual",
+      source_url: "https://system-clean.example",
+    }).item;
+    await runCleanStage(repo, "system@local");
+    assert.equal(repo.getWorkflowHeadByItem(systemCleanedItem.id).production_state, "analyzed");
+    assert.equal(repo.getWorkflowHeadByItem(systemCleanedItem.id).cleaned_at, null, "runCleanStage must not mark a user Clean save");
   } finally {
     db.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

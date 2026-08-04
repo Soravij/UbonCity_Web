@@ -1338,7 +1338,7 @@ function attachItemMatchFields(items = [], options = {}) {
       current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
       workflow_state_version: Number(workflow?.state_version || 0) || 0,
       workflow_content_version: Number(workflow?.content_version || 0) || 0,
-      has_active_approved_context: repo.hasActiveApprovedContext(itemId),
+      cleaned_at: String(workflow?.cleaned_at || "").trim() || null,
       match_phone: matchPhone || null,
       interestingness: scorePlaceInterestingness({
         ...item,
@@ -1398,6 +1398,7 @@ function attachWorkflowHeadFields(item, scopeContext = null) {
     current_field_pack_status: String(currentFieldPack?.status || latestFieldPack?.status || "").trim().toLowerCase() || null,
     workflow_state_version: Number(workflow?.state_version || 0) || 0,
     workflow_content_version: Number(workflow?.content_version || 0) || 0,
+    cleaned_at: String(workflow?.cleaned_at || "").trim() || null,
   };
 }
 
@@ -8973,6 +8974,7 @@ app.put("/api/items/:id", requireRole("admin", "user"), (req, res) => {
         workflow_patch: {
           production_state: "analyzed",
           last_transition_note: "clean step saved by editor",
+          cleaned_at: true,
         },
         workflow_metadata: {
           actor_role: String(req.user?.role || "user").trim().toLowerCase() || "user",
