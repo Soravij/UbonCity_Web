@@ -3125,6 +3125,13 @@ export function createRepository(db) {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
+  const hasActiveApprovedContextStmt = db.prepare(`
+    SELECT 1
+    FROM approved_context_blocks
+    WHERE content_item_id=? AND status='active'
+    LIMIT 1
+  `);
+
   const findActiveApprovedContextByEvidenceStmt = db.prepare(`
     SELECT id
     FROM approved_context_blocks
@@ -4337,6 +4344,10 @@ export function createRepository(db) {
 
   function listItems() {
     return listStmt.all().map(mapItem);
+  }
+
+  function hasActiveApprovedContext(contentItemId) {
+    return Boolean(hasActiveApprovedContextStmt.get(Number(contentItemId || 0)));
   }
 
   function listItemsByStatus(statuses = []) {
@@ -12606,6 +12617,7 @@ export function createRepository(db) {
     advanceWorkflowHead,
     saveItemWithFieldPack,
     listItems,
+    hasActiveApprovedContext,
     listItemsByStatus,
     listInFlightItems,
     getItem,
