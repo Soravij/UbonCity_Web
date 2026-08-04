@@ -26,13 +26,15 @@ Clean Prep retains its local `กำลังทำ Clean` status.  Its ownershi
 ## Verification
 
 - `node --test tests/raw-intake-clean-prep.behavior.test.mjs` passes.
-- The behavioral test calls the actual splitter, existing bucket splitter, renderer, repository, and `runCleanStage`.  It covers unclaimed and claimed-but-not-cleaned Raw Intake rows, claimed-and-cleaned Clean Prep rows, scores, no duplicate/drop across all four rendered tables, no Raw status column and matching header/body counts, and confirms `runCleanStage` leaves `cleaned_at` unset.
+- The behavioral test calls the actual splitter, existing bucket splitter, renderer, repository, `runCleanStage`, and the live `PUT /api/items/:id` `mark_cleaned` route against a temporary SQLite database.  It covers unclaimed and claimed-but-not-cleaned Raw Intake rows, claimed-and-cleaned Clean Prep rows, scores, no duplicate/drop across all four rendered tables, no Raw status column and matching header/body counts, confirms `runCleanStage` leaves `cleaned_at` unset, and verifies the route persists and returns `cleaned_at`.
 - Reverting the production splitter, renderer, repository/schema marker, or Clean route marker makes the relevant behavioral assertion fail.
 - `node --check` passes for the changed JavaScript modules; `git diff --check` passes.
 
 ### Full gate: `npm run test:all`
 
-The gate was run in `D:\UbonCity_Web` by switching checkout in the same tree, without a worktree.  `main` and this branch both exited non-zero with the same 60 failure names.  The name-set comparison is: new on this branch: none; present on main but missing on this branch: none.  The pre-existing names include `collector admin final review smoke`, the assignment/article UI contract group, `/api/assets is filtered to collector-controlled local media`, the requested-check pair, `index route wiring keeps HEAD route count and replacement helper on assignment upload only`, and the four `rerunProblemTranslations` cases; no Raw Intake/Clean Prep test is in the failure set.
+The gate was run in `D:\UbonCity_Web` by switching checkout in the same tree, without a worktree.  `main` and this branch both exited non-zero with the same 59 failure names.  The name-set comparison is: new on this branch: none; present on main but missing on this branch: none.  The pre-existing names include `collector admin final review smoke`, the assignment/article UI contract group, `/api/assets is filtered to collector-controlled local media`, the requested-check pair, `index route wiring keeps HEAD route count and replacement helper on assignment upload only`, and the four `rerunProblemTranslations` cases; no Raw Intake/Clean Prep test is in the failure set.
+
+The earlier `60` was a reporting error: it was anchored to the uncommitted `docs/TEST_SUITE_BASELINE.md` left in this working tree by an unrelated branch, rather than the actual gate summary/name set.  External audit re-measured both trees at 59/59; `test:all` was not re-run in this closing change.
 
 ## Runtime database action (not run here)
 
@@ -48,11 +50,11 @@ Run this once on the Runtime database before deploying the code.  No migration s
 
 | File | Added | Deleted |
 | --- | ---: | ---: |
-| `audit/raw-clean-split-criterion-fix.md` | 58 | 0 |
+| `audit/raw-clean-split-criterion-fix.md` | 60 | 0 |
 | `collector/database/schema.sql` | 1 | 0 |
 | `collector/db/repository.mjs` | 17 | 14 |
 | `collector/server/index.mjs` | 3 | 1 |
 | `collector/server/public/app.js` | 11 | 9 |
 | `collector/server/public/styles.css` | 33 | 0 |
-| `collector/tests/raw-intake-clean-prep.behavior.test.mjs` | 28 | 13 |
-| **Total** | **151** | **37** |
+| `collector/tests/raw-intake-clean-prep.behavior.test.mjs` | 125 | 13 |
+| **Total** | **250** | **37** |
