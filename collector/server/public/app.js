@@ -5688,8 +5688,8 @@ function renderRawTable(items) {
   const tableWrap = qs("raw-table-wrap");
   if (!tableWrap) return;
   const list = sortRawItems(getPreparationQueueItems(items));
-  const split = splitRawIntakeAndCleanPrep(list);
   const workflowSplit = splitRawQueueByFieldPack(list);
+  const split = splitRawIntakeAndCleanPrep(workflowSplit.intake);
   const canManage = canManageBulkContentItems();
   const requestedReviewFilter = String(state.dashboard.rawReviewFilter || "all").trim().toLowerCase() || "all";
   const activeReviewFilter = RAW_REVIEW_FILTERS.some((filter) => filter.value === requestedReviewFilter)

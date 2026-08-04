@@ -41,6 +41,7 @@ function extractFunction(name) {
 
 function loadRawIntakeHooks() {
   const splitSource = extractFunction("splitRawIntakeAndCleanPrep");
+  const bucketSplitSource = extractFunction("splitRawQueueByFieldPack");
   const renderSource = extractFunction("renderRawTable");
   const state = {
     items: [],
@@ -69,7 +70,7 @@ function loadRawIntakeHooks() {
     "qs",
     "sortRawItems",
     "getPreparationQueueItems",
-    "splitRawQueueByFieldPack",
+    "resolveQueueBucket",
     "RAW_REVIEW_FILTERS",
     "isHandoffEligibleItem",
     "buildRawReviewFilterHtml",
@@ -80,13 +81,13 @@ function loadRawIntakeHooks() {
     "getRawSelectedIds",
     "annotateRawTableBlockers",
     "document",
-    `${splitSource}\n${renderSource}\nreturn { splitRawIntakeAndCleanPrep, renderRawTable };`
+    `${splitSource}\n${bucketSplitSource}\n${renderSource}\nreturn { splitRawIntakeAndCleanPrep, splitRawQueueByFieldPack, renderRawTable };`
   )(
     state,
     qs,
     (items) => [...items],
     (items) => Array.isArray(items) ? items : [],
-    () => ({ intake: [], review: [], unknown: [] }),
+    (item) => String(item?.test_bucket || ""),
     [],
     () => false,
     () => "",
@@ -147,18 +148,21 @@ function renderQueueTableForTest({ item, showInterestingness, queueType }) {
 test("Raw Intake / Clean Prep splitter is exhaustive and its real renderer keeps score and chip contracts", () => {
   const hooks = loadRawIntakeHooks();
   const items = [
-    { id: 1, claimed_by_user_id: null, has_active_approved_context: false, interestingness: { score: 91 } },
-    { id: 2, claimed_by_user_id: 22, has_active_approved_context: false, interestingness: { score: 72 } },
-    { id: 3, claimed_by_user_id: 33, has_active_approved_context: true, interestingness: { score: 55 } },
+    { id: 1, test_bucket: "raw_prep", claimed_by_user_id: null, has_active_approved_context: false, interestingness: { score: 91 } },
+    { id: 2, test_bucket: "raw_prep", claimed_by_user_id: 22, has_active_approved_context: false, interestingness: { score: 72 } },
+    { id: 3, test_bucket: "raw_prep", claimed_by_user_id: 33, has_active_approved_context: true, interestingness: { score: 55 } },
+    { id: 4, test_bucket: "field_pack_review", claimed_by_user_id: null, has_active_approved_context: false, interestingness: { score: 41 } },
+    { id: 5, test_bucket: "unknown_workflow", claimed_by_user_id: null, has_active_approved_context: false, interestingness: { score: 18 } },
   ];
 
-  const split = hooks.splitRawIntakeAndCleanPrep(items);
+  const buckets = hooks.splitRawQueueByFieldPack(items);
+  const split = hooks.splitRawIntakeAndCleanPrep(buckets.intake);
   assert.deepEqual(split.rawIntake.map((item) => item.id), [1, 2]);
   assert.deepEqual(split.cleanPrep.map((item) => item.id), [3]);
   assert.deepEqual(
     [...split.rawIntake, ...split.cleanPrep].map((item) => item.id).sort((a, b) => a - b),
     [1, 2, 3],
-    "every input item must be in exactly one of the two tables"
+    "every raw_prep item must be in exactly one of Raw Intake and Clean Prep"
   );
 
   hooks.renderRawTable(items);
@@ -168,6 +172,11 @@ test("Raw Intake / Clean Prep splitter is exhaustive and its real renderer keeps
   assert.deepEqual(hooks.renderedTables[1].items.map((item) => item.id), [3]);
   assert.equal(hooks.renderedTables[1].showInterestingness, false, "Clean Prep never renders interestingness");
   assert.equal(hooks.renderedTables[1].queueType, "clean_prep");
+  assert.deepEqual(hooks.renderedTables[2].items.map((item) => item.id), [4]);
+  assert.deepEqual(hooks.renderedTables[3].items.map((item) => item.id), [5]);
+  const renderedIds = hooks.renderedTables.flatMap((table) => table.items.map((item) => item.id));
+  assert.equal(new Set(renderedIds).size, renderedIds.length, "no item may render in more than one table");
+  assert.deepEqual(renderedIds.sort((a, b) => a - b), [1, 2, 3, 4, 5], "no Process-1 item may disappear from all tables");
   assert.equal(hooks.tableWrap.innerHTML.includes("data-intake-filter"), false, "the removed intake filter chips are not rendered");
 
   const rawRow = renderQueueTableForTest({ item: items[0], showInterestingness: true, queueType: "intake" });

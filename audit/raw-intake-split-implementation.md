@@ -43,7 +43,7 @@ For the Raw Intake table, the badge text is local to `collector/server/public/ap
 - `buildRawQueueStatusLabel()` returns `รอคัดเข้า AI` only when `isRawPreparationItem()` is true; otherwise it returns `กำลังคัดข้อมูล` (`app.js:5190-5201`).
 - `isRawPreparationItem()` requires `resolveQueueBucket(item) === 'raw_prep'` **and** `production_state === 'collected'` (`app.js:777-781`).
 - `resolveQueueBucket()` is a broader routing helper used by dashboard entry actions and queue splitting, not only badge display (`app.js:738-776`, `:5150-5188`).
-- `normalizeDashboardWorkflowStage()` and the generic `formatWorkflowBadge()` are also shared workflow presentation helpers (`app.js:4950-4959`, `:5000-5048`).
+- `normalizeDashboardWorkflowStage()` and `workflowBadge()` are shared workflow presentation helpers. This hotfix does not change either one.
 
 Do **not** change `resolveQueueBucket`, `isRawPreparationItem`, `normalizeDashboardWorkflowStage`, or generic workflow-badge mapping for this hotfix: they affect other dashboard/workflow surfaces. The safe implementation is a new, page-local splitter for this one Raw Intake panel and a local label such as `กำลังทำ Clean` for its second table; it must not repurpose the global status mapping.
 
@@ -67,20 +67,20 @@ The one unresolved data discrepancy is the supplied item-1 observation versus th
 
 ## Approved implementation (completed)
 
-The approved criterion is implemented as `claimed_by_user_id > 0 && has_active_approved_context === true`. The new Raw Intake/Clean Prep splitter is page-local in `app.js`; it does not change `resolveQueueBucket`, `isRawPreparationItem`, `normalizeDashboardWorkflowStage`, or `formatWorkflowBadge`.
+The approved criterion is implemented as `claimed_by_user_id > 0 && has_active_approved_context === true`. The new Raw Intake/Clean Prep splitter is page-local in `app.js`; it does not change `resolveQueueBucket`, `isRawPreparationItem`, `normalizeDashboardWorkflowStage`, or `workflowBadge`.
 
 `bulk_preview.approved_context_count` was not usable as the shared criterion: `GET /api/items` sets `includeBulkPreview` only for `isAdminLikeUser(req.authUser)`, whereas the Raw Intake page is also available to role `user`. The implementation therefore adds the smallest role-neutral response field: boolean `has_active_approved_context`.
 
-The two main tables partition every item that was already in this page's Process-1 preparation list (`getPreparationQueueItems`) exactly once:
+The two main tables partition every `raw_prep` item exactly once. `Field Pack Review` and the workflow-warning table keep their existing bucket-based populations; they are not inputs to Raw Intake/Clean Prep.
 
-- Raw Intake: every item not meeting the criterion, including unclaimed and claimed-without-active-context items. Interestingness renders for every row and unclaimed rows retain the existing claim button.
-- Clean Prep: only claimed items with active approved context. It omits the score and uses the local `กำลังทำ Clean` badge while retaining existing claimant/assignee/assigner chips.
+- Raw Intake: every `raw_prep` item not meeting the criterion, including unclaimed and claimed-without-active-context items. Interestingness renders for every row and unclaimed rows retain the existing claim button.
+- Clean Prep: only `raw_prep` items that are claimed and have active approved context. It omits the score and uses the local `กำลังทำ Clean` badge while retaining existing claimant/assignee/assigner chips.
 
-The existing Field Pack Review (including Raw Review filters) and workflow-warning table remain separate downstream/special-purpose surfaces. They were restored after the one full-suite run exposed that removing the warning panel was outside this hotfix's scope.
+Field Pack Review (including Raw Review filters) and the workflow-warning table remain their existing bucket-owned surfaces. Raw Intake/Clean Prep consume only `workflowSplit.intake`, so an item cannot be rendered by both a new table and either of those existing tables. They were restored after the one full-suite run exposed that removing the warning panel was outside this hotfix's scope.
 
 ### Exact diff by file
 
-Counts below are from `git diff --numstat main..HEAD` for the committed hotfix; the stat is exactly `382 insertions(+), 72 deletions(-)` across these six files.
+Counts below are from `git diff --numstat main..HEAD` for the final hotfix tree; the stat is exactly `416 insertions(+), 72 deletions(-)` across these six files.
 
 | File | Exact diff | Change |
 | --- | ---: | --- |
@@ -88,7 +88,7 @@ Counts below are from `git diff --numstat main..HEAD` for the committed hotfix; 
 | `collector/server/index.mjs` | `+1/-0` | Adds `has_active_approved_context` to each `/api/items` match-shaped row. |
 | `collector/server/public/app.js` | `+59/-71` | Removes only Raw Intake filter state/chips/handler; adds the local exhaustive splitter; creates Raw Intake and Clean Prep rendering; keeps Field Pack Review, Raw Review filters, and warning surface. |
 | `collector/server/public/index.html` | `+0/-1` | Removes the Raw Intake chip-container node. |
-| `collector/tests/raw-intake-clean-prep.behavior.test.mjs` | new, `206` lines | Calls actual extracted splitter and render functions; verifies all required row classifications, score visibility, partition exhaustiveness, and non-rendering intake chip markup; uses a temporary OS directory for repository behavior, never `collector/data`. |
+| `collector/tests/raw-intake-clean-prep.behavior.test.mjs` | new, `215` lines | Calls actual extracted splitter and render functions; exercises all three real queue buckets, verifies no cross-table duplicate or missing item, score visibility, and non-rendering intake chip markup; uses a temporary OS directory for repository behavior, never `collector/data`. |
 | `audit/raw-intake-split-implementation.md` | modified | Review record plus this implementation handoff. |
 
 No CSS file changed and no CSS class was added. Static theme review confirmed the existing `workflow-badge-cleaned`, `intake-chip`, and `raw-interest-wrap` rules have both normal and `:root[data-theme="dark"]` coverage in `collector/server/public/styles.css`.
@@ -98,10 +98,10 @@ No CSS file changed and no CSS class was added. Static theme review confirmed th
 - `node --test tests/raw-intake-clean-prep.behavior.test.mjs` — PASS (2 tests).
 - `node --check server/public/app.js`, `node --check server/index.mjs`, and `node --check db/repository.mjs` — PASS.
 - `git diff --check` — PASS.
-- Revert gate: temporarily stashed only `collector/server/public/app.js` in this same checkout, ran the behavioral test against baseline, and observed the expected failure (`splitRawIntakeAndCleanPrep` missing); then popped the stash successfully. No worktree was created.
-- Old single-branch `npm run test:all` result is superseded by the final two-tree gate below; it was collected before the warning panel had been restored.
+- Bucket-filter revert gate: temporarily stashed only `collector/server/public/app.js` in this same checkout, ran the behavioral test against the prior implementation, and observed the expected failure: Raw Intake received `[1, 2, 4, 5]` instead of only raw-prep `[1, 2]`; then popped the stash successfully. No worktree was created.
+- Earlier single-branch `npm run test:all` output is superseded by the final two-tree gate below.
 
-### Final two-tree gate (after warning-panel restoration)
+### Final two-tree gate (after raw-prep bucket isolation)
 
 The full suite was run once on `main` and once on this branch by switching checkout in this same working tree. No worktree was created.
 
