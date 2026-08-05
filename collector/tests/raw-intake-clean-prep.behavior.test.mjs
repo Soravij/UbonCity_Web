@@ -81,11 +81,11 @@ function loadRawIntakeHooks() {
   };
   const renderedTables = [];
   const nodes = new Map();
-  const actionBodies = new Map([
-    ["#table-raw-intake tbody", {}],
-    ["#table-clean-prep tbody", {}],
-    ["#table-raw-review tbody", {}],
-  ]);
+  // Auto-vivifying: records a node for whatever selector renderRawTable's real source actually
+  // queries, instead of a hardcoded guess at which tables exist. A table added later that renderRawTable
+  // never calls document.querySelector(...) for simply won't get an entry here, which is exactly the
+  // signal the coverage test below needs.
+  const actionBodies = new Map();
   const tableWrap = {
     html: "",
     set innerHTML(value) { this.html = value; },
@@ -130,7 +130,10 @@ function loadRawIntakeHooks() {
     () => {},
     {
       getElementById: () => null,
-      querySelector: (selector) => actionBodies.get(selector) || null,
+      querySelector: (selector) => {
+        if (!actionBodies.has(selector)) actionBodies.set(selector, {});
+        return actionBodies.get(selector);
+      },
       querySelectorAll: () => [],
     }
   );
@@ -186,6 +189,21 @@ function renderQueueTableForTest({
   );
   render({ tableId: "table", items: [item], canManage, showInterestingness, queueType });
   return { head: head.innerHTML, row: rows[0]?.innerHTML || "" };
+}
+
+// All permission flags forced on: this asks "can this queueType's real template ever render an
+// actionable button", not "does it for one specific item/permission combination".
+function tableRendersActionButtons(queueType, item) {
+  const { row } = renderQueueTableForTest({
+    item,
+    showInterestingness: queueType === "intake",
+    queueType,
+    canManage: true,
+    canClaim: true,
+    canRelease: true,
+    canTakeOver: true,
+  });
+  return /<button[^>]*\sdata-action="/.test(row);
 }
 
 test("Raw Intake / Clean Prep splitter is exhaustive and its real renderer keeps score and chip contracts", () => {
@@ -258,15 +276,62 @@ test("Raw Intake and Clean Prep action buttons retain handler attributes and del
   assert.match(rawActions, /data-action="open-state-entry" data-id="77" data-url="[^"]+">คัดข้อมูล<\//);
   assert.match(rawActions, /data-action="claim-item" data-id="77">รับงานนี้<\//);
   assert.match(rawActions, /data-action="release-item" data-id="77"[^>]*>ปล่อยงาน<\//);
+  assert.match(rawActions, /data-action="takeover-item" data-id="77"[^>]*>Take over<\//);
   assert.match(rawActions, /data-action="delete" data-id="77"[^>]*>ลบ<\//);
+  assert.match(rawActions, /<input type="checkbox" data-action="select" data-id="77"/, "Raw Intake row-select checkbox keeps its action attributes");
   assert.match(cleanPrepActions, /data-action="open-state-entry" data-id="77" data-url="[^"]+">ทำ Clean ต่อ<\//);
   assert.match(cleanPrepActions, /data-action="release-item" data-id="77"[^>]*>ปล่อยงาน<\//);
   assert.match(cleanPrepActions, /data-action="delete" data-id="77"[^>]*>ลบ<\//);
 
-  const rawHandler = hooks.actionBodies.get("#table-raw-intake tbody").onclick;
-  const cleanPrepHandler = hooks.actionBodies.get("#table-clean-prep tbody").onclick;
+  const rawHandler = hooks.actionBodies.get("#table-raw-intake tbody")?.onclick;
+  const cleanPrepHandler = hooks.actionBodies.get("#table-clean-prep tbody")?.onclick;
   assert.equal(typeof rawHandler, "function", "Raw Intake actions have their delegated handler");
   assert.equal(cleanPrepHandler, rawHandler, "Clean Prep actions use the same delegated handler as Raw Intake");
+});
+
+test("every table renderRawTable renders with actionable buttons is bound to the delegated row-action handler", () => {
+  // Derived from the real template, not a hardcoded table list: renderRawTable's own
+  // renderRawQueueTable(...) calls (captured in hooks.renderedTables) tell us which tables exist today,
+  // and re-running the real renderRawQueueTable source per queueType tells us whether that table's
+  // template can ever produce a clickable button[data-action]. Any table meeting both conditions is
+  // required to be bound to the same delegated handler as Raw Intake, or explicitly exempted below.
+  // A future table added to renderRawTable that renders buttons but forgets the handler binding fails
+  // this test automatically, without the test file needing to know its id in advance.
+  //
+  // table-raw-workflow-unknown is a pre-existing gap (see audit/clean-prep-actions-audit.md, Section D):
+  // main and this branch both leave it unbound. Fixing that is out of scope for this hotfix (production
+  // code should change only for the bug this branch targets), so it is named here rather than silently
+  // passing or silently failing this test.
+  const KNOWN_UNBOUND_TABLE_IDS = new Set(["table-raw-workflow-unknown"]);
+
+  const hooks = loadRawIntakeHooks();
+  const item = { id: 88, test_bucket: "raw_prep", claimed_by_user_id: 33, cleaned_at: "2026-08-04 10:00:00" };
+  hooks.renderRawTable([item]);
+
+  assert.ok(hooks.renderedTables.length > 0, "renderRawTable must render at least one queue table to exercise this check");
+
+  const rawHandler = hooks.actionBodies.get("#table-raw-intake tbody")?.onclick;
+  assert.equal(typeof rawHandler, "function", "Raw Intake tbody must carry the delegated row-action handler");
+
+  for (const rendered of hooks.renderedTables) {
+    const { tableId, queueType } = rendered;
+    if (!tableRendersActionButtons(queueType, item)) continue;
+
+    const boundHandler = hooks.actionBodies.get(`#${tableId} tbody`)?.onclick;
+    if (KNOWN_UNBOUND_TABLE_IDS.has(tableId)) {
+      assert.notEqual(
+        boundHandler,
+        rawHandler,
+        `${tableId} is listed in KNOWN_UNBOUND_TABLE_IDS as a known pre-existing gap but is now bound — remove it from that list`
+      );
+      continue;
+    }
+    assert.equal(
+      boundHandler,
+      rawHandler,
+      `${tableId} renders actionable buttons but its tbody is not bound to the same delegated handler as Raw Intake (add it to KNOWN_UNBOUND_TABLE_IDS only if that is intentional)`
+    );
+  }
 });
 
 test("cleaned_at is set only by the user clean marker and not by runCleanStage", async () => {
