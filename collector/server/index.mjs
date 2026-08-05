@@ -40,7 +40,7 @@ import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import { resolveExtractedArticle } from "../collector/sources/extracted-article.mjs";
 import { buildFilteredMediaList } from "../collector/sources/media-filter.mjs";
-import { buildNormalizedFromExtractedPayload } from "../collector/sources/extracted-payload-normalizer.mjs";
+import { buildNormalizedFromExtractedPayload, pickNormalizedFromSourceRecords } from "../collector/sources/extracted-payload-normalizer.mjs";
 import {
   getCurrentTranslationSourceFingerprint,
   isTranslationRowStale as isWorkflowTranslationRowStale,
@@ -6795,18 +6795,7 @@ function parseObjectCandidate(value) {
   return value;
 }
 
-function pickNormalizedFromSourceRecords(sourceRecords = []) {
-  for (const row of sourceRecords) {
-    const payload = parseObjectCandidate(row?.payload_json);
-    if (!payload) continue;
-    const normalized = parseObjectCandidate(payload?.normalized_json)
-      || parseObjectCandidate(payload?.payload_json?.normalized_json);
-    if (normalized) return normalized;
-    const extractedNormalized = buildNormalizedFromExtractedPayload(payload, row);
-    if (extractedNormalized) return extractedNormalized;
-  }
-  return null;
-}
+
 
 function buildFallbackNormalizedFromItem(item) {
   return {

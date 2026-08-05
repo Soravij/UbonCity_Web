@@ -94,3 +94,26 @@ export function buildNormalizedFromExtractedPayload(payload = {}, sourceRecord =
   }
   return candidate;
 }
+
+export function pickNormalizedFromSourceRecords(sourceRecords = []) {
+  for (const row of sourceRecords) {
+    const payload = parseObjectCandidate(row?.payload_json);
+    if (!payload) continue;
+    const normalized = parseObjectCandidate(payload?.normalized_json)
+      || parseObjectCandidate(payload?.payload_json?.normalized_json);
+    if (normalized) {
+      const hasBodyText = typeof normalized.article_body_text === "string" && normalized.article_body_text.trim();
+      const hasSectionTexts = Array.isArray(normalized.article_section_texts) && normalized.article_section_texts.length > 0;
+      if (hasBodyText && hasSectionTexts) return normalized;
+      const extracted = buildNormalizedFromExtractedPayload(payload, row);
+      if (!extracted) return normalized;
+      if (!hasBodyText && extracted.article_body_text) normalized.article_body_text = extracted.article_body_text;
+      if (!hasSectionTexts && extracted.article_section_texts?.length) normalized.article_section_texts = extracted.article_section_texts;
+      if (!normalized.article_page_title && extracted.article_page_title) normalized.article_page_title = extracted.article_page_title;
+      return normalized;
+    }
+    const extractedNormalized = buildNormalizedFromExtractedPayload(payload, row);
+    if (extractedNormalized) return extractedNormalized;
+  }
+  return null;
+}
