@@ -50,6 +50,7 @@ function mapSearchResultToRawItem(item, query, category) {
       editorial_summary: snippet,
       tags,
       payload_json: item,
+      // metadata_json stores the raw pagemap object, not {source, role, order}
       media: image ? [{ media_url: image, metadata_json: item?.pagemap || null }] : [],
       source_ref: String(item?.cacheId || item?.formattedUrl || link || title).trim(),
     },

@@ -54,22 +54,30 @@ flagged here so a future investigation doesn't have to rediscover it from scratc
 
 ## Baseline
 
-Measured against **`main` @ `0b4f105`** (2026-07-31), using the standard command shape
-(backend+collector combined, process-isolated, both concurrency settings gave the identical
-result):
+Measured against **`main` @ `d5cc8a1`** (2026-08-05), using the standard command
+(`npm run test:all`):
 
-- **806 tests total** (92 backend + 714 collector)
-- **739 pass**
-- **66 fail**
+- **826 tests total**
+- **766 pass**
+- **59 fail**
 
-This branch (`codex/harden-runtime-smoke-target-guard` @ `cacb737`), measured the same way,
-currently shows **60 fail** (806 total, 745 pass) — 6 fewer than the `main` baseline, all from
-the `manual-import-merge-backfill.behavior.test.mjs` cluster described above. Zero new failures
-were introduced relative to the `main` baseline (verified by diffing the two sorted name lists,
-not comparing counts).
+After this change set (same baseline commit `d5cc8a1`):
 
-**After this branch merges to `main`, the 66-failure baseline above is stale — re-measure and
-update this file rather than trusting the number.**
+- **844 tests total**
+- **784 pass**
+- **59 fail**
+
+### History: the earlier 66-failure number
+
+An earlier baseline measured **66 fail** (739 pass, same 806 total) against `main` @ `0b4f105`
+(also 2026-07-31, same day, earlier commit). This was **not** a different measurement method —
+it's the same `npm run test:all` command, just measured before the
+`codex/harden-runtime-smoke-target-guard` branch (which fixed the
+`manual-import-merge-backfill.behavior.test.mjs` cluster, 6 tests) merged into `main` as
+`0c1824b`. That branch's own pre-merge measurement already showed 60 fail with zero regressions
+against the 66-fail baseline (verified by diffing sorted failing-name lists, not just counts) —
+merging simply made that the new `main` state. The 66 number is kept here only as a historical
+data point for that comparison; treat the 60-fail baseline above as current.
 
 ## How to check for a regression
 
@@ -87,16 +95,17 @@ sorted lists. Anything appearing only on your branch's side is a regression to e
 merging; anything only on `main`'s side is a pre-existing failure your branch happens to fix (nice,
 but call it out explicitly rather than letting it silently change the baseline number).
 
-## Known pre-existing failures (main baseline, 66)
+## Known pre-existing failures (main baseline, 60)
 
 All failures cluster by file — grouped below with what's actually wrong, from reading the real
-error each one throws (not guessed):
+error each one throws (not guessed). The `manual-import-merge-backfill.behavior.test.mjs`
+cluster (6 tests) that appeared in the earlier 66-fail baseline is gone as of `0c1824b` — see
+the History note above — and has been dropped from this table.
 
 | File | Count | Cause | Category |
 | --- | --- | --- | --- |
 | `collector/tests/assignment-ui-scope.test.mjs` | 33 | Assertions compare against navigation/tab-list structure (e.g. expects `["handoff","work","review","assignments"]`) that no longer matches the current UI source. | Outdated harness — assertions weren't updated after a UI/route refactor |
 | `collector/tests/article-workspace-ui-surface.test.mjs` | 10 | Regex assertions against HTML markup (e.g. `id="table-article-intake"`) that no longer exists under that id. | Outdated harness — markup ids changed |
-| `collector/tests/manual-import-merge-backfill.behavior.test.mjs` | 6 | Passes 100% when run in isolation; only fails as part of a large combined-file `main`-baseline run. Did not reproduce on this branch's `test:all` run (2/2 clean). | Full-suite-composition-dependent — root cause not fully diagnosed, see note above |
 | `collector/tests/translation-workflow-fallback.test.mjs` | 4 | `TypeError: repo.updateTranslationRecheck is not a function` — the real function exists in `collector/db/repository.mjs:11691` and is exported, but the test's mock `repo` object doesn't include it. | Outdated harness — mock repo object hasn't kept up with the real repo's method set |
 | `collector/tests/article-workspace-translation-behavior.test.mjs` | 3 | `SyntaxError: Cannot use import statement outside a module` — the harness loads the target file with `vm.Script`/`runInNewContext`, which can't parse a file that now contains an ESM `import` statement. | Outdated harness — VM-based loader technique incompatible with a since-added `import` |
 | `backend/tests/public-response-dto.test.mjs` | 2 | Regex assertions against serializer source (e.g. expects `serializePublicPlaceResponse(normalizePlaceForResponse(` inline) that no longer matches after a refactor. | Outdated harness |
