@@ -5863,6 +5863,7 @@ function renderRawTable(items) {
   }
 
   const intakeTbody = document.querySelector("#table-raw-intake tbody");
+  const cleanPrepTbody = document.querySelector("#table-clean-prep tbody");
   const reviewTbody = document.querySelector("#table-raw-review tbody");
   if (intakeTbody) intakeTbody.onchange = (event) => {
     const checkbox = event.target.closest('input[data-action="select"]');
@@ -5932,6 +5933,7 @@ function renderRawTable(items) {
     }
   };
   if (intakeTbody) intakeTbody.onclick = handleRowAction;
+  if (cleanPrepTbody) cleanPrepTbody.onclick = handleRowAction;
   if (reviewTbody) reviewTbody.onclick = handleRowAction;
 
   // Fire-and-forget: the queue above is already on screen, and annotateRawTableBlockers swallows its
