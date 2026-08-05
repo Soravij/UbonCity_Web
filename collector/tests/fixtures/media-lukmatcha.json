@@ -1,0 +1,17 @@
+{
+  "_comment": "Real source_raw_media rows for lukmatcha.com (content item, all real content photos). Expected: all 10 survive the junk filter.",
+  "expected_surviving_count": 10,
+  "normalized_image_fallback": "https://lukmatcha.com/images/hero/hero-01-exterior-front.jpg",
+  "media": [
+    { "media_url": "https://lukmatcha.com/images/hero/hero-01-exterior-front.jpg", "metadata_json": { "source": "manual_url_metadata", "role": "hero", "order": 0 } },
+    { "media_url": "https://lukmatcha.com/images/restaurant/restaurant-08-customers-dining.jpg", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 1 } },
+    { "media_url": "https://lukmatcha.com/images/matcha/matcha-04-latte-bokeh.jpg", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 2 } },
+    { "media_url": "https://lukmatcha.com/images/hero/hero-04-exterior-garden-side.jpg", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 3 } },
+    { "media_url": "https://lukmatcha.com/images/restaurant/restaurant-07-pendant-lights.jpg", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 4 } },
+    { "media_url": "https://lukmatcha.com/images/gallery/gallery-05.jpg", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 5 } },
+    { "media_url": "https://lukmatcha.com/images/drinks/drinks-07-matcha-cake-set.jpg", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 6 } },
+    { "media_url": "https://lukmatcha.com/images/restaurant/restaurant-03-indoor-main.jpg", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 7 } },
+    { "media_url": "https://lukmatcha.com/images/matcha/matcha-03-pouring-wide.jpg", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 8 } },
+    { "media_url": "https://lukmatcha.com/images/matcha/matcha-05-latte-window.jpg", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 9 } }
+  ]
+}

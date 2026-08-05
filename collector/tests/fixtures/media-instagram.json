@@ -1,0 +1,15 @@
+{
+  "_comment": "Real source_raw_media rows for an instagram-sourced item. 6 of 7 are Instagram's rsrc.php static UI/sprite assets (junk); only the scontent CDN photo is real content. Expected: 1 survives.",
+  "expected_surviving_count": 1,
+  "expected_surviving_url_substring": "scontent.cdninstagram.com/v/t51.2885-19/331850848",
+  "normalized_image_fallback": "https://static.cdninstagram.com/rsrc.php/yr/r/rzWiSjZRxk5.webp",
+  "media": [
+    { "media_url": "https://static.cdninstagram.com/rsrc.php/yr/r/rzWiSjZRxk5.webp", "metadata_json": { "source": "manual_url_metadata", "role": "hero", "order": 0 } },
+    { "media_url": "https://static.cdninstagram.com/rsrc.php/yj/r/f01UdNyJjJj.webp", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 1 } },
+    { "media_url": "https://static.cdninstagram.com/rsrc.php/yL/r/mMvhX4currF.webp", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 2 } },
+    { "media_url": "https://static.cdninstagram.com/rsrc.php/yY/r/5OCV_xUyQ5h.webp", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 3 } },
+    { "media_url": "https://static.cdninstagram.com/rsrc.php/y9/r/MptwNl-B2pS.webp", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 4 } },
+    { "media_url": "https://static.cdninstagram.com/rsrc.php/yw/r/icwX0xAk0pz.webp", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 5 } },
+    { "media_url": "https://scontent.cdninstagram.com/v/t51.2885-19/331850848_1291936925085273_2331456775969031321_n.jpg", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 6 } }
+  ]
+}

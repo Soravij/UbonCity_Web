@@ -1,0 +1,17 @@
+{
+  "_comment": "Real source_raw_media rows for ryoiireview.com. Every entry is a /images/menu/ nav icon (home, review, recommend, article, ryoii_food, pr, contact, career, plus mobile variants). Expected: 0 survive, and the mapper must NOT fall back to normalized.image (which is itself the junk home.png icon).",
+  "expected_surviving_count": 0,
+  "normalized_image_fallback": "https://www.ryoiireview.com/images/menu/home.png",
+  "media": [
+    { "media_url": "https://www.ryoiireview.com/images/menu/home.png", "metadata_json": { "source": "manual_url_metadata", "role": "hero", "order": 0 } },
+    { "media_url": "https://www.ryoiireview.com/images/menu/review.png", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 1 } },
+    { "media_url": "https://www.ryoiireview.com/images/menu/recommend.png", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 2 } },
+    { "media_url": "https://www.ryoiireview.com/images/menu/article.png", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 3 } },
+    { "media_url": "https://www.ryoiireview.com/images/menu/ryoii_food.png", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 4 } },
+    { "media_url": "https://www.ryoiireview.com/images/menu/pr.png", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 5 } },
+    { "media_url": "https://www.ryoiireview.com/images/menu/contact.png", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 6 } },
+    { "media_url": "https://www.ryoiireview.com/images/menu/career.png", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 7 } },
+    { "media_url": "https://www.ryoiireview.com/images/menu/home_m.png", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 8 } },
+    { "media_url": "https://www.ryoiireview.com/images/menu/review_m.png", "metadata_json": { "source": "manual_url_metadata", "role": "gallery", "order": 9 } }
+  ]
+}

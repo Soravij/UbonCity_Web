@@ -1,4 +1,6 @@
-﻿function toStringValue(value) {
+﻿import { resolveExtractedArticle } from "./extracted-article.mjs";
+
+function toStringValue(value) {
   return String(value ?? "").trim();
 }
 
@@ -76,6 +78,26 @@ function toReviewSnippets(value, limit = 5) {
 }
 
 export function normalizeRawItem(input = {}, sourceType = "social") {
+  const extractedArticle = resolveExtractedArticle(input);
+  const articleBodyText = String(extractedArticle?.body_text || "").trim();
+  const articleSectionTexts = Array.isArray(extractedArticle?.section_texts)
+    ? extractedArticle.section_texts.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+  const media = Array.isArray(input.media)
+    ? input.media
+        .map((m) => ({
+          media_url: toStringValue(m?.media_url || m?.url),
+          mime_type: toStringValue(m?.mime_type),
+          width: toNumber(m?.width),
+          height: toNumber(m?.height),
+          // Adapter entries already carry {media_url, metadata_json: {source, role, order}};
+          // use that inner object directly instead of re-wrapping the whole entry, which
+          // would otherwise double-nest metadata_json (metadata_json.metadata_json.role).
+          metadata_json: (m?.metadata_json && typeof m.metadata_json === "object") ? m.metadata_json : (m || null),
+        }))
+        .filter((m) => m.media_url)
+    : [];
+
   return {
     source_ref: toStringValue(input.source_ref || input.id || input.post_id),
     source_url: toStringValue(input.source_url || input.url),
@@ -112,17 +134,10 @@ export function normalizeRawItem(input = {}, sourceType = "social") {
       full_address_normalized: toStringValue(input.full_address_normalized),
       phone_normalized: toStringValue(input.phone_normalized),
       primary_type_display_name: toStringValue(input.primary_type_display_name),
+      article_body_text: articleBodyText,
+      article_section_texts: articleSectionTexts,
+      media,
     },
-    media: Array.isArray(input.media)
-      ? input.media
-          .map((m) => ({
-            media_url: toStringValue(m?.media_url || m?.url),
-            mime_type: toStringValue(m?.mime_type),
-            width: toNumber(m?.width),
-            height: toNumber(m?.height),
-            metadata_json: m || null,
-          }))
-          .filter((m) => m.media_url)
-      : [],
+    media,
   };
 }
