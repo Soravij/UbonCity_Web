@@ -31,17 +31,17 @@ Raw Intake remains bound to the handler and retains its existing action attribut
 
 ## Actual diff size
 
-Command run before adding this audit record:
+Command run against the branch's audited commit (`5c49d26`):
 
 ```text
-git diff --numstat -- collector/server/public/app.js collector/tests/raw-intake-clean-prep.behavior.test.mjs
+git diff --numstat d2911fb..5c49d26 -- collector/server/public/app.js collector/tests/raw-intake-clean-prep.behavior.test.mjs
 ```
 
 Output:
 
 ```text
 2       0       collector/server/public/app.js
-60      7       collector/tests/raw-intake-clean-prep.behavior.test.mjs
+125     7       collector/tests/raw-intake-clean-prep.behavior.test.mjs
 ```
 
 No state-machine, transition, route, `resolveQueueBucket`, `isRawPreparationItem`,
