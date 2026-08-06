@@ -40,7 +40,8 @@ import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import { resolveExtractedArticle } from "../collector/sources/extracted-article.mjs";
 import { buildFilteredMediaList } from "../collector/sources/media-filter.mjs";
-import { buildNormalizedFromExtractedPayload, pickNormalizedFromSourceRecords } from "../collector/sources/extracted-payload-normalizer.mjs";
+import { buildNormalizedFromExtractedPayload, hasUsableNormalizedKeys, pickNormalizedFromSourceRecords } from "../collector/sources/extracted-payload-normalizer.mjs";
+import { makeEvidenceSignature } from "./evidence-signature.mjs";
 import {
   getCurrentTranslationSourceFingerprint,
   isTranslationRowStale as isWorkflowTranslationRowStale,
@@ -6820,20 +6821,6 @@ function normalizeEnum(value, allowed) {
   return allowed.has(normalized) ? normalized : "";
 }
 
-function makeEvidenceSignature(block = {}) {
-  const listValue = Array.isArray(block.list_value)
-    ? block.list_value.map((x) => String(x)).filter(Boolean)
-    : [];
-  return [
-    String(block.block_type || "").trim().toLowerCase(),
-    String(block.source_type || "").trim().toLowerCase(),
-    String(block.source_url || "").trim(),
-    String(block.text_value || "").trim(),
-    block.numeric_value == null ? "" : String(block.numeric_value),
-    JSON.stringify(listValue),
-  ].join("|");
-}
-
 function pushEvidenceCandidate(out, payload = {}) {
   const textValue = String(payload.text_value || "").trim();
   const numericValue = payload.numeric_value == null ? null : toFiniteNumberOrNull(payload.numeric_value);
@@ -6848,6 +6835,7 @@ function pushEvidenceCandidate(out, payload = {}) {
 }
 
 function buildEvidenceCandidatesForNormalized(normalized = {}, base = {}) {
+  if (!hasUsableNormalizedKeys(normalized)) return [];
   const out = [];
   const title = String(normalized.title || normalized.name || "").trim();
   const description = String(normalized.description || "").trim();
@@ -7029,24 +7017,6 @@ function seedEvidenceBlocksForItem(item, options = {}) {
   const sourceRecords = Array.isArray(options.sourceRecords)
     ? options.sourceRecords
     : repo.listSourceRecordsByItem(contentItemId);
-  const picked = parseObjectCandidate(options.normalized)
-    ? { normalized: options.normalized, articleSourceRecordId: null }
-    : pickNormalizedFromSourceRecords(sourceRecords)
-    || { normalized: buildFallbackNormalizedFromItem(item), articleSourceRecordId: null };
-  const { normalized, articleSourceRecordId } = picked;
-
-  const sourceRecord = sourceRecords[0] || null;
-  const base = {
-    source_type: normalizeEvidenceSourceType(options.sourceType || sourceRecord?.source_type || item?.source_type || "import"),
-    source_record_type: sourceRecord ? "source_records" : null,
-    source_record_id: sourceRecord ? String(sourceRecord.id || "") : null,
-    source_url: String(normalized.source_url || sourceRecord?.source_url || item?.source_url || "").trim() || null,
-    source_label: String(normalized.source_name || sourceRecord?.source_name || item?.source_name || "").trim() || null,
-    lang: String(normalized.lang || item?.lang || "th").trim().toLowerCase() || "th",
-    attribution_text: "Collected source signal",
-    status: "active",
-    ...(articleSourceRecordId != null ? { article_source_record_id: String(articleSourceRecordId) } : {}),
-  };
 
   const existing = repo.listEvidenceBlocks(contentItemId);
   const seen = new Set(existing.map((row) => makeEvidenceSignature({
@@ -7056,13 +7026,69 @@ function seedEvidenceBlocksForItem(item, options = {}) {
     text_value: row.text_value,
     numeric_value: row.numeric_value,
     list_value: Array.isArray(row.list_value_json) ? row.list_value_json : [],
+    source_record_id: row.source_record_id,
   })));
 
-  const candidates = buildEvidenceCandidatesForNormalized(normalized, base);
+  let allCandidates = [];
+
+  if (options.normalized) {
+    const sourceRecord = sourceRecords[0] || null;
+    const base = {
+      source_type: normalizeEvidenceSourceType(options.sourceType || sourceRecord?.source_type || item?.source_type || "import"),
+      source_record_type: sourceRecord ? "source_records" : null,
+      source_record_id: sourceRecord ? String(sourceRecord.id || "") : null,
+      source_url: String(options.normalized.source_url || sourceRecord?.source_url || item?.source_url || "").trim() || null,
+      source_label: String(options.normalized.source_name || sourceRecord?.source_name || item?.source_name || "").trim() || null,
+      lang: String(options.normalized.lang || item?.lang || "th").trim().toLowerCase() || "th",
+      attribution_text: "Collected source signal",
+      status: "active",
+    };
+    allCandidates = buildEvidenceCandidatesForNormalized(options.normalized, base);
+  } else {
+    for (const sourceRecord of sourceRecords) {
+      const payload = parseObjectCandidate(sourceRecord?.payload_json);
+      if (!payload) continue;
+      const normalized = parseObjectCandidate(payload?.normalized_json)
+        || parseObjectCandidate(payload?.payload_json?.normalized_json)
+        || buildNormalizedFromExtractedPayload(payload, sourceRecord);
+
+      const base = {
+        source_type: normalizeEvidenceSourceType(options.sourceType || sourceRecord?.source_type || item?.source_type || "import"),
+        source_record_type: "source_records",
+        source_record_id: String(sourceRecord.id || ""),
+        source_url: String(normalized.source_url || sourceRecord?.source_url || item?.source_url || "").trim() || null,
+        source_label: String(normalized.source_name || sourceRecord?.source_name || item?.source_name || "").trim() || null,
+        lang: String(normalized.lang || item?.lang || "th").trim().toLowerCase() || "th",
+        attribution_text: "Collected source signal",
+        status: "active",
+      };
+      const candidates = buildEvidenceCandidatesForNormalized(normalized, base);
+      allCandidates.push(...candidates);
+    }
+
+    if (allCandidates.length === 0) {
+      const fallback = buildFallbackNormalizedFromItem(item);
+      if (fallback) {
+        const sourceRecord = sourceRecords[0] || null;
+        const base = {
+          source_type: normalizeEvidenceSourceType(options.sourceType || sourceRecord?.source_type || item?.source_type || "import"),
+          source_record_type: sourceRecord ? "source_records" : null,
+          source_record_id: sourceRecord ? String(sourceRecord.id || "") : null,
+          source_url: String(fallback.source_url || sourceRecord?.source_url || item?.source_url || "").trim() || null,
+          source_label: String(fallback.source_name || sourceRecord?.source_name || item?.source_name || "").trim() || null,
+          lang: String(fallback.lang || item?.lang || "th").trim().toLowerCase() || "th",
+          attribution_text: "Collected source signal",
+          status: "active",
+        };
+        allCandidates = buildEvidenceCandidatesForNormalized(fallback, base);
+      }
+    }
+  }
+
   let added = 0;
   let skipped = 0;
 
-  for (const candidate of candidates) {
+  for (const candidate of allCandidates) {
     const signature = makeEvidenceSignature(candidate);
     if (seen.has(signature)) {
       skipped += 1;
@@ -7073,7 +7099,7 @@ function seedEvidenceBlocksForItem(item, options = {}) {
     added += 1;
   }
 
-  return { added, skipped, total_candidates: candidates.length };
+  return { added, skipped, total_candidates: allCandidates.length };
 }
 
 function parseTargetLangs() {
@@ -15397,7 +15423,7 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-export { buildCollectedImportSeed, importCollectedRawItem, importCollectedRawItemsTxn, buildNormalizedFromExtractedPayload };
+export { buildCollectedImportSeed, importCollectedRawItem, importCollectedRawItemsTxn, buildNormalizedFromExtractedPayload, makeEvidenceSignature };
 
 process.once("exit", () => {
   try {
