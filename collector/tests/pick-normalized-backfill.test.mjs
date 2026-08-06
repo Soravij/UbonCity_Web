@@ -332,3 +332,21 @@ test("pickNormalizedFromSourceRecords: all rows normalized = {} with source_url 
 
   assert.equal(result, null, "all-empty normalized should return null even if payload has source_url");
 });
+
+test("hasUsableNormalizedKeys: whitespace-only string fields return false", () => {
+  assert.equal(hasUsableNormalizedKeys({ title: "   " }), false, "whitespace-only title must be rejected");
+  assert.equal(hasUsableNormalizedKeys({ description: "  \t  " }), false, "whitespace-only description must be rejected");
+  assert.equal(hasUsableNormalizedKeys({ source_url: " " }), false, "whitespace-only source_url must be rejected");
+});
+
+test("hasUsableNormalizedKeys: numeric 0 is valid for latitude/longitude/rating", () => {
+  assert.equal(hasUsableNormalizedKeys({ latitude: 0 }), true, "latitude=0 must be accepted");
+  assert.equal(hasUsableNormalizedKeys({ longitude: 0 }), true, "longitude=0 must be accepted");
+  assert.equal(hasUsableNormalizedKeys({ rating: 0 }), true, "rating=0 must be accepted");
+});
+
+test("hasUsableNormalizedKeys: normal object with real title returns true", () => {
+  assert.equal(hasUsableNormalizedKeys({ title: "Real Place" }), true);
+  assert.equal(hasUsableNormalizedKeys({ description: "A description" }), true);
+  assert.equal(hasUsableNormalizedKeys({ image: "https://img.url" }), true);
+});

@@ -6835,6 +6835,7 @@ function pushEvidenceCandidate(out, payload = {}) {
 }
 
 function buildEvidenceCandidatesForNormalized(normalized = {}, base = {}) {
+  if (!hasUsableNormalizedKeys(normalized)) return [];
   const out = [];
   const title = String(normalized.title || normalized.name || "").trim();
   const description = String(normalized.description || "").trim();
@@ -7050,7 +7051,6 @@ function seedEvidenceBlocksForItem(item, options = {}) {
       const normalized = parseObjectCandidate(payload?.normalized_json)
         || parseObjectCandidate(payload?.payload_json?.normalized_json)
         || buildNormalizedFromExtractedPayload(payload, sourceRecord);
-      if (!hasUsableNormalizedKeys(normalized)) continue;
 
       const base = {
         source_type: normalizeEvidenceSourceType(options.sourceType || sourceRecord?.source_type || item?.source_type || "import"),

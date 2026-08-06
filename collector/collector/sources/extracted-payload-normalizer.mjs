@@ -97,10 +97,12 @@ export function buildNormalizedFromExtractedPayload(payload = {}, sourceRecord =
 
 export function hasUsableNormalizedKeys(obj) {
   if (!obj || typeof obj !== "object") return false;
+  const hasText = (v) => typeof v === "string" && v.trim().length > 0;
+  const hasNum = (v) => typeof v === "number" && Number.isFinite(v);
   return Boolean(
-    obj.title || obj.description || obj.image || obj.address ||
-    obj.latitude || obj.longitude || obj.rating ||
-    obj.article_body_text || obj.source_url
+    hasText(obj.title) || hasText(obj.description) || hasText(obj.image) || hasText(obj.address) ||
+    hasNum(obj.latitude) || hasNum(obj.longitude) || hasNum(obj.rating) ||
+    hasText(obj.article_body_text) || hasText(obj.source_url)
   );
 }
 
