@@ -8,6 +8,7 @@ const ENRICH_ROW_TIMEOUT_MS = Math.max(
 );
 const MAX_HTML_CHARS = 250000;
 const MAX_WONGNAI_PHOTOS_HTML_CHARS = 750000;
+const MAX_WONGNAI_STOREFRONT_HTML_CHARS = 1000000;
 const MAX_MEDIA_ITEMS = 10;
 const MAX_WONGNAI_MEDIA_ITEMS = 20;
 const MAX_REVIEW_ITEMS = 50;
@@ -416,7 +417,7 @@ function extractJsonLdObjects(html) {
 }
 
 function extractWongnaiStructuredState(html) {
-  const match = String(html || "").match(/<script>\s*window\._wn\s*=\s*([\s\S]*?)<\/script>/i);
+  const match = String(html || "").match(/<script[^>]*>\s*window\._wn\s*=\s*([\s\S]*?)<\/script>/i);
   if (!match?.[1]) return null;
   const raw = String(match[1]).trim().replace(/;\s*$/, "");
   return safeJsonParse(raw);
@@ -987,6 +988,45 @@ function extractWongnaiAddress(html, generic = {}) {
   return afterPipe || generic.address || "";
 }
 
+function extractWongnaiReviewsFromStructuredState(html, restaurantName, businessId) {
+  const state = extractWongnaiStructuredState(html);
+  if (!state || typeof state !== "object") return { reviews: [], stateFound: false };
+  const store = state.store || state;
+  const reviewsPage = store.reviewsPage;
+  if (!reviewsPage || typeof reviewsPage !== "object") return { reviews: [], stateFound: true };
+  const value = reviewsPage.value;
+  if (!value || typeof value !== "object") return { reviews: [], stateFound: true };
+  const data = Array.isArray(value.data) ? value.data : [];
+  const numBusinessId = toNumber(businessId);
+  const normalizedName = toText(restaurantName).toLowerCase();
+  const out = [];
+  const skippedNames = [];
+  for (const review of data) {
+    if (!review || typeof review !== "object") continue;
+    const reviewedItemId = toNumber(review?.reviewedItem?.id);
+    if (numBusinessId && reviewedItemId && reviewedItemId !== numBusinessId) continue;
+    if (!numBusinessId) {
+      const reviewedItemName = toText(review?.reviewedItem?.name).toLowerCase();
+      if (normalizedName && reviewedItemName && reviewedItemName !== normalizedName) {
+        skippedNames.push(toText(review?.reviewedItem?.name));
+        continue;
+      }
+    }
+    const text = firstNonEmpty(review.description, review.summary);
+    if (!text || toText(text).length < 10) continue;
+    const rating = toNumber(review.rating);
+    const author = toText(review?.reviewerProfile?.name);
+    const isoDate = toText(review?.reviewedTime?.iso);
+    out.push({
+      text: toText(text),
+      rating: rating != null && rating > 0 ? rating : null,
+      author,
+      relative_time: isoDate || toText(review?.reviewedTime?.timePassed),
+    });
+  }
+  return { reviews: out.slice(0, MAX_REVIEW_ITEMS), stateFound: true, rawDataCount: data.length, skippedNames };
+}
+
 function extractWongnaiAlternateTitles(title, description) {
   const out = [];
   const withParens = [...extractAlternateTitles(title, description)];
@@ -1462,7 +1502,19 @@ function extractWongnaiEnrichment(html, finalUrl, generic, options = {}) {
     );
     mediaUrls = dedupeMediaUrls([...mediaUrls, ...reviewCommentMediaUrls], MAX_WONGNAI_MEDIA_ITEMS);
   }
-  const reviewItems = Array.isArray(generic.reviewItems) ? generic.reviewItems.slice(0, MAX_REVIEW_ITEMS) : [];
+  const restaurantName = firstNonEmpty(
+    extractMetaContent(html, "og:title", "property")?.split("|")[0]?.replace(/^ร้าน\s*/i, "").trim(),
+    title
+  );
+  const stateObj = extractWongnaiStructuredState(html);
+  const businessId = stateObj?.store?.business?.value?.id ?? stateObj?.business?.value?.id ?? null;
+  const { reviews: structuredReviews, stateFound, rawDataCount, skippedNames } = extractWongnaiReviewsFromStructuredState(html, restaurantName, businessId);
+  const genericReviews = Array.isArray(generic.reviewItems) ? generic.reviewItems.slice(0, MAX_REVIEW_ITEMS) : [];
+  const reviewItems = structuredReviews.length > 0 ? structuredReviews : genericReviews;
+  const wongnai_review_extraction_note = stateFound && rawDataCount > 0 && structuredReviews.length === 0
+    ? `wongnai_state_has_${rawDataCount}_raw_reviews_but_0_matched_scope`
+    : (!stateFound ? "wongnai_state_not_found"
+      : (skippedNames.length > 0 ? `wongnai_partial_skip_${skippedNames.length}_of_${rawDataCount}_reviews_name_mismatch: ${skippedNames.join(", ")}` : null));
   const articleSections = uniqueTextList([
     description,
     ...reviewItems.map((row) => toText(row?.text)).filter((text) => text.length >= 50),
@@ -1480,6 +1532,7 @@ function extractWongnaiEnrichment(html, finalUrl, generic, options = {}) {
     alternateTitles,
     mediaUrls,
     reviewItems,
+    wongnai_review_extraction_note,
     article: mergeArticleData(
       {
         ...(generic.article && typeof generic.article === "object" ? generic.article : {}),
@@ -1586,7 +1639,15 @@ async function fetchHtmlDocument(sourceUrl, options = {}) {
 }
 
 async function fetchUrlMetadata(sourceUrl) {
-  const mainDoc = await fetchHtmlDocument(sourceUrl);
+  const isWongnaiStorefront = (() => {
+    try {
+      const parsed = new URL(sourceUrl);
+      return toHostLabel(parsed.hostname).includes("wongnai.com") && parsed.pathname.includes("/restaurants/");
+    } catch {
+      return false;
+    }
+  })();
+  const mainDoc = await fetchHtmlDocument(sourceUrl, isWongnaiStorefront ? { maxHtmlChars: MAX_WONGNAI_STOREFRONT_HTML_CHARS } : {});
   const finalUrl = toText(mainDoc.finalUrl || sourceUrl);
   const contentType = String(mainDoc.contentType || "").toLowerCase();
   if (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
@@ -1811,6 +1872,7 @@ async function enrichManualRow(row = {}) {
                 relative_time: toText(row?.relative_time),
               }))
               .filter((row) => row.text),
+            extraction_note: toText(metadata.wongnai_review_extraction_note) || null,
           },
         },
         media: mediaUrls.length

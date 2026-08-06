@@ -79,6 +79,13 @@ After this change set (same baseline commit `d5cc8a1`):
 - **59 fail**
 - **1 skipped**
 
+After `fix/wongnai-review-extract` (regex script tag fix, real fixture test, partial-skip extraction_note, storefront cap, negative cap test, PROJECT_POLICY docs):
+
+- **873 tests total**
+- **813 pass**
+- **59 fail**
+- **1 skipped**
+
 ### History: the earlier 66-failure number
 
 An earlier baseline measured **66 fail** (739 pass, same 806 total) against `main` @ `0b4f105`
