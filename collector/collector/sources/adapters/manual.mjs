@@ -987,6 +987,36 @@ function extractWongnaiAddress(html, generic = {}) {
   return afterPipe || generic.address || "";
 }
 
+function extractWongnaiReviewsFromStructuredState(html, restaurantName) {
+  const state = extractWongnaiStructuredState(html);
+  if (!state || typeof state !== "object") return [];
+  const store = state.store || state;
+  const reviewsPage = store.reviewsPage;
+  if (!reviewsPage || typeof reviewsPage !== "object") return [];
+  const value = reviewsPage.value;
+  if (!value || typeof value !== "object") return [];
+  const data = Array.isArray(value.data) ? value.data : [];
+  const normalizedName = toText(restaurantName).toLowerCase();
+  const out = [];
+  for (const review of data) {
+    if (!review || typeof review !== "object") continue;
+    const reviewedItemName = toText(review?.reviewedItem?.name).toLowerCase();
+    if (normalizedName && reviewedItemName && reviewedItemName !== normalizedName) continue;
+    const text = firstNonEmpty(review.description, review.summary);
+    if (!text || toText(text).length < 10) continue;
+    const rating = toNumber(review.rating);
+    const author = toText(review?.reviewerProfile?.name);
+    const isoDate = toText(review?.reviewedTime?.iso);
+    out.push({
+      text: toText(text),
+      rating: rating != null && rating > 0 ? rating : null,
+      author,
+      relative_time: isoDate || toText(review?.reviewedTime?.timePassed),
+    });
+  }
+  return out.slice(0, MAX_REVIEW_ITEMS);
+}
+
 function extractWongnaiAlternateTitles(title, description) {
   const out = [];
   const withParens = [...extractAlternateTitles(title, description)];
@@ -1462,7 +1492,13 @@ function extractWongnaiEnrichment(html, finalUrl, generic, options = {}) {
     );
     mediaUrls = dedupeMediaUrls([...mediaUrls, ...reviewCommentMediaUrls], MAX_WONGNAI_MEDIA_ITEMS);
   }
-  const reviewItems = Array.isArray(generic.reviewItems) ? generic.reviewItems.slice(0, MAX_REVIEW_ITEMS) : [];
+  const restaurantName = firstNonEmpty(
+    extractMetaContent(html, "og:title", "property")?.split("|")[0]?.replace(/^ร้าน\s*/i, "").trim(),
+    title
+  );
+  const structuredReviews = extractWongnaiReviewsFromStructuredState(html, restaurantName);
+  const genericReviews = Array.isArray(generic.reviewItems) ? generic.reviewItems.slice(0, MAX_REVIEW_ITEMS) : [];
+  const reviewItems = structuredReviews.length > 0 ? structuredReviews : genericReviews;
   const articleSections = uniqueTextList([
     description,
     ...reviewItems.map((row) => toText(row?.text)).filter((text) => text.length >= 50),
