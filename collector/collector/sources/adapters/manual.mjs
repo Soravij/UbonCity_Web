@@ -8,6 +8,7 @@ const ENRICH_ROW_TIMEOUT_MS = Math.max(
 );
 const MAX_HTML_CHARS = 250000;
 const MAX_WONGNAI_PHOTOS_HTML_CHARS = 750000;
+const MAX_WONGNAI_STOREFRONT_HTML_CHARS = 1000000;
 const MAX_MEDIA_ITEMS = 10;
 const MAX_WONGNAI_MEDIA_ITEMS = 20;
 const MAX_REVIEW_ITEMS = 50;
@@ -1638,7 +1639,15 @@ async function fetchHtmlDocument(sourceUrl, options = {}) {
 }
 
 async function fetchUrlMetadata(sourceUrl) {
-  const mainDoc = await fetchHtmlDocument(sourceUrl);
+  const isWongnaiStorefront = (() => {
+    try {
+      const parsed = new URL(sourceUrl);
+      return toHostLabel(parsed.hostname).includes("wongnai.com") && parsed.pathname.includes("/restaurants/");
+    } catch {
+      return false;
+    }
+  })();
+  const mainDoc = await fetchHtmlDocument(sourceUrl, isWongnaiStorefront ? { maxHtmlChars: MAX_WONGNAI_STOREFRONT_HTML_CHARS } : {});
   const finalUrl = toText(mainDoc.finalUrl || sourceUrl);
   const contentType = String(mainDoc.contentType || "").toLowerCase();
   if (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {

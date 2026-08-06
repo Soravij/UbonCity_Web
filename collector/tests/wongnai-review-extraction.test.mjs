@@ -6,6 +6,10 @@ import test from "node:test";
 
 import { collectFromManualPayload } from "../collector/sources/adapters/manual.mjs";
 
+// wongnai-trimmed-tree-cafe.html: SSR body stripped, only <head> metadata + window._wn kept.
+// Tests parsing logic only — does NOT prove the real page survives MAX_HTML_CHARS truncation.
+// See "wongnai storefront cap" test below for the actual cap proof.
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(__dirname, "fixtures");
 
@@ -170,8 +174,8 @@ test("wongnai signal: extraction_note when state exists but 0 reviews matched sc
   );
 });
 
-test("wongnai real fixture: wongnai-real-tree-cafe.html extracts 6 reviews scoped to business id 329973", async () => {
-  const html = loadFixture("wongnai-real-tree-cafe.html");
+test("wongnai real fixture: wongnai-trimmed-tree-cafe.html extracts 6 reviews scoped to business id 329973", async () => {
+  const html = loadFixture("wongnai-trimmed-tree-cafe.html");
   const url = "https://www.wongnai.com/restaurants/329973fR-tree-cafe-rim-moon";
   const result = await withImmediateTimers(() =>
     withFetchMock(
@@ -192,7 +196,7 @@ test("wongnai real fixture: wongnai-real-tree-cafe.html extracts 6 reviews scope
 });
 
 test("wongnai real fixture: review items stay scoped to business id 329973 — no neighbor leak", async () => {
-  const html = loadFixture("wongnai-real-tree-cafe.html");
+  const html = loadFixture("wongnai-trimmed-tree-cafe.html");
   const url = "https://www.wongnai.com/restaurants/329973fR-tree-cafe-rim-moon";
   const result = await withImmediateTimers(() =>
     withFetchMock(
@@ -241,7 +245,7 @@ test("wongnai partial-skip: extraction_note when some reviews differ by name", a
 });
 
 test("wongnai partial-skip reverts cleanly: no extraction_note when regex fix is reverted", async () => {
-  const html = loadFixture("wongnai-real-tree-cafe.html");
+  const html = loadFixture("wongnai-trimmed-tree-cafe.html");
   const url = "https://www.wongnai.com/restaurants/329973fR-tree-cafe-rim-moon";
   const result = await withImmediateTimers(() =>
     withFetchMock(
@@ -255,4 +259,37 @@ test("wongnai partial-skip reverts cleanly: no extraction_note when regex fix is
   const reviews = result?.payload_json?.payload_json?.extracted_reviews;
   assert.ok(reviews, "extracted_reviews should exist");
   assert.equal(reviews.count_found, 6, "must find 6 reviews with <script type=text/javascript> regex");
+});
+
+test("wongnai storefront cap: synthetic 800K HTML with window._wn at ~745K extracts reviews", async () => {
+  const reviewsData = [
+    { id: "r1", description: "Synthetic review one with enough text to pass the length filter", rating: 5, reviewedItem: { id: 111111, name: "Synth Shop" }, reviewerProfile: { name: "Alice" }, reviewedTime: { iso: "2024-01-01" } },
+    { id: "r2", description: "Synthetic review two with enough text to pass the length filter", rating: 4, reviewedItem: { id: 111111, name: "Synth Shop" }, reviewerProfile: { name: "Bob" }, reviewedTime: { iso: "2024-02-01" } },
+    { id: "r3", description: "Synthetic review three with enough text to pass the length filter", rating: 3, reviewedItem: { id: 111111, name: "Synth Shop" }, reviewerProfile: { name: "Carol" }, reviewedTime: { iso: "2024-03-01" } },
+  ];
+  const state = { store: { business: { value: { id: 111111 } }, reviewsPage: { value: { data: reviewsData } } } };
+  const wnScript = '<script type="text/javascript">\nwindow._wn = ' + JSON.stringify(state) + "\n</script>";
+  const prefix = '<!DOCTYPE html><html><head><title>Synth</title></head><body>';
+  const trailPad = "<p>" + "z".repeat(100000) + "</p>";
+  const suffix = "</body></html>";
+  const padChars = 745000 - prefix.length - "<div>".length;
+  const padding = "<div>" + "x".repeat(Math.max(0, padChars)) + "</div>";
+  const html = prefix + padding + wnScript + trailPad + suffix;
+  assert.ok(html.length > 800000, "synthetic HTML must exceed 800K chars");
+  assert.ok(html.indexOf("window._wn") > 740000, "window._wn must be placed after 740K");
+
+  const url = "https://www.wongnai.com/restaurants/111111synth-shop";
+  const result = await withImmediateTimers(() =>
+    withFetchMock(
+      async (fetchUrl) => createMockResponse({ url: fetchUrl, html }),
+      async () => {
+        const [row] = await collectFromManualPayload([{ source_url: url }]);
+        return row;
+      }
+    )
+  );
+  const reviews = result?.payload_json?.payload_json?.extracted_reviews;
+  assert.ok(reviews, "extracted_reviews should exist");
+  assert.equal(reviews.count_found, 3, "should find 3 reviews despite window._wn at ~745K");
+  assert.equal(reviews.items.length, 3, "should have 3 items");
 });
