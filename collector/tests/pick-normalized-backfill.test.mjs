@@ -76,3 +76,48 @@ test("no normalized_json at all -> falls back to buildNormalizedFromExtractedPay
   assert.deepEqual(result.article_section_texts, ["Full section"]);
   assert.equal(result.article_page_title, "Full page title");
 });
+
+test("first row normalized = {} payload = null, second row has data -> picks from second row", () => {
+  const sourceRecords = [
+    {
+      payload_json: {
+        normalized_json: {},
+        extracted_article: null,
+      },
+    },
+    {
+      payload_json: {
+        normalized_json: {
+          title: "Second Row Place",
+          description: "From second row",
+        },
+        extracted_article: {
+          body_text: "Article body from second row",
+          section_texts: ["Section A"],
+          page_title: "Second Page",
+        },
+      },
+    },
+  ];
+
+  const result = pickNormalizedFromSourceRecords(sourceRecords);
+
+  assert.ok(result, "should return a result");
+  assert.equal(result.title, "Second Row Place");
+  assert.equal(result.description, "From second row");
+  assert.equal(result.article_body_text, "Article body from second row");
+  assert.deepEqual(result.article_section_texts, ["Section A"]);
+  assert.equal(result.article_page_title, "Second Page");
+});
+
+test("all rows normalized = {} -> returns null without crash", () => {
+  const sourceRecords = [
+    { payload_json: { normalized_json: {} } },
+    { payload_json: { normalized_json: {} } },
+    { payload_json: { normalized_json: {} } },
+  ];
+
+  const result = pickNormalizedFromSourceRecords(sourceRecords);
+
+  assert.equal(result, null, "should return null when all rows are empty");
+});

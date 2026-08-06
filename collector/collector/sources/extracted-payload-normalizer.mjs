@@ -95,25 +95,65 @@ export function buildNormalizedFromExtractedPayload(payload = {}, sourceRecord =
   return candidate;
 }
 
+function hasUsableNormalizedKeys(obj) {
+  if (!obj || typeof obj !== "object") return false;
+  return Boolean(
+    obj.title || obj.description || obj.image || obj.address ||
+    obj.latitude || obj.longitude || obj.rating ||
+    obj.article_body_text || obj.source_url
+  );
+}
+
 export function pickNormalizedFromSourceRecords(sourceRecords = []) {
+  let picked = null;
+
   for (const row of sourceRecords) {
     const payload = parseObjectCandidate(row?.payload_json);
     if (!payload) continue;
     const normalized = parseObjectCandidate(payload?.normalized_json)
       || parseObjectCandidate(payload?.payload_json?.normalized_json);
-    if (normalized) {
+    if (hasUsableNormalizedKeys(normalized)) {
       const hasBodyText = typeof normalized.article_body_text === "string" && normalized.article_body_text.trim();
       const hasSectionTexts = Array.isArray(normalized.article_section_texts) && normalized.article_section_texts.length > 0;
       if (hasBodyText && hasSectionTexts) return normalized;
       const extracted = buildNormalizedFromExtractedPayload(payload, row);
-      if (!extracted) return normalized;
+      if (!extracted) { picked = normalized; break; }
       if (!hasBodyText && extracted.article_body_text) normalized.article_body_text = extracted.article_body_text;
       if (!hasSectionTexts && extracted.article_section_texts?.length) normalized.article_section_texts = extracted.article_section_texts;
       if (!normalized.article_page_title && extracted.article_page_title) normalized.article_page_title = extracted.article_page_title;
-      return normalized;
+      picked = normalized;
+      break;
     }
     const extractedNormalized = buildNormalizedFromExtractedPayload(payload, row);
-    if (extractedNormalized) return extractedNormalized;
+    if (extractedNormalized) { picked = extractedNormalized; break; }
   }
-  return null;
+
+  if (!picked) return null;
+
+  const hasBodyText = typeof picked.article_body_text === "string" && picked.article_body_text.trim();
+  const hasSectionTexts = Array.isArray(picked.article_section_texts) && picked.article_section_texts.length > 0;
+  const needsArticleBackfill = !hasBodyText || !hasSectionTexts || !picked.article_page_title;
+
+  if (needsArticleBackfill) {
+    for (const row of sourceRecords) {
+      const payload = parseObjectCandidate(row?.payload_json);
+      if (!payload) continue;
+      const extractedArticle = resolveExtractedArticle(payload);
+      if (!extractedArticle) continue;
+      if (!hasBodyText && extractedArticle.body_text) {
+        picked.article_body_text = String(extractedArticle.body_text).trim();
+      }
+      if (!hasSectionTexts && Array.isArray(extractedArticle.section_texts) && extractedArticle.section_texts.length) {
+        picked.article_section_texts = extractedArticle.section_texts.map((v) => String(v || "").trim()).filter(Boolean);
+      }
+      if (!picked.article_page_title && extractedArticle.page_title) {
+        picked.article_page_title = String(extractedArticle.page_title).trim();
+      }
+      const nowHasBody = typeof picked.article_body_text === "string" && picked.article_body_text.trim();
+      const nowHasSections = Array.isArray(picked.article_section_texts) && picked.article_section_texts.length > 0;
+      if (nowHasBody && nowHasSections && picked.article_page_title) break;
+    }
+  }
+
+  return picked;
 }
