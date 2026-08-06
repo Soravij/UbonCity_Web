@@ -6,6 +6,19 @@
 npm run test:all
 ```
 
+### การอ่านผลเทสต์
+
+Output ของ `npm run test:all` เป็น **UTF-16 LE** — อ่านด้วย:
+
+```powershell
+$lines = [System.IO.File]::ReadAllLines($path, [System.Text.Encoding]::Unicode)
+```
+
+แล้ว match บรรทัด `tests` / `pass` / `fail` / `skipped` / `suites` จาก node test runner summary
+
+**ห้าม** grep เครื่องหมาย ✔ / ✖ — จะได้ 0 เสมอเพราะ encoding เดียวกัน ให้ใช้บรรทัดสรุปเท่านั้น
+และต้องรายงาน `skipped` ทุกครั้ง ไม่ใช่แค่ tests / pass / fail
+
 Must run from the repo root. It wraps `scripts/testAll.mjs`, which:
 
 1. Refuses to run (exits 1 with an explicit message) unless `process.cwd()` is the repo root —
