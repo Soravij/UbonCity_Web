@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { pickNormalizedFromSourceRecords, buildNormalizedFromExtractedPayload } from "../collector/sources/extracted-payload-normalizer.mjs";
+import { pickNormalizedFromSourceRecords, buildNormalizedFromExtractedPayload, hasUsableNormalizedKeys } from "../collector/sources/extracted-payload-normalizer.mjs";
 import { makeEvidenceSignature } from "../server/evidence-signature.mjs";
 
 test("normalized already has article fields -> returns unchanged", () => {
@@ -305,4 +305,30 @@ test("pickNormalizedFromSourceRecords: first row normalized = {} skips, second r
   assert.equal(result.normalized.title, "From Extracted");
   assert.equal(result.normalized.article_body_text, "Extracted body");
   assert.equal(result.articleSourceRecordId, 202);
+});
+
+test("hasUsableNormalizedKeys: empty object returns false", () => {
+  assert.equal(hasUsableNormalizedKeys({}), false, "empty object must be rejected");
+  assert.equal(hasUsableNormalizedKeys(null), false, "null must be rejected");
+  assert.equal(hasUsableNormalizedKeys(undefined), false, "undefined must be rejected");
+  assert.equal(hasUsableNormalizedKeys(123), false, "non-object must be rejected");
+});
+
+test("hasUsableNormalizedKeys: object with only source_url returns true", () => {
+  assert.equal(hasUsableNormalizedKeys({ source_url: "https://example.com" }), true);
+});
+
+test("hasUsableNormalizedKeys: object with title returns true", () => {
+  assert.equal(hasUsableNormalizedKeys({ title: "Place" }), true);
+});
+
+test("pickNormalizedFromSourceRecords: all rows normalized = {} with source_url in payload -> returns null", () => {
+  const sourceRecords = [
+    { id: 301, payload_json: { normalized_json: {}, source_url: "https://a.com" } },
+    { id: 302, payload_json: { normalized_json: {}, source_url: "https://b.com" } },
+  ];
+
+  const result = pickNormalizedFromSourceRecords(sourceRecords);
+
+  assert.equal(result, null, "all-empty normalized should return null even if payload has source_url");
 });

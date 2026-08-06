@@ -95,7 +95,7 @@ export function buildNormalizedFromExtractedPayload(payload = {}, sourceRecord =
   return candidate;
 }
 
-function hasUsableNormalizedKeys(obj) {
+export function hasUsableNormalizedKeys(obj) {
   if (!obj || typeof obj !== "object") return false;
   return Boolean(
     obj.title || obj.description || obj.image || obj.address ||

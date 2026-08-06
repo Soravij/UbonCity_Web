@@ -40,7 +40,7 @@ import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import { resolveExtractedArticle } from "../collector/sources/extracted-article.mjs";
 import { buildFilteredMediaList } from "../collector/sources/media-filter.mjs";
-import { buildNormalizedFromExtractedPayload, pickNormalizedFromSourceRecords } from "../collector/sources/extracted-payload-normalizer.mjs";
+import { buildNormalizedFromExtractedPayload, hasUsableNormalizedKeys, pickNormalizedFromSourceRecords } from "../collector/sources/extracted-payload-normalizer.mjs";
 import { makeEvidenceSignature } from "./evidence-signature.mjs";
 import {
   getCurrentTranslationSourceFingerprint,
@@ -7050,7 +7050,7 @@ function seedEvidenceBlocksForItem(item, options = {}) {
       const normalized = parseObjectCandidate(payload?.normalized_json)
         || parseObjectCandidate(payload?.payload_json?.normalized_json)
         || buildNormalizedFromExtractedPayload(payload, sourceRecord);
-      if (!normalized) continue;
+      if (!hasUsableNormalizedKeys(normalized)) continue;
 
       const base = {
         source_type: normalizeEvidenceSourceType(options.sourceType || sourceRecord?.source_type || item?.source_type || "import"),
