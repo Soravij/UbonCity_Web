@@ -8,16 +8,14 @@ npm run test:all
 
 ### การอ่านผลเทสต์
 
-Output ของ `npm run test:all` เป็น **UTF-16 LE** — อ่านด้วย:
-
 ```powershell
-$lines = [System.IO.File]::ReadAllLines($path, [System.Text.Encoding]::Unicode)
+npm run test:all 2>&1 | Select-String -Pattern '(tests|suites|pass|fail|cancelled|skipped|todo) \d+' | Select-Object -Last 8
 ```
 
-แล้ว match บรรทัด `tests` / `pass` / `fail` / `skipped` / `suites` จาก node test runner summary
-
-**ห้าม** grep เครื่องหมาย ✔ / ✖ — จะได้ 0 เสมอเพราะ encoding เดียวกัน ให้ใช้บรรทัดสรุปเท่านั้น
-และต้องรายงาน `skipped` ทุกครั้ง ไม่ใช่แค่ tests / pass / fail
+- ห้าม redirect ลงไฟล์แล้วอ่านทีหลัง — PowerShell 5.1 เขียนไฟล์เป็น UTF-16 LE แต่ stdout ของ node เป็น UTF-8 อ่านไม่ออก
+- ห้ามนับด้วย grep ✔ / ✖ — ให้ใช้บรรทัดสรุปของ node test runner เท่านั้น
+- รายงาน `skipped` ทุกครั้ง ไม่ใช่แค่ tests / pass / fail
+- exit code 1 เป็นเรื่องปกติขณะที่ยังมี 59 fail ไม่ใช่สัญญาณว่ารันล้มเหลว
 
 Must run from the repo root. It wraps `scripts/testAll.mjs`, which:
 
