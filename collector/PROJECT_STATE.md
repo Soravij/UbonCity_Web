@@ -1,14 +1,35 @@
 # PROJECT_STATE
 
-Last Updated: 2026-07-14
+Last Updated: 2026-08-06
 
 ## Active Branch
 
 `main`
 
 Current mainline status:
-- merged at `7c044a1`
+- merged at `e206922`
 - CTA documentation baseline inherited from `1d08fb1`
+
+## Crawler State (2026-08-06)
+
+### Done
+
+- **multi-source evidence**: `seedEvidenceBlocksForItem` iterates all `source_records` instead of picking one row; signature includes `source_record_id` (`fix/multi-source-evidence` @ `eb7c46f`)
+- **article block provenance**: correct on Runtime (confirmed)
+- **wongnai review extraction**: works on real pages — confirmed on Runtime, returns 6 reviews with text/rating/author/date from real HTML, was 0 from all sources before
+  - contract documented in `collector/PROJECT_POLICY.md` § "Wongnai review extraction contracts"
+  - per-host cap: default 250K, wongnai photos 750K, wongnai storefront 1M
+  - review scoping: business id first, name fallback only
+  - extraction_note: `null` / `"wongnai_state_not_found"` / `"wongnai_state_has_N_raw_reviews_but_0_matched_scope"` / `"wongnai_partial_skip_N_of_M_reviews_name_mismatch: <names>"`
+- **gate**: 873 / 813 / fail 59 / skipped 1
+
+### Backlog
+
+1. audit 63 evidence_blocks seeded by multi-source loop for junk/duplication
+2. strip web shell (nav/footer/menu/buttons/category links) from body_text — currently starts with nav
+3. unmapped extractor fields: `extracted_reviews`, `menu_url`, `menu_sections`, `price_signals`, `service_facts`, `phone_normalized`, others
+4. orphan evidence_block references
+5. need new official-site example for pattern (1) — lukmatcha.com no longer tied to item 2
 
 ## Completed Media Workflow
 
@@ -770,6 +791,23 @@ D:\UbonRuntime\
 - giant rewrites
 - mixing collector runtime into public deployment
 - treating Cloudflare test exposure as production hardening
+
+---
+
+# Deferred: HTML parser + adapter split
+
+Not scheduled yet. Pre-condition: map all internal dependencies in `manual.mjs` before splitting.
+
+Why needed:
+- no HTML parser in the system (no cheerio/jsdom/readability/node-html-parser); all extraction is regex-based, unreliable for nested elements
+- `manual.mjs` ~1,900 lines handles fetch/decode/cap/generic scrape/JSON-LD/meta/media + wongnai host branch in one file; fixing one area can break another
+- adapter selection comes from request body, not host; per-site logic piles into a central `if`
+
+Intended shape (not committed):
+- `sources/adapters/wongnai.mjs` — enrichment + state parser + own cap
+- `sources/adapters/article.mjs` — readability for unknown-structure official sites
+- `manual.mjs` retains fetch/decode/meta basics only
+- adapter selection driven by host
 
 ---
 
