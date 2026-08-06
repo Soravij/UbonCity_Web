@@ -71,6 +71,18 @@ enforces them; these are the collector-side facts that contract depends on:
   `ตรวจ`: `#reference-cleanup-panel`, `#reference-cleanup-item-id`, and
   `#btn-reference-cleanup-execute` let the owner sweep eligible candidates before confirmation and Purge.
 
+## Wongnai review extraction contracts
+
+- **Per-host HTML cap**: default `MAX_HTML_CHARS` = 250K (`manual.mjs:9`). Wongnai photos page uses `MAX_WONGNAI_PHOTOS_HTML_CHARS` = 750K (`manual.mjs:10`, passed at `:1676`). Wongnai storefront (`/restaurants/*`) uses `MAX_WONGNAI_STOREFRONT_HTML_CHARS` = 1M (`manual.mjs:11`, passed at `:1641`). Reason: real storefront HTML measures ~832K chars; `window._wn` blob sits at char offset ~450K–745K depending on SSR payload size. The 250K default would truncate it entirely.
+  - TH: cap 250K เป็นค่าเริ่มต้น หน้า photos ใช้ 750K หน้าร้าน `/restaurants/*` ใช้ 1M เพราะ HTML จริงยาว ~832K และ blob รีวิวอยู่ที่ offset ~450K–745K
+- **Review scoping**: `extractWongnaiReviewsFromStructuredState` (`manual.mjs:990`) filters by `reviewedItem.id === businessId` first. Name matching is a fallback only (when `businessId` is null). This is because wongnai storefront pages embed 20+ neighboring shop reviews in the same `window._wn` state; name-only matching would leak them.
+  - TH: กรองด้วย business id ก่อน ชื่อเป็น fallback เท่านั้น เพราะหน้าร้าน wongnai มีรีวิวร้านข้างเคียง 20+ ร้านปนใน `window._wn`
+- **`extraction_note` values** (`manual.mjs:1513-1516`):
+  - `null` — all reviews matched scope (happy path)
+  - `"wongnai_state_not_found"` — `window._wn` script tag missing or truncated by HTML cap
+  - `"wongnai_state_has_N_raw_reviews_but_0_matched_scope"` — state found, N reviews exist, but none passed the business-id/name filter
+  - `"wongnai_partial_skip_N_of_M_reviews_name_mismatch: <names>"` — name fallback active, N of M reviews skipped because their `reviewedItem.name` differed from the page title
+
 Current work boundaries:
 - Current project focus is CTA & Curation.
 - Media workflow is complete for current pipeline testing and must not be reopened unless a confirmed regression is found.

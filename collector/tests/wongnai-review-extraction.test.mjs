@@ -293,3 +293,33 @@ test("wongnai storefront cap: synthetic 800K HTML with window._wn at ~745K extra
   assert.equal(reviews.count_found, 3, "should find 3 reviews despite window._wn at ~745K");
   assert.equal(reviews.items.length, 3, "should have 3 items");
 });
+
+test("wongnai storefront cap negative: 250K cap truncates window._wn at ~745K → count_found 0", async () => {
+  const reviewsData = [
+    { id: "r1", description: "Synthetic review one with enough text to pass the length filter", rating: 5, reviewedItem: { id: 222222, name: "Neg Shop" }, reviewerProfile: { name: "Alice" }, reviewedTime: { iso: "2024-01-01" } },
+  ];
+  const state = { store: { business: { value: { id: 222222 } }, reviewsPage: { value: { data: reviewsData } } } };
+  const wnScript = '<script type="text/javascript">\nwindow._wn = ' + JSON.stringify(state) + "\n</script>";
+  const prefix = '<!DOCTYPE html><html><head><title>Synth</title></head><body>';
+  const trailPad = "<p>" + "z".repeat(100000) + "</p>";
+  const suffix = "</body></html>";
+  const padChars = 745000 - prefix.length - "<div>".length;
+  const padding = "<div>" + "x".repeat(Math.max(0, padChars)) + "</div>";
+  const html = prefix + padding + wnScript + trailPad + suffix;
+  assert.ok(html.length > 800000, "synthetic HTML must exceed 800K chars");
+
+  const url = "https://www.wongnai.com/biz/222222neg-shop";
+  const result = await withImmediateTimers(() =>
+    withFetchMock(
+      async (fetchUrl) => createMockResponse({ url: fetchUrl, html }),
+      async () => {
+        const [row] = await collectFromManualPayload([{ source_url: url }]);
+        return row;
+      }
+    )
+  );
+  const reviews = result?.payload_json?.payload_json?.extracted_reviews;
+  assert.ok(reviews, "extracted_reviews should exist");
+  assert.equal(reviews.count_found, 0, "250K cap must truncate window._wn at ~745K");
+  assert.equal(reviews.extraction_note, "wongnai_state_not_found", "state not found under 250K cap");
+});
