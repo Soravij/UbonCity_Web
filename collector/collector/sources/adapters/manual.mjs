@@ -416,7 +416,7 @@ function extractJsonLdObjects(html) {
 }
 
 function extractWongnaiStructuredState(html) {
-  const match = String(html || "").match(/<script>\s*window\._wn\s*=\s*([\s\S]*?)<\/script>/i);
+  const match = String(html || "").match(/<script[^>]*>\s*window\._wn\s*=\s*([\s\S]*?)<\/script>/i);
   if (!match?.[1]) return null;
   const raw = String(match[1]).trim().replace(/;\s*$/, "");
   return safeJsonParse(raw);
@@ -999,13 +999,17 @@ function extractWongnaiReviewsFromStructuredState(html, restaurantName, business
   const numBusinessId = toNumber(businessId);
   const normalizedName = toText(restaurantName).toLowerCase();
   const out = [];
+  const skippedNames = [];
   for (const review of data) {
     if (!review || typeof review !== "object") continue;
     const reviewedItemId = toNumber(review?.reviewedItem?.id);
     if (numBusinessId && reviewedItemId && reviewedItemId !== numBusinessId) continue;
     if (!numBusinessId) {
       const reviewedItemName = toText(review?.reviewedItem?.name).toLowerCase();
-      if (normalizedName && reviewedItemName && reviewedItemName !== normalizedName) continue;
+      if (normalizedName && reviewedItemName && reviewedItemName !== normalizedName) {
+        skippedNames.push(toText(review?.reviewedItem?.name));
+        continue;
+      }
     }
     const text = firstNonEmpty(review.description, review.summary);
     if (!text || toText(text).length < 10) continue;
@@ -1019,7 +1023,7 @@ function extractWongnaiReviewsFromStructuredState(html, restaurantName, business
       relative_time: isoDate || toText(review?.reviewedTime?.timePassed),
     });
   }
-  return { reviews: out.slice(0, MAX_REVIEW_ITEMS), stateFound: true, rawDataCount: data.length };
+  return { reviews: out.slice(0, MAX_REVIEW_ITEMS), stateFound: true, rawDataCount: data.length, skippedNames };
 }
 
 function extractWongnaiAlternateTitles(title, description) {
@@ -1503,12 +1507,13 @@ function extractWongnaiEnrichment(html, finalUrl, generic, options = {}) {
   );
   const stateObj = extractWongnaiStructuredState(html);
   const businessId = stateObj?.store?.business?.value?.id ?? stateObj?.business?.value?.id ?? null;
-  const { reviews: structuredReviews, stateFound, rawDataCount } = extractWongnaiReviewsFromStructuredState(html, restaurantName, businessId);
+  const { reviews: structuredReviews, stateFound, rawDataCount, skippedNames } = extractWongnaiReviewsFromStructuredState(html, restaurantName, businessId);
   const genericReviews = Array.isArray(generic.reviewItems) ? generic.reviewItems.slice(0, MAX_REVIEW_ITEMS) : [];
   const reviewItems = structuredReviews.length > 0 ? structuredReviews : genericReviews;
   const wongnai_review_extraction_note = stateFound && rawDataCount > 0 && structuredReviews.length === 0
     ? `wongnai_state_has_${rawDataCount}_raw_reviews_but_0_matched_scope`
-    : (!stateFound ? "wongnai_state_not_found" : null);
+    : (!stateFound ? "wongnai_state_not_found"
+      : (skippedNames.length > 0 ? `wongnai_partial_skip_${skippedNames.length}_of_${rawDataCount}_reviews_name_mismatch: ${skippedNames.join(", ")}` : null));
   const articleSections = uniqueTextList([
     description,
     ...reviewItems.map((row) => toText(row?.text)).filter((text) => text.length >= 50),

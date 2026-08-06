@@ -169,3 +169,90 @@ test("wongnai signal: extraction_note when state exists but 0 reviews matched sc
     `extraction_note should indicate scope mismatch: "${reviews.extraction_note}"`
   );
 });
+
+test("wongnai real fixture: wongnai-real-tree-cafe.html extracts 6 reviews scoped to business id 329973", async () => {
+  const html = loadFixture("wongnai-real-tree-cafe.html");
+  const url = "https://www.wongnai.com/restaurants/329973fR-tree-cafe-rim-moon";
+  const result = await withImmediateTimers(() =>
+    withFetchMock(
+      async (fetchUrl) => createMockResponse({ url: fetchUrl, html }),
+      async () => {
+        const [row] = await collectFromManualPayload([{ source_url: url }]);
+        return row;
+      }
+    )
+  );
+  const reviews = result?.payload_json?.payload_json?.extracted_reviews;
+  assert.ok(reviews, "extracted_reviews should exist");
+  assert.equal(reviews.count_found, 6, "should find exactly 6 reviews");
+  assert.equal(reviews.items.length, 6, "should have 6 items");
+  for (const item of reviews.items) {
+    assert.ok(item.text.length > 0, "text should not be empty");
+  }
+});
+
+test("wongnai real fixture: review items stay scoped to business id 329973 — no neighbor leak", async () => {
+  const html = loadFixture("wongnai-real-tree-cafe.html");
+  const url = "https://www.wongnai.com/restaurants/329973fR-tree-cafe-rim-moon";
+  const result = await withImmediateTimers(() =>
+    withFetchMock(
+      async (fetchUrl) => createMockResponse({ url: fetchUrl, html }),
+      async () => {
+        const [row] = await collectFromManualPayload([{ source_url: url }]);
+        return row;
+      }
+    )
+  );
+  const reviews = result?.payload_json?.payload_json?.extracted_reviews;
+  assert.ok(reviews, "extracted_reviews should exist");
+  assert.equal(reviews.items.length, 6, "should have 6 items (all from business 329973)");
+  assert.ok(!reviews.extraction_note, "extraction_note should be null when all reviews match scope");
+});
+
+test("wongnai partial-skip: extraction_note when some reviews differ by name", async () => {
+  const html = loadFixture("wongnai-partial-skip-name.html");
+  const url = "https://www.wongnai.com/restaurants/no-biz-id-shop";
+  const result = await withImmediateTimers(() =>
+    withFetchMock(
+      async (fetchUrl) => createMockResponse({ url: fetchUrl, html }),
+      async () => {
+        const [row] = await collectFromManualPayload([{ source_url: url }]);
+        return row;
+      }
+    )
+  );
+  const reviews = result?.payload_json?.payload_json?.extracted_reviews;
+  assert.ok(reviews, "extracted_reviews should exist");
+  assert.equal(reviews.count_found, 3, "should find 3 reviews with matching name");
+  assert.equal(reviews.items.length, 3, "should have 3 items");
+  assert.ok(reviews.extraction_note, "extraction_note should be set for partial skip");
+  assert.ok(
+    reviews.extraction_note.includes("partial_skip"),
+    `extraction_note should indicate partial skip: "${reviews.extraction_note}"`
+  );
+  assert.ok(
+    reviews.extraction_note.includes("3_of_6"),
+    `extraction_note should mention 3 skipped out of 6: "${reviews.extraction_note}"`
+  );
+  assert.ok(
+    reviews.extraction_note.includes("\u0e2a\u0e32\u0e02\u0e32"),
+    `extraction_note should include skipped branch name: "${reviews.extraction_note}"`
+  );
+});
+
+test("wongnai partial-skip reverts cleanly: no extraction_note when regex fix is reverted", async () => {
+  const html = loadFixture("wongnai-real-tree-cafe.html");
+  const url = "https://www.wongnai.com/restaurants/329973fR-tree-cafe-rim-moon";
+  const result = await withImmediateTimers(() =>
+    withFetchMock(
+      async (fetchUrl) => createMockResponse({ url: fetchUrl, html }),
+      async () => {
+        const [row] = await collectFromManualPayload([{ source_url: url }]);
+        return row;
+      }
+    )
+  );
+  const reviews = result?.payload_json?.payload_json?.extracted_reviews;
+  assert.ok(reviews, "extracted_reviews should exist");
+  assert.equal(reviews.count_found, 6, "must find 6 reviews with <script type=text/javascript> regex");
+});
