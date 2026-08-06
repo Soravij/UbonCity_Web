@@ -987,21 +987,26 @@ function extractWongnaiAddress(html, generic = {}) {
   return afterPipe || generic.address || "";
 }
 
-function extractWongnaiReviewsFromStructuredState(html, restaurantName) {
+function extractWongnaiReviewsFromStructuredState(html, restaurantName, businessId) {
   const state = extractWongnaiStructuredState(html);
-  if (!state || typeof state !== "object") return [];
+  if (!state || typeof state !== "object") return { reviews: [], stateFound: false };
   const store = state.store || state;
   const reviewsPage = store.reviewsPage;
-  if (!reviewsPage || typeof reviewsPage !== "object") return [];
+  if (!reviewsPage || typeof reviewsPage !== "object") return { reviews: [], stateFound: true };
   const value = reviewsPage.value;
-  if (!value || typeof value !== "object") return [];
+  if (!value || typeof value !== "object") return { reviews: [], stateFound: true };
   const data = Array.isArray(value.data) ? value.data : [];
+  const numBusinessId = toNumber(businessId);
   const normalizedName = toText(restaurantName).toLowerCase();
   const out = [];
   for (const review of data) {
     if (!review || typeof review !== "object") continue;
-    const reviewedItemName = toText(review?.reviewedItem?.name).toLowerCase();
-    if (normalizedName && reviewedItemName && reviewedItemName !== normalizedName) continue;
+    const reviewedItemId = toNumber(review?.reviewedItem?.id);
+    if (numBusinessId && reviewedItemId && reviewedItemId !== numBusinessId) continue;
+    if (!numBusinessId) {
+      const reviewedItemName = toText(review?.reviewedItem?.name).toLowerCase();
+      if (normalizedName && reviewedItemName && reviewedItemName !== normalizedName) continue;
+    }
     const text = firstNonEmpty(review.description, review.summary);
     if (!text || toText(text).length < 10) continue;
     const rating = toNumber(review.rating);
@@ -1014,7 +1019,7 @@ function extractWongnaiReviewsFromStructuredState(html, restaurantName) {
       relative_time: isoDate || toText(review?.reviewedTime?.timePassed),
     });
   }
-  return out.slice(0, MAX_REVIEW_ITEMS);
+  return { reviews: out.slice(0, MAX_REVIEW_ITEMS), stateFound: true, rawDataCount: data.length };
 }
 
 function extractWongnaiAlternateTitles(title, description) {
@@ -1496,9 +1501,14 @@ function extractWongnaiEnrichment(html, finalUrl, generic, options = {}) {
     extractMetaContent(html, "og:title", "property")?.split("|")[0]?.replace(/^ร้าน\s*/i, "").trim(),
     title
   );
-  const structuredReviews = extractWongnaiReviewsFromStructuredState(html, restaurantName);
+  const stateObj = extractWongnaiStructuredState(html);
+  const businessId = stateObj?.store?.business?.value?.id ?? stateObj?.business?.value?.id ?? null;
+  const { reviews: structuredReviews, stateFound, rawDataCount } = extractWongnaiReviewsFromStructuredState(html, restaurantName, businessId);
   const genericReviews = Array.isArray(generic.reviewItems) ? generic.reviewItems.slice(0, MAX_REVIEW_ITEMS) : [];
   const reviewItems = structuredReviews.length > 0 ? structuredReviews : genericReviews;
+  const wongnai_review_extraction_note = stateFound && rawDataCount > 0 && structuredReviews.length === 0
+    ? `wongnai_state_has_${rawDataCount}_raw_reviews_but_0_matched_scope`
+    : (!stateFound ? "wongnai_state_not_found" : null);
   const articleSections = uniqueTextList([
     description,
     ...reviewItems.map((row) => toText(row?.text)).filter((text) => text.length >= 50),
@@ -1516,6 +1526,7 @@ function extractWongnaiEnrichment(html, finalUrl, generic, options = {}) {
     alternateTitles,
     mediaUrls,
     reviewItems,
+    wongnai_review_extraction_note,
     article: mergeArticleData(
       {
         ...(generic.article && typeof generic.article === "object" ? generic.article : {}),
@@ -1847,6 +1858,7 @@ async function enrichManualRow(row = {}) {
                 relative_time: toText(row?.relative_time),
               }))
               .filter((row) => row.text),
+            extraction_note: toText(metadata.wongnai_review_extraction_note) || null,
           },
         },
         media: mediaUrls.length

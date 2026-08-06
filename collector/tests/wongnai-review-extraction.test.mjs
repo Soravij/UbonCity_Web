@@ -123,3 +123,49 @@ test("wongnai review extraction: no reviews returns empty items without throwing
   assert.equal(reviews.count_found, 0, "count_found should be 0");
   assert.deepEqual(reviews.items, [], "items should be empty array");
 });
+
+test("wongnai scope: filters by business id, not just name", async () => {
+  const html = loadFixture("wongnai-with-neighbors.html");
+  const url = "https://www.wongnai.com/restaurants/target-shop";
+  const result = await withImmediateTimers(() =>
+    withFetchMock(
+      async (fetchUrl) => createMockResponse({ url: fetchUrl, html }),
+      async () => {
+        const [row] = await collectFromManualPayload([{ source_url: url }]);
+        return row;
+      }
+    )
+  );
+  const reviews = result?.payload_json?.payload_json?.extracted_reviews;
+  assert.ok(reviews, "extracted_reviews should exist");
+  assert.equal(reviews.items.length, 2, "should have exactly 2 items (only Target Shop id=888888)");
+  for (const item of reviews.items) {
+    assert.ok(
+      !item.text.includes("Neighbor Cafe") && !item.text.includes("Delicious Place"),
+      `review text should not contain neighbor shop names: "${item.text}"`
+    );
+  }
+});
+
+test("wongnai signal: extraction_note when state exists but 0 reviews matched scope", async () => {
+  const html = loadFixture("wongnai-mismatch-id.html");
+  const url = "https://www.wongnai.com/restaurants/mismatch-shop";
+  const result = await withImmediateTimers(() =>
+    withFetchMock(
+      async (fetchUrl) => createMockResponse({ url: fetchUrl, html }),
+      async () => {
+        const [row] = await collectFromManualPayload([{ source_url: url }]);
+        return row;
+      }
+    )
+  );
+  const reviews = result?.payload_json?.payload_json?.extracted_reviews;
+  assert.ok(reviews, "extracted_reviews should exist");
+  assert.equal(reviews.count_found, 0, "count_found should be 0");
+  assert.deepEqual(reviews.items, [], "items should be empty array");
+  assert.ok(reviews.extraction_note, "extraction_note should be set when state exists but 0 matched");
+  assert.ok(
+    reviews.extraction_note.includes("raw_reviews_but_0_matched_scope"),
+    `extraction_note should indicate scope mismatch: "${reviews.extraction_note}"`
+  );
+});
