@@ -63,9 +63,10 @@ Measured against **`main` @ `d5cc8a1`** (2026-08-05), using the standard command
 
 After this change set (same baseline commit `d5cc8a1`):
 
-- **844 tests total**
-- **784 pass**
+- **851 tests total**
+- **791 pass**
 - **59 fail**
+- **1 skipped**
 
 ### History: the earlier 66-failure number
 

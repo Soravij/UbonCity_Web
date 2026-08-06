@@ -6974,8 +6974,9 @@ function buildEvidenceCandidatesForNormalized(normalized = {}, base = {}) {
   }
 
   for (const section of articleSections.slice(0, 5)) {
+    const articleBase = base.article_source_record_id ? { ...base, source_record_id: base.article_source_record_id, source_record_type: "source_records" } : base;
     pushEvidenceCandidate(out, {
-      ...base,
+      ...articleBase,
       block_type: "mention",
       text_value: section,
       payload_json: { field: "article_section", value: section },
@@ -6983,8 +6984,9 @@ function buildEvidenceCandidatesForNormalized(normalized = {}, base = {}) {
   }
 
   if (!articleSections.length) {
+    const articleBase = base.article_source_record_id ? { ...base, source_record_id: base.article_source_record_id, source_record_type: "source_records" } : base;
     pushEvidenceCandidate(out, {
-      ...base,
+      ...articleBase,
       block_type: "mention",
       text_value: articleBodyText || null,
       payload_json: articleBodyText ? { field: "article_body_text", value: articleBodyText } : null,
@@ -7027,9 +7029,11 @@ function seedEvidenceBlocksForItem(item, options = {}) {
   const sourceRecords = Array.isArray(options.sourceRecords)
     ? options.sourceRecords
     : repo.listSourceRecordsByItem(contentItemId);
-  const normalized = parseObjectCandidate(options.normalized)
-    || pickNormalizedFromSourceRecords(sourceRecords)
-    || buildFallbackNormalizedFromItem(item);
+  const picked = parseObjectCandidate(options.normalized)
+    ? { normalized: options.normalized, articleSourceRecordId: null }
+    : pickNormalizedFromSourceRecords(sourceRecords)
+    || { normalized: buildFallbackNormalizedFromItem(item), articleSourceRecordId: null };
+  const { normalized, articleSourceRecordId } = picked;
 
   const sourceRecord = sourceRecords[0] || null;
   const base = {
@@ -7041,6 +7045,7 @@ function seedEvidenceBlocksForItem(item, options = {}) {
     lang: String(normalized.lang || item?.lang || "th").trim().toLowerCase() || "th",
     attribution_text: "Collected source signal",
     status: "active",
+    ...(articleSourceRecordId != null ? { article_source_record_id: String(articleSourceRecordId) } : {}),
   };
 
   const existing = repo.listEvidenceBlocks(contentItemId);
