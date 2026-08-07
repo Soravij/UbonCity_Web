@@ -230,8 +230,20 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
     });
   }
 
-  // Dedupe: same text must not appear as both fact and mention in same source_record
-  // Also handle truncated prefix: "Some text..." is a prefix of "Some text goes here"
+  // Field priority: when the same text appears in multiple fields,
+  // keep the candidate from the highest-priority field.
+  // description and editorial_summary are always set to the same excerpt
+  // in buildNormalizedFromExtractedPayload, so description (fact) wins.
+  const FIELD_PRIORITY = {
+    description: 10,
+    editorial_summary: 20,
+    article_body_text: 30,
+    article_section: 40,
+    title: 50,
+  };
+
+  // Dedupe: same text must not appear as both fact and mention in same source_record.
+  // When same text comes from different fields, keep the higher-priority field.
   const deduped = [];
   const seenTexts = new Map();
   for (const candidate of out) {
@@ -241,42 +253,25 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
       continue;
     }
     if (!seenTexts.has(text)) {
-      // Check if this text is a truncated prefix of an existing longer text
-      let dominated = false;
-      if (text.endsWith("...")) {
-        const prefix = text.slice(0, -3);
-        for (const [existingText, existingCandidate] of seenTexts) {
-          if (existingText !== text && existingText.startsWith(prefix)) {
-            // This candidate is a truncated version of an existing one — skip it
-            dominated = true;
-            break;
-          }
-        }
-      }
-      // Check if any existing text is a truncated prefix of this longer text
-      if (!dominated) {
-        for (const [existingText, existingCandidate] of seenTexts) {
-          if (existingText !== text && existingText.endsWith("...")) {
-            const existingPrefix = existingText.slice(0, -3);
-            if (text.startsWith(existingPrefix)) {
-              // This candidate is the full version — replace the truncated one
-              const index = deduped.indexOf(existingCandidate);
-              if (index >= 0) deduped[index] = candidate;
-              seenTexts.delete(existingText);
-              seenTexts.set(text, candidate);
-              dominated = true; // mark as handled (it was inserted via replacement)
-              break;
-            }
-          }
-        }
-      }
-      if (!dominated) {
-        seenTexts.set(text, candidate);
-        deduped.push(candidate);
-      }
+      seenTexts.set(text, candidate);
+      deduped.push(candidate);
     } else {
       const existing = seenTexts.get(text);
-      if (candidate.block_type === "fact" && existing.block_type !== "fact") {
+      const existingField = existing.payload_json?.field || "";
+      const candidateField = candidate.payload_json?.field || "";
+      const existingPriority = FIELD_PRIORITY[existingField] ?? 99;
+      const candidatePriority = FIELD_PRIORITY[candidateField] ?? 99;
+
+      let shouldReplace = false;
+      if (candidatePriority < existingPriority) {
+        // Higher-priority field wins
+        shouldReplace = true;
+      } else if (candidatePriority === existingPriority && candidate.block_type === "fact" && existing.block_type !== "fact") {
+        // Same field priority: fact wins over mention
+        shouldReplace = true;
+      }
+
+      if (shouldReplace) {
         const index = deduped.indexOf(existing);
         if (index >= 0) deduped[index] = candidate;
         seenTexts.set(text, candidate);

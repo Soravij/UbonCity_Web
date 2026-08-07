@@ -233,10 +233,13 @@ test("buildEvidenceCandidatesForNormalized: google.com unknown description gets 
 });
 
 // ============================================================
-// Fix 4: same-source dup — dedupe with prefix truncation handling
+// Fix 4: same-source dup — field-priority dedupe
+// description and editorial_summary are always set to the same excerpt
+// in buildNormalizedFromExtractedPayload. description (fact, priority 10)
+// should win over editorial_summary (mention, priority 20).
 // ============================================================
 
-test("buildEvidenceCandidatesForNormalized: same text deduped — fact wins over mention", () => {
+test("buildEvidenceCandidatesForNormalized: same text deduped — description (fact) wins over editorial_summary (mention) by field priority", () => {
   const normalized = {
     title: "Test Place",
     description: "Great coffee shop by the river",
@@ -254,8 +257,10 @@ test("buildEvidenceCandidatesForNormalized: same text deduped — fact wins over
   assert.equal(types.length, 1, `text "${text}" should appear only once, got ${types.length}`);
   assert.ok(
     types.includes("fact") && !types.includes("mention"),
-    "fact should win over mention when text is the same"
+    "fact (description) should win over mention (editorial_summary) by field priority"
   );
+  const winner = candidates.find((c) => c.text_value === text);
+  assert.equal(winner.payload_json.field, "description", "winner should be from description field");
 });
 
 test("buildEvidenceCandidatesForNormalized: different texts keep both fact and mention", () => {
@@ -275,11 +280,13 @@ test("buildEvidenceCandidatesForNormalized: different texts keep both fact and m
   assert.ok(texts.includes("Popular spot for locals and tourists alike"), "should keep editorial_summary");
 });
 
-test("dedupe prefix: truncated version ending with ... is dropped when full version exists", () => {
+test("regression guard: unrelated mentions with same prefix must NOT be collapsed", () => {
+  // Two completely different texts that happen to start with the same words.
+  // This proves exact-match dedupe does not drop legitimate content.
   const normalized = {
     title: "Test Place",
-    description: "This is a long description about a place that goes on for quite a while",
-    editorial_summary: "This is a long description about a place that goes on for quite a...",
+    description: "Great coffee shop by the river with amazing sunset views every evening",
+    editorial_summary: "Great coffee shop by the river serves the best latte in town",
   };
   const base = {
     content_item_id: 1,
@@ -288,18 +295,22 @@ test("dedupe prefix: truncated version ending with ... is dropped when full vers
   };
   const candidates = buildEvidenceCandidatesForNormalized(normalized, base);
   const texts = textValues(candidates);
-  const fullText = "This is a long description about a place that goes on for quite a while";
-  const shortText = "This is a long description about a place that goes on for quite a...";
-
-  assert.ok(texts.includes(fullText), "full version should be kept");
-  assert.ok(!texts.includes(shortText), "truncated ... version should be dropped");
+  assert.ok(
+    texts.includes("Great coffee shop by the river with amazing sunset views every evening"),
+    "description must survive — different content despite same prefix"
+  );
+  assert.ok(
+    texts.includes("Great coffee shop by the river serves the best latte in town"),
+    "editorial_summary must survive — different content despite same prefix"
+  );
 });
 
-test("dedupe prefix: full version replaces truncated version when truncated comes first", () => {
+test("field priority: article_body_text loses to description when text is the same", () => {
   const normalized = {
     title: "Test Place",
-    editorial_summary: "This is a long description about a place that goes on for quite a...",
-    description: "This is a long description about a place that goes on for quite a while",
+    description: "Shared text from both fields",
+    article_body_text: "Shared text from both fields",
+    article_section_texts: [],
   };
   const base = {
     content_item_id: 1,
@@ -307,27 +318,9 @@ test("dedupe prefix: full version replaces truncated version when truncated come
     source_record_type: "source_records",
   };
   const candidates = buildEvidenceCandidatesForNormalized(normalized, base);
-  const texts = textValues(candidates);
-  const fullText = "This is a long description about a place that goes on for quite a while";
-  const shortText = "This is a long description about a place that goes on for quite a...";
-
-  assert.ok(texts.includes(fullText), "full version should be kept regardless of order");
-  assert.ok(!texts.includes(shortText), "truncated ... version should be dropped regardless of order");
-});
-
-test("dedupe prefix: unrelated ... text is not deduped", () => {
-  const normalized = {
-    title: "Test Place",
-    description: "Something completely different...",
-    editorial_summary: "Another unrelated text that is not a prefix at all",
-  };
-  const base = {
-    content_item_id: 1,
-    source_record_id: 1,
-    source_record_type: "source_records",
-  };
-  const candidates = buildEvidenceCandidatesForNormalized(normalized, base);
-  const texts = textValues(candidates);
-  assert.ok(texts.includes("Something completely different..."), "unrelated ... text should be kept");
-  assert.ok(texts.includes("Another unrelated text that is not a prefix at all"), "unrelated text should be kept");
+  const text = "Shared text from both fields";
+  const types = blockTypes(candidates, text);
+  assert.equal(types.length, 1, "should appear only once");
+  const winner = candidates.find((c) => c.text_value === text);
+  assert.equal(winner.payload_json.field, "description", "description should win over article_body_text");
 });
