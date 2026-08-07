@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -7,8 +8,8 @@ import test from "node:test";
 import { collectFromManualPayload } from "../collector/sources/adapters/manual.mjs";
 
 // wongnai-trimmed-tree-cafe.html: SSR body stripped, only <head> metadata + window._wn kept.
-// Tests parsing logic only — does NOT prove the real page survives MAX_HTML_CHARS truncation.
-// See "wongnai storefront cap" test below for the actual cap proof.
+// Tests parsing logic only — does NOT prove the real page survives byte limit truncation.
+// See "wongnai storefront byte limit" test below for the actual limit proof.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(__dirname, "fixtures");
@@ -294,7 +295,7 @@ test("wongnai storefront cap: synthetic 800K HTML with window._wn at ~745K extra
   assert.equal(reviews.items.length, 3, "should have 3 items");
 });
 
-test("wongnai storefront cap negative: 250K cap truncates window._wn at ~745K → count_found 0", async () => {
+test("wongnai byte limit negative: 3MB limit truncates window._wn at ~3.5MB → count_found 0", async () => {
   const reviewsData = [
     { id: "r1", description: "Synthetic review one with enough text to pass the length filter", rating: 5, reviewedItem: { id: 222222, name: "Neg Shop" }, reviewerProfile: { name: "Alice" }, reviewedTime: { iso: "2024-01-01" } },
   ];
@@ -303,10 +304,10 @@ test("wongnai storefront cap negative: 250K cap truncates window._wn at ~745K �
   const prefix = '<!DOCTYPE html><html><head><title>Synth</title></head><body>';
   const trailPad = "<p>" + "z".repeat(100000) + "</p>";
   const suffix = "</body></html>";
-  const padChars = 745000 - prefix.length - "<div>".length;
-  const padding = "<div>" + "x".repeat(Math.max(0, padChars)) + "</div>";
+  const padBytes = 3500000 - Buffer.byteLength(prefix, "utf-8") - Buffer.byteLength("<div>", "utf-8");
+  const padding = "<div>" + "x".repeat(Math.max(0, padBytes)) + "</div>";
   const html = prefix + padding + wnScript + trailPad + suffix;
-  assert.ok(html.length > 800000, "synthetic HTML must exceed 800K chars");
+  assert.ok(Buffer.byteLength(html, "utf-8") > 3500000, "synthetic HTML must exceed 3.5MB bytes");
 
   const url = "https://www.wongnai.com/biz/222222neg-shop";
   const result = await withImmediateTimers(() =>
@@ -320,6 +321,90 @@ test("wongnai storefront cap negative: 250K cap truncates window._wn at ~745K �
   );
   const reviews = result?.payload_json?.payload_json?.extracted_reviews;
   assert.ok(reviews, "extracted_reviews should exist");
-  assert.equal(reviews.count_found, 0, "250K cap must truncate window._wn at ~745K");
-  assert.equal(reviews.extraction_note, "wongnai_state_not_found", "state not found under 250K cap");
+  assert.equal(reviews.count_found, 0, "3MB byte limit must truncate window._wn at ~3.5MB");
+  assert.equal(reviews.extraction_note, "wongnai_state_not_found", "state not found under 3MB byte limit");
 });
+
+test("byte limit: Thai UTF-8 characters are not corrupted at truncation boundary", async () => {
+  const thaiText = "\u0e2a\u0e27\u0e31\u0e2a\u0e14\u0e35\u0e04\u0e23\u0e31\u0e1a \u0e01\u0e23\u0e38\u0e07\u0e40\u0e17\u0e1e \u0e1b\u0e23\u0e30\u0e40\u0e17\u0e28\u0e44\u0e17\u0e22";
+  const encoder = new TextEncoder();
+  const thaiBytes = encoder.encode(thaiText).length;
+  const targetBytes = 3000000;
+  const prefix = '<!DOCTYPE html><html><head><title>Thai</title></head><body>';
+  const suffix = "</body></html>";
+  const wrapper = "<div>" + thaiText + "</div>";
+  const prefixBytes = encoder.encode(prefix).length;
+  const suffixBytes = encoder.encode(suffix).length;
+  const wrapperBytes = encoder.encode(wrapper).length;
+  const padBytes = targetBytes - prefixBytes - suffixBytes - wrapperBytes + 50000;
+  const padding = "<p>" + "a".repeat(Math.max(0, padBytes)) + "</p>";
+  const html = prefix + padding + wrapper + suffix;
+  const totalBytes = encoder.encode(html).length;
+  assert.ok(totalBytes > targetBytes, "HTML must exceed byte limit");
+
+  const url = "https://example.com/thai-test";
+  const result = await withImmediateTimers(() =>
+    withFetchMock(
+      async (fetchUrl) => createMockResponse({ url: fetchUrl, html }),
+      async () => {
+        const [row] = await collectFromManualPayload([{ source_url: url }]);
+        return row;
+      }
+    )
+  );
+  const decoded = result?.payload_json?.payload_json?.title || "";
+  const decodedBytes = encoder.encode(decoded).length;
+  assert.ok(decodedBytes <= targetBytes, "decoded output must not exceed byte limit");
+  assert.ok(!decoded.includes("\uFFFD"), "decoded output must not contain replacement characters (U+FFFD)");
+});
+
+test("raw-html-buffer: flag off (default) does not write files", async () => {
+  const html = '<!DOCTYPE html><html><head><title>Test</title></head><body><p>Hello</p></body></html>';
+  const url = "https://example.com/flag-off-test";
+
+  const { resolvePaths } = await import("../config/paths.mjs");
+  const { rawHtmlBufferDir } = resolvePaths();
+
+  await withImmediateTimers(() =>
+    withFetchMock(
+      async (fetchUrl) => createMockResponse({ url: fetchUrl, html }),
+      async () => {
+        const [row] = await collectFromManualPayload([{ source_url: url }]);
+        return row;
+      }
+    )
+  );
+
+  assert.ok(!process.env.RAW_HTML_BUFFER_ENABLED, "flag must be off by default");
+  const dirExists = fs.existsSync(rawHtmlBufferDir);
+  if (dirExists) {
+    const files = fs.readdirSync(rawHtmlBufferDir);
+    const recentFiles = files.filter((f) => f.endsWith(".html"));
+    assert.equal(recentFiles.length, 0, "no files should be written when flag is off");
+  }
+});
+
+test("UTF-8 safe truncation: drops incomplete 3-byte Thai char at boundary", () => {
+  const buffer = new Uint8Array([0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0xE0, 0xB8, 0xA1]);
+  assert.equal(buffer.length, 12, "buffer must be 12 bytes");
+  const MAX = 10;
+  let cut = MAX;
+  while (cut > 0 && (buffer[cut] & 0xC0) === 0x80) cut--;
+  const result = buffer.subarray(0, cut);
+  assert.equal(result.length, 9, "must keep 9 ASCII bytes, drop incomplete Thai char");
+  const decoded = new TextDecoder("utf-8").decode(result);
+  assert.equal(decoded, "AAAAAAAAA", "output must be 9 A's");
+  assert.ok(!decoded.includes("\uFFFD"), "must not contain replacement character");
+});
+
+test("UTF-8 safe truncation: exact boundary keeps full ASCII", () => {
+  const buffer = new Uint8Array([0x41, 0x42, 0x43, 0x44, 0x45]);
+  assert.equal(buffer.length, 5, "buffer must be 5 bytes");
+  const MAX = 5;
+  let cut = MAX;
+  while (cut > 0 && (buffer[cut] & 0xC0) === 0x80) cut--;
+  const result = buffer.subarray(0, cut);
+  assert.equal(result.length, 5, "exact boundary keeps all bytes");
+  assert.equal(new TextDecoder("utf-8").decode(result), "ABCDE");
+});
+

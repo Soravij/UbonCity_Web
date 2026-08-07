@@ -1,14 +1,17 @@
-﻿import { dedupeMediaUrls, normalizeMediaUrl } from "../media.mjs";
+﻿import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { dedupeMediaUrls, normalizeMediaUrl } from "../media.mjs";
 import { normalizeRawItem } from "../normalize.mjs";
+import { resolvePaths } from "../../../config/paths.mjs";
 
 const FETCH_TIMEOUT_MS = 8000;
 const ENRICH_ROW_TIMEOUT_MS = Math.max(
   FETCH_TIMEOUT_MS + 2000,
   Number(process.env.COLLECTOR_MANUAL_ROW_TIMEOUT_MS || process.env.COLLECTOR_SOURCE_FETCH_TIMEOUT_MS || 12000) || 12000
 );
-const MAX_HTML_CHARS = 250000;
-const MAX_WONGNAI_PHOTOS_HTML_CHARS = 750000;
-const MAX_WONGNAI_STOREFRONT_HTML_CHARS = 1000000;
+const MAX_HTML_BYTES = Number(process.env.MAX_HTML_BYTES || 3000000) || 3000000;
+const RAW_HTML_BUFFER_ENABLED = /^(1|true|yes)$/i.test(String(process.env.RAW_HTML_BUFFER_ENABLED || ""));
 const MAX_MEDIA_ITEMS = 10;
 const MAX_WONGNAI_MEDIA_ITEMS = 20;
 const MAX_REVIEW_ITEMS = 50;
@@ -149,14 +152,14 @@ function normalizeCharset(charset) {
   return raw;
 }
 
-function decodeHtmlBuffer(buffer, contentType, maxChars = MAX_HTML_CHARS) {
+function decodeHtmlBuffer(buffer, contentType) {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer || new ArrayBuffer(0));
   const hintedAscii = new TextDecoder("latin1").decode(bytes.subarray(0, Math.min(bytes.length, 4096)));
   const charset = normalizeCharset(extractCharsetFromContentType(contentType) || extractCharsetFromHtmlHint(hintedAscii) || "utf-8");
   try {
-    return new TextDecoder(charset).decode(bytes).slice(0, Math.max(1, Number(maxChars || MAX_HTML_CHARS)));
+    return new TextDecoder(charset).decode(bytes);
   } catch {
-    return new TextDecoder("utf-8").decode(bytes).slice(0, Math.max(1, Number(maxChars || MAX_HTML_CHARS)));
+    return new TextDecoder("utf-8").decode(bytes);
   }
 }
 
@@ -1608,7 +1611,7 @@ function resolveDomainMetadata(html, finalUrl, sourceUrl, options = {}) {
   return generic;
 }
 
-async function fetchHtmlDocument(sourceUrl, options = {}) {
+async function fetchHtmlDocument(sourceUrl) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -1628,10 +1631,35 @@ async function fetchHtmlDocument(sourceUrl, options = {}) {
     if (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
       return { finalUrl, contentType, html: "" };
     }
+
+    const rawBuffer = await response.arrayBuffer();
+    let buffer = new Uint8Array(rawBuffer);
+
+    if (buffer.length > MAX_HTML_BYTES) {
+      const originalLength = buffer.length;
+      let cut = MAX_HTML_BYTES;
+      while (cut > 0 && (buffer[cut] & 0xC0) === 0x80) cut--;
+      buffer = buffer.subarray(0, cut);
+      console.warn(`[byte-limit] truncated ${sourceUrl}: ${originalLength} -> ${buffer.length} bytes (limit ${MAX_HTML_BYTES})`);
+    }
+
+    if (RAW_HTML_BUFFER_ENABLED) {
+      try {
+        const { rawHtmlBufferDir } = resolvePaths();
+        fs.mkdirSync(rawHtmlBufferDir, { recursive: true });
+        const urlHash = crypto.createHash("sha256").update(sourceUrl).digest("hex").slice(0, 16);
+        const ts = new Date().toISOString().replace(/[:.]/g, "-");
+        const filePath = path.join(rawHtmlBufferDir, `${urlHash}_${ts}.html`);
+        fs.writeFileSync(filePath, buffer);
+      } catch (writeErr) {
+        console.warn(`[raw-html-buffer] write failed for ${sourceUrl}: ${writeErr?.message}`);
+      }
+    }
+
     return {
       finalUrl,
       contentType,
-      html: decodeHtmlBuffer(await response.arrayBuffer(), contentType, options.maxHtmlChars),
+      html: decodeHtmlBuffer(buffer, contentType),
     };
   } finally {
     clearTimeout(timer);
@@ -1647,7 +1675,7 @@ async function fetchUrlMetadata(sourceUrl) {
       return false;
     }
   })();
-  const mainDoc = await fetchHtmlDocument(sourceUrl, isWongnaiStorefront ? { maxHtmlChars: MAX_WONGNAI_STOREFRONT_HTML_CHARS } : {});
+  const mainDoc = await fetchHtmlDocument(sourceUrl);
   const finalUrl = toText(mainDoc.finalUrl || sourceUrl);
   const contentType = String(mainDoc.contentType || "").toLowerCase();
   if (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
@@ -1682,7 +1710,7 @@ async function fetchUrlMetadata(sourceUrl) {
     if (host.includes("wongnai.com")) {
       const targetPhotosUrl = buildWongnaiPhotosUrl(finalUrl);
       if (targetPhotosUrl) {
-        const photosDoc = await fetchHtmlDocument(targetPhotosUrl, { maxHtmlChars: MAX_WONGNAI_PHOTOS_HTML_CHARS });
+        const photosDoc = await fetchHtmlDocument(targetPhotosUrl);
         if (String(photosDoc.contentType || "").includes("text/html") || String(photosDoc.contentType || "").includes("application/xhtml+xml")) {
           photosHtml = toText(photosDoc.html);
           photosUrl = toText(photosDoc.finalUrl || targetPhotosUrl);
