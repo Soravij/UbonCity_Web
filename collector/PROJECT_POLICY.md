@@ -73,10 +73,11 @@ enforces them; these are the collector-side facts that contract depends on:
 
 ## Wongnai review extraction contracts
 
-- **Byte limit**: `MAX_HTML_BYTES` = 3MB default (`manual.mjs:15`, env override `MAX_HTML_BYTES`). Applied at fetch time before decoding; truncation is UTF-8 safe (drops trailing incomplete multi-byte sequence). No per-host char cap remains.
+- **Byte limit**: `MAX_HTML_BYTES` = 3MB default (`manual.mjs:13`, env override `MAX_HTML_BYTES`). Applied at fetch time before decoding; truncation is UTF-8 safe (drops trailing incomplete multi-byte sequence). No per-host char cap remains.
   - TH: byte limit 3MB เป็น guard เดียว ตัดที่ buffer ก่อน decode, ไม่มี char cap แยก per-host อีก
 - **Raw HTML buffer retention**: controlled by `RAW_HTML_BUFFER_ENABLED` env flag (default off). When enabled, writes the raw (pre-decode, post-truncation) buffer to `RAW_HTML_BUFFER_DIR` (default `raw/html-buffer/`). Filename = sha256(url) + timestamp. Write failures are logged and swallowed.
   - TH: เก็บ buffer ดิบลงดิสก์เปิด/ปิดด้วย env flag, เขียนล้มเหลวไม่กระทบ crawl
+  - **Debug-only tool**: `RAW_HTML_BUFFER_ENABLED` is a temporary debug aid. There is no auto-cleanup by design — files must be deleted manually. Must never be left enabled on Runtime.
 - **Review scoping**: `extractWongnaiReviewsFromStructuredState` (`manual.mjs:990`) filters by `reviewedItem.id === businessId` first. Name matching is a fallback only (when `businessId` is null). This is because wongnai storefront pages embed 20+ neighboring shop reviews in the same `window._wn` state; name-only matching would leak them.
   - TH: กรองด้วย business id ก่อน ชื่อเป็น fallback เท่านั้น เพราะหน้าร้าน wongnai มีรีวิวร้านข้างเคียง 20+ ร้านปนใน `window._wn`
 - **`extraction_note` values** (`manual.mjs:1513-1516`):

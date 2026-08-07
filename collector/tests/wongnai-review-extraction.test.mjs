@@ -384,3 +384,27 @@ test("raw-html-buffer: flag off (default) does not write files", async () => {
   }
 });
 
+test("UTF-8 safe truncation: drops incomplete 3-byte Thai char at boundary", () => {
+  const buffer = new Uint8Array([0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0xE0, 0xB8, 0xA1]);
+  assert.equal(buffer.length, 12, "buffer must be 12 bytes");
+  const MAX = 10;
+  let cut = MAX;
+  while (cut > 0 && (buffer[cut] & 0xC0) === 0x80) cut--;
+  const result = buffer.subarray(0, cut);
+  assert.equal(result.length, 9, "must keep 9 ASCII bytes, drop incomplete Thai char");
+  const decoded = new TextDecoder("utf-8").decode(result);
+  assert.equal(decoded, "AAAAAAAAA", "output must be 9 A's");
+  assert.ok(!decoded.includes("\uFFFD"), "must not contain replacement character");
+});
+
+test("UTF-8 safe truncation: exact boundary keeps full ASCII", () => {
+  const buffer = new Uint8Array([0x41, 0x42, 0x43, 0x44, 0x45]);
+  assert.equal(buffer.length, 5, "buffer must be 5 bytes");
+  const MAX = 5;
+  let cut = MAX;
+  while (cut > 0 && (buffer[cut] & 0xC0) === 0x80) cut--;
+  const result = buffer.subarray(0, cut);
+  assert.equal(result.length, 5, "exact boundary keeps all bytes");
+  assert.equal(new TextDecoder("utf-8").decode(result), "ABCDE");
+});
+

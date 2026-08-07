@@ -1611,7 +1611,7 @@ function resolveDomainMetadata(html, finalUrl, sourceUrl, options = {}) {
   return generic;
 }
 
-async function fetchHtmlDocument(sourceUrl, options = {}) {
+async function fetchHtmlDocument(sourceUrl) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -1636,10 +1636,11 @@ async function fetchHtmlDocument(sourceUrl, options = {}) {
     let buffer = new Uint8Array(rawBuffer);
 
     if (buffer.length > MAX_HTML_BYTES) {
+      const originalLength = buffer.length;
       let cut = MAX_HTML_BYTES;
       while (cut > 0 && (buffer[cut] & 0xC0) === 0x80) cut--;
-      if (cut > 0 && buffer[cut] >= 0x80) cut--;
       buffer = buffer.subarray(0, cut);
+      console.warn(`[byte-limit] truncated ${sourceUrl}: ${originalLength} -> ${buffer.length} bytes (limit ${MAX_HTML_BYTES})`);
     }
 
     if (RAW_HTML_BUFFER_ENABLED) {
