@@ -1,7 +1,7 @@
 ---
 description: Run test suites and report results. Does not fix code, does not make decisions. Mechanical-only agent.
 mode: subagent
-model: xiaomi-token-plan-sgp/mimo-v2.5-lite
+model: xiaomi-token-plan-sgp/mimo-v2.5
 permission:
   edit: deny
   bash:

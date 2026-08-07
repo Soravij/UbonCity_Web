@@ -1,7 +1,7 @@
 ---
 description: Layer-1 triage scanner for code audits. Use FIRST when auditing any scope against a baseline. Produces a structured candidate list — does NOT decide what is or isn't a real bug.
 mode: subagent
-model: xiaomi-token-plan-sgp/mimo-v2.5-lite
+model: xiaomi-token-plan-sgp/mimo-v2.5
 permission:
   edit: deny
   bash:
