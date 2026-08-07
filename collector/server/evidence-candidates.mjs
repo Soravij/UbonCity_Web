@@ -24,10 +24,37 @@ const BOILERPLATE_DESCRIPTIONS = [
   "find local businesses, view maps and get driving directions in google maps",
 ];
 
-export function isBoilerplateDescription(text) {
-  if (!text) return false;
+export function isBoilerplateDescription(text, sourceUrl) {
+  if (!text) return { matched: false };
   const lower = text.toLowerCase().trim();
-  return BOILERPLATE_DESCRIPTIONS.some((bp) => lower === bp);
+  const matched = BOILERPLATE_DESCRIPTIONS.some((bp) => lower === bp);
+  if (matched) return { matched: true };
+  const host = safeHostname(sourceUrl);
+  if (host === "google.com" || host.endsWith(".google.com")) {
+    return { matched: false, note: "google_description_not_in_boilerplate_list" };
+  }
+  return { matched: false };
+}
+
+function safeHostname(url) {
+  try { return new URL(url).hostname.toLowerCase(); } catch { return ""; }
+}
+
+function normalizeUrlForComparison(url) {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    let s = u.hostname.toLowerCase();
+    if (s.startsWith("www.")) s = s.slice(4);
+    s += u.pathname.replace(/\/+$/, "");
+    return s;
+  } catch {
+    let s = String(url).trim().toLowerCase();
+    s = s.replace(/^https?:\/\//, "").replace(/^www\./, "");
+    s = s.split("?")[0].split("#")[0];
+    s = s.replace(/\/+$/, "");
+    return s;
+  }
 }
 
 export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {}) {
@@ -66,11 +93,12 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
     payload_json: { field: "title", value: title || null },
   });
 
+  const boilerplate = isBoilerplateDescription(description, sourceUrl);
   pushEvidenceCandidate(out, {
     ...base,
     block_type: "fact",
-    text_value: description && !isBoilerplateDescription(description) ? description : null,
-    payload_json: { field: "description", value: description || null },
+    text_value: description && !boilerplate.matched ? description : null,
+    payload_json: { field: "description", value: description || null, ...(boilerplate.note ? { extraction_note: boilerplate.note } : {}) },
   });
 
   if (category || type || primaryTypeName) {
@@ -180,7 +208,7 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
   pushEvidenceCandidate(out, {
     ...base,
     block_type: "mention",
-    text_value: website && website !== sourceUrl ? `Website: ${website}` : null,
+    text_value: website && normalizeUrlForComparison(website) !== normalizeUrlForComparison(sourceUrl) ? `Website: ${website}` : null,
     payload_json: { field: "website_url", value: website || null },
   });
 
@@ -203,6 +231,7 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
   }
 
   // Dedupe: same text must not appear as both fact and mention in same source_record
+  // Also handle truncated prefix: "Some text..." is a prefix of "Some text goes here"
   const deduped = [];
   const seenTexts = new Map();
   for (const candidate of out) {
@@ -212,8 +241,39 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
       continue;
     }
     if (!seenTexts.has(text)) {
-      seenTexts.set(text, candidate);
-      deduped.push(candidate);
+      // Check if this text is a truncated prefix of an existing longer text
+      let dominated = false;
+      if (text.endsWith("...")) {
+        const prefix = text.slice(0, -3);
+        for (const [existingText, existingCandidate] of seenTexts) {
+          if (existingText !== text && existingText.startsWith(prefix)) {
+            // This candidate is a truncated version of an existing one — skip it
+            dominated = true;
+            break;
+          }
+        }
+      }
+      // Check if any existing text is a truncated prefix of this longer text
+      if (!dominated) {
+        for (const [existingText, existingCandidate] of seenTexts) {
+          if (existingText !== text && existingText.endsWith("...")) {
+            const existingPrefix = existingText.slice(0, -3);
+            if (text.startsWith(existingPrefix)) {
+              // This candidate is the full version — replace the truncated one
+              const index = deduped.indexOf(existingCandidate);
+              if (index >= 0) deduped[index] = candidate;
+              seenTexts.delete(existingText);
+              seenTexts.set(text, candidate);
+              dominated = true; // mark as handled (it was inserted via replacement)
+              break;
+            }
+          }
+        }
+      }
+      if (!dominated) {
+        seenTexts.set(text, candidate);
+        deduped.push(candidate);
+      }
     } else {
       const existing = seenTexts.get(text);
       if (candidate.block_type === "fact" && existing.block_type !== "fact") {
