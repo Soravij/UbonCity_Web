@@ -7,6 +7,9 @@ export function resolvePaths(baseDir = process.cwd()) {
   const exportDir = process.env.EXPORT_DIR ? path.resolve(process.env.EXPORT_DIR) : stagingDir;
   const mediaDir = process.env.MEDIA_DIR ? path.resolve(process.env.MEDIA_DIR) : path.join(rootDir, "media");
   const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.join(rootDir, "data", "collector.db");
+  const rawHtmlBufferDir = process.env.RAW_HTML_BUFFER_DIR
+    ? path.resolve(process.env.RAW_HTML_BUFFER_DIR)
+    : path.join(rootDir, "raw", "html-buffer");
 
   return {
     rootDir,
@@ -15,5 +18,6 @@ export function resolvePaths(baseDir = process.cwd()) {
     exportDir,
     mediaDir,
     dbPath,
+    rawHtmlBufferDir,
   };
 }
