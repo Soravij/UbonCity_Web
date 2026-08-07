@@ -79,10 +79,17 @@ After this change set (same baseline commit `d5cc8a1`):
 - **59 fail**
 - **1 skipped**
 
-After merging `fix/wongnai-review-extract` into main (current):
+After merging `fix/wongnai-review-extract` into main:
 
 - **873 tests total**
 - **813 pass**
+- **59 fail**
+- **1 skipped**
+
+After merging `feat/raw-html-buffer-retention` into main (current):
+
+- **877 tests total**
+- **817 pass**
 - **59 fail**
 - **1 skipped**
 
