@@ -23,6 +23,7 @@ const JUNK_MEDIA_PATH_SEGMENTS = [
   "/icons/",
   "/logos/",
   "/static/",
+  "/static2/images/",
   "/assets/ui/",
   "/rsrc.php",
   "/images/menu/",
