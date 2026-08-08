@@ -100,6 +100,13 @@ After merging `fix/evidence-noise-filter` into main:
 - **59 fail**
 - **1 skipped**
 
+After merging `fix/normalizer-media-phone` into main:
+
+- **915 tests total**
+- **855 pass**
+- **59 fail**
+- **1 skipped**
+
 ### History: the earlier 66-failure number
 
 An earlier baseline measured **66 fail** (739 pass, same 806 total) against `main` @ `0b4f105`
