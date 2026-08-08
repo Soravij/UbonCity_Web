@@ -159,13 +159,13 @@ test("isBoilerplateDescription: non-google source, non-boilerplate returns match
 test("isBoilerplateDescription: google.com source with unknown description returns extraction_note", () => {
   const result = isBoilerplateDescription("Some new Google description text.", "https://www.google.com/maps/place/456");
   assert.equal(result.matched, false, "unknown text should not match");
-  assert.equal(result.note, "google_description_not_in_boilerplate_list", "google.com source should get extraction_note");
+  assert.equal(result.note, "google_source_text_not_in_boilerplate_list", "google.com source should get extraction_note");
 });
 
 test("isBoilerplateDescription: maps.google.com source also gets note", () => {
   const result = isBoilerplateDescription("Updated Google boilerplate wording.", "https://maps.google.com/maps/place/789");
   assert.equal(result.matched, false);
-  assert.equal(result.note, "google_description_not_in_boilerplate_list", "maps.google.com should also trigger note");
+  assert.equal(result.note, "google_source_text_not_in_boilerplate_list", "maps.google.com should also trigger note");
 });
 
 test("isBoilerplateDescription: no sourceUrl returns matched=false no note", () => {
@@ -211,6 +211,27 @@ test("buildEvidenceCandidatesForNormalized: boilerplate in both description and 
   assert.equal(matches.length, 0, "boilerplate must not leak through editorial_summary when description is already filtered");
 });
 
+test("buildEvidenceCandidatesForNormalized: boilerplate in all 4 text fields produces 0 blocks", () => {
+  const bp = "Find local businesses, view maps and get driving directions in Google Maps.";
+  const normalized = {
+    title: "Test Place",
+    description: bp,
+    editorial_summary: bp,
+    article_section_texts: [bp],
+    article_body_text: bp,
+  };
+  const base = {
+    content_item_id: 1,
+    source_record_id: 1,
+    source_record_type: "source_records",
+    source_url: "https://www.google.com/maps/place/123",
+  };
+  const candidates = buildEvidenceCandidatesForNormalized(normalized, base);
+  const texts = textValues(candidates);
+  const matches = texts.filter((t) => t === bp);
+  assert.equal(matches.length, 0, "boilerplate must not leak through any of the 4 text fields");
+});
+
 test("buildEvidenceCandidatesForNormalized: real description is kept", () => {
   const normalized = {
     title: "Test Place",
@@ -246,8 +267,8 @@ test("buildEvidenceCandidatesForNormalized: google.com unknown description gets 
   assert.ok(descCandidate, "should have description candidate");
   assert.equal(
     descCandidate.payload_json.extraction_note,
-    "google_description_not_in_boilerplate_list",
-    "should carry extraction_note for google.com unknown description"
+    "google_source_text_not_in_boilerplate_list:description",
+    "should carry extraction_note with field name for google.com unknown description"
   );
 });
 

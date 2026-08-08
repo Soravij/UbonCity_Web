@@ -6,17 +6,31 @@ function toFiniteNumberOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-function pushEvidenceCandidate(out, payload = {}) {
+function pushEvidenceCandidate(out, payload = {}, sourceUrl = "") {
   const textValue = String(payload.text_value || "").trim();
   const numericValue = payload.numeric_value == null ? null : toFiniteNumberOrNull(payload.numeric_value);
   const listValue = Array.isArray(payload.list_value) ? payload.list_value.map((x) => String(x)).filter(Boolean) : [];
   if (!textValue && numericValue == null && listValue.length === 0) return;
-  out.push({
+
+  // Centralized boilerplate gate: reject known Google Maps boilerplate text
+  // regardless of which field it came from.
+  const bp = isBoilerplateDescription(textValue, sourceUrl);
+  if (bp.matched) return;
+
+  const result = {
     ...payload,
     text_value: textValue || null,
     numeric_value: numericValue,
     list_value: listValue,
-  });
+  };
+
+  // For Google sources with unknown text, tag extraction_note with the field name.
+  if (bp.note && result.payload_json) {
+    const field = result.payload_json.field || "unknown";
+    result.payload_json = { ...result.payload_json, extraction_note: `${bp.note}:${field}` };
+  }
+
+  out.push(result);
 }
 
 const BOILERPLATE_DESCRIPTIONS = [
@@ -31,7 +45,7 @@ export function isBoilerplateDescription(text, sourceUrl) {
   if (matched) return { matched: true };
   const host = safeHostname(sourceUrl);
   if (host === "google.com" || host.endsWith(".google.com")) {
-    return { matched: false, note: "google_description_not_in_boilerplate_list" };
+    return { matched: false, note: "google_source_text_not_in_boilerplate_list" };
   }
   return { matched: false };
 }
@@ -91,15 +105,14 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
     block_type: "fact",
     text_value: title ? `Name: ${title}` : null,
     payload_json: { field: "title", value: title || null },
-  });
+  }, sourceUrl);
 
-  const boilerplate = isBoilerplateDescription(description, sourceUrl);
   pushEvidenceCandidate(out, {
     ...base,
     block_type: "fact",
-    text_value: description && !boilerplate.matched ? description : null,
-    payload_json: { field: "description", value: description || null, ...(boilerplate.note ? { extraction_note: boilerplate.note } : {}) },
-  });
+    text_value: description || null,
+    payload_json: { field: "description", value: description || null },
+  }, sourceUrl);
 
   if (category || type || primaryTypeName) {
     pushEvidenceCandidate(out, {
@@ -108,7 +121,7 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
       text_value: "Place classification",
       list_value: [category && `category=${category}`, type && `type=${type}`, primaryTypeName && `primary_type=${primaryTypeName}`].filter(Boolean),
       payload_json: { field: "classification" },
-    });
+    }, sourceUrl);
   }
 
   if (address || mapUrl || sourceUrl) {
@@ -118,7 +131,7 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
       text_value: address || "Location link available",
       list_value: [mapUrl && `map_url=${mapUrl}`, sourceUrl && `source_url=${sourceUrl}`].filter(Boolean),
       payload_json: { field: "location" },
-    });
+    }, sourceUrl);
   }
 
   pushEvidenceCandidate(out, {
@@ -127,7 +140,7 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
     text_value: rating == null ? null : "Rating signal",
     numeric_value: rating,
     payload_json: { field: "rating", value: rating },
-  });
+  }, sourceUrl);
 
   pushEvidenceCandidate(out, {
     ...base,
@@ -135,14 +148,14 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
     text_value: userRatingCount == null ? null : "Review count signal",
     numeric_value: userRatingCount,
     payload_json: { field: "user_rating_count", value: userRatingCount },
-  });
+  }, sourceUrl);
 
   pushEvidenceCandidate(out, {
     ...base,
     block_type: "fact",
     text_value: businessStatus ? `Business status: ${businessStatus}` : null,
     payload_json: { field: "business_status", value: businessStatus || null },
-  });
+  }, sourceUrl);
 
   if (typeof normalized.open_now === "boolean") {
     pushEvidenceCandidate(out, {
@@ -151,7 +164,7 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
       text_value: `Open now: ${normalized.open_now ? "yes" : "no"}`,
       list_value: [`open_now=${normalized.open_now ? "true" : "false"}`],
       payload_json: { field: "open_now", value: normalized.open_now },
-    });
+    }, sourceUrl);
   }
 
   if (Array.isArray(normalized.opening_hours_weekday_text) && normalized.opening_hours_weekday_text.length > 0) {
@@ -161,16 +174,15 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
       text_value: "Opening hours",
       list_value: normalized.opening_hours_weekday_text,
       payload_json: { field: "opening_hours_weekday_text" },
-    });
+    }, sourceUrl);
   }
 
-  const editorialBoilerplate = isBoilerplateDescription(editorialSummary, sourceUrl);
   pushEvidenceCandidate(out, {
     ...base,
     block_type: "mention",
-    text_value: editorialSummary && !editorialBoilerplate.matched ? editorialSummary : null,
-    payload_json: { field: "editorial_summary", value: editorialSummary || null, ...(editorialBoilerplate.note ? { extraction_note: editorialBoilerplate.note } : {}) },
-  });
+    text_value: editorialSummary || null,
+    payload_json: { field: "editorial_summary", value: editorialSummary || null },
+  }, sourceUrl);
 
   if (Array.isArray(normalized.review_snippets)) {
     for (const snippet of normalized.review_snippets.slice(0, 3)) {
@@ -182,7 +194,7 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
         text_value: text,
         numeric_value: toFiniteNumberOrNull(snippet?.rating),
         payload_json: { field: "review_snippet", snippet },
-      });
+      }, sourceUrl);
     }
   }
 
@@ -193,7 +205,7 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
       block_type: "mention",
       text_value: section,
       payload_json: { field: "article_section", value: section },
-    });
+    }, sourceUrl);
   }
 
   if (!articleSections.length) {
@@ -203,7 +215,7 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
       block_type: "mention",
       text_value: articleBodyText || null,
       payload_json: articleBodyText ? { field: "article_body_text", value: articleBodyText } : null,
-    });
+    }, sourceUrl);
   }
 
   pushEvidenceCandidate(out, {
@@ -211,14 +223,14 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
     block_type: "mention",
     text_value: website && normalizeUrlForComparison(website) !== normalizeUrlForComparison(sourceUrl) ? `Website: ${website}` : null,
     payload_json: { field: "website_url", value: website || null },
-  });
+  }, sourceUrl);
 
   pushEvidenceCandidate(out, {
     ...base,
     block_type: "mention",
     text_value: phone ? `Phone: ${phone}` : null,
     payload_json: { field: "phone", value: phone || null },
-  });
+  }, sourceUrl);
 
   const mediaList = Array.isArray(normalized.media) ? normalized.media : [];
   const filteredMedia = buildFilteredMediaList(mediaList, { fallbackImageUrl: imageUrl, cap: 30 });
@@ -228,7 +240,7 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
       block_type: "media",
       text_value: media.media_url,
       payload_json: { field: "image", media_url: media.media_url, role: media.role, order: media.order },
-    });
+    }, sourceUrl);
   }
 
   // Field priority: when the same text appears in multiple fields,
