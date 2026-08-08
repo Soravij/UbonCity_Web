@@ -272,6 +272,50 @@ test("buildEvidenceCandidatesForNormalized: google.com unknown description gets 
   );
 });
 
+test("buildEvidenceCandidatesForNormalized: media URL from google.com does not get extraction_note", () => {
+  const normalized = {
+    title: "Test Place",
+    media: [{ media_url: "https://lh3.googleusercontent.com/p/abc123.jpg" }],
+    source_url: "https://www.google.com/maps/place/123",
+  };
+  const base = {
+    content_item_id: 1,
+    source_record_id: 1,
+    source_record_type: "source_records",
+    source_url: "https://www.google.com/maps/place/123",
+  };
+  const candidates = buildEvidenceCandidatesForNormalized(normalized, base);
+  const mediaCandidate = candidates.find((c) => c.payload_json?.field === "image");
+  assert.ok(mediaCandidate, "should have media candidate");
+  assert.equal(
+    mediaCandidate.payload_json.extraction_note,
+    undefined,
+    "media URL must not carry extraction_note"
+  );
+});
+
+test("buildEvidenceCandidatesForNormalized: description from google.com still gets extraction_note", () => {
+  const normalized = {
+    title: "Test Place",
+    description: "Some unknown Google text.",
+    source_url: "https://www.google.com/maps/place/123",
+  };
+  const base = {
+    content_item_id: 1,
+    source_record_id: 1,
+    source_record_type: "source_records",
+    source_url: "https://www.google.com/maps/place/123",
+  };
+  const candidates = buildEvidenceCandidatesForNormalized(normalized, base);
+  const descCandidate = candidates.find((c) => c.payload_json?.field === "description");
+  assert.ok(descCandidate, "should have description candidate");
+  assert.equal(
+    descCandidate.payload_json.extraction_note,
+    "google_source_text_not_in_boilerplate_list:description",
+    "description from google.com should still carry extraction_note"
+  );
+});
+
 // ============================================================
 // Fix 4: same-source dup — field-priority dedupe
 // description and editorial_summary are always set to the same excerpt

@@ -24,8 +24,9 @@ function pushEvidenceCandidate(out, payload = {}, sourceUrl = "") {
     list_value: listValue,
   };
 
-  // For Google sources with unknown text, tag extraction_note with the field name.
-  if (bp.note && result.payload_json) {
+  // For Google sources with unknown descriptive text, tag extraction_note with the field name.
+  // Skip for URLs (media, website links) — the note is only meaningful for prose text.
+  if (bp.note && result.payload_json && !textValue.startsWith("http://") && !textValue.startsWith("https://")) {
     const field = result.payload_json.field || "unknown";
     result.payload_json = { ...result.payload_json, extraction_note: `${bp.note}:${field}` };
   }
