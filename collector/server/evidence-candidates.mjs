@@ -55,7 +55,7 @@ function safeHostname(url) {
   try { return new URL(url).hostname.toLowerCase(); } catch { return ""; }
 }
 
-function normalizeUrlForComparison(url) {
+export function normalizeUrlForComparison(url) {
   if (!url) return "";
   try {
     const u = new URL(url);
