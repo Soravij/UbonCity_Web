@@ -101,14 +101,42 @@ test("buildCollectedImportSeed: does not overwrite existing media in inner paylo
 });
 
 // ── Fix 1b: attachCollectedSourceRecord payloadJson (:6614) ──
-// Extracts the ACTUAL expression at :6614 from serverSource at load time.
-// Reverting :6614 in index.mjs changes the expression, causing these tests to fail.
+// Anchors by function name, not line number. If the function or its
+// payloadJson assignment is removed/renamed, extraction throws → test fails.
 
-const serverLines = serverSource.split("\n");
-const line6614 = serverLines[6613].trimEnd(); // 0-indexed, strip \r
-const expr6614Match = line6614.match(/const payloadJson = (.+);$/);
-if (!expr6614Match) throw new Error(`Could not extract expression at :6614, got: ${JSON.stringify(line6614)}`);
-const expr6614Src = expr6614Match[1];
+function extractPayloadJsonFromAttachCollectedSourceRecord(source) {
+  const fnMarker = "function attachCollectedSourceRecord(";
+  const fnStart = source.indexOf(fnMarker);
+  if (fnStart === -1) throw new Error("attachCollectedSourceRecord not found in source");
+  const fnBodyStart = source.indexOf("{", fnStart);
+  let depth = 0, fnEnd = -1;
+  for (let i = fnBodyStart; i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    if (source[i] === "}") { depth--; if (depth === 0) { fnEnd = i; break; } }
+  }
+  if (fnEnd === -1) throw new Error("Could not find end of attachCollectedSourceRecord");
+  const fnBody = source.slice(fnStart, fnEnd + 1);
+  const assignMarker = "const payloadJson = ";
+  const assignIdx = fnBody.indexOf(assignMarker);
+  if (assignIdx === -1) throw new Error("const payloadJson not found inside attachCollectedSourceRecord");
+  const exprStart = assignIdx + assignMarker.length;
+  let parenDepth = 0, braceDepth = 0, bracketDepth = 0, exprEnd = -1;
+  for (let i = exprStart; i < fnBody.length; i++) {
+    const ch = fnBody[i];
+    if (ch === "(") parenDepth++;
+    if (ch === ")") parenDepth--;
+    if (ch === "{") braceDepth++;
+    if (ch === "}") braceDepth--;
+    if (ch === "[") bracketDepth++;
+    if (ch === "]") bracketDepth--;
+    if (ch === ";" && parenDepth === 0 && braceDepth === 0 && bracketDepth === 0) { exprEnd = i; break; }
+  }
+  if (exprEnd === -1) throw new Error("Could not find end of payloadJson expression");
+  return fnBody.slice(exprStart, exprEnd).trim();
+}
+
+const expr6614Src = extractPayloadJsonFromAttachCollectedSourceRecord(serverSource);
+if (!expr6614Src) throw new Error("extractPayloadJsonFromAttachCollectedSourceRecord returned empty");
 
 function evalPayloadJson6614(rawItem) {
   const normalized = (rawItem?.normalized_json && typeof rawItem.normalized_json === "object") ? rawItem.normalized_json : {};
