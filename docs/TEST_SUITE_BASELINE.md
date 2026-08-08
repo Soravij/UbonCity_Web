@@ -93,6 +93,13 @@ After merging `feat/raw-html-buffer-retention` into main (current):
 - **59 fail**
 - **1 skipped**
 
+After merging `fix/evidence-noise-filter` into main:
+
+- **905 tests total**
+- **845 pass**
+- **59 fail**
+- **1 skipped**
+
 ### History: the earlier 66-failure number
 
 An earlier baseline measured **66 fail** (739 pass, same 806 total) against `main` @ `0b4f105`
