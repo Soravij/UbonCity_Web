@@ -192,6 +192,25 @@ test("buildEvidenceCandidatesForNormalized: Google Maps boilerplate description 
   );
 });
 
+test("buildEvidenceCandidatesForNormalized: boilerplate in both description and editorial_summary produces 0 blocks", () => {
+  const boilerplate = "Find local businesses, view maps and get driving directions in Google Maps.";
+  const normalized = {
+    title: "Test Place",
+    description: boilerplate,
+    editorial_summary: boilerplate,
+  };
+  const base = {
+    content_item_id: 1,
+    source_record_id: 1,
+    source_record_type: "source_records",
+    source_url: "https://www.google.com/maps/place/123",
+  };
+  const candidates = buildEvidenceCandidatesForNormalized(normalized, base);
+  const texts = textValues(candidates);
+  const matches = texts.filter((t) => t === boilerplate);
+  assert.equal(matches.length, 0, "boilerplate must not leak through editorial_summary when description is already filtered");
+});
+
 test("buildEvidenceCandidatesForNormalized: real description is kept", () => {
   const normalized = {
     title: "Test Place",

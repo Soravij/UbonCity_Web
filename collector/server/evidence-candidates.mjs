@@ -164,11 +164,12 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
     });
   }
 
+  const editorialBoilerplate = isBoilerplateDescription(editorialSummary, sourceUrl);
   pushEvidenceCandidate(out, {
     ...base,
     block_type: "mention",
-    text_value: editorialSummary || null,
-    payload_json: { field: "editorial_summary", value: editorialSummary || null },
+    text_value: editorialSummary && !editorialBoilerplate.matched ? editorialSummary : null,
+    payload_json: { field: "editorial_summary", value: editorialSummary || null, ...(editorialBoilerplate.note ? { extraction_note: editorialBoilerplate.note } : {}) },
   });
 
   if (Array.isArray(normalized.review_snippets)) {
