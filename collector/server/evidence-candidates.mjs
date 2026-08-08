@@ -234,12 +234,48 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
   // keep the candidate from the highest-priority field.
   // description and editorial_summary are always set to the same excerpt
   // in buildNormalizedFromExtractedPayload, so description (fact) wins.
+  // Field priority for dedupe: lower number = higher priority = wins collision.
+  // Tier 1 — primary evidence
+  //   description: source description, most authoritative fact
+  //   review_snippet: real customer reviews, high evidence value
+  // Tier 2 — curated/summary
+  //   editorial_summary: Google editorial curation
+  // Tier 3 — article content
+  //   article_body_text: article main body
+  //   article_section: article section headings
+  // Tier 4 — core metadata
+  //   title: place name
+  //   classification: category/type/primary_type
+  //   location: address + map/source URLs
+  // Tier 5 — operational
+  //   business_status: open/closed/permanently_closed
+  //   opening_hours_weekday_text: weekly hours
+  //   open_now: real-time open status
+  // Tier 6 — social proof
+  //   rating: numeric rating
+  //   user_rating_count: review count
+  // Tier 7 — reference
+  //   website_url: business website
+  //   phone: phone number
+  // Tier 8 — media
+  //   image: images, lowest priority for text dedupe
   const FIELD_PRIORITY = {
     description: 10,
+    review_snippet: 15,
     editorial_summary: 20,
     article_body_text: 30,
     article_section: 40,
     title: 50,
+    classification: 55,
+    location: 60,
+    business_status: 65,
+    opening_hours_weekday_text: 70,
+    open_now: 75,
+    rating: 80,
+    user_rating_count: 82,
+    website_url: 85,
+    phone: 90,
+    image: 95,
   };
 
   // Dedupe: same text must not appear as both fact and mention in same source_record.

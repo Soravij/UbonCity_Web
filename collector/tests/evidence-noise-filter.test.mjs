@@ -324,3 +324,55 @@ test("field priority: article_body_text loses to description when text is the sa
   const winner = candidates.find((c) => c.text_value === text);
   assert.equal(winner.payload_json.field, "description", "description should win over article_body_text");
 });
+
+// ============================================================
+// Field-priority proving cases:
+// These tests prove that field priority (not block_type) decides the winner.
+// Old logic (prefix dedupe + fact-wins-over-mention) would pick the fact;
+// new logic (field priority) picks the higher-priority field regardless of block_type.
+// Reverting FIELD_PRIORITY to old logic should make these FAIL.
+// ============================================================
+
+test("field-priority proof: editorial_summary (mention) beats classification (fact) when field priority is higher", () => {
+  // editorial_summary priority 20 < classification priority 55
+  // Old logic: classification is fact → fact wins → WRONG
+  // New logic: editorial_summary has higher field priority → wins
+  const normalized = {
+    title: "Test Place",
+    editorial_summary: "Place classification",
+    category: "Place classification",
+  };
+  const base = {
+    content_item_id: 1,
+    source_record_id: 1,
+    source_record_type: "source_records",
+  };
+  const candidates = buildEvidenceCandidatesForNormalized(normalized, base);
+  const text = "Place classification";
+  const winner = candidates.find((c) => c.text_value === text);
+  assert.ok(winner, "winner should exist");
+  assert.equal(winner.payload_json.field, "editorial_summary", "editorial_summary (mention, priority 20) should beat classification (fact, priority 55) by field priority");
+  assert.equal(winner.block_type, "mention", "winner should be mention, not fact");
+});
+
+test("field-priority proof: review_snippet beats location (fact) when field priority is higher", () => {
+  // review_snippet priority 15 < location priority 60
+  // Old logic: location is fact → fact wins → WRONG
+  // New logic: review_snippet has higher field priority → wins
+  const normalized = {
+    title: "Test Place",
+    review_snippets: [{ text: "456 River Road, Ubon Ratchathani", rating: 5 }],
+    formatted_address: "456 River Road, Ubon Ratchathani",
+  };
+  const base = {
+    content_item_id: 1,
+    source_record_id: 1,
+    source_record_type: "source_records",
+  };
+  const candidates = buildEvidenceCandidatesForNormalized(normalized, base);
+  const text = "456 River Road, Ubon Ratchathani";
+  const winner = candidates.find((c) => c.text_value === text);
+  assert.ok(winner, "winner should exist");
+  assert.equal(winner.payload_json.field, "review_snippet", "review_snippet (priority 15) should beat location (fact, priority 60) by field priority");
+  assert.equal(winner.block_type, "review_snippet", "winner should be review_snippet, not fact");
+});
