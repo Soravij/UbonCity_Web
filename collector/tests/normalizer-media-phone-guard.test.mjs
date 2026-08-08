@@ -33,10 +33,7 @@ const parseObjectCandidate = (v) => {
 };
 const buildCollectedImportSeed = loadNamedFunction(serverSource, "buildCollectedImportSeed", { parseObjectCandidate });
 
-// ── revert-guard hash ────────────────────────────────────────
-const GUARD_HASH = "r2-media-phone-7a3f9c";
-
-// ── Fix 1: media carried through buildCollectedImportSeed ────
+// ── Fix 1a: media carried through buildCollectedImportSeed (:6591) ──
 
 test("buildCollectedImportSeed: attaches media from rawItem.payload_json.media into payload_json", () => {
   const rawMedia = [
@@ -103,6 +100,55 @@ test("buildCollectedImportSeed: does not overwrite existing media in inner paylo
   );
 });
 
+// ── Fix 1b: attachCollectedSourceRecord payloadJson (:6614) ──
+// Extracts the ACTUAL expression at :6614 from serverSource at load time.
+// Reverting :6614 in index.mjs changes the expression, causing these tests to fail.
+
+const serverLines = serverSource.split("\n");
+const line6614 = serverLines[6613].trimEnd(); // 0-indexed, strip \r
+const expr6614Match = line6614.match(/const payloadJson = (.+);$/);
+if (!expr6614Match) throw new Error(`Could not extract expression at :6614, got: ${JSON.stringify(line6614)}`);
+const expr6614Src = expr6614Match[1];
+
+function evalPayloadJson6614(rawItem) {
+  const normalized = (rawItem?.normalized_json && typeof rawItem.normalized_json === "object") ? rawItem.normalized_json : {};
+  return Function("rawItem", "normalized", `return (${expr6614Src});`)(rawItem, normalized);
+}
+
+test("attachCollectedSourceRecord :6614 — expression includes media attachment", () => {
+  assert.ok(
+    expr6614Src.includes("media"),
+    `:6614 expression must reference media, got: ${expr6614Src.slice(0, 120)}`
+  );
+});
+
+test("attachCollectedSourceRecord :6614 — media survives JSON.stringify round-trip", () => {
+  const rawMedia = [
+    { media_url: "https://example.com/a.jpg", metadata_json: { source: "manual_url_metadata", role: "hero", order: 0 } },
+  ];
+  const rawItem = {
+    payload_json: {
+      payload_json: { title: "inner" },
+      media: rawMedia,
+    },
+  };
+  const payloadJson = evalPayloadJson6614(rawItem);
+  const roundTripped = JSON.parse(JSON.stringify(payloadJson));
+
+  assert.deepEqual(roundTripped.media, rawMedia, "media must survive serialization into source_records.payload_json");
+  assert.equal(roundTripped.title, "inner", "inner fields preserved");
+});
+
+test("attachCollectedSourceRecord :6614 — no media when rawItem has none", () => {
+  const rawItem = {
+    payload_json: {
+      payload_json: { title: "inner" },
+    },
+  };
+  const payloadJson = evalPayloadJson6614(rawItem);
+  assert.equal(payloadJson.media, undefined, "no media key when rawItem lacks it");
+});
+
 // ── Fix 2: national_phone_number in extracted normalizer ─────
 
 test("buildNormalizedFromExtractedPayload: national_phone_number from extractedMetadata.phone", () => {
@@ -144,8 +190,4 @@ test("buildNormalizedFromExtractedPayload: national_phone_number is null when no
   assert.equal(result.national_phone_number, null, "should be null when no phone data");
 });
 
-// ── guard hash assertion ─────────────────────────────────────
 
-test("revert-guard hash: if this fails, a behavioral contract was broken", () => {
-  assert.equal(GUARD_HASH, "r2-media-phone-7a3f9c", "guard hash mismatch — check which contract broke");
-});
