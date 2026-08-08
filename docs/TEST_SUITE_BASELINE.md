@@ -3,10 +3,20 @@
 ## Standard command
 
 ```
-npm run test:all
+npm run gate
 ```
 
-### การอ่านผลเทสต์
+`npm run gate` spawns `testAll.mjs` internally, reads stdout as UTF-8 in Node (avoids
+PowerShell encoding issues), parses the summary line, and prints one fixed-format line:
+
+```
+GATE tests=915 pass=855 fail=59 skipped=1
+```
+
+Exit code 0 on successful parse (even when fail > 0), non-zero if summary line not found.
+The old `npm run test:all` still works; `npm run gate` is the recommended one-command gate.
+
+### การอ่านผลเทสต์ (manual, legacy)
 
 ```powershell
 npm run test:all 2>&1 | Select-String -Pattern '(tests|suites|pass|fail|cancelled|skipped|todo) \d+' | Select-Object -Last 8
