@@ -78,6 +78,7 @@ export function buildNormalizedFromExtractedPayload(payload = {}, sourceRecord =
     article_body_text: bodyText,
     article_section_texts: sectionTexts,
     article_page_title: String(extractedArticle?.page_title || "").trim(),
+    national_phone_number: String(extractedMetadata?.phone || extractedMetadata?.phone_normalized || "").trim() || null,
     media,
   };
 

@@ -6588,7 +6588,7 @@ function buildCollectedImportSeed(rawItem, adapter) {
       source_name: normalized.source_name || adapter,
       source_url: normalized.source_url || rawItem?.source_url || "",
       source_entity_id: normalized.google_place_id || rawItem?.source_ref || "",
-      payload_json: rawItem?.payload_json?.payload_json || rawItem?.payload_json || normalized || null,
+      payload_json: (() => { const b = rawItem?.payload_json?.payload_json || rawItem?.payload_json || normalized || null; return b && typeof b === "object" && !b.media && Array.isArray(rawItem?.payload_json?.media) ? { ...b, media: rawItem.payload_json.media } : b; })(),
       tags: Array.isArray(normalized.tags) ? normalized.tags : [],
       source_type: adapter,
     },
@@ -6611,7 +6611,7 @@ function resolveCreateWorkflowPatch(body, fallbackLegacyStatus = "raw") {
 
 function attachCollectedSourceRecord(contentItemId, rawItem, adapter) {
   const normalized = parseObjectCandidate(rawItem?.normalized_json) || {};
-  const payloadJson = rawItem?.payload_json?.payload_json || rawItem?.payload_json || normalized || null;
+  const payloadJson = (() => { const b = rawItem?.payload_json?.payload_json || rawItem?.payload_json || normalized || null; return b && typeof b === "object" && !b.media && Array.isArray(rawItem?.payload_json?.media) ? { ...b, media: rawItem.payload_json.media } : b; })();
   const sourceParams = {
     content_item_id: Number(contentItemId || 0),
     source_type: String(adapter || rawItem?.source_type || "manual").trim() || "manual",
