@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const collectorRoot = path.dirname(__dirname);
 const itemEditorJs = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.js"), "utf8");
 const itemEditorHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "item-editor.html"), "utf8");
 const cleanItemHtml = fs.readFileSync(path.join(collectorRoot, "server", "public", "clean-item.html"), "utf8");

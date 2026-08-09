@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { buildNormalizedFromExtractedPayload } from "../collector/sources/extracted-payload-normalizer.mjs";
 
-const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const collectorRoot = path.dirname(__dirname);
 const serverSource = fs.readFileSync(path.join(collectorRoot, "server", "index.mjs"), "utf8");
 
 function extractFunctionSource(source, functionName) {

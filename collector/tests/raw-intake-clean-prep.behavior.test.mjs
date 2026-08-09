@@ -6,13 +6,15 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import jwt from "jsonwebtoken";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 import { runCleanStage } from "../services/workflow.mjs";
 
-const collectorRoot = path.resolve("D:\\UbonCity_Web\\collector");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const collectorRoot = path.dirname(__dirname);
 const appSource = fs.readFileSync(path.join(collectorRoot, "server", "public", "app.js"), "utf8");
 
 async function reservePort() {

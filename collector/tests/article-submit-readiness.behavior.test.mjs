@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import fs from "node:fs";
 
-const coreModulePath = path.resolve("D:/UbonCity_Web/collector/server/public/article-workflow-core.js");
-const pageSource = fs.readFileSync(path.resolve("D:/UbonCity_Web/collector/server/public/article-workspace-page.js"), "utf8");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
+const coreModulePath = path.join(root, "server", "public", "article-workflow-core.js");
+const pageSource = fs.readFileSync(path.join(root, "server", "public", "article-workspace-page.js"), "utf8");
 
 function createElement(id = "", value = "") {
   return {

@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import { fileURLToPath } from "node:url";
 
-const root = "D:\\UbonCity_Web\\collector";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
 const source = fs.readFileSync(path.join(root, "server", "index.mjs"), "utf8");
 
 function extractFunctionBlock(name) {

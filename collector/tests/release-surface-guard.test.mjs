@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = "D:\\UbonCity_Web\\collector";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(__dirname);
 
 test("batch release routes are disabled in the HTTP surface", () => {
   const source = fs.readFileSync(path.join(root, "server", "index.mjs"), "utf8");
