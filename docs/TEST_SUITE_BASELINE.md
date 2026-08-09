@@ -145,6 +145,34 @@ sorted lists. Anything appearing only on your branch's side is a regression to e
 merging; anything only on `main`'s side is a pre-existing failure your branch happens to fix (nice,
 but call it out explicitly rather than letting it silently change the baseline number).
 
+## Worktree measurement traps
+
+เมื่อวัด baseline ใน `git worktree` แยก ต้องระวัง 4 กับดักที่เคยทำให้ได้เลขปลอม
+มาแล้ว 3 ครั้ง (66 ครั้งหนึ่ง, +7 อีกสองครั้ง) — ทุกครั้งไม่ใช่ regression จริง
+แต่เป็น worktree setup ไม่ครบ:
+
+1. **copy `.env` เข้า worktree ด้วย** — `.env` อยู่ใน `.gitignore` ไม่ตาม worktree
+   อัตโนมัติ ถ้าไม่มี `manual-import-merge-backfill.behavior.test.mjs` จะ spawn
+   `collector/server/index.mjs` ซึ่ง throw `Backend auth API base URL is required`
+   ทำให้ fail เพิ่มปลอม ~6 tests
+
+2. **อย่าวาง worktree ใน OS temp dir** — `smoke-safety.test.mjs` เช็คว่า path
+   อยู่ใต้ `os.tmpdir()` หรือไม่ ถ้า worktree อยู่ใน temp dir จริง
+   (เช่น `C:\Users\...\AppData\Local\Temp\`) test จะเข้าใจว่า path เป็น temp จริง
+   และ fail ปลอม วาง worktree ใน location ปกติ เช่น `D:\audit-scratch\...`
+
+3. **ต้องมี `node_modules` ครบ** — worktree ใหม่ไม่มี `node_modules` (untracked)
+   ต้อง junction/copy `collector/node_modules` และ `backend/node_modules` เข้าไป
+   ไม่งั้นจะ throw `ERR_MODULE_NOT_FOUND` จาก dependency หลายตัว
+
+4. **ถ้าวัดได้ไม่เท่า baseline 59 ให้ตรวจ setup ก่อน** — อย่าสรุปว่าเป็น regression
+   ตรวจ .env, node_modules, และ location ของ worktree ก่อนเสมอ
+
+เพิ่มเติม: **ห้าม checkout `main` ใน worktree** — worktree share branch ref กับ
+main checkout ถ้า commit ใน worktree ที่มี `main` checked out จะดัน local `main`
+ref ไปที่ commit นั้นด้วย ให้สร้าง worktree บน branch ชั่วคราวหรือ `--detach`
+เสมอ
+
 ## Known pre-existing failures (main baseline, 60)
 
 All failures cluster by file — grouped below with what's actually wrong, from reading the real
