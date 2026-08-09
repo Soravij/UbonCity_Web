@@ -1361,6 +1361,7 @@ function getEvidenceFilteredRows(rows = []) {
   const sortMode = String(state.evidenceView?.sort || "source_priority").trim().toLowerCase();
   const list = (Array.isArray(rows) ? rows : []).filter((row) => {
     const blockType = String(row?.block_type || "").trim().toLowerCase();
+    if (blockType === "media") return false;
     const sourceFamily = classifyEvidenceSourceFamily(row).key;
     if (blockFilter !== "all" && blockType !== blockFilter) return false;
     if (sourceFilter !== "all" && sourceFamily !== sourceFilter) return false;
@@ -1594,16 +1595,23 @@ function renderEvidenceTable() {
     }
   }
 
+  const nonMediaCount = rows.filter((r) => String(r?.block_type || "").trim().toLowerCase() !== "media").length;
   const summaryNode = qs("evidence-table-summary");
   if (summaryNode) {
-    summaryNode.textContent = visibleRows.length === rows.length
+    summaryNode.textContent = visibleRows.length === nonMediaCount
       ? `แสดง ${visibleRows.length} evidence`
-      : `แสดง ${visibleRows.length}/${rows.length} evidence`;
+      : `แสดง ${visibleRows.length}/${nonMediaCount} evidence`;
   }
 
   if (!visibleRows.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="6" class="muted">${rows.length ? "ไม่พบ evidence ตามเงื่อนไขที่เลือก" : "ยังไม่มี evidence blocks"}</td>`;
+    const allMedia = !nonMediaCount && rows.length > 0;
+    const msg = nonMediaCount
+      ? "ไม่พบ evidence ตามเงื่อนไขที่เลือก"
+      : allMedia
+        ? `evidence ทั้งหมด ${rows.length} รายการเป็นรูป — ดูได้ที่ส่วน "รายการรูปอ้างอิง" ด้านบน`
+        : "ยังไม่มี evidence blocks";
+    tr.innerHTML = `<td colspan="6" class="muted">${msg}</td>`;
     tbody.appendChild(tr);
     return;
   }
