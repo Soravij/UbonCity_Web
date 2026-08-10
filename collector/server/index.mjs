@@ -65,6 +65,7 @@ import { buildCleanStructuredContext, computeCompleteness, validateCleanMinimum 
 import {
   DEFAULT_FIELD_PACK_AGENT_PROFILE,
   FIELD_PACK_AGENT_KEY,
+  MAX_REFERENCE_MEDIA_FOR_AI,
   createAgentGenerationEngine,
 } from "../services/agent-generation.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
@@ -12844,7 +12845,7 @@ app.get("/api/items/:id/image-workflow", requireRole("owner", "admin", "editor",
   const status = buildImageWorkflowState(id);
   const assets = repo.listContentAssetsByItem(id).filter((row) => isCollectorControlledLocalAssetRow(row));
   const referenceMedia = repo.listReferenceMediaByItem(id);
-  res.json({ item_id: id, status, assets, reference_media: referenceMedia });
+  res.json({ item_id: id, status, assets, reference_media: referenceMedia, max_reference_media_for_ai: MAX_REFERENCE_MEDIA_FOR_AI });
 });
 
 app.get("/api/items/:id/reference-media", requireRole("owner", "admin", "editor", "user", "freelance"), (req, res) => {

@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MAX_REFERENCE_MEDIA_FOR_AI,
   buildExternalAgentPayload,
   buildFieldPackPrompt,
   buildFieldPackRevisionPrompt,
   createAgentGenerationEngine,
   normalizeFieldPack,
+  collectVisualImageUrls,
+  prepareVisualImageInputs,
 } from "../services/agent-generation.mjs";
 
 function createItem(overrides = {}) {
@@ -216,4 +219,21 @@ test("external agent engine normalizes visual context and field pack responses",
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("MAX_REFERENCE_MEDIA_FOR_AI is exported and equals 10", () => {
+  assert.equal(MAX_REFERENCE_MEDIA_FOR_AI, 10);
+});
+
+test("collectVisualImageUrls respects MAX_REFERENCE_MEDIA_FOR_AI as default limit", () => {
+  const item = {
+    structured_context: {
+      reference_media_context: {
+        selected_urls: Array.from({ length: 15 }, (_, i) => `https://example.com/ref-${i}.jpg`),
+      },
+    },
+    visual_image_urls: [],
+  };
+  const urls = collectVisualImageUrls(item);
+  assert.ok(urls.length <= MAX_REFERENCE_MEDIA_FOR_AI, `expected <= ${MAX_REFERENCE_MEDIA_FOR_AI} but got ${urls.length}`);
 });

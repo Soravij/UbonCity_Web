@@ -11186,28 +11186,51 @@ export function createRepository(db) {
       .sort((left, right) => {
         if (left._priority !== right._priority) return left._priority - right._priority;
         return String(left.reference_media_id || "").localeCompare(String(right.reference_media_id || ""));
-      })
-      .map(({ _priority, ...row }) => row);
+      });
   }
 
   function listReferenceMediaByItem(contentItemId, options = {}) {
     const rows = collectReferenceMediaCandidatesByItem(contentItemId);
     const selectedOnly = options?.selectedOnly === true;
     const selectionRows = db.prepare(`
-      SELECT reference_media_id, selected_for_ai
+      SELECT reference_media_id, selected_for_ai, created_at
       FROM content_reference_media_selections
       WHERE content_item_id=?
     `).all(Number(contentItemId || 0) || 0);
     const selectedLookup = new Map(
-      selectionRows.map((row) => [String(row.reference_media_id || "").trim(), Number(row.selected_for_ai || 0) === 1])
+      selectionRows.map((row) => [
+        String(row.reference_media_id || "").trim(),
+        {
+          selected: Number(row.selected_for_ai || 0) === 1,
+          created_at: String(row.created_at || ""),
+        },
+      ])
     );
 
-    const mapped = rows.map((row) => ({
-      ...row,
-      selected_for_ai: selectedLookup.get(String(row.reference_media_id || "").trim()) === true,
-    }));
-    if (!selectedOnly) return mapped;
-    return mapped.filter((row) => row.selected_for_ai === true);
+    const mapped = rows.map((row) => {
+      const refId = String(row.reference_media_id || "").trim();
+      const selection = selectedLookup.get(refId);
+      return {
+        ...row,
+        selected_for_ai: selection?.selected === true,
+        _approval_at: selection?.selected ? selection.created_at : "",
+      };
+    });
+
+    mapped.sort((left, right) => {
+      if (left._priority !== right._priority) return left._priority - right._priority;
+      const leftSelected = left.selected_for_ai === true;
+      const rightSelected = right.selected_for_ai === true;
+      if (leftSelected && rightSelected) {
+        const cmp = String(left._approval_at || "").localeCompare(String(right._approval_at || ""));
+        if (cmp !== 0) return cmp;
+      }
+      return String(left.reference_media_id || "").localeCompare(String(right.reference_media_id || ""));
+    });
+
+    const cleaned = mapped.map(({ _priority, _approval_at, ...row }) => row);
+    if (!selectedOnly) return cleaned;
+    return cleaned.filter((row) => row.selected_for_ai === true);
   }
 
   function setReferenceMediaSelected(contentItemId, referenceMediaId, selected) {
