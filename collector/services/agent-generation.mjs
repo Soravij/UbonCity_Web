@@ -295,7 +295,8 @@ function toCollectorAbsoluteUrl(url) {
 
 async function fetchImageUrlToDataUrl(url) {
   const absoluteUrl = toCollectorAbsoluteUrl(url);
-  const response = await fetch(absoluteUrl);
+  const timeoutMs = Number(process.env.COLLECTOR_VISUAL_IMAGE_TIMEOUT_MS || 15000) || 15000;
+  const response = await fetch(absoluteUrl, { signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) {
     throw new Error(`image fetch failed ${response.status}`);
   }
