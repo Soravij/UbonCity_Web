@@ -58,6 +58,15 @@ test("isJunkMediaUrl: real content URLs with home/banner substrings must NOT be 
   assert.equal(isJunkMediaUrl("https://example.com/uploads/urban-banner-district.jpg"), false);
 });
 
+test("isJunkMediaUrl: .fbcdn.net hosts are junk regardless of path (no signed token the crawler can use)", () => {
+  assert.equal(isJunkMediaUrl("https://scontent.fubp1-1.fna.fbcdn.net/v/t1.6435/photo.jpg"), true);
+  // pre-existing path-segment rule still catches this host's rsrc.php icons too
+  assert.equal(isJunkMediaUrl("https://static.xx.fbcdn.net/rsrc.php/v3/y6/r/abc.png"), true);
+  assert.equal(isJunkMediaUrl("https://img.wongnai.com/p/800x0/2024/01/01/test-photo.jpg"), false);
+  // "fbcdn" appearing mid-hostname on an unrelated domain must not match the suffix rule
+  assert.equal(isJunkMediaUrl("https://fbcdn.example.com/uploads/photo.jpg"), false);
+});
+
 test("buildFilteredMediaList: fallback to normalized.image only applies when the media list was empty from the start", () => {
   const junkFallback = "https://example.com/images/menu/home.png";
   const cleanFallback = "https://example.com/uploads/photo.jpg";

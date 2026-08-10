@@ -29,6 +29,13 @@ const JUNK_MEDIA_PATH_SEGMENTS = [
   "/images/menu/",
 ];
 
+// Hosts whose media URLs require a signed/session-scoped token the crawler never has, so a
+// fetched URL always 403s regardless of path shape. Suffix match: host must end with the
+// listed string (with its leading dot), so "fbcdn.example.com" is not caught by ".fbcdn.net".
+const JUNK_MEDIA_HOST_SUFFIXES = [
+  ".fbcdn.net",
+];
+
 const DEFAULT_MEDIA_CAP = 30;
 
 function toText(value) {
@@ -43,12 +50,23 @@ function resolveUrlPath(value) {
   }
 }
 
+function resolveUrlHost(value) {
+  try {
+    return new URL(value).hostname || "";
+  } catch {
+    return "";
+  }
+}
+
 // The crawler never downloads image bytes, so junk is classified from the URL
-// shape alone (extension / filename / path), not from fetched content.
+// shape alone (extension / filename / path / host), not from fetched content.
 export function isJunkMediaUrl(value) {
   const raw = toText(value);
   if (!raw) return true;
   if (/^data:/i.test(raw)) return true;
+
+  const host = resolveUrlHost(raw).toLowerCase();
+  if (JUNK_MEDIA_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) return true;
 
   const path = resolveUrlPath(raw).toLowerCase();
   if (JUNK_MEDIA_EXTENSION_PATTERN.test(path)) return true;
