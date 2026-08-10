@@ -10,7 +10,7 @@ const GOVERNANCE_REASON_CODES = Object.freeze({
   review_request_changes: "review_changes_requested",
   workflow_reopen: "workflow_reopened",
 });
-import { FIELD_PACK_AGENT_KEY, createAgentGenerationEngine } from "./agent-generation.mjs";
+import { FIELD_PACK_AGENT_KEY, collectVisualImageUrls, createAgentGenerationEngine } from "./agent-generation.mjs";
 import { createTranslationGenerator } from "../translation/service.mjs";
 import { runAutomaticTranslationChecks } from "../quality/translation-checks.mjs";
 import { executeBackendAiJson, isBackendAiConfigured } from "./backend-ai-client.mjs";
@@ -2342,7 +2342,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
 
         if ((visualImageUrls.length > 0 || referenceMediaUrls.length > 0) && typeof agentEngine.generateVisualContext === "function") {
           try {
-            traceAiDraft("visual_context.start", { item_id: Number(item?.id || 0) || null, image_count: visualImageUrls.length });
+            traceAiDraft("visual_context.start", { item_id: Number(item?.id || 0) || null, image_count: collectVisualImageUrls(item, 5).length });
             visualContext = await agentEngine.generateVisualContext(item);
             if (visualContext) {
               visualContextSuccessCount += 1;

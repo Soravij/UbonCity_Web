@@ -38,6 +38,23 @@ test("workflow gate source uses OR condition for visual_image_urls and reference
   );
 });
 
+test("visual_context.start trace uses collectVisualImageUrls for image_count", () => {
+  const traceMatch = workflowSource.match(
+    /traceAiDraft\("visual_context\.start",\s*\{[^}]*image_count:\s*([^}]+)\}\)/
+  );
+  assert.ok(traceMatch, "visual_context.start trace must exist");
+  assert.match(
+    traceMatch[1],
+    /collectVisualImageUrls\(item/,
+    "image_count must use collectVisualImageUrls(item, ...) to include both local and reference-media urls"
+  );
+  assert.doesNotMatch(
+    traceMatch[1],
+    /^visualImageUrls\.length$/,
+    "image_count must NOT be just visualImageUrls.length (would miss reference-media-only items)"
+  );
+});
+
 // ─── งาน 1: functional gate test via collectVisualImageUrls ───
 
 test("collectVisualImageUrls includes reference_media_context.selected_urls", () => {
