@@ -10,6 +10,7 @@ import {
   selectBestPublishableAssignmentCandidate,
 } from "../services/publishable-assignment-candidate.mjs";
 import { assertAssignmentStateMigrationApplied, assertPlaceReviewFlagMigrationApplied } from "./workflow-head-schema.mjs";
+import { isJunkMediaUrl } from "../collector/sources/media-filter.mjs";
 
 function parseTags(raw) {
   if (!raw) return [];
@@ -61,7 +62,7 @@ function normalizeImportedMediaUrl(value) {
   return "";
 }
 
-function normalizeReferenceMediaUrl(value) {
+export function normalizeReferenceMediaUrl(value) {
   const text = decodeUrlEntities(String(value || "").trim());
   if (!text) return "";
 
@@ -74,6 +75,9 @@ function normalizeReferenceMediaUrl(value) {
     }
 
     if (!/^https?:$/i.test(parsed.protocol)) return "";
+    if (/^(?:www\.)?img\.wongnai\.com$/i.test(parsed.hostname) && /\/p\/_-x_\//.test(parsed.pathname)) {
+      parsed.pathname = parsed.pathname.replace("/p/_-x_/", "/p/400x0/");
+    }
     parsed.hash = "";
     const params = [...parsed.searchParams.entries()].sort(([a], [b]) => a.localeCompare(b));
     parsed.search = "";
@@ -11162,6 +11166,7 @@ export function createRepository(db) {
       if (!matchUrls.has(sourceUrl) && !matchEntities.has(sourceRef) && !matchEntities.has(placeId)) {
         continue;
       }
+      if (isJunkMediaUrl(row?.media_url)) continue;
       const metadata = parseJson(row?.metadata_json, null);
       maybeAddCandidate({
         source_kind: "source_raw_media",

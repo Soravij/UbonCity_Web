@@ -89,6 +89,7 @@ enforces them; these are the collector-side facts that contract depends on:
 Current work boundaries:
 - Current project focus is CTA & Curation.
 - Media workflow is complete for current pipeline testing and must not be reopened unless a confirmed regression is found.
+  - Confirmed regression (10 Aug 2026): `scontent.fbcdn.net` images return HTTP 403; `img.wongnai.com/p/_-x_/` images fail with `net::ERR`. Verified from Network tab.
 - Media Library deduplication is separate follow-up work and must not be mixed with CTA / Curation changes.
 - Runtime DB/test data exists only on the Runtime machine.
 - Dev code audit must not assume Runtime records are locally available.

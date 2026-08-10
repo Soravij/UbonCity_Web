@@ -39,7 +39,7 @@ import {
 import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/index.mjs";
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import { resolveExtractedArticle } from "../collector/sources/extracted-article.mjs";
-import { buildFilteredMediaList } from "../collector/sources/media-filter.mjs";
+import { buildFilteredMediaList, isJunkMediaUrl } from "../collector/sources/media-filter.mjs";
 import { buildNormalizedFromExtractedPayload, hasUsableNormalizedKeys, pickNormalizedFromSourceRecords } from "../collector/sources/extracted-payload-normalizer.mjs";
 import { makeEvidenceSignature } from "./evidence-signature.mjs";
 import { buildEvidenceCandidatesForNormalized, normalizeUrlForComparison } from "./evidence-candidates.mjs";
@@ -13853,6 +13853,7 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
 
         if (Array.isArray(item.media)) {
           for (const media of item.media) {
+            if (isJunkMediaUrl(media?.media_url)) continue;
             repo.addRawSourceMedia(rawItemId, media);
           }
         }
