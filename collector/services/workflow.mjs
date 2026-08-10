@@ -2335,9 +2335,12 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
     if (agentEngine) {
       try {
         const visualImageUrls = Array.isArray(item.visual_image_urls) ? item.visual_image_urls : [];
+        const referenceMediaUrls = Array.isArray(item?.structured_context?.reference_media_context?.selected_urls)
+          ? item.structured_context.reference_media_context.selected_urls
+          : [];
         let visualContext = null;
 
-        if (visualImageUrls.length > 0 && typeof agentEngine.generateVisualContext === "function") {
+        if ((visualImageUrls.length > 0 || referenceMediaUrls.length > 0) && typeof agentEngine.generateVisualContext === "function") {
           try {
             traceAiDraft("visual_context.start", { item_id: Number(item?.id || 0) || null, image_count: visualImageUrls.length });
             visualContext = await agentEngine.generateVisualContext(item);
