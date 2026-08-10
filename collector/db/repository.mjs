@@ -11128,6 +11128,7 @@ export function createRepository(db) {
       for (const candidate of evidenceCandidates) {
         const candidateUrl = String(candidate?.url || "").trim();
         if (!candidateUrl) continue;
+        if (isJunkMediaUrl(candidateUrl)) continue;
         maybeAddCandidate({
           source_kind: "evidence_block",
           source_label: row?.source_label || row?.source_type || "evidence",

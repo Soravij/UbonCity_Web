@@ -87,7 +87,7 @@ test("listReferenceMediaByItem returns deduped read-only candidates without mate
       ) VALUES (?, 'media', 'facebook', 'facebook', ?, ?, 'th', 'active')
     `).run(
       item.id,
-      "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg",
+      "https://img.wongnai.com/p/1200x0/2024/01/01/example.jpg",
       JSON.stringify({
         field: "image",
         media_url: "/api/google-maps/photo?name=places%2Fabc%2Fphotos%2Fcover-photo&maxWidthPx=1400&maxHeightPx=1400",
@@ -145,8 +145,8 @@ test("setReferenceMediaSelected upserts and preserves selection across source su
     `);
     const evidenceResult = evidenceInsert.run(
       item.id,
-      "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg",
-      JSON.stringify({ field: "image", media_url: "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg" })
+      "https://img.wongnai.com/p/1200x0/2024/01/01/evidence-photo.jpg",
+      JSON.stringify({ field: "image", media_url: "https://img.wongnai.com/p/1200x0/2024/01/01/evidence-photo.jpg" })
     );
     const evidenceId = Number(evidenceResult.lastInsertRowid || 0) || 0;
 
@@ -159,10 +159,10 @@ test("setReferenceMediaSelected upserts and preserves selection across source su
     ctx.db.prepare(`
       INSERT INTO source_raw_media (raw_item_id, media_url, checksum, mime_type, width, height, status, metadata_json)
       VALUES (?, ?, 'sum-1', 'image/jpeg', 1200, 900, 'raw', '{}')
-    `).run(rawItemId, "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg");
+    `).run(rawItemId, "https://img.wongnai.com/p/1200x0/2024/01/01/evidence-photo.jpg");
 
     const before = ctx.repo.listReferenceMediaByItem(item.id);
-    const target = before.find((row) => row.url.includes("example.jpg"));
+    const target = before.find((row) => row.url.includes("evidence-photo.jpg"));
     assert.ok(target);
 
     ctx.repo.setReferenceMediaSelected(item.id, target.reference_media_id, true);
@@ -209,8 +209,8 @@ test("getImageWorkflowStatus counts reference media for AI readiness but not pub
       ) VALUES (?, 'media', 'facebook', 'facebook', ?, ?, 'th', 'active')
     `).run(
       item.id,
-      "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg",
-      JSON.stringify({ field: "image", media_url: "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg" })
+      "https://img.wongnai.com/p/1200x0/2024/01/01/workflow-photo.jpg",
+      JSON.stringify({ field: "image", media_url: "https://img.wongnai.com/p/1200x0/2024/01/01/workflow-photo.jpg" })
     );
 
     const target = ctx.repo.listReferenceMediaByItem(item.id)[0];
@@ -238,8 +238,8 @@ test("buildDraftInputPreview includes selected reference media and excludes it f
       ) VALUES (?, 'media', 'facebook', 'facebook', ?, ?, 'th', 'active')
     `).run(
       item.id,
-      "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg",
-      JSON.stringify({ field: "image", media_url: "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg" })
+      "https://img.wongnai.com/p/1200x0/2024/01/01/preview-photo.jpg",
+      JSON.stringify({ field: "image", media_url: "https://img.wongnai.com/p/1200x0/2024/01/01/preview-photo.jpg" })
     );
 
     const target = ctx.repo.listReferenceMediaByItem(item.id)[0];
@@ -248,9 +248,9 @@ test("buildDraftInputPreview includes selected reference media and excludes it f
 
     const preview = ctx.repo.buildDraftInputPreview(item.id);
     assert.equal(preview.reference_media_context.selected_count, 1);
-    assert.deepEqual(preview.reference_media_context.selected_urls, ["https://scontent.fubp1-1.fna.fbcdn.net/example.jpg"]);
-    assert.equal(preview.image_context.selected_urls.includes("https://scontent.fubp1-1.fna.fbcdn.net/example.jpg"), false);
-    assert.equal(preview.reference_media_context.selected_urls.includes("https://scontent.fubp1-1.fna.fbcdn.net/example.jpg"), true);
+    assert.deepEqual(preview.reference_media_context.selected_urls, ["https://img.wongnai.com/p/1200x0/2024/01/01/preview-photo.jpg"]);
+    assert.equal(preview.image_context.selected_urls.includes("https://img.wongnai.com/p/1200x0/2024/01/01/preview-photo.jpg"), false);
+    assert.equal(preview.reference_media_context.selected_urls.includes("https://img.wongnai.com/p/1200x0/2024/01/01/preview-photo.jpg"), true);
     assert.equal(preview.image_context.cover_url, null);
   } finally {
     ctx.cleanup();
@@ -284,17 +284,39 @@ test("buildDraftInputPreview keeps local publish assets in image context without
       ) VALUES (?, 'media', 'facebook', 'facebook', ?, ?, 'th', 'active')
     `).run(
       item.id,
-      "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg",
-      JSON.stringify({ field: "image", media_url: "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg" })
+      "https://img.wongnai.com/p/1200x0/2024/01/01/local-photo.jpg",
+      JSON.stringify({ field: "image", media_url: "https://img.wongnai.com/p/1200x0/2024/01/01/local-photo.jpg" })
     );
     const refTarget = ctx.repo.listReferenceMediaByItem(item.id)[0];
     ctx.repo.setReferenceMediaSelected(item.id, refTarget.reference_media_id, true);
 
     const preview = ctx.repo.buildDraftInputPreview(item.id);
     assert.deepEqual(preview.image_context.selected_urls.sort(), [localCover.public_url, localGallery.public_url].sort());
-    assert.equal(preview.image_context.selected_urls.includes("https://scontent.fubp1-1.fna.fbcdn.net/example.jpg"), false);
+    assert.equal(preview.image_context.selected_urls.includes("https://img.wongnai.com/p/1200x0/2024/01/01/local-photo.jpg"), false);
     assert.equal(preview.reference_media_context.selected_count, 1);
-    assert.deepEqual(preview.reference_media_context.selected_urls, ["https://scontent.fubp1-1.fna.fbcdn.net/example.jpg"]);
+    assert.deepEqual(preview.reference_media_context.selected_urls, ["https://img.wongnai.com/p/1200x0/2024/01/01/local-photo.jpg"]);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("fbcdn URL via evidence_blocks is filtered by junk filter and does not appear in reference-media", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem({ image_url: "" });
+    ctx.db.prepare(`
+      INSERT INTO evidence_blocks (
+        content_item_id, block_type, source_type, source_label, text_value, payload_json, lang, status
+      ) VALUES (?, 'media', 'facebook', 'facebook', ?, ?, 'th', 'active')
+    `).run(
+      item.id,
+      "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg",
+      JSON.stringify({ field: "image", media_url: "https://scontent.fubp1-1.fna.fbcdn.net/example.jpg" })
+    );
+
+    const rows = ctx.repo.listReferenceMediaByItem(item.id);
+    assert.equal(rows.some((row) => row.url.includes("fbcdn.net")), false, "fbcdn URL must not appear in reference-media");
+    assert.equal(rows.length, 0, "no reference media expected when only candidate is junk");
   } finally {
     ctx.cleanup();
   }
