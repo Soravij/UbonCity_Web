@@ -76,7 +76,7 @@ export function normalizeReferenceMediaUrl(value) {
 
     if (!/^https?:$/i.test(parsed.protocol)) return "";
     if (/^(?:www\.)?img\.wongnai\.com$/i.test(parsed.hostname) && /\/p\/_-x_\//.test(parsed.pathname)) {
-      parsed.pathname = parsed.pathname.replace("/p/_-x_/", "/p/400x0/");
+      parsed.pathname = parsed.pathname.replace(/\/p\/_-x_\//g, "/p/400x0/");
     }
     parsed.hash = "";
     const params = [...parsed.searchParams.entries()].sort(([a], [b]) => a.localeCompare(b));

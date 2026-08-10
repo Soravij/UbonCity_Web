@@ -62,3 +62,12 @@ test("normalizeReferenceMediaUrl: www.img.wongnai.com also normalizes _-x_", () 
   const result = normalizeReferenceMediaUrl(input);
   assert.ok(result.includes("/p/400x0/"), `expected /p/400x0/ in ${result}`);
 });
+
+test("normalizeReferenceMediaUrl: pathname with two /p/_-x_/ segments replaces both", () => {
+  const input = "https://img.wongnai.com/p/_-x_/2024/p/_-x_/photo.jpg";
+  const result = normalizeReferenceMediaUrl(input);
+  assert.ok(!result.includes("_-x_"), `expected no _-x_ in ${result}`);
+  assert.ok(result.includes("/p/400x0/"), `expected /p/400x0/ in ${result}`);
+  const matches = result.match(/\/p\/400x0\//g);
+  assert.equal(matches?.length, 2, `expected two /p/400x0/ segments, got ${matches?.length}`);
+});

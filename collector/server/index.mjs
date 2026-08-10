@@ -13847,13 +13847,14 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
       const collected = await collectRawFromAdapter(adapter, payload);
       signalSummary = summarizeCollectSignals(collected);
 
+      let junkMediaSkipped = 0;
       for (const item of collected) {
         const rawItemId = repo.addRawSourceItem(batchUid, item);
         rawCount += 1;
 
         if (Array.isArray(item.media)) {
           for (const media of item.media) {
-            if (isJunkMediaUrl(media?.media_url)) continue;
+            if (isJunkMediaUrl(media?.media_url)) { junkMediaSkipped += 1; continue; }
             repo.addRawSourceMedia(rawItemId, media);
           }
         }
@@ -13911,6 +13912,10 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
 
           importedCount += 1;
         }
+      }
+
+      if (junkMediaSkipped > 0) {
+        console.warn(`[collect] junk media skipped: ${junkMediaSkipped}`);
       }
 
       repo.finishSourceIngestion(batchUid, "collected", rawCount, `Collected ${rawCount}`);
