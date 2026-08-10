@@ -304,7 +304,8 @@ test("every table renderRawTable renders with actionable buttons is bound to the
   // main and this branch both leave it unbound. Fixing that is out of scope for this hotfix (production
   // code should change only for the bug this branch targets), so it is named here rather than silently
   // passing or silently failing this test.
-  const KNOWN_UNBOUND_TABLE_IDS = new Set(["table-raw-workflow-unknown"]);
+  // table-raw-workflow-unknown was previously unbound but is now bound (fix/raw-workflow-unknown-buttons).
+  const KNOWN_UNBOUND_TABLE_IDS = new Set();
 
   const hooks = loadRawIntakeHooks();
   const item = { id: 88, test_bucket: "raw_prep", claimed_by_user_id: 33, cleaned_at: "2026-08-04 10:00:00" };
