@@ -5289,10 +5289,12 @@ function renderRawQueueTable({
       <td>${formatPreparationClaimBadge(item)}</td>
       <td class="raw-actions-cell">
         <button type="button" data-action="open-state-entry" data-id="${id}" data-url="${escapeHtml(primaryUrl)}">${escapeHtml(primaryLabel)}</button>
+        ${queueType !== "unknown" ? `
         ${canClaimPreparationItem(item) ? `<button type="button" data-action="claim-item" data-id="${id}">รับงานนี้</button>` : ""}
         ${canReleasePreparationItem(item) ? `<button type="button" data-action="release-item" data-id="${id}" class="utility-action">ปล่อยงาน</button>` : ""}
         ${canTakeOverPreparationItem(item) ? `<button type="button" data-action="takeover-item" data-id="${id}" class="fail">Take over</button>` : ""}
         ${canManage ? `<button data-action="delete" data-id="${id}" class="fail">ลบ</button>` : ""}
+        ` : ""}
       </td>
     `;
     tbody.appendChild(tr);
@@ -5865,6 +5867,7 @@ function renderRawTable(items) {
   const intakeTbody = document.querySelector("#table-raw-intake tbody");
   const cleanPrepTbody = document.querySelector("#table-clean-prep tbody");
   const reviewTbody = document.querySelector("#table-raw-review tbody");
+  const unknownTbody = document.querySelector("#table-raw-workflow-unknown tbody");
   if (intakeTbody) intakeTbody.onchange = (event) => {
     const checkbox = event.target.closest('input[data-action="select"]');
     if (!checkbox) return;
@@ -5935,6 +5938,7 @@ function renderRawTable(items) {
   if (intakeTbody) intakeTbody.onclick = handleRowAction;
   if (cleanPrepTbody) cleanPrepTbody.onclick = handleRowAction;
   if (reviewTbody) reviewTbody.onclick = handleRowAction;
+  if (unknownTbody) unknownTbody.onclick = handleRowAction;
 
   // Fire-and-forget: the queue above is already on screen, and annotateRawTableBlockers swallows its
   // own failures, so a slow or broken blocker-summary call can never delay or break this render.
