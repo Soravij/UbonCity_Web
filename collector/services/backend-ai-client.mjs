@@ -69,5 +69,6 @@ export async function executeBackendAiJson({ aiConfig, featureKey, task, prompt,
     model: String(payload?.model || model).trim(),
     outputText: String(payload?.output_text || "").trim(),
     parsed: payload?.parsed ?? null,
+    usage: payload?.usage ?? null,
   };
 }
