@@ -451,7 +451,7 @@ function buildPromptInput(item) {
       selected_images: Array.isArray(imageContext?.selected_urls) ? imageContext.selected_urls.length : 0,
       reference_media: Array.isArray(referenceMediaContext?.selected_urls) ? referenceMediaContext.selected_urls.length : 0,
     },
-    visual_image_count: collectVisualImageUrls(item, 5).length,
+    visual_image_count: collectVisualImageUrls(item, MAX_REFERENCE_MEDIA_FOR_AI).length,
   };
 }
 

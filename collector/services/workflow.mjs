@@ -2343,7 +2343,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
 
         if ((visualImageUrls.length > 0 || referenceMediaUrls.length > 0) && typeof agentEngine.generateVisualContext === "function") {
           try {
-            traceAiDraft("visual_context.start", { item_id: Number(item?.id || 0) || null, image_count: collectVisualImageUrls(item, 5).length });
+            traceAiDraft("visual_context.start", { item_id: Number(item?.id || 0) || null, image_count: collectVisualImageUrls(item, MAX_REFERENCE_MEDIA_FOR_AI).length });
             visualContext = await agentEngine.generateVisualContext(item);
             if (visualContext) {
               visualContextSuccessCount += 1;
