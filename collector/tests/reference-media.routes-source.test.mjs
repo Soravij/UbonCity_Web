@@ -47,3 +47,8 @@ test("legacy imported media repair route is deprecated and import flows no longe
   assert.equal(routeBlock.includes("REFERENCE_MEDIA_POLICY_V2"), true);
   assert.equal(indexServer.includes("reference_media_count"), true);
 });
+
+test("image-workflow API includes max_reference_media_for_ai in response", () => {
+  assert.equal(indexServer.includes("max_reference_media_for_ai: MAX_REFERENCE_MEDIA_FOR_AI"), true);
+  assert.match(indexServer, /import \{[^}]*MAX_REFERENCE_MEDIA_FOR_AI[^}]*\} from ["']\.\.\/services\/agent-generation\.mjs["']/);
+});

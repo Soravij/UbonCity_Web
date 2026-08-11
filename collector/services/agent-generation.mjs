@@ -3,6 +3,8 @@ import { executeBackendAiJson } from "./backend-ai-client.mjs";
 import { deriveCtaContactCandidatesFromStructuredContext, isCtaEligibleItem, mergeAiCtaWithDeterministicCandidates, normalizeAiCtaContactJson } from '../server/cta-contact-normalizer.mjs';
 import { getTaxonomyCatalogPromptChecks, normalizeAiTaxonomySuggestions } from '../server/taxonomy-resolver.mjs';
 
+export const MAX_REFERENCE_MEDIA_FOR_AI = 10;
+
 const FIELD_PACK_AGENT_KEY = "field_pack_agent";
 const DEFAULT_FIELD_PACK_AGENT_PROFILE = [
   "คุณคือ field content producer สำหรับทีม UbonCity ที่ต้องเตรียมชุดสั่งงานให้คนลงพื้นที่จริง",
@@ -253,8 +255,8 @@ function hasVisualContext(context) {
   );
 }
 
-function collectVisualImageUrls(item, limit = 5) {
-  const max = Math.max(1, Math.min(5, Number(limit || 5)));
+function collectVisualImageUrls(item, limit = MAX_REFERENCE_MEDIA_FOR_AI) {
+  const max = Math.max(1, Math.min(MAX_REFERENCE_MEDIA_FOR_AI, Number(limit || MAX_REFERENCE_MEDIA_FOR_AI)));
   const structuredReferenceMedia = Array.isArray(item?.structured_context?.reference_media_context?.selected_urls)
     ? item.structured_context.reference_media_context.selected_urls
     : [];
@@ -315,7 +317,7 @@ async function fetchImageUrlToDataUrl(url) {
   return `data:${contentType};base64,${bytes.toString("base64")}`;
 }
 
-async function prepareVisualImageInputs(item, limit = 5) {
+async function prepareVisualImageInputs(item, limit = MAX_REFERENCE_MEDIA_FOR_AI) {
   const imageUrls = collectVisualImageUrls(item, limit);
   const inputs = [];
 
@@ -449,7 +451,7 @@ function buildPromptInput(item) {
       selected_images: Array.isArray(imageContext?.selected_urls) ? imageContext.selected_urls.length : 0,
       reference_media: Array.isArray(referenceMediaContext?.selected_urls) ? referenceMediaContext.selected_urls.length : 0,
     },
-    visual_image_count: collectVisualImageUrls(item, 5).length,
+    visual_image_count: collectVisualImageUrls(item, MAX_REFERENCE_MEDIA_FOR_AI).length,
   };
 }
 
@@ -691,7 +693,7 @@ function createExternalAgentGenerationEngine(aiConfig) {
       }
       const featureConfig = resolveFeatureConfig(aiConfig, "visualContext");
 
-      const imageInputs = await prepareVisualImageInputs(item, 5);
+      const imageInputs = await prepareVisualImageInputs(item, MAX_REFERENCE_MEDIA_FOR_AI);
       if (!imageInputs.length) {
         return null;
       }
@@ -796,7 +798,7 @@ export function createAgentGenerationEngine(aiConfig) {
         throw new Error("backend AI proxy is not enabled");
       }
 
-      const imageInputs = await prepareVisualImageInputs(item, 5);
+      const imageInputs = await prepareVisualImageInputs(item, MAX_REFERENCE_MEDIA_FOR_AI);
       if (!imageInputs.length) {
         return null;
       }

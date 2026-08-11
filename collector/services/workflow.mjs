@@ -3,6 +3,7 @@ import { cleanReviewsAndContent } from "../cleaner/review-cleaner.mjs";
 import { generateContentDrafts } from "../ai/generate-content.mjs";
 import { runQualityChecks } from "../quality/checks.mjs";
 import { PRODUCTION_STATES } from "../db/repository.mjs";
+import { MAX_REFERENCE_MEDIA_FOR_AI } from "./agent-generation.mjs";
 
 const GOVERNANCE_REASON_CODES = Object.freeze({
   review_approve: "review_approved",
@@ -1851,8 +1852,8 @@ function mergeDraft(baseItem, draft) {
   };
 }
 
-function selectVisualImageUrls(imageContext, limit = 5) {
-  const max = Math.max(1, Math.min(5, Number(limit || 5)));
+function selectVisualImageUrls(imageContext, limit = MAX_REFERENCE_MEDIA_FOR_AI) {
+  const max = Math.max(1, Math.min(MAX_REFERENCE_MEDIA_FOR_AI, Number(limit || MAX_REFERENCE_MEDIA_FOR_AI)));
   const cover = String(imageContext?.cover_url || "").trim();
   const selected = Array.isArray(imageContext?.selected_urls) ? imageContext.selected_urls : [];
   const gallery = Array.isArray(imageContext?.gallery_urls) ? imageContext.gallery_urls : [];
@@ -2291,7 +2292,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
       image_context_urls: imageContext?.selected_urls || [],
       image_context_gallery_urls: imageContext?.gallery_urls || [],
       image_context_inline_urls: imageContext?.inline_urls || [],
-      visual_image_urls: selectVisualImageUrls(imageContext, 5),
+      visual_image_urls: selectVisualImageUrls(imageContext, MAX_REFERENCE_MEDIA_FOR_AI),
     }];
   });
 
@@ -2342,7 +2343,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
 
         if ((visualImageUrls.length > 0 || referenceMediaUrls.length > 0) && typeof agentEngine.generateVisualContext === "function") {
           try {
-            traceAiDraft("visual_context.start", { item_id: Number(item?.id || 0) || null, image_count: collectVisualImageUrls(item, 5).length });
+            traceAiDraft("visual_context.start", { item_id: Number(item?.id || 0) || null, image_count: collectVisualImageUrls(item, MAX_REFERENCE_MEDIA_FOR_AI).length });
             visualContext = await agentEngine.generateVisualContext(item);
             if (visualContext) {
               visualContextSuccessCount += 1;

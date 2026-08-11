@@ -13,6 +13,7 @@ const state = {
   itemId: Number(new URLSearchParams(window.location.search).get("id") || 0),
   item: null,
   imageWorkflow: null,
+  maxReferenceMediaForAi: 10,
   assets: [],
   evidenceBlocks: [],
   approvedContextBlocks: [],
@@ -2106,6 +2107,22 @@ function renderCleanAiGuard() {
   const list = missing.map((msg) => `<li>${escapeHtml(normalizeGuardMessage(msg))}</li>`).join("");
   box.classList.remove("hidden", "ready");
   box.innerHTML = `<h4>ยังส่งให้ Agent ไม่ได้</h4><ul>${list || "<li>ยังไม่ทราบสาเหตุ</li>"}</ul>`;
+}
+
+function renderAiReferenceCountHint() {
+  const hint = document.getElementById("ai-reference-count-hint");
+  if (!hint) return;
+  const count = Number(state.imageWorkflow?.ai_reference_selected_count || 0);
+  const max = Number(state.maxReferenceMediaForAi || 10);
+  if (count === 0) {
+    hint.textContent = "ยังไม่ได้เลือกรูปอ้างอิงสำหรับ Agent";
+    return;
+  }
+  if (count <= max) {
+    hint.textContent = `เลือกแล้ว ${count} รูป (สูงสุด ${max} รูป)`;
+    return;
+  }
+  hint.textContent = `เลือกแล้ว ${count} รูป เกินเพดาน ${max} รูป — จะถูกส่งจริงเพียง ${max} รูป`;
 }
 function fillForm(item) {
   qs("e-id").value = item.id;
@@ -5503,9 +5520,11 @@ async function refreshAssets() {
       api(`/api/items/${state.itemId}/reference-media`),
     ]);
     state.imageWorkflow = workflowData?.status || null;
+    state.maxReferenceMediaForAi = Number(workflowData?.max_reference_media_for_ai || 10);
     state.assets = Array.isArray(referenceRows) ? referenceRows : [];
     renderAssetsTable(state.assets);
     renderCleanAiGuard();
+    renderAiReferenceCountHint();
     return;
   }
 

@@ -345,3 +345,20 @@ test("preserveMediaHints strips stale urls from internal asset rows", () => {
     },
   ]);
 });
+
+test("clean-item.html has ai-reference-count-hint element", () => {
+  assert.match(cleanItemHtml, /id="ai-reference-count-hint"/);
+});
+
+test("item-editor.js includes renderAiReferenceCountHint function", () => {
+  assert.match(itemEditorJs, /function renderAiReferenceCountHint\(\)/);
+});
+
+test("item-editor.js calls renderAiReferenceCountHint after refreshAssets in clean mode", () => {
+  const refreshAssetsSource = extractFunctionSource(itemEditorJs, "refreshAssets");
+  assert.match(refreshAssetsSource, /renderAiReferenceCountHint\(\)/);
+});
+
+test("item-editor.js stores maxReferenceMediaForAi from workflow API response", () => {
+  assert.match(itemEditorJs, /state\.maxReferenceMediaForAi = Number\(workflowData\?\.max_reference_media_for_ai/);
+});

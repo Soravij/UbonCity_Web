@@ -240,3 +240,33 @@ test("UI workflow readers preserve and flag unknown states using the canonical s
   assert.match(editorSource, /api\("\/api\/workflow-states"\)\.catch\(\(\) => null\)/);
   assert.match(intakeSource, /api\("\/api\/workflow-states"\)\.catch\(\(\) => null\)/);
 });
+
+test("workflow.mjs imports MAX_REFERENCE_MEDIA_FOR_AI from agent-generation and uses it in selectVisualImageUrls", () => {
+  assert.match(workflowSource, /import \{[^}]*MAX_REFERENCE_MEDIA_FOR_AI[^}]*\} from ["']\.\/agent-generation\.mjs["']/);
+  assert.match(workflowSource, /function selectVisualImageUrls\(imageContext, limit = MAX_REFERENCE_MEDIA_FOR_AI\)/);
+  assert.match(workflowSource, /Math\.min\(MAX_REFERENCE_MEDIA_FOR_AI/);
+  assert.match(workflowSource, /selectVisualImageUrls\(imageContext, MAX_REFERENCE_MEDIA_FOR_AI\)/);
+});
+
+test("agent-generation.mjs exports MAX_REFERENCE_MEDIA_FOR_AI and uses it instead of hardcoded 5", () => {
+  const agentGenSource = fs.readFileSync(path.join(collectorRoot, "services", "agent-generation.mjs"), "utf8");
+  assert.match(agentGenSource, /export const MAX_REFERENCE_MEDIA_FOR_AI = 10/);
+  assert.match(agentGenSource, /function collectVisualImageUrls\(item, limit = MAX_REFERENCE_MEDIA_FOR_AI\)/);
+  assert.match(agentGenSource, /Math\.min\(MAX_REFERENCE_MEDIA_FOR_AI/);
+  assert.match(agentGenSource, /async function prepareVisualImageInputs\(item, limit = MAX_REFERENCE_MEDIA_FOR_AI\)/);
+});
+
+test("agent-generation.mjs uses MAX_REFERENCE_MEDIA_FOR_AI in visual_image_count (line ~454)", () => {
+  const agentGenSource = fs.readFileSync(path.join(collectorRoot, "services", "agent-generation.mjs"), "utf8");
+  assert.match(agentGenSource, /visual_image_count:\s*collectVisualImageUrls\(item,\s*MAX_REFERENCE_MEDIA_FOR_AI\)\.length/);
+});
+
+test("workflow.mjs uses MAX_REFERENCE_MEDIA_FOR_AI in traceAiDraft visual_context.start (line ~2346)", () => {
+  assert.match(workflowSource, /traceAiDraft\("visual_context\.start".*collectVisualImageUrls\(item,\s*MAX_REFERENCE_MEDIA_FOR_AI\)\.length/);
+});
+
+test("trigger-field-pack.js imports MAX_REFERENCE_MEDIA_FOR_AI and uses it for slice limit", () => {
+  const triggerSource = fs.readFileSync(path.join(collectorRoot, "scripts", "trigger-field-pack.js"), "utf8");
+  assert.match(triggerSource, /import \{[^}]*MAX_REFERENCE_MEDIA_FOR_AI[^}]*\} from ["']\.\.\/services\/agent-generation\.mjs["']/);
+  assert.match(triggerSource, /visualImageUrls\.slice\(0,\s*MAX_REFERENCE_MEDIA_FOR_AI\)/);
+});

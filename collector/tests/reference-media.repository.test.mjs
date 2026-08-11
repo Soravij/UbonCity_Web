@@ -321,3 +321,68 @@ test("fbcdn URL via evidence_blocks is filtered by junk filter and does not appe
     ctx.cleanup();
   }
 });
+
+test("listReferenceMediaByItem sorts selected reference media by approval time (created_at)", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem();
+    ctx.db.prepare(`
+      INSERT INTO evidence_blocks (
+        content_item_id, block_type, source_type, source_label, text_value, payload_json, lang, status
+      ) VALUES (?, 'media', 'facebook', 'facebook', ?, ?, 'th', 'active')
+    `).run(
+      item.id,
+      "https://img.wongnai.com/p/1200x0/2024/01/01/photo-a.jpg",
+      JSON.stringify({ field: "image", media_url: "https://img.wongnai.com/p/1200x0/2024/01/01/photo-a.jpg" })
+    );
+    ctx.db.prepare(`
+      INSERT INTO evidence_blocks (
+        content_item_id, block_type, source_type, source_label, text_value, payload_json, lang, status
+      ) VALUES (?, 'media', 'facebook', 'facebook', ?, ?, 'th', 'active')
+    `).run(
+      item.id,
+      "https://img.wongnai.com/p/1200x0/2024/01/01/photo-b.jpg",
+      JSON.stringify({ field: "image", media_url: "https://img.wongnai.com/p/1200x0/2024/01/01/photo-b.jpg" })
+    );
+    ctx.db.prepare(`
+      INSERT INTO evidence_blocks (
+        content_item_id, block_type, source_type, source_label, text_value, payload_json, lang, status
+      ) VALUES (?, 'media', 'facebook', 'facebook', ?, ?, 'th', 'active')
+    `).run(
+      item.id,
+      "https://img.wongnai.com/p/1200x0/2024/01/01/photo-c.jpg",
+      JSON.stringify({ field: "image", media_url: "https://img.wongnai.com/p/1200x0/2024/01/01/photo-c.jpg" })
+    );
+
+    const rows = ctx.repo.listReferenceMediaByItem(item.id);
+    assert.ok(rows.length >= 3, "expected at least 3 reference media rows");
+
+    const refA = rows.find((r) => r.url.includes("photo-a.jpg"));
+    const refB = rows.find((r) => r.url.includes("photo-b.jpg"));
+    const refC = rows.find((r) => r.url.includes("photo-c.jpg"));
+    assert.ok(refA && refB && refC, "all three photos must be present");
+
+    ctx.db.prepare(`
+      INSERT INTO content_reference_media_selections (content_item_id, reference_media_id, selected_for_ai, created_at)
+      VALUES (?, ?, 1, '2025-01-01 10:00:00')
+    `).run(item.id, refB.reference_media_id);
+    ctx.db.prepare(`
+      INSERT INTO content_reference_media_selections (content_item_id, reference_media_id, selected_for_ai, created_at)
+      VALUES (?, ?, 1, '2025-01-01 08:00:00')
+    `).run(item.id, refA.reference_media_id);
+    ctx.db.prepare(`
+      INSERT INTO content_reference_media_selections (content_item_id, reference_media_id, selected_for_ai, created_at)
+      VALUES (?, ?, 1, '2025-01-01 12:00:00')
+    `).run(item.id, refC.reference_media_id);
+
+    const sorted = ctx.repo.listReferenceMediaByItem(item.id, { selectedOnly: true });
+    assert.equal(sorted.length, 3, "all three must be selected");
+    assert.equal(sorted[0].reference_media_id, refA.reference_media_id, "refA approved first must come first");
+    assert.equal(sorted[1].reference_media_id, refB.reference_media_id, "refB approved second must come second");
+    assert.equal(sorted[2].reference_media_id, refC.reference_media_id, "refC approved third must come third");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+

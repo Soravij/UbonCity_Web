@@ -14,7 +14,7 @@ import { resolvePaths } from "../config/paths.mjs";
 import { resolveAiConfig } from "../config/ai.mjs";
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
-import { FIELD_PACK_AGENT_KEY, createAgentGenerationEngine } from "../services/agent-generation.mjs";
+import { FIELD_PACK_AGENT_KEY, createAgentGenerationEngine, MAX_REFERENCE_MEDIA_FOR_AI } from "../services/agent-generation.mjs";
 import { assertSmokeSqliteDatabaseAllowed } from "../../scripts/smokeSafety.mjs";
 
 // ── parse args ──────────────────────────────────────────────────────────────
@@ -122,8 +122,7 @@ async function main() {
       if (url && !visualImageUrls.includes(url)) visualImageUrls.push(url);
     }
   }
-  // limit to 5
-  item.visual_image_urls = visualImageUrls.slice(0, 5);
+  item.visual_image_urls = visualImageUrls.slice(0, MAX_REFERENCE_MEDIA_FOR_AI);
   item.structured_context = context;
 
   console.log(`   visual_image_urls: ${item.visual_image_urls.length} images`);
