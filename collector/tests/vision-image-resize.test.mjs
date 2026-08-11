@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { describe } from "node:test";
 import sharp from "sharp";
 
-import { resizeImageBuffer } from "../services/agent-generation.mjs";
+import { resizeImageBuffer, _resetSharpCacheForTesting } from "../services/agent-generation.mjs";
 
 async function createLargeJpeg(width = 2000, height = 1500) {
   return sharp({
@@ -61,4 +61,26 @@ test("resizeImageBuffer: corrupt buffer returns original", async () => {
   assert.equal(result.mime, "image/jpeg");
   assert.equal(result.buffer, corrupt, "should return original corrupt buffer");
   assert.equal(result.meta, null);
+});
+
+describe("resizeImageBuffer: sharp load failure", () => {
+  test("returns original buffer when sharp cannot be loaded", async (t) => {
+    _resetSharpCacheForTesting();
+
+    t.mock.module("sharp", {
+      exports: {},
+    });
+
+    const fallback = await import("../services/agent-generation.mjs");
+
+    const buf = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x01, 0x4a, 0x46, 0x49, 0x46]);
+    const result = await fallback.resizeImageBuffer(buf, "image/jpeg");
+
+    assert.equal(result.resized, false);
+    assert.equal(result.mime, "image/jpeg");
+    assert.equal(result.buffer, buf, "should return original buffer");
+    assert.equal(result.meta, null);
+
+    _resetSharpCacheForTesting();
+  });
 });

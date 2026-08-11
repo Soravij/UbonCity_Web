@@ -1,5 +1,4 @@
 import fsSync from "node:fs";
-import sharp from "sharp";
 import { executeBackendAiJson } from "./backend-ai-client.mjs";
 import { deriveCtaContactCandidatesFromStructuredContext, isCtaEligibleItem, mergeAiCtaWithDeterministicCandidates, normalizeAiCtaContactJson } from '../server/cta-contact-normalizer.mjs';
 import { getTaxonomyCatalogPromptChecks, normalizeAiTaxonomySuggestions } from '../server/taxonomy-resolver.mjs';
@@ -296,17 +295,48 @@ function toCollectorAbsoluteUrl(url) {
   return new URL(value, `${resolveCollectorBaseUrl()}/`).toString();
 }
 
+let _sharp = null;
+let _sharpLoadFailed = false;
+let _sharpWarnLogged = false;
+
+export function _resetSharpCacheForTesting() {
+  _sharp = null;
+  _sharpLoadFailed = false;
+  _sharpWarnLogged = false;
+}
+
+async function getSharp() {
+  if (_sharpLoadFailed) return null;
+  if (_sharp) return _sharp;
+  try {
+    _sharp = (await import("sharp")).default;
+    return _sharp;
+  } catch {
+    _sharpLoadFailed = true;
+    if (!_sharpWarnLogged) {
+      _sharpWarnLogged = true;
+      try { console.error(`[${new Date().toISOString()}] [warn] sharp module not available — image resize disabled`); } catch {}
+    }
+    return null;
+  }
+}
+
 export async function resizeImageBuffer(buffer, originalMime) {
   const maxDim = Number(process.env.COLLECTOR_VISUAL_IMAGE_MAX_DIM || 768) || 768;
   const jpegQuality = Number(process.env.COLLECTOR_VISUAL_IMAGE_JPEG_QUALITY || 80) || 80;
 
+  const sharpInstance = await getSharp();
+  if (!sharpInstance) {
+    return { buffer, mime: originalMime, resized: false, meta: null };
+  }
+
   try {
-    const metadata = await sharp(buffer).metadata();
+    const metadata = await sharpInstance(buffer).metadata();
     const originalWidth = metadata.width || 0;
     const originalHeight = metadata.height || 0;
     const hasAlpha = metadata.hasAlpha === true;
 
-    let pipeline = sharp(buffer)
+    let pipeline = sharpInstance(buffer)
       .resize({ width: maxDim, height: maxDim, fit: "inside", withoutEnlargement: true });
 
     if (hasAlpha) {
@@ -320,7 +350,7 @@ export async function resizeImageBuffer(buffer, originalMime) {
       return { buffer, mime: originalMime, resized: false, meta: { originalWidth, originalHeight, finalWidth: originalWidth, finalHeight: originalHeight } };
     }
 
-    const resultMeta = await sharp(resized).metadata();
+    const resultMeta = await sharpInstance(resized).metadata();
     return {
       buffer: resized,
       mime: resultMime,
@@ -364,6 +394,8 @@ async function fetchImageUrlToDataUrl(url) {
     width_after: meta?.finalWidth ?? null,
     height_after: meta?.finalHeight ?? null,
     resized,
+    max_dim: Number(process.env.COLLECTOR_VISUAL_IMAGE_MAX_DIM || 768) || 768,
+    jpeg_quality: Number(process.env.COLLECTOR_VISUAL_IMAGE_JPEG_QUALITY || 80) || 80,
   });
 
   return { dataUrl: `data:${finalMime};base64,${finalBuffer.toString("base64")}`, bytesBefore: originalBytes, bytesAfter: finalBuffer.length, resized };
@@ -397,6 +429,8 @@ async function prepareVisualImageInputs(item, limit = MAX_REFERENCE_MEDIA_FOR_AI
       resized_count: totalResized,
       bytes_before: totalBytesBefore,
       bytes_after: totalBytesAfter,
+      max_dim: Number(process.env.COLLECTOR_VISUAL_IMAGE_MAX_DIM || 768) || 768,
+      jpeg_quality: Number(process.env.COLLECTOR_VISUAL_IMAGE_JPEG_QUALITY || 80) || 80,
     });
   }
 

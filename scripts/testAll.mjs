@@ -41,7 +41,7 @@ const testFiles = [
 // Explicit file list (not a shell glob) so this behaves the same whether npm invokes cmd.exe,
 // PowerShell, or bash. --test-concurrency=1 (still one process per file — this is not
 // --test-isolation=none) is the invocation proven deterministic in docs/TEST_SUITE_BASELINE.md.
-const result = spawnSync(process.execPath, ["--test", "--test-concurrency=1", ...testFiles], {
+const result = spawnSync(process.execPath, ["--test", "--test-concurrency=1", "--experimental-test-module-mocks", ...testFiles], {
   cwd: repoRoot,
   stdio: "inherit",
 });
