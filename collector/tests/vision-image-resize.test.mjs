@@ -63,8 +63,38 @@ test("resizeImageBuffer: corrupt buffer returns original", async () => {
   assert.equal(result.meta, null);
 });
 
-describe("resizeImageBuffer: sharp load failure", () => {
-  test("returns original buffer when sharp cannot be loaded", async (t) => {
+describe("resizeImageBuffer: sharp fallback", () => {
+  test("catch path: returns original buffer and warn-once when sharp import throws", async (t) => {
+    _resetSharpCacheForTesting();
+
+    const errorSpy = t.mock.method(console, "error");
+
+    t.mock.module("sharp", {
+      exports: {
+        get default() {
+          throw new Error("sharp not installed");
+        },
+      },
+    });
+
+    const fallback = await import("../services/agent-generation.mjs");
+
+    const buf = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x01, 0x4a, 0x46, 0x49, 0x46]);
+
+    const r1 = await fallback.resizeImageBuffer(buf, "image/jpeg");
+    assert.equal(r1.resized, false);
+    assert.equal(r1.buffer, buf, "should return original buffer");
+    assert.equal(r1.meta, null);
+
+    await fallback.resizeImageBuffer(buf, "image/jpeg");
+    await fallback.resizeImageBuffer(buf, "image/jpeg");
+
+    assert.equal(console.error.mock.callCount(), 1, "warn fires exactly once across 3 calls");
+
+    _resetSharpCacheForTesting();
+  });
+
+  test("guard path: returns original buffer when sharp has no default export", async (t) => {
     _resetSharpCacheForTesting();
 
     t.mock.module("sharp", {
