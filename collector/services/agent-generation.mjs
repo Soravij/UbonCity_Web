@@ -911,6 +911,14 @@ export function createAgentGenerationEngine(aiConfig) {
         prompt: buildVisualPrompt(item, imageInputs.length),
         imageInputs,
       });
+      traceAgentGeneration("visual_context.usage", {
+        promptTokenCount: result.usage?.promptTokenCount ?? null,
+        candidatesTokenCount: result.usage?.candidatesTokenCount ?? null,
+        totalTokenCount: result.usage?.totalTokenCount ?? null,
+        image_count: imageInputs.length,
+        max_dim: Number(process.env.COLLECTOR_VISUAL_IMAGE_MAX_DIM || 768) || 768,
+        jpeg_quality: Number(process.env.COLLECTOR_VISUAL_IMAGE_JPEG_QUALITY || 80) || 80,
+      });
       const parsed = normalizeVisualContext(result.parsed || parseJsonLike(result.outputText));
       if (!hasVisualContext(parsed)) {
         return null;

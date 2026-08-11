@@ -189,6 +189,7 @@ async function requestGoogleJsonCompletion({ model, prompt, imageInputs = [] }) 
     provider: "google",
     outputText,
     parsed: parseJsonLike(outputText),
+    usageMetadata: data?.usageMetadata ?? null,
   };
 }
 
