@@ -23,7 +23,7 @@ export function isBackendAiConfigured(aiConfig) {
   return Boolean(backendApiBase && backendSyncToken);
 }
 
-export async function executeBackendAiJson({ aiConfig, featureKey, task, prompt, imageInputs = [] }) {
+export async function executeBackendAiJson({ aiConfig, featureKey, task, prompt, imageInputs = [], actorEmail }) {
   const featureConfig = resolveFeatureConfig(aiConfig, featureKey);
   const backendApiBase = normalizeBackendApiBase(featureConfig?.backendApiBase || aiConfig?.backendApiBase);
   const backendSyncToken = String(featureConfig?.backendSyncToken || aiConfig?.backendSyncToken || "").trim();
@@ -55,6 +55,7 @@ export async function executeBackendAiJson({ aiConfig, featureKey, task, prompt,
       model,
       prompt: String(prompt || "").trim(),
       image_inputs: Array.isArray(imageInputs) ? imageInputs : [],
+      ...(actorEmail ? { actor_email: String(actorEmail).trim() } : {}),
     }),
   });
 

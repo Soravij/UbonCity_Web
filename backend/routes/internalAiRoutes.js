@@ -27,6 +27,7 @@ router.post("/internal/ai/json", requireLifecycleSyncToken, async (req, res) => 
     const prompt = String(req.body?.prompt || "").trim();
     const task = String(req.body?.task || "").trim() || "unknown";
     const imageInputs = Array.isArray(req.body?.image_inputs) ? req.body.image_inputs : [];
+    const actorEmail = req.body?.actor_email ? String(req.body.actor_email).trim() : null;
 
     if (!provider) return res.status(400).json({ error: "provider is required" });
     if (!model) return res.status(400).json({ error: "model is required" });
@@ -37,6 +38,8 @@ router.post("/internal/ai/json", requireLifecycleSyncToken, async (req, res) => 
       model,
       prompt,
       imageInputs,
+      task,
+      actorEmail,
     });
 
     return res.json({

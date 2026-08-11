@@ -1,3 +1,5 @@
+import pool from "../config/db.js";
+
 function parseJsonLike(rawText) {
   const text = String(rawText || "").trim();
   if (!text) return null;
@@ -159,6 +161,7 @@ async function requestOpenAiJsonCompletion({ model, prompt, imageInputs = [] }) 
     provider: "openai",
     outputText,
     parsed: parseJsonLike(outputText),
+    usageMetadata: data?.usage ?? null,
   };
 }
 
@@ -197,7 +200,28 @@ async function requestGoogleJsonCompletion({ model, prompt, imageInputs = [] }) 
   };
 }
 
-export async function requestJsonCompletion({ provider, model, prompt, imageInputs = [] }) {
+async function logAiUsage({ actorEmail, task, provider, model, usageMetadata }) {
+  try {
+    let userId = null;
+    if (actorEmail) {
+      const [rows] = await pool.query("SELECT id FROM users WHERE email = ? LIMIT 1", [actorEmail]);
+      if (rows.length) userId = rows[0].id;
+    }
+
+    const promptTokens = usageMetadata?.promptTokenCount ?? null;
+    const candidatesTokens = usageMetadata?.candidatesTokenCount ?? null;
+    const totalTokens = usageMetadata?.totalTokenCount ?? null;
+
+    await pool.query(
+      "INSERT INTO ai_usage_log (actor_email, user_id, task, provider, model, prompt_tokens, candidates_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [actorEmail || null, userId, task || "unknown", provider, model, promptTokens, candidatesTokens, totalTokens]
+    );
+  } catch (err) {
+    console.error("[aiExecutionService] logAiUsage failed:", err?.message || err);
+  }
+}
+
+export async function requestJsonCompletion({ provider, model, prompt, imageInputs = [], task, actorEmail }) {
   const normalizedProvider = normalizeProvider(provider);
   const normalizedModel = String(model || "").trim();
   const normalizedPrompt = String(prompt || "").trim();
@@ -211,16 +235,20 @@ export async function requestJsonCompletion({ provider, model, prompt, imageInpu
   }
 
   if (normalizedProvider === "google") {
-    return requestGoogleJsonCompletion({
+    const result = await requestGoogleJsonCompletion({
       model: normalizedModel,
       prompt: normalizedPrompt,
       imageInputs: normalizedImages,
     });
+    logAiUsage({ actorEmail, task, provider: "google", model: normalizedModel, usageMetadata: result.usageMetadata });
+    return result;
   }
 
-  return requestOpenAiJsonCompletion({
+  const result = await requestOpenAiJsonCompletion({
     model: normalizedModel,
     prompt: normalizedPrompt,
     imageInputs: normalizedImages,
   });
+  logAiUsage({ actorEmail, task, provider: "openai", model: normalizedModel, usageMetadata: result.usageMetadata });
+  return result;
 }
