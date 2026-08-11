@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS `ai_usage_log` (
   `prompt_tokens` int unsigned DEFAULT NULL,
   `candidates_tokens` int unsigned DEFAULT NULL,
   `total_tokens` int unsigned DEFAULT NULL,
+  `raw_usage_json` json DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_ai_usage_log_actor_email` (`actor_email`),

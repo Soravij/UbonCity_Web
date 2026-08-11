@@ -1,5 +1,18 @@
 import pool from "../config/db.js";
 
+const TOKEN_EXTRACTORS = {
+  google: (usage) => ({
+    promptTokens: usage?.promptTokenCount ?? null,
+    candidatesTokens: usage?.candidatesTokenCount ?? null,
+    totalTokens: usage?.totalTokenCount ?? null,
+  }),
+  openai: (usage) => ({
+    promptTokens: usage?.prompt_tokens ?? null,
+    candidatesTokens: usage?.completion_tokens ?? null,
+    totalTokens: usage?.total_tokens ?? null,
+  }),
+};
+
 function parseJsonLike(rawText) {
   const text = String(rawText || "").trim();
   if (!text) return null;
@@ -208,13 +221,17 @@ async function logAiUsage({ actorEmail, task, provider, model, usageMetadata }) 
       if (rows.length) userId = rows[0].id;
     }
 
-    const promptTokens = usageMetadata?.promptTokenCount ?? null;
-    const candidatesTokens = usageMetadata?.candidatesTokenCount ?? null;
-    const totalTokens = usageMetadata?.totalTokenCount ?? null;
+    const extractor = TOKEN_EXTRACTORS[provider];
+    const normalized = extractor ? extractor(usageMetadata) : { promptTokens: null, candidatesTokens: null, totalTokens: null };
+    const { promptTokens, candidatesTokens, totalTokens } = normalized;
+
+    if (usageMetadata && !extractor && promptTokens === null && candidatesTokens === null && totalTokens === null) {
+      console.warn(`[aiExecutionService] logAiUsage: no token extractor for provider="${provider}", raw keys: [${Object.keys(usageMetadata).join(", ")}]`);
+    }
 
     await pool.query(
-      "INSERT INTO ai_usage_log (actor_email, user_id, task, provider, model, prompt_tokens, candidates_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [actorEmail || null, userId, task || "unknown", provider, model, promptTokens, candidatesTokens, totalTokens]
+      "INSERT INTO ai_usage_log (actor_email, user_id, task, provider, model, prompt_tokens, candidates_tokens, total_tokens, raw_usage_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [actorEmail || null, userId, task || "unknown", provider, model, promptTokens, candidatesTokens, totalTokens, usageMetadata ? JSON.stringify(usageMetadata) : null]
     );
   } catch (err) {
     console.error("[aiExecutionService] logAiUsage failed:", err?.message || err);
