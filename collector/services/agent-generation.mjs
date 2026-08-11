@@ -1,4 +1,5 @@
 import fsSync from "node:fs";
+import sharp from "sharp";
 import { executeBackendAiJson } from "./backend-ai-client.mjs";
 import { deriveCtaContactCandidatesFromStructuredContext, isCtaEligibleItem, mergeAiCtaWithDeterministicCandidates, normalizeAiCtaContactJson } from '../server/cta-contact-normalizer.mjs';
 import { getTaxonomyCatalogPromptChecks, normalizeAiTaxonomySuggestions } from '../server/taxonomy-resolver.mjs';
@@ -295,6 +296,42 @@ function toCollectorAbsoluteUrl(url) {
   return new URL(value, `${resolveCollectorBaseUrl()}/`).toString();
 }
 
+export async function resizeImageBuffer(buffer, originalMime) {
+  const maxDim = Number(process.env.COLLECTOR_VISUAL_IMAGE_MAX_DIM || 768) || 768;
+  const jpegQuality = Number(process.env.COLLECTOR_VISUAL_IMAGE_JPEG_QUALITY || 80) || 80;
+
+  try {
+    const metadata = await sharp(buffer).metadata();
+    const originalWidth = metadata.width || 0;
+    const originalHeight = metadata.height || 0;
+    const hasAlpha = metadata.hasAlpha === true;
+
+    let pipeline = sharp(buffer)
+      .resize({ width: maxDim, height: maxDim, fit: "inside", withoutEnlargement: true });
+
+    if (hasAlpha) {
+      pipeline = pipeline.flatten({ background: "#ffffff" });
+    }
+
+    const resized = await pipeline.jpeg({ quality: jpegQuality }).toBuffer();
+    const resultMime = "image/jpeg";
+
+    if (resized.length >= buffer.length) {
+      return { buffer, mime: originalMime, resized: false, meta: { originalWidth, originalHeight, finalWidth: originalWidth, finalHeight: originalHeight } };
+    }
+
+    const resultMeta = await sharp(resized).metadata();
+    return {
+      buffer: resized,
+      mime: resultMime,
+      resized: true,
+      meta: { originalWidth, originalHeight, finalWidth: resultMeta.width || originalWidth, finalHeight: resultMeta.height || originalHeight },
+    };
+  } catch {
+    return { buffer, mime: originalMime, resized: false, meta: null };
+  }
+}
+
 async function fetchImageUrlToDataUrl(url) {
   const absoluteUrl = toCollectorAbsoluteUrl(url);
   const timeoutMs = Number(process.env.COLLECTOR_VISUAL_IMAGE_TIMEOUT_MS || 15000) || 15000;
@@ -308,29 +345,59 @@ async function fetchImageUrlToDataUrl(url) {
     throw new Error(`proxy image returned non-image content-type: ${contentType}`);
   }
 
-  const bytes = Buffer.from(await response.arrayBuffer());
+  const originalBuffer = Buffer.from(await response.arrayBuffer());
+  const originalBytes = originalBuffer.length;
+
+  const { buffer: finalBuffer, mime: finalMime, resized, meta } = await resizeImageBuffer(originalBuffer, contentType);
+
   const maxBytes = Number(process.env.COLLECTOR_VISUAL_IMAGE_MAX_BYTES || 8 * 1024 * 1024) || 8 * 1024 * 1024;
-  if (bytes.length > maxBytes) {
-    throw new Error(`proxy image is too large: ${bytes.length} bytes`);
+  if (finalBuffer.length > maxBytes) {
+    throw new Error(`proxy image is too large: ${finalBuffer.length} bytes`);
   }
 
-  return `data:${contentType};base64,${bytes.toString("base64")}`;
+  traceAgentGeneration("visual_image.resize", {
+    url: String(url || "").slice(0, 220),
+    bytes_before: originalBytes,
+    bytes_after: finalBuffer.length,
+    width_before: meta?.originalWidth ?? null,
+    height_before: meta?.originalHeight ?? null,
+    width_after: meta?.finalWidth ?? null,
+    height_after: meta?.finalHeight ?? null,
+    resized,
+  });
+
+  return { dataUrl: `data:${finalMime};base64,${finalBuffer.toString("base64")}`, bytesBefore: originalBytes, bytesAfter: finalBuffer.length, resized };
 }
 
 async function prepareVisualImageInputs(item, limit = MAX_REFERENCE_MEDIA_FOR_AI) {
   const imageUrls = collectVisualImageUrls(item, limit);
   const inputs = [];
+  let totalBytesBefore = 0;
+  let totalBytesAfter = 0;
+  let totalResized = 0;
 
   for (const url of imageUrls) {
     try {
-      const imageUrl = await fetchImageUrlToDataUrl(url);
-      inputs.push({ type: "image_url", image_url: { url: imageUrl, detail: "low" } });
+      const { dataUrl, bytesBefore, bytesAfter, resized } = await fetchImageUrlToDataUrl(url);
+      inputs.push({ type: "image_url", image_url: { url: dataUrl, detail: "low" } });
+      totalBytesBefore += bytesBefore;
+      totalBytesAfter += bytesAfter;
+      if (resized) totalResized++;
     } catch (error) {
       traceAgentGeneration("visual_image.skip", {
         url: String(url || "").slice(0, 220),
         error: String(error?.message || error || "unknown error"),
       });
     }
+  }
+
+  if (inputs.length > 0) {
+    traceAgentGeneration("visual_image.summary", {
+      image_count: inputs.length,
+      resized_count: totalResized,
+      bytes_before: totalBytesBefore,
+      bytes_after: totalBytesAfter,
+    });
   }
 
   return inputs;
