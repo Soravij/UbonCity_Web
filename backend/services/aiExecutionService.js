@@ -78,15 +78,19 @@ function decodeDataUrl(url) {
 }
 
 function normalizeImageInputs(imageInputs = []) {
+  const maxImages = Math.max(1, Number(process.env.BACKEND_AI_MAX_IMAGE_INPUTS || 10) || 10);
   const list = Array.isArray(imageInputs) ? imageInputs : [];
-  return list
+  const normalized = list
     .map((entry) => {
       const dataUrl = String(entry?.image_url?.url || "").trim();
       if (!dataUrl) return null;
       return decodeDataUrl(dataUrl);
     })
-    .filter(Boolean)
-    .slice(0, 5);
+    .filter(Boolean);
+  if (normalized.length > maxImages) {
+    console.error(`[aiExecutionService] normalizeImageInputs: slicing ${normalized.length} -> ${maxImages} (BACKEND_AI_MAX_IMAGE_INPUTS=${maxImages})`);
+  }
+  return normalized.slice(0, maxImages);
 }
 
 function buildOpenAiContent(prompt, imageInputs = []) {
