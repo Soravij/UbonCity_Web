@@ -93,7 +93,7 @@ function decodeDataUrl(url) {
 }
 
 function normalizeImageInputs(imageInputs = []) {
-  const maxImages = Math.max(1, Number(process.env.BACKEND_AI_MAX_IMAGE_INPUTS || 10) || 10);
+  const maxImages = Math.max(1, Number(process.env.BACKEND_AI_MAX_IMAGE_INPUTS || 20) || 20);
   const list = Array.isArray(imageInputs) ? imageInputs : [];
   const normalized = list
     .map((entry) => {

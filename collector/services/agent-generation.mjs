@@ -3,7 +3,7 @@ import { executeBackendAiJson } from "./backend-ai-client.mjs";
 import { deriveCtaContactCandidatesFromStructuredContext, isCtaEligibleItem, mergeAiCtaWithDeterministicCandidates, normalizeAiCtaContactJson } from '../server/cta-contact-normalizer.mjs';
 import { getTaxonomyCatalogPromptChecks, normalizeAiTaxonomySuggestions } from '../server/taxonomy-resolver.mjs';
 
-export const MAX_REFERENCE_MEDIA_FOR_AI = 10;
+export const MAX_REFERENCE_MEDIA_FOR_AI = Number(process.env.COLLECTOR_MAX_REFERENCE_MEDIA_FOR_AI || 20) || 20;
 
 const FIELD_PACK_AGENT_KEY = "field_pack_agent";
 const DEFAULT_FIELD_PACK_AGENT_PROFILE = [

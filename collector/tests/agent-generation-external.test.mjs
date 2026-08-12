@@ -221,8 +221,8 @@ test("external agent engine normalizes visual context and field pack responses",
   }
 });
 
-test("MAX_REFERENCE_MEDIA_FOR_AI is exported and equals 10", () => {
-  assert.equal(MAX_REFERENCE_MEDIA_FOR_AI, 10);
+test("MAX_REFERENCE_MEDIA_FOR_AI is exported and defaults to 20", () => {
+  assert.equal(MAX_REFERENCE_MEDIA_FOR_AI, 20);
 });
 
 test("collectVisualImageUrls respects MAX_REFERENCE_MEDIA_FOR_AI as default limit", () => {
