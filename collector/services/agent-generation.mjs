@@ -919,6 +919,12 @@ export function createAgentGenerationEngine(aiConfig) {
         max_dim: Number(process.env.COLLECTOR_VISUAL_IMAGE_MAX_DIM || 768) || 768,
         jpeg_quality: Number(process.env.COLLECTOR_VISUAL_IMAGE_JPEG_QUALITY || 80) || 80,
       });
+      if (Number(result.images_used ?? imageInputs.length) < imageInputs.length) {
+        traceAgentGeneration("visual_context.images_sliced", {
+          images_sent: imageInputs.length,
+          images_used: Number(result.images_used ?? imageInputs.length),
+        });
+      }
       const parsed = normalizeVisualContext(result.parsed || parseJsonLike(result.outputText));
       if (!hasVisualContext(parsed)) {
         return null;

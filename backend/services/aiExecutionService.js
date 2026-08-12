@@ -242,6 +242,7 @@ export async function requestJsonCompletion({ provider, model, prompt, imageInpu
   const normalizedProvider = normalizeProvider(provider);
   const normalizedModel = String(model || "").trim();
   const normalizedPrompt = String(prompt || "").trim();
+  const rawImageCount = Array.isArray(imageInputs) ? imageInputs.length : 0;
   const normalizedImages = normalizeImageInputs(imageInputs);
 
   if (!normalizedModel) {
@@ -258,7 +259,7 @@ export async function requestJsonCompletion({ provider, model, prompt, imageInpu
       imageInputs: normalizedImages,
     });
     logAiUsage({ actorEmail, task, provider: "google", model: normalizedModel, usageMetadata: result.usageMetadata });
-    return result;
+    return { ...result, images_received: rawImageCount, images_used: normalizedImages.length };
   }
 
   const result = await requestOpenAiJsonCompletion({
@@ -267,5 +268,5 @@ export async function requestJsonCompletion({ provider, model, prompt, imageInpu
     imageInputs: normalizedImages,
   });
   logAiUsage({ actorEmail, task, provider: "openai", model: normalizedModel, usageMetadata: result.usageMetadata });
-  return result;
+  return { ...result, images_received: rawImageCount, images_used: normalizedImages.length };
 }

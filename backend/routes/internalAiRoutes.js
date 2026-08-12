@@ -50,6 +50,8 @@ router.post("/internal/ai/json", requireLifecycleSyncToken, async (req, res) => 
       output_text: result.outputText,
       parsed: result.parsed,
       usage: result.usageMetadata ?? null,
+      images_received: result.images_received ?? null,
+      images_used: result.images_used ?? null,
     });
   } catch (error) {
     const message = String(error?.message || "internal ai execution failed");
