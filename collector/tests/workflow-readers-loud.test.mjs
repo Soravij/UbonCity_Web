@@ -250,7 +250,7 @@ test("workflow.mjs imports MAX_REFERENCE_MEDIA_FOR_AI from agent-generation and 
 
 test("agent-generation.mjs exports MAX_REFERENCE_MEDIA_FOR_AI and uses it instead of hardcoded 5", () => {
   const agentGenSource = fs.readFileSync(path.join(collectorRoot, "services", "agent-generation.mjs"), "utf8");
-  assert.match(agentGenSource, /export const MAX_REFERENCE_MEDIA_FOR_AI = 10/);
+  assert.match(agentGenSource, /export const MAX_REFERENCE_MEDIA_FOR_AI = Number\(process\.env\.COLLECTOR_MAX_REFERENCE_MEDIA_FOR_AI \|\| 20\) \|\| 20/);
   assert.match(agentGenSource, /function collectVisualImageUrls\(item, limit = MAX_REFERENCE_MEDIA_FOR_AI\)/);
   assert.match(agentGenSource, /Math\.min\(MAX_REFERENCE_MEDIA_FOR_AI/);
   assert.match(agentGenSource, /async function prepareVisualImageInputs\(item, limit = MAX_REFERENCE_MEDIA_FOR_AI\)/);

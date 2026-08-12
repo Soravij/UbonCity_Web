@@ -3,7 +3,7 @@ import { executeBackendAiJson } from "./backend-ai-client.mjs";
 import { deriveCtaContactCandidatesFromStructuredContext, isCtaEligibleItem, mergeAiCtaWithDeterministicCandidates, normalizeAiCtaContactJson } from '../server/cta-contact-normalizer.mjs';
 import { getTaxonomyCatalogPromptChecks, normalizeAiTaxonomySuggestions } from '../server/taxonomy-resolver.mjs';
 
-export const MAX_REFERENCE_MEDIA_FOR_AI = 10;
+export const MAX_REFERENCE_MEDIA_FOR_AI = Number(process.env.COLLECTOR_MAX_REFERENCE_MEDIA_FOR_AI || 20) || 20;
 
 const FIELD_PACK_AGENT_KEY = "field_pack_agent";
 const DEFAULT_FIELD_PACK_AGENT_PROFILE = [
@@ -947,6 +947,12 @@ export function createAgentGenerationEngine(aiConfig) {
         max_dim: Number(process.env.COLLECTOR_VISUAL_IMAGE_MAX_DIM || 768) || 768,
         jpeg_quality: Number(process.env.COLLECTOR_VISUAL_IMAGE_JPEG_QUALITY || 80) || 80,
       });
+      if (Number(result.images_used ?? imageInputs.length) < imageInputs.length) {
+        traceAgentGeneration("visual_context.images_sliced", {
+          images_sent: imageInputs.length,
+          images_used: Number(result.images_used ?? imageInputs.length),
+        });
+      }
       const parsed = normalizeVisualContext(result.parsed || parseJsonLike(result.outputText));
       if (!hasVisualContext(parsed)) {
         return null;
