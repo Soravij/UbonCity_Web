@@ -567,8 +567,6 @@ function buildPromptInput(item) {
       result.evidence_blocks = result.evidence_blocks.map((block) => ({
         block_type: block.block_type,
         source_type: block.source_type,
-        source_url: block.source_url,
-        source_label: block.source_label,
         text_value: block.text_value,
         numeric_value: block.numeric_value,
         list_value: block.list_value,
