@@ -24,6 +24,13 @@ export function isBackendAiConfigured(aiConfig) {
 }
 
 export async function executeBackendAiJson({ aiConfig, featureKey, task, prompt, imageInputs = [], actorEmail }) {
+  const _actorEmail = (() => {
+    const raw = String(actorEmail || "").trim();
+    if (!raw) return null;
+    const lower = raw.toLowerCase();
+    if (lower === "internal@local" || lower === "system@local") return null;
+    return raw;
+  })();
   const featureConfig = resolveFeatureConfig(aiConfig, featureKey);
   const backendApiBase = normalizeBackendApiBase(featureConfig?.backendApiBase || aiConfig?.backendApiBase);
   const backendSyncToken = String(featureConfig?.backendSyncToken || aiConfig?.backendSyncToken || "").trim();
@@ -55,7 +62,7 @@ export async function executeBackendAiJson({ aiConfig, featureKey, task, prompt,
       model,
       prompt: String(prompt || "").trim(),
       image_inputs: Array.isArray(imageInputs) ? imageInputs : [],
-      ...(actorEmail ? { actor_email: String(actorEmail).trim() } : {}),
+      ...(_actorEmail ? { actor_email: _actorEmail } : {}),
     }),
   });
 

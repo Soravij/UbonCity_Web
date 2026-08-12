@@ -1151,7 +1151,7 @@ function buildTranslationRepairPrompt(article, translationRow) {
   ].join("\n");
 }
 
-async function runSemanticTranslationRecheck(aiConfig, article, translationRow) {
+async function runSemanticTranslationRecheck(aiConfig, article, translationRow, actorEmail) {
   const recheckFeatureConfig = aiConfig?.features?.translationRecheck
     || aiConfig?.features?.translation
     || aiConfig
@@ -1189,6 +1189,7 @@ async function runSemanticTranslationRecheck(aiConfig, article, translationRow) 
       featureKey: "translationRecheck",
       task: "translation_recheck",
       prompt: buildTranslationRecheckPrompt(article, translationRow),
+      actorEmail,
     });
     return normalizeTranslationRecheckResult(result?.parsed || result?.outputText, result?.provider || provider, result?.model || model);
   } catch (error) {
@@ -1211,7 +1212,7 @@ export function getCurrentTranslationSourceFingerprint(repo, contentItemId) {
   return buildSourceFingerprint(buildTranslationSourceForItem(repo, contentItemId));
 }
 
-async function runTranslationRecheckForRow(repo, article, translationRow, aiConfig) {
+async function runTranslationRecheckForRow(repo, article, translationRow, aiConfig, actorEmail) {
   const currentSourceFingerprint = buildSourceFingerprint(article);
   const eligibility = isTranslationTechnicalReady(translationRow, currentSourceFingerprint);
   if (!eligibility) {
@@ -1230,7 +1231,7 @@ async function runTranslationRecheckForRow(repo, article, translationRow, aiConf
     });
   }
 
-  const result = await runSemanticTranslationRecheck(aiConfig, article, translationRow);
+  const result = await runSemanticTranslationRecheck(aiConfig, article, translationRow, actorEmail);
   traceTranslationDiagnostics("translation_recheck_completed", {
     item_id: Number(article?.content_item_id || 0) || null,
     lang: String(translationRow?.lang || "").trim().toLowerCase() || null,
@@ -1301,7 +1302,7 @@ function buildDraftTranslationSource(repo, contentItemId) {
 async function runTranslationStageForSources(repo, translationSources, aiConfig, actorEmail = "system@local", stage = "final-prefrontend", options = {}) {
   const normalizedSources = translationSources.map((source) => normalizeTranslationSource(source)).filter((source) => source.content_item_id);
   const targets = parseTargetLangs();
-  const translator = createTranslationGenerator(aiConfig);
+  const translator = createTranslationGenerator(aiConfig, actorEmail);
   const runUid = repo.startTranslationRun(stage, normalizedSources.length, "Translation started");
   const forceRegenerate = options?.forceRegenerate === true;
 
@@ -1632,7 +1633,7 @@ export async function rerunTranslationRecheck(repo, actorEmail, options = {}) {
 
   const results = [];
   for (const row of eligibleRows) {
-    const saved = await runTranslationRecheckForRow(repo, article, row, options.aiConfig || null);
+    const saved = await runTranslationRecheckForRow(repo, article, row, options.aiConfig || null, actorEmail);
     results.push({
       lang: String(saved?.lang || row?.lang || "").trim().toLowerCase(),
       translation_recheck_status: String(saved?.translation_recheck_status || "not_checked").trim().toLowerCase() || "not_checked",
@@ -1722,6 +1723,7 @@ export async function repairTranslationFromRecheckIssues(repo, contentItemId, la
     featureKey: "translationRepair",
     task: "translation_repair",
     prompt: buildTranslationRepairPrompt(article, translationRow),
+    actorEmail,
   });
   const repaired = normalizeTranslationRepairPayload(result?.parsed || result?.outputText);
   const check = runAutomaticTranslationChecks({
@@ -2344,7 +2346,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
         if ((visualImageUrls.length > 0 || referenceMediaUrls.length > 0) && typeof agentEngine.generateVisualContext === "function") {
           try {
             traceAiDraft("visual_context.start", { item_id: Number(item?.id || 0) || null, image_count: collectVisualImageUrls(item, MAX_REFERENCE_MEDIA_FOR_AI).length });
-            visualContext = await agentEngine.generateVisualContext(item);
+            visualContext = await agentEngine.generateVisualContext(item, actorEmail);
             if (visualContext) {
               visualContextSuccessCount += 1;
               traceAiDraft("visual_context.ok", { item_id: Number(item?.id || 0) || null });
@@ -2369,7 +2371,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
           ...item,
           agent_profile: fieldPackAgentProfile,
           visual_context: visualContext,
-        });
+        }, actorEmail);
         assertAgentFieldPackContract(finalFieldPack);
         traceAiDraft("field_pack.generate.ok", { item_id: Number(item?.id || 0) || null });
         finalItem = { ...item, visual_context: visualContext };

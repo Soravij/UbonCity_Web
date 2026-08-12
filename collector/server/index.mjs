@@ -6413,7 +6413,7 @@ function readSubmittedStringField(source, key, fallback = "") {
   return String(fallback ?? "");
 }
 
-async function buildAiCollectQueries(topic, category, lang = "th", maxQueries = 5) {
+async function buildAiCollectQueries(topic, category, lang = "th", maxQueries = 5, actorEmail) {
   const safeTopic = String(topic || "").trim();
   if (!safeTopic) return [];
   const aiConfig = resolveAiFeatureConfig(getEffectiveAiConfig(), "aiDiscovery");
@@ -6436,6 +6436,7 @@ async function buildAiCollectQueries(topic, category, lang = "th", maxQueries = 
       featureKey: "aiDiscovery",
       task: "ai_discovery_queries",
       prompt,
+      actorEmail,
     });
   } catch {
     return [];
@@ -8977,6 +8978,7 @@ app.post("/api/items/:id/seo-suggestion", requireRole("owner", "admin", "editor"
       featureKey: "seoAgent",
       task: "seo_metadata_suggestion",
       prompt: buildSeoSuggestionPrompt(promptInput, seoAgentProfile.profile_text),
+      actorEmail: actorEmail(req),
     });
     const parsed = result?.parsed || parseJsonLike(String(result?.outputText || ""));
     const suggestion = normalizeSeoSuggestion(parsed);
@@ -9055,6 +9057,7 @@ app.post("/api/items/:id/article-suggestion", requireRole("owner", "admin", "edi
       featureKey: "articleGenerator",
       task: "article_draft_suggestion",
       prompt: buildArticleSuggestionPrompt(promptInput, articleAgentProfile.profile_text),
+      actorEmail: actorEmail(req),
     });
     const parsed = result?.parsed || parseJsonLike(String(result?.outputText || ""));
     const suggestion = normalizeArticleSuggestion(parsed);
@@ -12679,12 +12682,12 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
       if (!agentEngine?.reviseFieldPack) {
         throw new Error("Agent engine does not support field pack revision");
       }
-      agentFieldPack = await agentEngine.reviseFieldPack(agentInput, currentFieldPack, revisionNote);
+      agentFieldPack = await agentEngine.reviseFieldPack(agentInput, currentFieldPack, revisionNote, actorEmail(req));
     } else {
       if (agentEngine?.reviseFieldPack) {
-        agentFieldPack = await agentEngine.reviseFieldPack(agentInput, {}, revisionNote);
+        agentFieldPack = await agentEngine.reviseFieldPack(agentInput, {}, revisionNote, actorEmail(req));
       } else if (agentEngine?.generateFieldPack) {
-        agentFieldPack = await agentEngine.generateFieldPack(agentInput);
+        agentFieldPack = await agentEngine.generateFieldPack(agentInput, actorEmail(req));
       } else {
         throw new Error("Agent engine does not support field pack generation");
       }
@@ -13830,7 +13833,8 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
             req.body?.topic || req.body?.query || "",
             req.body?.category || "attractions",
             req.body?.lang || "th",
-            req.body?.max_queries || 5
+            req.body?.max_queries || 5,
+            actorEmail(req)
           )
         : [];
 

@@ -341,7 +341,7 @@ function resolveTargetLanguageLabel(targetLang) {
   return target;
 }
 
-async function backendTranslate(source, targetLang, aiConfig) {
+async function backendTranslate(source, targetLang, aiConfig, actorEmail) {
   const translationConfig = aiConfig?.features?.translation && typeof aiConfig.features.translation === "object"
     ? aiConfig.features.translation
     : aiConfig;
@@ -350,6 +350,7 @@ async function backendTranslate(source, targetLang, aiConfig) {
     featureKey: "translation",
     task: "translation_content",
     prompt: buildTranslationPrompt(source, targetLang),
+    actorEmail,
   });
   const parsed = ensureValidModelPayload(result.parsed || parseJsonLike(result.outputText));
   if (!parsed) {
@@ -463,7 +464,7 @@ function createDeterministicTranslator() {
   };
 }
 
-export function createTranslationGenerator(aiConfig) {
+export function createTranslationGenerator(aiConfig, actorEmail) {
   if (!aiConfig || typeof aiConfig !== "object") {
     return createDeterministicTranslator();
   }
@@ -471,7 +472,7 @@ export function createTranslationGenerator(aiConfig) {
   if (isBackendAiConfigured(aiConfig)) {
     return {
       async translate(source, targetLang) {
-        return backendTranslate(source, targetLang, aiConfig);
+        return backendTranslate(source, targetLang, aiConfig, actorEmail);
       },
     };
   }

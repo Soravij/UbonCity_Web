@@ -922,7 +922,7 @@ export function createAgentGenerationEngine(aiConfig) {
   }
 
   return {
-    async generateVisualContext(item) {
+    async generateVisualContext(item, actorEmail) {
       if (!aiConfig?.enabled) {
         throw new Error("backend AI proxy is not enabled");
       }
@@ -938,6 +938,7 @@ export function createAgentGenerationEngine(aiConfig) {
         task: "visual_context",
         prompt: buildVisualPrompt(item, imageInputs.length),
         imageInputs,
+        actorEmail,
       });
       traceAgentGeneration("visual_context.usage", {
         promptTokenCount: result.usage?.promptTokenCount ?? null,
@@ -960,7 +961,7 @@ export function createAgentGenerationEngine(aiConfig) {
       return parsed;
     },
 
-    async generateFieldPack(item) {
+    async generateFieldPack(item, actorEmail) {
       if (!aiConfig?.enabled) {
         throw new Error("backend AI proxy is not enabled");
       }
@@ -973,6 +974,7 @@ export function createAgentGenerationEngine(aiConfig) {
         featureKey: "fieldPack",
         task: "field_pack",
         prompt: fullPrompt,
+        actorEmail,
       });
       const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText), { item });
       if (!parsed) {
@@ -981,7 +983,7 @@ export function createAgentGenerationEngine(aiConfig) {
       return parsed;
     },
 
-    async reviseFieldPack(item, previousFieldPack = {}, revisionNote = "") {
+    async reviseFieldPack(item, previousFieldPack = {}, revisionNote = "", actorEmail) {
       if (!aiConfig?.enabled) {
         throw new Error("backend AI proxy is not enabled");
       }
@@ -994,6 +996,7 @@ export function createAgentGenerationEngine(aiConfig) {
         featureKey: "revision",
         task: "field_pack_revision",
         prompt: revisionPrompt,
+        actorEmail,
       });
       const parsed = normalizeFieldPack(result.parsed || parseJsonLike(result.outputText), { item });
       if (!parsed) {

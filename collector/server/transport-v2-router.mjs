@@ -452,7 +452,7 @@ function extractResponseText(data) {
   return "";
 }
 
-async function translateLabelEntries(aiConfig, entries, targetLang) {
+async function translateLabelEntries(aiConfig, entries, targetLang, actorEmail) {
   const translationConfig = resolveAiFeatureConfig(aiConfig, "translation");
   if (!translationConfig?.enabled) {
     throw new Error("translation AI is not configured");
@@ -478,6 +478,7 @@ async function translateLabelEntries(aiConfig, entries, targetLang) {
     featureKey: "translation",
     task: "transport_label_translation",
     prompt,
+    actorEmail,
   });
   const parsed = result?.parsed || parseJsonLike(String(result?.outputText || ""));
   if (!parsed || typeof parsed !== "object") {
@@ -1529,7 +1530,7 @@ const collectorIntegrationConfig = () => ({
         Object.entries(thaiSource).filter(([labelKey]) => !String(nextDictionary?.[locale]?.[labelKey] || "").trim())
       );
       if (!Object.keys(missingSource).length) continue;
-      const translated = await translateLabelEntries(aiConfig, missingSource, locale);
+      const translated = await translateLabelEntries(aiConfig, missingSource, locale, actorEmail(req));
       nextDictionary[locale] = {
         ...(nextDictionary[locale] || {}),
         ...translated,
@@ -1693,7 +1694,7 @@ const collectorIntegrationConfig = () => ({
       if (!Object.keys(missingSource).length) {
         continue;
       }
-      const translated = await translateLabelEntries(aiConfig, missingSource, locale);
+      const translated = await translateLabelEntries(aiConfig, missingSource, locale, actorEmail(req));
       translatedLocaleCount += 1;
       nextDictionary[locale] = {
         ...(nextDictionary[locale] || {}),
