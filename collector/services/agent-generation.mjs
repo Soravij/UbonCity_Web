@@ -555,7 +555,8 @@ function buildPromptInput(item) {
     visual_image_count: collectVisualImageUrls(item, MAX_REFERENCE_MEDIA_FOR_AI).length,
   };
 
-  const lean = String(process.env.COLLECTOR_FIELD_PACK_LEAN || "").toLowerCase() === "on";
+  const leanEnv = String(process.env.COLLECTOR_FIELD_PACK_LEAN ?? "").trim().toLowerCase();
+  const lean = leanEnv !== "0" && leanEnv !== "false";
   if (lean) {
     delete result.completeness;
     delete result.evidence_policy;
