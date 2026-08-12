@@ -144,12 +144,12 @@ test("lean on: buildPromptInput removes specified top-level keys and trims evide
     }
 
     const block = result.evidence_blocks[0];
-    const keptBlockKeys = ["block_type", "source_type", "text_value", "numeric_value", "list_value"];
+    const keptBlockKeys = ["block_type", "source_type", "source_url", "source_label", "text_value", "numeric_value", "list_value"];
     for (const key of keptBlockKeys) {
       assert.ok(key in block, `expected evidence_block key "${key}" to be kept when lean is on`);
     }
 
-    const removedBlockKeys = ["id", "source_url", "source_label", "lang", "attribution_text", "status"];
+    const removedBlockKeys = ["id", "lang", "attribution_text", "status"];
     for (const key of removedBlockKeys) {
       assert.ok(!(key in block), `expected evidence_block key "${key}" to be removed when lean is on`);
     }
