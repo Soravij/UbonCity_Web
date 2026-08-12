@@ -1,6 +1,6 @@
 ﻿# UbonCity Project State
 
-Last Updated: 2026-07-15
+Last Updated: 2026-08-12
 
 ## Current Branch
 
@@ -180,6 +180,28 @@ Known open gaps (not fixed in this change set):
 - 2026-07-24: After Phase 5 Step B commit 3, `upsertCollectorImportReviewFromImport()` in `backend/services/collectorImportReviewService.js:365` has no remaining caller. Retain it with the other dead-code cleanup until Step B/C completes.
 - 2026-07-23: `backend/scripts/runtime-smoke-review-translation-promotion.mjs` covers only place fixtures (`type: "place"` at line 38 and place identity assertion at line 92); the event submit path has no equivalent end-to-end coverage until `smoke-collector-admin-final-review.mjs` passes.
 - 2026-07-24: `smoke-field-flow-publish-translation.mjs` cannot run as a Runtime gate because no approved/published candidate has complete field-flow readiness. The identical failure reproduces on `main` at `8b70cda`, so it is Runtime fixture/data debt, not a Step B regression; create a complete field-flow fixture before using this smoke as a gate.
+
+## AI cost tracking
+
+- `ai_usage_log` table stores token count per model call; migration 024 + merged into `000_baseline_schema.sql`
+- Usage from provider flows through 3 layers to collector: `TOKEN_EXTRACTORS` map per provider + `raw_usage_json` stores raw payload
+- `actor_email` / `user_id` recorded across all 10 AI call sites; sanitizer converts `internal@local` / `system@local` / `""` → `null`
+- Lean `field_pack` prompt reduces token ~34%, controlled by `COLLECTOR_FIELD_PACK_LEAN` (default OFF)
+- Image cap 20 on both sides (`COLLECTOR_MAX_REFERENCE_MEDIA_FOR_AI`, `BACKEND_AI_MAX_IMAGE_INPUTS`) + `trace.visual_context.images_sliced` warns when backend slices
+
+## Known gaps — จงใจเหลือไว้
+
+- `approved_context.selected_text` duplicates `evidence_blocks.text_value` (21/21 in measured sample); combined ~80% of prompt, not trimmed because instruction assigns different priority to the two keys
+- No cost-per-user UI yet (plan: user management page in admin panel)
+- `field_pack_references` has no schema in instruction; filtered to `[]` by normalizer URL check; `regenerate` endpoint also hardcodes `[]` intentionally
+- Duplicate images differing only by extension (`.webp`/`.jpg`) consume image quota
+- Branch `feat/lean-default-on` stuck on origin, not merged; 2 legacy tests must be fixed first
+- `npm run gate` does not work on Runtime (Node 22 vs 24 output format difference)
+- `normalizeProvider` only recognizes `google`/`openai`; other providers silently fall back to `openai`
+- `workflow.mjs:1302, 1659, 1762` still have default param `"system@local"`; no caller depends on it but it's a trap if a new caller is added
+- `.env` is gitignored — new deploy must set `COLLECTOR_FIELD_PACK_LEAN` manually or it reverts to full prompt cost
+
+---
 
 - CTA public rendering redesign (all 5 channels, fixed order, drop `primary_cta`) — see 2026-07-15 section above
 - CTA / Curation follow-up work
