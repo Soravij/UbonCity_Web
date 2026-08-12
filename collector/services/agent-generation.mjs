@@ -450,7 +450,7 @@ function buildPromptInput(item) {
   const evidencePolicy = context?.evidence_policy && typeof context.evidence_policy === "object" ? context.evidence_policy : {};
   const task = context?.task && typeof context.task === "object" ? context.task : {};
 
-  return {
+  const result = {
     item: {
       id: item?.id ?? null,
       title: toText(context?.item?.title || item?.title),
@@ -554,6 +554,34 @@ function buildPromptInput(item) {
     },
     visual_image_count: collectVisualImageUrls(item, MAX_REFERENCE_MEDIA_FOR_AI).length,
   };
+
+  const lean = String(process.env.COLLECTOR_FIELD_PACK_LEAN || "").toLowerCase() === "on";
+  if (lean) {
+    delete result.completeness;
+    delete result.evidence_policy;
+    delete result.cta_contact_candidates;
+    delete result.visual_context_counts;
+    delete result.context_counts;
+    delete result.visual_image_count;
+    if (Array.isArray(result.evidence_blocks)) {
+      result.evidence_blocks = result.evidence_blocks.map((block) => ({
+        block_type: block.block_type,
+        source_type: block.source_type,
+        text_value: block.text_value,
+        numeric_value: block.numeric_value,
+        list_value: block.list_value,
+      }));
+    }
+  }
+
+  try {
+    traceAgentGeneration("field_pack.prompt_size", {
+      chars: JSON.stringify(result).length,
+      lean,
+    });
+  } catch { /* ignore */ }
+
+  return result;
 }
 
 function buildVisualPrompt(item, imageCount) {
