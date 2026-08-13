@@ -5622,13 +5622,10 @@ export function createRepository(db) {
       ? requestedPlaceFieldProductionState
       : null;
     if (requestedPlaceFieldProductionState && !placeFieldProductionState) {
-      console.error("[workflow-transition] skipped production sync", {
-        source: "field_assignment_state",
-        item_id: Number(existing.content_item_id || 0) || null,
-        content_type: contentType || null,
-        current_production_state: String(workflow?.production_state || "").trim().toLowerCase() || null,
-        attempted_production_state: requestedPlaceFieldProductionState,
-      });
+      const currentProductionState = String(workflow?.production_state || "").trim().toLowerCase() || null;
+      throw new Error(
+        `invalid production transition: ${currentProductionState || "unknown"} → ${requestedPlaceFieldProductionState} (from assignment state ${existingAssignmentState} → ${normalizedState})`
+      );
     }
     if (placeFieldProductionState) {
       upsertWorkflowModel(

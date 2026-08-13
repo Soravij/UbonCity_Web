@@ -11050,7 +11050,12 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
     });
     res.json({ ok: true, assignment });
   } catch (err) {
-    res.status(400).json({ error: String(err?.message || "Cannot update assignment state") });
+    const msg = String(err?.message || "");
+    if (/^invalid production transition:/.test(msg)) {
+      res.status(409).json({ error: msg });
+      return;
+    }
+    res.status(400).json({ error: msg || "Cannot update assignment state" });
   }
 });
 
