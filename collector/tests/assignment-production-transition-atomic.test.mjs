@@ -86,7 +86,7 @@ test("place field assignment with head=analyzed rejects in_progress and rolls ba
       () => ctx.repo.updateAssignmentState(assignment.id, "in_progress", "test@local"),
       (err) => {
         assert.ok(err instanceof Error);
-        assert.match(err.message, /^invalid production transition:/);
+        assert.equal(err.code, "INVALID_PRODUCTION_TRANSITION");
         assert.match(err.message, /analyzed → field_working/);
         return true;
       }
@@ -133,6 +133,40 @@ test("event field assignment with head=collected still returns 200 (no productio
 
     const head = ctx.repo.ensureWorkflowModel(event.id);
     assert.equal(head.production_state, "collected", "head must stay at collected (no target computed for event)");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("submission on place+field with invalid production transition rolls back submission row and returns error", () => {
+  const ctx = createTestContext();
+  try {
+    const place = ctx.createPlace("collected");
+    const assignment = ctx.createFieldAssignment(place.id);
+
+    const userResult = ctx.db.prepare(`INSERT INTO users (email, display_name, password_hash, role) VALUES (?, 'test', 'hash', 'user')`).run(`test-${Date.now()}@local`);
+    const userId = Number(userResult.lastInsertRowid);
+
+    const submissionPayload = {
+      assignment_id: assignment.id,
+      submitted_by_user_id: userId,
+      submission_state: "submitted",
+    };
+
+    assert.throws(
+      () => ctx.repo.addSubmissionWithAssignmentTransition(submissionPayload, assignment.id, "submitted", "test@local", { actor_role: "user", reason_code: "test" }),
+      (err) => {
+        assert.ok(err instanceof Error);
+        assert.equal(err.code, "INVALID_PRODUCTION_TRANSITION");
+        return true;
+      }
+    );
+
+    const submissions = ctx.repo.listAssignmentSubmissions(assignment.id);
+    assert.equal(submissions.length, 0, "no submission row must remain after rollback");
+
+    const stillAssigned = ctx.repo.getAssignmentById(assignment.id);
+    assert.equal(stillAssigned.state, "assigned", "assignment must stay at assigned after rollback");
   } finally {
     ctx.cleanup();
   }
