@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
+import { advancePlaceProductionState } from "./test-helpers/fixture-ladder.mjs";
 import { mergeConfirmedDraftMetadata } from "../server/endpoint-schema-mapping.mjs";
 
 process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "AcceptMeta!Test1";
@@ -75,6 +76,8 @@ function createTestContext() {
   }
 
   function submitWithReturns(assignmentId, assigneeId, requestedCheckReturns, submissionState = "submitted") {
+    const assignment = repo.getAssignmentById(assignmentId);
+    advancePlaceProductionState(repo, assignment.content_item_id, "field_working");
     const submission = repo.addAssignmentSubmission({
       assignment_id: assignmentId,
       submitted_by_user_id: assigneeId,

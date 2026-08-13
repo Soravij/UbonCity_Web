@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
+import { advancePlaceProductionState } from "./test-helpers/fixture-ladder.mjs";
 import {
   getPublishableAssignmentStateRank,
   isSelectedAssignmentAccepted,
@@ -52,6 +53,8 @@ function createContext() {
     "admin"
   ).assignment.id || 0);
   const submit = (assignmentId, assigneeUserId) => {
+    const assignment = repo.getAssignmentById(assignmentId);
+    advancePlaceProductionState(repo, assignment.content_item_id, "field_working");
     repo.addAssignmentSubmission({
       assignment_id: assignmentId,
       submitted_by_user_id: assigneeUserId,

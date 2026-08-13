@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
+import { advancePlaceProductionState } from "./test-helpers/fixture-ladder.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.dirname(__dirname);
@@ -349,6 +350,7 @@ test("field return evidence submitted_at uses updated_at after accepted resubmis
       ) VALUES (?, ?, NULL, '{}', 'ready', NULL, 'test'
       )
     `).run(assignment.id, item.id);
+    advancePlaceProductionState(ctx.repo, item.id, "field_working");
     const initialSubmission = ctx.repo.addAssignmentSubmission({
       assignment_id: assignment.id,
       submitted_by_user_id: user.id,

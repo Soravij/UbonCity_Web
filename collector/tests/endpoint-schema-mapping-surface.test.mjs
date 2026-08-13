@@ -8,6 +8,7 @@ import {
 } from "../server/endpoint-schema-mapping.mjs";
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
+import { advancePlaceProductionState } from "./test-helpers/fixture-ladder.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -192,6 +193,7 @@ test("assignment submission repository path still works with and without field_r
     });
     assert.deepEqual(first.article_payload_json, { body: "draft body" });
 
+    advancePlaceProductionState(ctx.repo, item.id, "field_working");
     ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "user", reason_code: "test" });
     ctx.repo.updateAssignmentState(assignment.id, "revision_requested", "tester@local", { actor_role: "admin", reason_code: "test" });
     const resubmitted = ctx.repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
