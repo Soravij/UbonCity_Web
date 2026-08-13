@@ -2302,7 +2302,9 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
     throw new Error(contextBlockedItems[0]?.missing_requirements?.join(" | ") || "ยังส่งเข้า Agent ไม่ได้");
   }
 
-  const agentEngine = mode === "ai" ? createAgentGenerationEngine(aiConfig) : null;
+  const agentEngine = mode === "ai"
+    ? (options.agentEngine || createAgentGenerationEngine(aiConfig))
+    : null;
   const fieldPackAgentProfile = agentEngine && typeof repo.getAgentProfile === "function"
     ? repo.getAgentProfile(FIELD_PACK_AGENT_KEY)
     : null;
@@ -2322,6 +2324,73 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
   let visualContextSuccessCount = 0;
   let visualContextSkippedCount = 0;
   let visualContextErrorCount = 0;
+
+  function saveDraftAndTransitionToGenerated(finalItem, savedFieldPack, generatedBy) {
+    repo.saveItem(
+      {
+        id: finalItem.id,
+        type: finalItem.type,
+        category: finalItem.category,
+        lang: finalItem.lang,
+        title: finalItem.draft_title || finalItem.title,
+        normalized_title: finalItem.title,
+        slug: finalItem.slug,
+        description_raw: finalItem.description,
+        description_clean: finalItem.description,
+        summary: finalItem.summary,
+        meta_title: finalItem.meta_title,
+        meta_description: finalItem.meta_description,
+        latitude: finalItem.latitude,
+        longitude: finalItem.longitude,
+        map_url: finalItem.map_url,
+        google_place_id: finalItem.google_place_id,
+        image_url: finalItem.image,
+        tags: finalItem.tags,
+        source_name: finalItem.source_name,
+        source_url: finalItem.source_url,
+        source_type: "manual",
+      },
+      actorEmail
+    );
+    traceAiDraft("item.save.ok", { item_id: Number(finalItem?.id || 0) || null });
+    repo.saveDraft(finalItem.id, generationRunUid, {
+      draft_title: finalItem.draft_title || finalItem.title,
+      excerpt: finalItem.excerpt || finalItem.summary || "",
+      body: finalItem.body || finalItem.description,
+      meta_title: finalItem.meta_title,
+      meta_description: finalItem.meta_description,
+      suggested_related: finalItem.suggested_related || [],
+      ai_quality_score: finalItem.ai_quality_score || 0,
+      status: "generated",
+      ...mergeConfirmedDraftMetadata({}, repo.latestDraftByItem(finalItem.id)),
+    });
+    traceAiDraft("draft.save.ok", { item_id: Number(finalItem?.id || 0) || null });
+    const latestDraft = repo.latestDraftByItem(finalItem.id);
+    repo.upsertWorkflowModel(
+      finalItem.id,
+      {
+        production_state: "generated",
+        ...(String(finalItem?.type || "").trim().toLowerCase() === "place" ? { place_review_flag: "none" } : {}),
+        current_field_pack_id: Number(savedFieldPack?.id || 0) || null,
+        current_draft_id: Number(latestDraft?.id || 0) || null,
+        last_transition_note: "draft generated",
+      },
+      actorEmail,
+      {
+        actor_role: "system",
+        reason_code: "draft_generated",
+        bump_state_version: true,
+        bump_content_version: true,
+      }
+    );
+    repo.addVersion(finalItem.id, generatedBy, {
+      title: finalItem.draft_title || finalItem.title,
+      description_clean: finalItem.body || finalItem.description,
+      summary: finalItem.summary,
+      meta_title: finalItem.meta_title,
+      meta_description: finalItem.meta_description,
+    });
+  }
 
   for (const item of generationInput) {
     let finalItem = item;
@@ -2419,7 +2488,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
         repo.upsertWorkflowModel(
           finalItem.id,
           {
-            production_state: "analyzed",
+            production_state: "generated",
             current_field_pack_id: Number(savedFieldPack?.id || 0) || null,
             last_transition_note: "agent field pack generated",
           },
@@ -2434,7 +2503,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
       } catch (err) {
         repo.logAudit(actorEmail, "workflow.sync.skipped", "content_item", String(finalItem.id), {
           stage: "ai_draft",
-          target_production_state: "analyzed",
+          target_production_state: "generated",
           reason: String(err?.message || "state sync failed"),
         });
       }
@@ -2448,71 +2517,7 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
         field_pack_id: Number(savedFieldPack?.id || 0) || null,
         status: String(savedFieldPack?.status || "").trim() || null,
       });
-      repo.saveItem(
-        {
-          id: finalItem.id,
-          type: finalItem.type,
-          category: finalItem.category,
-          lang: finalItem.lang,
-          title: finalItem.draft_title || finalItem.title,
-          normalized_title: finalItem.title,
-          slug: finalItem.slug,
-          description_raw: finalItem.description,
-          description_clean: finalItem.description,
-          summary: finalItem.summary,
-          meta_title: finalItem.meta_title,
-          meta_description: finalItem.meta_description,
-          latitude: finalItem.latitude,
-          longitude: finalItem.longitude,
-          map_url: finalItem.map_url,
-          google_place_id: finalItem.google_place_id,
-          image_url: finalItem.image,
-          tags: finalItem.tags,
-          source_name: finalItem.source_name,
-          source_url: finalItem.source_url,
-          source_type: "manual",
-        },
-        actorEmail
-      );
-      traceAiDraft("item.save.ok", { item_id: Number(finalItem?.id || 0) || null });
-      repo.saveDraft(finalItem.id, generationRunUid, {
-        draft_title: finalItem.draft_title || finalItem.title,
-        excerpt: finalItem.excerpt || finalItem.summary || "",
-        body: finalItem.body || finalItem.description,
-        meta_title: finalItem.meta_title,
-        meta_description: finalItem.meta_description,
-        suggested_related: finalItem.suggested_related || [],
-        ai_quality_score: finalItem.ai_quality_score || 0,
-        status: "generated",
-        // accepted confirmed_* metadata must survive a regenerated draft row (§7A)
-        ...mergeConfirmedDraftMetadata({}, repo.latestDraftByItem(finalItem.id)),
-      });
-      traceAiDraft("draft.save.ok", { item_id: Number(finalItem?.id || 0) || null });
-      const latestDraft = repo.latestDraftByItem(finalItem.id);
-      repo.upsertWorkflowModel(
-        finalItem.id,
-        {
-          production_state: "generated",
-          ...(String(finalItem?.type || "").trim().toLowerCase() === "place" ? { place_review_flag: "none" } : {}),
-          current_field_pack_id: Number(savedFieldPack?.id || 0) || null,
-          current_draft_id: Number(latestDraft?.id || 0) || null,
-          last_transition_note: "draft generated",
-        },
-        actorEmail,
-        {
-          actor_role: "system",
-          reason_code: "draft_generated",
-          bump_state_version: true,
-          bump_content_version: true,
-        }
-      );
-      repo.addVersion(finalItem.id, generatedBy, {
-        title: finalItem.draft_title || finalItem.title,
-        description_clean: finalItem.body || finalItem.description,
-        summary: finalItem.summary,
-        meta_title: finalItem.meta_title,
-        meta_description: finalItem.meta_description,
-      });
+      saveDraftAndTransitionToGenerated(finalItem, savedFieldPack, generatedBy);
     }
 
     count += 1;
