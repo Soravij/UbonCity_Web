@@ -2485,7 +2485,21 @@ export async function runAiDraftStage(repo, actorEmail, options = {}) {
         status: String(savedFieldPack?.status || "").trim() || null,
       });
       try {
-        saveDraftAndTransitionToGenerated(finalItem, savedFieldPack, generatedBy);
+        repo.upsertWorkflowModel(
+          finalItem.id,
+          {
+            production_state: "generated",
+            current_field_pack_id: Number(savedFieldPack?.id || 0) || null,
+            last_transition_note: "agent field pack generated",
+          },
+          actorEmail,
+          {
+            actor_role: "system",
+            reason_code: "agent_field_pack_generated",
+            bump_state_version: true,
+            bump_content_version: true,
+          }
+        );
       } catch (err) {
         repo.logAudit(actorEmail, "workflow.sync.skipped", "content_item", String(finalItem.id), {
           stage: "ai_draft",

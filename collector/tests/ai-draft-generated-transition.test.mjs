@@ -5,8 +5,13 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDatabase } from "../db/client.mjs";
-import { createRepository } from "../db/repository.mjs";
+import { createRepository, PRODUCTION_STATES } from "../db/repository.mjs";
 import { runAiDraftStage } from "../services/workflow.mjs";
+
+assert.ok(PRODUCTION_STATES.has("analyzed"), "PRODUCTION_STATES must define analyzed");
+assert.ok(PRODUCTION_STATES.has("generated"), "PRODUCTION_STATES must define generated");
+const STATE_ANALYZED = "analyzed";
+const STATE_GENERATED = "generated";
 
 process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "AiDraft!Test1";
 
@@ -130,11 +135,11 @@ function createMockAgentEngine(fieldPackOverride = null) {
   };
 }
 
-test("AI mode produces draft with non-empty body and transitions head to generated", async () => {
+test("AI mode transitions head to generated without writing a draft row", async () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItemWithSetup();
-    ctx.setProductionState(item.id, "analyzed");
+    ctx.setProductionState(item.id, STATE_ANALYZED);
 
     const agentEngine = createMockAgentEngine();
     const result = await runAiDraftStage(ctx.repo, "test@local", {
@@ -148,53 +153,57 @@ test("AI mode produces draft with non-empty body and transitions head to generat
     assert.equal(result.errorCount, 0, "must have no errors");
 
     const head = ctx.repo.ensureWorkflowModel(item.id);
-    assert.equal(head.production_state, "generated", "head must be generated after AI draft");
+    assert.equal(head.production_state, STATE_GENERATED, "head must be generated after AI draft");
 
     const draft = ctx.repo.latestDraftByItem(item.id);
-    assert.ok(draft, "draft must exist");
-    assert.ok(String(draft.body || "").trim().length > 0, "draft body must not be empty");
-    assert.equal(draft.status, "generated", "draft status must be generated");
+    assert.ok(!draft, "AI mode must not create a draft row");
   } finally {
     ctx.cleanup();
   }
 });
 
-test("AI mode draft failure does not advance head from analyzed", async () => {
+test("AI mode does not advance head when field pack save fails", async () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItemWithSetup();
-    ctx.setProductionState(item.id, "analyzed");
+    ctx.setProductionState(item.id, STATE_ANALYZED);
 
     const agentEngine = createMockAgentEngine();
 
-    const originalSaveDraft = ctx.repo.saveDraft.bind(ctx.repo);
+    const originalCreateFieldPack = ctx.repo.createFieldPack.bind(ctx.repo);
     let callCount = 0;
-    ctx.repo.saveDraft = function (...args) {
+    ctx.repo.createFieldPack = function (...args) {
       callCount += 1;
-      throw new Error("saveDraft failed intentionally");
+      throw new Error("createFieldPack failed intentionally");
     };
 
-    await runAiDraftStage(ctx.repo, "test@local", {
-      mode: "ai",
-      contentItemId: item.id,
-      agentEngine,
-      aiConfig: { model: "test-model", provider: "test" },
-    });
+    await assert.rejects(
+      runAiDraftStage(ctx.repo, "test@local", {
+        mode: "ai",
+        contentItemId: item.id,
+        agentEngine,
+        aiConfig: { model: "test-model", provider: "test" },
+      }),
+      /createFieldPack failed intentionally/,
+      "field pack save failure must propagate"
+    );
 
-    assert.ok(callCount >= 1, "saveDraft must have been called at least once");
+    assert.ok(callCount >= 1, "createFieldPack must have been called at least once");
 
     const head = ctx.repo.ensureWorkflowModel(item.id);
-    assert.equal(head.production_state, "analyzed", "head must stay at analyzed when draft save fails");
+    assert.equal(head.production_state, STATE_ANALYZED, "head must stay at analyzed when field pack save fails");
+
+    ctx.repo.createFieldPack = originalCreateFieldPack;
   } finally {
     ctx.cleanup();
   }
 });
 
-test("AI mode saves field pack before transitioning to generated", async () => {
+test("AI mode saves field pack and sets current_field_pack_id when transitioning to generated", async () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItemWithSetup();
-    ctx.setProductionState(item.id, "analyzed");
+    ctx.setProductionState(item.id, STATE_ANALYZED);
 
     const agentEngine = createMockAgentEngine({
       ai_summary: "Custom AI summary for field pack check",
@@ -213,7 +222,7 @@ test("AI mode saves field pack before transitioning to generated", async () => {
     assert.ok(String(fieldPack.status || "").trim().length > 0, "field pack must have a status");
 
     const head = ctx.repo.ensureWorkflowModel(item.id);
-    assert.equal(head.production_state, "generated", "head must be generated");
+    assert.equal(head.production_state, STATE_GENERATED, "head must be generated");
     assert.equal(head.current_field_pack_id, fieldPack.id, "head must reference the saved field pack");
   } finally {
     ctx.cleanup();
