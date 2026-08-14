@@ -404,3 +404,96 @@ test("WIRING CHECK (composition test, NOT today's live behavior -- see PINNED BE
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+// --- PUT /api/items/:id/editor-work guard wiring ---------------------------------------------
+// This is the real Save-button write path (see audit/field-pack-guard-impact.md) that was
+// missing the guard entirely; the guard is now called at index.mjs before repo.saveItemWithFieldPack().
+
+test("PUT editor-work: place head=analyzed setting field pack to ready_for_field -> 409, pack status unchanged", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlace(ctx.repo, "analyzed");
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/items/${place.id}/editor-work`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ item: {}, field_pack: { status: "ready_for_field", ai_summary: "test pack" } }),
+      });
+      assert.equal(response.status, 409);
+
+      const current = await fetch(`${baseUrl}/api/items/${place.id}/field-pack/current`, {
+        headers: { authorization: `Bearer ${ownerToken()}` },
+      });
+      const currentBody = await current.json();
+      assert.equal(currentBody.field_pack, null, "no field pack should have been created");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("PUT editor-work: place head=generated setting field pack to ready_for_field -> succeeds", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlace(ctx.repo, "generated");
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/items/${place.id}/editor-work`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ item: {}, field_pack: { status: "ready_for_field", ai_summary: "test pack" } }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.field_pack.status, "ready_for_field");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("PUT editor-work: event head=collected setting field pack to ready_for_field -> succeeds (guard is place-only)", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const event = createEvent(ctx.repo);
+    assert.equal(event.production_state, "collected");
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/items/${event.id}/editor-work`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ item: {}, field_pack: { status: "ready_for_field", ai_summary: "test pack" } }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.field_pack.status, "ready_for_field");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("PUT editor-work: place head=analyzed saving without touching field pack status -> succeeds normally", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlace(ctx.repo, "analyzed");
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/items/${place.id}/editor-work`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ item: { title: "Updated title only" } }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.item.title, "Updated title only");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});

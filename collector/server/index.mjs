@@ -8873,6 +8873,7 @@ app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "u
     if (draftPayload) {
       draftPayload.body = sanitizedBody;
     }
+    assertFieldPackReadyProductionGate(current, fieldPackPayload?.status);
     const result = repo.saveItemWithFieldPack(itemPayload, fieldPackPayload, actorEmail(req));
     let responseItem = result?.item || null;
     if (responseItem && otherTransportMetaPayload) {
@@ -8933,7 +8934,8 @@ app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "u
     res.json({ ok: true, item: responseItem, field_pack: result?.field_pack || null, draft: savedDraft || null });
   } catch (err) {
     const message = String(err?.message || "Failed to save editor work");
-    const status = /not found/i.test(message) ? 404 : /conflict|constraint/i.test(message) ? 409 : 400;
+    const isConflict = err?.code === "FIELD_PACK_HEAD_NOT_GENERATED" || /conflict|constraint/i.test(message);
+    const status = /not found/i.test(message) ? 404 : isConflict ? 409 : 400;
     res.status(status).json({ error: message });
   }
 });
