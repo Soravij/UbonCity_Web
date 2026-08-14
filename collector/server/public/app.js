@@ -765,7 +765,21 @@ function resolveQueueBucket(itemSnapshot) {
   ) {
     return "published";
   }
-  if (hasFieldPack && isAssignmentContextReady(fieldPackStatus)) {
+  if (
+    hasFieldPack
+    && isAssignmentContextReady(fieldPackStatus)
+    && (
+      productionState === "ready_for_content"
+      || productionState === "field_working"
+      || productionState === "field_review"
+      || productionState === "writing_assigned"
+      || productionState === "writing"
+      || productionState === "in_review"
+      || productionState === "ready_for_publish"
+      || productionState === "submitted_for_admin_review"
+      || productionState === "completed"
+    )
+  ) {
     return "handoff";
   }
   if (hasFieldPack) {
