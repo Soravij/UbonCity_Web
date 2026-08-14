@@ -8873,9 +8873,16 @@ app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "u
     if (draftPayload) {
       draftPayload.body = sanitizedBody;
     }
-    const currentFieldPackId = Number(repo.ensureWorkflowModel(id)?.current_field_pack_id || 0) || null;
-    const previousFieldPackStatus = currentFieldPackId
-      ? repo.getFieldPackBundleById(currentFieldPackId)?.status
+    // previousStatus must come from the exact pack repo.saveItemWithFieldPack() is about to write
+    // (fieldPackPayload.id/.field_pack_id, same as its own target-pack resolution below) -- not from
+    // content_workflow_models.current_field_pack_id, which nothing keeps in sync with that pointer.
+    // A payload id that doesn't resolve (missing or belongs to another item) reads as null here
+    // (fail-closed, same as the no-id/create case) and is still rejected -- not silently -- by
+    // saveItemWithFieldPack()'s own existing "field pack not found" / "belongs to another content
+    // item" checks (repository.mjs:10132-10139) once this call reaches it.
+    const targetFieldPackId = Number(fieldPackPayload?.id || fieldPackPayload?.field_pack_id || 0) || null;
+    const previousFieldPackStatus = targetFieldPackId
+      ? repo.getFieldPackBundleById(targetFieldPackId)?.status
       : null;
     assertFieldPackReadyProductionGate(current, previousFieldPackStatus, fieldPackPayload?.status);
     const result = repo.saveItemWithFieldPack(itemPayload, fieldPackPayload, actorEmail(req));

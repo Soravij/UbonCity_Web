@@ -112,10 +112,11 @@ function createPlaceWithCleanContext(ctx, productionState) {
   return ctx.repo.getItem(place.id);
 }
 
-// editor-work's guard reads the *raw* content_workflow_models.current_field_pack_id column, not
-// getCurrentFieldPackByItem()'s is_current=1 lookup -- and nothing in the normal create/update
-// field-pack write path keeps that raw pointer in sync (see index.mjs:8880). Fixtures that need an
-// "existing pack" visible to the editor-work route must therefore point it explicitly.
+// editor-work's guard now resolves previousStatus from fieldPackPayload.id -- the exact pack
+// repo.saveItemWithFieldPack() is about to write -- not from content_workflow_models.current_field_pack_id
+// (see index.mjs:8876-8884). This helper still also sets current_field_pack_id so fixtures reflect a
+// realistic "pointer aligned with is_current" DB state; it is no longer load-bearing for this guard,
+// but nothing else in the write paths keeps it in sync either, so setting it here still matches reality.
 function createFieldPackWithCurrentPointer(ctx, itemId, status) {
   const fieldPack = ctx.repo.createFieldPack({
     content_item_id: itemId,
@@ -682,18 +683,18 @@ test("PUT editor-work: place head=analyzed saving without touching field pack st
   }
 });
 
-test("PUT editor-work: place head=analyzed, current_field_pack_id pack already ready_for_field, resaving the same value -> 200, DB unchanged (this is the reported item-14/pack-11 bug)", async () => {
+test("PUT editor-work: place head=analyzed, target pack already ready_for_field, resaving the same value -> 200, DB unchanged (this is the reported item-14/pack-11 bug)", async () => {
   const ctx = fieldPackRequestContext();
   try {
     const place = createPlace(ctx.repo, "analyzed");
-    createFieldPackWithCurrentPointer(ctx, place.id, "ready_for_field");
+    const fieldPack = createFieldPackWithCurrentPointer(ctx, place.id, "ready_for_field");
     ctx.db.close();
 
     await withServer(ctx.dbPath, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/items/${place.id}/editor-work`, {
         method: "PUT",
         headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
-        body: JSON.stringify({ item: {}, field_pack: { status: "ready_for_field", ai_summary: "test pack" } }),
+        body: JSON.stringify({ item: {}, field_pack: { id: fieldPack.id, status: "ready_for_field", ai_summary: "test pack" } }),
       });
       assert.equal(response.status, 200);
       const body = await response.json();
@@ -710,18 +711,18 @@ test("PUT editor-work: place head=analyzed, current_field_pack_id pack already r
   }
 });
 
-test("PUT editor-work: place head=analyzed, current_field_pack_id pack is draft, switching to ready_for_field -> 409, pack status unchanged", async () => {
+test("PUT editor-work: place head=analyzed, target pack is draft, switching to ready_for_field -> 409, pack status unchanged", async () => {
   const ctx = fieldPackRequestContext();
   try {
     const place = createPlace(ctx.repo, "analyzed");
-    createFieldPackWithCurrentPointer(ctx, place.id, "draft");
+    const fieldPack = createFieldPackWithCurrentPointer(ctx, place.id, "draft");
     ctx.db.close();
 
     await withServer(ctx.dbPath, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/items/${place.id}/editor-work`, {
         method: "PUT",
         headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
-        body: JSON.stringify({ item: {}, field_pack: { status: "ready_for_field", ai_summary: "test pack" } }),
+        body: JSON.stringify({ item: {}, field_pack: { id: fieldPack.id, status: "ready_for_field", ai_summary: "test pack" } }),
       });
       assert.equal(response.status, 409);
 
@@ -736,22 +737,101 @@ test("PUT editor-work: place head=analyzed, current_field_pack_id pack is draft,
   }
 });
 
-test("PUT editor-work: place head=analyzed, current_field_pack_id pack already ready_for_field, downgrading to draft -> 200", async () => {
+test("PUT editor-work: place head=analyzed, target pack already ready_for_field, downgrading to draft -> 200", async () => {
   const ctx = fieldPackRequestContext();
   try {
     const place = createPlace(ctx.repo, "analyzed");
-    createFieldPackWithCurrentPointer(ctx, place.id, "ready_for_field");
+    const fieldPack = createFieldPackWithCurrentPointer(ctx, place.id, "ready_for_field");
     ctx.db.close();
 
     await withServer(ctx.dbPath, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/items/${place.id}/editor-work`, {
         method: "PUT",
         headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
-        body: JSON.stringify({ item: {}, field_pack: { status: "draft", ai_summary: "test pack" } }),
+        body: JSON.stringify({ item: {}, field_pack: { id: fieldPack.id, status: "draft", ai_summary: "test pack" } }),
       });
       assert.equal(response.status, 200);
       const body = await response.json();
       assert.equal(body.field_pack.status, "draft", "downgrading away from ready_for_field must never be blocked by this guard");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+// --- Divergent pointer: current_field_pack_id (pack A) != fieldPackPayload.id (pack B) ----------
+// These two deliberately do NOT use createFieldPackWithCurrentPointer to keep the pointer and the
+// payload's target pack aligned -- they reproduce the real-world case (nothing in the write paths
+// keeps current_field_pack_id synced to the pack a save actually targets) that the earlier version
+// of this guard got wrong: it read previousStatus off pack A (via current_field_pack_id) while
+// repo.saveItemWithFieldPack() was actually about to write pack B (via fieldPackPayload.id).
+
+test("PUT editor-work: current_field_pack_id points at pack A (ready_for_field) but the payload targets pack B (draft) -> 409, pack B's own status must gate this, not pack A's", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlace(ctx.repo, "analyzed");
+    const packA = ctx.repo.createFieldPack({ content_item_id: place.id, status: "ready_for_field", ai_summary: "pack A" });
+    ctx.repo.upsertWorkflowModel(
+      place.id,
+      { current_field_pack_id: packA.id },
+      "test@local",
+      { actor_role: "system", reason_code: "test_fixture_divergent_pointer" }
+    );
+    const packB = ctx.repo.createFieldPack({ content_item_id: place.id, status: "draft", ai_summary: "pack B" });
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/items/${place.id}/editor-work`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ item: {}, field_pack: { id: packB.id, status: "ready_for_field", ai_summary: "pack B" } }),
+      });
+      assert.equal(
+        response.status,
+        409,
+        "trusting pack A's already-ready status here would let pack B skip the production-state check entirely"
+      );
+
+      const current = await fetch(`${baseUrl}/api/items/${place.id}/field-pack/current`, {
+        headers: { authorization: `Bearer ${ownerToken()}` },
+      });
+      const currentBody = await current.json();
+      assert.equal(currentBody.field_pack.id, packB.id);
+      assert.equal(currentBody.field_pack.status, "draft", "pack B must stay unchanged after the 409");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("PUT editor-work: current_field_pack_id points at pack A (draft) but the payload resaves pack B (already ready_for_field) with the same value -> 200", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlace(ctx.repo, "analyzed");
+    const packA = ctx.repo.createFieldPack({ content_item_id: place.id, status: "draft", ai_summary: "pack A" });
+    ctx.repo.upsertWorkflowModel(
+      place.id,
+      { current_field_pack_id: packA.id },
+      "test@local",
+      { actor_role: "system", reason_code: "test_fixture_divergent_pointer" }
+    );
+    const packB = ctx.repo.createFieldPack({ content_item_id: place.id, status: "ready_for_field", ai_summary: "pack B" });
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/items/${place.id}/editor-work`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ item: {}, field_pack: { id: packB.id, status: "ready_for_field", ai_summary: "pack B" } }),
+      });
+      assert.equal(
+        response.status,
+        200,
+        "trusting pack A's draft status here would wrongly 409 a legitimate resave of pack B -- the exact item-14 bug shape"
+      );
+      const body = await response.json();
+      assert.equal(body.field_pack.id, packB.id);
+      assert.equal(body.field_pack.status, "ready_for_field");
     });
   } finally {
     ctx.cleanup();
