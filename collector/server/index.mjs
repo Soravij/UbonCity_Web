@@ -8873,7 +8873,11 @@ app.put("/api/items/:id/editor-work", requireRole("owner", "admin", "editor", "u
     if (draftPayload) {
       draftPayload.body = sanitizedBody;
     }
-    assertFieldPackReadyProductionGate(current, fieldPackPayload?.status);
+    const currentFieldPackId = Number(repo.ensureWorkflowModel(id)?.current_field_pack_id || 0) || null;
+    const previousFieldPackStatus = currentFieldPackId
+      ? repo.getFieldPackBundleById(currentFieldPackId)?.status
+      : null;
+    assertFieldPackReadyProductionGate(current, previousFieldPackStatus, fieldPackPayload?.status);
     const result = repo.saveItemWithFieldPack(itemPayload, fieldPackPayload, actorEmail(req));
     let responseItem = result?.item || null;
     if (responseItem && otherTransportMetaPayload) {
@@ -12576,9 +12580,15 @@ function isFieldPackReadyStatusRequest(rawStatus) {
   return normalized === "ready_for_field" || normalized === "ready_for_handoff";
 }
 
-function assertFieldPackReadyProductionGate(item, requestedStatus) {
+// Gates the TRANSITION into a ready status, not the value itself: a pack that is already
+// ready_for_field/ready_for_handoff can be re-saved (no-op) or switched between the two ready
+// flavors with no head check, and any downgrade (-> draft, etc.) is never touched by this guard.
+// Only "was not ready, now requesting ready" is checked against production_state. previousStatus
+// must come from the DB (the pack row), never from the request payload.
+function assertFieldPackReadyProductionGate(item, previousStatus, requestedStatus) {
   if (String(item?.type || "").trim().toLowerCase() !== "place") return;
   if (!isFieldPackReadyStatusRequest(requestedStatus)) return;
+  if (isFieldPackReadyStatusRequest(previousStatus)) return;
   const productionState = String(item?.production_state || "").trim().toLowerCase();
   if (!FIELD_PACK_PRE_GENERATED_PLACE_PRODUCTION_STATES.has(productionState)) return;
   const err = new Error(
@@ -12605,7 +12615,7 @@ app.post("/api/items/:id/field-packs", requireRole("owner", "admin", "user"), (r
   }
 
   try {
-    assertFieldPackReadyProductionGate(item, req.body?.status);
+    assertFieldPackReadyProductionGate(item, null, req.body?.status);
     const fieldPack = repo.createFieldPack({
       ...(req.body || {}),
       content_item_id: id,
@@ -12645,7 +12655,7 @@ app.put("/api/field-packs/:fieldPackId", requireRole("owner", "admin", "user"), 
     if (!ensureItemMutationAccess(req, res, item)) {
       return;
     }
-    assertFieldPackReadyProductionGate(item, req.body?.status);
+    assertFieldPackReadyProductionGate(item, existingFieldPack?.status, req.body?.status);
     const fieldPack = repo.updateFieldPack(fieldPackId, {
       ...(req.body || {}),
       updated_by: actorEmail(req),
@@ -12735,7 +12745,7 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
       }
     }
     const fieldPackUpdatePayload = buildFieldPackUpdatePayloadFromAgent(agentFieldPack);
-    assertFieldPackReadyProductionGate(item, fieldPackUpdatePayload.status);
+    assertFieldPackReadyProductionGate(item, currentFieldPack?.status, fieldPackUpdatePayload.status);
     fieldPack = repo.createFieldPack({
       ...(currentFieldPack || {}),
       ...fieldPackUpdatePayload,

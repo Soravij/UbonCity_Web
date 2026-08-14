@@ -112,6 +112,25 @@ function createPlaceWithCleanContext(ctx, productionState) {
   return ctx.repo.getItem(place.id);
 }
 
+// editor-work's guard reads the *raw* content_workflow_models.current_field_pack_id column, not
+// getCurrentFieldPackByItem()'s is_current=1 lookup -- and nothing in the normal create/update
+// field-pack write path keeps that raw pointer in sync (see index.mjs:8880). Fixtures that need an
+// "existing pack" visible to the editor-work route must therefore point it explicitly.
+function createFieldPackWithCurrentPointer(ctx, itemId, status) {
+  const fieldPack = ctx.repo.createFieldPack({
+    content_item_id: itemId,
+    status,
+    ai_summary: "test pack",
+  });
+  ctx.repo.upsertWorkflowModel(
+    itemId,
+    { current_field_pack_id: fieldPack.id },
+    "test@local",
+    { actor_role: "system", reason_code: "test_fixture_current_pack_pointer" }
+  );
+  return fieldPack;
+}
+
 async function withServer(dbPath, run, extraEnv = {}) {
   const port = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -289,6 +308,64 @@ test("POST field pack create: place head=analyzed rejects ready_for_field with 4
   }
 });
 
+test("PUT field pack: place head=analyzed resaving pack already at ready_for_field with the same value -> 200, DB unchanged", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlace(ctx.repo, "analyzed");
+    const fieldPack = ctx.repo.createFieldPack({
+      content_item_id: place.id,
+      status: "ready_for_field",
+      ai_summary: "already ready",
+    });
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/field-packs/${fieldPack.id}`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ status: "ready_for_field", ai_summary: "already ready" }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.field_pack.status, "ready_for_field");
+
+      const current = await fetch(`${baseUrl}/api/items/${place.id}/field-pack/current`, {
+        headers: { authorization: `Bearer ${ownerToken()}` },
+      });
+      const currentBody = await current.json();
+      assert.equal(currentBody.field_pack.status, "ready_for_field", "resave with the same value must not be blocked");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("PUT field pack: place head=analyzed downgrading pack from ready_for_field to draft -> 200", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlace(ctx.repo, "analyzed");
+    const fieldPack = ctx.repo.createFieldPack({
+      content_item_id: place.id,
+      status: "ready_for_field",
+      ai_summary: "was ready",
+    });
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/field-packs/${fieldPack.id}`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ status: "draft" }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.field_pack.status, "draft", "downgrading away from ready_for_field must never be blocked by this guard");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 // --- POST /api/items/:id/field-pack/regenerate guard wiring -----------------------------------
 //
 // Every real agentEngine.generateFieldPack/reviseFieldPack call (internal AND external, see
@@ -358,6 +435,44 @@ test("PINNED BEHAVIOR (today's actual live route, not the guard wiring): POST re
   }
 });
 
+test("regenerate: place head=analyzed with an existing ready_for_field pack, agent sends no status -> 200, pack downgrades to draft (never blocked)", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlaceWithCleanContext(ctx, "analyzed");
+    ctx.repo.createFieldPack({
+      content_item_id: place.id,
+      status: "ready_for_field",
+      ai_summary: "already ready before regenerate",
+    });
+    ctx.db.close();
+
+    await withMockExternalAgent(async (externalAgentUrl) => {
+      await withServer(ctx.dbPath, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/items/${place.id}/field-pack/regenerate`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+          body: JSON.stringify({ revision_note: "regenerate over an already-ready pack" }),
+        });
+        assert.equal(response.status, 200);
+        const body = await response.json();
+        assert.equal(body.field_pack.status, "draft");
+      }, {
+        COLLECTOR_AGENT_ENGINE: "external",
+        COLLECTOR_EXTERNAL_AGENT_URL: externalAgentUrl,
+      });
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+// Note: regenerate cannot exercise the "resave" (old=ready_for_field, new=ready_for_field) or
+// "block" (old=draft, new=ready_for_field) scenarios through a real HTTP call at all -- see the
+// PINNED BEHAVIOR comment block above. normalizeFieldPack forces every real agent response's status
+// down to draft/field_in_progress/field_done/on_hold before it reaches this route's guard call, so
+// "new === ready_for_field" is structurally unreachable here. Those two scenarios are covered at the
+// guard-composition level by the WIRING CHECK test below instead.
+
 const wiringProbeSource = String.raw`
 process.chdir(process.env.COLLECTOR_ROOT);
 const { buildFieldPackUpdatePayloadFromAgent } = await import(process.env.ENDPOINT_SCHEMA_MAPPING_MODULE_URL);
@@ -366,7 +481,7 @@ const payload = buildFieldPackUpdatePayloadFromAgent({});
 let threw = false;
 let code = null;
 try {
-  assertFieldPackReadyProductionGate({ type: "place", production_state: "analyzed" }, payload.status);
+  assertFieldPackReadyProductionGate({ type: "place", production_state: "analyzed" }, null, payload.status);
 } catch (err) {
   threw = true;
   code = (err && err.code) || null;
@@ -400,6 +515,75 @@ test("WIRING CHECK (composition test, NOT today's live behavior -- see PINNED BE
     assert.equal(output.payloadStatus, "ready_for_field", "buildFieldPackUpdatePayloadFromAgent must default to ready_for_field when the agent sends no status");
     assert.equal(output.threw, true, "assertFieldPackReadyProductionGate must throw for place head=analyzed given that default");
     assert.equal(output.code, "FIELD_PACK_HEAD_NOT_GENERATED");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+const oldNewComboProbeSource = String.raw`
+process.chdir(process.env.COLLECTOR_ROOT);
+const { assertFieldPackReadyProductionGate } = await import(process.env.SERVER_MODULE_URL);
+
+function check(label, item, previousStatus, requestedStatus) {
+  let threw = false;
+  let code = null;
+  try {
+    assertFieldPackReadyProductionGate(item, previousStatus, requestedStatus);
+  } catch (err) {
+    threw = true;
+    code = (err && err.code) || null;
+  }
+  return { label, threw, code };
+}
+
+const analyzed = { type: "place", production_state: "analyzed" };
+const generated = { type: "place", production_state: "generated" };
+
+const results = [
+  check("resave: ready_for_field -> ready_for_field, head=analyzed", analyzed, "ready_for_field", "ready_for_field"),
+  check("block: draft -> ready_for_field, head=analyzed", analyzed, "draft", "ready_for_field"),
+  check("create: null -> ready_for_field, head=analyzed", analyzed, null, "ready_for_field"),
+  check("downgrade: ready_for_field -> draft, head=analyzed", analyzed, "ready_for_field", "draft"),
+  check("generated head allows a fresh ready_for_field request", generated, null, "ready_for_field"),
+];
+process.stdout.write(JSON.stringify(results));
+process.exit(0);
+`;
+
+test("WIRING CHECK: old-vs-new status combinations (resave/block/create/downgrade) match the spec exactly", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "field-pack-guard-combo-"));
+  const runnerPath = path.join(tempDir, "runner.mjs");
+  const dbPath = path.join(tempDir, "collector.sqlite");
+  fs.writeFileSync(runnerPath, oldNewComboProbeSource, "utf8");
+  try {
+    const result = spawnSync(process.execPath, [runnerPath], {
+      cwd: collectorRoot,
+      env: {
+        ...process.env,
+        COLLECTOR_ROOT: collectorRoot,
+        DB_PATH: dbPath,
+        BACKEND_JWT_SECRET: authSecret,
+        SERVER_MODULE_URL: pathToFileURL(serverPath).href,
+        COLLECTOR_DISABLE_LISTEN: "1",
+      },
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    assert.equal(result.status, 0, `combo probe failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    const results = JSON.parse(String(result.stdout || "").trim());
+    const byLabel = Object.fromEntries(results.map((r) => [r.label, r]));
+
+    assert.equal(byLabel["resave: ready_for_field -> ready_for_field, head=analyzed"].threw, false, "resaving the same ready value must be a no-op regardless of head");
+
+    assert.equal(byLabel["block: draft -> ready_for_field, head=analyzed"].threw, true, "switching draft -> ready_for_field before generated must be blocked");
+    assert.equal(byLabel["block: draft -> ready_for_field, head=analyzed"].code, "FIELD_PACK_HEAD_NOT_GENERATED");
+
+    assert.equal(byLabel["create: null -> ready_for_field, head=analyzed"].threw, true, "creating fresh at ready_for_field before generated must be blocked, same as before this change");
+    assert.equal(byLabel["create: null -> ready_for_field, head=analyzed"].code, "FIELD_PACK_HEAD_NOT_GENERATED");
+
+    assert.equal(byLabel["downgrade: ready_for_field -> draft, head=analyzed"].threw, false, "downgrading away from ready_for_field must never be touched by this guard");
+
+    assert.equal(byLabel["generated head allows a fresh ready_for_field request"].threw, false, "once head reaches generated, a fresh ready_for_field request must be allowed");
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -492,6 +676,82 @@ test("PUT editor-work: place head=analyzed saving without touching field pack st
       assert.equal(response.status, 200);
       const body = await response.json();
       assert.equal(body.item.title, "Updated title only");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("PUT editor-work: place head=analyzed, current_field_pack_id pack already ready_for_field, resaving the same value -> 200, DB unchanged (this is the reported item-14/pack-11 bug)", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlace(ctx.repo, "analyzed");
+    createFieldPackWithCurrentPointer(ctx, place.id, "ready_for_field");
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/items/${place.id}/editor-work`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ item: {}, field_pack: { status: "ready_for_field", ai_summary: "test pack" } }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.field_pack.status, "ready_for_field");
+
+      const current = await fetch(`${baseUrl}/api/items/${place.id}/field-pack/current`, {
+        headers: { authorization: `Bearer ${ownerToken()}` },
+      });
+      const currentBody = await current.json();
+      assert.equal(currentBody.field_pack.status, "ready_for_field", "resave with the same value must not be blocked");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("PUT editor-work: place head=analyzed, current_field_pack_id pack is draft, switching to ready_for_field -> 409, pack status unchanged", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlace(ctx.repo, "analyzed");
+    createFieldPackWithCurrentPointer(ctx, place.id, "draft");
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/items/${place.id}/editor-work`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ item: {}, field_pack: { status: "ready_for_field", ai_summary: "test pack" } }),
+      });
+      assert.equal(response.status, 409);
+
+      const current = await fetch(`${baseUrl}/api/items/${place.id}/field-pack/current`, {
+        headers: { authorization: `Bearer ${ownerToken()}` },
+      });
+      const currentBody = await current.json();
+      assert.equal(currentBody.field_pack.status, "draft", "field pack status must stay unchanged after the 409");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("PUT editor-work: place head=analyzed, current_field_pack_id pack already ready_for_field, downgrading to draft -> 200", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlace(ctx.repo, "analyzed");
+    createFieldPackWithCurrentPointer(ctx, place.id, "ready_for_field");
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/items/${place.id}/editor-work`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ item: {}, field_pack: { status: "draft", ai_summary: "test pack" } }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.field_pack.status, "draft", "downgrading away from ready_for_field must never be blocked by this guard");
     });
   } finally {
     ctx.cleanup();
