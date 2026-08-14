@@ -4787,7 +4787,9 @@ export function createRepository(db) {
 
   function assertValidTransition(contentType, stateGroup, fromState, toState, contentItemId = null) {
     if (!canTransition(contentType, stateGroup, fromState, toState, contentItemId)) {
-      throw new Error(`invalid ${stateGroup} transition: ${String(fromState || "null")} -> ${String(toState || "null")}`);
+      const err = new Error(`invalid ${stateGroup} transition: ${String(fromState || "null")} -> ${String(toState || "null")}`);
+      err.code = "INVALID_TRANSITION";
+      throw err;
     }
   }
 
@@ -5555,6 +5557,14 @@ export function createRepository(db) {
     return runInTransaction(db, () => updateAssignmentStateInternal(assignmentId, nextState, actorEmail, payload));
   }
 
+  function addSubmissionWithAssignmentTransition(submissionPayload, assignmentId, nextState, actorEmail = "system@local", assignmentPayload = {}) {
+    return runInTransaction(db, () => {
+      const submission = addAssignmentSubmission(submissionPayload);
+      const assignment = updateAssignmentStateInternal(assignmentId, nextState, actorEmail, assignmentPayload);
+      return { submission, assignment };
+    });
+  }
+
   function updateAssignmentStateInternal(assignmentId, nextState, actorEmail = "system@local", payload = {}) {
     const id = Number(assignmentId || 0);
     const normalizedState = normalizeStateValue(nextState, "assignment");
@@ -5622,13 +5632,12 @@ export function createRepository(db) {
       ? requestedPlaceFieldProductionState
       : null;
     if (requestedPlaceFieldProductionState && !placeFieldProductionState) {
-      console.error("[workflow-transition] skipped production sync", {
-        source: "field_assignment_state",
-        item_id: Number(existing.content_item_id || 0) || null,
-        content_type: contentType || null,
-        current_production_state: String(workflow?.production_state || "").trim().toLowerCase() || null,
-        attempted_production_state: requestedPlaceFieldProductionState,
-      });
+      const currentProductionState = String(workflow?.production_state || "").trim().toLowerCase() || null;
+      const err = new Error(
+        `invalid production transition: ${currentProductionState || "unknown"} → ${requestedPlaceFieldProductionState} (from assignment state ${existingAssignmentState} → ${normalizedState})`
+      );
+      err.code = "INVALID_PRODUCTION_TRANSITION";
+      throw err;
     }
     if (placeFieldProductionState) {
       upsertWorkflowModel(
@@ -12690,6 +12699,7 @@ export function createRepository(db) {
     updateAssignmentMediaResetPolicy,
     requestAssignmentRevisionWithReset,
     addAssignmentSubmission,
+    addSubmissionWithAssignmentTransition,
     setAssignmentLatestSubmission,
     getAssignmentSubmissionById,
     listAssignmentSubmissions,

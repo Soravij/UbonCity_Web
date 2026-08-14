@@ -475,13 +475,8 @@ test("quality pass moves place from the P1 gate to ready_for_content before reco
   }
 });
 
-test("legacy place field sync logs its skipped ladder write instead of failing the assignment", () => {
+test("place field assignment rejects invalid production transition and rolls back assignment", () => {
   const ctx = createContext();
-  const originalError = console.error;
-  const skippedLogs = [];
-  console.error = (...args) => {
-    if (args[0] === "[workflow-transition] skipped production sync") skippedLogs.push(args[1]);
-  };
   try {
     const place = ctx.createItem("place", { production_state: "collected" });
     const assignment = ctx.repo.createAssignment({
@@ -491,17 +486,19 @@ test("legacy place field sync logs its skipped ladder write instead of failing t
       assignee_name: "legacy worker",
       assignee_contact: "legacy@example.com",
     });
-    assert.doesNotThrow(() => ctx.repo.updateAssignmentState(assignment.id, "in_progress", "test@local"));
+    assert.throws(
+      () => ctx.repo.updateAssignmentState(assignment.id, "in_progress", "test@local"),
+      (err) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /^invalid production transition:/);
+        assert.match(err.message, /collected → field_working/);
+        return true;
+      }
+    );
+    const stillAssigned = ctx.repo.getAssignmentById(assignment.id);
+    assert.equal(stillAssigned.state, "assigned", "assignment must stay at assigned after rollback");
     assert.equal(ctx.repo.ensureWorkflowModel(place.id).production_state, "collected");
-    assert.deepEqual(skippedLogs, [{
-      source: "field_assignment_state",
-      item_id: place.id,
-      content_type: "place",
-      current_production_state: "collected",
-      attempted_production_state: "field_working",
-    }]);
   } finally {
-    console.error = originalError;
     ctx.cleanup();
   }
 }, { concurrency: false });

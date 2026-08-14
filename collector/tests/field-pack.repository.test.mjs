@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
+import { advancePlaceProductionState } from "./test-helpers/fixture-ladder.mjs";
 
 process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "FieldPack!Test1";
 
@@ -2273,6 +2274,7 @@ test("resubmitted assignment creates a new submission row, preserves the previou
       },
       contributor_note: "initial submit",
     });
+    advancePlaceProductionState(ctx.repo, item.id, "field_working");
     ctx.repo.updateAssignmentState(
       assignmentId,
       "submitted",
@@ -2373,6 +2375,7 @@ test("resubmitted assignment merges incoming media payload into the existing sub
         ],
       },
     });
+    advancePlaceProductionState(ctx.repo, item.id, "field_working");
     ctx.repo.updateAssignmentState(
       assignmentId,
       "submitted",
@@ -2437,6 +2440,7 @@ test("createAssignmentSubmissionDeliverable binds source_asset_id to the current
     const assignmentId = Number(assignmentResult.assignment.id || 0);
     const roundZeroAsset = ctx.createAssignmentWorkAsset(item.id, assignmentId, 0, "round-zero");
 
+    advancePlaceProductionState(ctx.repo, item.id, "field_working");
     ctx.repo.addAssignmentSubmission({
       assignment_id: assignmentId,
       submitted_by_user_id: assignee.id,

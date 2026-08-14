@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
 import { createRepository, resolveActiveAssignmentWorkBatchRows } from "../db/repository.mjs";
+import { advancePlaceProductionState } from "./test-helpers/fixture-ladder.mjs";
 
 const testFilePath = fileURLToPath(import.meta.url);
 const testsDir = path.dirname(testFilePath);
@@ -153,6 +154,8 @@ function createTestContext() {
   // round moves from 1 to 2 (the first revision_requested transition only bumps
   // revision_round 0 -> 1, which still canonically resolves to round 1).
   function advanceToRoundTwo(assignmentId) {
+    const assignment = repo.getAssignmentById(assignmentId);
+    advancePlaceProductionState(repo, assignment.content_item_id, "field_working");
     repo.updateAssignmentState(assignmentId, "submitted", "tester@local", { actor_role: "admin", reason_code: "test_submit" });
     requestRevision(assignmentId);
     repo.updateAssignmentState(assignmentId, "resubmitted", "tester@local", { actor_role: "admin", reason_code: "test_resubmit" });
@@ -269,6 +272,7 @@ test("image_reset_required removes only image assignment-work assets; retained v
       assignment_media_type: "video",
     });
 
+    advancePlaceProductionState(ctx.repo, item.id, "field_working");
     ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "admin", reason_code: "test_submit" });
     ctx.requestRevision(assignment.id, {
       image_reset_required: true,
@@ -296,6 +300,7 @@ test("reset targets the canonical current round, not revision_round + 1, and sti
       assignment_media_type: "image",
     });
 
+    advancePlaceProductionState(ctx.repo, item.id, "field_working");
     ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "admin", reason_code: "test_submit" });
     ctx.requestRevision(assignment.id); // revision_round 0 -> 1, no reset; asset stays untouched at round 1
     ctx.repo.updateAssignmentState(assignment.id, "resubmitted", "tester@local", { actor_role: "admin", reason_code: "test_resubmit" });
@@ -395,6 +400,7 @@ test("a reset asset no longer exists and cannot be bound to a deliverable", () =
       assignment_media_type: "image",
     });
 
+    advancePlaceProductionState(ctx.repo, item.id, "field_working");
     ctx.repo.addAssignmentSubmission({ assignment_id: assignment.id, submitted_by_user_id: assignee.id, submission_state: "submitted" });
     ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "admin", reason_code: "test_submit" });
     ctx.requestRevision(assignment.id, {
@@ -442,6 +448,7 @@ test("image reset detaches a promoted (Article Workspace-selected) row instead o
     });
     ctx.repo.setContentAssetRole(item.id, promotedAsset.asset_id, "cover");
 
+    advancePlaceProductionState(ctx.repo, item.id, "field_working");
     ctx.repo.updateAssignmentState(assignment.id, "submitted", "tester@local", { actor_role: "admin", reason_code: "test_submit" });
     ctx.requestRevision(assignment.id, {
       image_reset_required: true,

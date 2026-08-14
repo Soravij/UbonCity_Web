@@ -8806,7 +8806,7 @@ app.post("/api/items/:id/place-ready-for-content", requireRole("owner", "admin",
     res.json({ ok: true, item: attachSingleItemClaimUser(attachWorkflowHeadFields(updated)), model });
   } catch (err) {
     const msg = String(err?.message || "Cannot move place item to ready_for_content");
-    res.status(/invalid .*transition/i.test(msg) ? 409 : 400).json({ error: msg });
+    res.status(err?.code === "INVALID_TRANSITION" || err?.code === "INVALID_PRODUCTION_TRANSITION" ? 409 : 400).json({ error: msg });
   }
 });
 
@@ -9179,7 +9179,7 @@ app.post("/api/items/:id/workflow/backward-transitions", requireRole("owner", "a
     });
   } catch (err) {
     const msg = String(err?.message || "Cannot transition workflow backward");
-    const status = /invalid .*transition/i.test(msg) ? 409 : 400;
+    const status = err?.code === "INVALID_TRANSITION" || err?.code === "INVALID_PRODUCTION_TRANSITION" ? 409 : 400;
     res.status(status).json({ error: msg });
   }
 });
@@ -9250,7 +9250,7 @@ app.post("/api/items/:id/article-process/transition", requireRole("owner", "admi
     res.json({ ok: true, ...buildArticleProcessPayload(req, nextItem) });
   } catch (err) {
     const msg = String(err?.message || "Cannot transition article process");
-    const status = /invalid .*transition|cannot transition|latest draft is required|review prerequisite missing|stale review report|quality gate failed/i.test(msg) ? 409 : 400;
+    const status = err?.code === "INVALID_TRANSITION" || err?.code === "INVALID_PRODUCTION_TRANSITION" || /cannot transition|latest draft is required|review prerequisite missing|stale review report|quality gate failed/i.test(msg) ? 409 : 400;
     res.status(status).json({ error: msg });
   }
 }));
@@ -9421,7 +9421,7 @@ app.post("/api/items/:id/article-process/submit-review", requireRole("owner", "a
       res.status(409).json({ ok: false, error: msg, failure_reason: "missing_latest_draft_body" });
       return;
     }
-    const status = /invalid .*transition|cannot transition|duplicate submission|requires revision_requested|use resubmitted/i.test(msg) ? 409 : 400;
+    const status = err?.code === "INVALID_TRANSITION" || err?.code === "INVALID_PRODUCTION_TRANSITION" || /cannot transition|duplicate submission|requires revision_requested|use resubmitted/i.test(msg) ? 409 : 400;
     res.status(status).json({ error: msg });
   }
 });
@@ -10425,7 +10425,7 @@ app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "a
     });
   } catch (err) {
     const msg = String(err?.message || "Cannot create article editorial assignment");
-    const status = /invalid .*transition|cannot transition|already exists/i.test(msg) ? 409 : 400;
+    const status = err?.code === "INVALID_TRANSITION" || err?.code === "INVALID_PRODUCTION_TRANSITION" || /cannot transition|already exists/i.test(msg) ? 409 : 400;
     res.status(status).json({ error: msg });
   }
 });
@@ -10487,7 +10487,7 @@ app.post("/api/items/:id/article-editorial-assignments/:assignmentId/request-rev
     });
   } catch (err) {
     const msg = String(err?.message || "Cannot request article revision");
-    const status = /invalid .*transition|cannot transition/i.test(msg) ? 409 : 400;
+    const status = err?.code === "INVALID_TRANSITION" || err?.code === "INVALID_PRODUCTION_TRANSITION" || /cannot transition/i.test(msg) ? 409 : 400;
     res.status(status).json({ error: msg });
   }
 });
@@ -11050,7 +11050,12 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
     });
     res.json({ ok: true, assignment });
   } catch (err) {
-    res.status(400).json({ error: String(err?.message || "Cannot update assignment state") });
+    const msg = String(err?.message || "");
+    if (err?.code === "INVALID_PRODUCTION_TRANSITION" || err?.code === "INVALID_TRANSITION") {
+      res.status(409).json({ error: msg });
+      return;
+    }
+    res.status(400).json({ error: msg || "Cannot update assignment state" });
   }
 });
 
@@ -11240,7 +11245,7 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
     const assignmentAction = normalizedSubmissionState === "resubmitted" ? "resubmit" : "submit";
     const reasonCode = String(req.body?.reason_code || "").trim().toLowerCase()
       || ASSIGNMENT_REASON_CODE_DEFAULTS[assignmentAction];
-    const submission = repo.addAssignmentSubmission(buildAssignmentSubmissionPayload({
+    const submissionPayload = buildAssignmentSubmissionPayload({
       assignmentId,
       submittedByUserId: req.authUser?.id,
       submissionState: normalizedSubmissionState,
@@ -11250,15 +11255,21 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
       contributorNote: req.body?.contributor_note,
       reviewerNote: req.body?.reviewer_note,
       reviewedAt: req.body?.reviewed_at,
-    }));
+    });
     const keepAssetIds = Array.isArray(req.body?.media_payload_json?.assets)
       ? req.body.media_payload_json.assets.map((row) => Number(row?.id || 0)).filter((id) => id > 0)
       : [];
     const nextAssignmentState = normalizedSubmissionState === "resubmitted" ? "resubmitted" : "submitted";
-    const updatedAssignment = repo.updateAssignmentState(assignmentId, nextAssignmentState, actorEmail(req), {
-      actor_role: role,
-      reason_code: reasonCode,
-    });
+    const { submission, assignment: updatedAssignment } = repo.addSubmissionWithAssignmentTransition(
+      submissionPayload,
+      assignmentId,
+      nextAssignmentState,
+      actorEmail(req),
+      {
+        actor_role: role,
+        reason_code: reasonCode,
+      }
+    );
     if (imageResetRequired || videoResetRequired) {
       repo.updateAssignmentMediaResetPolicy(assignmentId, {
         image_reset_required: false,
@@ -11302,7 +11313,9 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
     }
     res.status(201).json({ ok: true, submission });
   } catch (err) {
-    res.status(400).json({ error: String(err?.message || "Cannot create submission") });
+    const msg = String(err?.message || "");
+    const status = err?.code === "INVALID_PRODUCTION_TRANSITION" || err?.code === "INVALID_TRANSITION" ? 409 : 400;
+    res.status(status).json({ error: msg || "Cannot create submission" });
   }
 });
 
@@ -14074,7 +14087,7 @@ app.post("/api/review/action", requireRole("admin"), (req, res) => {
     res.json({ ...result, cleanup });
   } catch (err) {
     const msg = String(err?.message || "Cannot apply review action");
-    const status = /invalid .*transition|cannot transition|Invalid review action payload|review prerequisite missing|latest review report is required|review governance conflict/i.test(msg) ? 409 : 400;
+    const status = err?.code === "INVALID_TRANSITION" || err?.code === "INVALID_PRODUCTION_TRANSITION" || /cannot transition|Invalid review action payload|review prerequisite missing|latest review report is required|review governance conflict/i.test(msg) ? 409 : 400;
     res.status(status).json({ error: msg });
   }
 });
@@ -14084,7 +14097,7 @@ app.post("/api/review/reopen", requireRole("admin"), (req, res) => {
     res.json(result);
   } catch (err) {
     const msg = String(err?.message || "Cannot reopen workflow decision");
-    const status = /workflow reopen conflict|invalid .*transition|cannot transition/i.test(msg) ? 409 : 400;
+    const status = err?.code === "INVALID_TRANSITION" || err?.code === "INVALID_PRODUCTION_TRANSITION" || /workflow reopen conflict|cannot transition/i.test(msg) ? 409 : 400;
     res.status(status).json({ error: msg });
   }
 });
@@ -14365,7 +14378,7 @@ app.post("/api/items/:id/unpublish", requireRole("admin", "owner"), (req, res) =
     res.json({ ok: true, item_id: id, publication_state: workflowAfter?.publication_state || "unpublished" });
   } catch (err) {
     const msg = String(err?.message || "Cannot unpublish item");
-    const status = /published article not found|invalid publication status|invalid .*transition|cannot transition/i.test(msg) ? 409 : 400;
+    const status = err?.code === "INVALID_TRANSITION" || err?.code === "INVALID_PRODUCTION_TRANSITION" || /published article not found|invalid publication status|cannot transition/i.test(msg) ? 409 : 400;
     res.status(status).json({ error: msg });
   }
 });
