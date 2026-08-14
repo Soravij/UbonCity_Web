@@ -12561,6 +12561,31 @@ app.get("/api/items/:id/field-pack/current", requireRole("owner", "admin", "edit
   res.json({ item_id: id, field_pack: fieldPack });
 });
 
+// Place-only: only the place production pipeline has a distinct pre-generated phase
+// (collected/analyzed) where the AI draft field crews would rely on doesn't exist yet.
+// Other content types don't gate field-pack readiness on production_state at all.
+const FIELD_PACK_PRE_GENERATED_PLACE_PRODUCTION_STATES = new Set(
+  ["collected", "analyzed"].filter((state) => PRODUCTION_STATES.has(state))
+);
+
+function isFieldPackReadyStatusRequest(rawStatus) {
+  if (rawStatus == null) return false;
+  const normalized = String(rawStatus).trim().toLowerCase();
+  return normalized === "ready_for_field" || normalized === "ready_for_handoff";
+}
+
+function assertFieldPackReadyProductionGate(item, requestedStatus) {
+  if (String(item?.type || "").trim().toLowerCase() !== "place") return;
+  if (!isFieldPackReadyStatusRequest(requestedStatus)) return;
+  const productionState = String(item?.production_state || "").trim().toLowerCase();
+  if (!FIELD_PACK_PRE_GENERATED_PLACE_PRODUCTION_STATES.has(productionState)) return;
+  const err = new Error(
+    `Cannot mark field pack ready before production_state reaches generated (current: ${productionState || "unknown"})`
+  );
+  err.code = "FIELD_PACK_HEAD_NOT_GENERATED";
+  throw err;
+}
+
 app.post("/api/items/:id/field-packs", requireRole("owner", "admin", "user"), (req, res) => {
   const id = Number(req.params.id || 0);
   if (!id) {
@@ -12578,6 +12603,7 @@ app.post("/api/items/:id/field-packs", requireRole("owner", "admin", "user"), (r
   }
 
   try {
+    assertFieldPackReadyProductionGate(item, req.body?.status);
     const fieldPack = repo.createFieldPack({
       ...(req.body || {}),
       content_item_id: id,
@@ -12591,7 +12617,7 @@ app.post("/api/items/:id/field-packs", requireRole("owner", "admin", "user"), (r
     res.status(201).json({ ok: true, item_id: id, field_pack: fieldPack });
   } catch (err) {
     const msg = String(err?.message || "Cannot create field pack");
-    const isConflict = String(err?.code || "") === "CONFLICT" || /UNIQUE|constraint/i.test(msg);
+    const isConflict = String(err?.code || "") === "CONFLICT" || err?.code === "FIELD_PACK_HEAD_NOT_GENERATED" || /UNIQUE|constraint/i.test(msg);
     res.status(isConflict ? 409 : 400).json({ error: msg });
   }
 });
@@ -12617,6 +12643,7 @@ app.put("/api/field-packs/:fieldPackId", requireRole("owner", "admin", "user"), 
     if (!ensureItemMutationAccess(req, res, item)) {
       return;
     }
+    assertFieldPackReadyProductionGate(item, req.body?.status);
     const fieldPack = repo.updateFieldPack(fieldPackId, {
       ...(req.body || {}),
       updated_by: actorEmail(req),
@@ -12637,7 +12664,7 @@ app.put("/api/field-packs/:fieldPackId", requireRole("owner", "admin", "user"), 
     });
   } catch (err) {
     const msg = String(err?.message || "Cannot update field pack");
-    const isConflict = String(err?.code || "") === "CONFLICT" || /UNIQUE|constraint/i.test(msg);
+    const isConflict = String(err?.code || "") === "CONFLICT" || err?.code === "FIELD_PACK_HEAD_NOT_GENERATED" || /UNIQUE|constraint/i.test(msg);
     const isNotFound = /field pack not found|item not found/i.test(msg);
     res.status(isNotFound ? 404 : isConflict ? 409 : 400).json({ error: msg });
   }
