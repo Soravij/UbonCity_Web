@@ -12732,9 +12732,11 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
         throw new Error("Agent engine does not support field pack generation");
       }
     }
+    const fieldPackUpdatePayload = buildFieldPackUpdatePayloadFromAgent(agentFieldPack);
+    assertFieldPackReadyProductionGate(item, fieldPackUpdatePayload.status);
     fieldPack = repo.createFieldPack({
       ...(currentFieldPack || {}),
-      ...buildFieldPackUpdatePayloadFromAgent(agentFieldPack),
+      ...fieldPackUpdatePayload,
       content_item_id: id,
       updated_by: actorEmail(req),
     });
@@ -12749,7 +12751,9 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
 
     res.json({ ok: true, item_id: id, field_pack: fieldPack });
   } catch (err) {
-    res.status(400).json({ error: String(err?.message || "Cannot regenerate field pack") });
+    const msg = String(err?.message || "Cannot regenerate field pack");
+    const isConflict = String(err?.code || "") === "CONFLICT" || err?.code === "FIELD_PACK_HEAD_NOT_GENERATED" || /UNIQUE|constraint/i.test(msg);
+    res.status(isConflict ? 409 : 400).json({ error: msg });
   }
 });
 
@@ -15292,7 +15296,7 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-export { buildCollectedImportSeed, importCollectedRawItem, importCollectedRawItemsTxn, buildNormalizedFromExtractedPayload, makeEvidenceSignature, buildEvidenceCandidatesForNormalized };
+export { buildCollectedImportSeed, importCollectedRawItem, importCollectedRawItemsTxn, buildNormalizedFromExtractedPayload, makeEvidenceSignature, buildEvidenceCandidatesForNormalized, assertFieldPackReadyProductionGate };
 
 process.once("exit", () => {
   try {

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import jwt from "jsonwebtoken";
 
 import { openDatabase } from "../db/client.mjs";
@@ -92,7 +93,26 @@ function createEvent(repo) {
   return repo.getItem(itemId);
 }
 
-async function withServer(dbPath, run) {
+// Regenerate hits buildCleanStructuredContext()'s minimum-required gate before it ever reaches the
+// AI agent call, so a bare createPlace() place (no lat/long, no approved context) 400s there before
+// the production-state guard is even in play. This gives it a title + traceable reference (lat/long)
+// + one approved context block so the request actually reaches the agent call.
+function createPlaceWithCleanContext(ctx, productionState) {
+  const place = createPlace(ctx.repo, productionState);
+  ctx.db.prepare(`UPDATE content_items SET latitude=15.2, longitude=104.8 WHERE id=?`).run(place.id);
+  const evidenceId = place.id * 100 + 1;
+  ctx.db.prepare(`
+    INSERT INTO evidence_blocks (id, content_item_id, block_type, source_type, source_url, source_label, lang, text_value, status)
+    VALUES (?, ?, 'fact', 'manual', 'https://example.com', 'test', 'th', 'Test evidence block', 'active')
+  `).run(evidenceId, place.id);
+  ctx.db.prepare(`
+    INSERT INTO approved_context_blocks (id, content_item_id, evidence_block_id, context_type, selected_text, sort_order, status)
+    VALUES (?, ?, ?, 'fact', 'Test approved context text', 1, 'active')
+  `).run(evidenceId, place.id, evidenceId);
+  return ctx.repo.getItem(place.id);
+}
+
+async function withServer(dbPath, run, extraEnv = {}) {
   const port = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   let child = null;
@@ -105,6 +125,7 @@ async function withServer(dbPath, run) {
         DB_PATH: dbPath,
         PORT: String(port),
         BACKEND_JWT_SECRET: authSecret,
+        ...extraEnv,
       },
       stdio: "ignore",
     });
@@ -265,5 +286,121 @@ test("POST field pack create: place head=analyzed rejects ready_for_field with 4
     });
   } finally {
     ctx.cleanup();
+  }
+});
+
+// --- POST /api/items/:id/field-pack/regenerate guard wiring -----------------------------------
+//
+// Every real agentEngine.generateFieldPack/reviseFieldPack call (internal AND external, see
+// collector/services/agent-generation.mjs:964-1008 and :852-915) already routes its response through
+// normalizeFieldPack (agent-generation.mjs:138-224), which force-downgrades a missing OR an explicit
+// ready_for_field/ready_for_handoff status to "draft" (lines 168-176) before the regenerate route ever
+// calls buildFieldPackUpdatePayloadFromAgent(). That means buildFieldPackUpdatePayloadFromAgent's own
+// "ready_for_field" default (collector/server/endpoint-schema-mapping.mjs:10) — and therefore the
+// production-state guard now wired to it in this route — cannot currently be triggered through a real
+// HTTP call. The two tests below pin both halves of that fact: the guard composition is correct (WIRING
+// CHECK), and today's live route still returns 200/draft for the same input (PINNED BEHAVIOR).
+
+async function withMockExternalAgent(run) {
+  const port = await reservePort();
+  const url = `http://127.0.0.1:${port}/run`;
+  const server = http.createServer((req, res) => {
+    if (req.method !== "POST" || req.url !== "/run") {
+      res.writeHead(404).end();
+      return;
+    }
+    req.on("data", () => {});
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      // Deliberately no "status" key, to simulate "the agent doesn't send status".
+      res.end(JSON.stringify({
+        field_pack: {
+          ai_summary: "mock external agent field pack (no status field sent)",
+          story_angle: "test angle",
+        },
+      }));
+    });
+  });
+  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  try {
+    await run(url);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test("PINNED BEHAVIOR (today's actual live route, not the guard wiring): POST regenerate where the agent sends no status -> 200, pack status stays draft", async () => {
+  const ctx = fieldPackRequestContext();
+  try {
+    const place = createPlaceWithCleanContext(ctx, "analyzed");
+    ctx.db.close();
+
+    await withMockExternalAgent(async (externalAgentUrl) => {
+      await withServer(ctx.dbPath, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/items/${place.id}/field-pack/regenerate`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+          body: JSON.stringify({ revision_note: "test regenerate, agent sends no status" }),
+        });
+        const body = await response.json();
+        // If this starts failing (e.g. 409 instead of 200), normalizeFieldPack stopped downgrading a
+        // missing/ready_for_field status to "draft" before buildFieldPackUpdatePayloadFromAgent runs --
+        // which means the WIRING CHECK test below just became live/reachable through this real route.
+        assert.equal(response.status, 200, JSON.stringify(body));
+        assert.equal(body.field_pack.status, "draft");
+      }, {
+        COLLECTOR_AGENT_ENGINE: "external",
+        COLLECTOR_EXTERNAL_AGENT_URL: externalAgentUrl,
+      });
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+const wiringProbeSource = String.raw`
+process.chdir(process.env.COLLECTOR_ROOT);
+const { buildFieldPackUpdatePayloadFromAgent } = await import(process.env.ENDPOINT_SCHEMA_MAPPING_MODULE_URL);
+const { assertFieldPackReadyProductionGate } = await import(process.env.SERVER_MODULE_URL);
+const payload = buildFieldPackUpdatePayloadFromAgent({});
+let threw = false;
+let code = null;
+try {
+  assertFieldPackReadyProductionGate({ type: "place", production_state: "analyzed" }, payload.status);
+} catch (err) {
+  threw = true;
+  code = (err && err.code) || null;
+}
+process.stdout.write(JSON.stringify({ payloadStatus: payload.status, threw, code }));
+process.exit(0);
+`;
+
+test("WIRING CHECK (composition test, NOT today's live behavior -- see PINNED BEHAVIOR test above): assertFieldPackReadyProductionGate blocks place head=analyzed given buildFieldPackUpdatePayloadFromAgent's own ready_for_field default when the agent object carries no status", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "field-pack-guard-wiring-"));
+  const runnerPath = path.join(tempDir, "runner.mjs");
+  const dbPath = path.join(tempDir, "collector.sqlite");
+  fs.writeFileSync(runnerPath, wiringProbeSource, "utf8");
+  try {
+    const result = spawnSync(process.execPath, [runnerPath], {
+      cwd: collectorRoot,
+      env: {
+        ...process.env,
+        COLLECTOR_ROOT: collectorRoot,
+        DB_PATH: dbPath,
+        BACKEND_JWT_SECRET: authSecret,
+        SERVER_MODULE_URL: pathToFileURL(serverPath).href,
+        ENDPOINT_SCHEMA_MAPPING_MODULE_URL: pathToFileURL(path.join(collectorRoot, "server", "endpoint-schema-mapping.mjs")).href,
+        COLLECTOR_DISABLE_LISTEN: "1",
+      },
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    assert.equal(result.status, 0, `wiring probe failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    const output = JSON.parse(String(result.stdout || "").trim());
+    assert.equal(output.payloadStatus, "ready_for_field", "buildFieldPackUpdatePayloadFromAgent must default to ready_for_field when the agent sends no status");
+    assert.equal(output.threw, true, "assertFieldPackReadyProductionGate must throw for place head=analyzed given that default");
+    assert.equal(output.code, "FIELD_PACK_HEAD_NOT_GENERATED");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
