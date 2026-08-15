@@ -21,6 +21,11 @@ export function renderWorkflowBackwardTransitionControls(root, payload, { busy =
   if (!root) return;
   const targets = Array.isArray(payload?.targets) ? payload.targets : [];
   const canTransition = payload?.can_transition === true;
+  if (payload?.loadFailed === true) {
+    root.classList.remove("hidden");
+    root.innerHTML = `<p class="status error">ไม่สามารถโหลดข้อมูลการถอยสถานะได้ ลองรีเฝรชหน้าอีกครั้ง</p>`;
+    return;
+  }
   root.classList.toggle("hidden", !canTransition || targets.length === 0);
   if (!canTransition || targets.length === 0) {
     root.innerHTML = "";

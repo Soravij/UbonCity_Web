@@ -3687,7 +3687,7 @@ async function refreshAssignmentBackwardTransitions(itemId) {
     state.assignments.backwardTransitions = await loadWorkflowBackwardTransitions(api, itemId);
   } catch (err) {
     console.error("[workflow-backward-transition] cannot load targets", { item_id: Number(itemId || 0) || null, error: String(err?.message || err) });
-    state.assignments.backwardTransitions = null;
+    state.assignments.backwardTransitions = { loadFailed: true, can_transition: false, targets: [] };
   }
   renderAssignmentBackwardTransitionControls();
 }
