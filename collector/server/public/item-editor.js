@@ -4374,6 +4374,7 @@ async function loadCurrentFieldPack() {
   const res = await api(`/api/items/${state.itemId}/field-pack/current`);
   state.fieldPack = res?.field_pack || null;
   fillFieldPackForm(state.fieldPack);
+  applyEditorActionGuards();
   return state.fieldPack;
 }
 
@@ -4403,6 +4404,7 @@ async function saveCurrentFieldPack() {
     : await api(`/api/items/${state.itemId}/field-packs`, { method: "POST", body: JSON.stringify(payload) });
   state.fieldPack = result?.field_pack || null;
   fillFieldPackForm(state.fieldPack);
+  applyEditorActionGuards();
   return state.fieldPack;
 }
 
@@ -4750,16 +4752,26 @@ function renderStepFourNextPanel() {
     actionLabel = "เปิดหน้าส่งต่อ";
   }
 
+  const editGuard = getEditPermissionGuard();
+  const assignmentGuard = getEditorAssignmentGuard();
+  const canAdvance = editGuard.allowed && assignmentGuard.allowed;
+  const advanceBlockedReason = !editGuard.allowed ? editGuard.reason : assignmentGuard.reason;
+
   root.innerHTML = `
     <strong>ขั้นถัดไป</strong>
     <div class="field-help">${escapeHtml(summary)}</div>
     <div class="step4-next-summary">
       ${details.map((item) => `<div class="summary-row"><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.value)}</span></div>`).join("")}
     </div>
-    ${actionLabel ? `<div class="step4-next-actions"><button type="button" class="primary" id="btn-step4-next-panel">${escapeHtml(actionLabel)}</button></div>` : ""}
+    ${actionLabel ? `
+    <div class="step4-next-actions">
+      <button type="button" class="primary" id="btn-step4-next-panel" ${canAdvance ? "" : "disabled"} title="${canAdvance ? "" : escapeHtml(advanceBlockedReason)}">${escapeHtml(actionLabel)}</button>
+      ${canAdvance ? "" : `<div class="field-progress-note warn">${escapeHtml(advanceBlockedReason)}</div>`}
+    </div>` : ""}
   `;
 
   root.querySelector("#btn-step4-next-panel")?.addEventListener("click", () => {
+    if (qs("btn-next-export")?.disabled) return;
     qs("btn-next-export")?.click();
   });
 }
@@ -5716,8 +5728,8 @@ function wire() {
     });
     state.item = result?.item || { ...(state.item || {}), ...(payload.item || {}) };
     state.fieldPack = result?.field_pack || state.fieldPack;
-    applyEditorActionGuards();
     fillFieldPackForm(state.fieldPack);
+    applyEditorActionGuards();
     renderStepFourGuides();
     return state.fieldPack;
   }
