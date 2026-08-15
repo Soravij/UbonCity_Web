@@ -35,6 +35,32 @@ function loadNamedFunction(functionName, dependencies = {}) {
   return Function(...dependencyNames, `return (${source});`)(...dependencyValues);
 }
 
+function extractAsyncFunctionSource(source, functionName) {
+  const asyncMarker = `async function ${functionName}`;
+  const marker = source.includes(asyncMarker) ? asyncMarker : `function ${functionName}`;
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, `${functionName} should exist`);
+  const bodyStart = source.indexOf("{", start);
+  assert.notEqual(bodyStart, -1, `${functionName} should have a body`);
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  throw new Error(`Could not extract function ${functionName}`);
+}
+
+function loadNamedAsyncFunction(functionName, dependencies = {}) {
+  const source = extractAsyncFunctionSource(itemEditorJs, functionName);
+  const dependencyNames = Object.keys(dependencies);
+  const dependencyValues = Object.values(dependencies);
+  return Function(...dependencyNames, `return (${source});`)(...dependencyValues);
+}
+
 test("step 4 packaging requirements keep must-ask as soft warning", () => {
   assert.equal(
     itemEditorJs.includes('"fp-must-ask-questions"') && itemEditorJs.includes('"soft"'),
@@ -361,4 +387,189 @@ test("item-editor.js calls renderAiReferenceCountHint after refreshAssets in cle
 
 test("item-editor.js stores maxReferenceMediaForAi from workflow API response", () => {
   assert.match(itemEditorJs, /state\.maxReferenceMediaForAi = Number\(workflowData\?\.max_reference_media_for_ai/);
+});
+
+// --- editor action guards must not go stale after the field pack finishes loading/saving ---
+//
+// Runtime-confirmed bug: applyEditorActionGuards() read fp-status while the field pack was still
+// loading, before fillFieldPackForm() had written the real status into the DOM. Once loaded, nothing
+// re-ran the guard, so btn-next-export stayed disabled forever even though the field pack was really
+// ready_for_field. These tests execute the real extracted async functions (not just string-match the
+// source) to prove the guard now observes the field pack state *after* it actually lands, in the real
+// async order, not the state that existed before the load/save started.
+
+test("loadCurrentFieldPack re-applies action guards only after the form reflects the freshly loaded field pack", async () => {
+  const callOrder = [];
+  let formStatus = "draft";
+  let formStatusWhenGuardsRan = null;
+  const state = { itemId: 14, fieldPack: null };
+
+  const api = async () => {
+    callOrder.push("api:start");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    callOrder.push("api:resolve");
+    return { field_pack: { id: 14, status: "ready_for_field" } };
+  };
+  const fillFieldPackForm = (pack) => {
+    callOrder.push("fillFieldPackForm");
+    formStatus = String(pack?.status || "draft");
+  };
+  const applyEditorActionGuards = () => {
+    callOrder.push("applyEditorActionGuards");
+    formStatusWhenGuardsRan = formStatus;
+  };
+
+  const loadCurrentFieldPack = loadNamedAsyncFunction("loadCurrentFieldPack", {
+    isCleanMode: false,
+    api,
+    state,
+    fillFieldPackForm,
+    applyEditorActionGuards,
+  });
+
+  await loadCurrentFieldPack();
+
+  assert.deepEqual(
+    callOrder,
+    ["api:start", "api:resolve", "fillFieldPackForm", "applyEditorActionGuards"],
+    "guards must be re-applied after the field pack request resolves and the form is filled, not before"
+  );
+  assert.equal(
+    formStatusWhenGuardsRan,
+    "ready_for_field",
+    "applyEditorActionGuards must see the just-loaded field pack status, not the stale pre-load form state"
+  );
+});
+
+test("saveCurrentWork refills the field-pack form before re-applying action guards (closes the save-button load race debt)", async () => {
+  const callOrder = [];
+  let formStatus = "draft";
+  let formStatusWhenGuardsRan = null;
+  const state = { itemId: 14, item: {}, fieldPack: { status: "draft" } };
+
+  const api = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return { item: {}, field_pack: { status: "ready_for_field" } };
+  };
+  const fillFieldPackForm = (pack) => {
+    callOrder.push("fillFieldPackForm");
+    formStatus = String(pack?.status || "draft");
+  };
+  const applyEditorActionGuards = () => {
+    callOrder.push("applyEditorActionGuards");
+    formStatusWhenGuardsRan = formStatus;
+  };
+
+  const saveCurrentWork = loadNamedAsyncFunction("saveCurrentWork", {
+    getEditPermissionGuard: () => ({ allowed: true, reason: "" }),
+    isCleanMode: false,
+    buildEditorWorkPayload: () => ({ item: {} }),
+    api,
+    state,
+    fillFieldPackForm,
+    applyEditorActionGuards,
+    renderStepFourGuides: () => callOrder.push("renderStepFourGuides"),
+  });
+
+  await saveCurrentWork();
+
+  assert.deepEqual(
+    callOrder,
+    ["fillFieldPackForm", "applyEditorActionGuards", "renderStepFourGuides"],
+    "saveCurrentWork must refill the field-pack form before re-applying guards, not after"
+  );
+  assert.equal(
+    formStatusWhenGuardsRan,
+    "ready_for_field",
+    "guards must be evaluated against the field pack status returned by the save, not the pre-save status"
+  );
+});
+
+// --- the step4-next-panel proxy button must never be enabled while its real target is disabled ---
+
+function makeRenderStepFourNextPanelDeps(overrides = {}) {
+  let capturedHtml = "";
+  const rootNode = {
+    set innerHTML(html) {
+      capturedHtml = html;
+    },
+    get innerHTML() {
+      return capturedHtml;
+    },
+    querySelector() {
+      return undefined;
+    },
+  };
+  const deps = {
+    qs: (id) => (id === "step4-next-panel" ? rootNode : null),
+    isCleanMode: false,
+    readFieldPackFormState: () => ({ status: "ready_for_field", assignments: [], field_assignment: {} }),
+    isFieldPackReadyForAssignment: (status) => status === "ready_for_field",
+    state: { itemAssignmentsLoadFailed: false, itemAssignments: [] },
+    getStepFourLatestAssignment: () => null,
+    formatStepFourAssignmentState: (value) => value,
+    getFieldProgressStatusLabel: (value) => value,
+    escapeHtml: (value) => String(value ?? ""),
+    getEditPermissionGuard: () => ({ allowed: true, reason: "" }),
+    getEditorAssignmentGuard: () => ({ allowed: true, reason: "" }),
+    ...overrides,
+  };
+  return { deps, getHtml: () => capturedHtml };
+}
+
+test("step4-next-panel proxy button is disabled and explains why when the real assignment guard disallows advancing", () => {
+  const { deps, getHtml } = makeRenderStepFourNextPanelDeps({
+    getEditorAssignmentGuard: () => ({
+      allowed: false,
+      reason: "ยังส่งมอบงานไม่ได้: ต้องส่งต่อบทความไปขั้น \"ส่งต่อ handoff\" ก่อน",
+    }),
+  });
+  const renderStepFourNextPanel = loadNamedFunction("renderStepFourNextPanel", deps);
+
+  renderStepFourNextPanel();
+  const html = getHtml();
+
+  const buttonTag = html.match(/<button[^>]*id="btn-step4-next-panel"[^>]*>/);
+  assert.ok(buttonTag, "expected the step4-next-panel action button to render");
+  assert.match(
+    buttonTag[0],
+    /\bdisabled\b/,
+    "proxy button must be disabled whenever the real btn-next-export guard would disallow the click"
+  );
+  assert.match(html, /ยังส่งมอบงานไม่ได้/, "panel should surface the guard's blocked reason instead of failing silently");
+});
+
+test("step4-next-panel proxy button is disabled when the base edit-permission guard disallows advancing", () => {
+  const { deps, getHtml } = makeRenderStepFourNextPanelDeps({
+    getEditPermissionGuard: () => ({ allowed: false, reason: "รายการนี้ถูก claim โดยผู้ใช้อื่นอยู่" }),
+  });
+  const renderStepFourNextPanel = loadNamedFunction("renderStepFourNextPanel", deps);
+
+  renderStepFourNextPanel();
+  const html = getHtml();
+
+  const buttonTag = html.match(/<button[^>]*id="btn-step4-next-panel"[^>]*>/);
+  assert.ok(buttonTag);
+  assert.match(buttonTag[0], /\bdisabled\b/);
+});
+
+test("step4-next-panel proxy button stays enabled only when both action guards allow advancing", () => {
+  const { deps, getHtml } = makeRenderStepFourNextPanelDeps();
+  const renderStepFourNextPanel = loadNamedFunction("renderStepFourNextPanel", deps);
+
+  renderStepFourNextPanel();
+  const html = getHtml();
+
+  const buttonTag = html.match(/<button[^>]*id="btn-step4-next-panel"[^>]*>/);
+  assert.ok(buttonTag);
+  assert.doesNotMatch(buttonTag[0], /\bdisabled\b/, "proxy button should be enabled when both guards allow advancing");
+});
+
+test("step4-next-panel proxy click handler refuses to forward the click when the real target is disabled", () => {
+  const source = extractFunctionSource(itemEditorJs, "renderStepFourNextPanel");
+  assert.match(
+    source,
+    /root\.querySelector\("#btn-step4-next-panel"\)\?\.addEventListener\("click", \(\) => \{\s*if \(qs\("btn-next-export"\)\?\.disabled\) return;/,
+    "click handler should bail out before forwarding to btn-next-export when it is disabled"
+  );
 });
