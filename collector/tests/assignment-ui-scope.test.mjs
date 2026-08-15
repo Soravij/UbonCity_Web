@@ -3423,15 +3423,31 @@ test("review-like assignment APIs no longer allow freelance access", () => {
   }
 });
 
-test("assignment UI no longer treats close_assignment or closed as a separate user-facing step", () => {
-  const forbiddenAppSnippets = [
-    'Object.freeze({ value: "close_assignment", label: "ปิดงาน" })',
-    'งานนี้ปิดแล้วและปิดในระบบแล้ว',
-    'งานนี้ปิดแล้ว',
+test("assignment UI exposes close_assignment for owner/admin only in open-round states", () => {
+  const requiredOpenRoundSnippets = [
+    'assigned: Object.freeze({\r\n    stateActions: [\r\n      Object.freeze({ value: "reopen_in_progress", label: "เริ่มทำงาน" }),\r\n      Object.freeze({ value: "close_assignment", label: "ปิดงาน" }),\r\n    ],',
+    'in_progress: Object.freeze({\r\n    stateActions: [\r\n      Object.freeze({ value: "close_assignment", label: "ปิดงาน" }),\r\n    ],',
+    'submitted: Object.freeze({\r\n    stateActions: [\r\n      Object.freeze({ value: "close_assignment", label: "ปิดงาน" }),\r\n    ],',
+    'revision_requested: Object.freeze({\r\n    stateActions: [\r\n      Object.freeze({ value: "close_assignment", label: "ปิดงาน" }),\r\n    ],',
+    'resubmitted: Object.freeze({\r\n    stateActions: [\r\n      Object.freeze({ value: "close_assignment", label: "ปิดงาน" }),\r\n    ],',
   ];
-  for (const snippet of forbiddenAppSnippets) {
-    assert.equal(appJs.includes(snippet), false, `assignment UI should not expose legacy close-step snippet: ${snippet}`);
+  for (const snippet of requiredOpenRoundSnippets) {
+    assert.equal(appJs.includes(snippet), true, `assignment UI should expose close_assignment in this open-round state: ${snippet}`);
   }
+
+  // accepted/closed are terminal states: close_assignment must not be offered there.
+  const requiredEmptyStateActionsSnippets = [
+    'accepted: Object.freeze({\r\n    stateActions: [],',
+    'closed: Object.freeze({\r\n    stateActions: [],',
+  ];
+  for (const snippet of requiredEmptyStateActionsSnippets) {
+    assert.equal(appJs.includes(snippet), true, `assignment UI should keep this terminal state free of close_assignment: ${snippet}`);
+  }
+
+  // role "user" is restricted to in_progress/revision_requested actions only, so close_assignment
+  // (which maps to "closed") is never selectable for that role regardless of which state list it's in.
+  const requiredRoleGateSnippet = 'return nextState === "in_progress" || nextState === "revision_requested";';
+  assert.equal(appJs.includes(requiredRoleGateSnippet), true, `assignment UI should keep the role gate that hides close_assignment from role "user": ${requiredRoleGateSnippet}`);
 
   const requiredAppSnippets = [
     'stateHelp: "งานนี้เสร็จแล้วหลังการตรวจรับผ่าน"',
