@@ -51,6 +51,7 @@ const ASSIGNMENT_UI_STATE_CONFIG = Object.freeze({
   assigned: Object.freeze({
     stateActions: [
       Object.freeze({ value: "reopen_in_progress", label: "เริ่มทำงาน" }),
+      Object.freeze({ value: "close_assignment", label: "ปิดงาน" }),
     ],
     stateHelp: "งานถูกส่งออกไปแล้ว ขั้นถัดไปคือเริ่มลงงานในกระบวนการ 2",
     stateButtonLabel: "เริ่มงาน / อัปเดตสถานะ",
@@ -61,7 +62,9 @@ const ASSIGNMENT_UI_STATE_CONFIG = Object.freeze({
     submissionButtonLabel: "ส่งงานกลับ",
   }),
   in_progress: Object.freeze({
-    stateActions: [],
+    stateActions: [
+      Object.freeze({ value: "close_assignment", label: "ปิดงาน" }),
+    ],
     stateHelp: "งานอยู่ระหว่างลงงาน โดยปกติขั้นถัดไปคือส่งข้อมูลกลับมาเพื่อตรวจงาน",
     stateButtonLabel: "อัปเดตสถานะงาน",
     submissionActions: [
@@ -71,7 +74,9 @@ const ASSIGNMENT_UI_STATE_CONFIG = Object.freeze({
     submissionButtonLabel: "ส่งงานกลับ",
   }),
   submitted: Object.freeze({
-    stateActions: [],
+    stateActions: [
+      Object.freeze({ value: "close_assignment", label: "ปิดงาน" }),
+    ],
     stateHelp: "งานถูกส่งกลับมาแล้ว ให้ตรวจงานในขั้นที่ 3",
     stateButtonLabel: "อัปเดตสถานะงาน",
     submissionActions: [],
@@ -79,7 +84,9 @@ const ASSIGNMENT_UI_STATE_CONFIG = Object.freeze({
     submissionButtonLabel: "ส่งงานกลับ",
   }),
   revision_requested: Object.freeze({
-    stateActions: [],
+    stateActions: [
+      Object.freeze({ value: "close_assignment", label: "ปิดงาน" }),
+    ],
     stateHelp: "งานนี้ถูกขอแก้เพิ่มแล้ว ให้แก้ตามหมายเหตุแล้วส่งงานกลับอีกครั้ง",
     stateButtonLabel: "อัปเดตสถานะงาน",
     submissionActions: [
@@ -89,7 +96,9 @@ const ASSIGNMENT_UI_STATE_CONFIG = Object.freeze({
     submissionButtonLabel: "ส่งงานกลับ",
   }),
   resubmitted: Object.freeze({
-    stateActions: [],
+    stateActions: [
+      Object.freeze({ value: "close_assignment", label: "ปิดงาน" }),
+    ],
     stateHelp: "งานที่ขอแก้ถูกส่งกลับมาแล้ว ให้ตรวจงานในขั้นที่ 3",
     stateButtonLabel: "อัปเดตสถานะงาน",
     submissionActions: [],
@@ -274,6 +283,7 @@ const state = {
     contextFieldPack: null,
     contextFieldPackLoadFailed: false,
     backwardTransitions: null,
+    contextAssignments: [],
     captureUploadDrafts: {},
     captureUploadLoading: {},
     captureUploadSyncState: {},
@@ -3689,6 +3699,7 @@ async function loadAssignmentContextFieldPackStatus(itemId) {
     state.assignments.contextFieldPack = null;
     state.assignments.contextFieldPackLoadFailed = false;
     state.assignments.backwardTransitions = null;
+    state.assignments.contextAssignments = [];
     renderAssignmentBackwardTransitionControls();
     renderAssignmentHandoffBrief();
     renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(state.assignments.selectedId)));
@@ -3707,6 +3718,17 @@ async function loadAssignmentContextFieldPackStatus(itemId) {
     state.assignments.contextFieldPack = null;
     state.assignments.contextFieldPackLoadFailed = true;
   }
+
+  try {
+    const assignmentsResponse = await api(`/api/items/${targetItemId}/assignments`);
+    state.assignments.contextAssignments = Array.isArray(assignmentsResponse?.assignments)
+      ? assignmentsResponse.assignments
+      : [];
+  } catch (err) {
+    console.error("[assignment-context] cannot load item assignments", { item_id: targetItemId, error: String(err?.message || err) });
+    state.assignments.contextAssignments = [];
+  }
+
   await refreshAssignmentBackwardTransitions(targetItemId);
   renderAssignmentHandoffBrief();
   renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(state.assignments.selectedId)));
@@ -7866,13 +7888,40 @@ function renderAssignmentCreateSummary() {
       : "ยังไม่มีชุดลงหน้างานปัจจุบัน";
   const briefStepLabel = prepState.briefPrepared ? "ผ่านแล้ว" : "ยังไม่ผ่าน";
   const readyStepLabel = prepState.readyForAssignment ? "ผ่านแล้ว" : "ยังไม่ผ่าน";
+  const openAssignments = (Array.isArray(state.assignments.contextAssignments) ? state.assignments.contextAssignments : [])
+    .filter((row) => OPEN_ASSIGNMENT_ROUND_STATES.has(String(row?.state || "").trim().toLowerCase()));
+  const openRoundHtml = openAssignments.length
+    ? `<div class="assignment-brief-text">มีรอบงานที่เปิดอยู่:${openAssignments
+        .map((row) => {
+          const assignmentId = Number(row?.id || 0) || 0;
+          const stateLabel = formatOpenAssignmentRoundStateLabel(row?.state);
+          return ` assignment #${escapeHtml(String(assignmentId))} (${escapeHtml(stateLabel)}) <a href="/?tab=work&item_id=${escapeHtml(String(itemId))}">ไปที่งาน</a>`;
+        })
+        .join("<br>")}</div>`
+    : "";
   node.className = "assignment-brief-section";
   node.innerHTML = `
     <div class="assignment-brief-text"><strong>item #${escapeHtml(String(itemId))}</strong> · ${escapeHtml(String(item.title || "").trim() || "-")}</div>
     <div class="assignment-brief-text">หมวด ${escapeHtml(toCategoryLabel(item.category))} · ภาษา ${escapeHtml(String(item.lang || "").trim() || "-")} · ประเภทงาน ${escapeHtml(assignmentKindLabel)}</div>
     <div class="assignment-brief-text">สถานะชุดลงหน้างาน: ${escapeHtml(fieldPackStatus)}</div>
     <div class="assignment-brief-text">จัด brief: ${escapeHtml(briefStepLabel)} · พร้อมส่งเข้า handoff: ${escapeHtml(readyStepLabel)}</div>
+    ${openRoundHtml}
   `;
+}
+
+const OPEN_ASSIGNMENT_ROUND_STATES = new Set(["assigned", "in_progress", "submitted", "resubmitted", "revision_requested", "accepted"]);
+
+function formatOpenAssignmentRoundStateLabel(stateValue) {
+  const value = String(stateValue || "").trim().toLowerCase();
+  const labels = {
+    assigned: "มอบหมายแล้ว",
+    in_progress: "กำลังทำ",
+    submitted: "ส่งงานแล้ว",
+    resubmitted: "ส่งงานใหม่แล้ว",
+    revision_requested: "ขอแก้เพิ่ม",
+    accepted: "ตรวจรับแล้ว",
+  };
+  return labels[value] || value || "-";
 }
 
 function getFieldPackPromptGroups(fieldPack = null) {
