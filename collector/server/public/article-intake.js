@@ -5,7 +5,11 @@
 ];
 
 const ARTICLE_FLOW_STATUSES = ["content_in_progress", "needs_revision", "in_review", "approved", "unpublished", "published"];
-import { reportUnknownWorkflowState } from "./workflow-state-catalog.js";
+import {
+  reportUnknownWorkflowState,
+  loadWorkflowBackwardTransitions,
+  renderWorkflowBackwardTransitionControls,
+} from "./workflow-state-catalog.js";
 const ASSIGNMENT_REQUIRED_STATUSES = ["content_in_progress", "needs_revision"];
 const DIRECTORY_SYNC_TTL_MS = 5 * 60 * 1000;
 const DIRECTORY_SYNC_CACHE_KEY = "collector_users_last_directory_sync_at";
@@ -33,6 +37,7 @@ const state = {
   busy: false,
   directorySyncInFlight: false,
   directoryLastSyncedAt: 0,
+  backwardTransitions: null,
 };
 
 function normalizedValue(value) {
@@ -372,6 +377,48 @@ function renderActivityLog() {
   `).join("");
 }
 
+function renderBackwardTransitionControls() {
+  renderWorkflowBackwardTransitionControls(qs("workflow-backward-controls"), state.backwardTransitions, {
+    busy: state.busy,
+    onTransition: async ({ targetProductionState, reason }) => {
+      state.busy = true;
+      applyActionGuards();
+      try {
+        const result = await api(`/api/items/${state.itemId}/workflow/backward-transitions`, {
+          method: "POST",
+          body: JSON.stringify({ target_production_state: targetProductionState, reason }),
+        });
+        const nextItem = result?.item || null;
+        if (nextItem?.id) {
+          state.items = state.items.map((row) => Number(row?.id || 0) === Number(nextItem.id) ? { ...row, ...nextItem } : row);
+        }
+        state.item = nextItem || state.item;
+        state.backwardTransitions = result?.backward_transitions || null;
+        if (result?.resume_path && result.resume_path !== `${window.location.pathname}${window.location.search}`) {
+          window.location.assign(result.resume_path);
+          return;
+        }
+        renderAll();
+        setBanner("ถอยสถานะแล้ว");
+      } finally {
+        state.busy = false;
+        applyActionGuards();
+        renderBackwardTransitionControls();
+      }
+    },
+  });
+}
+
+async function refreshBackwardTransitions() {
+  try {
+    state.backwardTransitions = await loadWorkflowBackwardTransitions(api, state.itemId);
+  } catch (err) {
+    console.error("[workflow-backward-transition] cannot load targets", { item_id: state.itemId, error: String(err?.message || err) });
+    state.backwardTransitions = null;
+  }
+  renderBackwardTransitionControls();
+}
+
 function derivedArticleWorkflowStatus(item, process = processForItem(item?.id)) {
   if (getArticleWorkflowAnomaly(item)) return "unknown_workflow";
   const processStatus = normalizedValue(process?.status);
@@ -703,6 +750,7 @@ async function loadSelectedItem(itemId) {
   if (!state.itemId) {
     state.item = null;
     state.articleProcess = null;
+    await refreshBackwardTransitions();
     return;
   }
   const [item, processPayload] = await Promise.all([
@@ -712,6 +760,7 @@ async function loadSelectedItem(itemId) {
   state.item = item;
   state.articleProcess = processPayload;
   state.processByItemId[state.itemId] = processPayload;
+  await refreshBackwardTransitions();
 }
 
 async function prefetchProcessSummaries() {
@@ -884,6 +933,7 @@ function renderAll() {
   renderStatusSummary();
   renderAssignmentControls();
   renderActivityLog();
+  renderBackwardTransitionControls();
   applyActionGuards();
 }
 
