@@ -333,6 +333,7 @@ function setBusy(isBusy, label = "Save") {
     "btn-save-workspace",
     "btn-save-before-review",
     "btn-submit-review",
+    "btn-withdraw-to-drafting",
     "btn-insert-heading",
     "btn-insert-paragraph",
     "btn-insert-selected-image",
@@ -1728,6 +1729,12 @@ function applyActionGuards() {
   if (articleBtn) articleBtn.disabled = state.busy || workspaceState.articleSuggestionBusy || !editable;
   const seoBtn = qs("btn-generate-seo-metadata");
   if (seoBtn) seoBtn.disabled = state.busy || workspaceState.seoSuggestionBusy || !editable;
+  const withdrawBtn = qs("btn-withdraw-to-drafting");
+  if (withdrawBtn) {
+    const canWithdraw = status === "revision_requested";
+    withdrawBtn.classList.toggle("hidden", !canWithdraw);
+    withdrawBtn.disabled = state.busy || !editable || !canWithdraw;
+  }
 }
 
 function isEditorWorkspaceUser() {
@@ -2394,6 +2401,15 @@ function wire() {
   });
   qs("btn-submit-review")?.addEventListener("click", async () => {
     await handleSubmitReviewClick();
+  });
+  qs("btn-withdraw-to-drafting")?.addEventListener("click", async () => {
+    try {
+      const note = currentReviewNote() || "withdrawn to drafting from article workspace";
+      await transitionArticle("drafting", note);
+      setInlineStatus("review-status", "ถอนกลับไปแก้ไขแล้ว");
+    } catch (err) {
+      setInlineStatus("review-status", err.message, "error");
+    }
   });
 }
 

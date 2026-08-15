@@ -4454,9 +4454,18 @@ function deriveArticleProcessStatus(item, workflowModel = null, publishableSourc
     || productionState === "brief_generated"
     || productionState === "analyzed"
     || productionState === "collected"
+    || productionState === "field_working"
+    || productionState === "field_review"
+    || productionState === "writing_assigned"
+    || productionState === "writing"
+    || productionState === "generated"
+    || productionState === "rejected"
+    || productionState === "completed"
   ) {
     return "drafting";
   }
+  // assertKnownWorkflowModelStates() above guarantees productionState is one of PRODUCTION_STATES,
+  // and every value is now covered by an explicit branch above — this is an unreachable safety net.
   return "drafting";
 }
 
