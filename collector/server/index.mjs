@@ -9182,6 +9182,44 @@ app.post("/api/items/:id/workflow/backward-transitions", requireRole("owner", "a
       reason_code: target.reason_code,
       reason,
     });
+    // PROJECT_POLICY.md 7A: a backward transition must not leave a stale open assignment
+    // behind — otherwise a later forward transition can hit a 409 "already exists" guard
+    // when a new assignment is attempted for this item.
+    const OPEN_ASSIGNMENT_STATES_FOR_BACKWARD_CLOSE = new Set([
+      "assigned",
+      "in_progress",
+      "submitted",
+      "resubmitted",
+      "revision_requested",
+      "accepted",
+    ]);
+    const openAssignments = repo
+      .listAssignmentsByItem(id)
+      .filter((assignment) => OPEN_ASSIGNMENT_STATES_FOR_BACKWARD_CLOSE.has(String(assignment?.state || "").trim().toLowerCase()));
+    for (const openAssignment of openAssignments) {
+      repo.updateAssignmentState(openAssignment.id, "closed", actorEmail(req), {
+        reason_code: "closed_by_backward_transition",
+        actor_role: actorPolicyRole(req),
+        actor_user_id: Number(req.authUser?.id || 0) || null,
+        internal_note: `auto-closed by backward workflow transition: ${workflowBefore.production_state} -> ${target.production_state}`,
+      });
+      repo.logAudit(actorEmail(req), "assignment.state.auto_close_backward_transition", "content_item", String(id), {
+        assignment_id: openAssignment.id,
+        reason_code: "closed_by_backward_transition",
+        from_production_state: workflowBefore.production_state,
+        to_production_state: target.production_state,
+      }, {
+        assignment_id: openAssignment.id,
+      });
+      repo.logAudit(actorEmail(req), "assignment.state.auto_close_backward_transition", "assignment", String(openAssignment.id), {
+        content_item_id: id,
+        reason_code: "closed_by_backward_transition",
+        from_production_state: workflowBefore.production_state,
+        to_production_state: target.production_state,
+      }, {
+        assignment_id: openAssignment.id,
+      });
+    }
     const nextItem = repo.getItem(id) || item;
     res.json({
       ok: true,
