@@ -1,6 +1,6 @@
 # PROJECT_STATE
 
-Last Updated: 2026-08-06
+Last Updated: 2026-08-15
 
 ## Active Branch
 
@@ -51,6 +51,60 @@ Current mainline status:
 - AI-filled versus needs-verification state
 - readiness gates before review and acceptance
 - consistent propagation from assignment return -> field pack -> review -> publishable data
+
+## 2026-08-15 Pipeline Round Audit/Implement (branch `fix/pipeline-round-15aug`)
+
+3-round audit → implement → 2-round verify cycle on the assignment/backward-transition/article-process
+pipeline. Findings A–F from the audit, fixes A–E applied and live-verified; F closed as not-a-bug.
+
+### ปิดเคสแล้ว
+
+- **A** — silent-fail widget ถอย: root cause คือ `refreshAssignmentBackwardTransitions` catch แล้ว set
+  `state.assignments.backwardTransitions = null` เงียบๆ, render ปฏิบัติกับ `null` เหมือน "ไม่มี legal
+  transition" จริง — ไม่มีทางแยกความแตกต่างจาก UI ได้เลย แก้แล้ว: แยก `{loadFailed: true}` ออกจาก
+  `{can_transition: false, targets: []}`, แสดง error notice ที่มองเห็นได้เมื่อโหลดพัง
+- **B** — ถอย state ไม่ปิด field round ที่เปิดอยู่: แก้แล้ว `POST
+  /api/items/:id/workflow/backward-transitions` ปิด assignment ที่เปิดอยู่ทุก state (assigned/
+  in_progress/submitted/resubmitted/revision_requested/accepted) โดยอัตโนมัติ พร้อม audit log
+  action `assignment.state.auto_close_backward_transition` แยกจาก manual close
+- **C** — `close_assignment` endpoint มีจริงแต่ไม่มี UI เรียก: แก้แล้ว เพิ่มปุ่ม "ปิดงาน" ใน
+  `ASSIGNMENT_UI_STATE_CONFIG` เฉพาะ role owner/admin และเฉพาะ 5 state ที่เปิดอยู่
+- **D** — แผงส่งงานไปทำไม่แสดงรอบที่เปิดค้าง: แก้แล้ว `renderAssignmentCreateSummary` แสดงรอบเปิดค้าง +
+  ลิงก์ไปหา ก่อนผู้ใช้กด "ส่งงานไปทำ"
+- **E** — `deriveArticleProcessStatus` fallthrough กว้างเกิน: แก้แล้ว ทั้ง 16 production state มี
+  explicit branch ครบ (ก่อนแก้มี 7 state fall through เงียบ: field_working, field_review,
+  writing_assigned, writing, generated, rejected, completed) — `writing_assigned`/`writing` ยังคง
+  resolve เป็น `"drafting"` เหมือนกัน = **ตั้งใจ** ไม่ขยาย closed 6-value enum ที่
+  `ARTICLE_PROCESS_TRANSITIONS`/`canTransitionArticleProcessByRole` อ้างอิงอยู่. `transitionArticle()`
+  ผูกกับปุ่ม "ถอนกลับไปแก้ไข (Drafting)" แล้ว (แสดงเฉพาะ status = revision_requested) ไม่ใช่ dead code
+  อีกต่อไป
+- **F** — "เริ่มทำงาน" ไม่เลื่อน state บน item 28 = **ไม่ใช่บั๊ก**: assignment #10 ของ item 28 ถูกปิดไปแล้ว
+  (ผ่าน direct API call ไม่ใช่ UI) ปุ่มจึงไม่มีอะไรให้ผูก ไม่ใช่ endpoint หรือ role gate เสีย —
+  live-test บน item 18 (field pack + assignment ใหม่) ยืนยัน flow ถูกต้องครบ: 200 →
+  `assignment.state = in_progress` → `production_state = field_working`
+
+### หนี้ใหม่ที่ต้องสืบต่อ
+
+- baseline gate "999/939/59" ที่เคยอ้างถึงไม่ตรงกับข้อมูลจริงในไฟล์นี้ (บันทึกล่าสุดในนี้คือ
+  `873 / 813 / fail 59 / skipped 1` ที่ 2026-08-06) — suite จริงที่รันได้บนบรรทัดนี้ก่อน implement
+  คือ 906 test รวม, fail 139 ตัว บน `main` ก่อนแก้ (diff กับหลัง implement ต่างกันแค่ 1 ตัวตามคาด) —
+  ต้องสืบว่าตัวเลข 999/939/59 มาจากไหน ไฟล์ไหน หรือ stale
+- ยังไม่ได้ live-test: B กรณี assignment state `accepted`, และ E edge
+  `revision_requested → drafting` โดยตรง — ทั้งสองติด media-upload pipeline จริงที่ต้อง setup
+  (ต้องแนบ deliverable อย่างน้อย 1 รายการก่อน submit ได้) เกินขอบเขตการ verify รอบนี้
+- server จริงบน port 5070 (test-stack.ps1-managed, PID ผูกกับ user context อื่น) restart ไม่ได้จาก
+  agent session นี้ — `Stop-Process` ติด "Access is denied", และ `test-stack.ps1 -Action stop` ล้มเงียบที่
+  cloudflared child process แล้วไม่ไปต่อ ต้องมีคนที่มี permission บนเครื่อง Runtime restart ก่อนโค้ดรอบนี้
+  จะ live จริงบน 5070 (verify รอบนี้ทำผ่าน instance คู่ขนานบน port 5071 ชี้ DB เดียวกันแทน)
+
+### อัปเดต inventory ข้อมูลทดสอบ (item 15–24) — ของเดิมใช้ไม่ได้แล้ว
+
+- item 15: article-process cycled กลับมาที่ `drafting` (ผ่านการทดสอบ transition graph)
+- item 17 → `analyzed` · item 18 → `analyzed` (+ field pack #29, assignment #11 จากรอบ audit ก่อนหน้า)
+- item 19 → `generated` · item 20 → `field_review` · item 21 → `writing_assigned` · item 22 → `generated`
+- assignment 12–16 (สร้างระหว่าง verify B) ปิดหมดแล้วผ่าน auto-close
+- item 28 ยังอยู่ `ready_for_content`, assignment #10 ยัง `closed` — ไม่ถูกแตะในรอบนี้
+- **ห้ามแตะ item 9, 14, assignment 5** (เหมือนเดิม ทุกรอบ)
 
 ## 2026-07-14 Taxonomy Resolver Restoration (branch `fix/restore-taxonomy-resolver`)
 
