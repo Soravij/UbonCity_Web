@@ -4507,6 +4507,10 @@ function syncAssignmentPageMode(assignment) {
   if (stateWorkspace) {
     stateWorkspace.classList.toggle("hidden", pageMode !== "handoff" || !canSeeExtendedManage);
   }
+  const backwardControls = qs("workflow-backward-controls");
+  if (backwardControls && pageMode !== "handoff") {
+    backwardControls.classList.add("hidden");
+  }
   if (submissionWorkspace) {
     submissionWorkspace.classList.toggle("hidden", !canSeeCurrentWork || pageMode === "handoff" || pageMode === "review");
   }
