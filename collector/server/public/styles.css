@@ -8363,7 +8363,7 @@ body {
 
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section + .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section + .assignment-review-submission-section,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel + #assignment-detail-panel-handoff {
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   margin-top: 18px !important;
 }
 

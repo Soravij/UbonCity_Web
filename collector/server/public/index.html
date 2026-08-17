@@ -451,6 +451,35 @@
                 <div id="assignment-next-step-content" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูขั้นถัดไปของงานนี้</div>
               </div>
             </div>
+            <div id="assignment-state-workspace" class="assignment-workspace-section hidden">
+              <h4 id="assignment-state-workspace-title" class="assignment-subtitle">ขั้นที่ 1: รับงาน / ลงหน้างาน</h4>
+              <p id="assignment-state-workspace-help" class="muted assignment-workspace-help">ใช้ส่วนนี้สำหรับรับงาน เริ่มลงหน้างาน และอัปเดตสถานะตามความคืบหน้าปัจจุบัน</p>
+              <p id="assignment-state-workspace-summary" class="muted assignment-workspace-summary hidden">เลือกงานมอบหมายเพื่อดูสรุปของขั้นนี้</p>
+              <div class="grid">
+                <div>
+                  <label>อัปเดตสถานะงาน</label>
+                  <select id="assignment-state-action">
+                    <option value="">-- เลือก action หรือ state --</option>
+                  </select>
+                  <p id="assignment-state-action-help" class="muted">เลือกงานก่อน ระบบจะจัด action ที่เหมาะกับสถานะให้อัตโนมัติ</p>
+                </div>
+                <div>
+                  <label>รหัสเหตุผล (ไม่บังคับ)</label>
+                  <input id="assignment-state-reason" placeholder="เช่น assignment_revision_requested" />
+                </div>
+                <div>
+                  <label>หมายเหตุถึงผู้ส่งงาน (ไม่บังคับ)</label>
+                  <textarea id="assignment-state-contributor-note" placeholder="บันทึกถึง contributor"></textarea>
+                </div>
+                <div>
+                  <label>หมายเหตุภายใน (ไม่บังคับ)</label>
+                  <textarea id="assignment-state-internal-note" placeholder="บันทึกภายใน"></textarea>
+                </div>
+              </div>
+              <div class="toolbar assignment-step-toolbar">
+                <button id="btn-assignment-update-state" class="step-main">อัปเดตสถานะงาน</button>
+              </div>
+            </div>
           </div>
           <div id="assignment-panel-work" class="assignment-panel-mode hidden"></div>
           <div id="assignment-panel-review" class="assignment-panel-mode hidden"></div>
@@ -539,36 +568,6 @@
                   <tbody></tbody>
                 </table>
               </div>
-            </div>
-          </div>
-
-          <div id="assignment-state-workspace" class="assignment-workspace-section hidden">
-            <h4 id="assignment-state-workspace-title" class="assignment-subtitle">ขั้นที่ 1: รับงาน / ลงหน้างาน</h4>
-            <p id="assignment-state-workspace-help" class="muted assignment-workspace-help">ใช้ส่วนนี้สำหรับรับงาน เริ่มลงหน้างาน และอัปเดตสถานะตามความคืบหน้าปัจจุบัน</p>
-            <p id="assignment-state-workspace-summary" class="muted assignment-workspace-summary hidden">เลือกงานมอบหมายเพื่อดูสรุปของขั้นนี้</p>
-            <div class="grid">
-              <div>
-                <label>อัปเดตสถานะงาน</label>
-                <select id="assignment-state-action">
-                  <option value="">-- เลือก action หรือ state --</option>
-                </select>
-                <p id="assignment-state-action-help" class="muted">เลือกงานก่อน ระบบจะจัด action ที่เหมาะกับสถานะให้อัตโนมัติ</p>
-              </div>
-              <div>
-                <label>รหัสเหตุผล (ไม่บังคับ)</label>
-                <input id="assignment-state-reason" placeholder="เช่น assignment_revision_requested" />
-              </div>
-              <div>
-                <label>หมายเหตุถึงผู้ส่งงาน (ไม่บังคับ)</label>
-                <textarea id="assignment-state-contributor-note" placeholder="บันทึกถึง contributor"></textarea>
-              </div>
-              <div>
-                <label>หมายเหตุภายใน (ไม่บังคับ)</label>
-                <textarea id="assignment-state-internal-note" placeholder="บันทึกภายใน"></textarea>
-              </div>
-            </div>
-            <div class="toolbar assignment-step-toolbar">
-              <button id="btn-assignment-update-state" class="step-main">อัปเดตสถานะงาน</button>
             </div>
           </div>
 

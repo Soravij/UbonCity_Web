@@ -4476,6 +4476,9 @@ function syncAssignmentPageMode(assignment) {
   if (listPanel) {
     listPanel.classList.toggle("hidden", !canSeeBaseTasks);
   }
+  qs("assignment-panel-handoff")?.classList.toggle("hidden", pageMode !== "handoff");
+  qs("assignment-panel-work")?.classList.toggle("hidden", pageMode !== "work");
+  qs("assignment-panel-review")?.classList.toggle("hidden", pageMode !== "review");
   if (detailPanel) {
     detailPanel.classList.toggle("hidden", !canSeeCurrentWork || (pageMode === "handoff" ? true : !hasAssignment));
   }
@@ -11423,7 +11426,8 @@ function wireAssignments() {
       }
 
       selectAssignment(id);
-      qs("assignment-detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const scrollPm1 = getAssignmentPageMode();
+      qs(scrollPm1 === "work" ? "assignment-submission-workspace" : scrollPm1 === "review" ? "assignment-review-workspace" : "assignment-detail-panel-handoff")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   });
 
@@ -11435,7 +11439,7 @@ function wireAssignments() {
       const id = Number(btn.dataset.id || 0);
       if (id) {
         selectAssignment(id, { submittedView: true });
-        qs("assignment-detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        qs("assignment-submission-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     }
   });

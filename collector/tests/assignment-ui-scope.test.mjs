@@ -3253,9 +3253,8 @@ test("step 1 handoff view keeps only the six agreed pre-submit blocks and redire
   }
 
   const requiredAppSnippets = [
-    'function ensureAssignmentHandoffLayoutOrder() {',
     'if (pageMode === "handoff") {',
-    'ensureAssignmentHandoffLayoutOrder();',
+    'qs("assignment-panel-handoff")?.classList.toggle("hidden", pageMode !== "handoff");',
     'pageSummary.classList.remove("hidden");',
     'detailPanel.classList.toggle("hidden", pageMode === "handoff" ? true : !hasAssignment);',
     'contextFieldPack: null,',
