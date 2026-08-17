@@ -4483,7 +4483,7 @@ function syncAssignmentPageMode(assignment) {
     detailPanel.classList.toggle("hidden", !canSeeCurrentWork || (pageMode === "handoff" ? true : !hasAssignment));
   }
   if (stateWorkspace) {
-    stateWorkspace.classList.toggle("hidden", pageMode !== "handoff" || !canSeeExtendedManage);
+    stateWorkspace.classList.toggle("hidden", pageMode !== "work" || !hasAssignment);
   }
   const backwardControls = qs("workflow-backward-controls");
   if (backwardControls && pageMode !== "handoff") {
@@ -9059,15 +9059,15 @@ function renderSubmittedAssignmentsTable(rows) {
 }
 
 function renderAssignmentsTable(rows) {
-  const table = qs("table-assignments");
+  const pageMode = getAssignmentPageMode();
+  const table = pageMode === "handoff" ? qs("table-assignments-handoff") : qs("table-assignments");
   if (!table) return;
-  const listTitle = qs("assignment-list-title");
-  const listNote = qs("assignment-list-note");
+  const listTitle = pageMode === "handoff" ? qs("assignment-list-title-handoff") : qs("assignment-list-title");
+  const listNote = pageMode === "handoff" ? qs("assignment-list-note-handoff") : qs("assignment-list-note");
   const actionableTitle = qs("assignment-actionable-list-title");
   const actionableNote = qs("assignment-actionable-list-note");
   const submittedWrap = qs("assignment-submitted-list-wrap");
   const loadBtn = qs("btn-assignments-load");
-  const pageMode = getAssignmentPageMode();
   const tbody = table.querySelector("tbody");
   const thead = table.querySelector("thead");
   if (!tbody || !thead) return;
@@ -11427,7 +11427,10 @@ function wireAssignments() {
 
       selectAssignment(id);
       const scrollPm1 = getAssignmentPageMode();
-      qs(scrollPm1 === "work" ? "assignment-submission-workspace" : scrollPm1 === "review" ? "assignment-review-workspace" : "assignment-detail-panel-handoff")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const scrollTarget1 = qs(scrollPm1 === "work" ? "assignment-submission-workspace" : scrollPm1 === "review" ? "assignment-review-workspace" : "assignment-detail-panel-handoff");
+      if (scrollTarget1) {
+        requestAnimationFrame(() => scrollTarget1.scrollIntoView({ behavior: "smooth", block: "start" }));
+      }
     }
   });
 
@@ -11439,7 +11442,10 @@ function wireAssignments() {
       const id = Number(btn.dataset.id || 0);
       if (id) {
         selectAssignment(id, { submittedView: true });
-        qs("assignment-submission-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        const scrollTarget2 = qs("assignment-submission-workspace");
+        if (scrollTarget2) {
+          requestAnimationFrame(() => scrollTarget2.scrollIntoView({ behavior: "smooth", block: "start" }));
+        }
       }
     }
   });

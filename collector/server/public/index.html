@@ -358,6 +358,25 @@
                 <li>ขั้น 3: ตรวจงาน ดูงานที่ส่งกลับมา ขอแก้ หรือรับงานผ่าน</li>
               </ul>
             </div>
+            <div class="secondary-panel hidden" id="assignment-list-panel-handoff">
+              <h3 id="assignment-list-title-handoff" class="section-title" style="margin-top:0;"></h3>
+              <p id="assignment-list-note-handoff" class="muted"></p>
+              <div class="table-wrap">
+                <table id="table-assignments-handoff">
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      <th>ชื่อคอนเทนต์</th>
+                      <th>หมวดหมู่</th>
+                      <th>สถานะปัจจุบัน</th>
+                      <th>Updated</th>
+                      <th>การทำงาน</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
             <div class="secondary-panel hidden" id="assignment-manual-create-panel">
               <h3 class="section-title" style="margin-top:0;">กระบวนการ 2 · ขั้น 1: ส่งงานไปทำ</h3>
               <div class="assignment-brief-card">
@@ -451,6 +470,8 @@
                 <div id="assignment-next-step-content" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูขั้นถัดไปของงานนี้</div>
               </div>
             </div>
+          </div>
+          <div id="assignment-panel-work" class="assignment-panel-mode hidden">
             <div id="assignment-state-workspace" class="assignment-workspace-section hidden">
               <h4 id="assignment-state-workspace-title" class="assignment-subtitle">ขั้นที่ 1: รับงาน / ลงหน้างาน</h4>
               <p id="assignment-state-workspace-help" class="muted assignment-workspace-help">ใช้ส่วนนี้สำหรับรับงาน เริ่มลงหน้างาน และอัปเดตสถานะตามความคืบหน้าปัจจุบัน</p>
@@ -481,7 +502,6 @@
               </div>
             </div>
           </div>
-          <div id="assignment-panel-work" class="assignment-panel-mode hidden"></div>
           <div id="assignment-panel-review" class="assignment-panel-mode hidden"></div>
 
           <div class="secondary-panel hidden" id="assignment-list-panel">
