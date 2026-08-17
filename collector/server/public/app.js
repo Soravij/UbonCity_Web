@@ -11422,18 +11422,33 @@ function wireAssignments() {
     }
   });
 
-  qs("table-assignments")?.querySelector("tbody")?.addEventListener("click", (event) => {
+  qs("table-assignments")?.querySelector("tbody")?.addEventListener("click", async (event) => {
     const btn = event.target.closest("button[data-action]");
     if (!btn) return;
     const action = String(btn.dataset.action || "");
 
     if (action === "open-assignment") {
       const id = Number(btn.dataset.id || 0);
-      if (id) {
-        selectAssignment(id);
-        qs("assignment-detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (!id) return;
+
+      const row = getAssignmentById(id);
+      if (row && String(row.state || "") === "assigned") {
+        try {
+          await withButtonLoading(btn, "กำลังเปิดงาน...", async () => {
+            await api(`/api/assignments/${id}/state`, {
+              method: "PATCH",
+              body: JSON.stringify({ action: "reopen_in_progress" }),
+            });
+            await refreshAssignments({ showStatus: false, preserveSelection: true });
+          });
+        } catch (err) {
+          setStatus("assignment-status", err.message, true);
+          return;
+        }
       }
-      return;
+
+      selectAssignment(id);
+      qs("assignment-detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   });
 
