@@ -1568,6 +1568,11 @@ button.fail {
   gap: 14px;
 }
 
+.grid > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .full-span {
   grid-column: 1 / -1;
 }
@@ -1589,6 +1594,10 @@ button.fail {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+.assignment-brief-grid > * {
+  min-width: 0;
 }
 
 .assignment-brief-section {
@@ -6518,6 +6527,7 @@ button.is-loading::before {
 }
 
 .as-scope #assignment-list-panel,
+.as-scope #assignment-list-panel-handoff,
 .as-scope #assignment-detail-panel-handoff {
   border-color: var(--as-border-subtle);
   border-radius: 16px;
@@ -6679,6 +6689,7 @@ button.is-loading::before {
 }
 
 .as-scope #assignment-list-panel,
+.as-scope #assignment-list-panel-handoff,
 .as-scope #assignment-detail-panel-handoff {
   background: color-mix(in srgb, var(--card) 88%, var(--as-surface-sunken)) !important;
 }
@@ -6790,6 +6801,7 @@ button.is-loading::before {
 }
 
 .as-scope #assignment-list-panel,
+.as-scope #assignment-list-panel-handoff,
 .as-scope #assignment-detail-panel-handoff,
 .as-scope .assignment-brief-card,
 .as-scope .assignment-workspace-section,
@@ -6881,6 +6893,7 @@ button.is-loading::before {
 }
 
 .as-scope #assignment-list-panel,
+.as-scope #assignment-list-panel-handoff,
 .as-scope #assignment-detail-panel-handoff,
 .as-scope .assignment-brief-card,
 .as-scope .assignment-workspace-section,
@@ -6985,11 +6998,13 @@ body {
 }
 
 .as-scope #assignment-list-panel,
+.as-scope #assignment-list-panel-handoff,
 .as-scope #assignment-detail-panel-handoff {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.34), 0 12px 24px rgba(15, 23, 42, 0.04) !important;
 }
 
 :root[data-theme="dark"] .as-scope #assignment-list-panel,
+:root[data-theme="dark"] .as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] .as-scope #assignment-detail-panel-handoff {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 16px 28px rgba(0, 0, 0, 0.22) !important;
 }
@@ -7086,7 +7101,9 @@ body {
 
 /* Phase-1 skin pass: reduce nested borders/noise in assignments page */
 #panel-assignments.as-scope #assignment-detail-panel-handoff,
-#panel-assignments.as-scope #assignment-list-panel {
+#panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
+.as-scope #assignment-list-panel-handoff {
   border-color: color-mix(in srgb, var(--line) 58%, transparent) !important;
 }
 
@@ -7125,6 +7142,8 @@ body {
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-brief-card,
@@ -7157,6 +7176,8 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
@@ -7362,6 +7383,7 @@ body {
 #panel-assignments.as-scope .secondary-panel,
 #panel-assignments.as-scope .table-wrap,
 #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border-color: color-mix(in srgb, var(--line) 62%, transparent) !important;
 }
@@ -7463,6 +7485,7 @@ body {
 #panel-assignments.as-scope .panel,
 #panel-assignments.as-scope .secondary-panel,
 #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 #panel-assignments.as-scope #assignment-detail-panel-handoff,
 #panel-assignments.as-scope .assignment-workspace-section,
 #panel-assignments.as-scope .assignment-review-submission-section,
@@ -7484,6 +7507,8 @@ body {
 :root[data-theme="dark"] #panel-assignments.as-scope .panel,
 :root[data-theme="dark"] #panel-assignments.as-scope .secondary-panel,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
@@ -7609,6 +7634,7 @@ body {
 
 /* Priority 1: reduce nested borders, rely on spacing + subtle surface contrast */
 #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border: 1px solid #cbd5e1 !important;
   background: #ffffff !important;
@@ -7645,6 +7671,8 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border-color: #334155 !important;
   background: #0f172a !important;
@@ -7729,6 +7757,7 @@ body {
 
 #panel-assignments.as-scope #assignment-page-summary,
 #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 #panel-assignments.as-scope #assignment-detail-panel-handoff,
 #panel-assignments.as-scope .assignment-workspace-section,
 #panel-assignments.as-scope .assignment-review-submission-section {
@@ -8162,11 +8191,13 @@ body {
 #panel-assignments.as-scope #assignment-page-summary,
 #panel-assignments.as-scope #assignment-manual-create-panel,
 #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 #panel-assignments.as-scope #assignment-detail-panel-handoff {
   margin: 0 !important;
 }
 
 #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 #panel-assignments.as-scope #assignment-detail-panel-handoff {
   padding: 24px !important;
 }
@@ -8182,6 +8213,7 @@ body {
   }
 
   #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
   #panel-assignments.as-scope #assignment-detail-panel-handoff {
     padding: 16px !important;
   }
@@ -8214,6 +8246,8 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
@@ -8281,6 +8315,8 @@ body {
 
 /* Phase 2 dark: reduce borders 40-60%, use layered surfaces + spacing */
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border: 1px solid rgba(255, 255, 255, 0.05) !important; /* keep only outer frame */
   background: linear-gradient(180deg, #111827 0%, #0f172a 100%) !important;
@@ -8350,6 +8386,8 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   padding: 28px !important;
 }
@@ -8503,6 +8541,8 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: var(--as-layer-card) !important;
   border-color: rgba(255, 255, 255, 0.045) !important;
@@ -8588,6 +8628,7 @@ body {
 }
 
 :root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: var(--as-light-card) !important;
   border-color: var(--as-light-line) !important;
@@ -8878,6 +8919,7 @@ body {
 }
 
 #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 #panel-assignments.as-scope #assignment-detail-panel-handoff {
   padding: 22px !important;
 }
@@ -8943,6 +8985,7 @@ body {
   }
 
   #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
   #panel-assignments.as-scope #assignment-detail-panel-handoff {
     padding: 16px !important;
   }
@@ -9054,6 +9097,7 @@ body {
 
 #panel-assignments.as-scope .page-actions-strip,
 #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 #panel-assignments.as-scope #assignment-detail-panel-handoff,
 #panel-assignments.as-scope .assignment-workspace-section,
 #panel-assignments.as-scope .assignment-review-submission-section,
@@ -9102,6 +9146,8 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2) !important;
 }
@@ -9225,6 +9271,7 @@ body {
 
 /* Final pass: reduce border-inside-border noise in assignments */
 #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border-color: color-mix(in srgb, var(--line) 56%, transparent) !important;
 }
@@ -9243,6 +9290,8 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border-color: rgba(148, 163, 184, 0.2) !important;
 }
@@ -9308,6 +9357,7 @@ body {
 
 /* Final visual cleanup: softer layers, fewer wireframe borders */
 #panel-assignments.as-scope #assignment-list-panel,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 #panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: color-mix(in srgb, var(--card) 98%, var(--as-surface-sunken) 2%) !important;
 }
@@ -9330,6 +9380,8 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: color-mix(in srgb, #111827 92%, #0f172a 8%) !important;
 }
