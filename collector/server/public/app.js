@@ -2502,28 +2502,6 @@ function syncUsersContextTopTabs(preferredTab = state.preferredTab) {
   });
 }
 
-function ensureAssignmentHandoffLayoutOrder() {
-  const root = qs("panel-assignments");
-  const pageSummary = qs("assignment-page-summary");
-  const listPanel = qs("assignment-list-panel");
-  const createPanel = qs("assignment-manual-create-panel");
-  const detailPanel = qs("assignment-detail-panel");
-  if (!root || !listPanel || !createPanel) return;
-
-  if (pageSummary && pageSummary.parentElement === root) {
-    root.appendChild(pageSummary);
-  }
-  if (listPanel.parentElement === root) {
-    root.appendChild(listPanel);
-  }
-  if (createPanel.parentElement === root) {
-    root.appendChild(createPanel);
-  }
-  if (detailPanel && detailPanel.parentElement === root) {
-    root.appendChild(detailPanel);
-  }
-}
-
 function setUserManagementVisibility(visible) {
   qs("tab-users")?.classList.toggle("hidden", !visible);
   const panel = qs("panel-users");
@@ -3777,7 +3755,7 @@ function resetAssignmentPreviews() {
 }
 
 function setAssignmentDetailVisible(visible) {
-  qs("assignment-detail-panel")?.classList.toggle("hidden", !visible);
+  qs("assignment-detail-panel-handoff")?.classList.toggle("hidden", !visible);
 }
 
 function setAssignmentProcessGuide(assignment) {
@@ -4423,15 +4401,12 @@ function syncAssignmentPageMode(assignment) {
   const canSeeCurrentWork = canSeeAssignmentCurrentWorkSurface();
   const canSeeExtendedManage = canSeeAssignmentExtendedManageSurface();
   const canSeeExtendedReview = canSeeAssignmentExtendedReviewSurface();
-  if (pageMode === "handoff") {
-    ensureAssignmentHandoffLayoutOrder();
-  }
-  const titleNode = qs("assignment-panel-title");
-  const noteNode = qs("assignment-panel-note");
+  const titleNode = pageMode === "handoff" ? qs("assignment-panel-title-handoff") : qs("assignment-panel-title");
+  const noteNode = pageMode === "handoff" ? qs("assignment-panel-note-handoff") : qs("assignment-panel-note");
   const pageSummary = qs("assignment-page-summary");
   const createPanel = qs("assignment-manual-create-panel");
   const listPanel = qs("assignment-list-panel");
-  const detailPanel = qs("assignment-detail-panel");
+  const detailPanel = qs("assignment-detail-panel-handoff");
   const stateWorkspace = qs("assignment-state-workspace");
   const submissionWorkspace = qs("assignment-submission-workspace");
   const reviewWorkspace = qs("assignment-review-workspace");
@@ -4579,7 +4554,7 @@ function applyAssignmentModernClasses() {
   addClassById("assignment-page-summary", "as-alert-box");
   addClassById("assignment-subnav", "as-subnav");
   addClassById("assignment-list-panel", "as-list-panel");
-  addClassById("assignment-detail-panel", "as-card-raised");
+  addClassById("assignment-detail-panel-handoff", "as-card-raised");
   addClassById("assignment-process-steps", "as-progress-steps");
   addClassById("assignment-state-workspace", "as-section");
   addClassById("assignment-submission-workspace", "as-section");

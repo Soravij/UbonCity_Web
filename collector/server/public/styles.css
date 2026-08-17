@@ -6408,7 +6408,7 @@ button.is-loading::before {
   font-size: var(--as-text-md);
 }
 
-.as-scope #assignment-detail-panel .grid,
+.as-scope #assignment-detail-panel-handoff .grid,
 .as-scope #assignment-list-panel .grid {
   gap: var(--as-space-3);
 }
@@ -6518,7 +6518,7 @@ button.is-loading::before {
 }
 
 .as-scope #assignment-list-panel,
-.as-scope #assignment-detail-panel {
+.as-scope #assignment-detail-panel-handoff {
   border-color: var(--as-border-subtle);
   border-radius: 16px;
   background: color-mix(in srgb, var(--card) 92%, var(--as-surface-sunken));
@@ -6679,7 +6679,7 @@ button.is-loading::before {
 }
 
 .as-scope #assignment-list-panel,
-.as-scope #assignment-detail-panel {
+.as-scope #assignment-detail-panel-handoff {
   background: color-mix(in srgb, var(--card) 88%, var(--as-surface-sunken)) !important;
 }
 
@@ -6738,8 +6738,8 @@ button.is-loading::before {
 .as-scope #assignment-subnav button,
 .as-scope #assignment-list-panel .assignment-step-toolbar .step-main,
 .as-scope #assignment-list-panel .assignment-step-toolbar .step-sub,
-.as-scope #assignment-detail-panel .assignment-step-toolbar .step-main,
-.as-scope #assignment-detail-panel .assignment-step-toolbar .step-sub {
+.as-scope #assignment-detail-panel-handoff .assignment-step-toolbar .step-main,
+.as-scope #assignment-detail-panel-handoff .assignment-step-toolbar .step-sub {
   border-color: color-mix(in srgb, var(--as-border-subtle) 86%, var(--accent) 14%) !important;
   background: color-mix(in srgb, var(--card) 94%, var(--as-surface-sunken)) !important;
   color: color-mix(in srgb, var(--text) 90%, var(--muted) 10%) !important;
@@ -6749,8 +6749,8 @@ button.is-loading::before {
 
 .as-scope #assignment-subnav button.active,
 .as-scope #assignment-list-panel .assignment-step-toolbar .step-main,
-.as-scope #assignment-detail-panel #btn-assignment-submit.assignment-submit-primary,
-.as-scope #assignment-detail-panel #btn-assignment-accept-submission {
+.as-scope #assignment-detail-panel-handoff #btn-assignment-submit.assignment-submit-primary,
+.as-scope #assignment-detail-panel-handoff #btn-assignment-accept-submission {
   background: linear-gradient(
     135deg,
     color-mix(in srgb, var(--accent) 62%, #ffffff 38%),
@@ -6762,7 +6762,7 @@ button.is-loading::before {
 }
 
 .as-scope #assignment-list-panel .assignment-step-toolbar,
-.as-scope #assignment-detail-panel .assignment-step-toolbar {
+.as-scope #assignment-detail-panel-handoff .assignment-step-toolbar {
   gap: 10px;
 }
 
@@ -6790,7 +6790,7 @@ button.is-loading::before {
 }
 
 .as-scope #assignment-list-panel,
-.as-scope #assignment-detail-panel,
+.as-scope #assignment-detail-panel-handoff,
 .as-scope .assignment-brief-card,
 .as-scope .assignment-workspace-section,
 .as-scope .assignment-deliverables-card,
@@ -6881,7 +6881,7 @@ button.is-loading::before {
 }
 
 .as-scope #assignment-list-panel,
-.as-scope #assignment-detail-panel,
+.as-scope #assignment-detail-panel-handoff,
 .as-scope .assignment-brief-card,
 .as-scope .assignment-workspace-section,
 .as-scope .assignment-deliverables-card,
@@ -6967,7 +6967,7 @@ body {
     linear-gradient(180deg, #0a0b0d 0%, #0d0f12 46%, #101317 100%) !important;
 }
 
-.as-scope #assignment-detail-panel,
+.as-scope #assignment-detail-panel-handoff,
 .as-scope .assignment-workspace-section,
 .as-scope .assignment-brief-card,
 .as-scope .assignment-deliverables-card,
@@ -6985,16 +6985,16 @@ body {
 }
 
 .as-scope #assignment-list-panel,
-.as-scope #assignment-detail-panel {
+.as-scope #assignment-detail-panel-handoff {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.34), 0 12px 24px rgba(15, 23, 42, 0.04) !important;
 }
 
 :root[data-theme="dark"] .as-scope #assignment-list-panel,
-:root[data-theme="dark"] .as-scope #assignment-detail-panel {
+:root[data-theme="dark"] .as-scope #assignment-detail-panel-handoff {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 16px 28px rgba(0, 0, 0, 0.22) !important;
 }
 
-:root[data-theme="dark"] .as-scope #assignment-detail-panel,
+:root[data-theme="dark"] .as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] .as-scope .assignment-workspace-section,
 :root[data-theme="dark"] .as-scope .assignment-brief-card,
 :root[data-theme="dark"] .as-scope .assignment-deliverables-card,
@@ -7085,7 +7085,7 @@ body {
 }
 
 /* Phase-1 skin pass: reduce nested borders/noise in assignments page */
-#panel-assignments.as-scope #assignment-detail-panel,
+#panel-assignments.as-scope #assignment-detail-panel-handoff,
 #panel-assignments.as-scope #assignment-list-panel {
   border-color: color-mix(in srgb, var(--line) 58%, transparent) !important;
 }
@@ -7123,7 +7123,7 @@ body {
   border-color: color-mix(in srgb, var(--line) 50%, transparent) !important;
 }
 
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
@@ -7157,7 +7157,7 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-brief-card,
@@ -7362,7 +7362,7 @@ body {
 #panel-assignments.as-scope .secondary-panel,
 #panel-assignments.as-scope .table-wrap,
 #panel-assignments.as-scope #assignment-list-panel,
-#panel-assignments.as-scope #assignment-detail-panel {
+#panel-assignments.as-scope #assignment-detail-panel-handoff {
   border-color: color-mix(in srgb, var(--line) 62%, transparent) !important;
 }
 
@@ -7463,7 +7463,7 @@ body {
 #panel-assignments.as-scope .panel,
 #panel-assignments.as-scope .secondary-panel,
 #panel-assignments.as-scope #assignment-list-panel,
-#panel-assignments.as-scope #assignment-detail-panel,
+#panel-assignments.as-scope #assignment-detail-panel-handoff,
 #panel-assignments.as-scope .assignment-workspace-section,
 #panel-assignments.as-scope .assignment-review-submission-section,
 #panel-assignments.as-scope .assignment-brief-card,
@@ -7484,7 +7484,7 @@ body {
 :root[data-theme="dark"] #panel-assignments.as-scope .panel,
 :root[data-theme="dark"] #panel-assignments.as-scope .secondary-panel,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-brief-card,
@@ -7609,7 +7609,7 @@ body {
 
 /* Priority 1: reduce nested borders, rely on spacing + subtle surface contrast */
 #panel-assignments.as-scope #assignment-list-panel,
-#panel-assignments.as-scope #assignment-detail-panel {
+#panel-assignments.as-scope #assignment-detail-panel-handoff {
   border: 1px solid #cbd5e1 !important;
   background: #ffffff !important;
 }
@@ -7645,7 +7645,7 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel {
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border-color: #334155 !important;
   background: #0f172a !important;
 }
@@ -7729,7 +7729,7 @@ body {
 
 #panel-assignments.as-scope #assignment-page-summary,
 #panel-assignments.as-scope #assignment-list-panel,
-#panel-assignments.as-scope #assignment-detail-panel,
+#panel-assignments.as-scope #assignment-detail-panel-handoff,
 #panel-assignments.as-scope .assignment-workspace-section,
 #panel-assignments.as-scope .assignment-review-submission-section {
   margin-top: 16px !important;
@@ -8162,12 +8162,12 @@ body {
 #panel-assignments.as-scope #assignment-page-summary,
 #panel-assignments.as-scope #assignment-manual-create-panel,
 #panel-assignments.as-scope #assignment-list-panel,
-#panel-assignments.as-scope #assignment-detail-panel {
+#panel-assignments.as-scope #assignment-detail-panel-handoff {
   margin: 0 !important;
 }
 
 #panel-assignments.as-scope #assignment-list-panel,
-#panel-assignments.as-scope #assignment-detail-panel {
+#panel-assignments.as-scope #assignment-detail-panel-handoff {
   padding: 24px !important;
 }
 
@@ -8182,7 +8182,7 @@ body {
   }
 
   #panel-assignments.as-scope #assignment-list-panel,
-  #panel-assignments.as-scope #assignment-detail-panel {
+  #panel-assignments.as-scope #assignment-detail-panel-handoff {
     padding: 16px !important;
   }
 }
@@ -8214,7 +8214,7 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-brief-card,
@@ -8281,7 +8281,7 @@ body {
 
 /* Phase 2 dark: reduce borders 40-60%, use layered surfaces + spacing */
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel {
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border: 1px solid rgba(255, 255, 255, 0.05) !important; /* keep only outer frame */
   background: linear-gradient(180deg, #111827 0%, #0f172a 100%) !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22) !important;
@@ -8350,7 +8350,7 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel {
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   padding: 28px !important;
 }
 
@@ -8363,7 +8363,7 @@ body {
 
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section + .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section + .assignment-review-submission-section,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel + #assignment-detail-panel {
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel + #assignment-detail-panel-handoff {
   margin-top: 18px !important;
 }
 
@@ -8503,7 +8503,7 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel {
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: var(--as-layer-card) !important;
   border-color: rgba(255, 255, 255, 0.045) !important;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.2) !important;
@@ -8588,7 +8588,7 @@ body {
 }
 
 :root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-list-panel,
-:root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-detail-panel {
+:root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: var(--as-light-card) !important;
   border-color: var(--as-light-line) !important;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04), 0 10px 22px rgba(15, 23, 42, 0.05) !important;
@@ -8878,7 +8878,7 @@ body {
 }
 
 #panel-assignments.as-scope #assignment-list-panel,
-#panel-assignments.as-scope #assignment-detail-panel {
+#panel-assignments.as-scope #assignment-detail-panel-handoff {
   padding: 22px !important;
 }
 
@@ -8943,7 +8943,7 @@ body {
   }
 
   #panel-assignments.as-scope #assignment-list-panel,
-  #panel-assignments.as-scope #assignment-detail-panel {
+  #panel-assignments.as-scope #assignment-detail-panel-handoff {
     padding: 16px !important;
   }
 
@@ -9054,7 +9054,7 @@ body {
 
 #panel-assignments.as-scope .page-actions-strip,
 #panel-assignments.as-scope #assignment-list-panel,
-#panel-assignments.as-scope #assignment-detail-panel,
+#panel-assignments.as-scope #assignment-detail-panel-handoff,
 #panel-assignments.as-scope .assignment-workspace-section,
 #panel-assignments.as-scope .assignment-review-submission-section,
 #panel-assignments.as-scope .assignment-brief-card,
@@ -9102,7 +9102,7 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel {
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2) !important;
 }
 
@@ -9225,7 +9225,7 @@ body {
 
 /* Final pass: reduce border-inside-border noise in assignments */
 #panel-assignments.as-scope #assignment-list-panel,
-#panel-assignments.as-scope #assignment-detail-panel {
+#panel-assignments.as-scope #assignment-detail-panel-handoff {
   border-color: color-mix(in srgb, var(--line) 56%, transparent) !important;
 }
 
@@ -9243,7 +9243,7 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel {
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border-color: rgba(148, 163, 184, 0.2) !important;
 }
 
@@ -9308,7 +9308,7 @@ body {
 
 /* Final visual cleanup: softer layers, fewer wireframe borders */
 #panel-assignments.as-scope #assignment-list-panel,
-#panel-assignments.as-scope #assignment-detail-panel {
+#panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: color-mix(in srgb, var(--card) 98%, var(--as-surface-sunken) 2%) !important;
 }
 
@@ -9330,7 +9330,7 @@ body {
 }
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel {
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: color-mix(in srgb, #111827 92%, #0f172a 8%) !important;
 }
 
