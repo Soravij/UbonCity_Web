@@ -9669,32 +9669,16 @@ async function refreshAssignments({ showStatus = true, preserveSelection = true 
       } else if (pageMode === "work") {
         if (stillExistsInSubmitted) {
           selectAssignment(previousSelection, { submittedView: true });
-        } else if (rows.length > 0) {
-          selectAssignment(rows[0]?.id);
-        } else if (submittedRows.length > 0) {
-          selectAssignment(submittedRows[0]?.id, { submittedView: true });
         } else {
           selectAssignment(null);
         }
       } else if (stillExistsAnywhere) {
         selectAssignment(previousSelection);
       } else {
-        if (rows.length > 0) {
-          selectAssignment(rows[0]?.id);
-        } else if (submittedRows.length > 0) {
-          selectAssignment(submittedRows[0]?.id, { submittedView: true });
-        } else {
-          selectAssignment(managedRows[0]?.id);
-        }
+        selectAssignment(null);
       }
     } else {
-      if (rows.length > 0) {
-        selectAssignment(rows[0]?.id);
-      } else if (submittedRows.length > 0) {
-        selectAssignment(submittedRows[0]?.id, { submittedView: true });
-      } else {
-        selectAssignment(managedRows[0]?.id);
-      }
+      selectAssignment(null);
     }
 
     if (showStatus) {
@@ -9764,7 +9748,7 @@ async function loadAssignmentsByItem(itemId, { showStatus = true, preserveSelect
   } else if (preserveSelection && previousSelection && rows.some((row) => Number(row.id || 0) === previousSelection)) {
     selectAssignment(previousSelection);
   } else {
-    selectAssignment(rows[0]?.id || 0);
+    selectAssignment(null);
   }
 
   if (showStatus) {
