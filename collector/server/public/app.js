@@ -3755,6 +3755,10 @@ function resetAssignmentPreviews() {
 }
 
 function setAssignmentDetailVisible(visible) {
+  if (!canSeeAssignmentCurrentWorkSurface()) {
+    qs("assignment-detail-panel-handoff")?.classList.add("hidden");
+    return;
+  }
   qs("assignment-detail-panel-handoff")?.classList.toggle("hidden", !visible);
 }
 
@@ -4479,12 +4483,6 @@ function syncAssignmentPageMode(assignment) {
   qs("assignment-panel-handoff")?.classList.toggle("hidden", pageMode !== "handoff");
   qs("assignment-panel-work")?.classList.toggle("hidden", pageMode !== "work");
   qs("assignment-panel-review")?.classList.toggle("hidden", pageMode !== "review");
-  if (detailPanel) {
-    detailPanel.classList.toggle("hidden", !canSeeCurrentWork || (pageMode === "handoff" ? true : !hasAssignment));
-  }
-  if (stateWorkspace) {
-    stateWorkspace.classList.toggle("hidden", pageMode !== "work" || !hasAssignment);
-  }
   const backwardControls = qs("workflow-backward-controls");
   if (backwardControls && pageMode !== "handoff") {
     backwardControls.classList.add("hidden");
