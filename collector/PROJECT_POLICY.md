@@ -15,6 +15,47 @@ See [../PROJECT_POLICY.md](../PROJECT_POLICY.md) for the canonical project-wide 
 - After Work Return is reviewed and accepted, Article Writers must not confirm CTA or Taxonomy again in Article Workspace; see root `PROJECT_POLICY.md` §7A Acceptance Boundary for the full contract.
   - TH: หลัง Work Return ผ่านการตรวจและอนุมัติแล้ว ผู้เขียนบทความใน Article Workspace ต้องไม่ยืนยัน CTA หรือ Taxonomy ซ้ำอีก — ดูรายละเอียดเต็มที่ root `PROJECT_POLICY.md` §7A Acceptance Boundary
 
+## Assignment panel visibility contract (`server/public/app.js`, `index.html`, under `#panel-assignments`)
+
+- **One element, one decider.** The `hidden` class of any element under `#panel-assignments` must be
+  decided by exactly one function/call site — never two writers racing on the same node. Before the
+  Step 1-4 DOM split, `pageMode` (handoff/work/review) was enforced per-node throughout
+  `syncAssignmentPageMode`; after the split, `pageMode` is a container-level concern only —
+  `#assignment-panel-handoff` / `#assignment-panel-work` / `#assignment-panel-review` are the sole
+  `pageMode` gate. Do not reintroduce a per-node `pageMode` toggle inside `syncAssignmentPageMode` (or
+  any other function) for an element that already lives inside one of those three containers — the
+  container toggle already decides it. The system used to rely on an unwritten "last call in the chain
+  wins" ordering between `applySectionState` (inside `syncAssignmentWorkflowLayout`) and
+  `syncAssignmentPageMode`'s own per-node toggle both writing to `#assignment-state-workspace`'s
+  `hidden` class; that silent race is what let the state-workspace form render unstyled in work mode
+  (fixed at `f8c7923` by deleting the per-node toggle and leaving `applySectionState` as sole decider).
+  Any new visibility logic under this panel must name its one decider explicitly, not lean on function
+  call order.
+  - TH: element ใต้ `#panel-assignments` ทุกตัว class `hidden` ต้องมีผู้ตัดสินเดียวเท่านั้น ห้ามมีสอง
+    ฟังก์ชันเขียนทับกัน ตั้งแต่แยก DOM เป็น 3 container แล้ว (`#assignment-panel-handoff/-work/-review`)
+    `pageMode` คุมได้แค่ระดับ container เท่านั้น ห้ามเพิ่ม per-node `pageMode` toggle กลับเข้ามาให้
+    element ที่อยู่ใต้ container ใดตัวหนึ่งอยู่แล้ว เดิมระบบพึ่งลำดับ "ใครเรียกทีหลังชนะ" ระหว่าง
+    `applySectionState` กับ `syncAssignmentPageMode` ที่เขียนทับ `#assignment-state-workspace` ตัว
+    เดียวกัน ซึ่งไม่เคยถูกเขียนเป็นกฎและเป็นสาเหตุที่ฟอร์มอัปเดตสถานะโผล่แบบไม่มีสไตล์ในโหมด work
+    (แก้แล้วที่ `f8c7923` โดยลบ per-node toggle ทิ้ง เหลือ `applySectionState` เป็นผู้ตัดสินเดียว)
+    visibility logic ใหม่ใต้ panel นี้ต้องระบุผู้ตัดสินให้ชัด ห้ามอาศัยลำดับการเรียกฟังก์ชัน
+- **`#workflow-backward-controls` — backend is the sole decider.** This widget's visibility is decided
+  only by `can_transition`/`targets` returned from the backward-transitions endpoint, consumed by
+  `renderWorkflowBackwardTransitionControls` (`workflow-backward-transitions.js`). It must show in
+  every `pageMode` the backend returns a non-empty `targets` for — a field-working item can sit on the
+  work page and still need to step backward from there. Never add a client-side `pageMode` gate on this
+  element, in any form, for any reason. History: `db1cccc` moved the element to the panel's top level;
+  `12b02f7` then added a force-hide outside handoff mode, which blocked exactly the field-working/work-page
+  case above; `1692863` removed that force-hide per this decision. If scope needs to be narrowed in the
+  future, narrow it in the backend's `targets`, never in the client.
+  - TH: การแสดงผลของ widget นี้ตัดสินจาก `can_transition`/`targets` ที่ backend ส่งมาเท่านั้น ผ่าน
+    `renderWorkflowBackwardTransitionControls` (`workflow-backward-transitions.js`) ต้องแสดงได้ทุก
+    `pageMode` ที่ backend คืน `targets` ไม่ว่าง เพราะ item ที่ยัง field-working อยู่สามารถนั่งอยู่หน้า
+    work และต้องถอยจากหน้านั้นได้จริง ห้ามเพิ่มเงื่อนไข `pageMode` ฝั่ง client ให้ element นี้ไม่ว่า
+    กรณีใด ประวัติ: `db1cccc` ย้าย element ไปอยู่ระดับบนสุดของ panel → `12b02f7` เพิ่ม force-hide นอก
+    handoff ซึ่งบล็อกเคส field-working/หน้า work ข้างต้นพอดี → `1692863` ลบ force-hide ทิ้งตามการ
+    ตัดสินใจนี้ ถ้าต้องการจำกัดขอบเขตในอนาคต ให้จำกัดที่ `targets` ฝั่ง backend ไม่ใช่ที่ client
+
 ## Delete / purge (collector-owned)
 
 The canonical rules are root `PROJECT_POLICY.md` §3 Delete Tier Contract. Collector owns the code that

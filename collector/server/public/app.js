@@ -446,8 +446,8 @@ function canSeeAssignmentExtendedReviewSurface(role = currentRole()) {
 
 function applyFreelanceWorkerView(pageMode = getAssignmentPageMode()) {
   if (currentRole() !== "freelance") return;
-  const titleNode = qs("assignment-panel-title");
-  const noteNode = qs("assignment-panel-note");
+  const titleNode = pageMode === "work" ? qs("assignment-panel-title-work") : pageMode === "review" ? qs("assignment-panel-title-review") : qs("assignment-panel-title-handoff");
+  const noteNode = pageMode === "work" ? qs("assignment-panel-note-work") : pageMode === "review" ? qs("assignment-panel-note-review") : qs("assignment-panel-note-handoff");
   const pageSummary = qs("assignment-page-summary");
   const guideBox = qs("assignment-next-action")?.closest(".assignment-guide") || null;
   const stepsRoot = qs("assignment-process-steps");
@@ -2502,28 +2502,6 @@ function syncUsersContextTopTabs(preferredTab = state.preferredTab) {
   });
 }
 
-function ensureAssignmentHandoffLayoutOrder() {
-  const root = qs("panel-assignments");
-  const pageSummary = qs("assignment-page-summary");
-  const listPanel = qs("assignment-list-panel");
-  const createPanel = qs("assignment-manual-create-panel");
-  const detailPanel = qs("assignment-detail-panel");
-  if (!root || !listPanel || !createPanel) return;
-
-  if (pageSummary && pageSummary.parentElement === root) {
-    root.appendChild(pageSummary);
-  }
-  if (listPanel.parentElement === root) {
-    root.appendChild(listPanel);
-  }
-  if (createPanel.parentElement === root) {
-    root.appendChild(createPanel);
-  }
-  if (detailPanel && detailPanel.parentElement === root) {
-    root.appendChild(detailPanel);
-  }
-}
-
 function setUserManagementVisibility(visible) {
   qs("tab-users")?.classList.toggle("hidden", !visible);
   const panel = qs("panel-users");
@@ -2581,9 +2559,7 @@ function getAssignmentCreateKind() {
 }
 
 function getSelectedAssignmentAssigneeUser() {
-  const assigneeId = parsePositiveInt(qs("assignment-assignee-id")?.value, 0);
-  if (!assigneeId) return null;
-  return getAssignableUsers().find((row) => Number(row?.id || 0) === assigneeId) || null;
+  return null;
 }
 
 function renderAssignmentAssigneeSelectionSummary(secondaryText = "") {
@@ -2637,9 +2613,7 @@ function resolveManagerLabel(user) {
 }
 
 function renderAssignmentAssigneeOptions() {
-  const filterOptions = getAssignableUsers();
   const createOptions = getAssignableUsers(getAssignmentCreateKind(), { restrictCreateInternalPolicy: true });
-  const filterNode = qs("assignment-assignee-id");
   const createNode = qs("assignment-create-assignee-id");
 
   const renderOptions = (node, options, { autoSelectSingle = false } = {}) => {
@@ -2671,7 +2645,6 @@ function renderAssignmentAssigneeOptions() {
     }
   };
 
-  renderOptions(filterNode, filterOptions);
   renderOptions(createNode, createOptions, { autoSelectSingle: true });
   syncAssignmentCreateAssigneeMode();
 }
@@ -3552,17 +3525,14 @@ function isExternalContributorUser() {
 }
 
 function setAssignmentRoleVisibility() {
-  const assigneeWrap = qs("assignment-assignee-wrap");
-  const limitWrap = qs("assignment-limit-wrap");
+  const limitWrap = qs("assignment-limit-wrap-work");
+  const limitWrapReview = qs("assignment-limit-wrap-review");
   const reviewTrackingWrap = qs("assignment-review-tracking-wrap");
   const updateStateBtn = qs("btn-assignment-update-state");
   const createPanel = qs("assignment-manual-create-panel");
   const createBtn = qs("btn-assignment-create");
   const createSummary = qs("assignment-create-summary");
   const assignmentsTab = qs("tab-assignments");
-  const handoffTab = qs("tab-handoff");
-  const workTab = qs("tab-work");
-  const reviewTab = qs("tab-review");
   const handoffMode = qs("assignment-mode-handoff");
   const workMode = qs("assignment-mode-work");
   const reviewMode = qs("assignment-mode-review");
@@ -3578,14 +3548,14 @@ function setAssignmentRoleVisibility() {
   const isWorkOnlyRole = isAssignmentWorkOnlyUser();
   const showCreatePanel = pageMode === "handoff" && contextItemId > 0 && canSeeExtendedManage;
 
-  if (assigneeWrap) {
-    assigneeWrap.classList.toggle("hidden", !canSeeExtendedManage || pageMode === "handoff" || pageMode === "work" || pageMode === "review");
-  }
   if (limitWrap) {
-    limitWrap.classList.toggle("hidden", !canSeeBaseTasks || pageMode === "handoff");
+    limitWrap.classList.toggle("hidden", !canSeeBaseTasks);
+  }
+  if (limitWrapReview) {
+    limitWrapReview.classList.toggle("hidden", !canSeeBaseTasks);
   }
   if (reviewTrackingWrap) {
-    reviewTrackingWrap.classList.toggle("hidden", !(pageMode === "review" && canSeeExtendedReview && isOwnerUser()));
+    reviewTrackingWrap.classList.toggle("hidden", !(canSeeExtendedReview && isOwnerUser()));
   }
   if (createPanel) {
     createPanel.classList.toggle("hidden", !showCreatePanel);
@@ -3602,15 +3572,6 @@ function setAssignmentRoleVisibility() {
   }
   if (assignmentsTab) {
     assignmentsTab.classList.toggle("hidden", false);
-  }
-  if (handoffTab) {
-    handoffTab.classList.add("hidden");
-  }
-  if (workTab) {
-    workTab.classList.add("hidden");
-  }
-  if (reviewTab) {
-    reviewTab.classList.add("hidden");
   }
   if (handoffMode) {
     handoffMode.classList.toggle("hidden", !canSeeExtendedManage);
@@ -3777,7 +3738,11 @@ function resetAssignmentPreviews() {
 }
 
 function setAssignmentDetailVisible(visible) {
-  qs("assignment-detail-panel")?.classList.toggle("hidden", !visible);
+  if (!canSeeAssignmentCurrentWorkSurface()) {
+    qs("assignment-detail-panel-handoff")?.classList.add("hidden");
+    return;
+  }
+  qs("assignment-detail-panel-handoff")?.classList.toggle("hidden", !visible);
 }
 
 function setAssignmentProcessGuide(assignment) {
@@ -4423,15 +4388,12 @@ function syncAssignmentPageMode(assignment) {
   const canSeeCurrentWork = canSeeAssignmentCurrentWorkSurface();
   const canSeeExtendedManage = canSeeAssignmentExtendedManageSurface();
   const canSeeExtendedReview = canSeeAssignmentExtendedReviewSurface();
-  if (pageMode === "handoff") {
-    ensureAssignmentHandoffLayoutOrder();
-  }
-  const titleNode = qs("assignment-panel-title");
-  const noteNode = qs("assignment-panel-note");
+  const titleNode = pageMode === "handoff" ? qs("assignment-panel-title-handoff") : pageMode === "work" ? qs("assignment-panel-title-work") : qs("assignment-panel-title-review");
+  const noteNode = pageMode === "handoff" ? qs("assignment-panel-note-handoff") : pageMode === "work" ? qs("assignment-panel-note-work") : qs("assignment-panel-note-review");
   const pageSummary = qs("assignment-page-summary");
   const createPanel = qs("assignment-manual-create-panel");
-  const listPanel = qs("assignment-list-panel");
-  const detailPanel = qs("assignment-detail-panel");
+  const listPanel = pageMode === "handoff" ? qs("assignment-list-panel-handoff") : pageMode === "work" ? qs("assignment-list-panel-work") : qs("assignment-list-panel-review");
+  const detailPanel = qs("assignment-detail-panel-handoff");
   const stateWorkspace = qs("assignment-state-workspace");
   const submissionWorkspace = qs("assignment-submission-workspace");
   const reviewWorkspace = qs("assignment-review-workspace");
@@ -4439,19 +4401,11 @@ function syncAssignmentPageMode(assignment) {
   const reviewSubmissionCard = qs("assignment-review-submission-card");
   const submissionForm = qs("assignment-submission-form");
   const workMonitor = qs("assignment-work-monitor");
-  const deliverableEditor = qs("assignment-deliverable-editor");
-  const deliverableActions = qs("assignment-deliverables-actions");
   const deliverablesCard = qs("assignment-deliverables-summary")?.closest(".assignment-deliverables-card") || null;
-  const selectedSummary = qs("assignment-selected-summary");
-  const guideBox = qs("assignment-next-action")?.closest(".assignment-guide") || null;
   const contextBriefCard = qs("assignment-context-brief")?.closest(".assignment-brief-card") || null;
   const contextBriefTitle = contextBriefCard?.querySelector(".assignment-subtitle") || null;
-  const nextStepCard = qs("assignment-next-step-content")?.closest(".assignment-brief-card") || null;
   const debugBox = qs("assignment-debug-box");
-  const loadSubmissionsBtn = qs("btn-assignment-load-submissions");
-  const loadHistoryBtn = qs("btn-assignment-load-history");
   const hasAssignment = Number(assignment?.id || state.assignments.selectedId || 0) > 0;
-  const hasContextItem = pageMode === "handoff" && Boolean(getAssignmentContextItem());
   const canActInWork = canActOnAssignmentWork(assignment);
   const isTrackOnlyInWork = isAssignmentTrackOnlySelection(assignment);
   const isSubmittedInWork = isAssignmentSubmittedSelection(assignment);
@@ -4492,75 +4446,41 @@ function syncAssignmentPageMode(assignment) {
       pageSummary.innerHTML = "";
     }
   }
-  if (createPanel && pageMode !== "handoff") {
-    createPanel.classList.add("hidden");
-  }
   if (createPanel && pageMode === "handoff" && !canSeeExtendedManage) {
     createPanel.classList.add("hidden");
   }
   if (listPanel) {
     listPanel.classList.toggle("hidden", !canSeeBaseTasks);
   }
-  if (detailPanel) {
-    detailPanel.classList.toggle("hidden", !canSeeCurrentWork || (pageMode === "handoff" ? true : !hasAssignment));
-  }
-  if (stateWorkspace) {
-    stateWorkspace.classList.toggle("hidden", pageMode !== "handoff" || !canSeeExtendedManage);
-  }
-  const backwardControls = qs("workflow-backward-controls");
-  if (backwardControls && pageMode !== "handoff") {
-    backwardControls.classList.add("hidden");
-  }
+  qs("assignment-panel-handoff")?.classList.toggle("hidden", pageMode !== "handoff");
+  qs("assignment-panel-work")?.classList.toggle("hidden", pageMode !== "work");
+  qs("assignment-panel-review")?.classList.toggle("hidden", pageMode !== "review");
   if (submissionWorkspace) {
-    submissionWorkspace.classList.toggle("hidden", !canSeeCurrentWork || pageMode === "handoff" || pageMode === "review");
+    submissionWorkspace.classList.toggle("hidden", !canSeeCurrentWork);
   }
   if (reviewWorkspace) {
     reviewWorkspace.classList.toggle("hidden", !canSeeExtendedReview || pageMode !== "review");
   }
   if (reviewSummaryCard) {
-    reviewSummaryCard.classList.toggle("hidden", !canSeeExtendedReview || pageMode !== "review" || !hasAssignment);
+    reviewSummaryCard.classList.toggle("hidden", !canSeeExtendedReview || !hasAssignment);
   }
   if (reviewSubmissionCard) {
-    reviewSubmissionCard.classList.toggle("hidden", !canSeeExtendedReview || pageMode !== "review" || !hasAssignment);
+    reviewSubmissionCard.classList.toggle("hidden", !canSeeExtendedReview || !hasAssignment);
   }
   if (submissionForm) {
-    submissionForm.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && (!canActInWork || isReadOnlyInWork)));
+    submissionForm.classList.toggle("hidden", hasAssignment && (!canActInWork || isReadOnlyInWork));
   }
   if (workMonitor) {
-    workMonitor.classList.toggle("hidden", pageMode !== "work" || !hasAssignment || (!isReadOnlyInWork && canActInWork));
-  }
-  if (deliverableEditor) {
-    deliverableEditor.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && (!canActInWork || isReadOnlyInWork)));
-  }
-  if (deliverableActions) {
-    deliverableActions.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && (!canActInWork || isReadOnlyInWork)));
+    workMonitor.classList.toggle("hidden", !hasAssignment || (!isReadOnlyInWork && canActInWork));
   }
   if (deliverablesCard) {
-    deliverablesCard.classList.toggle("hidden", isEditor || (pageMode === "work" && hasAssignment && (!canActInWork || isReadOnlyInWork)));
-  }
-  if (selectedSummary) {
-    selectedSummary.classList.toggle("hidden", pageMode === "work" || pageMode === "review");
-  }
-  if (guideBox) {
-    guideBox.classList.toggle("hidden", pageMode === "work" || pageMode === "review");
-  }
-  if (contextBriefCard) {
-    contextBriefCard.classList.toggle("hidden", pageMode === "work" || pageMode === "review");
+    deliverablesCard.classList.toggle("hidden", isEditor || (hasAssignment && (!canActInWork || isReadOnlyInWork)));
   }
   if (contextBriefTitle) {
     contextBriefTitle.textContent = pageMode === "handoff" ? "คำสั่งงาน" : "ข้อมูลประกอบงาน";
   }
-  if (nextStepCard) {
-    nextStepCard.classList.toggle("hidden", pageMode === "work" || pageMode === "review");
-  }
   if (debugBox) {
-    debugBox.classList.toggle("hidden", !canSeeExtendedManage || pageMode === "work" || pageMode === "review");
-  }
-  if (loadSubmissionsBtn) {
-    loadSubmissionsBtn.classList.toggle("hidden", isEditor || pageMode === "work");
-  }
-  if (loadHistoryBtn) {
-    loadHistoryBtn.classList.toggle("hidden", isEditor || pageMode === "work");
+    debugBox.classList.toggle("hidden", !canSeeExtendedManage);
   }
   applyFreelanceWorkerView(pageMode);
   syncAssignmentSubnav();
@@ -4578,8 +4498,10 @@ function applyAssignmentModernClasses() {
   const addClassById = (id, className) => qs(id)?.classList.add(className);
   addClassById("assignment-page-summary", "as-alert-box");
   addClassById("assignment-subnav", "as-subnav");
-  addClassById("assignment-list-panel", "as-list-panel");
-  addClassById("assignment-detail-panel", "as-card-raised");
+  addClassById("assignment-list-panel-handoff", "as-list-panel");
+  addClassById("assignment-list-panel-work", "as-list-panel");
+  addClassById("assignment-list-panel-review", "as-list-panel");
+  addClassById("assignment-detail-panel-handoff", "as-card-raised");
   addClassById("assignment-process-steps", "as-progress-steps");
   addClassById("assignment-state-workspace", "as-section");
   addClassById("assignment-submission-workspace", "as-section");
@@ -6322,23 +6244,23 @@ function normalizeCollectPayload(adapter) {
 }
 
 function buildAssignmentsActionablePath() {
-  const limit = parsePositiveInt(qs("assignment-limit")?.value, 50) || 50;
+  const limit = parsePositiveInt(qs("assignment-limit-work")?.value, 50) || 50;
   return `/api/assignments/mine?scope=actionable&limit=${limit}`;
 }
 
 function buildAssignmentsManagedPath() {
   if (!canSeeManagedAssignmentsTable()) return "";
-  const limit = parsePositiveInt(qs("assignment-limit")?.value, 50) || 50;
+  const limit = parsePositiveInt(qs("assignment-limit-work")?.value, 50) || 50;
   return `/api/assignments/mine?scope=managed&limit=${limit}`;
 }
 
 function buildAssignmentsSubmittedPath() {
-  const limit = parsePositiveInt(qs("assignment-limit")?.value, 50) || 50;
+  const limit = parsePositiveInt(qs("assignment-limit-work")?.value, 50) || 50;
   return `/api/assignments/mine?scope=submitted&limit=${limit}`;
 }
 
 function buildAssignmentsMinePath() {
-  const limit = parsePositiveInt(qs("assignment-limit")?.value, 50) || 50;
+  const limit = parsePositiveInt(qs("assignment-limit-work")?.value, 50) || 50;
   if (currentRole() === "editor") {
     const selfId = parsePositiveInt(state.user?.id, 0);
     if (getAssignmentPageMode() === "work") {
@@ -6354,27 +6276,20 @@ function buildAssignmentsMinePath() {
   }
   if (getAssignmentPageMode() === "review") {
     const includeTracking = isOwnerReviewTrackingEnabled() ? "&include_tracking=1" : "";
-    return `/api/assignments/mine?scope=review&limit=${limit}${includeTracking}`;
+    const reviewLimit = parsePositiveInt(qs("assignment-limit-review")?.value, 50) || 50;
+    return `/api/assignments/mine?scope=review&limit=${reviewLimit}${includeTracking}`;
   }
   if (isFreelanceUser()) {
     return `/api/assignments/mine?limit=${limit}`;
   }
   const selfId = parsePositiveInt(state.user?.id, 0);
   if (isAdminUser()) {
-    const assigneeId = parsePositiveInt(qs("assignment-assignee-id")?.value, 0);
-    if (assigneeId) {
-      return `/api/assignments/mine?assignee_user_id=${assigneeId}&limit=${limit}`;
-    }
     return `/api/assignments/mine?limit=${limit}`;
   }
-  const assigneeId = parsePositiveInt(qs("assignment-assignee-id")?.value, 0);
-  if (selfId && (!assigneeId || assigneeId === selfId)) {
+  if (selfId) {
     return `/api/assignments/mine?assignee_user_id=${selfId}&limit=${limit}`;
   }
-  if (!assigneeId) {
-    return `/api/assignments/mine?assigned_by_me=1&limit=${limit}`;
-  }
-  return `/api/assignments/mine?assignee_user_id=${assigneeId}&limit=${limit}`;
+  return `/api/assignments/mine?assigned_by_me=1&limit=${limit}`;
 }
 
 function getAssignmentAssignerLabel(assignment) {
@@ -9081,15 +8996,15 @@ function renderSubmittedAssignmentsTable(rows) {
 }
 
 function renderAssignmentsTable(rows) {
-  const table = qs("table-assignments");
-  if (!table) return;
-  const listTitle = qs("assignment-list-title");
-  const listNote = qs("assignment-list-note");
+  const pageMode = getAssignmentPageMode();
+  const table = pageMode === "handoff" ? qs("table-assignments-handoff") : pageMode === "work" ? qs("table-assignments-work") : qs("table-assignments-review");
+  if (!table) { console.warn(`[assignments] table not found for pageMode=${pageMode}`); return; }
+  const listTitle = pageMode === "handoff" ? qs("assignment-list-title-handoff") : pageMode === "work" ? qs("assignment-list-title-work") : qs("assignment-list-title-review");
+  const listNote = pageMode === "handoff" ? qs("assignment-list-note-handoff") : pageMode === "work" ? qs("assignment-list-note-work") : qs("assignment-list-note-review");
   const actionableTitle = qs("assignment-actionable-list-title");
   const actionableNote = qs("assignment-actionable-list-note");
   const submittedWrap = qs("assignment-submitted-list-wrap");
   const loadBtn = qs("btn-assignments-load");
-  const pageMode = getAssignmentPageMode();
   const tbody = table.querySelector("tbody");
   const thead = table.querySelector("thead");
   if (!tbody || !thead) return;
@@ -9669,32 +9584,16 @@ async function refreshAssignments({ showStatus = true, preserveSelection = true 
       } else if (pageMode === "work") {
         if (stillExistsInSubmitted) {
           selectAssignment(previousSelection, { submittedView: true });
-        } else if (rows.length > 0) {
-          selectAssignment(rows[0]?.id);
-        } else if (submittedRows.length > 0) {
-          selectAssignment(submittedRows[0]?.id, { submittedView: true });
         } else {
           selectAssignment(null);
         }
       } else if (stillExistsAnywhere) {
         selectAssignment(previousSelection);
       } else {
-        if (rows.length > 0) {
-          selectAssignment(rows[0]?.id);
-        } else if (submittedRows.length > 0) {
-          selectAssignment(submittedRows[0]?.id, { submittedView: true });
-        } else {
-          selectAssignment(managedRows[0]?.id);
-        }
+        selectAssignment(null);
       }
     } else {
-      if (rows.length > 0) {
-        selectAssignment(rows[0]?.id);
-      } else if (submittedRows.length > 0) {
-        selectAssignment(submittedRows[0]?.id, { submittedView: true });
-      } else {
-        selectAssignment(managedRows[0]?.id);
-      }
+      selectAssignment(null);
     }
 
     if (showStatus) {
@@ -9764,7 +9663,7 @@ async function loadAssignmentsByItem(itemId, { showStatus = true, preserveSelect
   } else if (preserveSelection && previousSelection && rows.some((row) => Number(row.id || 0) === previousSelection)) {
     selectAssignment(previousSelection);
   } else {
-    selectAssignment(rows[0]?.id || 0);
+    selectAssignment(null);
   }
 
   if (showStatus) {
@@ -10511,8 +10410,7 @@ async function refreshAll() {
     return;
   }
 
-  const assigneeSelected = parsePositiveInt(qs("assignment-assignee-id")?.value, 0);
-  if (assignmentPageMode === "work" || assignmentPageMode === "review" || assigneeSelected) {
+  if (assignmentPageMode === "work" || assignmentPageMode === "review") {
     await refreshAssignments({ showStatus: false, preserveSelection: true }).catch(() => {
       state.assignments.rows = [];
       state.assignments.managedRows = [];
@@ -11407,9 +11305,6 @@ function wireAssignments() {
     }
   });
 
-  qs("assignment-assignee-id")?.addEventListener("change", () => {
-    refreshAssignments({ showStatus: true, preserveSelection: false }).catch(() => {});
-  });
   qs("assignment-review-tracking")?.addEventListener("change", () => {
     refreshAssignments({ showStatus: true, preserveSelection: false }).catch(() => {});
   });
@@ -11438,18 +11333,71 @@ function wireAssignments() {
     }
   });
 
-  qs("table-assignments")?.querySelector("tbody")?.addEventListener("click", (event) => {
+  qs("table-assignments-review")?.querySelector("tbody")?.addEventListener("click", async (event) => {
     const btn = event.target.closest("button[data-action]");
     if (!btn) return;
     const action = String(btn.dataset.action || "");
 
     if (action === "open-assignment") {
       const id = Number(btn.dataset.id || 0);
-      if (id) {
-        selectAssignment(id);
-        qs("assignment-detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (!id) return;
+
+      const row = getAssignmentById(id);
+      if (row && String(row.state || "") === "assigned") {
+        try {
+          await withButtonLoading(btn, "กำลังเปิดงาน...", async () => {
+            await api(`/api/assignments/${id}/state`, {
+              method: "PATCH",
+              body: JSON.stringify({ action: "reopen_in_progress" }),
+            });
+            await refreshAssignments({ showStatus: false, preserveSelection: true });
+          });
+        } catch (err) {
+          setStatus("assignment-status", err.message, true);
+          return;
+        }
       }
-      return;
+
+      selectAssignment(id);
+      const scrollPm3 = getAssignmentPageMode();
+      const scrollTarget3 = qs(scrollPm3 === "work" ? "assignment-submission-workspace" : scrollPm3 === "review" ? "assignment-review-workspace" : "assignment-detail-panel-handoff");
+      if (scrollTarget3) {
+        requestAnimationFrame(() => scrollTarget3.scrollIntoView({ behavior: "smooth", block: "start" }));
+      }
+    }
+  });
+
+  qs("table-assignments-work")?.querySelector("tbody")?.addEventListener("click", async (event) => {
+    const btn = event.target.closest("button[data-action]");
+    if (!btn) return;
+    const action = String(btn.dataset.action || "");
+
+    if (action === "open-assignment") {
+      const id = Number(btn.dataset.id || 0);
+      if (!id) return;
+
+      const row = getAssignmentById(id);
+      if (row && String(row.state || "") === "assigned") {
+        try {
+          await withButtonLoading(btn, "กำลังเปิดงาน...", async () => {
+            await api(`/api/assignments/${id}/state`, {
+              method: "PATCH",
+              body: JSON.stringify({ action: "reopen_in_progress" }),
+            });
+            await refreshAssignments({ showStatus: false, preserveSelection: true });
+          });
+        } catch (err) {
+          setStatus("assignment-status", err.message, true);
+          return;
+        }
+      }
+
+      selectAssignment(id);
+      const scrollPm2 = getAssignmentPageMode();
+      const scrollTarget2 = qs(scrollPm2 === "work" ? "assignment-submission-workspace" : scrollPm2 === "review" ? "assignment-review-workspace" : "assignment-detail-panel-handoff");
+      if (scrollTarget2) {
+        requestAnimationFrame(() => scrollTarget2.scrollIntoView({ behavior: "smooth", block: "start" }));
+      }
     }
   });
 
@@ -11461,7 +11409,10 @@ function wireAssignments() {
       const id = Number(btn.dataset.id || 0);
       if (id) {
         selectAssignment(id, { submittedView: true });
-        qs("assignment-detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        const scrollTarget2 = qs("assignment-submission-workspace");
+        if (scrollTarget2) {
+          requestAnimationFrame(() => scrollTarget2.scrollIntoView({ behavior: "smooth", block: "start" }));
+        }
       }
     }
   });

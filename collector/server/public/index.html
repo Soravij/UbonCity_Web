@@ -52,9 +52,6 @@
           <button class="tab" id="tab-assignments" data-tab="assignments" data-panel="assignments">ส่งงานไปทำ</button>
           <button class="tab hidden" id="tab-events" data-tab="events" data-nav="page" data-href="/events.html">Events</button>
           <button class="tab hidden" id="tab-transport" data-tab="transport" data-nav="page" data-href="/transport.html">Transport</button>
-          <button class="tab hidden" id="tab-handoff" data-tab="handoff" data-panel="assignments">ส่งงานไปทำ</button>
-          <button class="tab hidden" id="tab-work" data-tab="work" data-panel="assignments">ลงงาน</button>
-          <button class="tab hidden" id="tab-review" data-tab="review" data-panel="assignments">ตรวจงาน</button>
           <button class="tab tab-users hidden" data-tab="users" id="tab-users">ระบบ</button>
         </div>
 
@@ -339,105 +336,26 @@
               <button id="btn-assignments-home" class="utility-action btn-home">Home</button>
             </div>
           </div>
-          <h2 id="assignment-panel-title" class="section-title">กระบวนการ 2 · ขั้น 1: ส่งงานไปทำ</h2>
-          <p id="assignment-panel-note" class="muted">เริ่มหลังจบการตรวจแก้และจัดชุดสั่งงาน ใช้สำหรับแสดงชุดลงหน้างาน เลือกผู้รับงาน กำหนดส่ง และส่งงานออกไป</p>
           <div class="toolbar compact-toolbar" id="assignment-subnav">
             <button type="button" id="assignment-mode-handoff" data-assignment-tab="handoff">ส่งงานไปทำ</button>
             <button type="button" id="assignment-mode-work" data-assignment-tab="work">ลงงาน</button>
             <button type="button" id="assignment-mode-review" data-assignment-tab="review">ตรวจงาน</button>
           </div>
-          <div class="readiness-alert ready hidden" id="assignment-page-summary">
-            <h4>กระบวนการ 2: ส่งงานไปทำ</h4>
-            <ul>
-              <li>ขั้น 1: ส่งงานไปทำ แสดงชุดลงหน้างาน เลือกผู้รับงาน และส่งออกไปทำ</li>
-              <li>ขั้น 2: ลงงาน ดูคำสั่งงาน ส่งข้อมูลกลับ และติดตามคอมเมนต์ล่าสุด</li>
-              <li>ขั้น 3: ตรวจงาน ดูงานที่ส่งกลับมา ขอแก้ หรือรับงานผ่าน</li>
-            </ul>
-          </div>
-
           <section id="workflow-backward-controls" class="assignment-brief-card hidden" aria-live="polite"></section>
-
-          <div class="secondary-panel hidden" id="assignment-manual-create-panel">
-            <h3 class="section-title" style="margin-top:0;">กระบวนการ 2 · ขั้น 1: ส่งงานไปทำ</h3>
-            <div class="assignment-brief-card">
-              <h4 class="assignment-subtitle" style="margin-top:0;">ข้อมูลงานสั้น ๆ</h4>
-              <div id="assignment-create-summary" class="assignment-brief-empty">ยังไม่ได้เลือกรายการที่จะส่งงานไปทำ</div>
-            </div>
-            <div class="assignment-brief-card">
-              <h4 class="assignment-subtitle" style="margin-top:0;">คำสั่งงานที่จะส่งออก</h4>
-              <div id="assignment-handoff-brief" class="assignment-brief-empty">เลือกรายการเพื่อดูคำสั่งงานที่จะส่งออก</div>
-            </div>
-            <div class="assignment-brief-card">
-              <label>ประเภทงาน</label>
-              <select id="assignment-create-kind">
-                <option value="field">field · งานภาคสนาม</option>
-                <option value="editorial">editorial · งานเรียบเรียง</option>
-              </select>
-            </div>
-            <div class="assignment-brief-card">
-              <label>ประเภทผู้รับงาน</label>
-              <select id="assignment-create-assignee-mode">
-                <option value="internal">ในระบบ</option>
-                <option value="external">ภายนอก</option>
-              </select>
-            </div>
-            <div id="assignment-create-assignee-internal-wrap" class="assignment-brief-card">
-              <label>ผู้รับงาน</label>
-              <select id="assignment-create-assignee-id">
-                <option value="">-- เลือกผู้รับงาน --</option>
-              </select>
-            </div>
-            <div id="assignment-create-assignee-external-wrap" class="assignment-brief-card hidden">
-              <label>ชื่อผู้รับงานภายนอก</label>
-              <input id="assignment-create-assignee-name" placeholder="เช่น ช่างภาพฟรีแลนซ์" />
-            </div>
-            <div id="assignment-create-assignee-contact-wrap" class="assignment-brief-card hidden">
-              <label>เบอร์โทรผู้รับงานภายนอก (ไม่บังคับ)</label>
-              <input id="assignment-create-assignee-phone" placeholder="เช่น 08xxxxxxxx" />
-              <label style="margin-top:8px;">อีเมลผู้รับงานภายนอก (ไม่บังคับ)</label>
-              <input id="assignment-create-assignee-email" placeholder="เช่น freelancer@example.com" />
-              <label style="margin-top:8px;">Line ID ผู้รับงานภายนอก (ไม่บังคับ)</label>
-              <input id="assignment-create-assignee-line-id" placeholder="เช่น @freelance" />
-            </div>
-            <div class="assignment-brief-card">
-              <label>กำหนดส่ง</label>
-              <select id="assignment-create-due-at">
-                <option value="">-- ไม่กำหนด --</option>
-                <option value="day_1">+1 วัน</option>
-                <option value="day_3">+3 วัน</option>
-                <option value="day_7">+7 วัน</option>
-                <option value="week_1">+1 สัปดาห์</option>
-                <option value="week_2">+2 สัปดาห์</option>
-                <option value="week_3">+3 สัปดาห์</option>
-                <option value="month_1">+1 เดือน</option>
-              </select>
-            </div>
-            <div class="assignment-brief-card">
-              <label>หมายเหตุถึงผู้รับงาน</label>
-              <textarea id="assignment-create-note" placeholder="บอกโจทย์หรือข้อควรระวังเพิ่มเติม"></textarea>
-            </div>
-            <div class="toolbar assignment-step-toolbar">
-              <button id="btn-assignment-create" class="primary step-main">ส่งงานไปทำ</button>
-              <span class="status" id="assignment-create-status"></span>
-            </div>
-          </div>
-
-          <div class="secondary-panel hidden" id="assignment-list-panel">
-            <h3 id="assignment-list-title" class="section-title" style="margin-top:0;">กระบวนการ 2: งานในขั้นลงงาน</h3>
-            <p id="assignment-list-note" class="muted">แยกตารางสำหรับงานที่ดูแลและงานที่ต้องลงมือทำจริง</p>
-            <div id="assignment-managed-list-wrap" class="hidden" style="margin-bottom:20px;">
-              <h4 id="assignment-managed-list-title" class="assignment-subtitle" style="margin-top:0;">งานที่ฉันดูแล</h4>
-              <p id="assignment-managed-list-note" class="muted">ใช้ติดตามงานในความรับผิดชอบของคุณ และเปิดใบสั่งงานได้โดยไม่เข้าสู่ contributor form</p>
+          <div id="assignment-panel-handoff" class="assignment-panel-mode hidden">
+            <h2 id="assignment-panel-title-handoff" class="section-title"></h2>
+            <p id="assignment-panel-note-handoff" class="muted"></p>
+            <div class="secondary-panel hidden" id="assignment-list-panel-handoff">
+              <h3 id="assignment-list-title-handoff" class="section-title" style="margin-top:0;"></h3>
+              <p id="assignment-list-note-handoff" class="muted"></p>
               <div class="table-wrap">
-                <table id="table-assignments-managed">
+                <table id="table-assignments-handoff">
                   <thead>
                     <tr>
-                      <th>ID</th>
-                      <th>Content Item</th>
-                      <th>Assigned By</th>
-                      <th>Assignee</th>
-                      <th>State</th>
-                      <th>Due</th>
+                      <th>Item</th>
+                      <th>ชื่อคอนเทนต์</th>
+                      <th>หมวดหมู่</th>
+                      <th>สถานะปัจจุบัน</th>
                       <th>Updated</th>
                       <th>การทำงาน</th>
                     </tr>
@@ -446,269 +364,107 @@
                 </table>
               </div>
             </div>
-            <div class="grid">
-              <div id="assignment-assignee-wrap">
-                <label>ผู้ลงงานในระบบ</label>
-                <select id="assignment-assignee-id">
-                  <option value="">-- งานภายนอกที่ฉันเป็นคนสั่ง --</option>
+            <div class="readiness-alert ready hidden" id="assignment-page-summary">
+              <h4>กระบวนการ 2: ส่งงานไปทำ</h4>
+              <ul>
+                <li>ขั้น 1: ส่งงานไปทำ แสดงชุดลงหน้างาน เลือกผู้รับงาน และส่งออกไปทำ</li>
+                <li>ขั้น 2: ลงงาน ดูคำสั่งงาน ส่งข้อมูลกลับ และติดตามคอมเมนต์ล่าสุด</li>
+                <li>ขั้น 3: ตรวจงาน ดูงานที่ส่งกลับมา ขอแก้ หรือรับงานผ่าน</li>
+              </ul>
+            </div>
+            <div class="secondary-panel hidden" id="assignment-manual-create-panel">
+              <h3 class="section-title" style="margin-top:0;">กระบวนการ 2 · ขั้น 1: ส่งงานไปทำ</h3>
+              <div class="assignment-brief-card">
+                <h4 class="assignment-subtitle" style="margin-top:0;">ข้อมูลงานสั้น ๆ</h4>
+                <div id="assignment-create-summary" class="assignment-brief-empty">ยังไม่ได้เลือกรายการที่จะส่งงานไปทำ</div>
+              </div>
+              <div class="assignment-brief-card">
+                <h4 class="assignment-subtitle" style="margin-top:0;">คำสั่งงานที่จะส่งออก</h4>
+                <div id="assignment-handoff-brief" class="assignment-brief-empty">เลือกรายการเพื่อดูคำสั่งงานที่จะส่งออก</div>
+              </div>
+              <div class="assignment-brief-card">
+                <label>ประเภทงาน</label>
+                <select id="assignment-create-kind">
+                  <option value="field">field · งานภาคสนาม</option>
+                  <option value="editorial">editorial · งานเรียบเรียง</option>
                 </select>
               </div>
-              <div id="assignment-limit-wrap">
-                <label>limit</label>
-                <input id="assignment-limit" type="number" min="1" max="200" value="50" />
-              </div>
-              <div id="assignment-review-tracking-wrap" class="hidden">
-                <label>&nbsp;</label>
-                <label class="assignment-inline-check">
-                  <input id="assignment-review-tracking" type="checkbox" />
-                  <span>โหมดติดตาม owner: รวมงานที่ส่งกลับแก้และงานที่ผ่านแล้ว</span>
-                </label>
-              </div>
-            </div>
-            <h4 id="assignment-actionable-list-title" class="assignment-subtitle" style="margin-top:0;">งานที่ฉันต้องทำ</h4>
-            <p id="assignment-actionable-list-note" class="muted">ใช้เปิดงานในขั้นลงงานเฉพาะงานที่ account นี้ทำต่อได้จริง</p>
-            <div class="toolbar assignment-step-toolbar">
-              <button id="btn-assignments-load" class="primary step-main">1.1 โหลดงานในกระบวนการนี้</button>
-              <span class="status result-banner" id="assignment-status"></span>
-            </div>
-            <div class="table-wrap">
-              <table id="table-assignments">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Content Item</th>
-                    <th>Assignee</th>
-                    <th>State</th>
-                    <th>Due</th>
-                    <th>Updated</th>
-                    <th>การทำงาน</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <div id="assignment-submitted-list-wrap" style="margin-top:20px;">
-            <h4 id="assignment-submitted-list-title" class="assignment-subtitle" style="margin-top:0;">งานที่ฉันส่งแล้ว / รอตรวจ</h4>
-            <p id="assignment-submitted-list-note" class="muted">รายการนี้มีเฉพาะงานที่ account นี้ส่งกลับเข้าระบบแล้ว และหลุดจากกระบวนการแก้ไขจนกว่าจะมีผลตรวจ</p>
-              <div class="table-wrap">
-                <table id="table-assignments-submitted">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Content Item</th>
-                      <th>Assignee</th>
-                      <th>State</th>
-                      <th>Due</th>
-                      <th>Updated</th>
-                      <th>การทำงาน</th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div class="secondary-panel hidden" id="assignment-detail-panel">
-            <h3 class="section-title" style="margin-top:0;">กระบวนการ 2: หน้าปฏิบัติงาน</h3>
-            <p id="assignment-selected-summary" class="muted">ยังไม่ได้เลือกงานมอบหมาย</p>
-          <div class="assignment-guide">
-            <p id="assignment-next-action" class="muted" style="margin-top:0;">ยังไม่มีงานที่เลือก</p>
-            <div class="progress-steps assignment-progress" id="assignment-process-steps">
-                <div class="step" data-step="1">
-                  <span class="dot">1</span>
-                  <span class="label">รับงาน / ลงหน้างาน</span>
-                </div>
-                <div class="step" data-step="2">
-                  <span class="dot">2</span>
-                  <span class="label">ส่งผลกลับระบบ</span>
-                </div>
-                <div class="step" data-step="3">
-                  <span class="dot">3</span>
-                  <span class="label">เสร็จแล้ว</span>
-                </div>
-            </div>
-          </div>
-
-          <div class="assignment-brief-card">
-            <h4 class="assignment-subtitle" style="margin-top:0;">คำสั่งงาน</h4>
-            <div id="assignment-context-brief" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูข้อมูลตั้งต้นของงานนี้</div>
-          </div>
-
-          <div class="assignment-brief-card">
-            <h4 class="assignment-subtitle" style="margin-top:0;">ขั้นถัดไป</h4>
-            <div id="assignment-next-step-content" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูขั้นถัดไปของงานนี้</div>
-          </div>
-
-          <div id="assignment-state-workspace" class="assignment-workspace-section hidden">
-            <h4 id="assignment-state-workspace-title" class="assignment-subtitle">ขั้นที่ 1: รับงาน / ลงหน้างาน</h4>
-            <p id="assignment-state-workspace-help" class="muted assignment-workspace-help">ใช้ส่วนนี้สำหรับรับงาน เริ่มลงหน้างาน และอัปเดตสถานะตามความคืบหน้าปัจจุบัน</p>
-            <p id="assignment-state-workspace-summary" class="muted assignment-workspace-summary hidden">เลือกงานมอบหมายเพื่อดูสรุปของขั้นนี้</p>
-            <div class="grid">
-              <div>
-                <label>อัปเดตสถานะงาน</label>
-                <select id="assignment-state-action">
-                  <option value="">-- เลือก action หรือ state --</option>
+              <div class="assignment-brief-card">
+                <label>ประเภทผู้รับงาน</label>
+                <select id="assignment-create-assignee-mode">
+                  <option value="internal">ในระบบ</option>
+                  <option value="external">ภายนอก</option>
                 </select>
-                <p id="assignment-state-action-help" class="muted">เลือกงานก่อน ระบบจะจัด action ที่เหมาะกับสถานะให้อัตโนมัติ</p>
               </div>
-              <div>
-                <label>รหัสเหตุผล (ไม่บังคับ)</label>
-                <input id="assignment-state-reason" placeholder="เช่น assignment_revision_requested" />
+              <div id="assignment-create-assignee-internal-wrap" class="assignment-brief-card">
+                <label>ผู้รับงาน</label>
+                <select id="assignment-create-assignee-id">
+                  <option value="">-- เลือกผู้รับงาน --</option>
+                </select>
               </div>
-              <div>
-                <label>หมายเหตุถึงผู้ส่งงาน (ไม่บังคับ)</label>
-                <textarea id="assignment-state-contributor-note" placeholder="บันทึกถึง contributor"></textarea>
+              <div id="assignment-create-assignee-external-wrap" class="assignment-brief-card hidden">
+                <label>ชื่อผู้รับงานภายนอก</label>
+                <input id="assignment-create-assignee-name" placeholder="เช่น ช่างภาพฟรีแลนซ์" />
               </div>
-              <div>
-                <label>หมายเหตุภายใน (ไม่บังคับ)</label>
-                <textarea id="assignment-state-internal-note" placeholder="บันทึกภายใน"></textarea>
+              <div id="assignment-create-assignee-contact-wrap" class="assignment-brief-card hidden">
+                <label>เบอร์โทรผู้รับงานภายนอก (ไม่บังคับ)</label>
+                <input id="assignment-create-assignee-phone" placeholder="เช่น 08xxxxxxxx" />
+                <label style="margin-top:8px;">อีเมลผู้รับงานภายนอก (ไม่บังคับ)</label>
+                <input id="assignment-create-assignee-email" placeholder="เช่น freelancer@example.com" />
+                <label style="margin-top:8px;">Line ID ผู้รับงานภายนอก (ไม่บังคับ)</label>
+                <input id="assignment-create-assignee-line-id" placeholder="เช่น @freelance" />
+              </div>
+              <div class="assignment-brief-card">
+                <label>กำหนดส่ง</label>
+                <select id="assignment-create-due-at">
+                  <option value="">-- ไม่กำหนด --</option>
+                  <option value="day_1">+1 วัน</option>
+                  <option value="day_3">+3 วัน</option>
+                  <option value="day_7">+7 วัน</option>
+                  <option value="week_1">+1 สัปดาห์</option>
+                  <option value="week_2">+2 สัปดาห์</option>
+                  <option value="week_3">+3 สัปดาห์</option>
+                  <option value="month_1">+1 เดือน</option>
+                </select>
+              </div>
+              <div class="assignment-brief-card">
+                <label>หมายเหตุถึงผู้รับงาน</label>
+                <textarea id="assignment-create-note" placeholder="บอกโจทย์หรือข้อควรระวังเพิ่มเติม"></textarea>
+              </div>
+              <div class="toolbar assignment-step-toolbar">
+                <button id="btn-assignment-create" class="primary step-main">ส่งงานไปทำ</button>
+                <span class="status" id="assignment-create-status"></span>
               </div>
             </div>
-            <div class="toolbar assignment-step-toolbar">
-              <button id="btn-assignment-update-state" class="step-main">อัปเดตสถานะงาน</button>
-            </div>
-          </div>
-
-          <div id="assignment-submission-workspace" class="assignment-workspace-section hidden">
-            <h4 id="assignment-submission-workspace-title" class="assignment-subtitle">ขั้นที่ 2: ลงงาน</h4>
-            <p id="assignment-submission-workspace-help" class="muted assignment-workspace-help">ใช้ส่วนนี้สำหรับดูชุดลงหน้างาน กรอกข้อมูลที่ได้จากหน้างาน แนบรูป/วิดีโอ และส่งงานกลับ</p>
-            <p id="assignment-submission-workspace-summary" class="muted assignment-workspace-summary hidden">เลือกงานมอบหมายเพื่อดูสรุปของขั้นนี้</p>
-            <div id="assignment-work-monitor" class="assignment-brief-card hidden">
-              <h5 class="assignment-subtitle" style="margin-top:0;">ติดตามงานในขั้นลงงาน</h5>
-              <div id="assignment-work-monitor-summary" class="assignment-brief-grid">
-                <div class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูข้อมูลติดตามงาน</div>
-              </div>
-              <div id="assignment-work-monitor-brief-link-wrap" class="toolbar assignment-step-toolbar">
-                <a id="assignment-work-monitor-brief-link" class="step-sub" href="/field-brief.html">เปิดใบสั่งงานสำหรับพิมพ์</a>
-              </div>
-              <p id="assignment-work-monitor-note" class="muted">step นี้ใช้สำหรับผู้รับงานที่กำลังลงงานอยู่</p>
-            </div>
-            <div id="assignment-submission-form">
-              <div class="grid">
-                <div style="grid-column: 1 / -1;">
-                  <label>ข้อมูลประกอบงาน (อ่านก่อนกรอก)</label>
-                  <div id="assignment-submission-context" class="assignment-brief-empty">เลือกงานก่อนเพื่อดูโจทย์งานในหน้านี้</div>
-                </div>
-                <div id="assignment-submission-reset-notice" class="hidden" style="grid-column: 1 / -1;"></div>
-                <div style="grid-column: 1 / -1;">
-                  <label id="assignment-submission-brief-label">ใบสั่งงาน (มุมมองพิมพ์)</label>
-                  <div id="assignment-submission-brief-link-wrap" class="toolbar assignment-step-toolbar">
-                    <a id="assignment-submission-brief-link" class="step-sub" href="/field-brief.html">เปิดใบสั่งงานสำหรับพิมพ์</a>
+            <div class="secondary-panel hidden" id="assignment-detail-panel-handoff">
+              <h3 class="section-title" style="margin-top:0;">กระบวนการ 2: หน้าปฏิบัติงาน</h3>
+              <p id="assignment-selected-summary" class="muted">ยังไม่ได้เลือกงานมอบหมาย</p>
+              <div class="assignment-guide">
+                <p id="assignment-next-action" class="muted" style="margin-top:0;">ยังไม่มีงานที่เลือก</p>
+                <div class="progress-steps assignment-progress" id="assignment-process-steps">
+                  <div class="step" data-step="1">
+                    <span class="dot">1</span>
+                    <span class="label">รับงาน / ลงหน้างาน</span>
+                  </div>
+                  <div class="step" data-step="2">
+                    <span class="dot">2</span>
+                    <span class="label">ส่งผลกลับระบบ</span>
+                  </div>
+                  <div class="step" data-step="3">
+                    <span class="dot">3</span>
+                    <span class="label">เสร็จแล้ว</span>
                   </div>
                 </div>
-                <div style="grid-column: 1 / -1;">
-                  <label id="assignment-submission-verified-label">สิ่งที่ต้องยืนยัน</label>
-                  <div id="assignment-submission-verified-fields" class="assignment-brief-empty">เลือกงานก่อนเพื่อกรอกคำตอบจากหน้างาน</div>
-                </div>
-                <div style="grid-column: 1 / -1;">
-                  <label id="assignment-submission-question-label">คำตอบจากหน้างาน</label>
-                  <div id="assignment-submission-question-fields" class="assignment-brief-empty">เลือกงานก่อนเพื่อกรอกคำตอบจากหน้างาน</div>
-                </div>
-                <div style="grid-column: 1 / -1;" id="assignment-submission-requested-checks-wrap" class="hidden">
-                  <label id="assignment-submission-requested-checks-label">คำตอบตามรายการที่ขอ</label>
-                  <div id="assignment-submission-requested-checks-fields" class="assignment-brief-empty">เลือกงานก่อนเพื่อดูรายการที่ขอจากชุดส่งงาน</div>
-                </div>
-                <div style="grid-column: 1 / -1;">
-                  <label id="assignment-submission-capture-label">สิ่งที่ต้องถ่าย</label>
-                  <div id="assignment-submission-capture-guide" class="assignment-brief-empty">เลือกงานก่อนเพื่อดูรายการที่ต้องถ่าย</div>
-                </div>
-                <div style="grid-column: 1 / -1;">
-                  <label id="assignment-submission-additional-label">ข้อความเพิ่มเติม</label>
-                  <textarea id="assignment-submission-additional-text" placeholder="สรุปข้อมูลเพิ่มเติมจากหน้างาน"></textarea>
-                </div>
-                <div style="grid-column: 1 / -1;">
-                  <label id="assignment-submission-files-label">สรุปไฟล์ที่จะส่ง</label>
-                  <div id="assignment-submission-file-list" class="assignment-deliverables-empty" style="margin-top:8px;">ยังไม่ได้เลือกรูปหรือวิดีโอ</div>
-                </div>
               </div>
-              <div class="toolbar assignment-step-toolbar assignment-submit-toolbar">
-                <p id="assignment-submit-callout" class="assignment-submit-callout">เมื่อกรอกข้อมูลและแนบไฟล์ครบแล้ว ให้ส่งงานกลับเพื่อเข้าคิวตรวจงาน</p>
-                <span id="assignment-draft-save-status" class="muted"></span>
-                <button id="btn-assignment-sync-upload" class="step-sub assignment-submit-secondary">อัปโหลด/ซิงก์ไฟล์</button>
-                <button id="btn-assignment-submit" class="step-main assignment-submit-primary">ส่งงานกลับ</button>
+              <div class="assignment-brief-card">
+                <h4 class="assignment-subtitle" style="margin-top:0;">คำสั่งงาน</h4>
+                <div id="assignment-context-brief" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูข้อมูลตั้งต้นของงานนี้</div>
+              </div>
+              <div class="assignment-brief-card">
+                <h4 class="assignment-subtitle" style="margin-top:0;">ขั้นถัดไป</h4>
+                <div id="assignment-next-step-content" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูขั้นถัดไปของงานนี้</div>
               </div>
             </div>
-            <div class="assignment-deliverables-card">
-              <div class="assignment-deliverables-header">
-                <div>
-                  <h5 class="assignment-deliverables-title">ไฟล์ที่ส่งกลับเข้าระบบ</h5>
-                  <p id="assignment-deliverables-meta" class="muted">ยังไม่ได้เลือกงานมอบหมาย</p>
-                </div>
-              </div>
-              <div id="assignment-deliverables-summary" class="assignment-deliverables-empty">
-                ยังไม่มีข้อมูลงานส่งของงานมอบหมายที่เลือก
-              </div>
-            </div>
-          </div>
-
-          <div id="assignment-review-workspace" class="assignment-workspace-section hidden">
-            <h4 id="assignment-review-workspace-title" class="assignment-subtitle">การตรวจรับในขั้นส่งผลกลับระบบ</h4>
-            <p id="assignment-review-workspace-help" class="muted assignment-workspace-help">ใช้ส่วนนี้สำหรับตรวจรับผลงานที่ส่งกลับมา และใส่คอมเมนต์หรือขอแก้เพิ่มในขั้นนี้</p>
-            <p id="assignment-review-workspace-summary" class="muted assignment-workspace-summary hidden">เลือกงานมอบหมายเพื่อดูสรุปของขั้นนี้</p>
-            <div id="assignment-review-summary-card" class="assignment-brief-card hidden">
-              <h5 class="assignment-subtitle" style="margin-top:0;">สรุปสำหรับตรวจงาน</h5>
-              <div id="assignment-review-summary-content" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูสรุปสำหรับการตรวจงาน</div>
-            </div>
-            <div id="assignment-review-submission-card" class="assignment-brief-card hidden">
-              <h5 class="assignment-subtitle" style="margin-top:0;">สิ่งที่ผู้ลงงานส่งกลับล่าสุด</h5>
-              <div id="assignment-review-submission-content" class="assignment-review-submission-layout">
-                <div id="assignment-review-submission-text" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูข้อความที่ผู้ลงงานส่งกลับ</div>
-                <div id="assignment-review-submission-photos" class="assignment-brief-empty">ยังไม่มีรูปที่ส่งกลับล่าสุด</div>
-                <div id="assignment-review-submission-videos" class="assignment-brief-empty">ยังไม่มีวิดีโอที่ส่งกลับล่าสุด</div>
-              </div>
-            </div>
-            <div class="grid">
-              <div>
-                <label>งานที่คาดว่าจะต้องส่ง (คั่นด้วย comma, ไม่บังคับ)</label>
-                <input id="assignment-expected-deliverables" placeholder="photos,videos,caption_draft" />
-              </div>
-              <div>
-                <label>รหัสเหตุผลสำหรับการประเมิน (ไม่บังคับ)</label>
-                <input id="assignment-evaluate-reason" placeholder="เช่น assignment_submission_decision_evaluated" />
-              </div>
-              <div>
-                <label><input id="assignment-review-image-reset" type="checkbox" /> ต้องรีเซ็ตรูปเดิม</label>
-                <textarea id="assignment-review-image-reset-reason" placeholder="เหตุผลการรีเซ็ตรูป (บังคับเมื่อเลือก)"></textarea>
-              </div>
-              <div>
-                <label><input id="assignment-review-video-reset" type="checkbox" /> ต้องรีเซ็ตวิดีโอเดิม</label>
-                <textarea id="assignment-review-video-reset-reason" placeholder="เหตุผลการรีเซ็ตวิดีโอ (บังคับเมื่อเลือก)"></textarea>
-              </div>
-              <div style="grid-column: 1 / -1;">
-                <label>คอมเมนต์ถึงผู้ลงงาน (ไม่บังคับ)</label>
-                <textarea id="assignment-review-note" placeholder="ระบุสิ่งที่ต้องแก้เพิ่ม หรือหมายเหตุประกอบการตรวจรับ"></textarea>
-              </div>
-            </div>
-            <div class="toolbar assignment-step-toolbar">
-              <button id="btn-assignment-request-revision" class="warn step-main">ขอแก้เพิ่ม</button>
-              <button id="btn-assignment-accept-submission" class="primary step-main">รับงานผ่าน</button>
-            </div>
-            <p class="muted">ผลตรวจไม่ผ่าน: ขอแก้เพิ่มแล้วให้ผู้ทำงานกลับไปแก้และส่งงานกลับในขั้นนี้ | ผลตรวจผ่าน: งานนี้เสร็จแล้ว</p>
-          </div>
-
-          <div id="assignment-return-to-field" class="assignment-workspace-section hidden">
-            <h4 class="assignment-subtitle">ส่งงานกลับไปทำรอบใหม่</h4>
-            <p class="muted assignment-workspace-help">งานที่รับผ่านแล้วจะไม่ถูกแก้ย้อนหลัง ระบบจะปิดรอบเดิมไว้เป็นหลักฐาน แล้วเปิดรอบภาคสนามใหม่พร้อมชุดคำสั่งงานใหม่ ค่าที่ยืนยันไว้เดิมจะยังอยู่จนกว่าจะรับงานรอบใหม่ และจะถูกทับเฉพาะช่องที่คนตรวจติ๊กยืนยันใหม่เท่านั้น</p>
-            <div class="grid">
-              <div style="grid-column: 1 / -1;">
-                <label>เหตุผลที่ส่งกลับ (บังคับ)</label>
-                <textarea id="assignment-return-note" placeholder="ระบุว่าต้องกลับไปตรวจสอบหรือเก็บข้อมูลอะไรเพิ่ม"></textarea>
-              </div>
-              <div>
-                <label>ยืนยันรหัสผ่านของบัญชีคุณ (บังคับ)</label>
-                <input id="assignment-return-password" type="password" autocomplete="current-password" placeholder="รหัสผ่านของบัญชีที่ล็อกอินอยู่" />
-              </div>
-            </div>
-            <div class="toolbar assignment-step-toolbar">
-              <button id="btn-assignment-return-to-field" class="warn step-main">ส่งกลับไปทำรอบใหม่</button>
-            </div>
-            <p id="assignment-return-status" class="muted"></p>
-          </div>
-          <div id="assignment-review-hover-preview" class="asset-hover-preview hidden">
-            <img id="assignment-review-hover-preview-image" alt="assignment review preview" />
-          </div>
-
             <details id="assignment-debug-box">
               <summary>ข้อมูลสำหรับตรวจสอบ (JSON / Audit)</summary>
               <div class="grid">
@@ -730,6 +486,286 @@
                 </div>
               </div>
             </details>
+          </div>
+          <div id="assignment-panel-work" class="assignment-panel-mode hidden">
+            <h2 id="assignment-panel-title-work" class="section-title"></h2>
+            <p id="assignment-panel-note-work" class="muted"></p>
+            <div class="secondary-panel hidden" id="assignment-list-panel-work">
+              <h3 id="assignment-list-title-work" class="section-title" style="margin-top:0;"></h3>
+              <p id="assignment-list-note-work" class="muted"></p>
+              <div id="assignment-managed-list-wrap" class="hidden" style="margin-bottom:20px;">
+                <h4 id="assignment-managed-list-title" class="assignment-subtitle" style="margin-top:0;">งานที่ฉันดูแล</h4>
+                <p id="assignment-managed-list-note" class="muted">ใช้ติดตามงานในความรับผิดชอบของคุณ และเปิดใบสั่งงานได้โดยไม่เข้าสู่ contributor form</p>
+                <div class="table-wrap">
+                  <table id="table-assignments-managed">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Content Item</th>
+                        <th>Assigned By</th>
+                        <th>Assignee</th>
+                        <th>State</th>
+                        <th>Due</th>
+                        <th>Updated</th>
+                        <th>การทำงาน</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="grid">
+                <div id="assignment-limit-wrap-work">
+                  <label>limit</label>
+                  <input id="assignment-limit-work" type="number" min="1" max="200" value="50" />
+                </div>
+              </div>
+              <h4 id="assignment-actionable-list-title" class="assignment-subtitle" style="margin-top:0;">งานที่ฉันต้องทำ</h4>
+              <p id="assignment-actionable-list-note" class="muted">ใช้เปิดงานในขั้นลงงานเฉพาะงานที่ account นี้ทำต่อได้จริง</p>
+              <div class="toolbar assignment-step-toolbar">
+                <button id="btn-assignments-load" class="primary step-main">1.1 โหลดงานในกระบวนการนี้</button>
+                <span class="status result-banner" id="assignment-status"></span>
+              </div>
+              <div class="table-wrap">
+                <table id="table-assignments-work">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Content Item</th>
+                      <th>Assignee</th>
+                      <th>State</th>
+                      <th>Due</th>
+                      <th>Updated</th>
+                      <th>การทำงาน</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div id="assignment-submitted-list-wrap" style="margin-top:20px;">
+                <h4 id="assignment-submitted-list-title" class="assignment-subtitle" style="margin-top:0;">งานที่ฉันส่งแล้ว / รอตรวจ</h4>
+                <p id="assignment-submitted-list-note" class="muted">รายการนี้มีเฉพาะงานที่ account นี้ส่งกลับเข้าระบบแล้ว และหลุดจากกระบวนการแก้ไขจนกว่าจะมีผลตรวจ</p>
+                <div class="table-wrap">
+                  <table id="table-assignments-submitted">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Content Item</th>
+                        <th>Assignee</th>
+                        <th>State</th>
+                        <th>Due</th>
+                        <th>Updated</th>
+                        <th>การทำงาน</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div id="assignment-state-workspace" class="assignment-workspace-section hidden">
+              <h4 id="assignment-state-workspace-title" class="assignment-subtitle">ขั้นที่ 1: รับงาน / ลงหน้างาน</h4>
+              <p id="assignment-state-workspace-help" class="muted assignment-workspace-help">ใช้ส่วนนี้สำหรับรับงาน เริ่มลงหน้างาน และอัปเดตสถานะตามความคืบหน้าปัจจุบัน</p>
+              <p id="assignment-state-workspace-summary" class="muted assignment-workspace-summary hidden">เลือกงานมอบหมายเพื่อดูสรุปของขั้นนี้</p>
+              <div class="grid">
+                <div>
+                  <label>อัปเดตสถานะงาน</label>
+                  <select id="assignment-state-action">
+                    <option value="">-- เลือก action หรือ state --</option>
+                  </select>
+                  <p id="assignment-state-action-help" class="muted">เลือกงานก่อน ระบบจะจัด action ที่เหมาะกับสถานะให้อัตโนมัติ</p>
+                </div>
+                <div>
+                  <label>รหัสเหตุผล (ไม่บังคับ)</label>
+                  <input id="assignment-state-reason" placeholder="เช่น assignment_revision_requested" />
+                </div>
+                <div>
+                  <label>หมายเหตุถึงผู้ส่งงาน (ไม่บังคับ)</label>
+                  <textarea id="assignment-state-contributor-note" placeholder="บันทึกถึง contributor"></textarea>
+                </div>
+                <div>
+                  <label>หมายเหตุภายใน (ไม่บังคับ)</label>
+                  <textarea id="assignment-state-internal-note" placeholder="บันทึกภายใน"></textarea>
+                </div>
+              </div>
+              <div class="toolbar assignment-step-toolbar">
+                <button id="btn-assignment-update-state" class="step-main">อัปเดตสถานะงาน</button>
+              </div>
+            </div>
+            <div id="assignment-submission-workspace" class="assignment-workspace-section hidden">
+              <h4 id="assignment-submission-workspace-title" class="assignment-subtitle">ขั้นที่ 2: ลงงาน</h4>
+              <p id="assignment-submission-workspace-help" class="muted assignment-workspace-help">ใช้ส่วนนี้สำหรับดูชุดลงหน้างาน กรอกข้อมูลที่ได้จากหน้างาน แนบรูป/วิดีโอ และส่งงานกลับ</p>
+              <p id="assignment-submission-workspace-summary" class="muted assignment-workspace-summary hidden">เลือกงานมอบหมายเพื่อดูสรุปของขั้นนี้</p>
+              <div id="assignment-work-monitor" class="assignment-brief-card hidden">
+                <h5 class="assignment-subtitle" style="margin-top:0;">ติดตามงานในขั้นลงงาน</h5>
+                <div id="assignment-work-monitor-summary" class="assignment-brief-grid">
+                  <div class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูข้อมูลติดตามงาน</div>
+                </div>
+                <div id="assignment-work-monitor-brief-link-wrap" class="toolbar assignment-step-toolbar">
+                  <a id="assignment-work-monitor-brief-link" class="step-sub" href="/field-brief.html">เปิดใบสั่งงานสำหรับพิมพ์</a>
+                </div>
+                <p id="assignment-work-monitor-note" class="muted">step นี้ใช้สำหรับผู้รับงานที่กำลังลงงานอยู่</p>
+              </div>
+              <div id="assignment-submission-form">
+                <div class="grid">
+                  <div style="grid-column: 1 / -1;">
+                    <label>ข้อมูลประกอบงาน (อ่านก่อนกรอก)</label>
+                    <div id="assignment-submission-context" class="assignment-brief-empty">เลือกงานก่อนเพื่อดูโจทย์งานในหน้านี้</div>
+                  </div>
+                  <div id="assignment-submission-reset-notice" class="hidden" style="grid-column: 1 / -1;"></div>
+                  <div style="grid-column: 1 / -1;">
+                    <label id="assignment-submission-brief-label">ใบสั่งงาน (มุมมองพิมพ์)</label>
+                    <div id="assignment-submission-brief-link-wrap" class="toolbar assignment-step-toolbar">
+                      <a id="assignment-submission-brief-link" class="step-sub" href="/field-brief.html">เปิดใบสั่งงานสำหรับพิมพ์</a>
+                    </div>
+                  </div>
+                  <div style="grid-column: 1 / -1;">
+                    <label id="assignment-submission-verified-label">สิ่งที่ต้องยืนยัน</label>
+                    <div id="assignment-submission-verified-fields" class="assignment-brief-empty">เลือกงานก่อนเพื่อกรอกคำตอบจากหน้างาน</div>
+                  </div>
+                  <div style="grid-column: 1 / -1;">
+                    <label id="assignment-submission-question-label">คำตอบจากหน้างาน</label>
+                    <div id="assignment-submission-question-fields" class="assignment-brief-empty">เลือกงานก่อนเพื่อกรอกคำตอบจากหน้างาน</div>
+                  </div>
+                  <div style="grid-column: 1 / -1;" id="assignment-submission-requested-checks-wrap" class="hidden">
+                    <label id="assignment-submission-requested-checks-label">คำตอบตามรายการที่ขอ</label>
+                    <div id="assignment-submission-requested-checks-fields" class="assignment-brief-empty">เลือกงานก่อนเพื่อดูรายการที่ขอจากชุดส่งงาน</div>
+                  </div>
+                  <div style="grid-column: 1 / -1;">
+                    <label id="assignment-submission-capture-label">สิ่งที่ต้องถ่าย</label>
+                    <div id="assignment-submission-capture-guide" class="assignment-brief-empty">เลือกงานก่อนเพื่อดูรายการที่ต้องถ่าย</div>
+                  </div>
+                  <div style="grid-column: 1 / -1;">
+                    <label id="assignment-submission-additional-label">ข้อความเพิ่มเติม</label>
+                    <textarea id="assignment-submission-additional-text" placeholder="สรุปข้อมูลเพิ่มเติมจากหน้างาน"></textarea>
+                  </div>
+                  <div style="grid-column: 1 / -1;">
+                    <label id="assignment-submission-files-label">สรุปไฟล์ที่จะส่ง</label>
+                    <div id="assignment-submission-file-list" class="assignment-deliverables-empty" style="margin-top:8px;">ยังไม่ได้เลือกรูปหรือวิดีโอ</div>
+                  </div>
+                </div>
+                <div class="toolbar assignment-step-toolbar assignment-submit-toolbar">
+                  <p id="assignment-submit-callout" class="assignment-submit-callout">เมื่อกรอกข้อมูลและแนบไฟล์ครบแล้ว ให้ส่งงานกลับเพื่อเข้าคิวตรวจงาน</p>
+                  <span id="assignment-draft-save-status" class="muted"></span>
+                  <button id="btn-assignment-sync-upload" class="step-sub assignment-submit-secondary">อัปโหลด/ซิงก์ไฟล์</button>
+                  <button id="btn-assignment-submit" class="step-main assignment-submit-primary">ส่งงานกลับ</button>
+                </div>
+              </div>
+              <div class="assignment-deliverables-card">
+                <div class="assignment-deliverables-header">
+                  <div>
+                    <h5 class="assignment-deliverables-title">ไฟล์ที่ส่งกลับเข้าระบบ</h5>
+                    <p id="assignment-deliverables-meta" class="muted">ยังไม่ได้เลือกงานมอบหมาย</p>
+                  </div>
+                </div>
+                <div id="assignment-deliverables-summary" class="assignment-deliverables-empty">
+                  ยังไม่มีข้อมูลงานส่งของงานมอบหมายที่เลือก
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="assignment-panel-review" class="assignment-panel-mode hidden">
+            <h2 id="assignment-panel-title-review" class="section-title"></h2>
+            <p id="assignment-panel-note-review" class="muted"></p>
+            <div class="secondary-panel hidden" id="assignment-list-panel-review">
+              <h3 id="assignment-list-title-review" class="section-title" style="margin-top:0;"></h3>
+              <p id="assignment-list-note-review" class="muted"></p>
+              <div class="grid">
+                <div id="assignment-limit-wrap-review">
+                  <label>limit</label>
+                  <input id="assignment-limit-review" type="number" min="1" max="200" value="50" />
+                </div>
+                <div id="assignment-review-tracking-wrap" class="hidden">
+                  <label>&nbsp;</label>
+                  <label class="assignment-inline-check">
+                    <input id="assignment-review-tracking" type="checkbox" />
+                    <span>โหมดติดตาม owner: รวมงานที่ส่งกลับแก้และงานที่ผ่านแล้ว</span>
+                  </label>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table id="table-assignments-review">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Content Item</th>
+                      <th>Assignee</th>
+                      <th>State</th>
+                      <th>Due</th>
+                      <th>Updated</th>
+                      <th>การทำงาน</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="assignment-review-workspace" class="assignment-workspace-section hidden">
+              <h4 id="assignment-review-workspace-title" class="assignment-subtitle">การตรวจรับในขั้นส่งผลกลับระบบ</h4>
+              <p id="assignment-review-workspace-help" class="muted assignment-workspace-help">ใช้ส่วนนี้สำหรับตรวจรับผลงานที่ส่งกลับมา และใส่คอมเมนต์หรือขอแก้เพิ่มในขั้นนี้</p>
+              <p id="assignment-review-workspace-summary" class="muted assignment-workspace-summary hidden">เลือกงานมอบหมายเพื่อดูสรุปของขั้นนี้</p>
+              <div id="assignment-review-summary-card" class="assignment-brief-card hidden">
+                <h5 class="assignment-subtitle" style="margin-top:0;">สรุปสำหรับตรวจงาน</h5>
+                <div id="assignment-review-summary-content" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูสรุปสำหรับการตรวจงาน</div>
+              </div>
+              <div id="assignment-review-submission-card" class="assignment-brief-card hidden">
+                <h5 class="assignment-subtitle" style="margin-top:0;">สิ่งที่ผู้ลงงานส่งกลับล่าสุด</h5>
+                <div id="assignment-review-submission-content" class="assignment-review-submission-layout">
+                  <div id="assignment-review-submission-text" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูข้อความที่ผู้ลงงานส่งกลับ</div>
+                  <div id="assignment-review-submission-photos" class="assignment-brief-empty">ยังไม่มีรูปที่ส่งกลับล่าสุด</div>
+                  <div id="assignment-review-submission-videos" class="assignment-brief-empty">ยังไม่มีวิดีโอที่ส่งกลับล่าสุด</div>
+                </div>
+              </div>
+              <div class="grid">
+                <div>
+                  <label>งานที่คาดว่าจะต้องส่ง (คั่นด้วย comma, ไม่บังคับ)</label>
+                  <input id="assignment-expected-deliverables" placeholder="photos,videos,caption_draft" />
+                </div>
+                <div>
+                  <label>รหัสเหตุผลสำหรับการประเมิน (ไม่บังคับ)</label>
+                  <input id="assignment-evaluate-reason" placeholder="เช่น assignment_submission_decision_evaluated" />
+                </div>
+                <div>
+                  <label><input id="assignment-review-image-reset" type="checkbox" /> ต้องรีเซ็ตรูปเดิม</label>
+                  <textarea id="assignment-review-image-reset-reason" placeholder="เหตุผลการรีเซ็ตรูป (บังคับเมื่อเลือก)"></textarea>
+                </div>
+                <div>
+                  <label><input id="assignment-review-video-reset" type="checkbox" /> ต้องรีเซ็ตวิดีโอเดิม</label>
+                  <textarea id="assignment-review-video-reset-reason" placeholder="เหตุผลการรีเซ็ตวิดีโอ (บังคับเมื่อเลือก)"></textarea>
+                </div>
+                <div style="grid-column: 1 / -1;">
+                  <label>คอมเมนต์ถึงผู้ลงงาน (ไม่บังคับ)</label>
+                  <textarea id="assignment-review-note" placeholder="ระบุสิ่งที่ต้องแก้เพิ่ม หรือหมายเหตุประกอบการตรวจรับ"></textarea>
+                </div>
+              </div>
+              <div class="toolbar assignment-step-toolbar">
+                <button id="btn-assignment-request-revision" class="warn step-main">ขอแก้เพิ่ม</button>
+                <button id="btn-assignment-accept-submission" class="primary step-main">รับงานผ่าน</button>
+              </div>
+              <p class="muted">ผลตรวจไม่ผ่าน: ขอแก้เพิ่มแล้วให้ผู้ทำงานกลับไปแก้และส่งงานกลับในขั้นนี้ | ผลตรวจผ่าน: งานนี้เสร็จแล้ว</p>
+            </div>
+            <div id="assignment-return-to-field" class="assignment-workspace-section hidden">
+              <h4 class="assignment-subtitle">ส่งงานกลับไปทำรอบใหม่</h4>
+              <p class="muted assignment-workspace-help">งานที่รับผ่านแล้วจะไม่ถูกแก้ย้อนหลัง ระบบจะปิดรอบเดิมไว้เป็นหลักฐาน แล้วเปิดรอบภาคสนามใหม่พร้อมชุดคำสั่งงานใหม่ ค่าที่ยืนยันไว้เดิมจะยังอยู่จนกว่าจะรับงานรอบใหม่ และจะถูกทับเฉพาะช่องที่คนตรวจติ๊กยืนยันใหม่เท่านั้น</p>
+              <div class="grid">
+                <div style="grid-column: 1 / -1;">
+                  <label>เหตุผลที่ส่งกลับ (บังคับ)</label>
+                  <textarea id="assignment-return-note" placeholder="ระบุว่าต้องกลับไปตรวจสอบหรือเก็บข้อมูลอะไรเพิ่ม"></textarea>
+                </div>
+                <div>
+                  <label>ยืนยันรหัสผ่านของบัญชีคุณ (บังคับ)</label>
+                  <input id="assignment-return-password" type="password" autocomplete="current-password" placeholder="รหัสผ่านของบัญชีที่ล็อกอินอยู่" />
+                </div>
+              </div>
+              <div class="toolbar assignment-step-toolbar">
+                <button id="btn-assignment-return-to-field" class="warn step-main">ส่งกลับไปทำรอบใหม่</button>
+              </div>
+              <p id="assignment-return-status" class="muted"></p>
+            </div>
+            <div id="assignment-review-hover-preview" class="asset-hover-preview hidden">
+              <img id="assignment-review-hover-preview-image" alt="assignment review preview" />
+            </div>
+          </div>
           </div>
 
         </section>

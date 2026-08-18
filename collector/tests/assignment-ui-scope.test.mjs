@@ -2574,27 +2574,33 @@ test("assignment route aliases expose separate handoff, work, and review views o
     'id="assignment-mode-handoff" data-assignment-tab="handoff"',
     'id="assignment-mode-work" data-assignment-tab="work"',
     'id="assignment-mode-review" data-assignment-tab="review"',
-    'id="assignment-panel-title"',
-    'id="assignment-panel-note"',
-    '<h2 id="assignment-panel-title" class="section-title">กระบวนการ 2 · ขั้น 1: ส่งงานไปทำ</h2>',
-    '<p id="assignment-panel-note" class="muted">เริ่มหลังจบการตรวจแก้และจัดชุดสั่งงาน ใช้สำหรับแสดงชุดลงหน้างาน เลือกผู้รับงาน กำหนดส่ง และส่งงานออกไป</p>',
+    'id="assignment-panel-title-handoff"',
+    'id="assignment-panel-note-handoff"',
+    'id="assignment-panel-title-work"',
+    'id="assignment-panel-note-work"',
+    'id="assignment-panel-title-review"',
+    'id="assignment-panel-note-review"',
     '<h4>กระบวนการ 2: ส่งงานไปทำ</h4>',
     '<li>ขั้น 1: ส่งงานไปทำ แสดงชุดลงหน้างาน เลือกผู้รับงาน และส่งออกไปทำ</li>',
     '<li>ขั้น 2: ลงงาน ดูคำสั่งงาน ส่งข้อมูลกลับ และติดตามคอมเมนต์ล่าสุด</li>',
     '<li>ขั้น 3: ตรวจงาน ดูงานที่ส่งกลับมา ขอแก้ หรือรับงานผ่าน</li>',
-    '<h3 id="assignment-list-title" class="section-title" style="margin-top:0;">กระบวนการ 2: งานในขั้นลงงาน</h3>',
-    'id="assignment-list-title"',
-    'id="assignment-list-note"',
+    'id="assignment-list-panel-handoff"',
+    'id="assignment-list-panel-work"',
+    'id="assignment-list-panel-review"',
+    'id="assignment-list-title-work"',
+    'id="assignment-list-note-work"',
+    'id="assignment-list-title-review"',
+    'id="assignment-list-note-review"',
     'id="assignment-managed-list-wrap"',
     'id="assignment-managed-list-title"',
     'id="assignment-managed-list-note"',
     'id="table-assignments-managed"',
     'id="assignment-actionable-list-title"',
     'id="assignment-actionable-list-note"',
-    'id="assignment-limit-wrap"',
+    'id="assignment-limit-wrap-work"',
+    'id="assignment-limit-wrap-review"',
     '<label>ผู้ลงงานในระบบ</label>',
     '<button id="btn-assignments-load" class="primary step-main">1.1 โหลดงานในกระบวนการนี้</button>',
-    'id="assignment-list-panel"',
     'id="assignment-submission-form"',
     'id="assignment-submission-files"',
   ];
@@ -2778,7 +2784,7 @@ test("assignment default page mode treats user as a work-capable assignee while 
 test("refreshAll keeps loading assignments in work or review mode even without an assignee filter", () => {
   const requiredAppSnippets = [
     "const assignmentPageMode = getAssignmentPageMode();",
-    'if (assignmentPageMode === "work" || assignmentPageMode === "review" || assigneeSelected) {',
+    'if (assignmentPageMode === "work" || assignmentPageMode === "review") {',
   ];
   for (const snippet of requiredAppSnippets) {
     assert.equal(appJs.includes(snippet), true, `refreshAll should keep assignment loading active in work/review mode: ${snippet}`);
@@ -3068,9 +3074,9 @@ test("work lane keeps only contributor-facing scope", () => {
     'submissionTitle: "ขั้นที่ 2: ติดตามงาน",',
     'submissionHelp: "ส่วนนี้ใช้สำหรับติดตามผู้รับงาน สถานะปัจจุบัน กำหนดส่ง และเปิดใบสั่งงาน",',
     'submissionMode: "active",',
-    'submissionForm.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && !canActInWork));',
-    'workMonitor.classList.toggle("hidden", pageMode !== "work" || !hasAssignment || canActInWork);',
-    'deliverablesCard.classList.toggle("hidden", pageMode === "work" && hasAssignment && !canActInWork);',
+    'submissionForm.classList.toggle("hidden", hasAssignment && (!canActInWork || isReadOnlyInWork));',
+    'workMonitor.classList.toggle("hidden", !hasAssignment || (!isReadOnlyInWork && canActInWork));',
+    'deliverablesCard.classList.toggle("hidden", isEditor || (hasAssignment && (!canActInWork || isReadOnlyInWork)));',
     'renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(state.assignments.selectedId)));',
     'renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId)));',
     'renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(assignment, pageMode));',
@@ -3187,7 +3193,7 @@ test("review lane keeps only returned work plus review controls", () => {
   }
 
   const requiredAppSnippets = [
-    'submissionForm.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && !canActInWork));',
+    'submissionForm.classList.toggle("hidden", hasAssignment && (!canActInWork || isReadOnlyInWork));',
     'reviewWorkspace.classList.toggle("hidden", pageMode !== "review");',
     'submissionTitle: "งานที่ส่งกลับมา"',
     'function buildEvaluatePayloadFromForm() {',
@@ -3253,11 +3259,12 @@ test("step 1 handoff view keeps only the six agreed pre-submit blocks and redire
   }
 
   const requiredAppSnippets = [
-    'function ensureAssignmentHandoffLayoutOrder() {',
     'if (pageMode === "handoff") {',
-    'ensureAssignmentHandoffLayoutOrder();',
+    'qs("assignment-panel-handoff")?.classList.toggle("hidden", pageMode !== "handoff");',
     'pageSummary.classList.remove("hidden");',
-    'detailPanel.classList.toggle("hidden", pageMode === "handoff" ? true : !hasAssignment);',
+    'function setAssignmentDetailVisible(visible) {',
+    'if (!canSeeAssignmentCurrentWorkSurface()) {',
+    'qs("assignment-detail-panel-handoff")?.classList.add("hidden");',
     'contextFieldPack: null,',
     'contextFieldPackLoadFailed: false,',
     'function syncAssignmentCreateAssigneeMode() {',
@@ -3459,8 +3466,12 @@ test("assignment UI exposes close_assignment for owner/admin only in open-round 
   }
 
   const requiredIndexSnippets = [
-    'id="assignment-panel-title"',
-    'id="assignment-panel-note"',
+    'id="assignment-panel-title-handoff"',
+    'id="assignment-panel-note-handoff"',
+    'id="assignment-panel-title-work"',
+    'id="assignment-panel-note-work"',
+    'id="assignment-panel-title-review"',
+    'id="assignment-panel-note-review"',
     'ใช้ส่วนนี้สำหรับรับงาน เริ่มลงหน้างาน และอัปเดตสถานะตามความคืบหน้าปัจจุบัน',
   ];
   for (const snippet of requiredIndexSnippets) {

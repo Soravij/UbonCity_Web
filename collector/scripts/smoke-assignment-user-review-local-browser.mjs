@@ -461,7 +461,7 @@ async function main() {
     const handoffSnapshot = await evaluate(cdp, `(() => ({
       href: window.location.href,
       auth: document.getElementById("auth-status")?.textContent || "",
-      listTitle: document.getElementById("assignment-list-title")?.textContent || "",
+      listTitle: document.getElementById("assignment-list-title-handoff")?.textContent || "",
       loginVisible: !document.body.classList.contains("is-authenticated")
     }))()`);
     assert(handoffSnapshot?.loginVisible === false, `handoff route should stay authenticated: ${JSON.stringify(handoffSnapshot)}`);
@@ -476,12 +476,12 @@ async function main() {
     await evaluate(cdp, 'document.getElementById("btn-assignments-load")?.click(); true;');
     await waitForCondition(
       cdp,
-      `Boolean(document.querySelector('#table-assignments tbody button[data-action="open-assignment"][data-id="${seeded.assignmentId}"]'))`,
+      `Boolean(document.querySelector('#table-assignments-work tbody button[data-action="open-assignment"][data-id="${seeded.assignmentId}"]'))`,
       20000
     );
     await evaluate(
       cdp,
-      `document.querySelector('#table-assignments tbody button[data-action="open-assignment"][data-id="${seeded.assignmentId}"]')?.click() || true;`
+      `document.querySelector('#table-assignments-work tbody button[data-action="open-assignment"][data-id="${seeded.assignmentId}"]')?.click() || true;`
     );
     await waitForCondition(
       cdp,
