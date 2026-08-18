@@ -3532,6 +3532,7 @@ function isExternalContributorUser() {
 function setAssignmentRoleVisibility() {
   const assigneeWrap = qs("assignment-assignee-wrap");
   const limitWrap = qs("assignment-limit-wrap-work");
+  const limitWrapReview = qs("assignment-limit-wrap-review");
   const reviewTrackingWrap = qs("assignment-review-tracking-wrap");
   const updateStateBtn = qs("btn-assignment-update-state");
   const createPanel = qs("assignment-manual-create-panel");
@@ -3560,7 +3561,10 @@ function setAssignmentRoleVisibility() {
     assigneeWrap.classList.toggle("hidden", !canSeeExtendedManage || pageMode === "handoff" || pageMode === "work" || pageMode === "review");
   }
   if (limitWrap) {
-    limitWrap.classList.toggle("hidden", !canSeeBaseTasks || pageMode === "handoff");
+    limitWrap.classList.toggle("hidden", !canSeeBaseTasks);
+  }
+  if (limitWrapReview) {
+    limitWrapReview.classList.toggle("hidden", !canSeeBaseTasks);
   }
   if (reviewTrackingWrap) {
     reviewTrackingWrap.classList.toggle("hidden", !(canSeeExtendedReview && isOwnerUser()));
@@ -4418,16 +4422,11 @@ function syncAssignmentPageMode(assignment) {
   const reviewSubmissionCard = qs("assignment-review-submission-card");
   const submissionForm = qs("assignment-submission-form");
   const workMonitor = qs("assignment-work-monitor");
-  const deliverableEditor = qs("assignment-deliverable-editor");
-  const deliverableActions = qs("assignment-deliverables-actions");
   const deliverablesCard = qs("assignment-deliverables-summary")?.closest(".assignment-deliverables-card") || null;
   const contextBriefCard = qs("assignment-context-brief")?.closest(".assignment-brief-card") || null;
   const contextBriefTitle = contextBriefCard?.querySelector(".assignment-subtitle") || null;
   const debugBox = qs("assignment-debug-box");
-  const loadSubmissionsBtn = qs("btn-assignment-load-submissions");
-  const loadHistoryBtn = qs("btn-assignment-load-history");
   const hasAssignment = Number(assignment?.id || state.assignments.selectedId || 0) > 0;
-  const hasContextItem = pageMode === "handoff" && Boolean(getAssignmentContextItem());
   const canActInWork = canActOnAssignmentWork(assignment);
   const isTrackOnlyInWork = isAssignmentTrackOnlySelection(assignment);
   const isSubmittedInWork = isAssignmentSubmittedSelection(assignment);
@@ -4495,12 +4494,6 @@ function syncAssignmentPageMode(assignment) {
   if (workMonitor) {
     workMonitor.classList.toggle("hidden", !hasAssignment || (!isReadOnlyInWork && canActInWork));
   }
-  if (deliverableEditor) {
-    deliverableEditor.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && (!canActInWork || isReadOnlyInWork)));
-  }
-  if (deliverableActions) {
-    deliverableActions.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && (!canActInWork || isReadOnlyInWork)));
-  }
   if (deliverablesCard) {
     deliverablesCard.classList.toggle("hidden", isEditor || (hasAssignment && (!canActInWork || isReadOnlyInWork)));
   }
@@ -4509,12 +4502,6 @@ function syncAssignmentPageMode(assignment) {
   }
   if (debugBox) {
     debugBox.classList.toggle("hidden", !canSeeExtendedManage);
-  }
-  if (loadSubmissionsBtn) {
-    loadSubmissionsBtn.classList.toggle("hidden", isEditor || pageMode === "work");
-  }
-  if (loadHistoryBtn) {
-    loadHistoryBtn.classList.toggle("hidden", isEditor || pageMode === "work");
   }
   applyFreelanceWorkerView(pageMode);
   syncAssignmentSubnav();

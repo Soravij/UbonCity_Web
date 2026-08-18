@@ -3074,9 +3074,9 @@ test("work lane keeps only contributor-facing scope", () => {
     'submissionTitle: "ขั้นที่ 2: ติดตามงาน",',
     'submissionHelp: "ส่วนนี้ใช้สำหรับติดตามผู้รับงาน สถานะปัจจุบัน กำหนดส่ง และเปิดใบสั่งงาน",',
     'submissionMode: "active",',
-    'submissionForm.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && !canActInWork));',
-    'workMonitor.classList.toggle("hidden", pageMode !== "work" || !hasAssignment || canActInWork);',
-    'deliverablesCard.classList.toggle("hidden", pageMode === "work" && hasAssignment && !canActInWork);',
+    'submissionForm.classList.toggle("hidden", hasAssignment && (!canActInWork || isReadOnlyInWork));',
+    'workMonitor.classList.toggle("hidden", !hasAssignment || (!isReadOnlyInWork && canActInWork));',
+    'deliverablesCard.classList.toggle("hidden", isEditor || (hasAssignment && (!canActInWork || isReadOnlyInWork)));',
     'renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(state.assignments.selectedId)));',
     'renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId)));',
     'renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(assignment, pageMode));',
@@ -3193,7 +3193,7 @@ test("review lane keeps only returned work plus review controls", () => {
   }
 
   const requiredAppSnippets = [
-    'submissionForm.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && !canActInWork));',
+    'submissionForm.classList.toggle("hidden", hasAssignment && (!canActInWork || isReadOnlyInWork));',
     'reviewWorkspace.classList.toggle("hidden", pageMode !== "review");',
     'submissionTitle: "งานที่ส่งกลับมา"',
     'function buildEvaluatePayloadFromForm() {',
@@ -3262,7 +3262,9 @@ test("step 1 handoff view keeps only the six agreed pre-submit blocks and redire
     'if (pageMode === "handoff") {',
     'qs("assignment-panel-handoff")?.classList.toggle("hidden", pageMode !== "handoff");',
     'pageSummary.classList.remove("hidden");',
-    'detailPanel.classList.toggle("hidden", pageMode === "handoff" ? true : !hasAssignment);',
+    'function setAssignmentDetailVisible(visible) {',
+    'if (!canSeeAssignmentCurrentWorkSurface()) {',
+    'qs("assignment-detail-panel-handoff")?.classList.add("hidden");',
     'contextFieldPack: null,',
     'contextFieldPackLoadFailed: false,',
     'function syncAssignmentCreateAssigneeMode() {',
