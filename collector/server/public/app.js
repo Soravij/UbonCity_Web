@@ -4478,7 +4478,7 @@ function syncAssignmentPageMode(assignment) {
   qs("assignment-panel-work")?.classList.toggle("hidden", pageMode !== "work");
   qs("assignment-panel-review")?.classList.toggle("hidden", pageMode !== "review");
   if (submissionWorkspace) {
-    submissionWorkspace.classList.toggle("hidden", !canSeeCurrentWork || pageMode === "handoff" || pageMode === "review");
+    submissionWorkspace.classList.toggle("hidden", !canSeeCurrentWork);
   }
   if (reviewWorkspace) {
     reviewWorkspace.classList.toggle("hidden", !canSeeExtendedReview || pageMode !== "review");
@@ -4490,10 +4490,10 @@ function syncAssignmentPageMode(assignment) {
     reviewSubmissionCard.classList.toggle("hidden", !canSeeExtendedReview || pageMode !== "review" || !hasAssignment);
   }
   if (submissionForm) {
-    submissionForm.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && (!canActInWork || isReadOnlyInWork)));
+    submissionForm.classList.toggle("hidden", hasAssignment && (!canActInWork || isReadOnlyInWork));
   }
   if (workMonitor) {
-    workMonitor.classList.toggle("hidden", pageMode !== "work" || !hasAssignment || (!isReadOnlyInWork && canActInWork));
+    workMonitor.classList.toggle("hidden", !hasAssignment || (!isReadOnlyInWork && canActInWork));
   }
   if (deliverableEditor) {
     deliverableEditor.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && (!canActInWork || isReadOnlyInWork)));
@@ -4502,13 +4502,13 @@ function syncAssignmentPageMode(assignment) {
     deliverableActions.classList.toggle("hidden", pageMode === "review" || (pageMode === "work" && hasAssignment && (!canActInWork || isReadOnlyInWork)));
   }
   if (deliverablesCard) {
-    deliverablesCard.classList.toggle("hidden", isEditor || (pageMode === "work" && hasAssignment && (!canActInWork || isReadOnlyInWork)));
+    deliverablesCard.classList.toggle("hidden", isEditor || (hasAssignment && (!canActInWork || isReadOnlyInWork)));
   }
   if (contextBriefTitle) {
     contextBriefTitle.textContent = pageMode === "handoff" ? "คำสั่งงาน" : "ข้อมูลประกอบงาน";
   }
   if (debugBox) {
-    debugBox.classList.toggle("hidden", !canSeeExtendedManage || pageMode === "work" || pageMode === "review");
+    debugBox.classList.toggle("hidden", !canSeeExtendedManage);
   }
   if (loadSubmissionsBtn) {
     loadSubmissionsBtn.classList.toggle("hidden", isEditor || pageMode === "work");
