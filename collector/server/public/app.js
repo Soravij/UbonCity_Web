@@ -2559,9 +2559,7 @@ function getAssignmentCreateKind() {
 }
 
 function getSelectedAssignmentAssigneeUser() {
-  const assigneeId = parsePositiveInt(qs("assignment-assignee-id")?.value, 0);
-  if (!assigneeId) return null;
-  return getAssignableUsers().find((row) => Number(row?.id || 0) === assigneeId) || null;
+  return null;
 }
 
 function renderAssignmentAssigneeSelectionSummary(secondaryText = "") {
@@ -2615,9 +2613,7 @@ function resolveManagerLabel(user) {
 }
 
 function renderAssignmentAssigneeOptions() {
-  const filterOptions = getAssignableUsers();
   const createOptions = getAssignableUsers(getAssignmentCreateKind(), { restrictCreateInternalPolicy: true });
-  const filterNode = qs("assignment-assignee-id");
   const createNode = qs("assignment-create-assignee-id");
 
   const renderOptions = (node, options, { autoSelectSingle = false } = {}) => {
@@ -2649,7 +2645,6 @@ function renderAssignmentAssigneeOptions() {
     }
   };
 
-  renderOptions(filterNode, filterOptions);
   renderOptions(createNode, createOptions, { autoSelectSingle: true });
   syncAssignmentCreateAssigneeMode();
 }
@@ -3530,7 +3525,6 @@ function isExternalContributorUser() {
 }
 
 function setAssignmentRoleVisibility() {
-  const assigneeWrap = qs("assignment-assignee-wrap");
   const limitWrap = qs("assignment-limit-wrap-work");
   const limitWrapReview = qs("assignment-limit-wrap-review");
   const reviewTrackingWrap = qs("assignment-review-tracking-wrap");
@@ -3539,9 +3533,6 @@ function setAssignmentRoleVisibility() {
   const createBtn = qs("btn-assignment-create");
   const createSummary = qs("assignment-create-summary");
   const assignmentsTab = qs("tab-assignments");
-  const handoffTab = qs("tab-handoff");
-  const workTab = qs("tab-work");
-  const reviewTab = qs("tab-review");
   const handoffMode = qs("assignment-mode-handoff");
   const workMode = qs("assignment-mode-work");
   const reviewMode = qs("assignment-mode-review");
@@ -3557,9 +3548,6 @@ function setAssignmentRoleVisibility() {
   const isWorkOnlyRole = isAssignmentWorkOnlyUser();
   const showCreatePanel = pageMode === "handoff" && contextItemId > 0 && canSeeExtendedManage;
 
-  if (assigneeWrap) {
-    assigneeWrap.classList.toggle("hidden", !canSeeExtendedManage || pageMode === "handoff" || pageMode === "work" || pageMode === "review");
-  }
   if (limitWrap) {
     limitWrap.classList.toggle("hidden", !canSeeBaseTasks);
   }
@@ -3584,15 +3572,6 @@ function setAssignmentRoleVisibility() {
   }
   if (assignmentsTab) {
     assignmentsTab.classList.toggle("hidden", false);
-  }
-  if (handoffTab) {
-    handoffTab.classList.add("hidden");
-  }
-  if (workTab) {
-    workTab.classList.add("hidden");
-  }
-  if (reviewTab) {
-    reviewTab.classList.add("hidden");
   }
   if (handoffMode) {
     handoffMode.classList.toggle("hidden", !canSeeExtendedManage);
@@ -6305,20 +6284,12 @@ function buildAssignmentsMinePath() {
   }
   const selfId = parsePositiveInt(state.user?.id, 0);
   if (isAdminUser()) {
-    const assigneeId = parsePositiveInt(qs("assignment-assignee-id")?.value, 0);
-    if (assigneeId) {
-      return `/api/assignments/mine?assignee_user_id=${assigneeId}&limit=${limit}`;
-    }
     return `/api/assignments/mine?limit=${limit}`;
   }
-  const assigneeId = parsePositiveInt(qs("assignment-assignee-id")?.value, 0);
-  if (selfId && (!assigneeId || assigneeId === selfId)) {
+  if (selfId) {
     return `/api/assignments/mine?assignee_user_id=${selfId}&limit=${limit}`;
   }
-  if (!assigneeId) {
-    return `/api/assignments/mine?assigned_by_me=1&limit=${limit}`;
-  }
-  return `/api/assignments/mine?assignee_user_id=${assigneeId}&limit=${limit}`;
+  return `/api/assignments/mine?assigned_by_me=1&limit=${limit}`;
 }
 
 function getAssignmentAssignerLabel(assignment) {
@@ -10439,8 +10410,7 @@ async function refreshAll() {
     return;
   }
 
-  const assigneeSelected = parsePositiveInt(qs("assignment-assignee-id")?.value, 0);
-  if (assignmentPageMode === "work" || assignmentPageMode === "review" || assigneeSelected) {
+  if (assignmentPageMode === "work" || assignmentPageMode === "review") {
     await refreshAssignments({ showStatus: false, preserveSelection: true }).catch(() => {
       state.assignments.rows = [];
       state.assignments.managedRows = [];
@@ -11335,9 +11305,6 @@ function wireAssignments() {
     }
   });
 
-  qs("assignment-assignee-id")?.addEventListener("change", () => {
-    refreshAssignments({ showStatus: true, preserveSelection: false }).catch(() => {});
-  });
   qs("assignment-review-tracking")?.addEventListener("change", () => {
     refreshAssignments({ showStatus: true, preserveSelection: false }).catch(() => {});
   });

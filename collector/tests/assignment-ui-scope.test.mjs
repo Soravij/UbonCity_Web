@@ -2784,7 +2784,7 @@ test("assignment default page mode treats user as a work-capable assignee while 
 test("refreshAll keeps loading assignments in work or review mode even without an assignee filter", () => {
   const requiredAppSnippets = [
     "const assignmentPageMode = getAssignmentPageMode();",
-    'if (assignmentPageMode === "work" || assignmentPageMode === "review" || assigneeSelected) {',
+    'if (assignmentPageMode === "work" || assignmentPageMode === "review") {',
   ];
   for (const snippet of requiredAppSnippets) {
     assert.equal(appJs.includes(snippet), true, `refreshAll should keep assignment loading active in work/review mode: ${snippet}`);
