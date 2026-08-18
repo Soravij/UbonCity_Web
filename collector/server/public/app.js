@@ -4421,11 +4421,8 @@ function syncAssignmentPageMode(assignment) {
   const deliverableEditor = qs("assignment-deliverable-editor");
   const deliverableActions = qs("assignment-deliverables-actions");
   const deliverablesCard = qs("assignment-deliverables-summary")?.closest(".assignment-deliverables-card") || null;
-  const selectedSummary = qs("assignment-selected-summary");
-  const guideBox = qs("assignment-next-action")?.closest(".assignment-guide") || null;
   const contextBriefCard = qs("assignment-context-brief")?.closest(".assignment-brief-card") || null;
   const contextBriefTitle = contextBriefCard?.querySelector(".assignment-subtitle") || null;
-  const nextStepCard = qs("assignment-next-step-content")?.closest(".assignment-brief-card") || null;
   const debugBox = qs("assignment-debug-box");
   const loadSubmissionsBtn = qs("btn-assignment-load-submissions");
   const loadHistoryBtn = qs("btn-assignment-load-history");
@@ -4471,9 +4468,6 @@ function syncAssignmentPageMode(assignment) {
       pageSummary.innerHTML = "";
     }
   }
-  if (createPanel && pageMode !== "handoff") {
-    createPanel.classList.add("hidden");
-  }
   if (createPanel && pageMode === "handoff" && !canSeeExtendedManage) {
     createPanel.classList.add("hidden");
   }
@@ -4483,10 +4477,6 @@ function syncAssignmentPageMode(assignment) {
   qs("assignment-panel-handoff")?.classList.toggle("hidden", pageMode !== "handoff");
   qs("assignment-panel-work")?.classList.toggle("hidden", pageMode !== "work");
   qs("assignment-panel-review")?.classList.toggle("hidden", pageMode !== "review");
-  const backwardControls = qs("workflow-backward-controls");
-  if (backwardControls && pageMode !== "handoff") {
-    backwardControls.classList.add("hidden");
-  }
   if (submissionWorkspace) {
     submissionWorkspace.classList.toggle("hidden", !canSeeCurrentWork || pageMode === "handoff" || pageMode === "review");
   }
@@ -4514,20 +4504,8 @@ function syncAssignmentPageMode(assignment) {
   if (deliverablesCard) {
     deliverablesCard.classList.toggle("hidden", isEditor || (pageMode === "work" && hasAssignment && (!canActInWork || isReadOnlyInWork)));
   }
-  if (selectedSummary) {
-    selectedSummary.classList.toggle("hidden", pageMode === "work" || pageMode === "review");
-  }
-  if (guideBox) {
-    guideBox.classList.toggle("hidden", pageMode === "work" || pageMode === "review");
-  }
-  if (contextBriefCard) {
-    contextBriefCard.classList.toggle("hidden", pageMode === "work" || pageMode === "review");
-  }
   if (contextBriefTitle) {
     contextBriefTitle.textContent = pageMode === "handoff" ? "คำสั่งงาน" : "ข้อมูลประกอบงาน";
-  }
-  if (nextStepCard) {
-    nextStepCard.classList.toggle("hidden", pageMode === "work" || pageMode === "review");
   }
   if (debugBox) {
     debugBox.classList.toggle("hidden", !canSeeExtendedManage || pageMode === "work" || pageMode === "review");
