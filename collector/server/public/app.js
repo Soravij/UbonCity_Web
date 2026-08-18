@@ -446,8 +446,8 @@ function canSeeAssignmentExtendedReviewSurface(role = currentRole()) {
 
 function applyFreelanceWorkerView(pageMode = getAssignmentPageMode()) {
   if (currentRole() !== "freelance") return;
-  const titleNode = qs("assignment-panel-title");
-  const noteNode = qs("assignment-panel-note");
+  const titleNode = pageMode === "work" ? qs("assignment-panel-title-work") : qs("assignment-panel-title");
+  const noteNode = pageMode === "work" ? qs("assignment-panel-note-work") : qs("assignment-panel-note");
   const pageSummary = qs("assignment-page-summary");
   const guideBox = qs("assignment-next-action")?.closest(".assignment-guide") || null;
   const stepsRoot = qs("assignment-process-steps");
@@ -3531,7 +3531,7 @@ function isExternalContributorUser() {
 
 function setAssignmentRoleVisibility() {
   const assigneeWrap = qs("assignment-assignee-wrap");
-  const limitWrap = qs("assignment-limit-wrap");
+  const limitWrap = qs("assignment-limit-wrap-work");
   const reviewTrackingWrap = qs("assignment-review-tracking-wrap");
   const updateStateBtn = qs("btn-assignment-update-state");
   const createPanel = qs("assignment-manual-create-panel");
@@ -4401,11 +4401,11 @@ function syncAssignmentPageMode(assignment) {
   const canSeeCurrentWork = canSeeAssignmentCurrentWorkSurface();
   const canSeeExtendedManage = canSeeAssignmentExtendedManageSurface();
   const canSeeExtendedReview = canSeeAssignmentExtendedReviewSurface();
-  const titleNode = pageMode === "handoff" ? qs("assignment-panel-title-handoff") : qs("assignment-panel-title");
-  const noteNode = pageMode === "handoff" ? qs("assignment-panel-note-handoff") : qs("assignment-panel-note");
+  const titleNode = pageMode === "handoff" ? qs("assignment-panel-title-handoff") : pageMode === "work" ? qs("assignment-panel-title-work") : qs("assignment-panel-title");
+  const noteNode = pageMode === "handoff" ? qs("assignment-panel-note-handoff") : pageMode === "work" ? qs("assignment-panel-note-work") : qs("assignment-panel-note");
   const pageSummary = qs("assignment-page-summary");
   const createPanel = qs("assignment-manual-create-panel");
-  const listPanel = qs("assignment-list-panel");
+  const listPanel = pageMode === "handoff" ? qs("assignment-list-panel-handoff") : pageMode === "work" ? qs("assignment-list-panel-work") : qs("assignment-list-panel");
   const detailPanel = qs("assignment-detail-panel-handoff");
   const stateWorkspace = qs("assignment-state-workspace");
   const submissionWorkspace = qs("assignment-submission-workspace");
@@ -4556,7 +4556,8 @@ function applyAssignmentModernClasses() {
   const addClassById = (id, className) => qs(id)?.classList.add(className);
   addClassById("assignment-page-summary", "as-alert-box");
   addClassById("assignment-subnav", "as-subnav");
-  addClassById("assignment-list-panel", "as-list-panel");
+  addClassById("assignment-list-panel-handoff", "as-list-panel");
+  addClassById("assignment-list-panel-work", "as-list-panel");
   addClassById("assignment-detail-panel-handoff", "as-card-raised");
   addClassById("assignment-process-steps", "as-progress-steps");
   addClassById("assignment-state-workspace", "as-section");
@@ -6300,23 +6301,23 @@ function normalizeCollectPayload(adapter) {
 }
 
 function buildAssignmentsActionablePath() {
-  const limit = parsePositiveInt(qs("assignment-limit")?.value, 50) || 50;
+  const limit = parsePositiveInt(qs("assignment-limit-work")?.value, 50) || 50;
   return `/api/assignments/mine?scope=actionable&limit=${limit}`;
 }
 
 function buildAssignmentsManagedPath() {
   if (!canSeeManagedAssignmentsTable()) return "";
-  const limit = parsePositiveInt(qs("assignment-limit")?.value, 50) || 50;
+  const limit = parsePositiveInt(qs("assignment-limit-work")?.value, 50) || 50;
   return `/api/assignments/mine?scope=managed&limit=${limit}`;
 }
 
 function buildAssignmentsSubmittedPath() {
-  const limit = parsePositiveInt(qs("assignment-limit")?.value, 50) || 50;
+  const limit = parsePositiveInt(qs("assignment-limit-work")?.value, 50) || 50;
   return `/api/assignments/mine?scope=submitted&limit=${limit}`;
 }
 
 function buildAssignmentsMinePath() {
-  const limit = parsePositiveInt(qs("assignment-limit")?.value, 50) || 50;
+  const limit = parsePositiveInt(qs("assignment-limit-work")?.value, 50) || 50;
   if (currentRole() === "editor") {
     const selfId = parsePositiveInt(state.user?.id, 0);
     if (getAssignmentPageMode() === "work") {
@@ -9060,10 +9061,10 @@ function renderSubmittedAssignmentsTable(rows) {
 
 function renderAssignmentsTable(rows) {
   const pageMode = getAssignmentPageMode();
-  const table = pageMode === "handoff" ? qs("table-assignments-handoff") : qs("table-assignments");
+  const table = pageMode === "handoff" ? qs("table-assignments-handoff") : pageMode === "work" ? qs("table-assignments-work") : qs("table-assignments");
   if (!table) return;
-  const listTitle = pageMode === "handoff" ? qs("assignment-list-title-handoff") : qs("assignment-list-title");
-  const listNote = pageMode === "handoff" ? qs("assignment-list-note-handoff") : qs("assignment-list-note");
+  const listTitle = pageMode === "handoff" ? qs("assignment-list-title-handoff") : pageMode === "work" ? qs("assignment-list-title-work") : qs("assignment-list-title");
+  const listNote = pageMode === "handoff" ? qs("assignment-list-note-handoff") : pageMode === "work" ? qs("assignment-list-note-work") : qs("assignment-list-note");
   const actionableTitle = qs("assignment-actionable-list-title");
   const actionableNote = qs("assignment-actionable-list-note");
   const submittedWrap = qs("assignment-submitted-list-wrap");
@@ -11430,6 +11431,40 @@ function wireAssignments() {
       const scrollTarget1 = qs(scrollPm1 === "work" ? "assignment-submission-workspace" : scrollPm1 === "review" ? "assignment-review-workspace" : "assignment-detail-panel-handoff");
       if (scrollTarget1) {
         requestAnimationFrame(() => scrollTarget1.scrollIntoView({ behavior: "smooth", block: "start" }));
+      }
+    }
+  });
+
+  qs("table-assignments-work")?.querySelector("tbody")?.addEventListener("click", async (event) => {
+    const btn = event.target.closest("button[data-action]");
+    if (!btn) return;
+    const action = String(btn.dataset.action || "");
+
+    if (action === "open-assignment") {
+      const id = Number(btn.dataset.id || 0);
+      if (!id) return;
+
+      const row = getAssignmentById(id);
+      if (row && String(row.state || "") === "assigned") {
+        try {
+          await withButtonLoading(btn, "กำลังเปิดงาน...", async () => {
+            await api(`/api/assignments/${id}/state`, {
+              method: "PATCH",
+              body: JSON.stringify({ action: "reopen_in_progress" }),
+            });
+            await refreshAssignments({ showStatus: false, preserveSelection: true });
+          });
+        } catch (err) {
+          setStatus("assignment-status", err.message, true);
+          return;
+        }
+      }
+
+      selectAssignment(id);
+      const scrollPm2 = getAssignmentPageMode();
+      const scrollTarget2 = qs(scrollPm2 === "work" ? "assignment-submission-workspace" : scrollPm2 === "review" ? "assignment-review-workspace" : "assignment-detail-panel-handoff");
+      if (scrollTarget2) {
+        requestAnimationFrame(() => scrollTarget2.scrollIntoView({ behavior: "smooth", block: "start" }));
       }
     }
   });

@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   color-scheme: light;
   --theme-bg-gradient: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 45%, #e2e8f0 100%);
   --theme-surface: #ffffff;
@@ -6528,6 +6528,7 @@ button.is-loading::before {
 
 .as-scope #assignment-list-panel,
 .as-scope #assignment-list-panel-handoff,
+.as-scope #assignment-list-panel-work,
 .as-scope #assignment-detail-panel-handoff {
   border-color: var(--as-border-subtle);
   border-radius: 16px;
@@ -6690,6 +6691,7 @@ button.is-loading::before {
 
 .as-scope #assignment-list-panel,
 .as-scope #assignment-list-panel-handoff,
+.as-scope #assignment-list-panel-work,
 .as-scope #assignment-detail-panel-handoff {
   background: color-mix(in srgb, var(--card) 88%, var(--as-surface-sunken)) !important;
 }
@@ -6802,6 +6804,7 @@ button.is-loading::before {
 
 .as-scope #assignment-list-panel,
 .as-scope #assignment-list-panel-handoff,
+.as-scope #assignment-list-panel-work,
 .as-scope #assignment-detail-panel-handoff,
 .as-scope .assignment-brief-card,
 .as-scope .assignment-workspace-section,
@@ -6894,6 +6897,7 @@ button.is-loading::before {
 
 .as-scope #assignment-list-panel,
 .as-scope #assignment-list-panel-handoff,
+.as-scope #assignment-list-panel-work,
 .as-scope #assignment-detail-panel-handoff,
 .as-scope .assignment-brief-card,
 .as-scope .assignment-workspace-section,
@@ -6999,12 +7003,14 @@ body {
 
 .as-scope #assignment-list-panel,
 .as-scope #assignment-list-panel-handoff,
+.as-scope #assignment-list-panel-work,
 .as-scope #assignment-detail-panel-handoff {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.34), 0 12px 24px rgba(15, 23, 42, 0.04) !important;
 }
 
 :root[data-theme="dark"] .as-scope #assignment-list-panel,
 :root[data-theme="dark"] .as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] .as-scope #assignment-list-panel-work,
 :root[data-theme="dark"] .as-scope #assignment-detail-panel-handoff {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 16px 28px rgba(0, 0, 0, 0.22) !important;
 }
@@ -7103,6 +7109,7 @@ body {
 #panel-assignments.as-scope #assignment-detail-panel-handoff,
 #panel-assignments.as-scope #assignment-list-panel,
 #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-work,
 .as-scope #assignment-list-panel-handoff {
   border-color: color-mix(in srgb, var(--line) 58%, transparent) !important;
 }
@@ -7143,7 +7150,9 @@ body {
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-work,
 #panel-assignments.as-scope #assignment-list-panel-handoff,
+#panel-assignments.as-scope #assignment-list-panel-work,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-brief-card,
