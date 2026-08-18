@@ -446,8 +446,8 @@ function canSeeAssignmentExtendedReviewSurface(role = currentRole()) {
 
 function applyFreelanceWorkerView(pageMode = getAssignmentPageMode()) {
   if (currentRole() !== "freelance") return;
-  const titleNode = pageMode === "work" ? qs("assignment-panel-title-work") : qs("assignment-panel-title");
-  const noteNode = pageMode === "work" ? qs("assignment-panel-note-work") : qs("assignment-panel-note");
+  const titleNode = pageMode === "work" ? qs("assignment-panel-title-work") : pageMode === "review" ? qs("assignment-panel-title-review") : qs("assignment-panel-title-handoff");
+  const noteNode = pageMode === "work" ? qs("assignment-panel-note-work") : pageMode === "review" ? qs("assignment-panel-note-review") : qs("assignment-panel-note-handoff");
   const pageSummary = qs("assignment-page-summary");
   const guideBox = qs("assignment-next-action")?.closest(".assignment-guide") || null;
   const stepsRoot = qs("assignment-process-steps");
@@ -4401,11 +4401,11 @@ function syncAssignmentPageMode(assignment) {
   const canSeeCurrentWork = canSeeAssignmentCurrentWorkSurface();
   const canSeeExtendedManage = canSeeAssignmentExtendedManageSurface();
   const canSeeExtendedReview = canSeeAssignmentExtendedReviewSurface();
-  const titleNode = pageMode === "handoff" ? qs("assignment-panel-title-handoff") : pageMode === "work" ? qs("assignment-panel-title-work") : qs("assignment-panel-title");
-  const noteNode = pageMode === "handoff" ? qs("assignment-panel-note-handoff") : pageMode === "work" ? qs("assignment-panel-note-work") : qs("assignment-panel-note");
+  const titleNode = pageMode === "handoff" ? qs("assignment-panel-title-handoff") : pageMode === "work" ? qs("assignment-panel-title-work") : qs("assignment-panel-title-review");
+  const noteNode = pageMode === "handoff" ? qs("assignment-panel-note-handoff") : pageMode === "work" ? qs("assignment-panel-note-work") : qs("assignment-panel-note-review");
   const pageSummary = qs("assignment-page-summary");
   const createPanel = qs("assignment-manual-create-panel");
-  const listPanel = pageMode === "handoff" ? qs("assignment-list-panel-handoff") : pageMode === "work" ? qs("assignment-list-panel-work") : qs("assignment-list-panel");
+  const listPanel = pageMode === "handoff" ? qs("assignment-list-panel-handoff") : pageMode === "work" ? qs("assignment-list-panel-work") : qs("assignment-list-panel-review");
   const detailPanel = qs("assignment-detail-panel-handoff");
   const stateWorkspace = qs("assignment-state-workspace");
   const submissionWorkspace = qs("assignment-submission-workspace");
@@ -4558,6 +4558,7 @@ function applyAssignmentModernClasses() {
   addClassById("assignment-subnav", "as-subnav");
   addClassById("assignment-list-panel-handoff", "as-list-panel");
   addClassById("assignment-list-panel-work", "as-list-panel");
+  addClassById("assignment-list-panel-review", "as-list-panel");
   addClassById("assignment-detail-panel-handoff", "as-card-raised");
   addClassById("assignment-process-steps", "as-progress-steps");
   addClassById("assignment-state-workspace", "as-section");
@@ -6333,7 +6334,8 @@ function buildAssignmentsMinePath() {
   }
   if (getAssignmentPageMode() === "review") {
     const includeTracking = isOwnerReviewTrackingEnabled() ? "&include_tracking=1" : "";
-    return `/api/assignments/mine?scope=review&limit=${limit}${includeTracking}`;
+    const reviewLimit = parsePositiveInt(qs("assignment-limit-review")?.value, 50) || 50;
+    return `/api/assignments/mine?scope=review&limit=${reviewLimit}${includeTracking}`;
   }
   if (isFreelanceUser()) {
     return `/api/assignments/mine?limit=${limit}`;
@@ -9061,10 +9063,10 @@ function renderSubmittedAssignmentsTable(rows) {
 
 function renderAssignmentsTable(rows) {
   const pageMode = getAssignmentPageMode();
-  const table = pageMode === "handoff" ? qs("table-assignments-handoff") : pageMode === "work" ? qs("table-assignments-work") : qs("table-assignments");
-  if (!table) return;
-  const listTitle = pageMode === "handoff" ? qs("assignment-list-title-handoff") : pageMode === "work" ? qs("assignment-list-title-work") : qs("assignment-list-title");
-  const listNote = pageMode === "handoff" ? qs("assignment-list-note-handoff") : pageMode === "work" ? qs("assignment-list-note-work") : qs("assignment-list-note");
+  const table = pageMode === "handoff" ? qs("table-assignments-handoff") : pageMode === "work" ? qs("table-assignments-work") : qs("table-assignments-review");
+  if (!table) { console.warn(`[assignments] table not found for pageMode=${pageMode}`); return; }
+  const listTitle = pageMode === "handoff" ? qs("assignment-list-title-handoff") : pageMode === "work" ? qs("assignment-list-title-work") : qs("assignment-list-title-review");
+  const listNote = pageMode === "handoff" ? qs("assignment-list-note-handoff") : pageMode === "work" ? qs("assignment-list-note-work") : qs("assignment-list-note-review");
   const actionableTitle = qs("assignment-actionable-list-title");
   const actionableNote = qs("assignment-actionable-list-note");
   const submittedWrap = qs("assignment-submitted-list-wrap");
@@ -11401,7 +11403,7 @@ function wireAssignments() {
     }
   });
 
-  qs("table-assignments")?.querySelector("tbody")?.addEventListener("click", async (event) => {
+  qs("table-assignments-review")?.querySelector("tbody")?.addEventListener("click", async (event) => {
     const btn = event.target.closest("button[data-action]");
     if (!btn) return;
     const action = String(btn.dataset.action || "");
@@ -11427,10 +11429,10 @@ function wireAssignments() {
       }
 
       selectAssignment(id);
-      const scrollPm1 = getAssignmentPageMode();
-      const scrollTarget1 = qs(scrollPm1 === "work" ? "assignment-submission-workspace" : scrollPm1 === "review" ? "assignment-review-workspace" : "assignment-detail-panel-handoff");
-      if (scrollTarget1) {
-        requestAnimationFrame(() => scrollTarget1.scrollIntoView({ behavior: "smooth", block: "start" }));
+      const scrollPm3 = getAssignmentPageMode();
+      const scrollTarget3 = qs(scrollPm3 === "work" ? "assignment-submission-workspace" : scrollPm3 === "review" ? "assignment-review-workspace" : "assignment-detail-panel-handoff");
+      if (scrollTarget3) {
+        requestAnimationFrame(() => scrollTarget3.scrollIntoView({ behavior: "smooth", block: "start" }));
       }
     }
   });

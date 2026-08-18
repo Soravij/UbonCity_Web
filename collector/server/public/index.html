@@ -339,8 +339,6 @@
               <button id="btn-assignments-home" class="utility-action btn-home">Home</button>
             </div>
           </div>
-          <h2 id="assignment-panel-title" class="section-title">กระบวนการ 2 · ขั้น 1: ส่งงานไปทำ</h2>
-          <p id="assignment-panel-note" class="muted">เริ่มหลังจบการตรวจแก้และจัดชุดสั่งงาน ใช้สำหรับแสดงชุดลงหน้างาน เลือกผู้รับงาน กำหนดส่ง และส่งงานออกไป</p>
           <div class="toolbar compact-toolbar" id="assignment-subnav">
             <button type="button" id="assignment-mode-handoff" data-assignment-tab="handoff">ส่งงานไปทำ</button>
             <button type="button" id="assignment-mode-work" data-assignment-tab="work">ลงงาน</button>
@@ -654,73 +652,107 @@
               </div>
             </div>
           </div>
-          <div id="assignment-panel-review" class="assignment-panel-mode hidden"></div>
-
-          <div id="assignment-review-workspace" class="assignment-workspace-section hidden">
-            <h4 id="assignment-review-workspace-title" class="assignment-subtitle">การตรวจรับในขั้นส่งผลกลับระบบ</h4>
-            <p id="assignment-review-workspace-help" class="muted assignment-workspace-help">ใช้ส่วนนี้สำหรับตรวจรับผลงานที่ส่งกลับมา และใส่คอมเมนต์หรือขอแก้เพิ่มในขั้นนี้</p>
-            <p id="assignment-review-workspace-summary" class="muted assignment-workspace-summary hidden">เลือกงานมอบหมายเพื่อดูสรุปของขั้นนี้</p>
-            <div id="assignment-review-summary-card" class="assignment-brief-card hidden">
-              <h5 class="assignment-subtitle" style="margin-top:0;">สรุปสำหรับตรวจงาน</h5>
-              <div id="assignment-review-summary-content" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูสรุปสำหรับการตรวจงาน</div>
-            </div>
-            <div id="assignment-review-submission-card" class="assignment-brief-card hidden">
-              <h5 class="assignment-subtitle" style="margin-top:0;">สิ่งที่ผู้ลงงานส่งกลับล่าสุด</h5>
-              <div id="assignment-review-submission-content" class="assignment-review-submission-layout">
-                <div id="assignment-review-submission-text" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูข้อความที่ผู้ลงงานส่งกลับ</div>
-                <div id="assignment-review-submission-photos" class="assignment-brief-empty">ยังไม่มีรูปที่ส่งกลับล่าสุด</div>
-                <div id="assignment-review-submission-videos" class="assignment-brief-empty">ยังไม่มีวิดีโอที่ส่งกลับล่าสุด</div>
+          <div id="assignment-panel-review" class="assignment-panel-mode hidden">
+            <h2 id="assignment-panel-title-review" class="section-title"></h2>
+            <p id="assignment-panel-note-review" class="muted"></p>
+            <div class="secondary-panel hidden" id="assignment-list-panel-review">
+              <h3 id="assignment-list-title-review" class="section-title" style="margin-top:0;"></h3>
+              <p id="assignment-list-note-review" class="muted"></p>
+              <div class="grid">
+                <div id="assignment-limit-wrap-review">
+                  <label>limit</label>
+                  <input id="assignment-limit-review" type="number" min="1" max="200" value="50" />
+                </div>
+                <div id="assignment-review-tracking-wrap" class="hidden">
+                  <label>&nbsp;</label>
+                  <label class="assignment-inline-check">
+                    <input id="assignment-review-tracking" type="checkbox" />
+                    <span>โหมดติดตาม owner: รวมงานที่ส่งกลับแก้และงานที่ผ่านแล้ว</span>
+                  </label>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table id="table-assignments-review">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Content Item</th>
+                      <th>Assignee</th>
+                      <th>State</th>
+                      <th>Due</th>
+                      <th>Updated</th>
+                      <th>การทำงาน</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
               </div>
             </div>
-            <div class="grid">
-              <div>
-                <label>งานที่คาดว่าจะต้องส่ง (คั่นด้วย comma, ไม่บังคับ)</label>
-                <input id="assignment-expected-deliverables" placeholder="photos,videos,caption_draft" />
+            <div id="assignment-review-workspace" class="assignment-workspace-section hidden">
+              <h4 id="assignment-review-workspace-title" class="assignment-subtitle">การตรวจรับในขั้นส่งผลกลับระบบ</h4>
+              <p id="assignment-review-workspace-help" class="muted assignment-workspace-help">ใช้ส่วนนี้สำหรับตรวจรับผลงานที่ส่งกลับมา และใส่คอมเมนต์หรือขอแก้เพิ่มในขั้นนี้</p>
+              <p id="assignment-review-workspace-summary" class="muted assignment-workspace-summary hidden">เลือกงานมอบหมายเพื่อดูสรุปของขั้นนี้</p>
+              <div id="assignment-review-summary-card" class="assignment-brief-card hidden">
+                <h5 class="assignment-subtitle" style="margin-top:0;">สรุปสำหรับตรวจงาน</h5>
+                <div id="assignment-review-summary-content" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูสรุปสำหรับการตรวจงาน</div>
               </div>
-              <div>
-                <label>รหัสเหตุผลสำหรับการประเมิน (ไม่บังคับ)</label>
-                <input id="assignment-evaluate-reason" placeholder="เช่น assignment_submission_decision_evaluated" />
+              <div id="assignment-review-submission-card" class="assignment-brief-card hidden">
+                <h5 class="assignment-subtitle" style="margin-top:0;">สิ่งที่ผู้ลงงานส่งกลับล่าสุด</h5>
+                <div id="assignment-review-submission-content" class="assignment-review-submission-layout">
+                  <div id="assignment-review-submission-text" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูข้อความที่ผู้ลงงานส่งกลับ</div>
+                  <div id="assignment-review-submission-photos" class="assignment-brief-empty">ยังไม่มีรูปที่ส่งกลับล่าสุด</div>
+                  <div id="assignment-review-submission-videos" class="assignment-brief-empty">ยังไม่มีวิดีโอที่ส่งกลับล่าสุด</div>
+                </div>
               </div>
-              <div>
-                <label><input id="assignment-review-image-reset" type="checkbox" /> ต้องรีเซ็ตรูปเดิม</label>
-                <textarea id="assignment-review-image-reset-reason" placeholder="เหตุผลการรีเซ็ตรูป (บังคับเมื่อเลือก)"></textarea>
+              <div class="grid">
+                <div>
+                  <label>งานที่คาดว่าจะต้องส่ง (คั่นด้วย comma, ไม่บังคับ)</label>
+                  <input id="assignment-expected-deliverables" placeholder="photos,videos,caption_draft" />
+                </div>
+                <div>
+                  <label>รหัสเหตุผลสำหรับการประเมิน (ไม่บังคับ)</label>
+                  <input id="assignment-evaluate-reason" placeholder="เช่น assignment_submission_decision_evaluated" />
+                </div>
+                <div>
+                  <label><input id="assignment-review-image-reset" type="checkbox" /> ต้องรีเซ็ตรูปเดิม</label>
+                  <textarea id="assignment-review-image-reset-reason" placeholder="เหตุผลการรีเซ็ตรูป (บังคับเมื่อเลือก)"></textarea>
+                </div>
+                <div>
+                  <label><input id="assignment-review-video-reset" type="checkbox" /> ต้องรีเซ็ตวิดีโอเดิม</label>
+                  <textarea id="assignment-review-video-reset-reason" placeholder="เหตุผลการรีเซ็ตวิดีโอ (บังคับเมื่อเลือก)"></textarea>
+                </div>
+                <div style="grid-column: 1 / -1;">
+                  <label>คอมเมนต์ถึงผู้ลงงาน (ไม่บังคับ)</label>
+                  <textarea id="assignment-review-note" placeholder="ระบุสิ่งที่ต้องแก้เพิ่ม หรือหมายเหตุประกอบการตรวจรับ"></textarea>
+                </div>
               </div>
-              <div>
-                <label><input id="assignment-review-video-reset" type="checkbox" /> ต้องรีเซ็ตวิดีโอเดิม</label>
-                <textarea id="assignment-review-video-reset-reason" placeholder="เหตุผลการรีเซ็ตวิดีโอ (บังคับเมื่อเลือก)"></textarea>
+              <div class="toolbar assignment-step-toolbar">
+                <button id="btn-assignment-request-revision" class="warn step-main">ขอแก้เพิ่ม</button>
+                <button id="btn-assignment-accept-submission" class="primary step-main">รับงานผ่าน</button>
               </div>
-              <div style="grid-column: 1 / -1;">
-                <label>คอมเมนต์ถึงผู้ลงงาน (ไม่บังคับ)</label>
-                <textarea id="assignment-review-note" placeholder="ระบุสิ่งที่ต้องแก้เพิ่ม หรือหมายเหตุประกอบการตรวจรับ"></textarea>
-              </div>
+              <p class="muted">ผลตรวจไม่ผ่าน: ขอแก้เพิ่มแล้วให้ผู้ทำงานกลับไปแก้และส่งงานกลับในขั้นนี้ | ผลตรวจผ่าน: งานนี้เสร็จแล้ว</p>
             </div>
-            <div class="toolbar assignment-step-toolbar">
-              <button id="btn-assignment-request-revision" class="warn step-main">ขอแก้เพิ่ม</button>
-              <button id="btn-assignment-accept-submission" class="primary step-main">รับงานผ่าน</button>
-            </div>
-            <p class="muted">ผลตรวจไม่ผ่าน: ขอแก้เพิ่มแล้วให้ผู้ทำงานกลับไปแก้และส่งงานกลับในขั้นนี้ | ผลตรวจผ่าน: งานนี้เสร็จแล้ว</p>
-          </div>
-
-          <div id="assignment-return-to-field" class="assignment-workspace-section hidden">
-            <h4 class="assignment-subtitle">ส่งงานกลับไปทำรอบใหม่</h4>
-            <p class="muted assignment-workspace-help">งานที่รับผ่านแล้วจะไม่ถูกแก้ย้อนหลัง ระบบจะปิดรอบเดิมไว้เป็นหลักฐาน แล้วเปิดรอบภาคสนามใหม่พร้อมชุดคำสั่งงานใหม่ ค่าที่ยืนยันไว้เดิมจะยังอยู่จนกว่าจะรับงานรอบใหม่ และจะถูกทับเฉพาะช่องที่คนตรวจติ๊กยืนยันใหม่เท่านั้น</p>
-            <div class="grid">
-              <div style="grid-column: 1 / -1;">
-                <label>เหตุผลที่ส่งกลับ (บังคับ)</label>
-                <textarea id="assignment-return-note" placeholder="ระบุว่าต้องกลับไปตรวจสอบหรือเก็บข้อมูลอะไรเพิ่ม"></textarea>
+            <div id="assignment-return-to-field" class="assignment-workspace-section hidden">
+              <h4 class="assignment-subtitle">ส่งงานกลับไปทำรอบใหม่</h4>
+              <p class="muted assignment-workspace-help">งานที่รับผ่านแล้วจะไม่ถูกแก้ย้อนหลัง ระบบจะปิดรอบเดิมไว้เป็นหลักฐาน แล้วเปิดรอบภาคสนามใหม่พร้อมชุดคำสั่งงานใหม่ ค่าที่ยืนยันไว้เดิมจะยังอยู่จนกว่าจะรับงานรอบใหม่ และจะถูกทับเฉพาะช่องที่คนตรวจติ๊กยืนยันใหม่เท่านั้น</p>
+              <div class="grid">
+                <div style="grid-column: 1 / -1;">
+                  <label>เหตุผลที่ส่งกลับ (บังคับ)</label>
+                  <textarea id="assignment-return-note" placeholder="ระบุว่าต้องกลับไปตรวจสอบหรือเก็บข้อมูลอะไรเพิ่ม"></textarea>
+                </div>
+                <div>
+                  <label>ยืนยันรหัสผ่านของบัญชีคุณ (บังคับ)</label>
+                  <input id="assignment-return-password" type="password" autocomplete="current-password" placeholder="รหัสผ่านของบัญชีที่ล็อกอินอยู่" />
+                </div>
               </div>
-              <div>
-                <label>ยืนยันรหัสผ่านของบัญชีคุณ (บังคับ)</label>
-                <input id="assignment-return-password" type="password" autocomplete="current-password" placeholder="รหัสผ่านของบัญชีที่ล็อกอินอยู่" />
+              <div class="toolbar assignment-step-toolbar">
+                <button id="btn-assignment-return-to-field" class="warn step-main">ส่งกลับไปทำรอบใหม่</button>
               </div>
+              <p id="assignment-return-status" class="muted"></p>
             </div>
-            <div class="toolbar assignment-step-toolbar">
-              <button id="btn-assignment-return-to-field" class="warn step-main">ส่งกลับไปทำรอบใหม่</button>
+            <div id="assignment-review-hover-preview" class="asset-hover-preview hidden">
+              <img id="assignment-review-hover-preview-image" alt="assignment review preview" />
             </div>
-            <p id="assignment-return-status" class="muted"></p>
-          </div>
-          <div id="assignment-review-hover-preview" class="asset-hover-preview hidden">
-            <img id="assignment-review-hover-preview-image" alt="assignment review preview" />
           </div>
 
             <details id="assignment-debug-box">
