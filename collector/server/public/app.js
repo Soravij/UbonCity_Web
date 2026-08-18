@@ -3563,7 +3563,7 @@ function setAssignmentRoleVisibility() {
     limitWrap.classList.toggle("hidden", !canSeeBaseTasks || pageMode === "handoff");
   }
   if (reviewTrackingWrap) {
-    reviewTrackingWrap.classList.toggle("hidden", !(pageMode === "review" && canSeeExtendedReview && isOwnerUser()));
+    reviewTrackingWrap.classList.toggle("hidden", !(canSeeExtendedReview && isOwnerUser()));
   }
   if (createPanel) {
     createPanel.classList.toggle("hidden", !showCreatePanel);
@@ -4484,10 +4484,10 @@ function syncAssignmentPageMode(assignment) {
     reviewWorkspace.classList.toggle("hidden", !canSeeExtendedReview || pageMode !== "review");
   }
   if (reviewSummaryCard) {
-    reviewSummaryCard.classList.toggle("hidden", !canSeeExtendedReview || pageMode !== "review" || !hasAssignment);
+    reviewSummaryCard.classList.toggle("hidden", !canSeeExtendedReview || !hasAssignment);
   }
   if (reviewSubmissionCard) {
-    reviewSubmissionCard.classList.toggle("hidden", !canSeeExtendedReview || pageMode !== "review" || !hasAssignment);
+    reviewSubmissionCard.classList.toggle("hidden", !canSeeExtendedReview || !hasAssignment);
   }
   if (submissionForm) {
     submissionForm.classList.toggle("hidden", hasAssignment && (!canActInWork || isReadOnlyInWork));
