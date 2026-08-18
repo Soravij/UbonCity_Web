@@ -1,12 +1,13 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, before, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDatabase } from "../db/client.mjs";
-import { createRepository } from "../db/repository.mjs";
+import { createRepository, ASSIGNMENT_STATES, PRODUCTION_STATES, PUBLICATION_STATES, PLACE_REVIEW_FLAGS } from "../db/repository.mjs";
 import { advancePlaceProductionState } from "./test-helpers/fixture-ladder.mjs";
+import { reportUnknownWorkflowState } from "../server/public/workflow-state-catalog.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -106,5 +107,110 @@ describe("queue-bucket-follows-state", () => {
 
     assert.equal(bucket, "handoff",
       `expected handoff but got ${bucket} (productionState=${wm.production_state})`);
+  });
+});
+
+// ── resolveQueueBucket integration (uses real app.js logic) ──
+
+const APP_JS_PATH = path.resolve(process.cwd(), "collector", "server", "public", "app.js");
+
+function loadResolveQueueBucket() {
+  const src = fs.readFileSync(APP_JS_PATH, "utf8");
+
+  const extractFunction = (name) => {
+    const start = src.indexOf(`function ${name}(`);
+    if (start < 0) throw new Error(`function ${name} not found in app.js`);
+    let depth = 0;
+    for (let i = src.indexOf("{", start); i < src.length; i += 1) {
+      if (src[i] === "{") depth += 1;
+      else if (src[i] === "}") {
+        depth -= 1;
+        if (depth === 0) return src.slice(start, i + 1);
+      }
+    }
+    throw new Error(`unbalanced braces while extracting ${name}`);
+  };
+
+  const catalog = {
+    production_states: [...PRODUCTION_STATES],
+    publication_states: [...PUBLICATION_STATES],
+    assignment_states: [...ASSIGNMENT_STATES],
+    place_review_flags: [...PLACE_REVIEW_FLAGS],
+  };
+
+  const names = [
+    "getItemWorkflowSnapshot",
+    "getUnknownWorkflowState",
+    "isAssignmentContextReady",
+    "resolveQueueBucket",
+  ];
+
+  const stateInit = `const state = { workflowStates: ${JSON.stringify(catalog)}, workflowStateLogKeys: new Set() };`;
+  const body = `${stateInit}\n${names.map(extractFunction).join("\n\n")}`;
+  const fn = new Function("reportUnknownWorkflowState", `${body}\nreturn { ${names.join(", ")} };`);
+  return fn(reportUnknownWorkflowState);
+}
+
+describe("resolveQueueBucket open-assignment guard", () => {
+  let resolveQueueBucket;
+
+  before(() => {
+    ({ resolveQueueBucket } = loadResolveQueueBucket());
+  });
+
+  it("item field_working + in_progress assignment → NOT in handoff bucket (goes to assignment)", () => {
+    const item = {
+      production_state: "field_working",
+      publication_state: "draft",
+      has_accepted_assignment: false,
+      has_open_assignment: true,
+      current_field_pack_id: 10,
+      current_field_pack_status: "ready_for_field",
+    };
+    const bucket = resolveQueueBucket(item);
+    assert.equal(bucket, "assignment",
+      `expected assignment but got ${bucket}`);
+  });
+
+  it("item no assignment + pack ready_for_field + field_working → in handoff bucket", () => {
+    const item = {
+      production_state: "field_working",
+      publication_state: "draft",
+      has_accepted_assignment: false,
+      has_open_assignment: false,
+      current_field_pack_id: 10,
+      current_field_pack_status: "ready_for_field",
+    };
+    const bucket = resolveQueueBucket(item);
+    assert.equal(bucket, "handoff",
+      `expected handoff but got ${bucket}`);
+  });
+
+  it("item accepted assignment → assignment bucket", () => {
+    const item = {
+      production_state: "field_working",
+      publication_state: "draft",
+      has_accepted_assignment: true,
+      has_open_assignment: true,
+      current_field_pack_id: 10,
+      current_field_pack_status: "ready_for_field",
+    };
+    const bucket = resolveQueueBucket(item);
+    assert.equal(bucket, "assignment",
+      `expected assignment but got ${bucket}`);
+  });
+
+  it("item closed assignment (not open) + field_working → handoff bucket", () => {
+    const item = {
+      production_state: "field_working",
+      publication_state: "draft",
+      has_accepted_assignment: true,
+      has_open_assignment: false,
+      current_field_pack_id: 10,
+      current_field_pack_status: "ready_for_field",
+    };
+    const bucket = resolveQueueBucket(item);
+    assert.equal(bucket, "handoff",
+      `expected handoff but got ${bucket}`);
   });
 });

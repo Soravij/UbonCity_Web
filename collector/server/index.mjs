@@ -36,6 +36,7 @@ import {
   mapWorkflowStatusToModelStates,
   resolveActiveAssignmentWorkBatchRows,
 } from "../db/repository.mjs";
+import { hasOpenAssignment } from "../services/publishable-assignment-candidate.mjs";
 import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/index.mjs";
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import { resolveExtractedArticle } from "../collector/sources/extracted-article.mjs";
@@ -1340,6 +1341,7 @@ function attachItemMatchFields(items = [], options = {}) {
       current_field_pack_id: Number(currentFieldPack?.id || latestFieldPack?.id || 0) || null,
       current_field_pack_status: String(currentFieldPack?.status || latestFieldPack?.status || "").trim().toLowerCase() || null,
       has_accepted_assignment: item?.has_accepted_assignment === true,
+      has_open_assignment: item?.has_open_assignment === true,
       current_draft_id: Number(workflow?.current_draft_id || 0) || null,
       current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
       workflow_state_version: Number(workflow?.state_version || 0) || 0,
@@ -1398,6 +1400,7 @@ function attachWorkflowHeadFields(item, scopeContext = null) {
     production_state: String(workflow?.production_state || "").trim().toLowerCase() || null,
     publication_state: String(workflow?.publication_state || "").trim().toLowerCase() || null,
     has_accepted_assignment: resolvedScope?.hasAcceptedAssignment === true,
+    has_open_assignment: resolvedScope?.hasOpenAssignment === true,
     current_draft_id: Number(workflow?.current_draft_id || 0) || null,
     current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
     current_field_pack_id: Number(workflow?.current_field_pack_id || currentFieldPack?.id || latestFieldPack?.id || 0) || null,
@@ -3984,6 +3987,7 @@ function resolveItemScopeContext(item) {
     primaryAssignment,
     assignmentUserIds,
     hasAcceptedAssignment,
+    hasOpenAssignment: hasOpenAssignment(primaryAssignment),
   };
 }
 
@@ -4005,6 +4009,7 @@ function attachItemScopeMetadata(authUser, item, scopeContext = null) {
     current_holder: buildItemCurrentHolder(item),
     assignment_owner: buildItemAssignmentOwner(primaryAssignment, userById),
     has_accepted_assignment: resolvedScope?.hasAcceptedAssignment === true,
+    has_open_assignment: resolvedScope?.hasOpenAssignment === true,
   });
 }
 

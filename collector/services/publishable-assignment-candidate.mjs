@@ -60,3 +60,12 @@ export function isSelectedAssignmentAccepted(candidate) {
   const state = String(candidate?.assignment_state || "").trim().toLowerCase();
   return state === "accepted" || state === "closed";
 }
+
+const OPEN_ASSIGNMENT_STATES = Object.freeze(new Set([
+  "assigned", "in_progress", "submitted", "resubmitted", "revision_requested", "accepted",
+]));
+
+export function hasOpenAssignment(assignment) {
+  const state = String(assignment?.state || assignment?.assignment_state || "").trim().toLowerCase();
+  return OPEN_ASSIGNMENT_STATES.has(state);
+}
