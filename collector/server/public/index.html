@@ -465,6 +465,27 @@
                 <div id="assignment-next-step-content" class="assignment-brief-empty">เลือกงานมอบหมายเพื่อดูขั้นถัดไปของงานนี้</div>
               </div>
             </div>
+            <details id="assignment-debug-box">
+              <summary>ข้อมูลสำหรับตรวจสอบ (JSON / Audit)</summary>
+              <div class="grid">
+                <div>
+                  <label>ข้อมูลงานมอบหมาย JSON</label>
+                  <pre id="assignment-selected-json" class="json-preview"></pre>
+                </div>
+                <div>
+                  <label>ข้อมูล Submission JSON</label>
+                  <pre id="assignment-submissions-json" class="json-preview"></pre>
+                </div>
+                <div>
+                  <label>ข้อมูลผลประเมิน JSON</label>
+                  <pre id="assignment-evaluate-json" class="json-preview"></pre>
+                </div>
+                <div>
+                  <label>History/Audit JSON</label>
+                  <pre id="assignment-history-json" class="json-preview"></pre>
+                </div>
+              </div>
+            </details>
           </div>
           <div id="assignment-panel-work" class="assignment-panel-mode hidden">
             <h2 id="assignment-panel-title-work" class="section-title"></h2>
@@ -745,28 +766,6 @@
               <img id="assignment-review-hover-preview-image" alt="assignment review preview" />
             </div>
           </div>
-
-            <details id="assignment-debug-box">
-              <summary>ข้อมูลสำหรับตรวจสอบ (JSON / Audit)</summary>
-              <div class="grid">
-                <div>
-                  <label>ข้อมูลงานมอบหมาย JSON</label>
-                  <pre id="assignment-selected-json" class="json-preview"></pre>
-                </div>
-                <div>
-                  <label>ข้อมูล Submission JSON</label>
-                  <pre id="assignment-submissions-json" class="json-preview"></pre>
-                </div>
-                <div>
-                  <label>ข้อมูลผลประเมิน JSON</label>
-                  <pre id="assignment-evaluate-json" class="json-preview"></pre>
-                </div>
-                <div>
-                  <label>History/Audit JSON</label>
-                  <pre id="assignment-history-json" class="json-preview"></pre>
-                </div>
-              </div>
-            </details>
           </div>
 
         </section>
