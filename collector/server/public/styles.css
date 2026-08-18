@@ -1989,7 +1989,6 @@ label {
 
 #table-source-ingestions,
 #table-assignments-managed,
-#table-assignments,
 #table-users {
   font-size: 12px;
   min-width: 980px;
@@ -2011,8 +2010,6 @@ label {
 #table-source-ingestions td,
 #table-assignments-managed th,
 #table-assignments-managed td,
-#table-assignments th,
-#table-assignments td,
 #table-users th,
 #table-users td {
   padding: 6px 8px;
@@ -6399,8 +6396,8 @@ button.is-loading::before {
   border-radius: var(--as-radius-lg);
 }
 
-.as-scope #assignment-panel-title-handoff {
-.as-scope #assignment-panel-title-work {
+.as-scope #assignment-panel-title-handoff,
+.as-scope #assignment-panel-title-work,
 .as-scope #assignment-panel-title-review {
   font-size: var(--as-text-xl);
   margin-bottom: var(--as-space-2);
@@ -6444,8 +6441,8 @@ button.is-loading::before {
   line-height: var(--line-height-body);
 }
 
-.as-scope #assignment-panel-title-handoff {
-.as-scope #assignment-panel-title-work {
+.as-scope #assignment-panel-title-handoff,
+.as-scope #assignment-panel-title-work,
 .as-scope #assignment-panel-title-review {
   font-size: clamp(2rem, 2.7vw, 2.4rem);
   line-height: 1.18;
@@ -7714,8 +7711,8 @@ body {
   --as-small: 0.84rem;
 }
 
-#panel-assignments.as-scope #assignment-panel-title-handoff {
-#panel-assignments.as-scope #assignment-panel-title-work {
+#panel-assignments.as-scope #assignment-panel-title-handoff,
+#panel-assignments.as-scope #assignment-panel-title-work,
 #panel-assignments.as-scope #assignment-panel-title-review {
   font-size: var(--as-title) !important;
   line-height: 1.22 !important;
@@ -8092,8 +8089,6 @@ body {
 
 #table-assignments-managed th:nth-child(1),
 #table-assignments-managed td:nth-child(1),
-#table-assignments th:nth-child(1),
-#table-assignments td:nth-child(1),
 #table-assignments-submitted th:nth-child(1),
 #table-assignments-submitted td:nth-child(1) {
   width: 72px !important;
@@ -8101,8 +8096,6 @@ body {
 
 #table-assignments-managed th:nth-child(6),
 #table-assignments-managed td:nth-child(6),
-#table-assignments th:nth-child(6),
-#table-assignments td:nth-child(6),
 #table-assignments-submitted th:nth-child(6),
 #table-assignments-submitted td:nth-child(6) {
   width: 110px !important;
@@ -8376,8 +8369,8 @@ body {
   --as-small-dark: 0.9rem;
 }
 
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-panel-title-handoff {
-:root[data-theme="dark"] #panel-assignments.as-scope #assignment-panel-title-work {
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-panel-title-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-panel-title-work,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-panel-title-review {
   line-height: 1.24 !important;
   margin: 22px 0 12px !important;
@@ -8664,8 +8657,8 @@ body {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75) !important;
 }
 
-:root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-panel-title-handoff {
-:root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-panel-title-work {
+:root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-panel-title-handoff,
+:root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-panel-title-work,
 :root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-panel-title-review {
   color: #0f172a !important;
   letter-spacing: -0.012em !important;
