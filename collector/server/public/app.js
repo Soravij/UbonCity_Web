@@ -10477,9 +10477,18 @@ async function refreshAll() {
 
 async function refreshAssignmentWorkspaceForCurrentMode({ showStatus = false } = {}) {
   const pageMode = getAssignmentPageMode();
+  const previousPageMode = refreshAssignmentWorkspaceForCurrentMode._lastPageMode || "";
+  refreshAssignmentWorkspaceForCurrentMode._lastPageMode = pageMode;
+
+  if (pageMode !== previousPageMode && previousPageMode) {
+    state.assignments.contextItemId = 0;
+    state.assignments.backwardTransitions = null;
+    renderAssignmentBackwardTransitionControls();
+  }
+
   const landingItemId = getAssignmentLandingItemId();
   if (pageMode === "handoff") {
-    if (!isAssignmentWorkOnlyUser() && landingItemId) {
+    if (!isAssignmentWorkOnlyUser()) {
       await loadAssignmentsByItem(landingItemId, { showStatus, preserveSelection: true });
       return;
     }
@@ -10487,7 +10496,7 @@ async function refreshAssignmentWorkspaceForCurrentMode({ showStatus = false } =
     setAssignmentRoleVisibility();
     return;
   }
-  if (pageMode !== "work" && landingItemId && !isAssignmentWorkOnlyUser()) {
+  if (pageMode !== "work" && !isAssignmentWorkOnlyUser()) {
     await loadAssignmentsByItem(landingItemId, { showStatus, preserveSelection: true });
     return;
   }
