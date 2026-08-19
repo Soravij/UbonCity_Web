@@ -4461,6 +4461,7 @@ function deriveArticleProcessStatus(item, workflowModel = null, publishableSourc
     || productionState === "collected"
     || productionState === "field_working"
     || productionState === "field_review"
+    || productionState === "ready_for_writer"
     || productionState === "writing_assigned"
     || productionState === "writing"
     || productionState === "generated"
@@ -11081,8 +11082,19 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
       clearExternalUsableMediaAtHandoff(contentItemId, { req });
       const item = repo.getItem(contentItemId);
       if (String(item?.type || "").trim().toLowerCase() === "place") {
-        // A place remains in field_review after acceptance. Editorial assignment creation is the
-        // explicit handoff that advances it to writing_assigned.
+        repo.upsertWorkflowModel(
+          contentItemId,
+          {
+            production_state: "ready_for_writer",
+            publication_state: "draft",
+            last_transition_note: String(req.body?.internal_note || "").trim() || "field assignment accepted — ready for writer assignment",
+          },
+          actorEmail(req),
+          {
+            actor_role: role,
+            reason_code: "field_assignment_accepted_ready_for_writer",
+          }
+        );
       } else {
         const workflowModel = repo.ensureWorkflowModel(contentItemId);
         const productionState = String(workflowModel?.production_state || "").trim().toLowerCase();

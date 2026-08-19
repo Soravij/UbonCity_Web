@@ -444,6 +444,7 @@ export const PRODUCTION_STATES = new Set([
   "ready_for_content",
   "field_working",
   "field_review",
+  "ready_for_writer",
   "writing_assigned",
   "writing",
   "content_in_progress",
@@ -519,8 +520,9 @@ function buildPlaceTransitionRules() {
       generated: new Set(["ready_for_content", "analyzed"]),
       ready_for_content: new Set(["field_working", "generated"]),
       field_working: new Set(["ready_for_content", "field_review"]),
-      field_review: new Set(["generated", "field_working", "writing_assigned"]),
-      writing_assigned: new Set(["writing", "field_review"]),
+      field_review: new Set(["generated", "field_working", "ready_for_writer"]),
+      ready_for_writer: new Set(["writing_assigned", "field_review"]),
+      writing_assigned: new Set(["writing", "ready_for_writer"]),
       writing: new Set(["writing_assigned", "in_review"]),
       in_review: new Set(["ready_for_publish", "writing", "field_review"]),
       ready_for_publish: new Set(["submitted_for_admin_review", "in_review"]),
@@ -553,7 +555,10 @@ export const PLACE_BACKWARD_PRODUCTION_TRANSITIONS = Object.freeze({
     generated: Object.freeze({ direction: "cross_process", label_th: "สร้างร่างด้วย AI และตรวจแก้เนื้อหา", surface: "item_editor", publication_state: "draft", return_to_clean: true }),
   }),
   writing_assigned: Object.freeze({
-    field_review: Object.freeze({ direction: "cross_process", label_th: "ตรวจงาน", surface: "assignment_review", publication_state: "draft", return_to_clean: true }),
+    ready_for_writer: Object.freeze({ direction: "in_process", label_th: "รับงาน", surface: "assignment_review", publication_state: "draft", return_to_clean: true }),
+  }),
+  ready_for_writer: Object.freeze({
+    field_review: Object.freeze({ direction: "in_process", label_th: "ตรวจงาน", surface: "assignment_review", publication_state: "draft" }),
   }),
   writing: Object.freeze({
     writing_assigned: Object.freeze({ direction: "in_process", label_th: "รับงาน", surface: "article_intake", publication_state: "draft", return_to_clean: true }),
