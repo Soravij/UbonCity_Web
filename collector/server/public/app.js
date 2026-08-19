@@ -3659,6 +3659,8 @@ async function refreshAssignmentBackwardTransitions(itemId) {
 async function loadAssignmentContextFieldPackStatus(itemId) {
   const targetItemId = parsePositiveInt(itemId, 0);
   if (!targetItemId) {
+    loadAssignmentContextFieldPackStatus._lastFetchedItemId = 0;
+    loadAssignmentContextFieldPackStatus._inflightItemId = 0;
     state.assignments.contextFieldPackStatus = "";
     state.assignments.contextFieldPack = null;
     state.assignments.contextFieldPackLoadFailed = false;
@@ -3670,14 +3672,24 @@ async function loadAssignmentContextFieldPackStatus(itemId) {
     return "";
   }
 
+  if (targetItemId === loadAssignmentContextFieldPackStatus._lastFetchedItemId || targetItemId === loadAssignmentContextFieldPackStatus._inflightItemId) {
+    return state.assignments.contextFieldPackStatus;
+  }
+
+  const requestSeq = (loadAssignmentContextFieldPackStatus._requestSeq || 0) + 1;
+  loadAssignmentContextFieldPackStatus._requestSeq = requestSeq;
+  loadAssignmentContextFieldPackStatus._inflightItemId = targetItemId;
+
   try {
     const response = await api(`/api/items/${targetItemId}/field-pack/current`);
+    if (requestSeq !== loadAssignmentContextFieldPackStatus._requestSeq) return state.assignments.contextFieldPackStatus;
     state.assignments.contextFieldPackStatus = String(response?.field_pack?.status || "").trim().toLowerCase();
     state.assignments.contextFieldPack = response?.field_pack && typeof response.field_pack === "object"
       ? response.field_pack
       : null;
     state.assignments.contextFieldPackLoadFailed = false;
   } catch {
+    if (requestSeq !== loadAssignmentContextFieldPackStatus._requestSeq) return state.assignments.contextFieldPackStatus;
     state.assignments.contextFieldPackStatus = "";
     state.assignments.contextFieldPack = null;
     state.assignments.contextFieldPackLoadFailed = true;
@@ -3685,15 +3697,20 @@ async function loadAssignmentContextFieldPackStatus(itemId) {
 
   try {
     const assignmentsResponse = await api(`/api/items/${targetItemId}/assignments`);
+    if (requestSeq !== loadAssignmentContextFieldPackStatus._requestSeq) return state.assignments.contextFieldPackStatus;
     state.assignments.contextAssignments = Array.isArray(assignmentsResponse?.assignments)
       ? assignmentsResponse.assignments
       : [];
   } catch (err) {
+    if (requestSeq !== loadAssignmentContextFieldPackStatus._requestSeq) return state.assignments.contextFieldPackStatus;
     console.error("[assignment-context] cannot load item assignments", { item_id: targetItemId, error: String(err?.message || err) });
     state.assignments.contextAssignments = [];
   }
 
   await refreshAssignmentBackwardTransitions(targetItemId);
+  if (requestSeq !== loadAssignmentContextFieldPackStatus._requestSeq) return state.assignments.contextFieldPackStatus;
+  loadAssignmentContextFieldPackStatus._inflightItemId = 0;
+  loadAssignmentContextFieldPackStatus._lastFetchedItemId = targetItemId;
   renderAssignmentHandoffBrief();
   renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(state.assignments.selectedId)));
   return state.assignments.contextFieldPackStatus;
