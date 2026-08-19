@@ -11099,19 +11099,23 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
       clearExternalUsableMediaAtHandoff(contentItemId, { req });
       const item = repo.getItem(contentItemId);
       if (String(item?.type || "").trim().toLowerCase() === "place") {
-        repo.upsertWorkflowModel(
-          contentItemId,
-          {
-            production_state: "ready_for_writer",
-            publication_state: "draft",
-            last_transition_note: String(req.body?.internal_note || "").trim() || "field assignment accepted — ready for writer assignment",
-          },
-          actorEmail(req),
-          {
-            actor_role: role,
-            reason_code: "field_assignment_accepted_ready_for_writer",
-          }
-        );
+        const currentWorkflow = repo.ensureWorkflowModel(contentItemId);
+        const currentProductionState = String(currentWorkflow?.production_state || "").trim().toLowerCase();
+        if (currentProductionState === "field_review") {
+          repo.upsertWorkflowModel(
+            contentItemId,
+            {
+              production_state: "ready_for_writer",
+              publication_state: "draft",
+              last_transition_note: String(req.body?.internal_note || "").trim() || "field assignment accepted — ready for writer assignment",
+            },
+            actorEmail(req),
+            {
+              actor_role: role,
+              reason_code: "field_assignment_accepted_ready_for_writer",
+            }
+          );
+        }
       } else {
         const workflowModel = repo.ensureWorkflowModel(contentItemId);
         const productionState = String(workflowModel?.production_state || "").trim().toLowerCase();
