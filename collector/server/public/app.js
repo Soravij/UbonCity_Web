@@ -10492,7 +10492,12 @@ async function refreshAssignmentWorkspaceForCurrentMode({ showStatus = false } =
   const landingItemId = getAssignmentLandingItemId();
   if (pageMode === "handoff") {
     if (!isAssignmentWorkOnlyUser()) {
-      await loadAssignmentsByItem(landingItemId, { showStatus, preserveSelection: true });
+      if (landingItemId) {
+        await loadAssignmentsByItem(landingItemId, { showStatus, preserveSelection: true });
+        return;
+      }
+      renderAssignmentsTable(state.assignments.rows);
+      setAssignmentRoleVisibility();
       return;
     }
     renderAssignmentsTable(state.assignments.rows);
@@ -10500,7 +10505,11 @@ async function refreshAssignmentWorkspaceForCurrentMode({ showStatus = false } =
     return;
   }
   if (pageMode !== "work" && !isAssignmentWorkOnlyUser()) {
-    await loadAssignmentsByItem(landingItemId, { showStatus, preserveSelection: true });
+    if (landingItemId) {
+      await loadAssignmentsByItem(landingItemId, { showStatus, preserveSelection: true });
+      return;
+    }
+    await refreshAssignments({ showStatus, preserveSelection: true });
     return;
   }
   await refreshAssignments({ showStatus, preserveSelection: true });
