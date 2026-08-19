@@ -9210,7 +9210,7 @@ app.post("/api/items/:id/workflow/backward-transitions", requireRole("owner", "a
     ]);
     const fromProductionState = String(workflowBefore.production_state || "").trim().toLowerCase();
     const EDITORIAL_PROCESS_STATES = new Set(["writing_assigned", "writing"]);
-    const FIELD_PROCESS_STATES = new Set(["field_working", "field_review"]);
+    const FIELD_PROCESS_STATES = new Set(["field_working", "field_review", "ready_for_writer"]);
     const closeKind = EDITORIAL_PROCESS_STATES.has(fromProductionState)
       ? "editorial"
       : FIELD_PROCESS_STATES.has(fromProductionState)
