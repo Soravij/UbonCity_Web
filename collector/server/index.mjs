@@ -10429,6 +10429,18 @@ app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "a
       });
     }
 
+    const isPlace = String(item?.type || "").trim().toLowerCase() === "place";
+    if (isPlace) {
+      const currentProductionState = String(workflowModel?.production_state || "").trim().toLowerCase();
+      if (currentProductionState !== "ready_for_writer") {
+        res.status(409).json({
+          error: `editorial assignment requires production_state=ready_for_writer but current state is "${currentProductionState}"`,
+          code: "EDITORIAL_ASSIGNMENT_INVALID_PRODUCTION_STATE",
+        });
+        return;
+      }
+    }
+
     const workflowPatch = resolvePlaceLadderWorkflowPatch(
       item,
       workflowModel,
