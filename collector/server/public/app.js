@@ -3646,10 +3646,13 @@ function renderAssignmentBackwardTransitionControls() {
   });
 }
 
-async function refreshAssignmentBackwardTransitions(itemId) {
+async function refreshAssignmentBackwardTransitions(itemId, requestSeq) {
   try {
-    state.assignments.backwardTransitions = await loadWorkflowBackwardTransitions(api, itemId);
+    const transitions = await loadWorkflowBackwardTransitions(api, itemId);
+    if (requestSeq != null && requestSeq !== loadAssignmentContextFieldPackStatus._requestSeq) return;
+    state.assignments.backwardTransitions = transitions;
   } catch (err) {
+    if (requestSeq != null && requestSeq !== loadAssignmentContextFieldPackStatus._requestSeq) return;
     console.error("[workflow-backward-transition] cannot load targets", { item_id: Number(itemId || 0) || null, error: String(err?.message || err) });
     state.assignments.backwardTransitions = { loadFailed: true, can_transition: false, targets: [] };
   }
@@ -3707,7 +3710,7 @@ async function loadAssignmentContextFieldPackStatus(itemId) {
     state.assignments.contextAssignments = [];
   }
 
-  await refreshAssignmentBackwardTransitions(targetItemId);
+  await refreshAssignmentBackwardTransitions(targetItemId, requestSeq);
   if (requestSeq !== loadAssignmentContextFieldPackStatus._requestSeq) return state.assignments.contextFieldPackStatus;
   loadAssignmentContextFieldPackStatus._inflightItemId = 0;
   loadAssignmentContextFieldPackStatus._lastFetchedItemId = targetItemId;
