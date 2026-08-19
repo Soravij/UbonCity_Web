@@ -520,7 +520,7 @@ function buildPlaceTransitionRules() {
       generated: new Set(["ready_for_content", "analyzed"]),
       ready_for_content: new Set(["field_working", "generated"]),
       field_working: new Set(["ready_for_content", "field_review"]),
-      field_review: new Set(["generated", "field_working", "ready_for_writer"]),
+      field_review: new Set(["generated", "ready_for_writer"]),
       ready_for_writer: new Set(["writing_assigned", "field_review"]),
       writing_assigned: new Set(["writing", "ready_for_writer"]),
       writing: new Set(["writing_assigned", "in_review"]),
@@ -548,7 +548,6 @@ export const PLACE_BACKWARD_PRODUCTION_TRANSITIONS = Object.freeze({
     ready_for_content: Object.freeze({ direction: "in_process", label_th: "ส่งงานไปทำ", surface: "handoff", publication_state: "draft", return_to_clean: true }),
   }),
   field_review: Object.freeze({
-    field_working: Object.freeze({ direction: "in_process", label_th: "ลงงาน", surface: "assignment_work", publication_state: "draft" }),
     generated: Object.freeze({ direction: "cross_process", label_th: "สร้างร่างด้วย AI และตรวจแก้เนื้อหา", surface: "item_editor", publication_state: "draft", return_to_clean: true }),
   }),
   ready_for_content: Object.freeze({

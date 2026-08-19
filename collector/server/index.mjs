@@ -9210,16 +9210,21 @@ app.post("/api/items/:id/workflow/backward-transitions", requireRole("owner", "a
     ]);
     const fromProductionState = String(workflowBefore.production_state || "").trim().toLowerCase();
     const EDITORIAL_PROCESS_STATES = new Set(["writing_assigned", "writing"]);
-    const FIELD_PROCESS_STATES = new Set(["field_working", "field_review", "ready_for_writer"]);
-    const closeKind = EDITORIAL_PROCESS_STATES.has(fromProductionState)
-      ? "editorial"
-      : FIELD_PROCESS_STATES.has(fromProductionState)
-        ? "field"
-        : null;
-    const openAssignments = repo
-      .listAssignmentsByItem(id)
-      .filter((assignment) => OPEN_ASSIGNMENT_STATES_FOR_BACKWARD_CLOSE.has(String(assignment?.state || "").trim().toLowerCase()))
-      .filter((assignment) => closeKind === null || String(assignment?.assignment_kind || "").trim().toLowerCase() === closeKind);
+    const FIELD_PROCESS_STATES = new Set(["field_working", "field_review"]);
+    const SKIP_AUTO_CLOSE_STATES = new Set(["ready_for_writer"]);
+    const closeKind = SKIP_AUTO_CLOSE_STATES.has(fromProductionState)
+      ? "skip"
+      : EDITORIAL_PROCESS_STATES.has(fromProductionState)
+        ? "editorial"
+        : FIELD_PROCESS_STATES.has(fromProductionState)
+          ? "field"
+          : null;
+    const openAssignments = closeKind === "skip"
+      ? []
+      : repo
+          .listAssignmentsByItem(id)
+          .filter((assignment) => OPEN_ASSIGNMENT_STATES_FOR_BACKWARD_CLOSE.has(String(assignment?.state || "").trim().toLowerCase()))
+          .filter((assignment) => closeKind === null || String(assignment?.assignment_kind || "").trim().toLowerCase() === closeKind);
     for (const openAssignment of openAssignments) {
       repo.updateAssignmentState(openAssignment.id, "closed", actorEmail(req), {
         reason_code: "closed_by_backward_transition",
