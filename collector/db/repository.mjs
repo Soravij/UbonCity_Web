@@ -548,6 +548,7 @@ export const PLACE_BACKWARD_PRODUCTION_TRANSITIONS = Object.freeze({
     ready_for_content: Object.freeze({ direction: "in_process", label_th: "ส่งงานไปทำ", surface: "handoff", publication_state: "draft", return_to_clean: true }),
   }),
   field_review: Object.freeze({
+    field_working: Object.freeze({ direction: "in_process", label_th: "ลงงาน", surface: "assignment_work", publication_state: "draft" }),
     generated: Object.freeze({ direction: "cross_process", label_th: "สร้างร่างด้วย AI และตรวจแก้เนื้อหา", surface: "item_editor", publication_state: "draft", return_to_clean: true }),
   }),
   ready_for_content: Object.freeze({
