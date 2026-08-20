@@ -410,12 +410,18 @@ function renderBackwardTransitionControls() {
 }
 
 async function refreshBackwardTransitions() {
+  const requestSeq = (refreshBackwardTransitions._requestSeq || 0) + 1;
+  refreshBackwardTransitions._requestSeq = requestSeq;
+  const targetItemId = Number(state.itemId || 0) || 0;
   try {
-    state.backwardTransitions = await loadWorkflowBackwardTransitions(api, state.itemId);
+    state.backwardTransitions = await loadWorkflowBackwardTransitions(api, targetItemId);
+    if (requestSeq !== refreshBackwardTransitions._requestSeq) return;
   } catch (err) {
-    console.error("[workflow-backward-transition] cannot load targets", { item_id: state.itemId, error: String(err?.message || err) });
+    if (requestSeq !== refreshBackwardTransitions._requestSeq) return;
+    console.error("[workflow-backward-transition] cannot load targets", { item_id: targetItemId, error: String(err?.message || err) });
     state.backwardTransitions = null;
   }
+  if (requestSeq !== refreshBackwardTransitions._requestSeq) return;
   renderBackwardTransitionControls();
 }
 
