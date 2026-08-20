@@ -9249,6 +9249,28 @@ app.post("/api/items/:id/workflow/backward-transitions", requireRole("owner", "a
         assignment_id: openAssignment.id,
       });
     }
+    if (fromProductionState === "ready_for_writer" && target.production_state === "field_review") {
+      const acceptedFieldAssignments = repo
+        .listAssignmentsByItem(id)
+        .filter((a) => String(a?.assignment_kind || "").trim().toLowerCase() === "field")
+        .filter((a) => String(a?.state || "").trim().toLowerCase() === "accepted");
+      for (const assignment of acceptedFieldAssignments) {
+        repo.updateAssignmentState(assignment.id, "revision_requested", actorEmail(req), {
+          reason_code: "reopened_by_backward_transition",
+          actor_role: actorPolicyRole(req),
+          actor_user_id: Number(req.authUser?.id || 0) || null,
+          internal_note: `reopened by backward workflow transition: ${workflowBefore.production_state} -> ${target.production_state}`,
+        });
+        repo.logAudit(actorEmail(req), "assignment.state.reopen_backward_transition", "content_item", String(id), {
+          assignment_id: assignment.id,
+          reason_code: "reopened_by_backward_transition",
+          from_production_state: workflowBefore.production_state,
+          to_production_state: target.production_state,
+        }, {
+          assignment_id: assignment.id,
+        });
+      }
+    }
     const nextItem = repo.getItem(id) || item;
     res.json({
       ok: true,
