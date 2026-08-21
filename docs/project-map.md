@@ -305,10 +305,10 @@
 - `mergeContentItems()` → `index.mjs:2209`
 - `purgeDeletedItemTx()` → `index.mjs:1916`
 - `sanitizeArticleRichTextHtml()` → `index.mjs:972`
-- `renderCollectorRootHtml()` → `index.mjs:2751` (called by GET `/`)
+- `renderCollectorRootHtml()` → `index.mjs:264`
 - `resolvePlaceLadderWorkflowPatch()` → `index.mjs:4267`
 - `transitionArticleProcessState()` → `index.mjs:4196`
-- `mapArticleProcessStatusToWorkflowPatch()` → `index.mjs:4534`
+- `mapArticleProcessStatusToWorkflowPatch()` → `index.mjs:4519`
 - `finalizeArticleProcessReadyForSync()` → `index.mjs:4321`
 - `applyPublishedWebReviewFeedback()` → `index.mjs:14206`
 
@@ -526,7 +526,7 @@
 | field_working→field_review | `PATCH /api/assignments/:id/state` → `index.mjs:10996` | inline | `repo.updateAssignmentState()` → `repository.mjs:5556` | assignment submission → `POST /api/assignments/:id/submissions` → `index.mjs:11230` | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
 | field_review→writing_assigned | `POST /api/items/:id/article-editorial-assignments` → `index.mjs:10341` | inline | `repo.createAssignmentWithWorkflow()` via `resolvePlaceLadderWorkflowPatch()` → `index.mjs:4267` | article-intake page → `place.html:168` → `btn-open-place-write` | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
 | writing_assigned→writing | `POST /api/items/:id/article-process/transition` → `index.mjs:9264` | inline | `transitionArticleProcessState()` → `index.mjs:4196` → `mapArticleProcessStatusToWorkflowPatch("drafting")` → `index.mjs:4548` | article-workspace → `article-workspace.js` start drafting | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
-| writing→in_review | `POST /api/items/:id/article-process/submit-review` → `index.mjs:9318` | inline | `transitionArticleProcessState()` → `index.mjs:4196` → `mapArticleProcessStatusToWorkflowPatch("ready_for_review")` → `index.mjs:4534` | article-submit page → `article-submit-page.js` submit button | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
+| writing→in_review | `POST /api/items/:id/article-process/submit-review` → `index.mjs:9318` | inline | `transitionArticleProcessState()` → `index.mjs:4196` → `mapArticleProcessStatusToWorkflowPatch("ready_for_review")` → `index.mjs:4519` | article-submit page → `article-submit-page.js` submit button | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
 | in_review→ready_for_publish | `POST /api/items/:id/article-process/transition` → `index.mjs:9264` (status: ready_for_sync) | inline | `finalizeArticleProcessReadyForSync()` → `index.mjs:4321` → `applyReviewAction()` → `workflow.mjs:2647` | article-submit page → approve+sync action | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
 | ready_for_publish→submitted_for_admin_review | `POST /api/items/:id/submit-admin-review` → `index.mjs:13128` | inline | `repo.upsertWorkflowModel()` → `repository.mjs:4946` | article-submit page → submit for admin review button | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
 | submitted_for_admin_review→completed | `POST /api/web-review-feedback` → `index.mjs:14241` | inline | `applyPublishedWebReviewFeedback()` → `index.mjs:14206` | not found (backend-driven event) | terminal (no backward) |
