@@ -1,4 +1,4 @@
-<!-- generated from 0d88134d296ff33eaaafde5cc09a6aaee7ec8bbb on 2026-08-21 -->
+<!-- generated from 91e4a79cc2e46695ee2e5f0d8179d82fe69cbc7b on 2026-08-21 -->
 
 ## 1. This system does what
 
@@ -34,21 +34,107 @@ An editor then creates an editorial assignment via `POST /api/items/:id/article-
 
 ## 5. index.mjs zone map
 
-Lines 1–94 are imports and constants. Lines 95–140 set up AI policy catalogs and agent profiles. Lines 140–260 define asset version resolution, HTML rendering helpers, and static file serving middleware. Lines 260–2750 configure Express middleware (CORS, rate limiting, JSON parsing) and mount static file handlers. Lines 2750–7190 serve the Collector's static HTML/JS UI files. Lines 7190–7220 define rate limiters for login, workflow, and upload. Lines 7220–7800 handle auth, admin diagnostics, and user management routes. Lines 7800–8300 handle item CRUD, bulk operations, and transport map routes. Lines 8300–10300 handle item mutations, workflow model, article process, transitions, and audit logs. Lines 10300–12100 handle assignments, submissions, deliverables, and governance. Lines 12100–12900 handle search enrichment, intelligence, social signals, momentum, content direction, evidence, field packs, and media candidates. Lines 12900–13500 handle transport v1 routes, export readiness, and admin review submission. Lines 13500–14500 handle bulk pipeline runs (`/api/run/clean`, `/api/run/ai-draft`, `/api/run/quality`), review queue, web-review feedback sync, and backward transitions. Lines 14500–15482 handle legacy transport map routes and server startup.
+Base path: `collector/server/index.mjs` (15,482 lines).
+
+| Lines | What it does | First / last landmark |
+|-------|-------------|----------------------|
+| 1–94 | Imports from all service modules, db, config | `import "dotenv/config"` :1 / `import { buildReviewIngestContentPayload }` :93 |
+| 95–153 | Constants, AI agent profiles, asset version setup | `ARTICLE_AGENT_KEY` :95 / `resolveCollectorAssetVersionForFile()` :154 |
+| 154–263 | Static file helpers: HTML/JS rendering, asset URL rewriting | `resolveCollectorAssetVersionForFile()` :154 / `renderCollectorRootHtml()` :264 |
+| 264–971 | Pure utility functions: AI config, transport normalization, HTML sanitization | `renderCollectorRootHtml()` :264 / `sanitizeArticleRichTextHtml()` :972 |
+| 972–1915 | Item enrichment, merge logic, soft-delete prep, audit snapshots | `sanitizeArticleRichTextHtml()` :972 / `purgeDeletedItemTx()` :1916 |
+| 1916–2718 | Item merge, bulk operations, assignment access checks | `purgeDeletedItemTx()` :1916 / `hasAssignmentDraftAccess()` :2712 |
+| 2719–2750 | Express middleware setup: CORS, JSON, rate limiter, static mounts | `app.set("trust proxy", 1)` :2725 / `app.use(express.static(...))` :2750 |
+| 2751–7197 | Root HTML route, static HTML/JS serving middleware, Google Maps proxy | `app.get("/")` :2751 / `assignmentChunkUploadRateLimit` :7196 |
+| 7198–7800 | Health, auth, admin diagnostics, user CRUD, config, workflow-states | `GET /api/health` :7198 / `GET /api/workflow-states` :7801 |
+| 7801–8340 | AI policies, agent profiles, item list/detail, bulk ops, create item | `GET /api/workflow-states` :7801 / `POST /api/items` :8290 |
+| 8341–8575 | Transport map v1 routes (config, CRUD, release) | `GET /api/transport-map/config` :8341 / `POST .../release-main` :8489 |
+| 8576–9100 | Item claim/release/takeover, save, place-ready, editor-work, AI suggestions | `POST /api/items/:id/claim` :8576 / `POST .../article-suggestion` :9022 |
+| 9101–9546 | Workflow model, backward transitions, article-process, transitions, audit logs | `GET .../workflow-model` :9101 / `PUT .../workflow-model` :9547 |
+| 9547–10164 | Intelligence, readiness, brief, execution controls, channels, governance | `PUT .../workflow-model` :9547 / `POST .../assignments/from-readiness` :10165 |
+| 10165–10748 | Assignment CRUD: create, editorial, request-revision, from-readiness | `POST .../assignments/from-readiness` :10165 / `POST .../assignments` :10555 |
+| 10749–12179 | Assignment list/detail, state, submissions, deliverables, governance, history | `GET /api/assignments/mine` :10749 / `GET .../history` :12110 |
+| 12180–12900 | Search enrichment, intelligence, social signals, momentum, content direction, evidence, field packs, media candidates | `GET .../search-enrichment` :12180 / `GET .../media-candidates` :12864 |
+| 12900–13500 | Transport v1 remaining, export readiness, submit-admin-review | transport v1 routes / `POST .../submit-admin-review` :13128 |
+| 13500–14500 | Bulk pipeline runs, review queue, web-review feedback, backward transitions, translation runs | `POST /api/run/clean` :14062 / `GET /api/translation-runs` :14500 |
+| 14500–15365 | Legacy run endpoints, quality/staging/exports, assets, upload, error handler, exports | `POST /api/run/approve` :14504 / `export { ... }` :15365 |
+| 15367–15380 | Server startup: db.close on exit, app.listen | `process.once("exit", ...)` :15367 / `app.listen(...)` :15374 |
 
 ## 6. If you need to fix X, look here
 
-| What you're fixing | Files to open | Watch out for |
-|---|---|---|
-| Place ladder transition not working | `repository.mjs:510` (rules), `index.mjs:9138` (backward endpoint), `workflow-backward-transitions.js:20` (UI) | Place uses a strict positional ladder (`repository.mjs:510`), not the legacy flexible graph (`repository.mjs:483`); mixing them up causes silent no-ops |
-| Assignment state stuck | `repository.mjs:5556` (`updateAssignmentState`), `repository.mjs:584` (assignment rules), `index.mjs:10996` (PATCH endpoint) | `updateAssignmentState` side-effects `production_state` for field assignments on places only; other types don't get this |
-| AI draft generation fails | `workflow.mjs:2213` (`runAiDraftStage`), `clean-context.mjs:107` (context builder), `agent-generation.mjs:919` (engine) | `validateCleanMinimum()` at `clean-context.mjs:210` blocks generation if approved context is missing; check `evidence_blocks` and `approved_context_blocks` tables first |
-| Content not reaching backend | `index.mjs:13128` (submit-admin-review), `review-ingest-mapping.mjs:1` (payload builder), `backend/routes/reviewContentRoutes.js:60` (ingest endpoint) | Requires `COLLECTOR_SYNC_BACKEND_API` and `COLLECTOR_PUBLIC_BASE_URL` env vars; fails silently if translation recheck hasn't passed |
-| Translation stuck or failing | `workflow.mjs:1560` (rerun), `workflow.mjs:1659` (repair), `workflow.mjs:1200` (ready check) | Fingerprint mismatch at `workflow.mjs:268` causes stale detection; source content changes invalidate all existing translations |
-| Transport v2 routes not rendering | `transport-v2-router.mjs:1958` (resolve), `transport-v2-router.mjs:1992` (render-poster), `schema.sql:415` (resolved paths) | OSRM resolution is async; `routing_status` stays `missing` until `/resolve` succeeds |
-| Item deletion blocked | `raw-delete.mjs:32` (hard blockers), `raw-delete.mjs:65` (classify), `index.mjs:8050` (bulk-delete) | `REFERENCE_HARD_BLOCKER_DEFS` at `repository.mjs:429` defines permanent blockers that cannot be overridden |
-| Frontend not showing content | `frontend/app/[lang]/page.js` (homepage), `frontend/app/api/media-proxy/route.js:37` (image proxy), `backend/routes/placeRoutes.js:18` (API) | Frontend reads from Backend MySQL, not Collector SQLite; content must be ingested first |
+Base paths: `collector/db/` for repository.mjs, `collector/services/` for workflow.mjs and others, `collector/server/` for index.mjs and UI files.
+
+| What you're fixing | Main file |
+|-------------------|-----------|
+| Place ladder transition | `repository.mjs:510` |
+| Assignment state stuck | `repository.mjs:5556` |
+| AI draft generation fails | `workflow.mjs:2213` |
+| Content not reaching backend | `index.mjs:13128` |
+| Translation stuck or failing | `workflow.mjs:1560` |
+| Transport v2 not rendering | `transport-v2-router.mjs:1958` |
+| Item deletion blocked | `raw-delete.mjs:32` |
+| Frontend not showing content | `backend/routes/placeRoutes.js:18` |
+
+**กับดัก:**
+
+1. Place ใช้ strict positional ladder (`repository.mjs:510`) ไม่ใช่ legacy flexible graph (`repository.mjs:483`); สลับกันจะ no-op เงียบ
+   - `index.mjs:9138` (backward endpoint), `workflow-backward-transitions.js:20` (UI)
+
+2. `updateAssignmentState()` side-effect `production_state` เฉพาะ field assignment บน place เท่านั้น
+   - `repository.mjs:584` (assignment rules), `index.mjs:10996` (PATCH endpoint)
+
+3. `validateCleanMinimum()` บล็อก generation ถ้า approved context หายไป
+   - `clean-context.mjs:107` (context builder), `agent-generation.mjs:919` (engine)
+
+4. ต้องมี env vars `COLLECTOR_SYNC_BACKEND_API` และ `COLLECTOR_PUBLIC_BASE_URL`; fail เงียบถ้า translation recheck ไม่ผ่าน
+   - `review-ingest-mapping.mjs:1` (payload), `backend/routes/reviewContentRoutes.js:60` (ingest)
+
+5. Fingerprint mismatch ที่ `workflow.mjs:268` ทำให้ stale detection; source content เปลี่ยน = translations ทั้งหมด invalid
+   - `workflow.mjs:1659` (repair), `workflow.mjs:1200` (ready check)
+
+6. OSRM resolution เป็น async; `routing_status` ค้าง `missing` จนกว่า `/resolve` สำเร็จ
+   - `transport-v2-router.mjs:1992` (render-poster), `schema.sql:415` (resolved paths)
+
+7. `REFERENCE_HARD_BLOCKER_DEFS` ที่ `repository.mjs:429` นิยาม permanent blockers ที่ override ไม่ได้
+   - `raw-delete.mjs:65` (classify), `index.mjs:8050` (bulk-delete)
+
+8. Frontend อ่านจาก Backend MySQL ไม่ใช่ Collector SQLite; content ต้อง ingest ก่อน
+   - `frontend/app/[lang]/page.js` (homepage), `frontend/app/api/media-proxy/route.js:37` (proxy)
 
 ## 7. Things to know before touching
 
 The Place production ladder at `repository.mjs:510` is intentionally stricter than the event/transport graph at `repository.mjs:483`; Place isolates `needs_revision`, `rejected`, `brief_generated`, and `content_in_progress` as terminal empty sets, using `place_review_flag` (`repository.mjs:468`) instead. The `state_version` column in `content_workflow_models` (`schema.sql:967`) is an optimistic concurrency token incremented on every transition; ignoring it causes lost updates. The `field_pack_assignments` table (`schema.sql:708`) is an optional supplementary table with no effect on display or guard logic; it is not a bug. The `close_assignment` action at `index.mjs:2833` has no UI caller; items stuck at `assigned` have no release path through the website. The `saveCurrentFieldPack()` function at `item-editor.js:4398` is confirmed dead code. The `article-intake` backward widget for `writing_assigned → field_review` has not been verified on Runtime because the dev DB has no item in that state.
+
+## 8. หน้าจอไหนทำอะไร
+
+Base path: `collector/server/public/`
+
+| หน้า (html / js) | ใช้ตอนไหน | ปุ่มหลัก |
+|-----------------|----------|---------|
+| `index.html` / `app.js` | Login + เลือกบทบาทเข้าระบบ | ปุ่ม Login, ลิงก์เข้าแต่ละบทบาท |
+| `place.html` / `place-page.js` | Hub หลักของ Place — เลือก process card | 3 ปุ่ม: จัดชุดข้อมูล, ส่งเข้า AI, ส่งงานเขียน |
+| `item-editor.html` / `item-editor.js` | แก้ไข item + field pack + AI draft | btn-save, btn-next-ai, btn-next-export |
+| `clean-item.html` / `item-editor.js` | ทำความสะอาดข้อมูล item (ใช้ js เดียวกับ item-editor) | btn-save (mark cleaned) |
+| `article-intake.html` / `article-intake.js` | รับงานเขียน — สร้าง editorial assignment | ปุ่มรับงาน, backward transition |
+| `article-workspace.html` / `article-workspace-page.js` | เขียนบทความ — แก้ไข draft | btn-save, ปุ่มส่งตรวจ |
+| `article-submit.html` / `article-submit-page.js` | ตรวจบทความ + ส่งเข้า admin review | ปุ่ม approve, submit-admin-review |
+| `article-preview.html` / `article-preview-page.js` | ดูตัวอย่างบทความก่อนส่ง | ปุ่มย้อนกลับ, ปุ่มส่ง |
+| `field-brief.html` / `field-brief.js` | ดู brief สำหรับ field work | ปุ่มเริ่มงาน, ปุ่มส่ง deliverables |
+| `editor-home.html` / `editor-home.js` | หน้าแรกของ editor — รายการงานที่ได้รับ | ลิงก์เข้า assignment แต่ละชิ้น |
+| `freelance-home.html` / `freelance-home.js` | หน้าแรกของ freelance — รายการงานที่ได้รับ | ลิงก์เข้า assignment แต่ละชิ้น |
+| `events.html` / `events-page.js` | รายการ events ทั้งหมด | ลิงก์เข้า event แต่ละชิ้น |
+| `events-manager.html` / `events-manager-page.js` | จัดการ events — สร้าง/ลบ/merge | ปุ่มสร้าง, bulk delete, bulk merge |
+| `event-workspace.html` / `event-workspace-page.js` | แก้ไข event detail | btn-save, ปุ่มส่งเข้า AI |
+| `event-submit.html` / `event-submit-page.js` | ส่ง event เข้า admin review | ปุ่ม submit |
+| `event-preview.html` / `event-preview-page.js` | ดูตัวอย่าง event | ปุ่มย้อนกลับ |
+| `other-transport.html` / `other-transport-page.js` | จัดการ transport ประเภทอื่น (taxi, van) | ปุ่มสร้าง, แก้ไข |
+| `transport.html` / `transport-page.js` | Hub หลักของ transport | ลิงก์เข้า transport map, v2 routes |
+| `transport-map-workspace.html` / `transport-map-workspace-page.js` | แก้ไข transport map v1 | ปุ่มบันทึก, release |
+| `transport-map-routes.html` / `transport-map-routes-page.js` | รายการ routes บน transport map v1 | ลิงก์เข้า route แต่ละชิ้น |
+| `transport-map-review.html` / `transport-map-review-page.js` | ตรวจ transport map v1 ก่อน release | ปุ่ม approve, reject |
+| `transport-v2-base-maps.html` / `transport-v2-base-maps-page.js` | จัดการ base maps ของ transport v2 | ปุ่มสร้าง, แก้ไข, render |
+| `transport-v2-routes.html` / `transport-v2-routes-page.js` | รายการ routes ของ transport v2 | ลิงก์เข้า route แต่ละชิ้น |
+| `transport-v2-routes-review.html` / `transport-v2-routes-review-page.js` | ตรวจ routes ของ transport v2 | ปุ่ม approve, reject |
+| `transport-v2-path-editor.html` / `transport-v2-path-editor-page.js` | แก้ไข path/stops ของ transport v2 route | ปุ่มบันทึก, resolve, render-poster |
+| `transport-v2-review.html` / `transport-v2-review-page.js` | ตรวจ transport v2 route ก่อน release | ปุ่ม approve, reject |
+| `transport-v2-workspace.html` | Redirect ไป `transport-v2-path-editor.html` | ไม่มีปุ่ม (redirect) |
