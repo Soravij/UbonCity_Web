@@ -353,7 +353,7 @@
 - `assertValidTransition(contentType, stateGroup, fromState, toState)` → `repository.mjs:4788`
 - `recordWorkflowTransition(contentItemId, stateGroup, fromState, toState, ...)` → `repository.mjs:4796`
 - `listLegalBackwardProductionTransitions(contentType, fromState)` → `repository.mjs:4769`
-- `updateAssignmentState()` → `repository.mjs:5618`
+- `updateAssignmentState()` → `repository.mjs:5556`
 
 ### 4D. Other Collector Services
 
@@ -523,7 +523,7 @@
 | analyzed→generated | `POST /api/run/ai-draft` → `index.mjs:14067` | inline | `runAiDraftStage()` → `workflow.mjs:2213` | `btn-next-ai` → `item-editor.js:5788` | `POST /api/items/:id/workflow/backward-transitions` → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
 | generated→ready_for_content | `POST /api/items/:id/place-ready-for-content` → `index.mjs:8773` | inline | `repo.upsertWorkflowModel()` → `repository.mjs:4946` | `btn-next-export` → `item-editor.js:5820` | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
 | ready_for_content→field_working | `POST /api/items/:id/assignments` → `index.mjs:10555` | inline | `repo.createAssignmentFromReadiness()` → `repository.mjs:5620` | handoff queue assignment creation → `place.html:154` | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
-| field_working→field_review | `PATCH /api/assignments/:id/state` → `index.mjs:10996` | inline | `repo.updateAssignmentState()` → `repository.mjs:5618` | assignment submission → `POST /api/assignments/:id/submissions` → `index.mjs:11230` | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
+| field_working→field_review | `PATCH /api/assignments/:id/state` → `index.mjs:10996` | inline | `repo.updateAssignmentState()` → `repository.mjs:5556` | assignment submission → `POST /api/assignments/:id/submissions` → `index.mjs:11230` | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
 | field_review→writing_assigned | `POST /api/items/:id/article-editorial-assignments` → `index.mjs:10341` | inline | `repo.createAssignmentWithWorkflow()` via `resolvePlaceLadderWorkflowPatch()` → `index.mjs:4267` | article-intake page → `place.html:168` → `btn-open-place-write` | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
 | writing_assigned→writing | `POST /api/items/:id/article-process/transition` → `index.mjs:9264` | inline | `transitionArticleProcessState()` → `index.mjs:4196` → `mapArticleProcessStatusToWorkflowPatch("drafting")` → `index.mjs:4548` | article-workspace → `article-workspace.js` start drafting | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
 | writing→in_review | `POST /api/items/:id/article-process/submit-review` → `index.mjs:9318` | inline | `transitionArticleProcessState()` → `index.mjs:4196` → `mapArticleProcessStatusToWorkflowPatch("ready_for_review")` → `index.mjs:4534` | article-submit page → `article-submit-page.js` submit button | backward → `index.mjs:9138`; UI → `workflow-backward-transitions.js:20` |
