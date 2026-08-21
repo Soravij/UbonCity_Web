@@ -2945,6 +2945,9 @@ const IN_FLIGHT_STATUS_LABELS = Object.freeze({
   submitted_for_admin_review: "ส่งให้แอดมินตรวจแล้ว",
   collected: "ยังไม่พ้นขั้นรับข้อมูล",
   completed: "เสร็จแล้ว",
+  field_review: "รอตรวจงานภาคสนาม",
+  ready_for_writer: "รอมอบหมายผู้เขียน",
+  writing_assigned: "มอบหมายผู้เขียนแล้ว",
 });
 
 // Only the selected active accepted assignment wins: a closed historical round cannot make the
