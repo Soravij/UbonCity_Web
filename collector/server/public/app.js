@@ -3645,6 +3645,7 @@ function renderAssignmentBackwardTransitionControls() {
       }
       renderAssignmentBackwardTransitionControls();
       setStatus("assignment-status", "ถอยสถานะแล้ว");
+      loadAssignmentDeliverablesBundle({ showStatus: false }).catch(() => {});
     },
   });
 }
