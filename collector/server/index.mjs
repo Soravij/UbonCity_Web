@@ -11352,11 +11352,10 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
       maxAgeMs: ASSIGNMENT_WORK_SYNC_EXPIRY_MS,
     });
     if (["owner", "admin", "user", "freelance"].includes(role)) {
-      const currentRoundImageAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "image");
-      const currentRoundVideoAssets = repo.listAssignmentRoundAssetsByType(assignmentId, currentRound, "video");
-      const currentRoundDeliverablesCount = (Array.isArray(currentRoundImageAssets) ? currentRoundImageAssets.length : 0)
-        + (Array.isArray(currentRoundVideoAssets) ? currentRoundVideoAssets.length : 0);
-      if (currentRoundDeliverablesCount < 1) {
+      const contentItemId = Number(assignment?.content_item_id || 0) || 0;
+      const activeAssets = repo.countActiveAssignmentWorkAssetsByType(assignmentId, contentItemId);
+      const activeDeliverablesCount = (Number(activeAssets?.image) || 0) + (Number(activeAssets?.video) || 0);
+      if (activeDeliverablesCount < 1) {
         res.status(409).json({
           error: "บล็อกการส่งงาน: ต้องแนบผลงานอย่างน้อย 1 รายการก่อนส่ง",
         });

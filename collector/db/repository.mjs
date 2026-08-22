@@ -6074,6 +6074,20 @@ export function createRepository(db) {
     return activeRows.some((row) => Number(row.id || 0) === candidateContentAssetId);
   }
 
+  function countActiveAssignmentWorkAssetsByType(assignmentId, contentItemId) {
+    const id = Number(assignmentId || 0) || 0;
+    const itemId = Number(contentItemId || 0) || 0;
+    if (!id || !itemId) return { image: 0, video: 0 };
+    const imageRows = listAssignmentWorkAssetsByAssignmentAndTypeStmt.all(id, itemId, "image");
+    const videoRows = listAssignmentWorkAssetsByAssignmentAndTypeStmt.all(id, itemId, "video");
+    const activeImageRows = resolveActiveAssignmentWorkBatchRows(imageRows);
+    const activeVideoRows = resolveActiveAssignmentWorkBatchRows(videoRows);
+    return {
+      image: activeImageRows.length,
+      video: activeVideoRows.length,
+    };
+  }
+
   function createAssignmentSubmissionDeliverable(payload = {}, actorEmail = "system@local") {
     const assignmentId = Number(payload.assignment_id || 0);
     const submissionId = Number(payload.submission_id || 0);
@@ -12715,6 +12729,7 @@ export function createRepository(db) {
     deleteAssignmentSubmissionDraftsByAssignment,
     purgeExpiredAssignmentSubmissionDrafts,
     listAssignmentRoundAssetsByType,
+    countActiveAssignmentWorkAssetsByType,
     deleteAssignmentRoundAssetsByType,
     deleteAssignmentWorkAssetsByType,
     createAssignmentSubmissionDeliverable,
