@@ -1,27 +1,27 @@
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const GATE_SUMMARY_PATH = path.join(repoRoot, ".gate-summary.json");
+
+try { fs.unlinkSync(GATE_SUMMARY_PATH); } catch {}
 
 const result = spawnSync(process.execPath, [path.join(repoRoot, "scripts", "testAll.mjs")], {
   cwd: repoRoot,
-  encoding: "utf-8",
-  stdio: ["ignore", "pipe", "pipe"],
+  stdio: "inherit",
 });
 
-const stdout = result.stdout ?? "";
-const lines = stdout.split(/\r?\n/);
+let summary;
+try {
+  summary = JSON.parse(fs.readFileSync(GATE_SUMMARY_PATH, "utf-8"));
+} catch {}
 
-const testsMatch = stdout.match(/tests\s+(\d+)/);
-const passMatch = stdout.match(/pass\s+(\d+)/);
-const failMatch = stdout.match(/fail\s+(\d+)/);
-const skippedMatch = stdout.match(/skipped\s+(\d+)/);
-
-if (!testsMatch || !passMatch || !failMatch || !skippedMatch) {
-  console.error("GATE: could not parse summary line from test output");
+if (!summary || typeof summary.tests !== "number") {
+  console.error("GATE: could not parse summary from test output");
   process.exit(1);
 }
 
-console.log(`GATE tests=${testsMatch[1]} pass=${passMatch[1]} fail=${failMatch[1]} skipped=${skippedMatch[1]}`);
-process.exit(0);
+console.log(`GATE tests=${summary.tests} pass=${summary.pass} fail=${summary.fail} skipped=${summary.skipped}`);
+process.exit(result.status ?? 1);
