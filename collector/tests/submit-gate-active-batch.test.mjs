@@ -162,8 +162,8 @@ test("revision_round=2 with round=1 assets passes submit gate (active batch sema
           article_payload_json: { additional_text: "test submission" },
         }),
       });
-      assert.ok(response.status === 200 || response.status === 201, `expected 200/201 but got ${response.status}: ${JSON.stringify(await response.json().catch(() => ({})))}`);
       const body = await response.json();
+      assert.equal(response.status, 201, `expected 201 but got ${response.status}: ${JSON.stringify(body)}`);
       assert.ok(body.submission || body.assignment, "response must contain submission or assignment");
     });
   } finally {
@@ -195,8 +195,8 @@ test("no assets at all -> 409 deliverables gate", async () => {
           article_payload_json: { additional_text: "test submission" },
         }),
       });
-      assert.equal(response.status, 409, `expected 409 but got ${response.status}`);
       const body = await response.json();
+      assert.equal(response.status, 409, `expected 409 but got ${response.status}: ${JSON.stringify(body)}`);
       assert.ok(
         String(body.error || "").includes("ต้องแนบผลงานอย่างน้อย 1 รายการก่อนส่ง"),
         `error must mention deliverables gate, got: ${body.error}`
@@ -207,7 +207,7 @@ test("no assets at all -> 409 deliverables gate", async () => {
   }
 });
 
-test("image_reset_required=1 with no assets -> 409 at deliverables gate", async () => {
+test("no assets with image_reset_required=1 -> 409 deliverables gate (not reset gate)", async () => {
   const ctx = testContext();
   try {
     const itemId = createFieldItem(ctx.repo);
@@ -233,8 +233,8 @@ test("image_reset_required=1 with no assets -> 409 at deliverables gate", async 
           article_payload_json: { additional_text: "test submission" },
         }),
       });
-      assert.equal(response.status, 409, `expected 409 but got ${response.status}`);
       const body = await response.json();
+      assert.equal(response.status, 409, `expected 409 but got ${response.status}: ${JSON.stringify(body)}`);
       assert.ok(
         String(body.error || "").includes("ต้องแนบผลงานอย่างน้อย 1 รายการก่อนส่ง"),
         `error must mention deliverables gate, got: ${body.error}`
