@@ -54,7 +54,7 @@ function createPlace(repo, productionState) {
 
 const HANDOFF_STATES = [
   "ready_for_content", "field_working", "field_review",
-  "writing_assigned", "writing", "in_review",
+  "ready_for_writer", "writing_assigned", "writing", "in_review",
   "ready_for_publish", "submitted_for_admin_review", "completed",
 ];
 
