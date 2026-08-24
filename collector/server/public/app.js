@@ -10050,6 +10050,7 @@ async function syncAssignmentSubmissionUploads() {
     const syncBatchId = createAssignmentSyncBatchId(assignmentId);
     const uploadedAssets = await uploadAssignmentSubmissionFiles(assignmentId, uploadQueue, { syncBatchId });
     markAssignmentCaptureUploadsSynced(assignmentId, formConfig.captureItems, uploadedAssets);
+    await loadAssignmentAssets({ showStatus: false }).catch(() => {});
     renderAssignmentSubmissionFileList();
     renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(assignmentId, formConfig));
     // TODO: define cleanup policy for synced-but-unsubmitted assignment assets.
@@ -10059,6 +10060,7 @@ async function syncAssignmentSubmissionUploads() {
 
   const serverSynced = applyAssignmentServerSyncedAssets(assignmentId, formConfig.captureItems, { showStatus: false });
   if (serverSynced.complete && Array.isArray(serverSynced.assets) && serverSynced.assets.length) {
+    await loadAssignmentAssets({ showStatus: false }).catch(() => {});
     renderAssignmentSubmissionFileList();
     renderAssignmentSubmissionGatePanel(buildAssignmentSubmissionGateState(assignmentId, formConfig));
     setStatus("assignment-status", `มีไฟล์ที่ซิงก์แล้วบน server รอส่งงานกลับ | ซิงก์แล้ว ${serverSynced.assets.length} ไฟล์`);
