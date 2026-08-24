@@ -785,6 +785,7 @@ function resolveQueueBucket(itemSnapshot) {
       productionState === "ready_for_content"
       || productionState === "field_working"
       || productionState === "field_review"
+      || productionState === "ready_for_writer"
       || productionState === "writing_assigned"
       || productionState === "writing"
       || productionState === "in_review"
