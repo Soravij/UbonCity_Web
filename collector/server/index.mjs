@@ -9249,7 +9249,7 @@ app.post("/api/items/:id/workflow/backward-transitions", requireRole("owner", "a
         assignment_id: openAssignment.id,
       });
     }
-    if (fromProductionState === "ready_for_writer" && target.production_state === "field_review") {
+    if ((fromProductionState === "ready_for_writer" || fromProductionState === "writing_assigned") && target.production_state === "field_review") {
       const acceptedFieldAssignments = repo
         .listAssignmentsByItem(id)
         .filter((a) => String(a?.assignment_kind || "").trim().toLowerCase() === "field")
