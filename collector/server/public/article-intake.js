@@ -173,7 +173,9 @@ function primaryAssignmentForItem(itemId) {
   if (!process) return fallbackAssignment;
   if (process.active_editorial_assignment) return process.active_editorial_assignment;
   const assignments = Array.isArray(process.editorial_assignments) ? process.editorial_assignments : [];
-  return assignments[0] || fallbackAssignment;
+  const activeStates = new Set(["assigned", "in_progress", "submitted", "resubmitted", "revision_requested"]);
+  const activeAssignment = assignments.find((a) => activeStates.has(String(a?.state || "").trim().toLowerCase())) || null;
+  return activeAssignment || fallbackAssignment;
 }
 
 function hasAssignedWriter(item) {
