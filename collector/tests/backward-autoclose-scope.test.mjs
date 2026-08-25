@@ -113,7 +113,7 @@ function testContext() {
   };
 }
 
-test("backward from writing_assigned: editorial closed, field accepted untouched", async () => {
+test("backward from writing_assigned: editorial closed, field reopened to revision_requested", async () => {
   const ctx = testContext();
   try {
     const place = createPlace(ctx.repo, "writing_assigned");
@@ -154,7 +154,48 @@ test("backward from writing_assigned: editorial closed, field accepted untouched
       const field = assignments.find((a) => a.assignment_kind === "field");
 
       assert.equal(editorial.state, "closed", "editorial assignment must be closed by backward transition");
-      assert.equal(field.state, "accepted", "field assignment must remain accepted (not closed)");
+      assert.equal(field.state, "revision_requested", "field assignment must be reopened to revision_requested");
+    });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("backward from in_review to field_review: field closed (closeKind=null closes all kinds)", async () => {
+  const ctx = testContext();
+  try {
+    const place = createPlace(ctx.repo, "in_review");
+
+    const fieldAssignment = ctx.repo.createAssignment({
+      content_item_id: place.id,
+      assignment_kind: "field",
+      state: "accepted",
+      assignee_name: "field user",
+      assignee_contact: "field@example.test",
+    });
+
+    ctx.db.close();
+
+    await withServer(ctx.dbPath, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/items/${place.id}/workflow/backward-transitions`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${ownerToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ reason: "test regression", target_production_state: "field_review" }),
+      });
+      assert.equal(response.status, 200, "in_review->field_review backward transition must succeed");
+
+      const assignmentsResp = await fetch(`${baseUrl}/api/items/${place.id}/assignments`, {
+        headers: { authorization: `Bearer ${ownerToken()}` },
+      });
+      const assignmentsBody = await assignmentsResp.json();
+      const assignments = assignmentsBody.assignments || assignmentsBody;
+
+      const field = assignments.find((a) => a.assignment_kind === "field");
+      // NOTE: closeKind=null (index.mjs:9215-9227) closes ALL open assignments
+      // regardless of kind when fromProductionState is in_review.
+      // This records current behavior; correctness not yet decided.
+      // What this guards: field must NOT become revision_requested.
+      assert.equal(field.state, "closed", "field assignment must be closed (not revision_requested)");
     });
   } finally {
     ctx.cleanup();

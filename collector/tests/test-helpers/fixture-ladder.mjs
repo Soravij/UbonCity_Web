@@ -1,10 +1,14 @@
 const PLACE_LADDER_PATH = Object.freeze({
-  collected: ["analyzed", "generated", "ready_for_content", "field_working", "field_review"],
-  analyzed: ["generated", "ready_for_content", "field_working", "field_review"],
-  generated: ["ready_for_content", "field_working", "field_review"],
-  ready_for_content: ["field_working", "field_review"],
-  field_working: ["field_review"],
-  field_review: [],
+  collected: ["analyzed", "generated", "ready_for_content", "field_working", "field_review", "ready_for_writer", "writing_assigned", "writing", "in_review"],
+  analyzed: ["generated", "ready_for_content", "field_working", "field_review", "ready_for_writer", "writing_assigned", "writing", "in_review"],
+  generated: ["ready_for_content", "field_working", "field_review", "ready_for_writer", "writing_assigned", "writing", "in_review"],
+  ready_for_content: ["field_working", "field_review", "ready_for_writer", "writing_assigned", "writing", "in_review"],
+  field_working: ["field_review", "ready_for_writer", "writing_assigned", "writing", "in_review"],
+  field_review: ["ready_for_writer", "writing_assigned", "writing", "in_review"],
+  ready_for_writer: ["writing_assigned", "writing", "in_review"],
+  writing_assigned: ["writing", "in_review"],
+  writing: ["in_review"],
+  in_review: [],
 });
 
 export function advancePlaceProductionState(repo, itemId, targetState, actorEmail = "test@local") {
