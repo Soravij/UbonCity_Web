@@ -3641,7 +3641,7 @@ function renderAssignmentBackwardTransitionControls() {
         state.items = state.items.map((row) => Number(row?.id || 0) === Number(nextItem.id) ? { ...row, ...nextItem } : row);
       }
       state.assignments.backwardTransitions = result?.backward_transitions || null;
-      const resumePath = resolveBackwardResumePath(itemId, result);
+      const resumePath = resolveBackwardResumePath(itemId, targetProductionState, result);
       if (resumePath && resumePath !== `${window.location.pathname}${window.location.search}`) {
         window.location.assign(resumePath);
         return;

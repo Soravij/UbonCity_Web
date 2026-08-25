@@ -63,7 +63,7 @@ function extractConstBlock(source, name) {
 }
 
 function buildResolver(source) {
-  const constSrc = extractConstBlock(source, "BACKWARD_RESUME_PATH_BY_STATE");
+  const constSrc = extractConstBlock(source, "BACKWARD_RESUME_PATH_BY_TARGET");
   const fnSrc = extractFunctionBlock(source, "resolveBackwardResumePath");
 
   const code = [
@@ -72,72 +72,78 @@ function buildResolver(source) {
     "module.exports = { resolveBackwardResumePath };",
   ].join("\n");
 
-  const mod = {};
   const factory = new Function("module", code + `\nreturn module.exports;`);
   return factory({ exports: {} }).resolveBackwardResumePath;
 }
 
-test("production_state=ready_for_writer → returns article-intake path even when resume_path is assignment_review", () => {
+test("target=ready_for_writer → returns article-intake path even when resume_path is assignment_review", () => {
   const source = readSource();
   const resolve = buildResolver(source);
-  const result = resolve(42, {
+  const result = resolve(42, "ready_for_writer", {
     resume_path: "/?tab=review&item_id=42",
-    backward_transitions: { production_state: "ready_for_writer" },
   });
   assert.equal(result, "/article-intake.html?id=42",
     "ready_for_writer must go to article-intake (3.1), not assignment_review");
 });
 
-test("production_state=field_working → returns handoff path (cascade case)", () => {
+test("target=field_review → returns work tab path, NOT handoff (blocker case)", () => {
   const source = readSource();
   const resolve = buildResolver(source);
-  const result = resolve(7, {
+  const result = resolve(42, "field_review", {
+    resume_path: "/?tab=review&item_id=42",
+  });
+  assert.equal(result, "/?tab=work&item_id=42",
+    "field_review must go to work tab (2.2), not handoff");
+  assert.notEqual(result, "/?tab=handoff&item_id=42",
+    "field_review must NOT go to handoff — that would be the field_working edge");
+});
+
+test("target=field_working → returns handoff path (declared target, not post-cascade)", () => {
+  const source = readSource();
+  const resolve = buildResolver(source);
+  const result = resolve(7, "field_working", {
     resume_path: "/?tab=review&item_id=7",
-    backward_transitions: { production_state: "field_working" },
   });
   assert.equal(result, "/?tab=handoff&item_id=7",
-    "field_working must go to handoff (2.2)");
+    "field_working must go to handoff (2.1)");
 });
 
-test("unknown production_state → falls back to result.resume_path", () => {
+test("target not in table → falls back to result.resume_path", () => {
   const source = readSource();
   const resolve = buildResolver(source);
-  const result = resolve(10, {
+  const result = resolve(10, "some_unknown_target", {
     resume_path: "/item-editor.html?id=10",
-    backward_transitions: { production_state: "some_unknown_state" },
   });
   assert.equal(result, "/item-editor.html?id=10",
-    "unknown state must fall back to result.resume_path");
+    "unknown target must fall back to result.resume_path");
 });
 
-test("non-tautological proof: emptying the table makes ready_for_writer fall back to wrong resume_path", () => {
+test("non-tautological proof: emptying the table makes field_review fall back to wrong resume_path", () => {
   const original = readSource();
 
-  const tableStart = original.indexOf("const BACKWARD_RESUME_PATH_BY_STATE");
-  assert.ok(tableStart >= 0, "source must contain BACKWARD_RESUME_PATH_BY_STATE");
+  const tableStart = original.indexOf("const BACKWARD_RESUME_PATH_BY_TARGET");
+  assert.ok(tableStart >= 0, "source must contain BACKWARD_RESUME_PATH_BY_TARGET");
   const tableEnd = original.indexOf("};", tableStart) + 2;
   const tableBlock = original.slice(tableStart, tableEnd);
-  assert.ok(tableBlock.includes("ready_for_writer"), "table must contain ready_for_writer entry");
+  assert.ok(tableBlock.includes("field_review"), "table must contain field_review entry");
 
   const patched = original.slice(0, tableStart)
-    + "const BACKWARD_RESUME_PATH_BY_STATE = {};"
+    + "const BACKWARD_RESUME_PATH_BY_TARGET = {};"
     + original.slice(tableEnd);
   assert.notEqual(original, patched, "patch must differ from original");
 
   const resolvePatched = buildResolver(patched);
-  const patchedResult = resolvePatched(42, {
+  const patchedResult = resolvePatched(42, "field_review", {
     resume_path: "/?tab=review&item_id=42",
-    backward_transitions: { production_state: "ready_for_writer" },
   });
   assert.equal(patchedResult, "/?tab=review&item_id=42",
     "with empty table, falls back to wrong resume_path (regression proof)");
 
   const resolveOriginal = buildResolver(original);
-  const originalResult = resolveOriginal(42, {
+  const originalResult = resolveOriginal(42, "field_review", {
     resume_path: "/?tab=review&item_id=42",
-    backward_transitions: { production_state: "ready_for_writer" },
   });
-  assert.equal(originalResult, "/article-intake.html?id=42",
+  assert.equal(originalResult, "/?tab=work&item_id=42",
     "with real table, returns correct path");
 
   assert.notEqual(patchedResult, originalResult,

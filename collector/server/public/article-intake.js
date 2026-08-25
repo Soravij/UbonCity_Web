@@ -397,7 +397,7 @@ function renderBackwardTransitionControls() {
         }
         state.item = nextItem || state.item;
         state.backwardTransitions = result?.backward_transitions || null;
-        const resumePath = resolveBackwardResumePath(state.itemId, result);
+        const resumePath = resolveBackwardResumePath(state.itemId, targetProductionState, result);
         if (resumePath && resumePath !== `${window.location.pathname}${window.location.search}`) {
           window.location.assign(resumePath);
           return;
