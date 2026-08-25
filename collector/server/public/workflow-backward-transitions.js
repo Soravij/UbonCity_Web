@@ -11,6 +11,29 @@ function directionLabel(direction) {
   return direction === "cross_process" ? "ถอยข้ามกระบวนการ" : "ถอยในกระบวนการ";
 }
 
+const BACKWARD_RESUME_PATH_BY_STATE = {
+  ready_for_writer: (id) => `/article-intake.html?id=${id}`,
+  field_review: (id) => `/?tab=work&item_id=${id}`,
+  field_working: (id) => `/?tab=handoff&item_id=${id}`,
+  ready_for_content: (id) => `/?tab=handoff&item_id=${id}`,
+  generated: (id) => `/item-editor.html?id=${id}`,
+  analyzed: (id) => `/item-editor.html?id=${id}`,
+  writing: (id) => `/article-workspace.html?id=${id}`,
+  in_review: (id) => `/article-submit.html?id=${id}`,
+  ready_for_publish: (id) => `/article-submit.html?id=${id}`,
+  submitted_for_admin_review: (id) => `/article-submit.html?id=${id}`,
+  writing_assigned: (id) => `/?tab=review&item_id=${id}`,
+  collected: (id) => `/item-editor.html?id=${id}`,
+};
+
+export function resolveBackwardResumePath(itemId, result) {
+  const id = Number(itemId || 0) || 0;
+  if (!id) return null;
+  const state = String(result?.backward_transitions?.production_state || "").trim().toLowerCase();
+  const pathFn = BACKWARD_RESUME_PATH_BY_STATE[state];
+  return pathFn ? pathFn(id) : (result?.resume_path || null);
+}
+
 export async function loadWorkflowBackwardTransitions(api, itemId) {
   const id = Number(itemId || 0) || 0;
   if (!id) return { item_id: null, can_transition: false, targets: [] };
