@@ -9,7 +9,9 @@ import {
   reportUnknownWorkflowState,
   loadWorkflowBackwardTransitions,
   renderWorkflowBackwardTransitionControls,
+  resolveBackwardResumePath,
 } from "./workflow-state-catalog.js";
+import { initItemHistory } from "./item-history.js";
 
 const ASSIGNMENT_PROCESS_GUIDE = Object.freeze({
   assigned: Object.freeze({
@@ -11627,6 +11629,10 @@ wireUserSettings();
 wireAssignments();
 showLandingStatus();
 applyAuthLandingNotice();
+initItemHistory({
+  fetchJson: api,
+  getItemId: () => Number(state?.assignments?.contextItemId || 0) || 0,
+});
 
 (async () => {
   if (!state.token) {

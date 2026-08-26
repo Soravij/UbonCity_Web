@@ -44,6 +44,7 @@
   state,
   validateWorkspace,
 } from "./article-workflow-core.js";
+import { initItemHistory } from "./item-history.js";
 
 const workspaceState = {
   bodyBlocks: [],
@@ -2415,6 +2416,10 @@ function wire() {
 
 async function init() {
   wire();
+  initItemHistory({
+    fetchJson: api,
+    getItemId: () => Number(state?.item?.id || 0) || 0,
+  });
   try {
     await loadWorkspace();
     await refreshBackwardTransitions();
