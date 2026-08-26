@@ -27,13 +27,15 @@ function extractNamedFunctionSource(source, name) {
   throw new Error(`Could not extract function ${name}`);
 }
 
-const OPEN_ASSIGNMENT_STATES = new Set([
-  "assigned", "in_progress", "submitted", "resubmitted", "revision_requested", "accepted",
-]);
+import { hasOpenAssignment } from "../services/publishable-assignment-candidate.mjs";
 
-function hasOpenAssignment(assignment) {
-  const state = String(assignment?.state || assignment?.assignment_state || "").trim().toLowerCase();
-  return OPEN_ASSIGNMENT_STATES.has(state);
+function extractConstSource(source, name) {
+  const marker = `const ${name}`;
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, `${name} should exist`);
+  const end = source.indexOf(");", start);
+  assert.notEqual(end, -1, `${name} should have end`);
+  return source.slice(start, end + 2);
 }
 
 function runResolveItemScopeContext(assignments, itemId = 1) {
@@ -50,6 +52,8 @@ function runResolveItemScopeContext(assignments, itemId = 1) {
     hasOpenAssignment,
   };
   const source = `
+${extractConstSource(indexServer, "PRIMARY_OPEN_ASSIGNMENT_STATE_PRIORITY")}
+${extractNamedFunctionSource(indexServer, "selectPrimaryOpenAssignment")}
 ${extractNamedFunctionSource(indexServer, "selectPrimaryEditorialAssignment")}
 ${extractNamedFunctionSource(indexServer, "resolveItemScopeContext")}
 resolveItemScopeContext;
@@ -93,4 +97,16 @@ test("resolveItemScopeContext falls back to first assignment when all are closed
 
   assert.equal(result.primaryAssignment?.id, 10, "should fall back to first assignment");
   assert.equal(result.hasOpenAssignment, false, "hasOpenAssignment should be false");
+});
+
+test("selectPrimaryOpenAssignment picks revision_requested over accepted when editorial is accepted", () => {
+  const assignments = [
+    { id: 40, assignment_kind: "editorial", state: "accepted", assignee_user_id: 100, assigned_by_user_id: 200 },
+    { id: 29, assignment_kind: "field", state: "revision_requested", assignee_user_id: 102, assigned_by_user_id: 202 },
+  ];
+
+  const result = runResolveItemScopeContext(assignments);
+
+  assert.equal(result.primaryAssignment?.id, 29, "should pick field assignment with revision_requested over accepted editorial");
+  assert.equal(result.hasOpenAssignment, true, "hasOpenAssignment should be true");
 });

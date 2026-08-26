@@ -3963,6 +3963,26 @@ function buildItemAssignmentOwner(assignment, userById = new Map()) {
   };
 }
 
+const PRIMARY_OPEN_ASSIGNMENT_STATE_PRIORITY = Object.freeze([
+  "revision_requested",
+  "in_progress",
+  "assigned",
+  "resubmitted",
+  "submitted",
+  "accepted",
+]);
+
+function selectPrimaryOpenAssignment(assignments = []) {
+  const list = Array.isArray(assignments) ? assignments : [];
+  for (const state of PRIMARY_OPEN_ASSIGNMENT_STATE_PRIORITY) {
+    const match = list.find(
+      (assignment) => String(assignment?.state || "").trim().toLowerCase() === state
+    );
+    if (match) return match;
+  }
+  return null;
+}
+
 function resolveItemScopeContext(item) {
   if (!item || typeof item !== "object") return item;
   const itemId = Number(item?.id || 0) || 0;
@@ -3973,9 +3993,7 @@ function resolveItemScopeContext(item) {
   const editorialAssignments = listAssignments
     .filter((assignment) => String(assignment?.assignment_kind || "").trim().toLowerCase() === "editorial");
   const activeEditorialAssignment = itemId ? selectPrimaryEditorialAssignment(editorialAssignments) : null;
-  const openAssignment = itemId
-    ? listAssignments.find((assignment) => hasOpenAssignment(assignment)) || null
-    : null;
+  const openAssignment = itemId ? selectPrimaryOpenAssignment(listAssignments) : null;
   const primaryAssignment = activeEditorialAssignment || openAssignment || listAssignments[0] || null;
   const publishableSource = itemId && typeof repo?.buildPublishableSourceByItem === "function"
     ? repo.buildPublishableSourceByItem(itemId, { assignments: listAssignments })
