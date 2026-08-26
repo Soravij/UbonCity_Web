@@ -3972,9 +3972,11 @@ function resolveItemScopeContext(item) {
   const listAssignments = Array.isArray(assignmentResult) ? assignmentResult : [];
   const editorialAssignments = listAssignments
     .filter((assignment) => String(assignment?.assignment_kind || "").trim().toLowerCase() === "editorial");
-  const primaryAssignment = itemId
-    ? selectPrimaryEditorialAssignment(editorialAssignments) || listAssignments[0] || null
+  const activeEditorialAssignment = itemId ? selectPrimaryEditorialAssignment(editorialAssignments) : null;
+  const openAssignment = itemId
+    ? listAssignments.find((assignment) => hasOpenAssignment(assignment)) || null
     : null;
+  const primaryAssignment = activeEditorialAssignment || openAssignment || listAssignments[0] || null;
   const publishableSource = itemId && typeof repo?.buildPublishableSourceByItem === "function"
     ? repo.buildPublishableSourceByItem(itemId, { assignments: listAssignments })
     : null;
