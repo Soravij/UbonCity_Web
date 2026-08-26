@@ -9,7 +9,6 @@ import {
   reportUnknownWorkflowState,
   loadWorkflowBackwardTransitions,
   renderWorkflowBackwardTransitionControls,
-  resolveBackwardResumePath,
 } from "./workflow-state-catalog.js";
 import { initItemHistory } from "./item-history.js";
 
