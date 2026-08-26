@@ -3644,12 +3644,9 @@ function buildSubmittedAssignmentsForActor(actorUserId, limit = 50) {
   ).slice(0, Math.max(1, Math.min(200, Number(limit) || 50)));
 }
 
-function buildReviewAssignmentsForActor(actorUserId, role, limit = 50, options = {}) {
+function buildReviewAssignmentsForActor(actorUserId, role, limit = 50) {
   const safeLimit = Math.max(1, Math.min(200, Number(limit) || 50));
-  const includeTracking = Boolean(options?.include_tracking);
-  const reviewStates = role === "owner" && includeTracking
-    ? new Set(["submitted", "resubmitted", "revision_requested", "accepted"])
-    : new Set(["submitted", "resubmitted"]);
+  const reviewStates = new Set(["submitted", "resubmitted"]);
   if (role === "owner") {
     return sortAssignmentsForList(
       repo.listAssignments(safeLimit).filter((row) => reviewStates.has(String(row?.state || "").trim().toLowerCase()))
@@ -10869,10 +10866,7 @@ app.get("/api/assignments/mine", requireRole("owner", "admin", "editor", "freela
   }
   if (scope === "review") {
     const assigneeId = Number(req.query.assignee_user_id || 0);
-    const includeTracking = authRole === "owner" && String(req.query.include_tracking || "").trim() === "1";
-    const assignments = buildReviewAssignmentsForActor(req.authUser?.id, authRole, limit, {
-      include_tracking: includeTracking,
-    })
+    const assignments = buildReviewAssignmentsForActor(req.authUser?.id, authRole, limit)
       .filter((row) => !assigneeId || Number(row?.assignee_user_id || 0) === assigneeId);
     res.json({ assignments });
     return;

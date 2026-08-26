@@ -411,10 +411,6 @@ function isOwnerUser() {
   return currentRole() === "owner";
 }
 
-function isOwnerReviewTrackingEnabled() {
-  return isOwnerUser() && Boolean(qs("assignment-review-tracking")?.checked);
-}
-
 function isAssignmentWorkOnlyUser() {
   const role = currentRole();
   return role === "freelance";
@@ -3535,7 +3531,6 @@ function isExternalContributorUser() {
 function setAssignmentRoleVisibility() {
   const limitWrap = qs("assignment-limit-wrap-work");
   const limitWrapReview = qs("assignment-limit-wrap-review");
-  const reviewTrackingWrap = qs("assignment-review-tracking-wrap");
   const updateStateBtn = qs("btn-assignment-update-state");
   const createPanel = qs("assignment-manual-create-panel");
   const createBtn = qs("btn-assignment-create");
@@ -3561,9 +3556,6 @@ function setAssignmentRoleVisibility() {
   }
   if (limitWrapReview) {
     limitWrapReview.classList.toggle("hidden", !canSeeBaseTasks);
-  }
-  if (reviewTrackingWrap) {
-    reviewTrackingWrap.classList.toggle("hidden", !(canSeeExtendedReview && isOwnerUser()));
   }
   if (createPanel) {
     createPanel.classList.toggle("hidden", !showCreatePanel);
@@ -6304,9 +6296,8 @@ function buildAssignmentsMinePath() {
     return buildAssignmentsActionablePath();
   }
   if (getAssignmentPageMode() === "review") {
-    const includeTracking = isOwnerReviewTrackingEnabled() ? "&include_tracking=1" : "";
     const reviewLimit = parsePositiveInt(qs("assignment-limit-review")?.value, 50) || 50;
-    return `/api/assignments/mine?scope=review&limit=${reviewLimit}${includeTracking}`;
+    return `/api/assignments/mine?scope=review&limit=${reviewLimit}`;
   }
   if (isFreelanceUser()) {
     return `/api/assignments/mine?limit=${limit}`;
@@ -11354,9 +11345,6 @@ function wireAssignments() {
     }
   });
 
-  qs("assignment-review-tracking")?.addEventListener("change", () => {
-    refreshAssignments({ showStatus: true, preserveSelection: false }).catch(() => {});
-  });
   qs("assignment-review-image-reset")?.addEventListener("change", () => {
     syncAssignmentReviewResetReasonUI();
   });
