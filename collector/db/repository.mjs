@@ -522,7 +522,7 @@ function buildPlaceTransitionRules() {
       field_working: new Set(["ready_for_content", "field_review"]),
       field_review: new Set(["generated", "field_working", "ready_for_writer"]),
       ready_for_writer: new Set(["writing_assigned", "field_review"]),
-      writing_assigned: new Set(["writing", "ready_for_writer"]),
+      writing_assigned: new Set(["writing", "ready_for_writer", "field_review"]),
       writing: new Set(["writing_assigned", "in_review"]),
       in_review: new Set(["ready_for_publish", "writing", "field_review"]),
       ready_for_publish: new Set(["submitted_for_admin_review", "in_review"]),
@@ -555,7 +555,8 @@ export const PLACE_BACKWARD_PRODUCTION_TRANSITIONS = Object.freeze({
     generated: Object.freeze({ direction: "in_process", label_th: "สร้างร่างด้วย AI และตรวจแก้เนื้อหา", surface: "item_editor", publication_state: "draft", return_to_clean: true }),
   }),
   writing_assigned: Object.freeze({
-    ready_for_writer: Object.freeze({ direction: "in_process", label_th: "รับงาน", surface: "assignment_review", publication_state: "draft", return_to_clean: true }),
+    ready_for_writer: Object.freeze({ direction: "in_process", label_th: "เปลี่ยนคนเขียน", surface: "assignment_review", publication_state: "draft", return_to_clean: true }),
+    field_review: Object.freeze({ direction: "in_process", label_th: "ส่งกลับให้ field แก้", surface: "assignment_review", publication_state: "draft" }),
   }),
   ready_for_writer: Object.freeze({
     field_review: Object.freeze({ direction: "in_process", label_th: "ส่งกลับให้แก้", surface: "assignment_review", publication_state: "draft" }),

@@ -11,6 +11,20 @@ function directionLabel(direction) {
   return direction === "cross_process" ? "ถอยข้ามกระบวนการ" : "ถอยในกระบวนการ";
 }
 
+const BACKWARD_RESUME_PATH_BY_TARGET = {
+  ready_for_writer: (id) => `/article-intake.html?id=${id}`,
+  field_review: (id) => `/?tab=work&item_id=${id}`,
+  field_working: (id) => `/?tab=handoff&item_id=${id}`,
+};
+
+export function resolveBackwardResumePath(itemId, targetProductionState, result) {
+  const id = Number(itemId || 0) || 0;
+  if (!id) return null;
+  const target = String(targetProductionState || "").trim().toLowerCase();
+  const pathFn = BACKWARD_RESUME_PATH_BY_TARGET[target];
+  return pathFn ? pathFn(id) : (result?.resume_path || null);
+}
+
 export async function loadWorkflowBackwardTransitions(api, itemId) {
   const id = Number(itemId || 0) || 0;
   if (!id) return { item_id: null, can_transition: false, targets: [] };

@@ -9,6 +9,7 @@ import {
   reportUnknownWorkflowState,
   loadWorkflowBackwardTransitions,
   renderWorkflowBackwardTransitionControls,
+  resolveBackwardResumePath,
 } from "./workflow-state-catalog.js";
 import { initItemHistory } from "./item-history.js";
 
@@ -3641,8 +3642,9 @@ function renderAssignmentBackwardTransitionControls() {
         state.items = state.items.map((row) => Number(row?.id || 0) === Number(nextItem.id) ? { ...row, ...nextItem } : row);
       }
       state.assignments.backwardTransitions = result?.backward_transitions || null;
-      if (result?.resume_path && result.resume_path !== `${window.location.pathname}${window.location.search}`) {
-        window.location.assign(result.resume_path);
+      const resumePath = resolveBackwardResumePath(itemId, targetProductionState, result);
+      if (resumePath && resumePath !== `${window.location.pathname}${window.location.search}`) {
+        window.location.assign(resumePath);
         return;
       }
       renderAssignmentBackwardTransitionControls();

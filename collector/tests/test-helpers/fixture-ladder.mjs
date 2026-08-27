@@ -1,11 +1,22 @@
 const PLACE_LADDER_PATH = Object.freeze({
-  collected: ["analyzed", "generated", "ready_for_content", "field_working", "field_review"],
-  analyzed: ["generated", "ready_for_content", "field_working", "field_review"],
-  generated: ["ready_for_content", "field_working", "field_review"],
-  ready_for_content: ["field_working", "field_review"],
-  field_working: ["field_review"],
-  field_review: [],
+  collected: ["analyzed", "generated", "ready_for_content", "field_working", "field_review", "ready_for_writer", "writing_assigned", "writing", "in_review"],
+  analyzed: ["generated", "ready_for_content", "field_working", "field_review", "ready_for_writer", "writing_assigned", "writing", "in_review"],
+  generated: ["ready_for_content", "field_working", "field_review", "ready_for_writer", "writing_assigned", "writing", "in_review"],
+  ready_for_content: ["field_working", "field_review", "ready_for_writer", "writing_assigned", "writing", "in_review"],
+  field_working: ["field_review", "ready_for_writer", "writing_assigned", "writing", "in_review"],
+  field_review: ["ready_for_writer", "writing_assigned", "writing", "in_review"],
+  ready_for_writer: ["writing_assigned", "writing", "in_review"],
+  writing_assigned: ["writing", "in_review"],
+  writing: ["in_review"],
+  in_review: [],
 });
+
+const PLACE_PRODUCTION_LADDER = [
+  "collected", "analyzed", "generated", "ready_for_content",
+  "field_working", "field_review", "ready_for_writer",
+  "writing_assigned", "writing", "in_review",
+  "ready_for_publish", "submitted_for_admin_review", "completed",
+];
 
 export function advancePlaceProductionState(repo, itemId, targetState, actorEmail = "test@local") {
   const item = repo.getItem(itemId);
@@ -23,10 +34,15 @@ export function advancePlaceProductionState(repo, itemId, targetState, actorEmai
 
   const targetIndex = path.indexOf(targetState);
   if (targetIndex === -1) {
-    if (path.length > 0 && path[path.length - 1] !== targetState) {
-      throw new Error(`advancePlaceProductionState: "${targetState}" is not reachable from "${current}"`);
+    const currentRung = PLACE_PRODUCTION_LADDER.indexOf(current);
+    const targetRung = PLACE_PRODUCTION_LADDER.indexOf(targetState);
+    if (targetRung === -1) {
+      throw new Error(`advancePlaceProductionState: "${targetState}" is not a known production state`);
     }
-    return;
+    if (targetRung <= currentRung) {
+      return; // ผ่านขั้นนี้มาแล้ว — no-op โดยตั้งใจ
+    }
+    throw new Error(`advancePlaceProductionState: "${targetState}" is not reachable from "${current}"`);
   }
 
   for (let i = 0; i <= targetIndex; i++) {

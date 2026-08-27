@@ -1,6 +1,7 @@
 export {
   loadWorkflowBackwardTransitions,
   renderWorkflowBackwardTransitionControls,
+  resolveBackwardResumePath,
 } from "./workflow-backward-transitions.js";
 
 function normalizedValue(value) {
