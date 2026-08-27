@@ -9,6 +9,7 @@ import {
   reportUnknownWorkflowState,
   loadWorkflowBackwardTransitions,
   renderWorkflowBackwardTransitionControls,
+  resolveBackwardResumePath,
 } from "./workflow-state-catalog.js";
 const ASSIGNMENT_REQUIRED_STATUSES = ["content_in_progress", "needs_revision"];
 const DIRECTORY_SYNC_TTL_MS = 5 * 60 * 1000;
@@ -173,7 +174,9 @@ function primaryAssignmentForItem(itemId) {
   if (!process) return fallbackAssignment;
   if (process.active_editorial_assignment) return process.active_editorial_assignment;
   const assignments = Array.isArray(process.editorial_assignments) ? process.editorial_assignments : [];
-  return assignments[0] || fallbackAssignment;
+  const activeStates = new Set(["assigned", "in_progress", "submitted", "resubmitted", "revision_requested"]);
+  const activeAssignment = assignments.find((a) => activeStates.has(String(a?.state || "").trim().toLowerCase())) || null;
+  return activeAssignment || fallbackAssignment;
 }
 
 function hasAssignedWriter(item) {
@@ -394,8 +397,9 @@ function renderBackwardTransitionControls() {
         }
         state.item = nextItem || state.item;
         state.backwardTransitions = result?.backward_transitions || null;
-        if (result?.resume_path && result.resume_path !== `${window.location.pathname}${window.location.search}`) {
-          window.location.assign(result.resume_path);
+        const resumePath = resolveBackwardResumePath(state.itemId, targetProductionState, result);
+        if (resumePath && resumePath !== `${window.location.pathname}${window.location.search}`) {
+          window.location.assign(resumePath);
           return;
         }
         renderAll();
