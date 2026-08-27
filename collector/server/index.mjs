@@ -3611,6 +3611,13 @@ function sortAssignmentsForList(rows = []) {
   });
 }
 
+function dropClosedAssignments(assignments = []) {
+  const list = Array.isArray(assignments) ? assignments : [];
+  return list.filter(
+    (assignment) => String(assignment?.state || "").trim().toLowerCase() !== "closed"
+  );
+}
+
 function buildActionableAssignmentsForActor(actorUserId, limit = 50) {
   const actorId = Number(actorUserId || 0);
   if (!actorId) return [];
@@ -3679,7 +3686,7 @@ function buildReviewAssignmentsForActor(actorUserId, role, limit = 50) {
 
 function buildManagedAssignmentsForActor(actorUserId, role, limit = 50) {
   if (role === "owner") {
-    return repo.listAssignments(limit);
+    return dropClosedAssignments(repo.listAssignments(limit));
   }
   if (role !== "admin" && role !== "user") {
     return [];
@@ -3690,9 +3697,11 @@ function buildManagedAssignmentsForActor(actorUserId, role, limit = 50) {
   }
   const scopeSet = new Set(scopeUserIds.map((value) => Number(value || 0)).filter(Boolean));
   return sortAssignmentsForList(
-    filterAssignmentsByManagementLine(
-      { id: actorUserId, role },
-      repo.listAssignmentsByScopeUserIds(Array.from(scopeSet), limit)
+    dropClosedAssignments(
+      filterAssignmentsByManagementLine(
+        { id: actorUserId, role },
+        repo.listAssignmentsByScopeUserIds(Array.from(scopeSet), limit)
+      )
     )
   ).slice(0, Math.max(1, Math.min(200, Number(limit) || 50)));
 }
@@ -10855,7 +10864,7 @@ app.get("/api/assignments/mine", requireRole("owner", "admin", "editor", "freela
       res.status(403).json({ error: "freelance can view assignments only for itself" });
       return;
     }
-    const assignments = repo.listAssignmentsByAssignee(actorId, limit);
+    const assignments = dropClosedAssignments(repo.listAssignmentsByAssignee(actorId, limit));
     res.json({ assignments });
     return;
   }
@@ -10899,7 +10908,7 @@ app.get("/api/assignments/mine", requireRole("owner", "admin", "editor", "freela
   if (assignedByMe) {
     const assignments = filterAssignmentsByManagementLine(
       req.authUser,
-      repo.listExternalAssignmentsByAssigner(req.authUser?.id, limit)
+      dropClosedAssignments(repo.listExternalAssignmentsByAssigner(req.authUser?.id, limit))
     );
     res.json({ assignments });
     return;
@@ -10907,12 +10916,12 @@ app.get("/api/assignments/mine", requireRole("owner", "admin", "editor", "freela
   const assigneeId = Number(req.query.assignee_user_id || 0);
   if (!assigneeId) {
     if (authRole === "freelance" || authRole === "editor") {
-      const assignments = repo.listAssignmentsByAssignee(req.authUser?.id, limit);
+      const assignments = dropClosedAssignments(repo.listAssignmentsByAssignee(req.authUser?.id, limit));
       res.json({ assignments });
       return;
     }
     if (authRole === "owner") {
-      const assignments = repo.listAssignments(limit);
+      const assignments = dropClosedAssignments(repo.listAssignments(limit));
       res.json({ assignments });
       return;
     }
@@ -10938,7 +10947,7 @@ app.get("/api/assignments/mine", requireRole("owner", "admin", "editor", "freela
   }
   const assignments = filterAssignmentsByManagementLine(
     req.authUser,
-    repo.listAssignmentsByAssignee(assigneeId, limit)
+    dropClosedAssignments(repo.listAssignmentsByAssignee(assigneeId, limit))
   );
   res.json({ assignments });
 });
