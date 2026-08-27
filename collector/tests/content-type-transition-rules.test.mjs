@@ -58,7 +58,7 @@ const PLACE_PRODUCTION_RULES = Object.freeze({
   field_working: ["ready_for_content", "field_review"],
   field_review: ["generated", "field_working", "ready_for_writer"],
   ready_for_writer: ["writing_assigned", "field_review"],
-  writing_assigned: ["writing", "ready_for_writer", "field_review"],
+  writing_assigned: ["writing", "ready_for_writer", "field_review", "in_review"],
   writing: ["writing_assigned", "in_review"],
   in_review: ["ready_for_publish", "writing", "field_review"],
   ready_for_publish: ["submitted_for_admin_review", "in_review"],

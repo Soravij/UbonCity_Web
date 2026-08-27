@@ -522,7 +522,7 @@ function buildPlaceTransitionRules() {
       field_working: new Set(["ready_for_content", "field_review"]),
       field_review: new Set(["generated", "field_working", "ready_for_writer"]),
       ready_for_writer: new Set(["writing_assigned", "field_review"]),
-      writing_assigned: new Set(["writing", "ready_for_writer", "field_review"]),
+      writing_assigned: new Set(["writing", "ready_for_writer", "field_review", "in_review"]),
       writing: new Set(["writing_assigned", "in_review"]),
       in_review: new Set(["ready_for_publish", "writing", "field_review"]),
       ready_for_publish: new Set(["submitted_for_admin_review", "in_review"]),
