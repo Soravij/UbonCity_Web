@@ -183,4 +183,44 @@ describe("resolveQueueBucket unknown_workflow from ADVANCED_PRODUCTION_STATES", 
     assert.equal(bucket, "raw_prep",
       `expected raw_prep but got ${bucket}`);
   });
+
+  it("only_field_accepted_open=true + field pack ready_for_field + field_review → handoff", () => {
+    const item = {
+      production_state: "field_review",
+      publication_state: "draft",
+      has_accepted_assignment: true,
+      has_open_assignment: true,
+      only_field_accepted_open: true,
+      current_field_pack_id: 10,
+      current_field_pack_status: "ready_for_field",
+    };
+    const bucket = resolveQueueBucket(item);
+    assert.equal(bucket, "handoff",
+      `expected handoff but got ${bucket}`);
+  });
+
+  it("only_field_accepted_open=false + open assignment → assignment", () => {
+    const item = {
+      production_state: "field_working",
+      publication_state: "draft",
+      has_accepted_assignment: false,
+      has_open_assignment: true,
+      only_field_accepted_open: false,
+    };
+    const bucket = resolveQueueBucket(item);
+    assert.equal(bucket, "assignment",
+      `expected assignment but got ${bucket}`);
+  });
+
+  it("only_field_accepted_open undefined + open assignment → assignment", () => {
+    const item = {
+      production_state: "field_working",
+      publication_state: "draft",
+      has_accepted_assignment: false,
+      has_open_assignment: true,
+    };
+    const bucket = resolveQueueBucket(item);
+    assert.equal(bucket, "assignment",
+      `expected assignment but got ${bucket}`);
+  });
 });

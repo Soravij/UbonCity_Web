@@ -714,6 +714,7 @@ function getItemWorkflowSnapshot(item) {
   const publicationState = String(item?.publication_state || "").trim().toLowerCase();
   const hasAcceptedAssignment = item?.has_accepted_assignment === true;
   const hasOpenAssignment = item?.has_open_assignment === true;
+  const onlyFieldAcceptedOpen = item?.only_field_accepted_open === true;
   const placeReviewFlag = String(item?.place_review_flag || "none").trim().toLowerCase();
   let compatibilityStatus = "";
   if (publicationState === "published") compatibilityStatus = "published";
@@ -735,6 +736,7 @@ function getItemWorkflowSnapshot(item) {
     publicationState,
     hasAcceptedAssignment,
     hasOpenAssignment,
+    onlyFieldAcceptedOpen,
     placeReviewFlag,
     compatibilityStatus,
   };
@@ -753,6 +755,7 @@ function resolveQueueBucket(itemSnapshot) {
   const publicationState = String(snapshot?.publicationState || "").trim().toLowerCase();
   const hasAcceptedAssignment = snapshot?.hasAcceptedAssignment === true;
   const hasOpenAssignment = snapshot?.hasOpenAssignment === true;
+  const onlyFieldAcceptedOpen = snapshot?.onlyFieldAcceptedOpen === true;
   const fieldPackStatus = String(source?.current_field_pack_status || source?.field_pack_status || snapshot?.current_field_pack_status || snapshot?.field_pack_status || "").trim().toLowerCase();
   const hasFieldPackPointer = Number(source?.current_field_pack_id || source?.field_pack_id || snapshot?.current_field_pack_id || snapshot?.field_pack_id || 0) > 0;
   const hasFieldPack = hasFieldPackPointer || Boolean(fieldPackStatus);
@@ -768,7 +771,7 @@ function resolveQueueBucket(itemSnapshot) {
   if (publicationState === "published" || productionState === "completed") {
     return "published";
   }
-  if (hasOpenAssignment) {
+  if (hasOpenAssignment && !onlyFieldAcceptedOpen) {
     return "assignment";
   }
   if (

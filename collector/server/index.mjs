@@ -1342,6 +1342,7 @@ function attachItemMatchFields(items = [], options = {}) {
       current_field_pack_status: String(currentFieldPack?.status || latestFieldPack?.status || "").trim().toLowerCase() || null,
       has_accepted_assignment: item?.has_accepted_assignment === true,
       has_open_assignment: item?.has_open_assignment === true,
+      only_field_accepted_open: item?.only_field_accepted_open === true,
       current_draft_id: Number(workflow?.current_draft_id || 0) || null,
       current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
       workflow_state_version: Number(workflow?.state_version || 0) || 0,
@@ -1401,6 +1402,7 @@ function attachWorkflowHeadFields(item, scopeContext = null) {
     publication_state: String(workflow?.publication_state || "").trim().toLowerCase() || null,
     has_accepted_assignment: resolvedScope?.hasAcceptedAssignment === true,
     has_open_assignment: resolvedScope?.hasOpenAssignment === true,
+    only_field_accepted_open: resolvedScope?.onlyFieldAcceptedOpen === true,
     current_draft_id: Number(workflow?.current_draft_id || 0) || null,
     current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
     current_field_pack_id: Number(workflow?.current_field_pack_id || currentFieldPack?.id || latestFieldPack?.id || 0) || null,
@@ -4024,11 +4026,17 @@ function resolveItemScopeContext(item) {
     Number(primaryAssignment?.assignee_user_id || 0) || 0,
     Number(primaryAssignment?.assigned_by_user_id || 0) || 0,
   ].filter(Boolean);
+  const openAssignments = listAssignments.filter((assignment) => hasOpenAssignment(assignment));
+  const onlyFieldAcceptedOpen = openAssignments.length > 0
+    && openAssignments.every((assignment) =>
+      String(assignment?.assignment_kind || "").trim().toLowerCase() === "field"
+      && String(assignment?.state || assignment?.assignment_state || "").trim().toLowerCase() === "accepted");
   return {
     primaryAssignment,
     assignmentUserIds,
     hasAcceptedAssignment,
     hasOpenAssignment: hasOpenAssignment(primaryAssignment),
+    onlyFieldAcceptedOpen,
   };
 }
 
@@ -4051,6 +4059,7 @@ function attachItemScopeMetadata(authUser, item, scopeContext = null) {
     assignment_owner: buildItemAssignmentOwner(primaryAssignment, userById),
     has_accepted_assignment: resolvedScope?.hasAcceptedAssignment === true,
     has_open_assignment: resolvedScope?.hasOpenAssignment === true,
+    only_field_accepted_open: resolvedScope?.onlyFieldAcceptedOpen === true,
   });
 }
 
