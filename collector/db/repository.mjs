@@ -1276,19 +1276,32 @@ function parseCtaJson(value) {
   } catch { return {}; }
 }
 
-function isEmptyCtaValue(val) {
+const CTA_META_KEYS = new Set(["confidence", "checked", "found", "source", "note"]);
+
+function isEmptyCtaScalar(val) {
   if (val === null || val === undefined) return true;
   if (typeof val === "string") {
     const t = val.trim();
     return t === "" || t === "null" || t === "undefined";
   }
   if (Array.isArray(val)) return val.length === 0;
-  if (typeof val === "object") return Object.keys(val).length === 0;
   return false;
 }
 
+function isEmptyCtaEntry(val) {
+  if (val && typeof val === "object" && !Array.isArray(val)) {
+    if ("value" in val) return isEmptyCtaScalar(val.value);
+    return Object.entries(val).every(
+      ([k, v]) => CTA_META_KEYS.has(k) || isEmptyCtaEntry(v)
+    );
+  }
+  return isEmptyCtaScalar(val);
+}
+
 function hasAnyCtaValue(value) {
-  return Object.values(parseCtaJson(value)).some((v) => !isEmptyCtaValue(v));
+  return Object.entries(parseCtaJson(value)).some(
+    ([key, val]) => !CTA_META_KEYS.has(key) && !isEmptyCtaEntry(val)
+  );
 }
 
 function mergeCtaPreservingExisting(previousValue, nextValue) {
@@ -1296,7 +1309,7 @@ function mergeCtaPreservingExisting(previousValue, nextValue) {
   const next = parseCtaJson(nextValue);
   const merged = { ...prev };
   for (const [key, val] of Object.entries(next)) {
-    if (!isEmptyCtaValue(val)) merged[key] = val;
+    if (CTA_META_KEYS.has(key) || !isEmptyCtaEntry(val)) merged[key] = val;
   }
   return merged;
 }

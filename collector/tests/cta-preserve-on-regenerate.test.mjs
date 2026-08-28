@@ -10,19 +10,32 @@ function parseCtaJson(value) {
   } catch { return {}; }
 }
 
-function isEmptyCtaValue(val) {
+const CTA_META_KEYS = new Set(["confidence", "checked", "found", "source", "note"]);
+
+function isEmptyCtaScalar(val) {
   if (val === null || val === undefined) return true;
   if (typeof val === "string") {
     const t = val.trim();
     return t === "" || t === "null" || t === "undefined";
   }
   if (Array.isArray(val)) return val.length === 0;
-  if (typeof val === "object") return Object.keys(val).length === 0;
   return false;
 }
 
+function isEmptyCtaEntry(val) {
+  if (val && typeof val === "object" && !Array.isArray(val)) {
+    if ("value" in val) return isEmptyCtaScalar(val.value);
+    return Object.entries(val).every(
+      ([k, v]) => CTA_META_KEYS.has(k) || isEmptyCtaEntry(v)
+    );
+  }
+  return isEmptyCtaScalar(val);
+}
+
 function hasAnyCtaValue(value) {
-  return Object.values(parseCtaJson(value)).some((v) => !isEmptyCtaValue(v));
+  return Object.entries(parseCtaJson(value)).some(
+    ([key, val]) => !CTA_META_KEYS.has(key) && !isEmptyCtaEntry(val)
+  );
 }
 
 function mergeCtaPreservingExisting(previousValue, nextValue) {
@@ -30,7 +43,7 @@ function mergeCtaPreservingExisting(previousValue, nextValue) {
   const next = parseCtaJson(nextValue);
   const merged = { ...prev };
   for (const [key, val] of Object.entries(next)) {
-    if (!isEmptyCtaValue(val)) merged[key] = val;
+    if (CTA_META_KEYS.has(key) || !isEmptyCtaEntry(val)) merged[key] = val;
   }
   return merged;
 }
@@ -67,18 +80,18 @@ test("JSON string input works correctly", () => {
   assert.equal(result.facebook_url, "https://fb.new");
 });
 
-test("empty array next does not overwrite previous array", () => {
-  const prev = { source: ["https://a.example", "https://b.example"] };
-  const next = { source: [] };
+test("empty array next does not overwrite previous array on non-meta key", () => {
+  const prev = { tags: ["outdoor", "family"] };
+  const next = { tags: [] };
   const result = mergeCtaPreservingExisting(prev, next);
-  assert.deepEqual(result.source, ["https://a.example", "https://b.example"]);
+  assert.deepEqual(result.tags, ["outdoor", "family"]);
 });
 
 test("non-empty array next overwrites previous array", () => {
-  const prev = { source: ["https://old.example"] };
-  const next = { source: ["https://new.example"] };
+  const prev = { tags: ["outdoor"] };
+  const next = { tags: ["family"] };
   const result = mergeCtaPreservingExisting(prev, next);
-  assert.deepEqual(result.source, ["https://new.example"]);
+  assert.deepEqual(result.tags, ["family"]);
 });
 
 test("null previous returns next values", () => {
@@ -116,17 +129,17 @@ test("string 'undefined' does not overwrite existing value", () => {
 });
 
 test("empty object as next value does not overwrite existing value", () => {
-  const prev = { source: { url: "https://a.example" } };
-  const next = { source: {} };
+  const prev = { extra: { url: "https://a.example" } };
+  const next = { extra: {} };
   const result = mergeCtaPreservingExisting(prev, next);
-  assert.deepEqual(result.source, { url: "https://a.example" });
+  assert.deepEqual(result.extra, { url: "https://a.example" });
 });
 
 test("empty array as next value does not overwrite existing value", () => {
-  const prev = { source: ["https://a.example"] };
-  const next = { source: [] };
+  const prev = { tags: ["outdoor"] };
+  const next = { tags: [] };
   const result = mergeCtaPreservingExisting(prev, next);
-  assert.deepEqual(result.source, ["https://a.example"]);
+  assert.deepEqual(result.tags, ["outdoor"]);
 });
 
 test("hasAnyCtaValue returns false for pack with all null values", () => {
@@ -153,4 +166,48 @@ test("hasAnyCtaValue returns false for empty object", () => {
 
 test("hasAnyCtaValue returns false for JSON string of all nulls", () => {
   assert.equal(hasAnyCtaValue(JSON.stringify({ phone: null, line_url: null })), false);
+});
+
+test("hasAnyCtaValue false when only meta keys present (confidence + all nulls)", () => {
+  assert.equal(hasAnyCtaValue({ confidence: "unknown", phone: null, facebook_url: null }), false);
+});
+
+test("hasAnyCtaValue true when meta keys present with real value", () => {
+  assert.equal(hasAnyCtaValue({ confidence: "unknown", facebook_url: "https://fb.com/x" }), true);
+});
+
+test("hasAnyCtaValue false for curated default shape (all meta + null value)", () => {
+  const curated = {
+    phone: { checked: false, found: false, value: null, source: [], note: null },
+    line_url: { checked: false, found: false, value: null, source: [], note: null },
+    facebook_url: { checked: false, found: false, value: null, source: [], note: null },
+    website_url: { checked: false, found: false, value: null, source: [], note: null },
+    primary_cta: { checked: false, found: false, value: null, source: [], note: null },
+  };
+  assert.equal(hasAnyCtaValue(curated), false);
+});
+
+test("hasAnyCtaValue true for curated with one real value", () => {
+  const curated = {
+    phone: { checked: true, found: true, value: "0832894629", source: ["manual"], note: null },
+    line_url: { checked: false, found: false, value: null, source: [], note: null },
+  };
+  assert.equal(hasAnyCtaValue(curated), true);
+});
+
+test("merge: next sub-object with value:null does not overwrite prev with real value", () => {
+  const prev = { phone: { checked: true, found: true, value: "0832894629", source: [], note: null } };
+  const next = { phone: { checked: false, found: false, value: null, source: [], note: null } };
+  const result = mergeCtaPreservingExisting(prev, next);
+  assert.equal(result.phone.value, "0832894629");
+});
+
+test("false is a meaningful value (not empty)", () => {
+  assert.equal(isEmptyCtaEntry(false), false);
+  assert.equal(hasAnyCtaValue({ some_flag: false }), true);
+});
+
+test("0 is a meaningful value (not empty)", () => {
+  assert.equal(isEmptyCtaEntry(0), false);
+  assert.equal(hasAnyCtaValue({ count: 0 }), true);
 });
