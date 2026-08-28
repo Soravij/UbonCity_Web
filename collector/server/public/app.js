@@ -714,6 +714,7 @@ function getItemWorkflowSnapshot(item) {
   const publicationState = String(item?.publication_state || "").trim().toLowerCase();
   const hasAcceptedAssignment = item?.has_accepted_assignment === true;
   const hasOpenAssignment = item?.has_open_assignment === true;
+  const onlyFieldAcceptedOpen = item?.only_field_accepted_open === true;
   const placeReviewFlag = String(item?.place_review_flag || "none").trim().toLowerCase();
   let compatibilityStatus = "";
   if (publicationState === "published") compatibilityStatus = "published";
@@ -735,6 +736,7 @@ function getItemWorkflowSnapshot(item) {
     publicationState,
     hasAcceptedAssignment,
     hasOpenAssignment,
+    onlyFieldAcceptedOpen,
     placeReviewFlag,
     compatibilityStatus,
   };
@@ -753,16 +755,23 @@ function resolveQueueBucket(itemSnapshot) {
   const publicationState = String(snapshot?.publicationState || "").trim().toLowerCase();
   const hasAcceptedAssignment = snapshot?.hasAcceptedAssignment === true;
   const hasOpenAssignment = snapshot?.hasOpenAssignment === true;
+  const onlyFieldAcceptedOpen = snapshot?.onlyFieldAcceptedOpen === true;
   const fieldPackStatus = String(source?.current_field_pack_status || source?.field_pack_status || snapshot?.current_field_pack_status || snapshot?.field_pack_status || "").trim().toLowerCase();
   const hasFieldPackPointer = Number(source?.current_field_pack_id || source?.field_pack_id || snapshot?.current_field_pack_id || snapshot?.field_pack_id || 0) > 0;
   const hasFieldPack = hasFieldPackPointer || Boolean(fieldPackStatus);
+  const ADVANCED_PRODUCTION_STATES = new Set([
+    "brief_generated", "generated", "ready_for_content", "field_working",
+    "field_review", "ready_for_writer", "writing_assigned", "writing",
+    "content_in_progress", "in_review", "needs_revision",
+    "ready_for_publish", "submitted_for_admin_review",
+  ]);
 
   if (getUnknownWorkflowState(source)) return "unknown_workflow";
 
   if (publicationState === "published" || productionState === "completed") {
     return "published";
   }
-  if (hasOpenAssignment) {
+  if (hasOpenAssignment && !onlyFieldAcceptedOpen) {
     return "assignment";
   }
   if (
@@ -797,6 +806,7 @@ function resolveQueueBucket(itemSnapshot) {
   if (hasFieldPack) {
     return "field_pack_review";
   }
+  if (ADVANCED_PRODUCTION_STATES.has(productionState)) return "unknown_workflow";
   return "raw_prep";
 }
 
@@ -5176,6 +5186,10 @@ function buildRawQueueStatusLabel(item, queueType) {
   const anomaly = getUnknownWorkflowState(item);
   if (anomaly) return `⚠ สถานะผิดปกติ: ${anomaly.state}`;
   const bucket = resolveQueueBucket(item);
+  if (bucket === "unknown_workflow") {
+    const productionState = String(item?.productionState || item?.production_state || "").trim().toLowerCase();
+    return `⚠ ${productionState} — ไม่มีงานที่กำลังทำ`;
+  }
   if (queueType === "review") {
     return bucket === "handoff" ? "พร้อมส่งต่อ" : "รอตรวจชุดสั่งงาน";
   }

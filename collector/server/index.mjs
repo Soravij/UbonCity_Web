@@ -1342,6 +1342,7 @@ function attachItemMatchFields(items = [], options = {}) {
       current_field_pack_status: String(currentFieldPack?.status || latestFieldPack?.status || "").trim().toLowerCase() || null,
       has_accepted_assignment: item?.has_accepted_assignment === true,
       has_open_assignment: item?.has_open_assignment === true,
+      only_field_accepted_open: item?.only_field_accepted_open === true,
       current_draft_id: Number(workflow?.current_draft_id || 0) || null,
       current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
       workflow_state_version: Number(workflow?.state_version || 0) || 0,
@@ -1401,6 +1402,7 @@ function attachWorkflowHeadFields(item, scopeContext = null) {
     publication_state: String(workflow?.publication_state || "").trim().toLowerCase() || null,
     has_accepted_assignment: resolvedScope?.hasAcceptedAssignment === true,
     has_open_assignment: resolvedScope?.hasOpenAssignment === true,
+    only_field_accepted_open: resolvedScope?.onlyFieldAcceptedOpen === true,
     current_draft_id: Number(workflow?.current_draft_id || 0) || null,
     current_review_report_id: Number(workflow?.current_review_report_id || 0) || null,
     current_field_pack_id: Number(workflow?.current_field_pack_id || currentFieldPack?.id || latestFieldPack?.id || 0) || null,
@@ -3618,6 +3620,21 @@ function dropClosedAssignments(assignments = []) {
   );
 }
 
+function dropDuplicateManagedAssignments(assignments, actorId) {
+  const ACTOR_OWNED_ELSEWHERE_STATES = new Set([
+    "assigned", "in_progress", "revision_requested", "submitted", "resubmitted",
+  ]);
+  if (!Array.isArray(assignments)) return [];
+  return assignments.filter((assignment) => {
+    if (!assignment) return false;
+    const state = String(assignment.state || assignment.assignment_state || "").trim().toLowerCase();
+    const kind = String(assignment.assignment_kind || "").trim().toLowerCase();
+    if (kind === "field" && state === "accepted") return false;
+    if (Number(assignment.assignee_user_id) === Number(actorId) && ACTOR_OWNED_ELSEWHERE_STATES.has(state)) return false;
+    return true;
+  });
+}
+
 function buildActionableAssignmentsForActor(actorUserId, limit = 50) {
   const actorId = Number(actorUserId || 0);
   if (!actorId) return [];
@@ -3686,7 +3703,7 @@ function buildReviewAssignmentsForActor(actorUserId, role, limit = 50) {
 
 function buildManagedAssignmentsForActor(actorUserId, role, limit = 50) {
   if (role === "owner") {
-    return dropClosedAssignments(repo.listAssignments(limit));
+    return dropDuplicateManagedAssignments(dropClosedAssignments(repo.listAssignments(limit)), actorUserId);
   }
   if (role !== "admin" && role !== "user") {
     return [];
@@ -3696,14 +3713,14 @@ function buildManagedAssignmentsForActor(actorUserId, role, limit = 50) {
     return [];
   }
   const scopeSet = new Set(scopeUserIds.map((value) => Number(value || 0)).filter(Boolean));
-  return sortAssignmentsForList(
+  return dropDuplicateManagedAssignments(sortAssignmentsForList(
     dropClosedAssignments(
       filterAssignmentsByManagementLine(
         { id: actorUserId, role },
         repo.listAssignmentsByScopeUserIds(Array.from(scopeSet), limit)
       )
     )
-  ).slice(0, Math.max(1, Math.min(200, Number(limit) || 50)));
+  ).slice(0, Math.max(1, Math.min(200, Number(limit) || 50))), actorUserId);
 }
 
 function hasItemBriefAccess(req, contentItemId, role = actorPolicyRole(req)) {
@@ -4009,11 +4026,17 @@ function resolveItemScopeContext(item) {
     Number(primaryAssignment?.assignee_user_id || 0) || 0,
     Number(primaryAssignment?.assigned_by_user_id || 0) || 0,
   ].filter(Boolean);
+  const openAssignments = listAssignments.filter((assignment) => hasOpenAssignment(assignment));
+  const onlyFieldAcceptedOpen = openAssignments.length > 0
+    && openAssignments.every((assignment) =>
+      String(assignment?.assignment_kind || "").trim().toLowerCase() === "field"
+      && String(assignment?.state || assignment?.assignment_state || "").trim().toLowerCase() === "accepted");
   return {
     primaryAssignment,
     assignmentUserIds,
     hasAcceptedAssignment,
     hasOpenAssignment: hasOpenAssignment(primaryAssignment),
+    onlyFieldAcceptedOpen,
   };
 }
 
@@ -4036,6 +4059,7 @@ function attachItemScopeMetadata(authUser, item, scopeContext = null) {
     assignment_owner: buildItemAssignmentOwner(primaryAssignment, userById),
     has_accepted_assignment: resolvedScope?.hasAcceptedAssignment === true,
     has_open_assignment: resolvedScope?.hasOpenAssignment === true,
+    only_field_accepted_open: resolvedScope?.onlyFieldAcceptedOpen === true,
   });
 }
 

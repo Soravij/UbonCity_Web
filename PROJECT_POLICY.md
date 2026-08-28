@@ -566,6 +566,7 @@ Placeholders:
 - Nothing from the finished round is deleted: its handoff snapshot, submission, and `requested_check_returns` stay as the record of what was confirmed and when.
 - An item has at most one open field round. Opening a rework round closes the previous one.
 - The current (newest) round is the source of truth for display; superseded rounds must not shadow it.
+- An item must appear in exactly one place system-wide: the point where work is currently happening. The in-flight diagnostic table is the only exception.
 - Acceptance patches confirmed values, it does not replace them:
   - `checked` + found → overwrite the confirmed value
   - `checked` + not found → the human verified there is none, clear the confirmed value
@@ -583,6 +584,7 @@ Placeholders:
 - ห้ามลบข้อมูลของรอบที่จบแล้ว ทั้ง handoff snapshot, submission และ `requested_check_returns` ต้องคงอยู่เป็นบันทึกว่ายืนยันอะไรไว้เมื่อใด
 - หนึ่ง item มีรอบภาคสนามที่เปิดอยู่ได้ไม่เกินหนึ่งรอบ การเปิดรอบใหม่จะปิดรอบก่อนหน้าเสมอ
 - รอบปัจจุบัน (ใหม่ที่สุด) คือแหล่งความจริงสำหรับการแสดงผล รอบที่ถูกแทนที่แล้วต้องไม่บังข้อมูลของรอบปัจจุบัน
+- หนึ่ง item ต้องปรากฏในที่เดียวเท่านั้นทั้งระบบ: จุดที่งานกำลังดำเนินอยู่ ตาราง in-flight diagnostic เป็นข้อยกเว้นเดียว
 - การรับงานเป็นการ "patch" ค่าที่ยืนยันไว้ ไม่ใช่การแทนที่ทั้งชุด:
   - ติ๊ก + พบข้อมูล → เขียนทับค่าที่ยืนยันไว้เดิม
   - ติ๊ก + ไม่พบข้อมูล → มนุษย์ยืนยันว่าไม่มี ให้ล้างค่าเดิม
