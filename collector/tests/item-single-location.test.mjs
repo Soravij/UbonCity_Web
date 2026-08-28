@@ -112,7 +112,92 @@ test("buildManagedAssignmentsForActor admin/user path wraps dropDuplicateManaged
   );
 });
 
-// ── resolveQueueBucket (loadResolveQueueBucket pattern) ──
+// ── resolveItemScopeContext: onlyFieldAcceptedOpen (vm.Script pattern) ──
+
+const OPEN_STATES = new Set(["assigned", "in_progress", "submitted", "resubmitted", "revision_requested", "accepted"]);
+
+function createResolveItemScopeContext() {
+  const fnSource = extractNamedFunctionSource(indexServer, "resolveItemScopeContext");
+  const stubs = {
+    repo: {
+      listAssignmentsByItem: (itemId) => stubs._assignments || [],
+      buildPublishableSourceByItem: () => ({ checks: {} }),
+    },
+    hasOpenAssignment: (assignment) => {
+      const state = String(assignment?.state || assignment?.assignment_state || "").trim().toLowerCase();
+      return OPEN_STATES.has(state);
+    },
+    selectPrimaryEditorialAssignment: (list) => (Array.isArray(list) && list.length > 0 ? list[0] : null),
+    selectPrimaryOpenAssignment: (list) => (Array.isArray(list) && list.length > 0 ? list[0] : null),
+    console,
+    _assignments: [],
+  };
+  const wrapper = `(function(resolveItemScopeContext) { return resolveItemScopeContext; })`;
+  const fn = new vm.Script(`${wrapper}(${fnSource})`).runInNewContext(stubs);
+  return (assignments) => {
+    stubs._assignments = assignments;
+    return fn({ id: 1 });
+  };
+}
+
+const callResolveItemScopeContext = createResolveItemScopeContext();
+
+test("resolveItemScopeContext: [field/accepted] → onlyFieldAcceptedOpen=true", () => {
+  const result = callResolveItemScopeContext([
+    { assignment_kind: "field", state: "accepted", assignee_user_id: 1 },
+  ]);
+  assert.equal(result.onlyFieldAcceptedOpen, true);
+});
+
+test("resolveItemScopeContext: [field/accepted, editorial/assigned] → onlyFieldAcceptedOpen=false", () => {
+  const result = callResolveItemScopeContext([
+    { assignment_kind: "field", state: "accepted", assignee_user_id: 1 },
+    { assignment_kind: "editorial", state: "assigned", assignee_user_id: 2 },
+  ]);
+  assert.equal(result.onlyFieldAcceptedOpen, false);
+});
+
+test("resolveItemScopeContext: [field/accepted, editorial/accepted] → onlyFieldAcceptedOpen=false", () => {
+  const result = callResolveItemScopeContext([
+    { assignment_kind: "field", state: "accepted", assignee_user_id: 1 },
+    { assignment_kind: "editorial", state: "accepted", assignee_user_id: 2 },
+  ]);
+  assert.equal(result.onlyFieldAcceptedOpen, false);
+});
+
+test("resolveItemScopeContext: [editorial/accepted] → onlyFieldAcceptedOpen=false", () => {
+  const result = callResolveItemScopeContext([
+    { assignment_kind: "editorial", state: "accepted", assignee_user_id: 1 },
+  ]);
+  assert.equal(result.onlyFieldAcceptedOpen, false);
+});
+
+test("resolveItemScopeContext: [field/in_progress] → onlyFieldAcceptedOpen=false", () => {
+  const result = callResolveItemScopeContext([
+    { assignment_kind: "field", state: "in_progress", assignee_user_id: 1 },
+  ]);
+  assert.equal(result.onlyFieldAcceptedOpen, false);
+});
+
+test("resolveItemScopeContext: [] → onlyFieldAcceptedOpen=false", () => {
+  const result = callResolveItemScopeContext([]);
+  assert.equal(result.onlyFieldAcceptedOpen, false);
+});
+
+test("resolveItemScopeContext: [field/accepted, field/closed] → onlyFieldAcceptedOpen=true (closed filtered)", () => {
+  const result = callResolveItemScopeContext([
+    { assignment_kind: "field", state: "accepted", assignee_user_id: 1 },
+    { assignment_kind: "field", state: "closed", assignee_user_id: 2 },
+  ]);
+  assert.equal(result.onlyFieldAcceptedOpen, true);
+});
+
+test("resolveItemScopeContext: [FIELD/ACCEPTED with whitespace] → onlyFieldAcceptedOpen=true (trim+lowercase)", () => {
+  const result = callResolveItemScopeContext([
+    { assignment_kind: " FIELD ", state: " ACCEPTED ", assignee_user_id: 1 },
+  ]);
+  assert.equal(result.onlyFieldAcceptedOpen, true);
+});
 
 const APP_JS_PATH = path.resolve(collectorRoot, "server", "public", "app.js");
 
