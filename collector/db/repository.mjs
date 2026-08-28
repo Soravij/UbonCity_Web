@@ -1267,6 +1267,57 @@ function hasMeaningfulValue(value) {
   return String(value || "").trim().length > 0;
 }
 
+function parseCtaJson(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch { return {}; }
+}
+
+const CTA_META_KEYS = new Set(["confidence", "checked", "found", "source", "note"]);
+
+function isEmptyCtaScalar(val) {
+  if (val === null || val === undefined) return true;
+  if (typeof val === "string") {
+    const t = val.trim();
+    return t === "" || t === "null" || t === "undefined";
+  }
+  if (Array.isArray(val)) return val.length === 0;
+  return false;
+}
+
+function isEmptyCtaEntry(val) {
+  if (val && typeof val === "object" && !Array.isArray(val)) {
+    if ("value" in val) return isEmptyCtaScalar(val.value);
+    return Object.entries(val).every(
+      ([k, v]) => CTA_META_KEYS.has(k) || isEmptyCtaEntry(v)
+    );
+  }
+  return isEmptyCtaScalar(val);
+}
+
+function hasAnyCtaValue(value) {
+  return Object.entries(parseCtaJson(value)).some(
+    ([key, val]) => !CTA_META_KEYS.has(key) && !isEmptyCtaEntry(val)
+  );
+}
+
+function mergeCtaPreservingExisting(previousValue, nextValue) {
+  const prev = parseCtaJson(previousValue);
+  const next = parseCtaJson(nextValue);
+  const merged = { ...prev };
+  for (const [key, val] of Object.entries(next)) {
+    const isExplicitReport =
+      val && typeof val === "object" && !Array.isArray(val) && val.checked === true;
+    if (isExplicitReport || CTA_META_KEYS.has(key) || !isEmptyCtaEntry(val)) {
+      merged[key] = val;
+    }
+  }
+  return merged;
+}
+
 function normalizeAiCtaContactJson(value, fieldName = "ai_cta_contact_json") {
   const parsed = value && typeof value === "object" && !Array.isArray(value)
     ? value
@@ -9647,6 +9698,24 @@ export function createRepository(db) {
     return getFieldPackBundleById(row.id);
   }
 
+  function getCtaContinuationContext(contentItemId) {
+    const itemId = Number(contentItemId || 0);
+    if (!itemId) return { ai_cta_contact_json: {}, curated_cta_contact_json: {} };
+    const rows = db.prepare(`
+      SELECT ai_cta_contact_json, curated_cta_contact_json
+      FROM field_packs
+      WHERE content_item_id = ?
+      ORDER BY COALESCE(archived_at, updated_at, created_at) ASC, id ASC
+    `).all(itemId);
+    let ai = {};
+    let curated = {};
+    for (const row of rows) {
+      ai = mergeCtaPreservingExisting(ai, row.ai_cta_contact_json);
+      curated = mergeCtaPreservingExisting(curated, row.curated_cta_contact_json);
+    }
+    return { ai_cta_contact_json: ai, curated_cta_contact_json: curated };
+  }
+
   function listFieldPacksByItem(contentItemId) {
     const itemId = Number(contentItemId || 0);
     if (!itemId) return [];
@@ -9789,7 +9858,19 @@ export function createRepository(db) {
   }
 
   function createFieldPackInternal(payload = {}) {
-    const normalized = normalizeFieldPackPayload(payload, { requireContentItemId: true });
+    const continuation = getCtaContinuationContext(payload?.content_item_id);
+    const payloadWithCta = {
+      ...payload,
+      ai_cta_contact_json: mergeCtaPreservingExisting(
+        continuation?.ai_cta_contact_json,
+        payload?.ai_cta_contact_json
+      ),
+      curated_cta_contact_json: mergeCtaPreservingExisting(
+        continuation?.curated_cta_contact_json,
+        payload?.curated_cta_contact_json
+      ),
+    };
+    const normalized = normalizeFieldPackPayload(payloadWithCta, { requireContentItemId: true });
     const item = getItem(normalized.content_item_id);
     if (!item) throw new Error("content item not found");
     assertFieldPackSourcesBelongToItem(normalized.content_item_id, normalized);
