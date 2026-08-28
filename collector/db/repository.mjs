@@ -1309,7 +1309,11 @@ function mergeCtaPreservingExisting(previousValue, nextValue) {
   const next = parseCtaJson(nextValue);
   const merged = { ...prev };
   for (const [key, val] of Object.entries(next)) {
-    if (CTA_META_KEYS.has(key) || !isEmptyCtaEntry(val)) merged[key] = val;
+    const isExplicitReport =
+      val && typeof val === "object" && !Array.isArray(val) && val.checked === true;
+    if (isExplicitReport || CTA_META_KEYS.has(key) || !isEmptyCtaEntry(val)) {
+      merged[key] = val;
+    }
   }
   return merged;
 }
@@ -9694,19 +9698,22 @@ export function createRepository(db) {
     return getFieldPackBundleById(row.id);
   }
 
-  function getFieldPackForContinuation(contentItemId) {
+  function getCtaContinuationContext(contentItemId) {
     const itemId = Number(contentItemId || 0);
-    if (!itemId) return null;
-    const packHasCta = (row) =>
-      row && (hasAnyCtaValue(row.ai_cta_contact_json) || hasAnyCtaValue(row.curated_cta_contact_json));
-    const current = getCurrentFieldPackByItem(itemId);
-    if (packHasCta(current)) return current;
+    if (!itemId) return { ai_cta_contact_json: {}, curated_cta_contact_json: {} };
     const rows = db.prepare(`
-      SELECT * FROM field_packs
+      SELECT ai_cta_contact_json, curated_cta_contact_json
+      FROM field_packs
       WHERE content_item_id = ?
-      ORDER BY COALESCE(archived_at, updated_at, created_at) DESC, id DESC
+      ORDER BY COALESCE(archived_at, updated_at, created_at) ASC, id ASC
     `).all(itemId);
-    return rows.find((row) => row.id !== current?.id && packHasCta(row)) || null;
+    let ai = {};
+    let curated = {};
+    for (const row of rows) {
+      ai = mergeCtaPreservingExisting(ai, row.ai_cta_contact_json);
+      curated = mergeCtaPreservingExisting(curated, row.curated_cta_contact_json);
+    }
+    return { ai_cta_contact_json: ai, curated_cta_contact_json: curated };
   }
 
   function listFieldPacksByItem(contentItemId) {
@@ -9851,7 +9858,7 @@ export function createRepository(db) {
   }
 
   function createFieldPackInternal(payload = {}) {
-    const continuation = getFieldPackForContinuation(payload?.content_item_id);
+    const continuation = getCtaContinuationContext(payload?.content_item_id);
     const payloadWithCta = {
       ...payload,
       ai_cta_contact_json: mergeCtaPreservingExisting(
@@ -12861,7 +12868,6 @@ export function createRepository(db) {
     updateFieldPack,
     getFieldPackBundleById,
     getCurrentFieldPackByItem,
-    getFieldPackForContinuation,
     listFieldPacksByItem,
     returnFieldPackToCleanAtomic,
     listAgentProfiles,

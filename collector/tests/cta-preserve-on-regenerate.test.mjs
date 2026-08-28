@@ -43,9 +43,23 @@ function mergeCtaPreservingExisting(previousValue, nextValue) {
   const next = parseCtaJson(nextValue);
   const merged = { ...prev };
   for (const [key, val] of Object.entries(next)) {
-    if (CTA_META_KEYS.has(key) || !isEmptyCtaEntry(val)) merged[key] = val;
+    const isExplicitReport =
+      val && typeof val === "object" && !Array.isArray(val) && val.checked === true;
+    if (isExplicitReport || CTA_META_KEYS.has(key) || !isEmptyCtaEntry(val)) {
+      merged[key] = val;
+    }
   }
   return merged;
+}
+
+function getCtaContinuationContext(packs) {
+  let ai = {};
+  let curated = {};
+  for (const pack of packs) {
+    ai = mergeCtaPreservingExisting(ai, pack.ai_cta_contact_json);
+    curated = mergeCtaPreservingExisting(curated, pack.curated_cta_contact_json);
+  }
+  return { ai_cta_contact_json: ai, curated_cta_contact_json: curated };
 }
 
 test("new empty values preserve previous values", () => {
@@ -210,4 +224,43 @@ test("false is a meaningful value (not empty)", () => {
 test("0 is a meaningful value (not empty)", () => {
   assert.equal(isEmptyCtaEntry(0), false);
   assert.equal(hasAnyCtaValue({ count: 0 }), true);
+});
+
+test("accumulate: old pack facebook_url + new pack phone → both present", () => {
+  const packs = [
+    { ai_cta_contact_json: { facebook_url: "https://fb.com/old", phone: null }, curated_cta_contact_json: {} },
+    { ai_cta_contact_json: { phone: "082-999-9999", facebook_url: null }, curated_cta_contact_json: {} },
+  ];
+  const result = getCtaContinuationContext(packs);
+  assert.equal(result.ai_cta_contact_json.facebook_url, "https://fb.com/old");
+  assert.equal(result.ai_cta_contact_json.phone, "082-999-9999");
+});
+
+test("accumulate: newer pack value wins for same field", () => {
+  const packs = [
+    { ai_cta_contact_json: { phone: "082-111-1111" }, curated_cta_contact_json: {} },
+    { ai_cta_contact_json: { phone: "082-222-2222" }, curated_cta_contact_json: {} },
+  ];
+  const result = getCtaContinuationContext(packs);
+  assert.equal(result.ai_cta_contact_json.phone, "082-222-2222");
+});
+
+test("curated checked:true found:false value:null overwrites prev with real value", () => {
+  const prev = { phone: { checked: true, found: true, value: "0832894629", source: [], note: null } };
+  const next = { phone: { checked: true, found: false, value: null, source: [], note: null } };
+  const result = mergeCtaPreservingExisting(prev, next);
+  assert.equal(result.phone.value, null);
+  assert.equal(result.phone.found, false);
+});
+
+test("curated checked:false found:false value:null does not overwrite prev", () => {
+  const prev = { phone: { checked: true, found: true, value: "0832894629", source: [], note: null } };
+  const next = { phone: { checked: false, found: false, value: null, source: [], note: null } };
+  const result = mergeCtaPreservingExisting(prev, next);
+  assert.equal(result.phone.value, "0832894629");
+});
+
+test("item with no packs returns empty objects", () => {
+  const result = getCtaContinuationContext([]);
+  assert.deepEqual(result, { ai_cta_contact_json: {}, curated_cta_contact_json: {} });
 });
