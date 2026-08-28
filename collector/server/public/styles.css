@@ -8640,7 +8640,7 @@ body {
 }
 
 :root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-list-panel-review,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
+:root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: var(--as-light-card) !important;
   border-color: var(--as-light-line) !important;
