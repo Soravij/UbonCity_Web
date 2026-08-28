@@ -3619,15 +3619,16 @@ function dropClosedAssignments(assignments = []) {
 }
 
 function dropDuplicateManagedAssignments(assignments, actorId) {
-  const REVIEW_QUEUE_STATES = new Set(["submitted", "resubmitted"]);
+  const ACTOR_OWNED_ELSEWHERE_STATES = new Set([
+    "assigned", "in_progress", "revision_requested", "submitted", "resubmitted",
+  ]);
   if (!Array.isArray(assignments)) return [];
   return assignments.filter((assignment) => {
     if (!assignment) return false;
-    const state = assignment.state || assignment.assignment_state || "";
-    const kind = assignment.assignment_kind || "";
+    const state = String(assignment.state || assignment.assignment_state || "").trim().toLowerCase();
+    const kind = String(assignment.assignment_kind || "").trim().toLowerCase();
     if (kind === "field" && state === "accepted") return false;
-    if (REVIEW_QUEUE_STATES.has(state)) return false;
-    if (Number(assignment.assignee_user_id) === Number(actorId)) return false;
+    if (Number(assignment.assignee_user_id) === Number(actorId) && ACTOR_OWNED_ELSEWHERE_STATES.has(state)) return false;
     return true;
   });
 }
@@ -10930,14 +10931,12 @@ app.get("/api/assignments/mine", requireRole("owner", "admin", "editor", "freela
   const assigneeId = Number(req.query.assignee_user_id || 0);
   if (!assigneeId) {
     if (authRole === "freelance" || authRole === "editor") {
-      const assignments = dropClosedAssignments(repo.listAssignmentsByAssignee(req.authUser?.id, limit))
-        .filter((a) => !(String(a?.assignment_kind || "") === "field" && String(a?.state || "").trim().toLowerCase() === "accepted"));
+      const assignments = dropClosedAssignments(repo.listAssignmentsByAssignee(req.authUser?.id, limit));
       res.json({ assignments });
       return;
     }
     if (authRole === "owner") {
-      const assignments = dropClosedAssignments(repo.listAssignments(limit))
-        .filter((a) => !(String(a?.assignment_kind || "") === "field" && String(a?.state || "").trim().toLowerCase() === "accepted"));
+      const assignments = dropClosedAssignments(repo.listAssignments(limit));
       res.json({ assignments });
       return;
     }

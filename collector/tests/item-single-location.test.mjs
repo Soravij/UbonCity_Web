@@ -45,18 +45,18 @@ test("dropDuplicateManagedAssignments removes field:accepted", () => {
   assert.equal(result[0].id, 2);
 });
 
-test("dropDuplicateManagedAssignments removes submitted (review queue)", () => {
+test("dropDuplicateManagedAssignments keeps submitted of another user (not assignee)", () => {
   const input = [
     { id: 10, assignment_kind: "field", state: "submitted", assignee_user_id: 99 },
     { id: 11, assignment_kind: "field", state: "resubmitted", assignee_user_id: 99 },
     { id: 12, assignment_kind: "editorial", state: "assigned", assignee_user_id: 99 },
   ];
   const result = dropDuplicateManagedAssignments(input, 1);
-  assert.equal(result.length, 1);
-  assert.equal(result[0].id, 12);
+  assert.equal(result.length, 3);
+  assert.deepEqual(result.map((r) => r.id), [10, 11, 12]);
 });
 
-test("dropDuplicateManagedAssignments removes assignee === actor", () => {
+test("dropDuplicateManagedAssignments removes assignee===actor with owned-elsewhere state", () => {
   const input = [
     { id: 20, assignment_kind: "editorial", state: "assigned", assignee_user_id: 5 },
     { id: 21, assignment_kind: "field", state: "in_progress", assignee_user_id: 5 },
@@ -72,6 +72,44 @@ test("dropDuplicateManagedAssignments keeps editorial:assigned of another user",
   const result = dropDuplicateManagedAssignments(input, 1);
   assert.equal(result.length, 1);
   assert.equal(result[0].id, 30);
+});
+
+test("dropDuplicateManagedAssignments drops field:accepted even when assignee===actor", () => {
+  const input = [
+    { id: 40, assignment_kind: "field", state: "accepted", assignee_user_id: 5 },
+  ];
+  const result = dropDuplicateManagedAssignments(input, 5);
+  assert.equal(result.length, 0);
+});
+
+test("dropDuplicateManagedAssignments keeps editorial:accepted when assignee===actor", () => {
+  const input = [
+    { id: 50, assignment_kind: "editorial", state: "accepted", assignee_user_id: 5 },
+  ];
+  const result = dropDuplicateManagedAssignments(input, 5);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, 50);
+});
+
+// ── string-snippet: buildManagedAssignmentsForActor wraps dropDuplicateManagedAssignments ──
+
+test("buildManagedAssignmentsForActor owner path wraps dropDuplicateManagedAssignments(dropClosedAssignments(...))", () => {
+  assert.ok(
+    indexServer.includes("dropDuplicateManagedAssignments(dropClosedAssignments("),
+    "owner return should wrap dropClosedAssignments with dropDuplicateManagedAssignments"
+  );
+});
+
+test("buildManagedAssignmentsForActor admin/user path wraps dropDuplicateManagedAssignments(..., actorUserId)", () => {
+  const fnSource = extractNamedFunctionSource(indexServer, "buildManagedAssignmentsForActor");
+  assert.ok(
+    fnSource.includes(".slice("),
+    "admin/user path should have .slice("
+  );
+  assert.ok(
+    fnSource.includes(", actorUserId)"),
+    "admin/user path should pass actorUserId to dropDuplicateManagedAssignments"
+  );
 });
 
 // ── resolveQueueBucket (loadResolveQueueBucket pattern) ──
