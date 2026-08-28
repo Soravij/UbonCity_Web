@@ -9647,6 +9647,19 @@ export function createRepository(db) {
     return getFieldPackBundleById(row.id);
   }
 
+  function getFieldPackForContinuation(contentItemId) {
+    const itemId = Number(contentItemId || 0);
+    if (!itemId) return null;
+    const current = getCurrentFieldPackByItem(itemId);
+    if (current) return current;
+    return db.prepare(`
+      SELECT * FROM field_packs
+      WHERE content_item_id = ?
+      ORDER BY COALESCE(archived_at, updated_at, created_at) DESC, id DESC
+      LIMIT 1
+    `).get(itemId) || null;
+  }
+
   function listFieldPacksByItem(contentItemId) {
     const itemId = Number(contentItemId || 0);
     if (!itemId) return [];
@@ -12787,6 +12800,7 @@ export function createRepository(db) {
     updateFieldPack,
     getFieldPackBundleById,
     getCurrentFieldPackByItem,
+    getFieldPackForContinuation,
     listFieldPacksByItem,
     returnFieldPackToCleanAtomic,
     listAgentProfiles,
