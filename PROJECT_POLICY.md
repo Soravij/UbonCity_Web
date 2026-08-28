@@ -566,6 +566,7 @@ Placeholders:
 - Nothing from the finished round is deleted: its handoff snapshot, submission, and `requested_check_returns` stay as the record of what was confirmed and when.
 - An item has at most one open field round. Opening a rework round closes the previous one.
 - The current (newest) round is the source of truth for display; superseded rounds must not shadow it.
+- An item must appear in exactly one place system-wide: the point where work is currently happening. The in-flight diagnostic table is the only exception.
 - Acceptance patches confirmed values, it does not replace them:
   - `checked` + found → overwrite the confirmed value
   - `checked` + not found → the human verified there is none, clear the confirmed value

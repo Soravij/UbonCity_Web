@@ -756,6 +756,12 @@ function resolveQueueBucket(itemSnapshot) {
   const fieldPackStatus = String(source?.current_field_pack_status || source?.field_pack_status || snapshot?.current_field_pack_status || snapshot?.field_pack_status || "").trim().toLowerCase();
   const hasFieldPackPointer = Number(source?.current_field_pack_id || source?.field_pack_id || snapshot?.current_field_pack_id || snapshot?.field_pack_id || 0) > 0;
   const hasFieldPack = hasFieldPackPointer || Boolean(fieldPackStatus);
+  const ADVANCED_PRODUCTION_STATES = new Set([
+    "brief_generated", "generated", "ready_for_content", "field_working",
+    "field_review", "ready_for_writer", "writing_assigned", "writing",
+    "content_in_progress", "in_review", "needs_revision",
+    "ready_for_publish", "submitted_for_admin_review",
+  ]);
 
   if (getUnknownWorkflowState(source)) return "unknown_workflow";
 
@@ -797,6 +803,7 @@ function resolveQueueBucket(itemSnapshot) {
   if (hasFieldPack) {
     return "field_pack_review";
   }
+  if (ADVANCED_PRODUCTION_STATES.has(productionState)) return "unknown_workflow";
   return "raw_prep";
 }
 
@@ -5176,6 +5183,10 @@ function buildRawQueueStatusLabel(item, queueType) {
   const anomaly = getUnknownWorkflowState(item);
   if (anomaly) return `⚠ สถานะผิดปกติ: ${anomaly.state}`;
   const bucket = resolveQueueBucket(item);
+  if (bucket === "unknown_workflow") {
+    const productionState = String(item?.productionState || item?.production_state || "").trim().toLowerCase();
+    return `⚠ ${productionState} — ไม่มีงานที่กำลังทำ`;
+  }
   if (queueType === "review") {
     return bucket === "handoff" ? "พร้อมส่งต่อ" : "รอตรวจชุดสั่งงาน";
   }

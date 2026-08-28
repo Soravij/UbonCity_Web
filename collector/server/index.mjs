@@ -3618,6 +3618,20 @@ function dropClosedAssignments(assignments = []) {
   );
 }
 
+function dropDuplicateManagedAssignments(assignments, actorId) {
+  const REVIEW_QUEUE_STATES = new Set(["submitted", "resubmitted"]);
+  if (!Array.isArray(assignments)) return [];
+  return assignments.filter((assignment) => {
+    if (!assignment) return false;
+    const state = assignment.state || assignment.assignment_state || "";
+    const kind = assignment.assignment_kind || "";
+    if (kind === "field" && state === "accepted") return false;
+    if (REVIEW_QUEUE_STATES.has(state)) return false;
+    if (Number(assignment.assignee_user_id) === Number(actorId)) return false;
+    return true;
+  });
+}
+
 function buildActionableAssignmentsForActor(actorUserId, limit = 50) {
   const actorId = Number(actorUserId || 0);
   if (!actorId) return [];
@@ -3686,7 +3700,7 @@ function buildReviewAssignmentsForActor(actorUserId, role, limit = 50) {
 
 function buildManagedAssignmentsForActor(actorUserId, role, limit = 50) {
   if (role === "owner") {
-    return dropClosedAssignments(repo.listAssignments(limit));
+    return dropDuplicateManagedAssignments(dropClosedAssignments(repo.listAssignments(limit)), actorUserId);
   }
   if (role !== "admin" && role !== "user") {
     return [];
@@ -3696,14 +3710,14 @@ function buildManagedAssignmentsForActor(actorUserId, role, limit = 50) {
     return [];
   }
   const scopeSet = new Set(scopeUserIds.map((value) => Number(value || 0)).filter(Boolean));
-  return sortAssignmentsForList(
+  return dropDuplicateManagedAssignments(sortAssignmentsForList(
     dropClosedAssignments(
       filterAssignmentsByManagementLine(
         { id: actorUserId, role },
         repo.listAssignmentsByScopeUserIds(Array.from(scopeSet), limit)
       )
     )
-  ).slice(0, Math.max(1, Math.min(200, Number(limit) || 50)));
+  ).slice(0, Math.max(1, Math.min(200, Number(limit) || 50))), actorUserId);
 }
 
 function hasItemBriefAccess(req, contentItemId, role = actorPolicyRole(req)) {
@@ -10916,12 +10930,14 @@ app.get("/api/assignments/mine", requireRole("owner", "admin", "editor", "freela
   const assigneeId = Number(req.query.assignee_user_id || 0);
   if (!assigneeId) {
     if (authRole === "freelance" || authRole === "editor") {
-      const assignments = dropClosedAssignments(repo.listAssignmentsByAssignee(req.authUser?.id, limit));
+      const assignments = dropClosedAssignments(repo.listAssignmentsByAssignee(req.authUser?.id, limit))
+        .filter((a) => !(String(a?.assignment_kind || "") === "field" && String(a?.state || "").trim().toLowerCase() === "accepted"));
       res.json({ assignments });
       return;
     }
     if (authRole === "owner") {
-      const assignments = dropClosedAssignments(repo.listAssignments(limit));
+      const assignments = dropClosedAssignments(repo.listAssignments(limit))
+        .filter((a) => !(String(a?.assignment_kind || "") === "field" && String(a?.state || "").trim().toLowerCase() === "accepted"));
       res.json({ assignments });
       return;
     }
