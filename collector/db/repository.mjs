@@ -1267,6 +1267,40 @@ function hasMeaningfulValue(value) {
   return String(value || "").trim().length > 0;
 }
 
+function parseCtaJson(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch { return {}; }
+}
+
+function isEmptyCtaValue(val) {
+  if (val === null || val === undefined) return true;
+  if (typeof val === "string") {
+    const t = val.trim();
+    return t === "" || t === "null" || t === "undefined";
+  }
+  if (Array.isArray(val)) return val.length === 0;
+  if (typeof val === "object") return Object.keys(val).length === 0;
+  return false;
+}
+
+function hasAnyCtaValue(value) {
+  return Object.values(parseCtaJson(value)).some((v) => !isEmptyCtaValue(v));
+}
+
+function mergeCtaPreservingExisting(previousValue, nextValue) {
+  const prev = parseCtaJson(previousValue);
+  const next = parseCtaJson(nextValue);
+  const merged = { ...prev };
+  for (const [key, val] of Object.entries(next)) {
+    if (!isEmptyCtaValue(val)) merged[key] = val;
+  }
+  return merged;
+}
+
 function normalizeAiCtaContactJson(value, fieldName = "ai_cta_contact_json") {
   const parsed = value && typeof value === "object" && !Array.isArray(value)
     ? value
@@ -9650,14 +9684,16 @@ export function createRepository(db) {
   function getFieldPackForContinuation(contentItemId) {
     const itemId = Number(contentItemId || 0);
     if (!itemId) return null;
+    const packHasCta = (row) =>
+      row && (hasAnyCtaValue(row.ai_cta_contact_json) || hasAnyCtaValue(row.curated_cta_contact_json));
     const current = getCurrentFieldPackByItem(itemId);
-    if (current) return current;
-    return db.prepare(`
+    if (packHasCta(current)) return current;
+    const rows = db.prepare(`
       SELECT * FROM field_packs
       WHERE content_item_id = ?
       ORDER BY COALESCE(archived_at, updated_at, created_at) DESC, id DESC
-      LIMIT 1
-    `).get(itemId) || null;
+    `).all(itemId);
+    return rows.find((row) => row.id !== current?.id && packHasCta(row)) || null;
   }
 
   function listFieldPacksByItem(contentItemId) {
@@ -9802,7 +9838,19 @@ export function createRepository(db) {
   }
 
   function createFieldPackInternal(payload = {}) {
-    const normalized = normalizeFieldPackPayload(payload, { requireContentItemId: true });
+    const continuation = getFieldPackForContinuation(payload?.content_item_id);
+    const payloadWithCta = {
+      ...payload,
+      ai_cta_contact_json: mergeCtaPreservingExisting(
+        continuation?.ai_cta_contact_json,
+        payload?.ai_cta_contact_json
+      ),
+      curated_cta_contact_json: mergeCtaPreservingExisting(
+        continuation?.curated_cta_contact_json,
+        payload?.curated_cta_contact_json
+      ),
+    };
+    const normalized = normalizeFieldPackPayload(payloadWithCta, { requireContentItemId: true });
     const item = getItem(normalized.content_item_id);
     if (!item) throw new Error("content item not found");
     assertFieldPackSourcesBelongToItem(normalized.content_item_id, normalized);

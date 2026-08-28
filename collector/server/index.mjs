@@ -12743,24 +12743,6 @@ const FIELD_PACK_PRE_GENERATED_PLACE_PRODUCTION_STATES = new Set(
   ["collected", "analyzed"].filter((state) => PRODUCTION_STATES.has(state))
 );
 
-function parseCtaJson(value) {
-  if (!value) return {};
-  if (typeof value === "object") return value;
-  try { return JSON.parse(value) || {}; } catch { return {}; }
-}
-
-function mergeCtaPreservingExisting(previousValue, nextValue) {
-  const prev = parseCtaJson(previousValue);
-  const next = parseCtaJson(nextValue);
-  const merged = { ...prev };
-  for (const [key, val] of Object.entries(next)) {
-    const isEmpty = val === null || val === undefined || val === ""
-      || (Array.isArray(val) && val.length === 0);
-    if (!isEmpty) merged[key] = val;
-  }
-  return merged;
-}
-
 function isFieldPackReadyStatusRequest(rawStatus) {
   if (rawStatus == null) return false;
   const normalized = String(rawStatus).trim().toLowerCase();
@@ -12902,7 +12884,6 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
   }
 
   const currentFieldPack = repo.getCurrentFieldPackByItem(id);
-  const continuationFieldPack = repo.getFieldPackForContinuation(id);
 
   try {
     const aiConfig = getEffectiveAiConfig();
@@ -12937,10 +12918,6 @@ app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "
     fieldPack = repo.createFieldPack({
       ...(currentFieldPack || {}),
       ...fieldPackUpdatePayload,
-      ai_cta_contact_json: mergeCtaPreservingExisting(
-        continuationFieldPack?.ai_cta_contact_json,
-        fieldPackUpdatePayload.ai_cta_contact_json
-      ),
       content_item_id: id,
       updated_by: actorEmail(req),
     });
