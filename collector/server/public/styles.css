@@ -7154,8 +7154,8 @@ body {
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-review,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-work,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
-#panel-assignments.as-scope #assignment-list-panel-work,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-work,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-brief-card,
@@ -7189,7 +7189,7 @@ body {
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-review,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
@@ -7520,7 +7520,7 @@ body {
 :root[data-theme="dark"] #panel-assignments.as-scope .secondary-panel,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-review,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
@@ -7684,7 +7684,7 @@ body {
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-review,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border-color: #334155 !important;
   background: #0f172a !important;
@@ -8257,7 +8257,7 @@ body {
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-review,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-workspace-section,
 :root[data-theme="dark"] #panel-assignments.as-scope .assignment-review-submission-section,
@@ -8326,7 +8326,7 @@ body {
 /* Phase 2 dark: reduce borders 40-60%, use layered surfaces + spacing */
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-review,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border: 1px solid rgba(255, 255, 255, 0.05) !important; /* keep only outer frame */
   background: linear-gradient(180deg, #111827 0%, #0f172a 100%) !important;
@@ -8554,7 +8554,7 @@ body {
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-review,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: var(--as-layer-card) !important;
   border-color: rgba(255, 255, 255, 0.045) !important;
@@ -8640,7 +8640,7 @@ body {
 }
 
 :root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-list-panel-review,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
+:root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root:not([data-theme="dark"]) #panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: var(--as-light-card) !important;
   border-color: var(--as-light-line) !important;
@@ -9161,7 +9161,7 @@ body {
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-review,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2) !important;
 }
@@ -9305,7 +9305,7 @@ body {
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-review,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   border-color: rgba(148, 163, 184, 0.2) !important;
 }
@@ -9395,7 +9395,7 @@ body {
 
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-review,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
-#panel-assignments.as-scope #assignment-list-panel-handoff,
+:root[data-theme="dark"] #panel-assignments.as-scope #assignment-list-panel-handoff,
 :root[data-theme="dark"] #panel-assignments.as-scope #assignment-detail-panel-handoff {
   background: color-mix(in srgb, #111827 92%, #0f172a 8%) !important;
 }
