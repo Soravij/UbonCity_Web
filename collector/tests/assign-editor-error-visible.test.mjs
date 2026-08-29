@@ -42,6 +42,7 @@ function extractFunctionBlock(source, name) {
 
 function createElement(id = "") {
   const classes = new Set();
+  const listeners = {};
   const syncClassName = (node) => {
     node.className = Array.from(classes).join(" ");
   };
@@ -62,7 +63,8 @@ function createElement(id = "") {
     querySelector() { return null; },
     querySelectorAll() { return []; },
     closest() { return null; },
-    addEventListener() {},
+    addEventListener(name, handler) { listeners[name] = handler; },
+    listeners,
     classList: {
       add(...tokens) {
         for (const t of tokens) { if (t) classes.add(t); }
@@ -84,10 +86,16 @@ function loadHarness(options = {}) {
 
   const setBannerSrc = extractFunctionBlock(source, "setBanner");
   const assignEditorSrc = extractFunctionBlock(source, "assignEditor");
+  const wireSrc = extractFunctionBlock(source, "wire");
 
   const selectEl = createElement("editor-assignee-select");
   selectEl.value = "5";
   elements.set("editor-assignee-select", selectEl);
+
+  elements.set("btn-assign-editor", createElement("btn-assign-editor"));
+  elements.set("btn-back-home", createElement("btn-back-home"));
+  elements.set("btn-open-selected-workspace", createElement("btn-open-selected-workspace"));
+  elements.set("workspace-status", createElement("workspace-status"));
 
   const document = {
     getElementById(id) {
@@ -108,6 +116,7 @@ function loadHarness(options = {}) {
   };
 
   const apiImpl = options.api || (async () => ({}));
+  const inlineStatusCalls = [];
 
   const context = {
     console,
@@ -124,6 +133,13 @@ function loadHarness(options = {}) {
     renderAll() {},
     applyActionGuards() {},
     async prefetchProcessSummaries() {},
+    queueRows() { return []; },
+    primaryEntryUrl() { return "/"; },
+    workspaceUrl() { return "/"; },
+    async loadIntake() {},
+    setInlineStatus(id, message, kind) {
+      inlineStatusCalls.push({ id, message, kind });
+    },
     qs(id) { return document.getElementById(id); },
     globalThis: null,
   };
@@ -132,23 +148,22 @@ function loadHarness(options = {}) {
   const code = `
 ${setBannerSrc}
 ${assignEditorSrc}
-globalThis.__testHooks = { setBanner, assignEditor };
+${wireSrc}
+globalThis.__testHooks = { setBanner, assignEditor, wire };
 `;
 
   vm.runInNewContext(code, context, { filename: "article-intake-test.js" });
-  return { hooks: context.__testHooks, elements, state };
+  return { hooks: context.__testHooks, elements, state, inlineStatusCalls };
 }
 
-test("assignEditor error path shows error banner on #workspace-status", async () => {
+test("assignEditor error path: wire click handler calls setBanner with error", async () => {
   const apiError = new Error("ไม่พบผู้รับผิดชอบ");
   const apiImpl = async () => { throw apiError; };
   const { hooks, elements } = loadHarness({ api: apiImpl });
 
-  try {
-    await hooks.assignEditor();
-  } catch (error) {
-    hooks.setBanner(error.message, "error");
-  }
+  hooks.wire();
+  const btn = elements.get("btn-assign-editor");
+  await btn.listeners["click"]();
 
   const banner = elements.get("workspace-status");
   assert.ok(banner, "workspace-status element should exist");
@@ -157,10 +172,12 @@ test("assignEditor error path shows error banner on #workspace-status", async ()
   assert.ok(!banner.classList.contains("hidden"), "should not be hidden");
 });
 
-test("assignEditor success path shows success banner on #workspace-status", async () => {
+test("assignEditor success path: wire click handler shows success banner", async () => {
   const { hooks, elements } = loadHarness({ api: async () => ({}) });
 
-  await hooks.assignEditor();
+  hooks.wire();
+  const btn = elements.get("btn-assign-editor");
+  await btn.listeners["click"]();
 
   const banner = elements.get("workspace-status");
   assert.ok(banner, "workspace-status element should exist");
@@ -168,4 +185,20 @@ test("assignEditor success path shows success banner on #workspace-status", asyn
   assert.ok(banner.classList.contains("is-success"), "should have is-success class");
   assert.ok(!banner.classList.contains("hidden"), "should not be hidden");
   assert.ok(!banner.classList.contains("is-error"), "should not have is-error");
+});
+
+test("setBanner('') clears text and adds hidden class", () => {
+  const { hooks, elements } = loadHarness();
+
+  elements.get("workspace-status").textContent = "old message";
+  elements.get("workspace-status").classList.add("is-error");
+
+  hooks.setBanner("");
+
+  const banner = elements.get("workspace-status");
+  assert.equal(banner.textContent, "");
+  assert.ok(banner.classList.contains("hidden"), "should have hidden class");
+  assert.ok(!banner.classList.contains("is-error"), "should not have is-error");
+  assert.ok(!banner.classList.contains("is-loading"), "should not have is-loading");
+  assert.ok(!banner.classList.contains("is-success"), "should not have is-success");
 });
