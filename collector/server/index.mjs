@@ -11430,14 +11430,21 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
         _dbgMissing.push(...findMissingPromptAnswers(_dbgGroups.mustVerify, _dbgPayload.verified_answers).map((p) => `สิ่งที่ต้องยืนยัน: ${p}`));
         _dbgMissing.push(...findMissingPromptAnswers(_dbgGroups.mustAsk, _dbgPayload.question_answers).map((p) => `คำตอบจากหน้างาน: ${p}`));
       }
-      console.log("[DEBUG-SUBMISSION] assignment=%d req.body.verified_answers=%s", assignmentId, JSON.stringify(_dbgPayload.verified_answers || null));
-      console.log("[DEBUG-SUBMISSION] assignment=%d req.body.question_answers=%s", assignmentId, JSON.stringify(_dbgPayload.question_answers || null));
-      console.log("[DEBUG-SUBMISSION] assignment=%d expected.mustVerify=%s", assignmentId, JSON.stringify(_dbgGroups.mustVerify));
-      console.log("[DEBUG-SUBMISSION] assignment=%d expected.mustAsk=%s", assignmentId, JSON.stringify(_dbgGroups.mustAsk));
-      console.log("[DEBUG-SUBMISSION] assignment=%d missing=%s", assignmentId, JSON.stringify(_dbgMissing));
-      console.log("[DEBUG-SUBMISSION] assignment=%d fieldPackId=%s", assignmentId, _dbgCtx.fieldPack?.id ?? "null");
+      const _dbgLogPath = path.resolve("collector", "logs", "debug-submission.log");
+      const _dbgLine = JSON.stringify({
+        ts: new Date().toISOString(),
+        assignmentId,
+        fieldPackId: _dbgCtx.fieldPack?.id ?? null,
+        reqBodyVerifiedAnswers: _dbgPayload.verified_answers || null,
+        reqBodyQuestionAnswers: _dbgPayload.question_answers || null,
+        expectedMustVerify: _dbgGroups.mustVerify,
+        expectedMustAsk: _dbgGroups.mustAsk,
+        missing: _dbgMissing,
+      }) + "\n";
+      fsSync.appendFileSync(_dbgLogPath, _dbgLine);
     } catch (_dbgErr) {
-      console.log("[DEBUG-SUBMISSION] assignment=%d log error: %s", assignmentId, _dbgErr?.message);
+      const _dbgLogPath = path.resolve("collector", "logs", "debug-submission.log");
+      fsSync.appendFileSync(_dbgLogPath, JSON.stringify({ ts: new Date().toISOString(), assignmentId, error: _dbgErr?.message }) + "\n");
     }
     // --- DEBUG LOG END ---
     enforceAssignmentSubmissionRequiredFields(assignment, normalizedArticlePayload, assignmentId, currentRound, mediaPayload);
