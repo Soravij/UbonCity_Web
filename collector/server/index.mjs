@@ -11415,38 +11415,6 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
     const mediaPayload = req.body?.media_payload_json && typeof req.body.media_payload_json === "object"
       ? req.body.media_payload_json
       : null;
-    // --- DEBUG LOG START (temporary, remove after diagnosis) ---
-    try {
-      const _dbgPayload = normalizedArticlePayload || {};
-      const _dbgCtx = resolveAssignmentSubmissionPromptContext(assignment);
-      const _dbgGroups = _dbgCtx.fieldPack ? getFieldPackPromptGroups(_dbgCtx.fieldPack) : getAssignmentBriefPromptGroups(_dbgCtx.brief);
-      const _dbgMissing = [];
-      const _dbgKind = String(assignment?.assignment_kind || "").trim().toLowerCase() === "editorial" ? "editorial" : "field";
-      if (_dbgKind === "editorial") {
-        const eg = getEditorialPromptGroups(_dbgCtx.fieldPack, _dbgCtx.brief);
-        _dbgMissing.push(...findMissingPromptAnswers(eg.directionPrompts, _dbgPayload.direction_answers).map((p) => `แนวสื่อสารหลัก: ${p}`));
-        _dbgMissing.push(...findMissingPromptAnswers(eg.sourcePrompts, _dbgPayload.source_answers).map((p) => `ข้อมูล/มุมที่ต้องใช้: ${p}`));
-      } else {
-        _dbgMissing.push(...findMissingPromptAnswers(_dbgGroups.mustVerify, _dbgPayload.verified_answers).map((p) => `สิ่งที่ต้องยืนยัน: ${p}`));
-        _dbgMissing.push(...findMissingPromptAnswers(_dbgGroups.mustAsk, _dbgPayload.question_answers).map((p) => `คำตอบจากหน้างาน: ${p}`));
-      }
-      const _dbgLogPath = path.resolve("collector", "logs", "debug-submission.log");
-      const _dbgLine = JSON.stringify({
-        ts: new Date().toISOString(),
-        assignmentId,
-        fieldPackId: _dbgCtx.fieldPack?.id ?? null,
-        reqBodyVerifiedAnswers: _dbgPayload.verified_answers || null,
-        reqBodyQuestionAnswers: _dbgPayload.question_answers || null,
-        expectedMustVerify: _dbgGroups.mustVerify,
-        expectedMustAsk: _dbgGroups.mustAsk,
-        missing: _dbgMissing,
-      }) + "\n";
-      fsSync.appendFileSync(_dbgLogPath, _dbgLine);
-    } catch (_dbgErr) {
-      const _dbgLogPath = path.resolve("collector", "logs", "debug-submission.log");
-      fsSync.appendFileSync(_dbgLogPath, JSON.stringify({ ts: new Date().toISOString(), assignmentId, error: _dbgErr?.message }) + "\n");
-    }
-    // --- DEBUG LOG END ---
     enforceAssignmentSubmissionRequiredFields(assignment, normalizedArticlePayload, assignmentId, currentRound, mediaPayload);
     enforceResetPerShotRequirements(assignment, assignmentId, currentRound);
     const assignmentAction = normalizedSubmissionState === "resubmitted" ? "resubmit" : "submit";
