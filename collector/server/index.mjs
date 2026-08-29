@@ -11415,6 +11415,31 @@ app.post("/api/assignments/:id/submissions", requireRole("owner", "admin", "edit
     const mediaPayload = req.body?.media_payload_json && typeof req.body.media_payload_json === "object"
       ? req.body.media_payload_json
       : null;
+    // --- DEBUG LOG START (temporary, remove after diagnosis) ---
+    try {
+      const _dbgPayload = normalizedArticlePayload || {};
+      const _dbgCtx = resolveAssignmentSubmissionPromptContext(assignment);
+      const _dbgGroups = _dbgCtx.fieldPack ? getFieldPackPromptGroups(_dbgCtx.fieldPack) : getAssignmentBriefPromptGroups(_dbgCtx.brief);
+      const _dbgMissing = [];
+      const _dbgKind = String(assignment?.assignment_kind || "").trim().toLowerCase() === "editorial" ? "editorial" : "field";
+      if (_dbgKind === "editorial") {
+        const eg = getEditorialPromptGroups(_dbgCtx.fieldPack, _dbgCtx.brief);
+        _dbgMissing.push(...findMissingPromptAnswers(eg.directionPrompts, _dbgPayload.direction_answers).map((p) => `แนวสื่อสารหลัก: ${p}`));
+        _dbgMissing.push(...findMissingPromptAnswers(eg.sourcePrompts, _dbgPayload.source_answers).map((p) => `ข้อมูล/มุมที่ต้องใช้: ${p}`));
+      } else {
+        _dbgMissing.push(...findMissingPromptAnswers(_dbgGroups.mustVerify, _dbgPayload.verified_answers).map((p) => `สิ่งที่ต้องยืนยัน: ${p}`));
+        _dbgMissing.push(...findMissingPromptAnswers(_dbgGroups.mustAsk, _dbgPayload.question_answers).map((p) => `คำตอบจากหน้างาน: ${p}`));
+      }
+      console.log("[DEBUG-SUBMISSION] assignment=%d req.body.verified_answers=%s", assignmentId, JSON.stringify(_dbgPayload.verified_answers || null));
+      console.log("[DEBUG-SUBMISSION] assignment=%d req.body.question_answers=%s", assignmentId, JSON.stringify(_dbgPayload.question_answers || null));
+      console.log("[DEBUG-SUBMISSION] assignment=%d expected.mustVerify=%s", assignmentId, JSON.stringify(_dbgGroups.mustVerify));
+      console.log("[DEBUG-SUBMISSION] assignment=%d expected.mustAsk=%s", assignmentId, JSON.stringify(_dbgGroups.mustAsk));
+      console.log("[DEBUG-SUBMISSION] assignment=%d missing=%s", assignmentId, JSON.stringify(_dbgMissing));
+      console.log("[DEBUG-SUBMISSION] assignment=%d fieldPackId=%s", assignmentId, _dbgCtx.fieldPack?.id ?? "null");
+    } catch (_dbgErr) {
+      console.log("[DEBUG-SUBMISSION] assignment=%d log error: %s", assignmentId, _dbgErr?.message);
+    }
+    // --- DEBUG LOG END ---
     enforceAssignmentSubmissionRequiredFields(assignment, normalizedArticlePayload, assignmentId, currentRound, mediaPayload);
     enforceResetPerShotRequirements(assignment, assignmentId, currentRound);
     const assignmentAction = normalizedSubmissionState === "resubmitted" ? "resubmit" : "submit";
