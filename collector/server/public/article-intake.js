@@ -955,8 +955,9 @@ function wire() {
       state.busy = true;
       applyActionGuards();
       await assignEditor();
+      setBanner("");
     } catch (error) {
-      setInlineStatus("assignment-status", error.message, "error");
+      setBanner(error.message, "error");
     } finally {
       state.busy = false;
       applyActionGuards();
