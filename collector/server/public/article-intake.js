@@ -905,7 +905,7 @@ async function assignEditor() {
   const externalName = String(qs("editor-external-name")?.value || "").trim();
   const externalContact = String(qs("editor-external-contact")?.value || "").trim();
   if (!assigneeId && !externalName) throw new Error("\u0e01\u0e23\u0e38\u0e13\u0e32\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e1c\u0e39\u0e49\u0e23\u0e31\u0e1a\u0e1c\u0e34\u0e14\u0e0a\u0e2d\u0e1a\u0e2b\u0e23\u0e37\u0e2d\u0e23\u0e30\u0e1a\u0e38 editor \u0e20\u0e32\u0e22\u0e19\u0e2d\u0e01");
-  setInlineStatus("assignment-status", "\u0e01\u0e33\u0e25\u0e31\u0e07\u0e21\u0e2d\u0e1a\u0e2b\u0e21\u0e32\u0e22\u0e07\u0e32\u0e19...", "loading");
+  setBanner("\u0e01\u0e33\u0e25\u0e31\u0e07\u0e21\u0e2d\u0e1a\u0e2b\u0e21\u0e32\u0e22\u0e07\u0e32\u0e19...", "loading");
   const result = await api(`/api/items/${state.itemId}/article-editorial-assignments`, {
     method: "POST",
     body: JSON.stringify({
@@ -923,7 +923,7 @@ async function assignEditor() {
   state.item = await api(`/api/items/${state.itemId}`);
   await prefetchProcessSummaries();
   renderAll();
-  setInlineStatus("assignment-status", "มอบหมายงานเขียนแล้ว");
+  setBanner("มอบหมายงานเขียนแล้ว");
 }
 
 function renderAll() {
@@ -955,7 +955,6 @@ function wire() {
       state.busy = true;
       applyActionGuards();
       await assignEditor();
-      setBanner("");
     } catch (error) {
       setBanner(error.message, "error");
     } finally {

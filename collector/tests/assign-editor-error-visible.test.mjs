@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -12,32 +13,159 @@ function readSource() {
   return fs.readFileSync(SOURCE_PATH, "utf8");
 }
 
-test("btn-assign-editor error handler uses setBanner instead of setInlineStatus", () => {
+function extractFunctionBlock(source, name) {
+  const signatures = [`async function ${name}`, `function ${name}`];
+  const start = signatures
+    .map((s) => source.indexOf(s))
+    .find((i) => i >= 0) ?? -1;
+  if (start < 0) throw new Error(`Function not found: ${name}`);
+  const paramsStart = source.indexOf("(", start);
+  let parenDepth = 0;
+  let bodyStart = -1;
+  for (let i = paramsStart; i < source.length; i++) {
+    if (source[i] === "(") parenDepth++;
+    if (source[i] === ")") {
+      parenDepth--;
+      if (parenDepth === 0) { bodyStart = source.indexOf("{", i); break; }
+    }
+  }
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    if (source[i] === "}") {
+      depth--;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`Unclosed function block: ${name}`);
+}
+
+function createElement(id = "") {
+  const classes = new Set();
+  const syncClassName = (node) => {
+    node.className = Array.from(classes).join(" ");
+  };
+  const node = {
+    id,
+    disabled: false,
+    value: "",
+    innerHTML: "",
+    textContent: "",
+    className: "",
+    dataset: {},
+    style: {},
+    focus() {},
+    setAttribute() {},
+    removeAttribute() {},
+    appendChild() {},
+    removeChild() {},
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    closest() { return null; },
+    addEventListener() {},
+    classList: {
+      add(...tokens) {
+        for (const t of tokens) { if (t) classes.add(t); }
+        syncClassName(node);
+      },
+      remove(...tokens) {
+        for (const t of tokens) classes.delete(t);
+        syncClassName(node);
+      },
+      contains(token) { return classes.has(token); },
+    },
+  };
+  return node;
+}
+
+function loadHarness(options = {}) {
+  const elements = new Map();
   const source = readSource();
-  const handlerMatch = source.match(
-    /qs\("btn-assign-editor"\)\?\.addEventListener\("click",\s*async\s*\(\)\s*=>\s*\{[\s\S]*?\}\s*\)/
-  );
-  assert.ok(handlerMatch, "btn-assign-editor handler not found");
-  const handler = handlerMatch[0];
-  assert.ok(
-    handler.includes("setBanner(error.message, \"error\")"),
-    "error path should call setBanner"
-  );
-  assert.ok(
-    !handler.includes("setInlineStatus"),
-    "error path should NOT call setInlineStatus"
-  );
+
+  const setBannerSrc = extractFunctionBlock(source, "setBanner");
+  const assignEditorSrc = extractFunctionBlock(source, "assignEditor");
+
+  const selectEl = createElement("editor-assignee-select");
+  selectEl.value = "5";
+  elements.set("editor-assignee-select", selectEl);
+
+  const document = {
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, createElement(id));
+      return elements.get(id);
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  };
+
+  const state = {
+    itemId: 1,
+    item: null,
+    articleProcess: {},
+    processByItemId: {},
+    items: [],
+    busy: false,
+  };
+
+  const apiImpl = options.api || (async () => ({}));
+
+  const context = {
+    console,
+    document,
+    window: {
+      location: { search: "?id=1", origin: "http://127.0.0.1:5062", href: "" },
+    },
+    URL,
+    URLSearchParams,
+    setTimeout,
+    clearTimeout,
+    state,
+    api: apiImpl,
+    renderAll() {},
+    applyActionGuards() {},
+    async prefetchProcessSummaries() {},
+    qs(id) { return document.getElementById(id); },
+    globalThis: null,
+  };
+  context.globalThis = context;
+
+  const code = `
+${setBannerSrc}
+${assignEditorSrc}
+globalThis.__testHooks = { setBanner, assignEditor };
+`;
+
+  vm.runInNewContext(code, context, { filename: "article-intake-test.js" });
+  return { hooks: context.__testHooks, elements, state };
+}
+
+test("assignEditor error path shows error banner on #workspace-status", async () => {
+  const apiError = new Error("ไม่พบผู้รับผิดชอบ");
+  const apiImpl = async () => { throw apiError; };
+  const { hooks, elements } = loadHarness({ api: apiImpl });
+
+  try {
+    await hooks.assignEditor();
+  } catch (error) {
+    hooks.setBanner(error.message, "error");
+  }
+
+  const banner = elements.get("workspace-status");
+  assert.ok(banner, "workspace-status element should exist");
+  assert.equal(banner.textContent, "ไม่พบผู้รับผิดชอบ");
+  assert.ok(banner.classList.contains("is-error"), "should have is-error class");
+  assert.ok(!banner.classList.contains("hidden"), "should not be hidden");
 });
 
-test("btn-assign-editor success path clears banner", () => {
-  const source = readSource();
-  const handlerMatch = source.match(
-    /qs\("btn-assign-editor"\)\?\.addEventListener\("click",\s*async\s*\(\)\s*=>\s*\{[\s\S]*?\}\s*\)/
-  );
-  assert.ok(handlerMatch, "btn-assign-editor handler not found");
-  const handler = handlerMatch[0];
-  assert.ok(
-    handler.includes("setBanner(\"\")"),
-    "success path should clear banner with setBanner(\"\")"
-  );
+test("assignEditor success path shows success banner on #workspace-status", async () => {
+  const { hooks, elements } = loadHarness({ api: async () => ({}) });
+
+  await hooks.assignEditor();
+
+  const banner = elements.get("workspace-status");
+  assert.ok(banner, "workspace-status element should exist");
+  assert.equal(banner.textContent, "มอบหมายงานเขียนแล้ว");
+  assert.ok(banner.classList.contains("is-success"), "should have is-success class");
+  assert.ok(!banner.classList.contains("hidden"), "should not be hidden");
+  assert.ok(!banner.classList.contains("is-error"), "should not have is-error");
 });
