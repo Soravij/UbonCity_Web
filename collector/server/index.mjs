@@ -10479,6 +10479,19 @@ app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "a
 
   try {
     const workflowModel = repo.ensureWorkflowModel(id);
+
+    const isPlace = String(item?.type || "").trim().toLowerCase() === "place";
+    if (isPlace) {
+      const currentProductionState = String(workflowModel?.production_state || "").trim().toLowerCase();
+      if (currentProductionState !== "ready_for_writer") {
+        res.status(409).json({
+          error: `editorial assignment requires production_state=ready_for_writer but current state is "${currentProductionState}"`,
+          code: "EDITORIAL_ASSIGNMENT_INVALID_PRODUCTION_STATE",
+        });
+        return;
+      }
+    }
+
     const activeEditorial = getPrimaryEditorialAssignment(id);
     const sameExternalAssignee =
       activeEditorial?.id
@@ -10504,18 +10517,6 @@ app.post("/api/items/:id/article-editorial-assignments", requireRole("owner", "a
         reason_code: "article_editorial_assignment_replaced",
         internal_note: String(req.body?.replace_note || "").trim() || "editorial assignment replaced",
       });
-    }
-
-    const isPlace = String(item?.type || "").trim().toLowerCase() === "place";
-    if (isPlace) {
-      const currentProductionState = String(workflowModel?.production_state || "").trim().toLowerCase();
-      if (currentProductionState !== "ready_for_writer") {
-        res.status(409).json({
-          error: `editorial assignment requires production_state=ready_for_writer but current state is "${currentProductionState}"`,
-          code: "EDITORIAL_ASSIGNMENT_INVALID_PRODUCTION_STATE",
-        });
-        return;
-      }
     }
 
     const workflowPatch = resolvePlaceLadderWorkflowPatch(
