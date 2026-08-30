@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { buildEvidenceCandidatesForNormalized, normalizeUrlForComparison } from "../server/evidence-candidates.mjs";
+import { buildNormalizedFromExtractedPayload } from "../collector/sources/extracted-payload-normalizer.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = path.resolve(__dirname, "..", "server", "index.mjs");
@@ -37,31 +38,6 @@ const parseObjectCandidate = (v) => {
   return v;
 };
 const normalizeEvidenceSourceType = (v) => String(v || "import").trim().toLowerCase();
-
-// buildNormalizedFromExtractedPayload: returns null when payload has no usable content
-function buildNormalizedFromExtractedPayload(payload, _sourceRecord) {
-  const candidate = {
-    title: payload?.title || "",
-    description: payload?.description || "",
-    image: payload?.image || "",
-    address: payload?.address || "",
-    article_body_text: payload?.article_body_text || "",
-    article_section_texts: Array.isArray(payload?.article_section_texts) ? payload.article_section_texts : [],
-    review_snippets: Array.isArray(payload?.review_snippets) ? payload.review_snippets : [],
-  };
-  if (
-    !candidate.title &&
-    !candidate.description &&
-    !candidate.image &&
-    !candidate.address &&
-    !candidate.article_body_text &&
-    !candidate.article_section_texts.length &&
-    !candidate.review_snippets.length
-  ) {
-    return null;
-  }
-  return candidate;
-}
 
 const buildFallbackNormalizedFromItem = loadNamedFunction(serverSource, "buildFallbackNormalizedFromItem", {});
 
@@ -113,7 +89,7 @@ test("seedEvidenceBlocksForItem: source_record with empty payload (null normaliz
     source_type: "wongnai",
     source_url: "https://www.wongnai.com/place/b",
     source_entity_id: "wn-b",
-    payload_json: { title: "Good Restaurant", description: "Nice food" },
+    payload_json: { extracted_metadata: { title: "Good Restaurant" } },
   };
 
   // Record C: also empty → skipped
