@@ -6933,6 +6933,7 @@ function seedEvidenceBlocksForItem(item, options = {}) {
       const normalized = parseObjectCandidate(payload?.normalized_json)
         || parseObjectCandidate(payload?.payload_json?.normalized_json)
         || buildNormalizedFromExtractedPayload(payload, sourceRecord);
+      if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) continue;
 
       const base = {
         source_type: normalizeEvidenceSourceType(options.sourceType || sourceRecord?.source_type || item?.source_type || "import"),
