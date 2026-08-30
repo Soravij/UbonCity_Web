@@ -5801,6 +5801,26 @@ export function createRepository(db) {
         actor_role: actorRole,
         reason_code: reasonCode,
       });
+      try {
+        const itemId = Number(assignment.content_item_id || 0);
+        if (itemId) {
+          const preview = buildAssignmentHandoffPreview(itemId);
+          if (preview?.handoff_package) {
+            insertAssignmentHandoffSnapshotStmt.run(
+              id,
+              itemId,
+              Number(preview.readiness_snapshot?.id || 0) || null,
+              JSON.stringify(preview.handoff_package),
+              "ready",
+              null,
+              String(actorEmail || "").trim() || null
+            );
+          }
+        }
+      } catch (snapshotErr) {
+        // snapshot failure must not break the state flip
+        try { console.error("[requestAssignmentRevisionWithReset] snapshot insert failed:", snapshotErr?.message || snapshotErr); } catch {}
+      }
       const imageDeleteResult = imageResetRequired
         ? deleteAssignmentWorkAssetsByType(id, "image")
         : { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
@@ -8481,20 +8501,25 @@ export function createRepository(db) {
 
   // Values a human already confirmed for this item, keyed by return_key. A rework round shows them as
   // read-only reference under each check so the worker can re-verify only what actually changed.
-  // They are NOT pre-checked: ticking a check means "a human verified it this round".
+  // The handoff payload marks these with previous_confirmed_checked so the client can pre-check them.
   function buildPreviousConfirmedCheckValues(item) {
     const itemId = Number(item?.id || 0) || 0;
     if (!itemId) return {};
-    // Handoff packages are rebuilt by every readiness/handoff preview, so keep the common case (an item
-    // that was never accepted, therefore has nothing previously confirmed) down to one indexed lookup.
-    if (!hasAcceptedFieldRoundStmt.get(itemId)) return {};
+
     const previous = {};
     const evidence = buildFieldReturnEvidenceByItem(itemId);
     for (const row of Array.isArray(evidence?.items) ? evidence.items : []) {
-      if (row?.submission_source !== "accepted" || row?.checked !== true) continue;
+      if (row?.checked !== true) continue;
+      const source = row?.submission_source;
+      if (source !== "accepted" && source !== "latest") continue;
       const key = String(row.key || "").trim().toLowerCase();
       if (!key) continue;
-      previous[key] = row.found === true ? (row.value ?? null) : null;
+      // accepted wins over latest; if we already have an accepted value for this key, skip the latest one
+      if (previous[key]?.source === "accepted" && source !== "accepted") continue;
+      previous[key] = {
+        value: row.found === true ? (row.value ?? null) : null,
+        source,
+      };
     }
     const confirmedCta = latestDraftByItem(itemId)?.confirmed_cta_contact_json || null;
     if (confirmedCta && String(item?.type || "").trim().toLowerCase() === "place") {
@@ -8509,7 +8534,8 @@ export function createRepository(db) {
         // explicitly verified it absent — otherwise "never touched" and "verified: none" collapse into
         // the same null and the contradiction check below can no longer tell them apart.
         if (confirmedValue == null && !Object.prototype.hasOwnProperty.call(previous, returnKey)) continue;
-        previous[returnKey] = confirmedValue;
+        // confirmed CTA is always from an accepted round
+        previous[returnKey] = { value: confirmedValue, source: "accepted" };
       }
     }
     return previous;
@@ -8568,7 +8594,9 @@ export function createRepository(db) {
             // fact for a CTA field: not-found is not a maybe). Collapsing both to "== null" let a
             // stale suggestion survive a human's explicit "verified: none" answer.
             const hasPreviousConfirmed = Object.prototype.hasOwnProperty.call(previousConfirmed, returnKey);
-            const previousValue = hasPreviousConfirmed ? previousConfirmed[returnKey] : undefined;
+            const previousEntry = hasPreviousConfirmed ? previousConfirmed[returnKey] : undefined;
+            const previousValue = previousEntry?.value;
+
             if (!hasPreviousConfirmed) return check;
             // §7A suggestion lifecycle: a suggestion must never contradict an already human-confirmed
             // value. The Work Return form prefills suggested_value into the worker's input, so a
@@ -8580,6 +8608,8 @@ export function createRepository(db) {
             return {
               ...check,
               ...(contradictsConfirmed ? { suggested_value: null, source: null } : {}),
+              // Both accepted and latest come from a human tick — pre-check both
+              ...(hasPreviousConfirmed ? { previous_confirmed_checked: true } : {}),
               ...(previousValue == null ? {} : { previous_confirmed_value: previousValue }),
             };
           }),

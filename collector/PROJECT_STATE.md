@@ -327,7 +327,7 @@ Rework round (§7A "Rework Round", locked):
 - opening a rework round records `accepted -> closed` for the finished assignment and `null -> assigned` for the new assignment directly in `content_workflow_transitions`; workflow head no longer stores an assignment mirror
 - `buildFieldReturnEvidenceByItem` keeps one row per check key with **accepted winning over unaccepted**, so a rework round that is submitted but not yet accepted never shadows the accepted answer that is still authoritative
 - UI: "ส่งงานกลับไปทำรอบใหม่" section in the assignment review panel, visible only on an accepted field round for a permitted actor.
-- The new round's requested checks carry `previous_confirmed_value` as read-only reference ("ยืนยันไว้รอบก่อน: …"), never pre-checked.
+- The new round's requested checks carry `previous_confirmed_value` as read-only reference ("ยืนยันไว้รอบก่อน: …"). AI/deterministic suggestions are never pre-checked; values previously confirmed by a human (`previous_confirmed_checked`) are pre-checked.
 
 Tests:
 - `collector/tests/assignment-accept-confirmed-metadata.repository.test.mjs` (27 cases: atomic rollback, handoff round resolution, repaired/legacy-UTC handoff, editorial without handoff, patch semantics scoped to accepted field rounds only (an accepted editorial round must not count as the baseline), rework round, evidence dedupe) — green
