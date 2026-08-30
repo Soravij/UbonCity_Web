@@ -8608,8 +8608,8 @@ export function createRepository(db) {
             return {
               ...check,
               ...(contradictsConfirmed ? { suggested_value: null, source: null } : {}),
-              // accepted round → pre-check; latest (pre-accept) → value only, no tick
-              ...(previousSource === "accepted" ? { previous_confirmed_checked: true } : {}),
+              // Both accepted and latest come from a human tick — pre-check both
+              ...(hasPreviousConfirmed ? { previous_confirmed_checked: true } : {}),
               ...(previousValue == null ? {} : { previous_confirmed_value: previousValue }),
             };
           }),

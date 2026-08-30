@@ -8179,16 +8179,12 @@ function buildAssignmentRequestedCheckReturnDraftFromHandoffPackage(handoffPacka
         // §7A: AI may prefill a suggested value to save the worker typing, but it must never pre-tick
         // the check. Ticking is the human verification act that turns a suggestion into confirmed data.
         // A previously human-confirmed value IS pre-checked: the human already verified it in an earlier round.
-        // A value from a rejected round (previous_confirmed_value without previous_confirmed_checked)
-        // is prefilled but NOT ticked — the worker must verify it again.
         checked: check.previous_confirmed_checked === true,
-        value: check.previous_confirmed_value != null
+        value: check.previous_confirmed_checked === true && check.previous_confirmed_value != null
           ? cloneAssignmentRequestedCheckValue(check.previous_confirmed_value, check.answer_type)
-          : check.previous_confirmed_checked === true && check.previous_confirmed_value != null
-            ? cloneAssignmentRequestedCheckValue(check.previous_confirmed_value, check.answer_type)
-            : hasSuggestedValue
-              ? cloneAssignmentRequestedCheckValue(check.suggested_value, check.answer_type)
-              : getAssignmentRequestedCheckDefaultValue(check.answer_type),
+          : hasSuggestedValue
+            ? cloneAssignmentRequestedCheckValue(check.suggested_value, check.answer_type)
+            : getAssignmentRequestedCheckDefaultValue(check.answer_type),
         condition_note: "",
         evidence: "",
         note: "",
@@ -8360,16 +8356,12 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
   const conditionValue = String(row?.condition_note || "");
   const isCtaGroup = String(check?.group_key || "").trim().toLowerCase() === "cta_contact";
   const isPreviouslyConfirmed = check.previous_confirmed_checked === true;
-  const hasPreviousConfirmedValue = check.previous_confirmed_value != null;
-  const isFromRejectedRound = hasPreviousConfirmedValue && !isPreviouslyConfirmed;
   const previousConfirmedText = formatAssignmentRequestedCheckPreviousConfirmedValue(check.previous_confirmed_value);
   const statusBadge = isPreviouslyConfirmed && isCtaGroup
     ? `<span class="workflow-badge workflow-badge-generated">ยืนยันแล้ว</span>`
-    : isFromRejectedRound && isCtaGroup
-      ? `<span class="workflow-badge workflow-badge-generated">จากรอบที่ถูกตีกลับ</span>`
-      : usesSuggestedValue
-        ? `<span class="workflow-badge workflow-badge-generated">AI แนะนำ</span>`
-        : "";
+    : usesSuggestedValue
+      ? `<span class="workflow-badge workflow-badge-generated">AI แนะนำ</span>`
+      : "";
   return `
     <div class="assignment-brief-section full-span assignment-capture-card requested-check-cta-row${extraClass}" data-requested-check-row data-requested-check-return-key="${escapeHtml(check.return_key)}" data-requested-check-answer-type="${escapeHtml(check.answer_type)}" data-requested-check-group-key="${escapeHtml(check.group_key)}" data-requested-check-key="${escapeHtml(check.check_key)}">
       <div class="assignment-capture-row requested-check-row-main">
@@ -8388,8 +8380,8 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
             <input type="text" data-requested-check-field="condition_note" value="${escapeHtml(conditionValue)}" placeholder="เงื่อนไข/รายละเอียดเพิ่มเติม" ${checked ? "" : "disabled"} />
           </div>
         ` : ""}
-        ${(isPreviouslyConfirmed && !isCtaGroup) || (previousConfirmedText && !isPreviouslyConfirmed) || (isFromRejectedRound && !isCtaGroup) ? `
-          <p class="muted">${isFromRejectedRound ? "ค่าจากรอบที่ถูกตีกลับ" : "ยืนยันไว้รอบก่อน"}: ${escapeHtml(previousConfirmedText || "—")} (${isFromRejectedRound ? "ต้องติ๊กเพื่อยืนยันอีกครั้ง" : "ไม่ติ๊ก = ใช้ค่านี้ต่อ"})</p>
+        ${(isPreviouslyConfirmed && !isCtaGroup) || (previousConfirmedText && !isPreviouslyConfirmed) ? `
+          <p class="muted">ยืนยันไว้รอบก่อน: ${escapeHtml(previousConfirmedText || "—")} (ไม่ติ๊ก = ใช้ค่านี้ต่อ)</p>
         ` : ""}
       </div>
     </div>

@@ -143,11 +143,11 @@ test("pre-accept revision: snapshot has previous_confirmed_value but NOT previou
 
     const phone = ctaGroup.checks.find((check) => check.key === "phone");
     assert.equal(phone.previous_confirmed_value, "0812345678", "phone value is prefilled from submitted round");
-    assert.equal(phone.previous_confirmed_checked || false, false, "phone must NOT be pre-checked (pre-accept)");
+    assert.equal(phone.previous_confirmed_checked, true, "phone must be pre-checked (human ticked it)");
 
     const lineUrl = ctaGroup.checks.find((check) => check.key === "line_url");
     assert.equal(lineUrl.previous_confirmed_value, "https://line.me/ti/p/@test", "line_url value is prefilled");
-    assert.equal(lineUrl.previous_confirmed_checked || false, false, "line_url must NOT be pre-checked (pre-accept)");
+    assert.equal(lineUrl.previous_confirmed_checked, true, "line_url must be pre-checked (human ticked it)");
 
     const websiteUrl = ctaGroup.checks.find((check) => check.key === "website_url");
     assert.equal(websiteUrl.previous_confirmed_value ?? undefined, undefined, "website_url has no value (was unchecked)");
@@ -186,11 +186,9 @@ test("pre-accept revision: 'verified: none' (checked=true, value=null) is prefil
       .find((group) => group.group_key === "cta_contact");
 
     const phone = ctaGroup.checks.find((check) => check.key === "phone");
-    // verified: none → previous_confirmed_value should be present (as null) but no pre-check
-    assert.equal(phone.previous_confirmed_checked || false, false, "phone must NOT be pre-checked");
-    // The value key should exist in the handoff (even if null) to signal "verified absent"
-    // Note: previous_confirmed_value is omitted when null by the backend, so we check the key doesn't have checked flag
-    assert.equal(phone.previous_confirmed_checked || false, false, "phone verified-absent has no pre-check");
+    // verified: none → previous_confirmed_checked=true (human ticked it), value is null
+    assert.equal(phone.previous_confirmed_checked, true, "phone must be pre-checked (human verified absent)");
+    assert.equal(phone.previous_confirmed_value ?? null, null, "phone value is null (verified: none)");
 
     const lineUrl = ctaGroup.checks.find((check) => check.key === "line_url");
     assert.equal(lineUrl.previous_confirmed_value ?? undefined, undefined, "line_url was unchecked, no value");
@@ -200,13 +198,42 @@ test("pre-accept revision: 'verified: none' (checked=true, value=null) is prefil
   }
 });
 
-test("revert proof: buildPreviousConfirmedCheckValues must accept 'latest' submission source", () => {
-  const repositorySource = fs.readFileSync(path.join(root, "db", "repository.mjs"), "utf8");
-  const fnStart = repositorySource.indexOf("function buildPreviousConfirmedCheckValues");
-  assert.ok(fnStart >= 0, "buildPreviousConfirmedCheckValues must exist");
-  const fnBody = repositorySource.slice(fnStart, fnStart + 1500);
-  assert.ok(
-    fnBody.includes('"latest"'),
-    "revert proof: buildPreviousConfirmedCheckValues must accept submission_source='latest' — if this fails after revert, the filter was restored to accepted-only"
-  );
+test("revert proof: pre-accept revision must produce previous_confirmed_checked=true for human-ticked keys", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Revert Proof PreAccept");
+    const assignee = ctx.createUser("revert-proof");
+    ctx.createReadinessBrief(item.id);
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      ai_summary: "Field pack",
+      requested_checks_json: ctaChecksFixture,
+    });
+    const assignmentId = ctx.createFieldAssignment(item.id, assignee.id);
+
+    ctx.submitWithReturns(assignmentId, assignee.id, {
+      "cta_contact.phone": { checked: true, value: "0899999999" },
+    });
+
+    ctx.repo.requestAssignmentRevisionWithReset(assignmentId, "reviewer@local", {
+      actor_role: "admin",
+      reason_code: "revision_requested",
+    });
+
+    const latest = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
+    const ctaGroup = latest.handoff_package_json.requested_checks.groups
+      .find((group) => group.group_key === "cta_contact");
+    const phone = ctaGroup.checks.find((check) => check.key === "phone");
+
+    // This assertion will fail if the code reverts to only pre-checking "accepted" source
+    // because this test never calls updateAssignmentState("accepted") — the submission stays "latest"
+    assert.equal(
+      phone.previous_confirmed_checked,
+      true,
+      "revert proof: pre-accept human-ticked key must have previous_confirmed_checked=true — if this fails, the code reverted to accepted-only pre-check"
+    );
+  } finally {
+    ctx.cleanup();
+  }
 });
