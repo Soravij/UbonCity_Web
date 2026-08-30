@@ -182,11 +182,39 @@ test("handoff payload sets previous_confirmed_checked=true for 'verified: none' 
   }
 });
 
-test("revert proof: removing previous_confirmed_checked from handoff payload causes test to fail", () => {
-  const repositorySource = fs.readFileSync(path.join(root, "db", "repository.mjs"), "utf8");
-  const marker = "previous_confirmed_checked: true";
-  assert.ok(
-    repositorySource.includes(marker),
-    `revert proof requires '${marker}' to exist in repository.mjs — if this fails after revert, the field was removed`
-  );
+test("keys never confirmed in any round have no previous_confirmed_checked field", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem("Never Confirmed");
+    const assignee = ctx.createUser("never");
+    ctx.createReadinessBrief(item.id);
+    ctx.repo.createFieldPack({
+      content_item_id: item.id,
+      status: "ready_for_field",
+      ai_summary: "Field pack",
+      requested_checks_json: ctaChecksFixture,
+    });
+    const firstAssignment = ctx.createFieldAssignment(item.id, assignee.id);
+
+    ctx.submitWithReturns(firstAssignment, assignee.id, {
+      "cta_contact.phone": { checked: false },
+      "cta_contact.line_url": { checked: false },
+    });
+    ctx.repo.updateAssignmentState(firstAssignment, "accepted", "reviewer@local", { actor_role: "admin", reason_code: "accepted" });
+
+    const rework = ctx.repo.returnFieldAssignmentForRework(firstAssignment, "reviewer@local", { note: "ตรวจอีกครั้ง", actor_role: "admin" });
+    const ctaGroup = rework.handoff.handoff_package_json.requested_checks.groups
+      .find((group) => group.group_key === "cta_contact");
+
+    const phone = ctaGroup.checks.find((check) => check.key === "phone");
+    assert.equal(phone.previous_confirmed_checked || false, false, "phone was never confirmed");
+
+    const lineUrl = ctaGroup.checks.find((check) => check.key === "line_url");
+    assert.equal(lineUrl.previous_confirmed_checked || false, false, "line_url was never confirmed");
+
+    const websiteUrl = ctaGroup.checks.find((check) => check.key === "website_url");
+    assert.equal(websiteUrl.previous_confirmed_checked || false, false, "website_url was never confirmed");
+  } finally {
+    ctx.cleanup();
+  }
 });

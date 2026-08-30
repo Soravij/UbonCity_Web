@@ -8380,8 +8380,8 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
             <input type="text" data-requested-check-field="condition_note" value="${escapeHtml(conditionValue)}" placeholder="เงื่อนไข/รายละเอียดเพิ่มเติม" ${checked ? "" : "disabled"} />
           </div>
         ` : ""}
-        ${previousConfirmedText && !isPreviouslyConfirmed ? `
-          <p class="muted">ยืนยันไว้รอบก่อน: ${escapeHtml(previousConfirmedText)} (ไม่ติ๊ก = ใช้ค่านี้ต่อ)</p>
+        ${(isPreviouslyConfirmed && !isCtaGroup) || (previousConfirmedText && !isPreviouslyConfirmed) ? `
+          <p class="muted">ยืนยันไว้รอบก่อน: ${escapeHtml(previousConfirmedText || "—")} (ไม่ติ๊ก = ใช้ค่านี้ต่อ)</p>
         ` : ""}
       </div>
     </div>
