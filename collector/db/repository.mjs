@@ -8481,7 +8481,7 @@ export function createRepository(db) {
 
   // Values a human already confirmed for this item, keyed by return_key. A rework round shows them as
   // read-only reference under each check so the worker can re-verify only what actually changed.
-  // They are NOT pre-checked: ticking a check means "a human verified it this round".
+  // The handoff payload marks these with previous_confirmed_checked so the client can pre-check them.
   function buildPreviousConfirmedCheckValues(item) {
     const itemId = Number(item?.id || 0) || 0;
     if (!itemId) return {};
@@ -8580,6 +8580,7 @@ export function createRepository(db) {
             return {
               ...check,
               ...(contradictsConfirmed ? { suggested_value: null, source: null } : {}),
+              ...(hasPreviousConfirmed ? { previous_confirmed_checked: true } : {}),
               ...(previousValue == null ? {} : { previous_confirmed_value: previousValue }),
             };
           }),
