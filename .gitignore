@@ -11,6 +11,9 @@ build/
 .next/
 out/
 
+# Migration backups
+backend/migrations/backup/
+
 # Local runtime artifacts
 *.log
 *.db
