@@ -8383,7 +8383,7 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
           </div>
         ` : ""}
         ${(isPreviouslyConfirmed && !isCtaGroup && previousConfirmedText) || (previousConfirmedText && !isPreviouslyConfirmed) ? `
-          <p class="muted">ยืนยันไว้รอบก่อน: ${escapeHtml(previousConfirmedText)} (ไม่ติ๊ก = ใช้ค่านี้ต่อ)</p>
+           <p class="muted full-span">ยืนยันไว้รอบก่อน: ${escapeHtml(previousConfirmedText)} (ไม่ติ๊ก = ใช้ค่านี้ต่อ)</p>
         ` : ""}
       </div>
     </div>

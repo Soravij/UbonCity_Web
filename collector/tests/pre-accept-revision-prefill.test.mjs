@@ -106,7 +106,7 @@ const ctaChecksFixture = {
   }],
 };
 
-test("pre-accept revision: snapshot has previous_confirmed_value but NOT previous_confirmed_checked", () => {
+test("pre-accept revision: snapshot has previous_confirmed_value and previous_confirmed_checked", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Pre Accept Revision");
@@ -157,7 +157,7 @@ test("pre-accept revision: snapshot has previous_confirmed_value but NOT previou
   }
 });
 
-test("pre-accept revision: 'verified: none' (checked=true, value=null) is prefilled as null without pre-check", () => {
+test("pre-accept revision: 'verified: none' (checked=true, value=null) is prefilled as null with pre-check", () => {
   const ctx = createTestContext();
   try {
     const item = ctx.createItem("Pre Accept Verified None");

@@ -1810,7 +1810,6 @@ button.fail {
 }
 
 #assignment-submission-requested-checks-fields .requested-check-row-main > p.muted {
-  grid-column: 1 / -1;
   margin: 2px 0 0 0;
   font-size: 0.8rem;
   line-height: 1.3;

@@ -8505,7 +8505,7 @@ export function createRepository(db) {
   function buildPreviousConfirmedCheckValues(item) {
     const itemId = Number(item?.id || 0) || 0;
     if (!itemId) return {};
-    const hasAccepted = Boolean(hasAcceptedFieldRoundStmt.get(itemId));
+
     const previous = {};
     const evidence = buildFieldReturnEvidenceByItem(itemId);
     for (const row of Array.isArray(evidence?.items) ? evidence.items : []) {
@@ -8596,7 +8596,7 @@ export function createRepository(db) {
             const hasPreviousConfirmed = Object.prototype.hasOwnProperty.call(previousConfirmed, returnKey);
             const previousEntry = hasPreviousConfirmed ? previousConfirmed[returnKey] : undefined;
             const previousValue = previousEntry?.value;
-            const previousSource = previousEntry?.source;
+
             if (!hasPreviousConfirmed) return check;
             // §7A suggestion lifecycle: a suggestion must never contradict an already human-confirmed
             // value. The Work Return form prefills suggested_value into the worker's input, so a
