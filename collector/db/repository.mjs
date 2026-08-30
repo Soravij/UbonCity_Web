@@ -5801,6 +5801,26 @@ export function createRepository(db) {
         actor_role: actorRole,
         reason_code: reasonCode,
       });
+      try {
+        const itemId = Number(assignment.content_item_id || 0);
+        if (itemId) {
+          const preview = buildAssignmentHandoffPreview(itemId);
+          if (preview?.handoff_package) {
+            insertAssignmentHandoffSnapshotStmt.run(
+              id,
+              itemId,
+              Number(preview.readiness_snapshot?.id || 0) || null,
+              JSON.stringify(preview.handoff_package),
+              "ready",
+              null,
+              String(actorEmail || "").trim() || null
+            );
+          }
+        }
+      } catch (snapshotErr) {
+        // snapshot failure must not break the state flip
+        try { console.error("[requestAssignmentRevisionWithReset] snapshot insert failed:", snapshotErr?.message || snapshotErr); } catch {}
+      }
       const imageDeleteResult = imageResetRequired
         ? deleteAssignmentWorkAssetsByType(id, "image")
         : { removed_content_assets: 0, removed_assets: 0, deleted_files: [] };
