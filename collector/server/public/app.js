@@ -8220,7 +8220,9 @@ function normalizeAssignmentRequestedCheckReturnDraft(draft = null, handoffPacka
     requestedCheckReturns[returnKey] = {
       ...baseRow,
       ...incomingRow,
-      checked: incomingRow.checked === true,
+      checked: Object.prototype.hasOwnProperty.call(incomingRow, "checked")
+        ? incomingRow.checked === true
+        : baseRow.checked === true,
       condition_note: String(incomingRow.condition_note == null ? baseRow.condition_note || "" : incomingRow.condition_note || "").trim(),
       evidence: String(incomingRow.evidence == null ? baseRow.evidence || "" : incomingRow.evidence || "").trim(),
       note: String(incomingRow.note == null ? baseRow.note || "" : incomingRow.note || "").trim(),
@@ -8380,8 +8382,8 @@ function buildAssignmentRequestedCheckReturnRowHtml(check, row, options = {}) {
             <input type="text" data-requested-check-field="condition_note" value="${escapeHtml(conditionValue)}" placeholder="เงื่อนไข/รายละเอียดเพิ่มเติม" ${checked ? "" : "disabled"} />
           </div>
         ` : ""}
-        ${(isPreviouslyConfirmed && !isCtaGroup) || (previousConfirmedText && !isPreviouslyConfirmed) ? `
-          <p class="muted">ยืนยันไว้รอบก่อน: ${escapeHtml(previousConfirmedText || "—")} (ไม่ติ๊ก = ใช้ค่านี้ต่อ)</p>
+        ${(isPreviouslyConfirmed && !isCtaGroup && previousConfirmedText) || (previousConfirmedText && !isPreviouslyConfirmed) ? `
+          <p class="muted">ยืนยันไว้รอบก่อน: ${escapeHtml(previousConfirmedText)} (ไม่ติ๊ก = ใช้ค่านี้ต่อ)</p>
         ` : ""}
       </div>
     </div>
