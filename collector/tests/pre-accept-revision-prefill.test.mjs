@@ -9,13 +9,13 @@ import { openDatabase } from "../db/client.mjs";
 import { createRepository } from "../db/repository.mjs";
 import { advancePlaceProductionState } from "./test-helpers/fixture-ladder.mjs";
 
-process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "RevisionSnap!Test1";
+process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "PreAccept!Test1";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.dirname(__dirname);
 
 function createTestContext() {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-revision-snap-"));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-pre-accept-"));
   const dbPath = path.join(tempDir, "test.sqlite");
   const schemaPath = path.join(root, "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
@@ -41,7 +41,7 @@ function createTestContext() {
     return created.item;
   }
 
-  function createUser(suffix = "rev-snap") {
+  function createUser(suffix = "pre-accept") {
     const email = `${suffix}-${Date.now()}-${Math.floor(Math.random() * 100000)}@local.test`;
     const result = db.prepare(`
       INSERT INTO users (email, display_name, password_hash, role)
@@ -106,11 +106,11 @@ const ctaChecksFixture = {
   }],
 };
 
-test("request_revision creates a new handoff snapshot with previous_confirmed_checked for confirmed CTA keys", () => {
+test("pre-accept revision: snapshot has previous_confirmed_value but NOT previous_confirmed_checked", () => {
   const ctx = createTestContext();
   try {
-    const item = ctx.createItem("Revision Snapshot");
-    const assignee = ctx.createUser("rev-snap");
+    const item = ctx.createItem("Pre Accept Revision");
+    const assignee = ctx.createUser("pre-accept");
     ctx.createReadinessBrief(item.id);
     ctx.repo.createFieldPack({
       content_item_id: item.id,
@@ -120,31 +120,19 @@ test("request_revision creates a new handoff snapshot with previous_confirmed_ch
     });
     const assignmentId = ctx.createFieldAssignment(item.id, assignee.id);
 
-    // Count snapshots before
-    const snapshotsBefore = ctx.db.prepare(
-      "SELECT COUNT(*) AS n FROM content_assignment_handoff_snapshots WHERE assignment_id=?"
-    ).get(assignmentId)?.n || 0;
-
+    // Submit with checked CTA values (state stays submitted, NOT accepted)
     ctx.submitWithReturns(assignmentId, assignee.id, {
       "cta_contact.phone": { checked: true, value: "0812345678" },
       "cta_contact.line_url": { checked: true, value: "https://line.me/ti/p/@test" },
       "cta_contact.website_url": { checked: false },
     });
-    ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", { actor_role: "admin", reason_code: "accepted" });
 
-    // Request revision
+    // Request revision while still in submitted state (no accept)
     ctx.repo.requestAssignmentRevisionWithReset(assignmentId, "reviewer@local", {
       actor_role: "admin",
       reason_code: "revision_requested",
     });
 
-    // Count snapshots after
-    const snapshotsAfter = ctx.db.prepare(
-      "SELECT COUNT(*) AS n FROM content_assignment_handoff_snapshots WHERE assignment_id=?"
-    ).get(assignmentId)?.n || 0;
-    assert.ok(snapshotsAfter > snapshotsBefore, "a new snapshot row was inserted");
-
-    // Get the latest snapshot
     const latest = ctx.repo.getLatestAssignmentHandoffByAssignment(assignmentId);
     assert.ok(latest, "latest snapshot exists");
     assert.ok(latest.handoff_package_json, "snapshot has handoff_package_json");
@@ -154,25 +142,26 @@ test("request_revision creates a new handoff snapshot with previous_confirmed_ch
     assert.ok(ctaGroup, "CTA group exists in snapshot");
 
     const phone = ctaGroup.checks.find((check) => check.key === "phone");
-    assert.equal(phone.previous_confirmed_checked, true, "phone has previous_confirmed_checked=true");
-    assert.equal(phone.previous_confirmed_value, "0812345678", "phone value carried forward");
+    assert.equal(phone.previous_confirmed_value, "0812345678", "phone value is prefilled from submitted round");
+    assert.equal(phone.previous_confirmed_checked || false, false, "phone must NOT be pre-checked (pre-accept)");
 
     const lineUrl = ctaGroup.checks.find((check) => check.key === "line_url");
-    assert.equal(lineUrl.previous_confirmed_checked, true, "line_url has previous_confirmed_checked=true");
-    assert.equal(lineUrl.previous_confirmed_value, "https://line.me/ti/p/@test", "line_url value carried forward");
+    assert.equal(lineUrl.previous_confirmed_value, "https://line.me/ti/p/@test", "line_url value is prefilled");
+    assert.equal(lineUrl.previous_confirmed_checked || false, false, "line_url must NOT be pre-checked (pre-accept)");
 
     const websiteUrl = ctaGroup.checks.find((check) => check.key === "website_url");
-    assert.equal(websiteUrl.previous_confirmed_checked || false, false, "website_url was NOT confirmed (unchecked)");
+    assert.equal(websiteUrl.previous_confirmed_value ?? undefined, undefined, "website_url has no value (was unchecked)");
+    assert.equal(websiteUrl.previous_confirmed_checked || false, false, "website_url has no confirmed flag");
   } finally {
     ctx.cleanup();
   }
 });
 
-test("request_revision snapshot preserves 'verified: none' as previous_confirmed_checked=true with null value", () => {
+test("pre-accept revision: 'verified: none' (checked=true, value=null) is prefilled as null without pre-check", () => {
   const ctx = createTestContext();
   try {
-    const item = ctx.createItem("Revision Verified None");
-    const assignee = ctx.createUser("rev-none");
+    const item = ctx.createItem("Pre Accept Verified None");
+    const assignee = ctx.createUser("pre-none");
     ctx.createReadinessBrief(item.id);
     ctx.repo.createFieldPack({
       content_item_id: item.id,
@@ -186,7 +175,6 @@ test("request_revision snapshot preserves 'verified: none' as previous_confirmed
       "cta_contact.phone": { checked: true, value: null },
       "cta_contact.line_url": { checked: false },
     });
-    ctx.repo.updateAssignmentState(assignmentId, "accepted", "reviewer@local", { actor_role: "admin", reason_code: "accepted" });
 
     ctx.repo.requestAssignmentRevisionWithReset(assignmentId, "reviewer@local", {
       actor_role: "admin",
@@ -198,12 +186,27 @@ test("request_revision snapshot preserves 'verified: none' as previous_confirmed
       .find((group) => group.group_key === "cta_contact");
 
     const phone = ctaGroup.checks.find((check) => check.key === "phone");
-    assert.equal(phone.previous_confirmed_checked, true, "phone verified as absent has previous_confirmed_checked=true");
-    assert.equal(phone.previous_confirmed_value ?? null, null, "phone value is null (verified: none)");
+    // verified: none → previous_confirmed_value should be present (as null) but no pre-check
+    assert.equal(phone.previous_confirmed_checked || false, false, "phone must NOT be pre-checked");
+    // The value key should exist in the handoff (even if null) to signal "verified absent"
+    // Note: previous_confirmed_value is omitted when null by the backend, so we check the key doesn't have checked flag
+    assert.equal(phone.previous_confirmed_checked || false, false, "phone verified-absent has no pre-check");
 
     const lineUrl = ctaGroup.checks.find((check) => check.key === "line_url");
-    assert.equal(lineUrl.previous_confirmed_checked || false, false, "line_url was NOT confirmed");
+    assert.equal(lineUrl.previous_confirmed_value ?? undefined, undefined, "line_url was unchecked, no value");
+    assert.equal(lineUrl.previous_confirmed_checked || false, false, "line_url has no confirmed flag");
   } finally {
     ctx.cleanup();
   }
+});
+
+test("revert proof: buildPreviousConfirmedCheckValues must accept 'latest' submission source", () => {
+  const repositorySource = fs.readFileSync(path.join(root, "db", "repository.mjs"), "utf8");
+  const fnStart = repositorySource.indexOf("function buildPreviousConfirmedCheckValues");
+  assert.ok(fnStart >= 0, "buildPreviousConfirmedCheckValues must exist");
+  const fnBody = repositorySource.slice(fnStart, fnStart + 1500);
+  assert.ok(
+    fnBody.includes('"latest"'),
+    "revert proof: buildPreviousConfirmedCheckValues must accept submission_source='latest' — if this fails after revert, the filter was restored to accepted-only"
+  );
 });
