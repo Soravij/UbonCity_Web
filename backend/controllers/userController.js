@@ -302,7 +302,52 @@ export const getUsers = async (req, res) => {
     } else {
       return res.status(403).json({ error: "Forbidden" });
     }
-    res.json({ items: rows });
+    let usageByUserId = new Map();
+    let unattributed = null;
+    try {
+      if (rows.length) {
+        const ids = rows.map((u) => Number(u.id));
+        const [usageRows] = await pool.query(
+          `SELECT user_id, COUNT(*) AS calls,
+                  COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
+                  COALESCE(SUM(total_tokens),0) AS total_tokens
+             FROM ai_usage_log
+            WHERE user_id IN (?)
+            GROUP BY user_id`,
+          [ids]
+        );
+        for (const r of usageRows) {
+          usageByUserId.set(Number(r.user_id), {
+            calls: Number(r.calls) || 0,
+            prompt_tokens: Number(r.prompt_tokens) || 0,
+            total_tokens: Number(r.total_tokens) || 0,
+          });
+        }
+      }
+      if (req.user.role === "owner") {
+        const [nullRows] = await pool.query(
+          `SELECT COUNT(*) AS calls,
+                  COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
+                  COALESCE(SUM(total_tokens),0) AS total_tokens
+             FROM ai_usage_log WHERE user_id IS NULL`
+        );
+        const r = nullRows[0] || {};
+        unattributed = {
+          calls: Number(r.calls) || 0,
+          prompt_tokens: Number(r.prompt_tokens) || 0,
+          total_tokens: Number(r.total_tokens) || 0,
+        };
+      }
+    } catch (err) {
+      console.error("[getUsers] ai_usage_log lookup failed:", err.message);
+      usageByUserId = new Map();
+      unattributed = null;
+    }
+    const itemsWithUsage = rows.map((u) => ({
+      ...u,
+      ai_usage: usageByUserId.get(Number(u.id)) || null,
+    }));
+    res.json({ items: itemsWithUsage, unattributed });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
