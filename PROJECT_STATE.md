@@ -193,11 +193,12 @@ Known open gaps (not fixed in this change set):
 - `actor_email` / `user_id` recorded across all 10 AI call sites; sanitizer converts `internal@local` / `system@local` / `""` → `null`
 - Lean `field_pack` prompt reduces token ~34%, controlled by `COLLECTOR_FIELD_PACK_LEAN` (default OFF)
 - Image cap 20 on both sides (`COLLECTOR_MAX_REFERENCE_MEDIA_FOR_AI`, `BACKEND_AI_MAX_IMAGE_INPUTS`) + `trace.visual_context.images_sliced` warns when backend slices
+- ยังไม่มีตัวกรองช่วงวันที่ — ตัวเลขเป็นยอดสะสมทั้งหมด (งานรอบถัดไป)
+- Cost-per-user UI: แสดงบนแท็บ Users ของ admin dashboard; ตัวเลขมาจาก `GET /users` (`getUsers`) ไม่ใช่ endpoint แยก; response มี field `ai_usage` ต่อ user, และ `unattributed` + `totals` (owner เท่านั้น); หัวการ์ดโชว์ calls/prompt/total ราย user, แถบบนโชว์ รวม/ระบุเจ้าของ/ไม่มีเจ้าของ; การ์ด user เป็น accordion เปิดทีละใบ
 
 ## Known gaps — จงใจเหลือไว้
 
 - `approved_context.selected_text` duplicates `evidence_blocks.text_value` (21/21 in measured sample); combined ~80% of prompt, not trimmed because instruction assigns different priority to the two keys
-- No cost-per-user UI yet (plan: user management page in admin panel)
 - `field_pack_references` has no schema in instruction; filtered to `[]` by normalizer URL check; `regenerate` endpoint also hardcodes `[]` intentionally
 - Duplicate images differing only by extension (`.webp`/`.jpg`) consume image quota
 - Branch `feat/lean-default-on` stuck on origin, not merged; 2 legacy tests must be fixed first
