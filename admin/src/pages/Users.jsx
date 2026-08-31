@@ -397,8 +397,8 @@ export default function Users({ token, role = "user" }) {
         {!isOwner ? <p className="muted">Admin can apply profile updates for visible scope and manager updates for user/editor/freelance in scope. Role changes and deletion remain owner-only.</p> : null}
 
         {unattributed != null ? (
-          <section className="admin-card">
-            <h3>Internal / System calls</h3>
+          <section className="users-panel">
+            <h4>Internal / System calls</h4>
             <div className="cta-metric-grid">
               <div className="cta-metric-card"><p>AI calls</p><strong>{Number(unattributed.calls || 0).toLocaleString()}</strong></div>
               <div className="cta-metric-card"><p>Prompt tokens</p><strong>{Number(unattributed.prompt_tokens || 0).toLocaleString()}</strong></div>
@@ -427,10 +427,10 @@ export default function Users({ token, role = "user" }) {
                       <div className="users-item-kicker">
                         {usage ? `${fmt(usage.total_tokens)} tokens` : "—"}
                       </div>
-                      <button type="button" className="approvals-toggle-detail-btn"
+                      <button type="button" className="users-readonly-value"
                         aria-expanded={isExpanded}
                         onClick={() => toggleUserExpanded(user.id)}>
-                        {isExpanded ? "Hide" : "Edit"}
+                        {isExpanded ? "Hide" : "Show"}
                       </button>
                     </div>
                     {user.avatar_preview_url ? (

@@ -324,7 +324,7 @@ export const getUsers = async (req, res) => {
           });
         }
       }
-      if (req.user.role === "owner") {
+      if (role === "owner") {
         const [nullRows] = await pool.query(
           `SELECT COUNT(*) AS calls,
                   COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
