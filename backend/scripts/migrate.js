@@ -164,9 +164,8 @@ async function cmdMigrate(conn) {
         continue;
       }
 
-      if (n <= 23) {
-        console.error(`HARD FLOOR: refusing to run ${file} (n=${n} <= 23)`);
-        process.exit(1);
+      if (classify(file) !== "runner") {
+        throw new Error(`refusing to run ${file}: classified '${classify(file)}', runner only executes 'runner' files`);
       }
 
       const content = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
@@ -176,8 +175,7 @@ async function cmdMigrate(conn) {
       try {
         await conn.query(content);
       } catch (err) {
-        console.error(`FAILED: ${file}: ${err.message}`);
-        process.exit(1);
+        throw new Error(`FAILED: ${file}: ${err.message} — ไฟล์นี้อาจ apply ไปแล้วบางส่วน (MySQL DDL ไม่ roll back) ตรวจ schema ด้วยมือก่อนรันซ้ำ`);
       }
 
       await conn.query(
@@ -210,7 +208,12 @@ if (isMain) {
     } else if (sub === "migrate:status") {
       await cmdStatus(conn);
     } else if (sub === "migrate") {
-      await cmdMigrate(conn);
+      try {
+        await cmdMigrate(conn);
+      } catch (err) {
+        console.error(err.message);
+        process.exitCode = 1;
+      }
     } else if (sub === "migrate:down") {
       await cmdDown();
     } else {

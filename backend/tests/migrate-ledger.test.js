@@ -51,3 +51,26 @@ test("checksumOf is deterministic", () => {
 test("checksumOf differs for different inputs", () => {
   assert.notEqual(checksumOf("a"), checksumOf("b"));
 });
+
+test("classify boundary: 024 is baseline, 027 is runner", () => {
+  assert.equal(classify("024_ai_usage_log.sql"), "baseline");
+  assert.equal(classify("027_x.sql"), "runner");
+});
+
+test("gate condition: classify(f) !== 'runner' blocks non-runner files", () => {
+  const shouldBlock = [
+    "000_baseline_schema.sql",
+    "023_drop_lifecycle_tables.sql",
+    "024_ai_usage_log.sql",
+    "025_align_category_translations.sql",
+    "026_users_role_default.sql",
+  ];
+  for (const f of shouldBlock) {
+    assert.equal(classify(f) !== "runner", true, `expected ${f} to be blocked`);
+  }
+
+  const shouldPass = ["027_audit_probe.sql"];
+  for (const f of shouldPass) {
+    assert.equal(classify(f) !== "runner", false, `expected ${f} to pass`);
+  }
+});
