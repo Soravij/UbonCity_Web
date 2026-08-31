@@ -119,6 +119,7 @@ export default function Users({ token, role = "user" }) {
   const [applyingUserId, setApplyingUserId] = useState(null);
   const [message, setMessage] = useState("");
   const [unattributed, setUnattributed] = useState(null);
+  const [totals, setTotals] = useState(null);
   const [expandedUserId, setExpandedUserId] = useState(null);
 
   const toggleUserExpanded = (id) =>
@@ -137,6 +138,7 @@ export default function Users({ token, role = "user" }) {
       const nextItems = Array.isArray(res.data?.items) ? res.data.items : [];
       setItems(nextItems.map((u) => normalizeUserRow(u)));
       setUnattributed(res.data?.unattributed ?? null);
+      setTotals(res.data?.totals ?? null);
     } catch (error) {
       setMessage(error.response?.data?.error || error.response?.data?.message || "Failed to load users");
     } finally {
@@ -396,13 +398,25 @@ export default function Users({ token, role = "user" }) {
 
         {!isOwner ? <p className="muted">Admin can apply profile updates for visible scope and manager updates for user/editor/freelance in scope. Role changes and deletion remain owner-only.</p> : null}
 
-        {unattributed != null ? (
+        {totals != null ? (
           <section className="users-panel">
-            <h4>Internal / System calls</h4>
+            <h4>AI usage — ทั้งระบบ</h4>
             <div className="cta-metric-grid">
-              <div className="cta-metric-card"><p>AI calls</p><strong>{Number(unattributed.calls || 0).toLocaleString()}</strong></div>
-              <div className="cta-metric-card"><p>Prompt tokens</p><strong>{Number(unattributed.prompt_tokens || 0).toLocaleString()}</strong></div>
-              <div className="cta-metric-card"><p>Total tokens</p><strong>{Number(unattributed.total_tokens || 0).toLocaleString()}</strong></div>
+              <div className="cta-metric-card">
+                <p>รวมทุกบัญชี</p>
+                <strong>{Number(totals.total_tokens || 0).toLocaleString()}</strong>
+                <span className="users-item-kicker">{Number(totals.calls || 0).toLocaleString()} calls</span>
+              </div>
+              <div className="cta-metric-card">
+                <p>ระบุเจ้าของแล้ว</p>
+                <strong>{Number((totals.total_tokens || 0) - (unattributed?.total_tokens || 0)).toLocaleString()}</strong>
+                <span className="users-item-kicker">{Number((totals.calls || 0) - (unattributed?.calls || 0)).toLocaleString()} calls</span>
+              </div>
+              <div className="cta-metric-card">
+                <p>ไม่มีเจ้าของ</p>
+                <strong>{Number(unattributed?.total_tokens || 0).toLocaleString()}</strong>
+                <span className="users-item-kicker">{Number(unattributed?.calls || 0).toLocaleString()} calls</span>
+              </div>
             </div>
           </section>
         ) : null}
@@ -419,20 +433,18 @@ export default function Users({ token, role = "user" }) {
               const fmt = (n) => Number(n || 0).toLocaleString();
               return (
                 <article key={user.id} className="users-item-card">
-                  <div className="users-item-head">
-                    <div>
-                      <p className="users-item-kicker">User #{user.id}</p>
-                      <h3>{user.display_name || user.email}</h3>
-                      <p className="muted users-email">{user.email}</p>
-                      <div className="users-item-kicker">
-                        {usage ? `${fmt(usage.total_tokens)} tokens` : "—"}
-                      </div>
-                      <button type="button" className="users-readonly-value"
-                        aria-expanded={isExpanded}
-                        onClick={() => toggleUserExpanded(user.id)}>
-                        {isExpanded ? "Hide" : "Show"}
-                      </button>
+                  <div className="users-item-head" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                    <div style={{ flex: 1 }}>
+                      <p className="users-item-kicker">User #{user.id} · {user.display_name || user.email} · <span className="muted users-email">{user.email}</span></p>
                     </div>
+                    <span className="users-item-kicker" style={{ flex: 1, textAlign: "center" }}>
+                      {usage ? `${fmt(usage.calls)} calls · ${fmt(usage.prompt_tokens)} prompt · ${fmt(usage.total_tokens)} total` : "ยังไม่มีการใช้งาน"}
+                    </span>
+                    <button type="button" className="users-readonly-value"
+                      aria-expanded={isExpanded}
+                      onClick={() => toggleUserExpanded(user.id)}>
+                      {isExpanded ? "Hide" : "Show"}
+                    </button>
                     {user.avatar_preview_url ? (
                       <img
                         src={user.avatar_preview_url}
@@ -448,15 +460,6 @@ export default function Users({ token, role = "user" }) {
 
                   {isExpanded ? (
                     <>
-                      {usage ? (
-                        <div className="cta-metric-grid">
-                          <div className="cta-metric-card"><p>AI calls</p><strong>{fmt(usage.calls)}</strong></div>
-                          <div className="cta-metric-card"><p>Prompt tokens</p><strong>{fmt(usage.prompt_tokens)}</strong></div>
-                          <div className="cta-metric-card"><p>Total tokens</p><strong>{fmt(usage.total_tokens)}</strong></div>
-                        </div>
-                      ) : (
-                        <p className="users-readonly-value">ยังไม่มีการใช้งาน</p>
-                      )}
 
                   <div className="users-item-grid">
                     <section className="users-panel">

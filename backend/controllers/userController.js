@@ -304,6 +304,7 @@ export const getUsers = async (req, res) => {
     }
     let usageByUserId = new Map();
     let unattributed = null;
+    let totals = null;
     try {
       if (rows.length) {
         const ids = rows.map((u) => Number(u.id));
@@ -337,17 +338,30 @@ export const getUsers = async (req, res) => {
           prompt_tokens: Number(r.prompt_tokens) || 0,
           total_tokens: Number(r.total_tokens) || 0,
         };
+        const [totalRows] = await pool.query(
+          `SELECT COUNT(*) AS calls,
+                  COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
+                  COALESCE(SUM(total_tokens),0) AS total_tokens
+             FROM ai_usage_log`
+        );
+        const tr = totalRows[0] || {};
+        totals = {
+          calls: Number(tr.calls) || 0,
+          prompt_tokens: Number(tr.prompt_tokens) || 0,
+          total_tokens: Number(tr.total_tokens) || 0,
+        };
       }
     } catch (err) {
       console.error("[getUsers] ai_usage_log lookup failed:", err.message);
       usageByUserId = new Map();
       unattributed = null;
+      totals = null;
     }
     const itemsWithUsage = rows.map((u) => ({
       ...u,
       ai_usage: usageByUserId.get(Number(u.id)) || null,
     }));
-    res.json({ items: itemsWithUsage, unattributed });
+    res.json({ items: itemsWithUsage, unattributed, totals });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
