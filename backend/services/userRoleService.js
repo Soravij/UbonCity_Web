@@ -260,7 +260,7 @@ export async function validateLifecycleTransition({ currentRole, nextRole, userI
   return { ok: true };
 }
 
-function normalizeLifecycleUser(row) {
+export function normalizeLifecycleUser(row) {
   if (!row) return null;
   const profile = normalizeUserRowProfile(row);
   return {
@@ -279,7 +279,7 @@ function normalizeLifecycleUser(row) {
   };
 }
 
-function withAvatarUrl(req, user) {
+export function withAvatarUrl(req, user) {
   if (!user) return null;
   return {
     ...user,
@@ -287,7 +287,7 @@ function withAvatarUrl(req, user) {
   };
 }
 
-function withAvatarUrls(req, users = []) {
+export function withAvatarUrls(req, users = []) {
   return (Array.isArray(users) ? users : []).map((user) => withAvatarUrl(req, user));
 }
 

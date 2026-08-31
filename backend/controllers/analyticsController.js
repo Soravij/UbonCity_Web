@@ -1,6 +1,6 @@
 import pool from "../config/db.js";
 import { cleanPlainText } from "../validators/inputSanitizer.js";
-import { resolveVisibleUserRows } from "../services/userRoleService.js";
+import { ensureUserLifecycleColumns, resolveVisibleUserRows } from "../services/userRoleService.js";
 
 const ALLOWED_EVENT_TYPES = new Set(["MAP_CLICK", "PHONE_CLICK", "LINE_CLICK", "FACEBOOK_CLICK", "WEBSITE_CLICK"]);
 const ALLOWED_ENTITY_TYPES = new Set(["place", "event", "review_content"]);
@@ -337,6 +337,7 @@ export function normalizeAiUsageRangeDays(value) {
 export async function getAiUsage(req, res) {
   try {
     const rangeDays = normalizeAiUsageRangeDays(req.query?.range_days);
+    await ensureUserLifecycleColumns();
     const rows = await resolveVisibleUserRows(req);
     const ids = rows.map((r) => Number(r.id));
 

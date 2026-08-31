@@ -6,13 +6,16 @@ import {
   ensureUserLifecycleColumns,
   listAdminAssignableManagerIds,
   listAdminScopedUserIds,
+  normalizeLifecycleUser,
   parseCanonicalRole,
   resolveVisibleUserRows,
   validateLifecycleTransition,
   validateManagedByLifecycle,
+  withAvatarUrl,
+  withAvatarUrls,
 } from "../services/userRoleService.js";
-import { buildStoredUserProfile, normalizeUserRowProfile } from "../services/userProfileService.js";
-import { clearUserAvatar, resolveUserAvatarPublicUrl, storeUserAvatar } from "../services/userAvatarService.js";
+import { buildStoredUserProfile } from "../services/userProfileService.js";
+import { clearUserAvatar, storeUserAvatar } from "../services/userAvatarService.js";
 
 function actorRole(req) {
   return String(req.user?.role || "").toLowerCase();
@@ -33,25 +36,6 @@ function resolveAutoManagerForCreate(req, targetRole) {
   return { ok: true, managedByUserId: Number(req.user?.id || 0) || null };
 }
 
-function normalizeLifecycleUser(row) {
-  if (!row) return null;
-  const profile = normalizeUserRowProfile(row);
-  return {
-    id: Number(row.id || 0),
-    email: String(row.email || ""),
-    role: String(row.role || "").toLowerCase(),
-    managed_by_user_id: row.managed_by_user_id == null ? null : Number(row.managed_by_user_id),
-    display_name: profile.display_name,
-    phone: profile.phone,
-    email_alt: profile.email_alt,
-    line_id: profile.line_id,
-    avatar_path: String(row.avatar_path || "").trim() || null,
-    avatar_url: "",
-    avatar_updated_at: row.avatar_updated_at || null,
-    profile_json: profile.profile_json,
-  };
-}
-
 function logLifecycleAudit(req, { action, targetUserId, before = null, after = null, metadata = null }) {
   console.info("[user-lifecycle-audit]", {
     action: String(action || "").trim() || "unknown",
@@ -68,18 +52,6 @@ function logLifecycleAudit(req, { action, targetUserId, before = null, after = n
 async function countByRole(role) {
   const [rows] = await pool.query("SELECT COUNT(*) AS total FROM users WHERE role=?", [String(role || "").toLowerCase()]);
   return Number(rows?.[0]?.total || 0);
-}
-
-function withAvatarUrl(req, user) {
-  if (!user) return null;
-  return {
-    ...user,
-    avatar_url: resolveUserAvatarPublicUrl(req, user.avatar_path),
-  };
-}
-
-function withAvatarUrls(req, users = []) {
-  return (Array.isArray(users) ? users : []).map((user) => withAvatarUrl(req, user));
 }
 
 async function fetchUserById(req, id) {
