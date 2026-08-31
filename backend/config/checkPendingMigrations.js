@@ -10,7 +10,7 @@ const MIGRATIONS_DIR = path.resolve(__dirname, "../migrations");
 
 export function computePending(files, ledgerFilenames) {
   const ledgerSet = new Set(ledgerFilenames);
-  return files.filter((f) => !ledgerSet.has(f) && classify(f) === "runner");
+  return files.filter((f) => !ledgerSet.has(f) && classify(f) === "runner").sort();
 }
 
 export async function checkPendingMigrations() {
