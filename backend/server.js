@@ -26,6 +26,7 @@ import { ensureContentGovernanceInfrastructure } from "./services/contentGoverna
 import reviewContentRoutes from "./routes/reviewContentRoutes.js";
 import integrationReadinessRoutes from "./routes/integrationReadinessRoutes.js";
 import { assertBackendIntegrationReadiness, getBackendRequiredIntegrationKeys } from "./services/integrationReadinessService.js";
+import { checkPendingMigrations } from "./config/checkPendingMigrations.js";
 import pool from "./config/db.js";
 import {
   applyBasicSecurityHeaders,
@@ -97,6 +98,17 @@ const PORT = Number(process.env.PORT || 5000);
 
 async function startServer() {
   try {
+    const migrationStatus = await checkPendingMigrations();
+    if (migrationStatus.error) {
+      console.log(`[migrations] check failed: ${migrationStatus.error} (boot continues)`);
+    } else if (!migrationStatus.hasLedger) {
+      console.log("[migrations] no schema_migrations table — run: npm run migrate:init");
+    } else if (migrationStatus.pending.length > 0) {
+      console.log(`[migrations] PENDING (${migrationStatus.pending.length}): ${migrationStatus.pending.join(", ")} — run: npm run migrate`);
+    } else {
+      console.log("[migrations] up to date");
+    }
+
     assertBackendIntegrationReadiness(getBackendRequiredIntegrationKeys());
     await ensureUtf8mb4();
     await ensureSharedSchemaBootstrap();
