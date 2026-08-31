@@ -121,6 +121,8 @@ export default function Users({ token, role = "user" }) {
   const [unattributed, setUnattributed] = useState(null);
   const [totals, setTotals] = useState(null);
   const [expandedUserId, setExpandedUserId] = useState(null);
+  const [rangeDays, setRangeDays] = useState("all");
+  const [usageMap, setUsageMap] = useState({});
 
   const toggleUserExpanded = (id) =>
     setExpandedUserId((prev) => (prev === id ? null : id));
@@ -137,8 +139,6 @@ export default function Users({ token, role = "user" }) {
       const res = await api.get("/users", { headers: authHeaders(token) });
       const nextItems = Array.isArray(res.data?.items) ? res.data.items : [];
       setItems(nextItems.map((u) => normalizeUserRow(u)));
-      setUnattributed(res.data?.unattributed ?? null);
-      setTotals(res.data?.totals ?? null);
     } catch (error) {
       setMessage(error.response?.data?.error || error.response?.data?.message || "Failed to load users");
     } finally {
@@ -146,9 +146,30 @@ export default function Users({ token, role = "user" }) {
     }
   }, [token]);
 
+  const fetchAiUsage = useCallback(async () => {
+    try {
+      const res = await api.get("/analytics/ai-usage", { params: { range_days: rangeDays }, headers: authHeaders(token) });
+      setTotals(res.data?.totals ?? null);
+      setUnattributed(res.data?.unattributed ?? null);
+      const map = {};
+      for (const item of res.data?.items || []) {
+        map[item.user_id] = item;
+      }
+      setUsageMap(map);
+    } catch {
+      setUsageMap({});
+      setTotals(null);
+      setUnattributed(null);
+    }
+  }, [token, rangeDays]);
+
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
+
+  useEffect(() => {
+    fetchAiUsage();
+  }, [fetchAiUsage]);
 
   useEffect(() => {
     if (!createRoleOptions.some((option) => option.value === form.role)) {
@@ -391,7 +412,7 @@ export default function Users({ token, role = "user" }) {
       <section className="admin-card">
         <div className="card-title-row">
           <h2>Users</h2>
-          <button type="button" className="ghost" onClick={fetchUsers} disabled={loading}>
+          <button type="button" className="ghost" onClick={() => { fetchUsers(); fetchAiUsage(); }} disabled={loading}>
             {loading ? "Loading..." : "Refresh"}
           </button>
         </div>
@@ -400,7 +421,18 @@ export default function Users({ token, role = "user" }) {
 
         {totals != null ? (
           <section className="users-panel">
-            <h4>AI usage — ทั้งระบบ</h4>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <h4>AI usage — ทั้งระบบ</h4>
+              <label className="cta-range-control">
+                <span>Range</span>
+                <select value={rangeDays} onChange={(e) => setRangeDays(e.target.value)}>
+                  <option value="all">ทั้งหมด</option>
+                  <option value="7">7 วัน</option>
+                  <option value="30">30 วัน</option>
+                  <option value="90">90 วัน</option>
+                </select>
+              </label>
+            </div>
             <div className="cta-metric-grid">
               <div className="cta-metric-card">
                 <p>รวมทุกบัญชี</p>
@@ -429,7 +461,7 @@ export default function Users({ token, role = "user" }) {
               const rowManagerOptions = getRowManagerOptions(items, user.role);
               const managerHelp = getManagerRoleForTargetRole(user.role);
               const isExpanded = expandedUserId === user.id;
-              const usage = user.ai_usage;
+              const usage = usageMap[user.id] || null;
               const fmt = (n) => Number(n || 0).toLocaleString();
               return (
                 <article key={user.id} className="users-item-card">

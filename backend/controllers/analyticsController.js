@@ -1,5 +1,6 @@
 import pool from "../config/db.js";
 import { cleanPlainText } from "../validators/inputSanitizer.js";
+import { resolveVisibleUserRows } from "../services/userRoleService.js";
 
 const ALLOWED_EVENT_TYPES = new Set(["MAP_CLICK", "PHONE_CLICK", "LINE_CLICK", "FACEBOOK_CLICK", "WEBSITE_CLICK"]);
 const ALLOWED_ENTITY_TYPES = new Set(["place", "event", "review_content"]);
@@ -319,6 +320,88 @@ export async function getMissingCtaPlaces(req, res) {
   } catch (err) {
     const msg = String(err?.message || "invalid query");
     if (/limit|invalid|must be/i.test(msg)) return res.status(400).json({ error: msg });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export function normalizeAiUsageRangeDays(value) {
+  if (value == null || value === "") return "all";
+  if (value === "all") return "all";
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw new Error("range_days is invalid");
+  const normalized = Math.floor(n);
+  if (normalized !== 7 && normalized !== 30 && normalized !== 90) throw new Error("range_days is invalid");
+  return normalized;
+}
+
+export async function getAiUsage(req, res) {
+  try {
+    const rangeDays = normalizeAiUsageRangeDays(req.query?.range_days);
+    const rows = await resolveVisibleUserRows(req);
+    const ids = rows.map((r) => Number(r.id));
+
+    const dateClause = rangeDays === "all" ? "" : " AND created_at >= (NOW() - INTERVAL ? DAY)";
+    const dateParams = rangeDays === "all" ? [] : [rangeDays];
+
+    let items = [];
+    if (ids.length) {
+      const placeholders = ids.map(() => "?").join(", ");
+      const [usageRows] = await pool.query(
+        `SELECT user_id, COUNT(*) AS calls,
+                COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
+                COALESCE(SUM(total_tokens),0) AS total_tokens
+         FROM ai_usage_log
+         WHERE user_id IN (${placeholders})${dateClause}
+         GROUP BY user_id`,
+        [...ids, ...dateParams]
+      );
+      items = (Array.isArray(usageRows) ? usageRows : []).map((r) => ({
+        user_id: Number(r.user_id),
+        calls: Number(r.calls) || 0,
+        prompt_tokens: Number(r.prompt_tokens) || 0,
+        total_tokens: Number(r.total_tokens) || 0,
+      }));
+    }
+
+    const actorRole = String(req.user?.role || "").toLowerCase();
+    let unattributed = null;
+    let totals = null;
+
+    if (actorRole === "owner") {
+      const [nullRows] = await pool.query(
+        `SELECT COUNT(*) AS calls,
+                COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
+                COALESCE(SUM(total_tokens),0) AS total_tokens
+         FROM ai_usage_log WHERE user_id IS NULL${dateClause}`,
+        dateParams
+      );
+      const nr = nullRows[0] || {};
+      unattributed = {
+        calls: Number(nr.calls) || 0,
+        prompt_tokens: Number(nr.prompt_tokens) || 0,
+        total_tokens: Number(nr.total_tokens) || 0,
+      };
+
+      const [totalRows] = await pool.query(
+        `SELECT COUNT(*) AS calls,
+                COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
+                COALESCE(SUM(total_tokens),0) AS total_tokens
+         FROM ai_usage_log WHERE 1=1${dateClause}`,
+        dateParams
+      );
+      const tr = totalRows[0] || {};
+      totals = {
+        calls: Number(tr.calls) || 0,
+        prompt_tokens: Number(tr.prompt_tokens) || 0,
+        total_tokens: Number(tr.total_tokens) || 0,
+      };
+    }
+
+    return res.json({ range_days: rangeDays, items, unattributed, totals });
+  } catch (err) {
+    const msg = String(err?.message || "invalid query");
+    if (err.status === 403) return res.status(403).json({ error: msg });
+    if (/range_days|invalid|must be/i.test(msg)) return res.status(400).json({ error: msg });
     return res.status(500).json({ error: "Internal server error" });
   }
 }

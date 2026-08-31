@@ -7,6 +7,7 @@ import {
   listAdminAssignableManagerIds,
   listAdminScopedUserIds,
   parseCanonicalRole,
+  resolveVisibleUserRows,
   validateLifecycleTransition,
   validateManagedByLifecycle,
 } from "../services/userRoleService.js";
@@ -279,89 +280,14 @@ async function resolveUnifiedLifecyclePatch(req, target, body = {}) {
 export const getUsers = async (req, res) => {
   try {
     await ensureUserLifecycleColumns();
-    const role = actorRole(req);
-    let rows = [];
-    if (role === "owner") {
-      const [allRows] = await pool.query("SELECT id, email, role, managed_by_user_id, profile_json, avatar_path, avatar_updated_at FROM users ORDER BY id DESC");
-      rows = withAvatarUrls(req, Array.isArray(allRows) ? allRows.map((row) => normalizeLifecycleUser(row)) : []);
-    } else if (role === "admin") {
-      const scopedIds = await listAdminScopedUserIds(req.user?.id);
-      const visibleIds = Array.from(new Set([Number(req.user?.id || 0) || 0, ...scopedIds].filter(Boolean)));
-      rows = await fetchUsersByIds(req, visibleIds);
-    } else if (role === "user") {
-      const [managedRows] = await pool.query(
-        `
-          SELECT id, email, role, managed_by_user_id, profile_json, avatar_path, avatar_updated_at
-          FROM users
-          WHERE managed_by_user_id=? AND role IN ('editor', 'freelance')
-          ORDER BY id DESC
-        `,
-        [Number(req.user?.id || 0) || 0]
-      );
-      rows = withAvatarUrls(req, Array.isArray(managedRows) ? managedRows.map((row) => normalizeLifecycleUser(row)) : []);
-    } else {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-    let usageByUserId = new Map();
-    let unattributed = null;
-    let totals = null;
+    let rows;
     try {
-      if (rows.length) {
-        const ids = rows.map((u) => Number(u.id));
-        const [usageRows] = await pool.query(
-          `SELECT user_id, COUNT(*) AS calls,
-                  COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
-                  COALESCE(SUM(total_tokens),0) AS total_tokens
-             FROM ai_usage_log
-            WHERE user_id IN (?)
-            GROUP BY user_id`,
-          [ids]
-        );
-        for (const r of usageRows) {
-          usageByUserId.set(Number(r.user_id), {
-            calls: Number(r.calls) || 0,
-            prompt_tokens: Number(r.prompt_tokens) || 0,
-            total_tokens: Number(r.total_tokens) || 0,
-          });
-        }
-      }
-      if (role === "owner") {
-        const [nullRows] = await pool.query(
-          `SELECT COUNT(*) AS calls,
-                  COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
-                  COALESCE(SUM(total_tokens),0) AS total_tokens
-             FROM ai_usage_log WHERE user_id IS NULL`
-        );
-        const r = nullRows[0] || {};
-        unattributed = {
-          calls: Number(r.calls) || 0,
-          prompt_tokens: Number(r.prompt_tokens) || 0,
-          total_tokens: Number(r.total_tokens) || 0,
-        };
-        const [totalRows] = await pool.query(
-          `SELECT COUNT(*) AS calls,
-                  COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
-                  COALESCE(SUM(total_tokens),0) AS total_tokens
-             FROM ai_usage_log`
-        );
-        const tr = totalRows[0] || {};
-        totals = {
-          calls: Number(tr.calls) || 0,
-          prompt_tokens: Number(tr.prompt_tokens) || 0,
-          total_tokens: Number(tr.total_tokens) || 0,
-        };
-      }
+      rows = await resolveVisibleUserRows(req);
     } catch (err) {
-      console.error("[getUsers] ai_usage_log lookup failed:", err.message);
-      usageByUserId = new Map();
-      unattributed = null;
-      totals = null;
+      if (err.status === 403) return res.status(403).json({ error: "Forbidden" });
+      throw err;
     }
-    const itemsWithUsage = rows.map((u) => ({
-      ...u,
-      ai_usage: usageByUserId.get(Number(u.id)) || null,
-    }));
-    res.json({ items: itemsWithUsage, unattributed, totals });
+    res.json({ items: rows });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }

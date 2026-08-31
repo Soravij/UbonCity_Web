@@ -1,4 +1,6 @@
 import pool from "../config/db.js";
+import { normalizeUserRowProfile } from "./userProfileService.js";
+import { resolveUserAvatarPublicUrl } from "./userAvatarService.js";
 
 let ensurePromise;
 const CANONICAL_ROLES = new Set(["owner", "admin", "editor", "freelance", "user"]);
@@ -256,6 +258,75 @@ export async function validateLifecycleTransition({ currentRole, nextRole, userI
   }
 
   return { ok: true };
+}
+
+function normalizeLifecycleUser(row) {
+  if (!row) return null;
+  const profile = normalizeUserRowProfile(row);
+  return {
+    id: Number(row.id || 0),
+    email: String(row.email || ""),
+    role: String(row.role || "").toLowerCase(),
+    managed_by_user_id: row.managed_by_user_id == null ? null : Number(row.managed_by_user_id),
+    display_name: profile.display_name,
+    phone: profile.phone,
+    email_alt: profile.email_alt,
+    line_id: profile.line_id,
+    avatar_path: String(row.avatar_path || "").trim() || null,
+    avatar_url: "",
+    avatar_updated_at: row.avatar_updated_at || null,
+    profile_json: profile.profile_json,
+  };
+}
+
+function withAvatarUrl(req, user) {
+  if (!user) return null;
+  return {
+    ...user,
+    avatar_url: resolveUserAvatarPublicUrl(req, user.avatar_path),
+  };
+}
+
+function withAvatarUrls(req, users = []) {
+  return (Array.isArray(users) ? users : []).map((user) => withAvatarUrl(req, user));
+}
+
+export async function resolveVisibleUserRows(req) {
+  const role = String(req.user?.role || "").toLowerCase();
+  if (role === "owner") {
+    const [allRows] = await pool.query(
+      "SELECT id, email, role, managed_by_user_id, profile_json, avatar_path, avatar_updated_at FROM users ORDER BY id DESC"
+    );
+    return withAvatarUrls(req, Array.isArray(allRows) ? allRows.map((row) => normalizeLifecycleUser(row)) : []);
+  }
+  if (role === "admin") {
+    const scopedIds = await listAdminScopedUserIds(req.user?.id);
+    const visibleIds = Array.from(new Set([Number(req.user?.id || 0) || 0, ...scopedIds].filter(Boolean)));
+    if (!visibleIds.length) return [];
+    const placeholders = visibleIds.map(() => "?").join(", ");
+    const [rows] = await pool.query(
+      `SELECT id, email, role, managed_by_user_id, profile_json, avatar_path, avatar_updated_at
+       FROM users
+       WHERE id IN (${placeholders})
+       ORDER BY id DESC`,
+      visibleIds
+    );
+    const users = Array.isArray(rows) ? rows.map((row) => normalizeLifecycleUser(row)) : [];
+    return withAvatarUrls(req, users);
+  }
+  if (role === "user") {
+    const [managedRows] = await pool.query(
+      `SELECT id, email, role, managed_by_user_id, profile_json, avatar_path, avatar_updated_at
+       FROM users
+       WHERE managed_by_user_id=? AND role IN ('editor', 'freelance')
+       ORDER BY id DESC`,
+      [Number(req.user?.id || 0) || 0]
+    );
+    return withAvatarUrls(req, Array.isArray(managedRows) ? managedRows.map((row) => normalizeLifecycleUser(row)) : []);
+  }
+  const err = new Error("Forbidden");
+  err.status = 403;
+  throw err;
 }
 
 export async function validateManagedByLifecycle(role, managedByUserId) {
