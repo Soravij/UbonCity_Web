@@ -4,7 +4,7 @@ import Link from "next/link";
 import MediaGallery from "@/components/MediaGallery";
 import HoverCoverCard from "@/components/HoverCoverCard";
 import RotatedImage from "@/components/RotatedImage";
-import { formatDistance, getImageSource } from "@/app/[lang]/[category]/[slug]/nearby/page";
+import { formatDistance, getImageSource } from "@/lib/nearby";
 import { hasRichHtmlContent, sanitizeRichContentHtml } from "@/lib/richContent";
 import { resolveDecisionSignalFromTags } from "@/lib/phase56-decision-helpers.mjs";
 import { buildPlaceCtaRows } from "@/lib/place-cta.mjs";
