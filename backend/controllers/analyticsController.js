@@ -324,25 +324,59 @@ export async function getMissingCtaPlaces(req, res) {
   }
 }
 
-export function normalizeAiUsageRangeDays(value) {
-  if (value == null || value === "") return "all";
-  if (value === "all") return "all";
-  const n = Number(value);
-  if (!Number.isFinite(n)) throw new Error("range_days is invalid");
-  const normalized = Math.floor(n);
-  if (normalized !== 7 && normalized !== 30 && normalized !== 90) throw new Error("range_days is invalid");
-  return normalized;
+export function normalizeAiUsageDateRange(query) {
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  let from = query?.from ?? null;
+  let to = query?.to ?? null;
+  if (from === "") from = null;
+  if (to === "") to = null;
+
+  function isValidDate(str) {
+    if (!DATE_RE.test(str)) return false;
+    const [y, m, d] = str.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+  }
+
+  if (from != null) {
+    if (!isValidDate(from)) throw new Error("from is invalid");
+  }
+  if (to != null) {
+    if (!isValidDate(to)) throw new Error("to is invalid");
+  }
+  if (from != null && to != null && from > to) {
+    throw new Error("from must be before to");
+  }
+  return { from, to };
+}
+
+function nextDay(dateStr) {
+  const d = new Date(dateStr + "T00:00:00+07:00");
+  d.setDate(d.getDate() + 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day} 00:00:00`;
 }
 
 export async function getAiUsage(req, res) {
   try {
-    const rangeDays = normalizeAiUsageRangeDays(req.query?.range_days);
+    const { from, to } = normalizeAiUsageDateRange(req.query);
     await ensureUserLifecycleColumns();
     const rows = await resolveVisibleUserRows(req);
     const ids = rows.map((r) => Number(r.id));
 
-    const dateClause = rangeDays === "all" ? "" : " AND created_at >= (NOW() - INTERVAL ? DAY)";
-    const dateParams = rangeDays === "all" ? [] : [rangeDays];
+    const dateClauses = [];
+    const dateParams = [];
+    if (from != null) {
+      dateClauses.push(" AND created_at >= ?");
+      dateParams.push(`${from} 00:00:00`);
+    }
+    if (to != null) {
+      dateClauses.push(" AND created_at < ?");
+      dateParams.push(nextDay(to));
+    }
+    const dateClause = dateClauses.join("");
 
     let items = [];
     if (ids.length) {
@@ -398,11 +432,11 @@ export async function getAiUsage(req, res) {
       };
     }
 
-    return res.json({ range_days: rangeDays, items, unattributed, totals });
+    return res.json({ from, to, items, unattributed, totals });
   } catch (err) {
     const msg = String(err?.message || "invalid query");
     if (err.status === 403) return res.status(403).json({ error: msg });
-    if (/range_days|invalid|must be/i.test(msg)) return res.status(400).json({ error: msg });
+    if (/from|to|invalid|must be/i.test(msg)) return res.status(400).json({ error: msg });
     return res.status(500).json({ error: "Internal server error" });
   }
 }

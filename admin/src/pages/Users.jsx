@@ -121,7 +121,8 @@ export default function Users({ token, role = "user" }) {
   const [unattributed, setUnattributed] = useState(null);
   const [totals, setTotals] = useState(null);
   const [expandedUserId, setExpandedUserId] = useState(null);
-  const [rangeDays, setRangeDays] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [usageMap, setUsageMap] = useState({});
 
   const toggleUserExpanded = (id) =>
@@ -148,7 +149,10 @@ export default function Users({ token, role = "user" }) {
 
   const fetchAiUsage = useCallback(async () => {
     try {
-      const res = await api.get("/analytics/ai-usage", { params: { range_days: rangeDays }, headers: authHeaders(token) });
+      const params = {};
+      if (dateFrom) params.from = dateFrom;
+      if (dateTo) params.to = dateTo;
+      const res = await api.get("/analytics/ai-usage", { params, headers: authHeaders(token) });
       setTotals(res.data?.totals ?? null);
       setUnattributed(res.data?.unattributed ?? null);
       const map = {};
@@ -161,7 +165,7 @@ export default function Users({ token, role = "user" }) {
       setTotals(null);
       setUnattributed(null);
     }
-  }, [token, rangeDays]);
+  }, [token, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchUsers();
@@ -424,14 +428,14 @@ export default function Users({ token, role = "user" }) {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <h4>AI usage — ทั้งระบบ</h4>
               <label className="cta-range-control">
-                <span>Range</span>
-                <select value={rangeDays} onChange={(e) => setRangeDays(e.target.value)}>
-                  <option value="all">ทั้งหมด</option>
-                  <option value="7">7 วัน</option>
-                  <option value="30">30 วัน</option>
-                  <option value="90">90 วัน</option>
-                </select>
+                <span>ตั้งแต่</span>
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
               </label>
+              <label className="cta-range-control">
+                <span>ถึง</span>
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              </label>
+              <button type="button" className="ghost" onClick={() => { setDateFrom(""); setDateTo(""); }}>ล้าง</button>
             </div>
             <div className="cta-metric-grid">
               <div className="cta-metric-card">
