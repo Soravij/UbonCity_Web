@@ -1,6 +1,6 @@
 import Link from "next/link";
 import PlaceDetailContent from "@/components/PlaceDetailContent";
-import { getPlaceDetail } from "@/lib/api";
+import { getPlaceDetail, getNearbyPlaces } from "@/lib/api";
 import {
   buildAbsoluteUrl,
   buildBreadcrumbJsonLd,
@@ -70,10 +70,13 @@ export async function generateMetadata({ params }) {
 export default async function PlaceDetailPage({ params }) {
   const { lang, category, slug } = await params;
   const activeLang = normalizeLang(lang);
-  const [place, copy] = await Promise.all([
+  const [placeResult, copy, nearbyResult] = await Promise.all([
     getPlaceDetail(category, slug, activeLang),
     Promise.resolve(getLangContent(activeLang)),
+    getNearbyPlaces(category, slug, activeLang, 6).catch(() => []),
   ]);
+  const place = placeResult;
+  const nearbyPlaces = Array.isArray(nearbyResult?.items) ? nearbyResult.items : Array.isArray(nearbyResult) ? nearbyResult : [];
   const categoryLabel = copy?.nav?.[category] || category || "-";
   const detailCopy = DETAIL_COPY[activeLang] || DETAIL_COPY.en;
   const canonicalPath = `/${activeLang}/${category}/${slug}`;
@@ -115,7 +118,7 @@ export default async function PlaceDetailPage({ params }) {
       <JsonLdScript id="place-webpage-jsonld" data={webPageJsonLd} />
       <JsonLdScript id="place-breadcrumb-jsonld" data={breadcrumbJsonLd} />
       <JsonLdScript id="place-entity-jsonld" data={placeJsonLd} />
-      <PlaceDetailContent place={place} activeLang={activeLang} category={category} categoryLabel={categoryLabel} />
+      <PlaceDetailContent place={place} activeLang={activeLang} category={category} categoryLabel={categoryLabel} nearbyPlaces={nearbyPlaces} />
     </>
   );
 }

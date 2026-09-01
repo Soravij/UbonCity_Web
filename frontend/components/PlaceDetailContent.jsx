@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import MediaGallery from "@/components/MediaGallery";
+import HoverCoverCard from "@/components/HoverCoverCard";
 import RotatedImage from "@/components/RotatedImage";
+import { formatDistance, getImageSource } from "@/app/[lang]/[category]/[slug]/nearby/page";
 import { hasRichHtmlContent, sanitizeRichContentHtml } from "@/lib/richContent";
 import { resolveDecisionSignalFromTags } from "@/lib/phase56-decision-helpers.mjs";
 import { buildPlaceCtaRows } from "@/lib/place-cta.mjs";
@@ -171,7 +173,7 @@ function hasPublishedPlaceIdentity(place) {
   return Number.isFinite(placeId) && placeId > 0;
 }
 
-export default function PlaceDetailContent({ place, activeLang = "th", category, categoryLabel = "-", isReviewMode = false }) {
+export default function PlaceDetailContent({ place, activeLang = "th", category, categoryLabel = "-", isReviewMode = false, nearbyPlaces = [] }) {
   const detailCopy = DETAIL_COPY[activeLang] || DETAIL_COPY.en;
   const rawGalleryImages = Array.isArray(place?.media_gallery_images)
     ? place.media_gallery_images.map((value) => cleanMediaUrl(value)).filter(Boolean).filter((value, index, list) => list.indexOf(value) === index)
@@ -317,12 +319,33 @@ export default function PlaceDetailContent({ place, activeLang = "th", category,
         </section>
       ) : null}
 
-      {!isReviewMode && place?.slug ? (
-        <div className="flex justify-start">
-          <Link href={`${nearbyHref}/nearby`} className="interactive-tile inline-flex rounded-full px-5 py-3 text-sm font-semibold transition">
-            {detailCopy.nearbyAction}
-          </Link>
-        </div>
+      {!isReviewMode && place?.slug && nearbyPlaces.length > 0 ? (
+        <section className="section-panel p-5 md:p-6">
+          <h2 className="text-lg font-semibold md:text-xl">{detailCopy.nearbyAction}</h2>
+          <div className="mt-3 flex flex-wrap gap-4">
+            {nearbyPlaces.map((item) => {
+              const href = item?.category && item?.slug ? `/${activeLang}/${item.category}/${item.slug}` : null;
+              if (!href) return null;
+              return (
+                <HoverCoverCard
+                  key={`nearby-inline-${item.id}`}
+                  href={href}
+                  imageSrc={getImageSource(item, item.category || category)}
+                  eyebrow={categoryLabel}
+                  title={item.title || "-"}
+                  description={item.excerpt || item.summary || item.description || ""}
+                  meta={item?.distance_km != null ? formatDistance(item.distance_km, activeLang) : ""}
+                  className="w-full md:w-[calc(50%_-_0.5rem)] xl:w-[calc(25%_-_0.75rem)]"
+                />
+              );
+            })}
+          </div>
+          <div className="mt-4">
+            <Link href={`${nearbyHref}/nearby`} className="interactive-tile inline-flex rounded-full px-5 py-3 text-sm font-semibold transition">
+              {detailCopy.nearbyAction}
+            </Link>
+          </div>
+        </section>
       ) : null}
     </section>
   );

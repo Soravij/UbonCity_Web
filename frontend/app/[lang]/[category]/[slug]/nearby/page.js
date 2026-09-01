@@ -44,7 +44,7 @@ const NEARBY_PAGE_COPY = {
   },
 };
 
-function formatDistance(distanceKm, lang) {
+export function formatDistance(distanceKm, lang) {
   const value = Number(distanceKm);
   if (!Number.isFinite(value) || value < 0) return "";
   const locale = lang === "th" ? "th-TH" : lang === "zh" ? "zh-CN" : lang === "lo" ? "lo-LA" : "en-US";
@@ -60,7 +60,7 @@ function buildPlaceHref(lang, item) {
   return `/${lang}/${item.category}/${item.slug}`;
 }
 
-function getImageSource(item, category) {
+export function getImageSource(item, category) {
   if (item?.effective_cover_image || item?.effective_thumbnail_image || item?.image) {
     return item.effective_cover_image || item.effective_thumbnail_image || item.image;
   }
