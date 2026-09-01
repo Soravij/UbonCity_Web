@@ -156,6 +156,7 @@ export default function Users({ token, role = "user" }) {
       return;
     }
     try {
+      setMessage("");
       const params = {};
       if (dateFrom) params.from = dateFrom;
       if (dateTo) params.to = dateTo;

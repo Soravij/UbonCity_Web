@@ -357,7 +357,7 @@ export function normalizeAiUsageDateRange(query) {
   return { from, to };
 }
 
-function nextDay(dateStr) {
+export function nextDay(dateStr) {
   let [y, m, d] = dateStr.split("-").map(Number);
   const table = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   function dim(y, m) {
