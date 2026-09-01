@@ -150,9 +150,6 @@ export default function Users({ token, role = "user" }) {
   const fetchAiUsage = useCallback(async () => {
     if (dateFrom && dateTo && dateFrom > dateTo) {
       setMessage("ช่วงวันไม่ถูกต้อง");
-      setUsageMap({});
-      setTotals(null);
-      setUnattributed(null);
       return;
     }
     try {
