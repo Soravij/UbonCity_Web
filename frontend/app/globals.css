@@ -1190,7 +1190,7 @@ a {
   z-index: 1;
 }
 
-:root:not([data-theme="dark"]) .page-stack--scenic-shell::before {
+.page-stack--scenic-shell::before {
   content: "";
   position: absolute;
   top: 0;
@@ -1206,6 +1206,11 @@ a {
     rgba(255, 251, 246, 0.94) 36%,
     rgba(255, 252, 248, 0.97) 100%
   );
+}
+
+:root[data-theme="dark"] .page-stack--scenic-shell::before {
+  background: color-mix(in srgb, var(--theme-surface) 45%, transparent);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
 }
 
 @media (min-width: 768px) {
