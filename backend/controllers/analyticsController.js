@@ -331,11 +331,18 @@ export function normalizeAiUsageDateRange(query) {
   if (from === "") from = null;
   if (to === "") to = null;
 
+  function daysInMonth(y, m) {
+    const table = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (m === 2 && ((y % 4 === 0 && y % 100 !== 0) || y % 400 === 0)) return 29;
+    return table[m - 1];
+  }
+
   function isValidDate(str) {
     if (!DATE_RE.test(str)) return false;
     const [y, m, d] = str.split("-").map(Number);
-    const dt = new Date(y, m - 1, d);
-    return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+    if (m < 1 || m > 12) return false;
+    if (d < 1 || d > daysInMonth(y, m)) return false;
+    return true;
   }
 
   if (from != null) {
@@ -351,12 +358,18 @@ export function normalizeAiUsageDateRange(query) {
 }
 
 function nextDay(dateStr) {
-  const d = new Date(dateStr + "T00:00:00+07:00");
-  d.setDate(d.getDate() + 1);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day} 00:00:00`;
+  let [y, m, d] = dateStr.split("-").map(Number);
+  const table = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  function dim(y, m) {
+    if (m === 2 && ((y % 4 === 0 && y % 100 !== 0) || y % 400 === 0)) return 29;
+    return table[m - 1];
+  }
+  d += 1;
+  if (d > dim(y, m)) { d = 1; m += 1; }
+  if (m > 12) { m = 1; y += 1; }
+  const mm = String(m).padStart(2, "0");
+  const dd = String(d).padStart(2, "0");
+  return `${y}-${mm}-${dd} 00:00:00`;
 }
 
 export async function getAiUsage(req, res) {
@@ -436,7 +449,7 @@ export async function getAiUsage(req, res) {
   } catch (err) {
     const msg = String(err?.message || "invalid query");
     if (err.status === 403) return res.status(403).json({ error: msg });
-    if (/from|to|invalid|must be/i.test(msg)) return res.status(400).json({ error: msg });
+    if (/(^|\b)(from|to) (is invalid|must be)/i.test(msg)) return res.status(400).json({ error: msg });
     return res.status(500).json({ error: "Internal server error" });
   }
 }
