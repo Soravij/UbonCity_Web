@@ -1214,7 +1214,7 @@ a {
 }
 
 @media (min-width: 768px) {
-  :root:not([data-theme="dark"]) .page-stack--scenic-shell::before {
+  .page-stack--scenic-shell::before {
     width: min(calc(100vw - 4rem), calc(var(--site-shell-max-width) + 4rem));
   }
 }
