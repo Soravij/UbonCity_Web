@@ -165,7 +165,11 @@ async function cmdMigrate(conn) {
       }
 
       if (classify(file) !== "runner") {
-        throw new Error(`refusing to run ${file}: classified '${classify(file)}', runner only executes 'runner' files`);
+        throw new Error(
+          `refusing to run ${file}: classified '${classify(file)}', runner only executes 'runner' files. ` +
+          `This file is not in schema_migrations, so the ledger has not been seeded. ` +
+          `Run "npm run migrate:init" first to record baseline/manual migrations, then re-run "npm run migrate".`
+        );
       }
 
       const content = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
