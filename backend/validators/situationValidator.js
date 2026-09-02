@@ -25,7 +25,9 @@ export function validateSituationCreatePayload(body) {
       };
     }
 
-    const sort_order = Number.isFinite(Number(body?.sort_order)) ? Number(body.sort_order) : 0;
+    const sort_order = body?.sort_order !== undefined && body?.sort_order !== null
+      ? (Number.isFinite(Number(body.sort_order)) ? Number(body.sort_order) : undefined)
+      : undefined;
     const is_active = body?.is_active === 0 || body?.is_active === false ? 0 : 1;
     const image_url = body?.image_url
       ? cleanUrl(body.image_url, { field: "image_url" })
