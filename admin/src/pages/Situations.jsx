@@ -23,7 +23,6 @@ const EMPTY_TRANSLATIONS = {
 
 function emptyForm() {
   return {
-    is_active: 1,
     translations: JSON.parse(JSON.stringify(EMPTY_TRANSLATIONS)),
   };
 }
@@ -83,7 +82,6 @@ export default function Situations({ token }) {
       }
 
       setForm({
-        is_active: item.is_active ?? 1,
         translations,
       });
       setEditing(item.slug);
@@ -119,7 +117,6 @@ export default function Situations({ token }) {
     }
 
     const body = {
-      is_active: form.is_active ? 1 : 0,
       translations,
     };
 
@@ -220,15 +217,6 @@ export default function Situations({ token }) {
         {message ? <p className="status">{message}</p> : null}
 
         <form onSubmit={handleSubmit}>
-          <label>
-            <input
-              type="checkbox"
-              checked={Boolean(form.is_active)}
-              onChange={(e) => updateField("is_active", e.target.checked ? 1 : 0)}
-            />{" "}
-            เปิดใช้งาน
-          </label>
-
           {LANGS.map((lang) => (
             <fieldset key={lang.code}>
               <legend>

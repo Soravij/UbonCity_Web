@@ -84,6 +84,8 @@ test("situations API", async (t) => {
     const { default: jwt } = await import("jsonwebtoken");
     const situationRoutes = (await import("../routes/situationRoutes.js")).default;
 
+    await pool.query("DELETE FROM situations WHERE slug LIKE '__test-fill-%' OR slug = 'test-409-probe'");
+
     let snapshot = [];
     const [snapRows] = await pool.query("SELECT id, slug, sort_order FROM situations ORDER BY sort_order ASC, id ASC");
     snapshot = snapRows;
@@ -124,9 +126,7 @@ test("situations API", async (t) => {
       assert.match(body.error, /Maximum 7 situations/);
     } finally {
       server.close();
-      for (const id of seedsToAdd) {
-        await pool.query("DELETE FROM situations WHERE id = ?", [id]);
-      }
+      await pool.query("DELETE FROM situations WHERE slug LIKE '__test-fill-%' OR slug = 'test-409-probe'");
       for (const row of snapshot) {
         await pool.query("UPDATE situations SET sort_order = ? WHERE id = ?", [row.sort_order, row.id]);
       }

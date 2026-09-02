@@ -38,7 +38,7 @@ export async function getSituationBySlug(slug) {
   return { ...situation, translations };
 }
 
-export async function createSituation({ slug, sort_order, is_active = 1, image_url = null, translations = {} }) {
+export async function createSituation({ slug, sort_order, is_active, image_url = null, translations = {} }) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -58,7 +58,7 @@ export async function createSituation({ slug, sort_order, is_active = 1, image_u
 
     const [result] = await conn.query(
       "INSERT INTO situations (slug, sort_order, is_active, image_url) VALUES (?, ?, ?, ?)",
-      [slug, finalSortOrder, is_active, image_url]
+      [slug, finalSortOrder, is_active ?? 1, image_url]
     );
     const situationId = Number(result.insertId);
 
