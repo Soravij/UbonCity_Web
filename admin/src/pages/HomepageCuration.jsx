@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, authHeaders } from "../api/api";
+import Situations from "./Situations";
 import {
   EVENT_BLOCK_KEY,
   HERO_BLOCK_KEY,
@@ -33,6 +34,7 @@ const FIXED_BLOCK_TYPES = {
 };
 const TAB_LAYOUT = "layout";
 const TAB_SIGNALS = "signals";
+const TAB_SITUATIONS = "situations";
 
 const SOURCE_MODE_OPTIONS = [
   { value: "manual-first-hybrid", label: "เลือกเองก่อน แล้วระบบช่วยเติม" },
@@ -684,6 +686,9 @@ export default function HomepageCuration({ token }) {
         <button type="button" className={activeTab === TAB_SIGNALS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SIGNALS)}>
           Signals / Content Pool
         </button>
+        <button type="button" className={activeTab === TAB_SITUATIONS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SITUATIONS)}>
+          สถานการณ์
+        </button>
       </div>
 
       {loading ? (
@@ -981,6 +986,8 @@ export default function HomepageCuration({ token }) {
             );
           })}
         </div>
+      ) : activeTab === TAB_SITUATIONS ? (
+        <Situations token={token} />
       ) : (
         <div className="homepage-curation-block-list">
           <article className="homepage-curation-block-card">

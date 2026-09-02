@@ -79,6 +79,60 @@ test("situations API", async (t) => {
     }
   });
 
+  await t.test("POST /api/situations with 7 rows returns 409", async () => {
+    const { default: express } = await import("express");
+    const { default: jwt } = await import("jsonwebtoken");
+    const situationRoutes = (await import("../routes/situationRoutes.js")).default;
+
+    await pool.query("DELETE FROM situations WHERE slug LIKE '__test-fill-%' OR slug = 'test-409-probe'");
+
+    let snapshot = [];
+    const [snapRows] = await pool.query("SELECT id, slug, sort_order FROM situations ORDER BY sort_order ASC, id ASC");
+    snapshot = snapRows;
+
+    const [countRows] = await pool.query("SELECT COUNT(*) AS cnt FROM situations");
+    const currentCount = Number(countRows[0].cnt);
+    const seedsToAdd = [];
+    if (currentCount < 7) {
+      const needed = 7 - currentCount;
+      for (let i = 0; i < needed; i++) {
+        const slug = `__test-fill-${Date.now()}-${i}`;
+        const [r] = await pool.query("INSERT INTO situations (slug, sort_order, is_active) VALUES (?, ?, 1)", [slug, 900 + i]);
+        seedsToAdd.push(Number(r.insertId));
+      }
+    }
+
+    const testApp = express();
+    testApp.use(express.json());
+    testApp.use("/api", situationRoutes);
+    const server = testApp.listen(0);
+    const port = server.address().port;
+
+    try {
+      const secret = process.env.JWT_SECRET;
+      const token = jwt.sign({ role: "admin", email: "test@test.com" }, secret, {
+        issuer: process.env.JWT_ISSUER || "uboncity-backend",
+        audience: process.env.JWT_AUDIENCE_BACKEND || "uboncity-backend",
+        expiresIn: "60s",
+      });
+
+      const res = await fetch(`http://localhost:${port}/api/situations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ slug: "test-409-probe", translations: { en: { title: "Should409" } } }),
+      });
+      const body = await res.json();
+      assert.equal(res.status, 409, `expected 409, got ${res.status}`);
+      assert.match(body.error, /Maximum 7 situations/);
+    } finally {
+      server.close();
+      await pool.query("DELETE FROM situations WHERE slug LIKE '__test-fill-%' OR slug = 'test-409-probe'");
+      for (const row of snapshot) {
+        await pool.query("UPDATE situations SET sort_order = ? WHERE id = ?", [row.sort_order, row.id]);
+      }
+    }
+  });
+
   await t.test("createSituation + getSituationBySlug round-trip", async () => {
     await cleanup();
     try {

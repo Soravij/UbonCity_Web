@@ -6,8 +6,10 @@ import {
   createSituation,
   updateSituationBySlug,
   deleteSituationBySlug,
+  reorderSituation,
 } from "../repositories/situationRepository.js";
 import { validateSituationCreatePayload, validateSituationUpdatePayload } from "../validators/situationValidator.js";
+import logger from "../middleware/logger.js";
 
 export async function getSituations(req, res) {
   try {
@@ -15,6 +17,7 @@ export async function getSituations(req, res) {
     const items = await listSituations(lang);
     return res.json({ items });
   } catch (err) {
+    logger.error("getSituations failed", { err });
     return res.status(500).json({ error: "Internal server error" });
   }
 }
@@ -26,6 +29,7 @@ export async function getSituationDetail(req, res) {
     if (!item) return res.status(404).json({ error: "Situation not found" });
     return res.json({ item });
   } catch (err) {
+    logger.error("getSituationDetail failed", { err });
     return res.status(500).json({ error: "Internal server error" });
   }
 }
@@ -45,6 +49,10 @@ export async function createSituationHandler(req, res) {
     const id = await createSituation(validated.value);
     return res.json({ message: "Situation created", id });
   } catch (err) {
+    if (err?.code === "SITUATION_LIMIT_REACHED") {
+      return res.status(409).json({ error: err.message });
+    }
+    logger.error("createSituation failed", { err });
     return res.status(500).json({ error: "Internal server error" });
   }
 }
@@ -67,6 +75,7 @@ export async function updateSituation(req, res) {
     if (!updated) return res.status(404).json({ error: "Situation not found" });
     return res.json({ message: "Situation updated" });
   } catch (err) {
+    logger.error("updateSituation failed", { err });
     return res.status(500).json({ error: "Internal server error" });
   }
 }
@@ -78,6 +87,30 @@ export async function deleteSituation(req, res) {
     if (!deleted) return res.status(404).json({ error: "Situation not found" });
     return res.json({ message: "Situation deleted" });
   } catch (err) {
+    logger.error("deleteSituation failed", { err });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function reorderSituationHandler(req, res) {
+  const slug = String(req.body?.slug || "").trim().toLowerCase();
+  const direction = String(req.body?.direction || "").trim().toLowerCase();
+
+  if (!slug) {
+    return res.status(400).json({ error: "slug is required" });
+  }
+  if (direction !== "up" && direction !== "down") {
+    return res.status(400).json({ error: "direction must be up or down" });
+  }
+
+  try {
+    const result = await reorderSituation(slug, direction);
+    if (result === null) {
+      return res.status(404).json({ error: "Situation not found" });
+    }
+    return res.json({ moved: result.moved });
+  } catch (err) {
+    logger.error("reorderSituation failed", { err });
     return res.status(500).json({ error: "Internal server error" });
   }
 }

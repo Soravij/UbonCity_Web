@@ -38,19 +38,27 @@ export async function getSituationBySlug(slug) {
   return { ...situation, translations };
 }
 
-export async function createSituation({ slug, sort_order = 0, is_active = 1, image_url = null, translations = {} }) {
+export async function createSituation({ slug, sort_order, is_active, image_url = null, translations = {} }) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
     const [countRows] = await conn.query("SELECT COUNT(*) AS cnt FROM situations FOR UPDATE");
     if (Number(countRows[0].cnt) >= 7) {
-      throw new Error("Maximum 7 situations allowed. Delete one first.");
+      const err = new Error("Maximum 7 situations allowed. Delete one first.");
+      err.code = "SITUATION_LIMIT_REACHED";
+      throw err;
+    }
+
+    let finalSortOrder = sort_order;
+    if (finalSortOrder === undefined || finalSortOrder === null) {
+      const [[maxRow]] = await conn.query("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM situations FOR UPDATE");
+      finalSortOrder = maxRow.next;
     }
 
     const [result] = await conn.query(
       "INSERT INTO situations (slug, sort_order, is_active, image_url) VALUES (?, ?, ?, ?)",
-      [slug, sort_order, is_active, image_url]
+      [slug, finalSortOrder, is_active ?? 1, image_url]
     );
     const situationId = Number(result.insertId);
 
@@ -126,4 +134,43 @@ export async function deleteSituationBySlug(slug) {
     "DELETE FROM situations WHERE slug = ?", [slug]
   );
   return result.affectedRows;
+}
+
+export async function reorderSituation(slug, direction) {
+  if (direction !== "up" && direction !== "down") return null;
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query(
+      "SELECT id, slug FROM situations ORDER BY sort_order ASC, id ASC FOR UPDATE"
+    );
+    for (let i = 0; i < rows.length; i += 1) {
+      await conn.query("UPDATE situations SET sort_order = ? WHERE id = ?", [i + 1, rows[i].id]);
+    }
+
+    const idx = rows.findIndex((r) => r.slug === slug);
+    if (idx === -1) {
+      await conn.rollback();
+      return null;
+    }
+
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= rows.length) {
+      await conn.commit();
+      return { moved: false };
+    }
+
+    await conn.query("UPDATE situations SET sort_order = ? WHERE id = ?", [swapIdx + 1, rows[idx].id]);
+    await conn.query("UPDATE situations SET sort_order = ? WHERE id = ?", [idx + 1, rows[swapIdx].id]);
+
+    await conn.commit();
+    return { moved: true };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
 }

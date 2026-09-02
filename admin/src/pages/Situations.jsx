@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { api, authHeaders } from "../api/api";
 
+function slugFromEnTitle(value) {
+  const base = String(value || "").normalize("NFKD").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return base || `situation-${Date.now()}`;
+}
+
 const LANGS = [
   { code: "en", label: "English" },
   { code: "th", label: "ไทย" },
@@ -17,10 +23,6 @@ const EMPTY_TRANSLATIONS = {
 
 function emptyForm() {
   return {
-    slug: "",
-    sort_order: 0,
-    is_active: 1,
-    image_url: "",
     translations: JSON.parse(JSON.stringify(EMPTY_TRANSLATIONS)),
   };
 }
@@ -80,10 +82,6 @@ export default function Situations({ token }) {
       }
 
       setForm({
-        slug: item.slug,
-        sort_order: item.sort_order ?? 0,
-        is_active: item.is_active ?? 1,
-        image_url: item.image_url || "",
         translations,
       });
       setEditing(item.slug);
@@ -119,10 +117,6 @@ export default function Situations({ token }) {
     }
 
     const body = {
-      slug: form.slug,
-      sort_order: Number(form.sort_order) || 0,
-      is_active: form.is_active ? 1 : 0,
-      image_url: form.image_url.trim() || null,
       translations,
     };
 
@@ -132,14 +126,15 @@ export default function Situations({ token }) {
         await api.put(`/situations/${editing}`, body, { headers });
         setMessage("อัปเดตสำเร็จ");
       } else {
-        await api.post("/situations", body, { headers });
+        await api.post("/situations", { ...body, slug: slugFromEnTitle(form.translations.en?.title) }, { headers });
         setMessage("สร้างสำเร็จ");
       }
       setForm(emptyForm());
       setEditing(null);
       loadList();
     } catch (err) {
-      setMessage(err.response?.data?.error || "บันทึกไม่สำเร็จ");
+      const serverError = err.response?.data?.error;
+      setMessage(serverError || "บันทึกไม่สำเร็จ");
     } finally {
       setSaving(false);
     }
@@ -149,6 +144,15 @@ export default function Situations({ token }) {
     setForm(emptyForm());
     setEditing(null);
     setMessage("");
+  }
+
+  async function handleReorder(slug, direction) {
+    try {
+      await api.post("/situations/reorder", { slug, direction }, { headers: authHeaders(token) });
+      loadList();
+    } catch {
+      setMessage("สลับลำดับไม่สำเร็จ");
+    }
   }
 
   return (
@@ -171,7 +175,7 @@ export default function Situations({ token }) {
               </tr>
             </thead>
             <tbody>
-              {list.map((item) => (
+              {list.map((item, idx) => (
                 <tr key={item.id}>
                   <td>{item.sort_order}</td>
                   <td>{item.slug}</td>
@@ -183,7 +187,17 @@ export default function Situations({ token }) {
                     </button>{" "}
                     <button type="button" className="danger" onClick={() => handleDelete(item.slug)}>
                       ลบ
-                    </button>
+                    </button>{" "}
+                    {idx > 0 ? (
+                      <button type="button" className="ghost" onClick={() => handleReorder(item.slug, "up")}>
+                        ↑
+                      </button>
+                    ) : null}{" "}
+                    {idx < list.length - 1 ? (
+                      <button type="button" className="ghost" onClick={() => handleReorder(item.slug, "down")}>
+                        ↓
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -203,45 +217,6 @@ export default function Situations({ token }) {
         {message ? <p className="status">{message}</p> : null}
 
         <form onSubmit={handleSubmit}>
-          <label>
-            Slug
-            <input
-              type="text"
-              value={form.slug}
-              onChange={(e) => updateField("slug", e.target.value)}
-              disabled={Boolean(editing)}
-              required
-            />
-          </label>
-
-          <label>
-            ลำดับ (sort_order)
-            <input
-              type="number"
-              value={form.sort_order}
-              onChange={(e) => updateField("sort_order", e.target.value)}
-            />
-          </label>
-
-          <label>
-            <input
-              type="checkbox"
-              checked={Boolean(form.is_active)}
-              onChange={(e) => updateField("is_active", e.target.checked ? 1 : 0)}
-            />{" "}
-            เปิดใช้งาน
-          </label>
-
-          <label>
-            Image URL
-            <input
-              type="text"
-              value={form.image_url}
-              onChange={(e) => updateField("image_url", e.target.value)}
-              placeholder="https://..."
-            />
-          </label>
-
           {LANGS.map((lang) => (
             <fieldset key={lang.code}>
               <legend>
@@ -281,6 +256,7 @@ export default function Situations({ token }) {
             <button type="button" className="ghost" onClick={handleCancel}>
               ยกเลิก
             </button>
+            {message ? <p className="status">{message}</p> : null}
           </div>
         </form>
       </div>
