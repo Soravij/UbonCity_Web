@@ -43,7 +43,7 @@ export async function createSituation({ slug, sort_order = 0, is_active = 1, ima
   try {
     await conn.beginTransaction();
 
-    const [countRows] = await conn.query("SELECT COUNT(*) AS cnt FROM situations");
+    const [countRows] = await conn.query("SELECT COUNT(*) AS cnt FROM situations FOR UPDATE");
     if (Number(countRows[0].cnt) >= 7) {
       throw new Error("Maximum 7 situations allowed. Delete one first.");
     }

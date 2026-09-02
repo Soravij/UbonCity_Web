@@ -142,6 +142,11 @@ test("situations API", async (t) => {
   await t.test("updateSituationBySlug with empty th.title removes th translation row", async () => {
     await cleanup();
     try {
+      const [countRows] = await pool.query("SELECT COUNT(*) AS cnt FROM situations");
+      if (Number(countRows[0].cnt) >= 7) {
+        await pool.query("DELETE FROM situations WHERE slug = ?", [SEED_SITUATIONS[SEED_SITUATIONS.length - 1].slug]);
+      }
+
       await createSituation({
         slug: TEST_SLUG,
         sort_order: 1,
@@ -164,6 +169,7 @@ test("situations API", async (t) => {
       assert.equal(enRow.title, "EN Keep");
     } finally {
       await cleanup();
+      await restoreSeed();
     }
   });
 
