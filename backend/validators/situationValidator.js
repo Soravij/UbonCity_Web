@@ -43,6 +43,9 @@ export function validateSituationUpdatePayload(body) {
     const translations = {};
 
     if (rawTranslations && typeof rawTranslations === "object" && !Array.isArray(rawTranslations)) {
+      if (!rawTranslations.en || !rawTranslations.en.title) {
+        return { ok: false, error: "English title is required" };
+      }
       for (const lang of SUPPORTED_CONTENT_LANGS) {
         const entry = rawTranslations[lang];
         if (!entry || !entry.title) continue;

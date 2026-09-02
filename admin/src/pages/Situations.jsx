@@ -112,12 +112,10 @@ export default function Situations({ token }) {
     const translations = {};
     for (const lang of LANGS) {
       const entry = form.translations[lang.code];
-      if (entry && entry.title.trim()) {
-        translations[lang.code] = {
-          title: entry.title.trim(),
-          description: entry.description.trim() || null,
-        };
-      }
+      translations[lang.code] = {
+        title: entry?.title?.trim() ?? "",
+        description: entry?.description?.trim() ?? "",
+      };
     }
 
     const body = {

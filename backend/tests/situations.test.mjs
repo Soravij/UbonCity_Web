@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import pool from "../config/db.js";
-import { listSituations, getSituationBySlug, createSituation, deleteSituationBySlug } from "../repositories/situationRepository.js";
-import { validateSituationCreatePayload } from "../validators/situationValidator.js";
+import { listSituations, getSituationBySlug, createSituation, updateSituationBySlug, deleteSituationBySlug } from "../repositories/situationRepository.js";
+import { validateSituationCreatePayload, validateSituationUpdatePayload } from "../validators/situationValidator.js";
 
 const TEST_SLUG = "test-situation-api-probe";
 
@@ -78,6 +78,42 @@ test("situations API", async (t) => {
     } finally {
       await cleanup();
     }
+  });
+
+  await t.test("updateSituationBySlug with empty th.title removes th translation row", async () => {
+    await cleanup();
+    try {
+      await createSituation({
+        slug: TEST_SLUG,
+        sort_order: 1,
+        translations: {
+          en: { title: "EN Keep" },
+          th: { title: "TH Remove" },
+        },
+      });
+
+      await updateSituationBySlug(TEST_SLUG, {
+        translations: { en: { title: "EN Keep" }, th: { title: "" } },
+      });
+
+      const item = await getSituationBySlug(TEST_SLUG);
+      assert.ok(item);
+      const thRow = item.translations.find((r) => r.lang === "th");
+      assert.equal(thRow, undefined, "th translation should be deleted");
+      const enRow = item.translations.find((r) => r.lang === "en");
+      assert.ok(enRow, "en translation should still exist");
+      assert.equal(enRow.title, "EN Keep");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  await t.test("validateSituationUpdatePayload rejects empty en.title", () => {
+    const result = validateSituationUpdatePayload({
+      translations: { en: { title: "" } },
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /English title/i);
   });
 
 });

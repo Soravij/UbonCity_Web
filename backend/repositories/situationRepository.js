@@ -50,6 +50,7 @@ export async function createSituation({ slug, sort_order = 0, is_active = 1, ima
     const situationId = Number(result.insertId);
 
     for (const [lang, data] of Object.entries(translations)) {
+      if (!(data.title || "").trim()) continue;
       await conn.query(
         `INSERT INTO situation_translations (situation_id, lang, title, description)
          VALUES (?, ?, ?, ?)`,
@@ -90,12 +91,19 @@ export async function updateSituationBySlug(slug, { sort_order, is_active, image
     }
 
     for (const [lang, data] of Object.entries(translations)) {
-      await conn.query(
-        `INSERT INTO situation_translations (situation_id, lang, title, description)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE title = VALUES(title), description = VALUES(description)`,
-        [situationId, lang, data.title, data.description || null]
-      );
+      if (lang !== "en" && !(data.title || "").trim()) {
+        await conn.query(
+          "DELETE FROM situation_translations WHERE situation_id = ? AND lang = ?",
+          [situationId, lang]
+        );
+      } else {
+        await conn.query(
+          `INSERT INTO situation_translations (situation_id, lang, title, description)
+           VALUES (?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE title = VALUES(title), description = VALUES(description)`,
+          [situationId, lang, data.title, data.description || null]
+        );
+      }
     }
 
     await conn.commit();
