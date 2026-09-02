@@ -268,6 +268,7 @@ export default function Situations({ token }) {
             <button type="button" className="ghost" onClick={handleCancel}>
               ยกเลิก
             </button>
+            {message ? <p className="status">{message}</p> : null}
           </div>
         </form>
       </div>

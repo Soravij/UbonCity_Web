@@ -1,16 +1,21 @@
 const LEVELS = { error: "error", warn: "warn", info: "info" };
 
 function emit(level, message, meta) {
+  const rest = meta && typeof meta === "object" ? { ...meta } : {};
+  const errValue = rest.err;
+  delete rest.err;
   const line = {
     ts: new Date().toISOString(),
     level,
     message,
-    ...(meta?.err instanceof Error
-      ? { err: { name: meta.err.name, message: meta.err.message, code: meta.err.code, stack: meta.err.stack } }
-      : {}),
-    ...(meta && typeof meta === "object" ? { ...meta, err: undefined } : {}),
+    ...rest,
+    ...(errValue instanceof Error
+      ? { err: { name: errValue.name, message: errValue.message, code: errValue.code, stack: errValue.stack } }
+      : errValue !== undefined
+        ? { err: errValue }
+        : {}),
   };
-  const out = JSON.stringify(line, (k, v) => (v === undefined ? undefined : v));
+  const out = JSON.stringify(line);
   if (level === LEVELS.error) console.error(out);
   else if (level === LEVELS.warn) console.warn(out);
   else console.info(out);
