@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import MediaGallery from "@/components/MediaGallery";
-import HoverCoverCard from "@/components/HoverCoverCard";
 import RotatedImage from "@/components/RotatedImage";
 import { formatDistance, getImageSource } from "@/lib/nearby";
 import { hasRichHtmlContent, sanitizeRichContentHtml } from "@/lib/richContent";
@@ -322,21 +321,24 @@ export default function PlaceDetailContent({ place, activeLang = "th", category,
       {!isReviewMode && place?.slug && nearbyPlaces.length > 0 ? (
         <section className="section-panel p-5 md:p-6">
           <h2 className="text-lg font-semibold md:text-xl">{detailCopy.nearbyAction}</h2>
-          <div className="mt-3 flex flex-wrap gap-4">
+          <div className="mt-3 flex flex-col gap-2">
             {nearbyPlaces.map((item) => {
               const href = item?.category && item?.slug ? `/${activeLang}/${item.category}/${item.slug}` : null;
               if (!href) return null;
+              const imgSrc = getImageSource(item, item.category || category);
+              const dist = item?.distance_km != null ? formatDistance(item.distance_km, activeLang) : null;
               return (
-                <HoverCoverCard
-                  key={`nearby-inline-${item.id}`}
-                  href={href}
-                  imageSrc={getImageSource(item, item.category || category)}
-                  eyebrow={categoryLabel}
-                  title={item.title || "-"}
-                  description={item.excerpt || item.summary || item.description || ""}
-                  meta={item?.distance_km != null ? formatDistance(item.distance_km, activeLang) : ""}
-                  className="w-full md:w-[calc(50%_-_0.5rem)] xl:w-[calc(25%_-_0.75rem)]"
-                />
+                <Link key={`nearby-inline-${item.id}`} href={href} className="flex items-center gap-3 rounded-xl transition hover:translate-x-1">
+                  {imgSrc ? (
+                    <img src={imgSrc} alt={item.title || ""} className="h-16 w-16 shrink-0 rounded-lg object-cover" />
+                  ) : null}
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{item.title || "-"}</p>
+                    <p className="truncate text-xs text-[color:var(--muted)]">
+                      {categoryLabel}{dist ? ` · ${dist}` : ""}
+                    </p>
+                  </div>
+                </Link>
               );
             })}
           </div>
