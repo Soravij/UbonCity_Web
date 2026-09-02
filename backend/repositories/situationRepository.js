@@ -43,6 +43,11 @@ export async function createSituation({ slug, sort_order = 0, is_active = 1, ima
   try {
     await conn.beginTransaction();
 
+    const [countRows] = await conn.query("SELECT COUNT(*) AS cnt FROM situations");
+    if (Number(countRows[0].cnt) >= 7) {
+      throw new Error("Maximum 7 situations allowed. Delete one first.");
+    }
+
     const [result] = await conn.query(
       "INSERT INTO situations (slug, sort_order, is_active, image_url) VALUES (?, ?, ?, ?)",
       [slug, sort_order, is_active, image_url]

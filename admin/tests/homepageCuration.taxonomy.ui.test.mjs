@@ -63,11 +63,11 @@ test("current page selection supports one row and select-all", () => {
 
 test("bulk add appends selected candidates and keeps duplicate guard/manual items", () => {
   const blocks = [{
-    key: "top_picks",
+    key: "scenarios",
     enabled: true,
     manual_items: [{ entity_type: "place", entity_id: "1", label: "Existing" }],
   }];
-  const next = addCandidatesToBlocks(blocks, "top_picks", [
+  const next = addCandidatesToBlocks(blocks, "scenarios", [
     { id: 1, entity_type: "place", title: "Duplicate" },
     { id: 2, entity_type: "place", title: "New" },
     { id: 2, entity_type: "place", title: "Duplicate in selection" },
@@ -75,18 +75,18 @@ test("bulk add appends selected candidates and keeps duplicate guard/manual item
   assert.equal(next[0].manual_items.length, 2);
   assert.equal(next[0].manual_items[0].label, "Existing");
   assert.equal(next[0].manual_items[1].entity_id, "2");
-  assert.deepEqual(addCandidatesToBlocks(blocks, "featured_events", [{ id: 2, entity_type: "place" }]), blocks);
+  assert.deepEqual(addCandidatesToBlocks(blocks, "featured_events", [{ id: 2, entity_type: "event" }]), blocks);
 });
 
 test("single-row add appends to the selected block and keeps its duplicate guard", () => {
   const blocks = [{
-    key: "top_picks",
+    key: "scenarios",
     enabled: true,
     manual_items: [{ entity_type: "place", entity_id: "1", label: "Existing" }],
   }];
-  const added = addCandidateToBlocks(blocks, "top_picks", { id: 2, entity_type: "place", title: "New" });
+  const added = addCandidateToBlocks(blocks, "scenarios", { id: 2, entity_type: "place", title: "New" });
   assert.deepEqual(added[0].manual_items.map((item) => item.entity_id), ["1", "2"]);
-  const duplicate = addCandidateToBlocks(added, "top_picks", { id: 2, entity_type: "place", title: "New again" });
+  const duplicate = addCandidateToBlocks(added, "scenarios", { id: 2, entity_type: "place", title: "New again" });
   assert.deepEqual(duplicate[0].manual_items.map((item) => item.entity_id), ["1", "2"]);
 });
 

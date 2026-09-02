@@ -7,11 +7,9 @@ import {
 const VALID_SOURCE_MODES = new Set(["manual-first-hybrid", "manual-only", "rule-only"]);
 const VALID_FALLBACK_MODES = new Set(["latest-approved", "featured", "none"]);
 const VALID_ENTITY_TYPES = new Set(["place", "event"]);
-const FIXED_BLOCK_ORDER = ["hero", "top_picks", "trending", "scenarios", "featured_events"];
+const FIXED_BLOCK_ORDER = ["hero", "scenarios", "featured_events"];
 const FIXED_BLOCK_TYPES = {
   hero: "hero",
-  top_picks: "place-list",
-  trending: "place-list",
   scenarios: "scenario-grid",
   featured_events: "event-list",
 };
@@ -25,29 +23,21 @@ const TAXONOMY_FILTER_SCAN_PAGE_SIZE = 100;
 const DEFAULT_BLOCK_COPY = {
   th: {
     hero: { title: "เลือกที่เที่ยวให้ง่ายขึ้น", subtitle: "บล็อกข้อความนำด้านบนของหน้าแรก" },
-    top_picks: { title: "ตัวเด่นวันนี้", subtitle: "ใช้ manual ก่อน แล้วค่อยเติมจาก featured/latest" },
-    trending: { title: "อัปเดตล่าสุด", subtitle: "รายการใหม่หรือกำลังถูกพูดถึง" },
     scenarios: { title: "เลือกตามสถานการณ์", subtitle: "บล็อกชุดแนะนำตามโจทย์ เช่น งบ 500 หรือมากับแฟน" },
     featured_events: { title: "อีเวนต์น่าสนใจ", subtitle: "ดึง event ที่อยากดันขึ้นหน้าแรก" },
   },
   en: {
     hero: { title: "Make the decision faster", subtitle: "Top-of-home hero messaging block" },
-    top_picks: { title: "Top Picks", subtitle: "Use manual items first, then fill from featured/latest" },
-    trending: { title: "Latest Updates", subtitle: "Fresh or trending items" },
     scenarios: { title: "By Situation", subtitle: "Scenario-based recommendation block" },
     featured_events: { title: "Featured Events", subtitle: "Push selected events onto the homepage" },
   },
   zh: {
     hero: { title: "更快做决定", subtitle: "首页顶部主视觉文案区块" },
-    top_picks: { title: "精选推荐", subtitle: "优先使用手动选择，再补自动结果" },
-    trending: { title: "最新更新", subtitle: "新内容或当前较热的内容" },
     scenarios: { title: "按情境选择", subtitle: "按需求场景整理的推荐区块" },
     featured_events: { title: "重点活动", subtitle: "将选定活动推到首页" },
   },
   lo: {
     hero: { title: "ຊ່ວຍໃຫ້ຕັດສິນໃຈໄດ້ໄວຂຶ້ນ", subtitle: "ບລັອກຂໍ້ຄວາມນຳດ້ານເທິງຂອງໜ້າຫຼັກ" },
-    top_picks: { title: "ຕົວເລືອກເດັ່ນ", subtitle: "ໃຊ້ manual ກ່ອນ ແລ້ວຄ່ອຍເຕີມດ້ວຍ featured/latest" },
-    trending: { title: "ອັບເດດຫຼ້າສຸດ", subtitle: "ລາຍການໃໝ່ ຫຼື ລາຍການທີ່ກຳລັງຖືກເວົ້າເຖິງ" },
     scenarios: { title: "ເລືອກຕາມສະຖານະການ", subtitle: "ບລັອກຊຸດແນະນຳຕາມໂຈດ" },
     featured_events: { title: "ອີເວັນເດັ່ນ", subtitle: "ດັນອີເວັນທີ່ເລືອກຂຶ້ນໜ້າຫຼັກ" },
   },
@@ -87,42 +77,6 @@ function createDefaultBlocks(lang = "th") {
         category_scope: [],
         scenario_tags: [],
         sort_by: "featured_then_recent",
-      },
-    },
-    {
-      key: "top_picks",
-      type: "place-list",
-      enabled: true,
-      position: 2,
-      title: getDefaultBlockCopy(activeLang, "top_picks").title,
-      subtitle: getDefaultBlockCopy(activeLang, "top_picks").subtitle,
-      source_mode: "manual-first-hybrid",
-      fallback_mode: "featured",
-      min_items: 3,
-      max_items: 10,
-      manual_items: [],
-      rule_config: {
-        category_scope: ["attractions", "cafes", "restaurants", "activities", "hotels"],
-        scenario_tags: [],
-        sort_by: "featured_then_recent",
-      },
-    },
-    {
-      key: "trending",
-      type: "place-list",
-      enabled: true,
-      position: 3,
-      title: getDefaultBlockCopy(activeLang, "trending").title,
-      subtitle: getDefaultBlockCopy(activeLang, "trending").subtitle,
-      source_mode: "manual-first-hybrid",
-      fallback_mode: "latest-approved",
-      min_items: 3,
-      max_items: 12,
-      manual_items: [],
-      rule_config: {
-        category_scope: ["attractions", "cafes", "restaurants", "activities", "hotels"],
-        scenario_tags: [],
-        sort_by: "recent",
       },
     },
     {

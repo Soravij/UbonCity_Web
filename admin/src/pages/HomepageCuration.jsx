@@ -25,11 +25,9 @@ const LANGUAGE_OPTIONS = [
   { value: "lo", label: "ลาว" },
 ];
 
-const FIXED_BLOCK_ORDER = ["hero", "top_picks", "trending", "scenarios", "featured_events"];
+const FIXED_BLOCK_ORDER = ["hero", "scenarios", "featured_events"];
 const FIXED_BLOCK_TYPES = {
   hero: "hero",
-  top_picks: "place-list",
-  trending: "place-list",
   scenarios: "scenario-grid",
   featured_events: "event-list",
 };
