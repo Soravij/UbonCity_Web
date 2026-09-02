@@ -133,6 +133,7 @@ export default async function PlaceNearbyPage({ params }) {
                 description={item.excerpt || item.summary || item.description || subtitle}
                 meta={item?.distance_km != null ? formatDistance(item.distance_km, activeLang) : ""}
                 cta={pageCopy.openPlace}
+                descriptionClassName="content-hover-card__description--clamped"
                 className="w-full md:w-[calc(50%_-_0.5rem)] xl:w-[calc(25%_-_0.75rem)]"
               />
             );

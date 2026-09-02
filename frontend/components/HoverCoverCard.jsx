@@ -9,6 +9,7 @@ export default function HoverCoverCard({
   meta,
   cta,
   className = "",
+  descriptionClassName = "",
 }) {
   return (
     <Link href={href} className={`content-hover-card ${className}`.trim()}>
@@ -36,7 +37,7 @@ export default function HoverCoverCard({
         <div className="content-hover-card__info">
           {eyebrow ? <p className="content-hover-card__category">{eyebrow}</p> : null}
           <h2 className="content-hover-card__title">{title}</h2>
-          {description ? <p className="content-hover-card__description">{description}</p> : null}
+          {description ? <p className={`content-hover-card__description ${descriptionClassName}`.trim()}>{description}</p> : null}
 
           {(cta || meta) ? (
             <div className="content-hover-card__footer">

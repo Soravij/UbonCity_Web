@@ -1789,6 +1789,13 @@ a {
   }
 }
 
+.content-hover-card__description--clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .content-prose {
   color: color-mix(in srgb, var(--theme-text) 86%, #2b2230);
 }
