@@ -1,13 +1,14 @@
 # Frontend Project State
 
-Last Updated: 2026-06-19
+Last Updated: 2026-09-02
 
 ## Active Branch Context
 
-- Root branch in progress: `feature/assignment-return-cta-taxonomy-ui`
+- Root branch in progress: `feat/nearby-inline-list`
 
 ## Current State
 
+- Nearby places list in place detail page now shows 4 vertical cards instead of inline link button; helpers moved to frontend/lib/nearby.js; description in /nearby page clamped to 3 lines.
 - No frontend code changes were made in this CTA/Curation Work Return patch.
 - Frontend continues to consume published/backend-approved taxonomy only.
 - Frontend does not read assignment requested-check drafts or handoff-return payloads.
