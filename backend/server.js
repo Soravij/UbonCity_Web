@@ -17,6 +17,7 @@ import importReviewRoutes from "./routes/importReviewRoutes.js";
 import homepageCurationRoutes from "./routes/homepageCurationRoutes.js";
 import internalAiRoutes from "./routes/internalAiRoutes.js";
 import analyticsRoutes from "./routes/analyticsRoutes.js";
+import logger from "./middleware/logger.js";
 import { initializeImportReviewInfrastructure } from "./controllers/importReviewController.js";
 import { ensureUtf8mb4 } from "./config/ensureUtf8mb4.js";
 import { ensureSharedSchemaBootstrap } from "./config/sharedSchemaBootstrap.js";
@@ -90,7 +91,7 @@ app.use("/api", internalAiRoutes);
 app.use("/api", analyticsRoutes);
 
 app.use((err, _req, res, _next) => {
-  console.error("Unhandled backend error:", err);
+  logger.error("Unhandled backend error", { err });
   if (res.headersSent) return;
   res.status(500).json({ error: "Internal server error" });
 });

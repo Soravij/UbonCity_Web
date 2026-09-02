@@ -136,7 +136,8 @@ export default function Situations({ token }) {
       setEditing(null);
       loadList();
     } catch (err) {
-      setMessage(err.response?.data?.error || "บันทึกไม่สำเร็จ");
+      const serverError = err.response?.data?.error;
+      setMessage(serverError || "บันทึกไม่สำเร็จ");
     } finally {
       setSaving(false);
     }

@@ -45,7 +45,9 @@ export async function createSituation({ slug, sort_order, is_active = 1, image_u
 
     const [countRows] = await conn.query("SELECT COUNT(*) AS cnt FROM situations FOR UPDATE");
     if (Number(countRows[0].cnt) >= 7) {
-      throw new Error("Maximum 7 situations allowed. Delete one first.");
+      const err = new Error("Maximum 7 situations allowed. Delete one first.");
+      err.code = "SITUATION_LIMIT_REACHED";
+      throw err;
     }
 
     let finalSortOrder = sort_order;

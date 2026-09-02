@@ -79,6 +79,26 @@ test("situations API", async (t) => {
     }
   });
 
+  await t.test("createSituation with 7 rows returns SITUATION_LIMIT_REACHED code", async () => {
+    await cleanup();
+    try {
+      await assert.rejects(
+        () => createSituation({
+          slug: TEST_SLUG,
+          sort_order: 99,
+          translations: { en: { title: "Should Fail" } },
+        }),
+        (err) => {
+          assert.equal(err.code, "SITUATION_LIMIT_REACHED");
+          assert.match(err.message, /Maximum 7 situations/);
+          return true;
+        }
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+
   await t.test("createSituation + getSituationBySlug round-trip", async () => {
     await cleanup();
     try {
