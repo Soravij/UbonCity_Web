@@ -13,6 +13,7 @@ const DASHBOARD_PATHS = [
   "/dashboard/emergency",
   "/dashboard/delete-content",
   "/dashboard/homepage-curation",
+  "/dashboard/situations",
   "/dashboard/approvals",
   "/dashboard/users",
   "/dashboard/settings",
@@ -188,6 +189,7 @@ function normalizePath(path, session) {
       path === "/dashboard/users" ||
       path === "/dashboard/approvals" ||
       path === "/dashboard/homepage-curation" ||
+      path === "/dashboard/situations" ||
       path === "/dashboard/analytics"
     ) &&
     !isAdminLike

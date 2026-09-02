@@ -5,6 +5,7 @@ import Users from "./Users";
 import Approvals from "./Approvals";
 import CtaAnalytics from "./CtaAnalytics";
 import HomepageCuration from "./HomepageCuration";
+import Situations from "./Situations";
 import EmergencyWorkspace from "./EmergencyWorkspace";
 import DeleteContentWorkspace from "./DeleteContentWorkspace";
 
@@ -16,6 +17,7 @@ function buildMainMenu(isAdminLike, pendingCount = 0) {
     { key: "approvals", label: "Approvals", path: "/dashboard/approvals", badge: pendingCount },
     { key: "analytics", label: "CTA & Analytics", path: "/dashboard/analytics" },
     { key: "homepage-curation", label: "Homepage Curation", path: "/dashboard/homepage-curation" },
+    { key: "situations", label: "สถานการณ์", path: "/dashboard/situations" },
     { key: "users", label: "Users", path: "/dashboard/users" },
     ...base,
   ];
@@ -39,6 +41,10 @@ function DashboardContent({ path, session, onPendingChanged, onNavigate }) {
 
   if (path === "/dashboard/homepage-curation" && isAdminLike) {
     return <HomepageCuration token={session.token} />;
+  }
+
+  if (path === "/dashboard/situations" && isAdminLike) {
+    return <Situations token={session.token} />;
   }
 
   if (path === "/dashboard/users" && isAdminLike) {
