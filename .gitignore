@@ -74,3 +74,7 @@ docs/UAT_ROLE_*.print.md
 outputs/
 work/
 test-out.txt
+
+# Gate output artifacts
+.gate-summary.json
+audit/gate-*.txt
