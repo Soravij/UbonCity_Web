@@ -135,6 +135,8 @@ export async function deleteSituationBySlug(slug) {
 }
 
 export async function reorderSituation(slug, direction) {
+  if (direction !== "up" && direction !== "down") return null;
+
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
