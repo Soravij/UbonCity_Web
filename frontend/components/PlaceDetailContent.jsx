@@ -17,6 +17,7 @@ const DETAIL_COPY = {
     budgetLabel: "Budget",
     galleryTitle: "More Photos",
     nearbyAction: "Nearby Places",
+    nearbyMore: "See more",
     contactTitle: "Contact",
     contactName: "Contact",
     contactPhone: "Phone",
@@ -39,6 +40,7 @@ const DETAIL_COPY = {
     budgetLabel: "งบประมาณโดยประมาณ",
     galleryTitle: "ภาพเพิ่มเติม",
     nearbyAction: "สถานที่ใกล้เคียง",
+    nearbyMore: "ดูเพิ่มเติม",
     contactTitle: "ข้อมูลติดต่อ",
     contactName: "ผู้ติดต่อ",
     contactPhone: "เบอร์โทร",
@@ -321,20 +323,26 @@ export default function PlaceDetailContent({ place, activeLang = "th", category,
       {!isReviewMode && place?.slug && nearbyPlaces.length > 0 ? (
         <section className="section-panel p-5 md:p-6">
           <h2 className="text-lg font-semibold md:text-xl">{detailCopy.nearbyAction}</h2>
-          <div className="mt-3 flex flex-col gap-2">
+          <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
             {nearbyPlaces.map((item) => {
               const href = item?.category && item?.slug ? `/${activeLang}/${item.category}/${item.slug}` : null;
               if (!href) return null;
               const imgSrc = getImageSource(item, item.category || category);
               const dist = item?.distance_km != null ? formatDistance(item.distance_km, activeLang) : null;
               return (
-                <Link key={`nearby-inline-${item.id}`} href={href} className="flex items-center gap-3 rounded-xl transition hover:translate-x-1">
+                <Link key={`nearby-inline-${item.id}`} href={href} className="group block overflow-hidden rounded-xl transition hover:-translate-y-0.5">
                   {imgSrc ? (
-                    <img src={imgSrc} alt={item.title || ""} className="h-16 w-16 shrink-0 rounded-lg object-cover" />
+                    <img
+                      src={imgSrc}
+                      alt=""
+                      className="aspect-square w-full rounded-xl object-cover"
+                      onError={(e) => { e.target.style.display = "none"; e.target.nextElementSibling.style.display = "block"; }}
+                    />
                   ) : null}
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">{item.title || "-"}</p>
-                    <p className="truncate text-xs text-[color:var(--muted)]">
+                  <div className={`aspect-square w-full rounded-xl bg-[color:var(--muted)]/10 ${imgSrc ? "hidden" : "block"}`} />
+                  <div className="mt-2 min-w-0 px-0.5">
+                    <p className="line-clamp-2 text-sm font-semibold leading-snug">{item.title || "-"}</p>
+                    <p className="mt-0.5 truncate text-xs text-[color:var(--muted)]">
                       {categoryLabel}{dist ? ` · ${dist}` : ""}
                     </p>
                   </div>
@@ -344,7 +352,7 @@ export default function PlaceDetailContent({ place, activeLang = "th", category,
           </div>
           <div className="mt-4">
             <Link href={`${nearbyHref}/nearby`} className="interactive-tile inline-flex rounded-full px-5 py-3 text-sm font-semibold transition">
-              {detailCopy.nearbyAction}
+              {detailCopy.nearbyMore}
             </Link>
           </div>
         </section>

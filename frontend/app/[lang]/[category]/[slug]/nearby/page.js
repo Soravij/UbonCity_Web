@@ -56,7 +56,7 @@ export async function generateMetadata({ params }) {
   const activeLang = normalizeLang(lang);
   const [place, nearbyResult] = await Promise.all([
     getPlaceDetail(category, slug, activeLang),
-    getNearbyPlaces(category, slug, activeLang, 8),
+    getNearbyPlaces(category, slug, activeLang, 12),
   ]);
   const copy = NEARBY_PAGE_COPY[activeLang] || NEARBY_PAGE_COPY.en;
   const titleBase = String(place?.title || copy.title).trim();
@@ -78,7 +78,7 @@ export default async function PlaceNearbyPage({ params }) {
   const activeLang = normalizeLang(lang);
   const [place, nearbyResult, siteCopy] = await Promise.all([
     getPlaceDetail(category, slug, activeLang),
-    getNearbyPlaces(category, slug, activeLang, 8),
+    getNearbyPlaces(category, slug, activeLang, 12),
     Promise.resolve(getLangContent(activeLang)),
   ]);
 

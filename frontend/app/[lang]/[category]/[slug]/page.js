@@ -73,7 +73,7 @@ export default async function PlaceDetailPage({ params }) {
   const [placeResult, copy, nearbyResult] = await Promise.all([
     getPlaceDetail(category, slug, activeLang),
     Promise.resolve(getLangContent(activeLang)),
-    getNearbyPlaces(category, slug, activeLang, 6).catch(() => []),
+    getNearbyPlaces(category, slug, activeLang, 4).catch(() => []),
   ]);
   const place = placeResult;
   const nearbyPlaces = Array.isArray(nearbyResult?.items) ? nearbyResult.items : Array.isArray(nearbyResult) ? nearbyResult : [];
