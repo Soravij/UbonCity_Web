@@ -87,7 +87,22 @@ export default async function LangHome({ params }) {
     allPlaces,
     placesByCategory,
   });
-  const featuredStripPlaces = topTenPlaces.slice(0, 3);
+  const resolvedBlocks = Array.isArray(homepageLayout?.resolved_blocks) ? homepageLayout.resolved_blocks : [];
+  const hasPublishedCurationLayout =
+    Boolean(homepageLayout?.published_at) &&
+    homepageLayout?.source !== "draft_fallback" &&
+    resolvedBlocks.length > 0;
+
+  const highlightBlock = resolvedBlocks.find((b) => b?.key === "highlight");
+  const highlightItems =
+    highlightBlock &&
+    highlightBlock.enabled &&
+    homepageLayout?.source !== "draft_fallback" &&
+    Array.isArray(highlightBlock.resolved_items) &&
+    highlightBlock.resolved_items.length > 0
+      ? highlightBlock.resolved_items
+      : null;
+  const featuredStripPlaces = highlightItems || topTenPlaces.slice(0, 3);
 
   const scenarioPicks = {
     day_trip: pickUniquePlaces(
@@ -143,12 +158,6 @@ export default async function LangHome({ params }) {
       href: `/${activeLang}/${action.category}?scenario=${encodeURIComponent(action.scenario)}`,
     };
   });
-
-  const resolvedBlocks = Array.isArray(homepageLayout?.resolved_blocks) ? homepageLayout.resolved_blocks : [];
-  const hasPublishedCurationLayout =
-    Boolean(homepageLayout?.published_at) &&
-    homepageLayout?.source !== "draft_fallback" &&
-    resolvedBlocks.length > 0;
 
   return (
     <section className="home-page-flow">

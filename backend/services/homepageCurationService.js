@@ -7,9 +7,10 @@ import {
 const VALID_SOURCE_MODES = new Set(["manual-first-hybrid", "manual-only", "rule-only"]);
 const VALID_FALLBACK_MODES = new Set(["latest-approved", "featured", "none"]);
 const VALID_ENTITY_TYPES = new Set(["place", "event"]);
-const FIXED_BLOCK_ORDER = ["hero", "scenarios", "featured_events"];
+const FIXED_BLOCK_ORDER = ["hero", "highlight", "scenarios", "featured_events"];
 const FIXED_BLOCK_TYPES = {
   hero: "hero",
+  highlight: "place-list",
   scenarios: "scenario-grid",
   featured_events: "event-list",
 };
@@ -23,21 +24,25 @@ const TAXONOMY_FILTER_SCAN_PAGE_SIZE = 100;
 const DEFAULT_BLOCK_COPY = {
   th: {
     hero: { title: "เลือกที่เที่ยวให้ง่ายขึ้น", subtitle: "บล็อกข้อความนำด้านบนของหน้าแรก" },
+    highlight: { title: "ไฮไลต์", subtitle: "สถานที่เด่นที่อยากแนะนำ" },
     scenarios: { title: "เลือกตามสถานการณ์", subtitle: "บล็อกชุดแนะนำตามโจทย์ เช่น งบ 500 หรือมากับแฟน" },
     featured_events: { title: "อีเวนต์น่าสนใจ", subtitle: "ดึง event ที่อยากดันขึ้นหน้าแรก" },
   },
   en: {
     hero: { title: "Make the decision faster", subtitle: "Top-of-home hero messaging block" },
+    highlight: { title: "Highlights", subtitle: "Featured places we recommend" },
     scenarios: { title: "By Situation", subtitle: "Scenario-based recommendation block" },
     featured_events: { title: "Featured Events", subtitle: "Push selected events onto the homepage" },
   },
   zh: {
     hero: { title: "更快做决定", subtitle: "首页顶部主视觉文案区块" },
+    highlight: { title: "精选推荐", subtitle: "我们推荐的特色地点" },
     scenarios: { title: "按情境选择", subtitle: "按需求场景整理的推荐区块" },
     featured_events: { title: "重点活动", subtitle: "将选定活动推到首页" },
   },
   lo: {
     hero: { title: "ຊ່ວຍໃຫ້ຕັດສິນໃຈໄດ້ໄວຂຶ້ນ", subtitle: "ບລັອກຂໍ້ຄວາມນຳດ້ານເທິງຂອງໜ້າຫຼັກ" },
+    highlight: { title: "ເດັ່ນ", subtitle: "ສະຖານທີ່ເດັ່ນທີ່ແນະນຳ" },
     scenarios: { title: "ເລືອກຕາມສະຖານະການ", subtitle: "ບລັອກຊຸດແນະນຳຕາມໂຈດ" },
     featured_events: { title: "ອີເວັນເດັ່ນ", subtitle: "ດັນອີເວັນທີ່ເລືອກຂຶ້ນໜ້າຫຼັກ" },
   },
@@ -80,10 +85,28 @@ function createDefaultBlocks(lang = "th") {
       },
     },
     {
+      key: "highlight",
+      type: "place-list",
+      enabled: true,
+      position: 2,
+      title: getDefaultBlockCopy(activeLang, "highlight").title,
+      subtitle: getDefaultBlockCopy(activeLang, "highlight").subtitle,
+      source_mode: "manual-first-hybrid",
+      fallback_mode: "latest-approved",
+      min_items: 0,
+      max_items: 3,
+      manual_items: [],
+      rule_config: {
+        category_scope: [],
+        scenario_tags: [],
+        sort_by: "featured_then_recent",
+      },
+    },
+    {
       key: "scenarios",
       type: "scenario-grid",
       enabled: true,
-      position: 4,
+      position: 5,
       title: getDefaultBlockCopy(activeLang, "scenarios").title,
       subtitle: getDefaultBlockCopy(activeLang, "scenarios").subtitle,
       source_mode: "manual-first-hybrid",
@@ -101,7 +124,7 @@ function createDefaultBlocks(lang = "th") {
       key: "featured_events",
       type: "event-list",
       enabled: true,
-      position: 5,
+      position: 6,
       title: getDefaultBlockCopy(activeLang, "featured_events").title,
       subtitle: getDefaultBlockCopy(activeLang, "featured_events").subtitle,
       source_mode: "manual-first-hybrid",

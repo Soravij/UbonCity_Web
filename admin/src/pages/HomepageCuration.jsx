@@ -26,13 +26,15 @@ const LANGUAGE_OPTIONS = [
   { value: "lo", label: "ลาว" },
 ];
 
-const FIXED_BLOCK_ORDER = ["hero", "scenarios", "featured_events"];
+const FIXED_BLOCK_ORDER = ["hero", "highlight", "scenarios", "featured_events"];
 const FIXED_BLOCK_TYPES = {
   hero: "hero",
+  highlight: "place-list",
   scenarios: "scenario-grid",
   featured_events: "event-list",
 };
 const TAB_LAYOUT = "layout";
+const TAB_HIGHLIGHT = "highlight";
 const TAB_SIGNALS = "signals";
 const TAB_SITUATIONS = "situations";
 
@@ -683,6 +685,9 @@ export default function HomepageCuration({ token }) {
         <button type="button" className={activeTab === TAB_LAYOUT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_LAYOUT)}>
           Layout
         </button>
+        <button type="button" className={activeTab === TAB_HIGHLIGHT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_HIGHLIGHT)}>
+          ไฮไลต์
+        </button>
         <button type="button" className={activeTab === TAB_SIGNALS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SIGNALS)}>
           Signals / Content Pool
         </button>
@@ -765,6 +770,39 @@ export default function HomepageCuration({ token }) {
             const candidateState = candidateByBlock[block.key] || createCandidateState(getDefaultCandidateEntityType(block));
             const hero = isHeroBlock(block);
             const eventBlock = isEventBlock(block);
+            const isHighlight = block.key === "highlight";
+
+            if (isHighlight) {
+              return (
+                <article key={block.key || index} className="homepage-curation-block-card">
+                  <div className="homepage-curation-block-head">
+                    <div>
+                      <p className="homepage-curation-block-kicker">
+                        {getBlockTypeLabel(block.type)} | ลำดับ #{index + 1}
+                      </p>
+                      <h3>{block.title || block.key}</h3>
+                      <p className="muted">{block.key} | {Array.isArray(block.manual_items) ? block.manual_items.length : 0} รายการเลือกเอง</p>
+                    </div>
+                    <div className="actions">
+                      <label className="homepage-curation-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(block.enabled)}
+                          onChange={(event) => updateBlock(index, { enabled: event.target.checked })}
+                        />
+                        <span>เปิดใช้งาน</span>
+                      </label>
+                      <button type="button" className="ghost tiny-btn" onClick={() => moveBlock(index, -1)} disabled={index === 0}>
+                        ขึ้น
+                      </button>
+                      <button type="button" className="ghost tiny-btn" onClick={() => moveBlock(index, 1)} disabled={index === blocks.length - 1}>
+                        ลง
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            }
 
             return (
               <article key={block.key || index} className="homepage-curation-block-card">
@@ -872,119 +910,58 @@ export default function HomepageCuration({ token }) {
                   </div>
                 ) : null}
 
-                {!hero ? (
-                  <div className="homepage-curation-rule-panel">
-                    <div className="card-title-row">
-                      <h4>รายการเลือกเอง</h4>
-                      <button type="button" className="ghost tiny-btn" onClick={() => addManualItem(index)}>
-                        เพิ่มแถวว่าง
-                      </button>
-                    </div>
-
-                    <div className="grid two">
-                      <label>
-                        ประเภทรายการ
-                        <select value={getDefaultCandidateEntityType(block)} disabled>
-                          {ENTITY_TYPE_OPTIONS.filter((option) => option.value === getDefaultCandidateEntityType(block)).map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        ค้นหารายการ
-                        <input
-                          value={candidateState.q}
-                          onChange={(event) => updateCandidateState(block.key, { q: event.target.value, entity_type: getDefaultCandidateEntityType(block) })}
-                          placeholder={eventBlock ? "ค้นหาชื่ออีเวนต์" : "ค้นหาด้วยชื่อหรือรหัสรายการ"}
-                        />
-                      </label>
-                    </div>
-
-                    <div className="actions">
-                      <button type="button" className="ghost" onClick={() => searchCandidates(block)} disabled={candidateState.loading}>
-                        {candidateState.loading ? "กำลังค้นหา..." : "ค้นหารายการ"}
-                      </button>
-                    </div>
-
-                    {candidateState.error ? <p className="muted">{candidateState.error}</p> : null}
-                    {candidateState.items.length ? (
-                      <div className="homepage-curation-manual-list">
-                        {candidateState.items.map((candidate) => (
-                          <div key={`${block.key}-cand-${candidate.entity_type}-${candidate.id}`} className="homepage-curation-manual-row">
-                            <div>
-                              <strong>{candidate.title || "-"}</strong>
-                              <p className="muted">
-                                {getEntityTypeLabel(candidate.entity_type)} #{candidate.id}
-                                {candidate.category ? ` | ${candidate.category}` : ""}
-                                {candidate.slug ? ` | รหัส: ${candidate.slug}` : ""}
-                              </p>
-                            </div>
-                            <div className="actions">
-                              <button type="button" className="ghost tiny-btn" onClick={() => addManualCandidate(index, candidate)}>
-                                เพิ่มเข้ารายการเลือกเอง
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {block.manual_items.length === 0 ? (
-                      <p className="muted">ยังไม่มีรายการเลือกเอง ระบบจะใช้วิธีเลือกเนื้อหาตามที่ตั้งไว้</p>
-                    ) : (
-                      <div className="homepage-curation-manual-list">
-                        {block.manual_items.map((item, itemIndex) => (
-                          <div key={`${block.key}-manual-${itemIndex}`} className="homepage-curation-manual-row">
-                            <label>
-                              ประเภท
-                              <select
-                                value={eventBlock ? "event" : item.entity_type}
-                                disabled={eventBlock}
-                                onChange={(event) => updateManualItem(index, itemIndex, { entity_type: event.target.value })}
-                              >
-                                {(eventBlock ? ENTITY_TYPE_OPTIONS.filter((option) => option.value === "event") : ENTITY_TYPE_OPTIONS).map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              รหัสรายการ
-                              <input value={item.entity_id} onChange={(event) => updateManualItem(index, itemIndex, { entity_id: event.target.value })} placeholder="123" />
-                            </label>
-                            <label>
-                              หมวดหมู่
-                              <input value={item.category} onChange={(event) => updateManualItem(index, itemIndex, { category: event.target.value })} placeholder="เช่น attractions" />
-                            </label>
-                            <label>
-                              รหัส slug
-                              <input value={item.slug} onChange={(event) => updateManualItem(index, itemIndex, { slug: event.target.value })} placeholder="เช่น wat-phra-that" />
-                            </label>
-                            <label>
-                              ป้ายชื่อ
-                              <input value={item.label} onChange={(event) => updateManualItem(index, itemIndex, { label: event.target.value })} placeholder="ชื่อภายในทีม" />
-                            </label>
-                            <label>
-                              หมายเหตุ
-                              <input value={item.note} onChange={(event) => updateManualItem(index, itemIndex, { note: event.target.value })} placeholder="เหตุผลที่ต้องอยู่ในบล็อกนี้" />
-                            </label>
-                            <div className="actions">
-                              <button type="button" className="danger tiny-btn" onClick={() => removeManualItem(index, itemIndex)}>
-                                ลบ
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
+                {!hero ? renderBlockEditor(block, index) : null}
               </article>
             );
           })}
+        </div>
+      ) : activeTab === TAB_HIGHLIGHT ? (
+        <div className="homepage-curation-block-list">
+          {(() => {
+            const highlightIndex = blocks.findIndex((b) => b.key === "highlight");
+            if (highlightIndex < 0) return <p className="muted">ไม่พบบล็อกไฮไลต์</p>;
+            const block = blocks[highlightIndex];
+            return (
+              <article className="homepage-curation-block-card">
+                <div className="homepage-curation-block-head">
+                  <div>
+                    <p className="homepage-curation-block-kicker">{getBlockTypeLabel(block.type)}</p>
+                    <h3>{block.title || block.key}</h3>
+                    <p className="muted">{block.subtitle || "สถานที่เด่นที่อยากแนะนำ"}</p>
+                  </div>
+                </div>
+
+                <div className="grid two homepage-curation-grid">
+                  <label>
+                    ชื่อบล็อก
+                    <input value={block.title} onChange={(event) => updateBlock(highlightIndex, { title: event.target.value })} />
+                  </label>
+                  <label>
+                    คำอธิบายย่อย
+                    <input value={block.subtitle} onChange={(event) => updateBlock(highlightIndex, { subtitle: event.target.value })} />
+                  </label>
+                  <label>
+                    จำนวนรายการที่แสดง
+                    <select value={block.max_items} onChange={(event) => updateBlock(highlightIndex, { max_items: Number(event.target.value) })}>
+                      <option value={3}>3</option>
+                      <option value={6}>6</option>
+                      <option value={9}>9</option>
+                    </select>
+                  </label>
+                  <label className="homepage-curation-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(block.enabled)}
+                      onChange={(event) => updateBlock(highlightIndex, { enabled: event.target.checked })}
+                    />
+                    <span>เปิดใช้งานบล็อกนี้</span>
+                  </label>
+                </div>
+
+                {renderBlockEditor(block, highlightIndex)}
+              </article>
+            );
+          })()}
         </div>
       ) : activeTab === TAB_SITUATIONS ? (
         <Situations token={token} />
@@ -1129,7 +1106,123 @@ export default function HomepageCuration({ token }) {
                         .filter(([, value]) => value === true)
                         .map(([taxonomyKey]) => taxonomyCatalog.find((entry) => entry.key === taxonomyKey)?.label || taxonomyKey)
                         .join(", ");
-                      return (
+  function renderBlockEditor(block, index) {
+    const candidateState = candidateByBlock[block.key] || createCandidateState(getDefaultCandidateEntityType(block));
+    const eventBlock = isEventBlock(block);
+
+    return (
+      <div className="homepage-curation-rule-panel">
+        <div className="card-title-row">
+          <h4>รายการเลือกเอง</h4>
+          <button type="button" className="ghost tiny-btn" onClick={() => addManualItem(index)}>
+            เพิ่มแถวว่าง
+          </button>
+        </div>
+
+        <div className="grid two">
+          <label>
+            ประเภทรายการ
+            <select value={getDefaultCandidateEntityType(block)} disabled>
+              {ENTITY_TYPE_OPTIONS.filter((option) => option.value === getDefaultCandidateEntityType(block)).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            ค้นหารายการ
+            <input
+              value={candidateState.q}
+              onChange={(event) => updateCandidateState(block.key, { q: event.target.value, entity_type: getDefaultCandidateEntityType(block) })}
+              placeholder={eventBlock ? "ค้นหาชื่ออีเวนต์" : "ค้นหาด้วยชื่อหรือรหัสรายการ"}
+            />
+          </label>
+        </div>
+
+        <div className="actions">
+          <button type="button" className="ghost" onClick={() => searchCandidates(block)} disabled={candidateState.loading}>
+            {candidateState.loading ? "กำลังค้นหา..." : "ค้นหารายการ"}
+          </button>
+        </div>
+
+        {candidateState.error ? <p className="muted">{candidateState.error}</p> : null}
+        {candidateState.items.length ? (
+          <div className="homepage-curation-manual-list">
+            {candidateState.items.map((candidate) => (
+              <div key={`${block.key}-cand-${candidate.entity_type}-${candidate.id}`} className="homepage-curation-manual-row">
+                <div>
+                  <strong>{candidate.title || "-"}</strong>
+                  <p className="muted">
+                    {getEntityTypeLabel(candidate.entity_type)} #{candidate.id}
+                    {candidate.category ? ` | ${candidate.category}` : ""}
+                    {candidate.slug ? ` | รหัส: ${candidate.slug}` : ""}
+                  </p>
+                </div>
+                <div className="actions">
+                  <button type="button" className="ghost tiny-btn" onClick={() => addManualCandidate(index, candidate)}>
+                    เพิ่มเข้ารายการเลือกเอง
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {block.manual_items.length === 0 ? (
+          <p className="muted">ยังไม่มีรายการเลือกเอง ระบบจะใช้วิธีเลือกเนื้อหาตามที่ตั้งไว้</p>
+        ) : (
+          <div className="homepage-curation-manual-list">
+            {block.manual_items.map((item, itemIndex) => (
+              <div key={`${block.key}-manual-${itemIndex}`} className="homepage-curation-manual-row">
+                <label>
+                  ประเภท
+                  <select
+                    value={eventBlock ? "event" : item.entity_type}
+                    disabled={eventBlock}
+                    onChange={(event) => updateManualItem(index, itemIndex, { entity_type: event.target.value })}
+                  >
+                    {(eventBlock ? ENTITY_TYPE_OPTIONS.filter((option) => option.value === "event") : ENTITY_TYPE_OPTIONS).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  รหัสรายการ
+                  <input value={item.entity_id} onChange={(event) => updateManualItem(index, itemIndex, { entity_id: event.target.value })} placeholder="123" />
+                </label>
+                <label>
+                  หมวดหมู่
+                  <input value={item.category} onChange={(event) => updateManualItem(index, itemIndex, { category: event.target.value })} placeholder="เช่น attractions" />
+                </label>
+                <label>
+                  รหัส slug
+                  <input value={item.slug} onChange={(event) => updateManualItem(index, itemIndex, { slug: event.target.value })} placeholder="เช่น wat-phra-that" />
+                </label>
+                <label>
+                  ป้ายชื่อ
+                  <input value={item.label} onChange={(event) => updateManualItem(index, itemIndex, { label: event.target.value })} placeholder="ชื่อภายในทีม" />
+                </label>
+                <label>
+                  หมายเหตุ
+                  <input value={item.note} onChange={(event) => updateManualItem(index, itemIndex, { note: event.target.value })} placeholder="เหตุผลที่ต้องอยู่ในบล็อกนี้" />
+                </label>
+                <div className="actions">
+                  <button type="button" className="danger tiny-btn" onClick={() => removeManualItem(index, itemIndex)}>
+                    ลบ
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
                         <tr key={`pool-${candidate.entity_type}-${candidate.id}`}>
                           <td>
                             <input
