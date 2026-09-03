@@ -152,6 +152,8 @@ Known open gaps (not fixed in this change set):
 - ตัวแก้ manual items (`renderBlockEditor` ใช้ร่วมทุก block): เพิ่มปุ่มขึ้น/ลงต่อ item, ค้นหาต้องพิมพ์ก่อนจึงแสดงผล, จำกัด 8 รายการ, ซ่อนตัวที่เลือกแล้ว, ลบปุ่ม "เพิ่มแถวว่าง" ออก; จำนวน item ถูกจำกัดด้วย `max_items` ของ block.
 - class ใหม่ `.homepage-curation-warning-text` (`App.css`) ใช้ `var(--theme-danger)`.
 - ยังไม่มี layout ไหนถูกเผยแพร่ (`published_at = null` ทั้ง 4 ภาษา) — หน้าแรกยังใช้ `HomeLandingStage` เดิม; การกดเผยแพร่จะสลับหน้าแรกไปใช้ `HomepageLayoutRenderer` ทั้งหน้า; ยังไม่ได้ตรวจว่า hero/อากาศ/ช่องค้นหาครบหรือไม่ (งานค้าง).
+- `renderEventListBlock` (`HomepageLayoutRenderer.jsx`) ตอนนี้ reuse `HomeTrendingBlock` (1 การ์ดใหญ่ + 4 เล็ก) แทน markup เดิมที่ตัดที่ 3 การ์ด; `featured_events` ถูก clamp เป็น `max_items` 5 / `min_items` 1 ฝั่ง server (`homepageCurationService.js` sanitizeBlockByKey).
+- ยังไม่เผยแพร่ layout เพราะการกดเผยแพร่จะสลับทั้งหน้า (`page.js:155`) ทำให้การ์ดอากาศ/AQI, featured strip, HomeSelectedBlock, explore grid หายทั้งหมด; ไม่มี unpublish endpoint ต้องแก้ DB มือ.
 
 ## Confirmed Direction
 
