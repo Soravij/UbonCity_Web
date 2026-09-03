@@ -1,6 +1,6 @@
 ﻿# UbonCity Project State
 
-Last Updated: 2026-08-31
+Last Updated: 2026-09-03
 
 ## Current Branch
 
@@ -142,16 +142,21 @@ Known open gaps (not fixed in this change set):
 
 - Assignment-return Curation flow and `requested_check_returns` handling are present on main.
 - The taxonomy catalog/resolver (`collector/server/taxonomy-catalog.mjs`, `collector/server/taxonomy-resolver.mjs`) is merged to `main` (commit `6bcb1cd` "Restore taxonomy resolver workflow", ported from `fix/taxonomy-work-return-catalog-checks`) — a cafes/attractions/etc. Work Return now gets real resolved taxonomy checks instead of an empty Curation section. See `collector/PROJECT_STATE.md` 2026-07-14 "Taxonomy Resolver Restoration" for the detailed restore notes.
-- Backend curated taxonomy storage/filtering, and Homepage Signals / Content Pool filtering, remain feature-branch-only work (`feature/taxonomy-phase5a-closure-matrix`, `feature/taxonomy-phase3-backend-storage`, `feature/taxonomy-phase3b-backend-filtering`, `feature/taxonomy-phase4a-content-pool-filtering`, `feature/taxonomy-phase4b-admin-content-pool-filters`) — do not assume these are on `main`.
-- 2026-07-16: `feature/curation-taxonomy-true-filters` adds internal Homepage Curation Content Pool filtering over canonical `review_contents.review_payload_json.confirmed_taxonomy_checks` only. It exposes boolean-compatible catalog entries, accepts `taxonomy_true` with AND semantics, and keeps manual block selection/layout publishing unchanged. It does not add taxonomy storage to `places` or support false/unknown filtering.
+- Backend curated taxonomy storage/filtering, and Homepage Signals / Content Pool filtering, are merged to `main` (commits `d611bd9`, `b9b329d`, `739a501`; migrations 028–030 present in tree). Content Pool filtering works over canonical `review_contents.review_payload_json.confirmed_taxonomy_checks` only — it exposes boolean-compatible catalog entries, accepts `taxonomy_true` with AND semantics, and keeps manual block selection/layout publishing unchanged. It does not add taxonomy storage to `places` or support false/unknown filtering.
 - 2026-07-16: the taxonomy catalog definitions now live in the neutral shared module `shared/taxonomy/taxonomy-catalog.mjs`. Both `collector` and `backend` import from it, so backend never imports from the collector tree; `collector/server/taxonomy-catalog.mjs` remains as a re-export shim and every existing collector import path/API is unchanged. Backend requires this shared directory to be present at runtime, and filter-key validation reads the same shared catalog.
 - The static taxonomy closure matrix is complete as a feature-branch milestone (separate from the catalog/resolver restoration above).
-- Runtime acceptance across representative fixtures remains pending for both the merged catalog/resolver and the still-unmerged backend/Homepage-Signals filtering work.
+- Runtime acceptance across representative fixtures remains pending for the merged catalog/resolver and the now-merged backend/Homepage-Signals filtering work.
+- Homepage Curation: fixed block ตัวที่ 4 type `place-list` (ไฮไลต์) — stored in `draft_blocks_json` เดิม, no new table, no migration; default `enabled: false`, `max_items` บังคับเป็น 3/6/9 ฝั่ง server (`homepageCurationService.js`), ค่าอื่นถูกปัดลง.
+- `sanitizeBlocks` แทรก fixed key ที่หายไปตามตำแหน่งใน `FIXED_BLOCK_ORDER` (ไม่ใช่ต่อท้าย) — layout เก่าในฐานข้อมูลจึงได้ไฮไลต์ที่ตำแหน่ง 2.
+- หน้า Homepage Curation แยกเป็นแท็บต่องาน; แท็บ Layout เหลือเป็นแดชบอร์ด (preview + ลำดับ + enabled + ปุ่มเผยแพร่กลาง) — ปุ่มเผยแพร่ยังเป็นปุ่มเดียวทั้งหน้า, no draft/published per block.
+- ตัวแก้ manual items (`renderBlockEditor` ใช้ร่วมทุก block): เพิ่มปุ่มขึ้น/ลงต่อ item, ค้นหาต้องพิมพ์ก่อนจึงแสดงผล, จำกัด 8 รายการ, ซ่อนตัวที่เลือกแล้ว, ลบปุ่ม "เพิ่มแถวว่าง" ออก; จำนวน item ถูกจำกัดด้วย `max_items` ของ block.
+- class ใหม่ `.homepage-curation-warning-text` (`App.css`) ใช้ `var(--theme-danger)`.
+- ยังไม่มี layout ไหนถูกเผยแพร่ (`published_at = null` ทั้ง 4 ภาษา) — หน้าแรกยังใช้ `HomeLandingStage` เดิม; การกดเผยแพร่จะสลับหน้าแรกไปใช้ `HomepageLayoutRenderer` ทั้งหน้า; ยังไม่ได้ตรวจว่า hero/อากาศ/ช่องค้นหาครบหรือไม่ (งานค้าง).
 
 ## Confirmed Direction
 
 - CTA/contact baseline is present on main.
-- Taxonomy v1's catalog/resolver (worker-facing Curation checks) is merged to main; backend curated storage/filtering and Homepage Signals / Content Pool integration remain feature-branch work with runtime acceptance still pending.
+- Taxonomy v1's catalog/resolver (worker-facing Curation checks) is merged to main; backend curated storage/filtering and Homepage Signals / Content Pool integration are also merged to main (migrations 028–030); runtime acceptance still pending.
 - Real taxonomy categories for the current Taxonomy v1 feature-branch category set are:
   - `attractions`
   - `activities`
