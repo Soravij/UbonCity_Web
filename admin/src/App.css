@@ -1294,6 +1294,12 @@ th {
   font-weight: 700;
 }
 
+.homepage-curation-warning-text {
+  color: var(--theme-danger);
+  margin-top: 4px;
+  font-size: 0.85rem;
+}
+
 .homepage-curation-preview-misses {
   display: flex;
   gap: 8px;

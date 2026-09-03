@@ -1082,7 +1082,7 @@ export default function HomepageCuration({ token }) {
                     </select>
                   </label>
                   {block.manual_items.length > block.max_items ? (
-                    <p className="muted">
+                    <p className="homepage-curation-warning-text">
                       มีรายการทั้งหมด {block.manual_items.length} รายการ แต่จะแสดงจริง {block.max_items} รายการ — รายการส่วนเกินจะไม่แสดงบนหน้าแรก กรุณาลบรายการที่ไม่ต้องการออก
                     </p>
                   ) : null}
