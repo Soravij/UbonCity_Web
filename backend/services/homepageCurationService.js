@@ -129,8 +129,8 @@ export function createDefaultBlocks(lang = "th") {
       subtitle: getDefaultBlockCopy(activeLang, "featured_events").subtitle,
       source_mode: "manual-first-hybrid",
       fallback_mode: "latest-approved",
-      min_items: 2,
-      max_items: 4,
+      min_items: 1,
+      max_items: 5,
       manual_items: [],
       rule_config: {
         category_scope: [],
@@ -557,6 +557,11 @@ function sanitizeBlockByKey(block, fallbackBlock, position) {
     if (!allowed.includes(maxItems)) {
       maxItems = allowed.reduce((best, v) => (v <= maxItems ? v : best), 3);
     }
+  }
+
+  if (block.key === 'featured_events') {
+    block.max_items = 5;
+    if (!(block.min_items >= 1)) block.min_items = 1;
   }
 
   const normalizedBlock = {

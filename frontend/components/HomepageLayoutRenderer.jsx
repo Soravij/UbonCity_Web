@@ -1,5 +1,6 @@
 import Link from "next/link";
 import DecisionSearchBar from "@/components/DecisionSearchBar";
+import HomeTrendingBlock from "@/components/home/HomeTrendingBlock";
 
 function buildPlaceHref(lang, place) {
   if (!place?.category || !place?.slug) return null;
@@ -116,47 +117,16 @@ function renderPlaceListBlock(block, props) {
 }
 
 function renderEventListBlock(block, props) {
-  const { activeLang, locale } = props;
-  const items = Array.isArray(block.resolved_items) ? block.resolved_items : [];
-  if (!items.length) return null;
+  const { activeLang, locale, copy, decisionCopy } = props;
   return (
-    <section key={block.key} className="editorial-section space-y-6">
-      <div className="space-y-2">
-        <p className="eyebrow-label">Events</p>
-        <h2 className="section-heading">{block.title || "Featured Events"}</h2>
-        {block.subtitle ? <p className="section-copy max-w-2xl">{block.subtitle}</p> : null}
-      </div>
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {items.slice(0, 3).map((event) => (
-          <Link
-            key={`${block.key}-${event.id}`}
-            href={`/${activeLang}/events/${event.id}`}
-            className="home-event-card group block"
-            aria-label={event.title || block.title || "Event"}
-          >
-            <div className="home-event-media">
-              <img
-                src={String(event.image || "/hero-uboncity.jpg")}
-                alt={event.title || "Event"}
-                className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.05]"
-                loading="lazy"
-              />
-            </div>
-            <div className="home-event-panel">
-              <p className="text-sm font-bold text-[color:var(--theme-text)]">
-                {formatUpdatedAt(event.approved_at || event.updated_at, locale)}
-              </p>
-              <h3 className="mt-3 line-clamp-2 text-xl font-semibold tracking-[-0.03em] text-[color:var(--theme-text)]">
-                {event.title || "-"}
-              </h3>
-              <span className="home-event-arrow" aria-hidden="true">
-                ›
-              </span>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </section>
+    <HomeTrendingBlock
+      activeLang={activeLang}
+      copy={copy}
+      decisionCopy={decisionCopy}
+      latestEvents={block.resolved_items || []}
+      title={block.title}
+      subtitle={block.subtitle}
+    />
   );
 }
 
@@ -204,7 +174,7 @@ export default function HomepageLayoutRenderer({
       {(Array.isArray(blocks) ? blocks : []).map((block) => {
         if (block.type === "hero") return renderHeroBlock(block, { activeLang, copy, decisionCopy, quickActions });
         if (block.type === "place-list") return renderPlaceListBlock(block, { activeLang, copy });
-        if (block.type === "event-list") return renderEventListBlock(block, { activeLang, locale });
+        if (block.type === "event-list") return renderEventListBlock(block, { activeLang, locale, copy, decisionCopy });
         if (block.type === "scenario-grid") return renderScenarioGridBlock(block, { activeLang, copy, decisionCopy });
         return null;
       })}
