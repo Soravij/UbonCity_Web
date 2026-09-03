@@ -414,16 +414,18 @@ export default function HomepageCuration({ token }) {
     });
   }
 
-  function addManualItem(blockIndex) {
+  function moveManualItem(blockIndex, itemIndex, direction) {
     setBlocks((current) =>
-      current.map((block, index) =>
-        index === blockIndex
-          ? {
-              ...block,
-              manual_items: [...block.manual_items, createManualItem(getDefaultCandidateEntityType(block))],
-            }
-          : block
-      )
+      current.map((block, bIdx) => {
+        if (bIdx !== blockIndex) return block;
+        const target = itemIndex + direction;
+        if (target < 0 || target >= block.manual_items.length) return block;
+        const next = [...block.manual_items];
+        const temp = next[itemIndex];
+        next[itemIndex] = next[target];
+        next[target] = temp;
+        return { ...block, manual_items: next };
+      })
     );
   }
 
@@ -633,9 +635,6 @@ export default function HomepageCuration({ token }) {
       <div className="homepage-curation-rule-panel">
         <div className="card-title-row">
           <h4>รายการเลือกเอง</h4>
-          <button type="button" className="ghost tiny-btn" onClick={() => addManualItem(index)}>
-            เพิ่มแถวว่าง
-          </button>
         </div>
 
         <div className="grid two">
@@ -666,27 +665,39 @@ export default function HomepageCuration({ token }) {
         </div>
 
         {candidateState.error ? <p className="muted">{candidateState.error}</p> : null}
-        {candidateState.items.length ? (
-          <div className="homepage-curation-manual-list">
-            {candidateState.items.map((candidate) => (
-              <div key={`${block.key}-cand-${candidate.entity_type}-${candidate.id}`} className="homepage-curation-manual-row">
-                <div>
-                  <strong>{candidate.title || "-"}</strong>
-                  <p className="muted">
-                    {getEntityTypeLabel(candidate.entity_type)} #{candidate.id}
-                    {candidate.category ? ` | ${candidate.category}` : ""}
-                    {candidate.slug ? ` | รหัส: ${candidate.slug}` : ""}
-                  </p>
+        {!candidateState.q.trim() ? (
+          <p className="muted">พิมพ์คำค้นแล้วกดค้นหา</p>
+        ) : candidateState.items.length ? (() => {
+          const maxReached = block.max_items > 0 && block.manual_items.length >= block.max_items;
+          const filtered = candidateState.items.filter(
+            (c) => !block.manual_items.some((m) => Number(m.entity_id) === Number(c.id) && m.entity_type === c.entity_type)
+          );
+          const shown = filtered.slice(0, 8);
+          const remaining = filtered.length - shown.length;
+          return (
+            <div className="homepage-curation-manual-list">
+              {maxReached ? <p className="muted">ครบตามจำนวนที่ตั้งไว้แล้ว</p> : null}
+              {shown.map((candidate) => (
+                <div key={`${block.key}-cand-${candidate.entity_type}-${candidate.id}`} className="homepage-curation-manual-row">
+                  <div>
+                    <strong>{candidate.title || "-"}</strong>
+                    <p className="muted">
+                      {getEntityTypeLabel(candidate.entity_type)} #{candidate.id}
+                      {candidate.category ? ` | ${candidate.category}` : ""}
+                      {candidate.slug ? ` | รหัส: ${candidate.slug}` : ""}
+                    </p>
+                  </div>
+                  <div className="actions">
+                    <button type="button" className="ghost tiny-btn" onClick={() => addManualCandidate(index, candidate)} disabled={maxReached}>
+                      เพิ่มเข้ารายการเลือกเอง
+                    </button>
+                  </div>
                 </div>
-                <div className="actions">
-                  <button type="button" className="ghost tiny-btn" onClick={() => addManualCandidate(index, candidate)}>
-                    เพิ่มเข้ารายการเลือกเอง
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
+              ))}
+              {remaining > 0 ? <p className="muted">มีอีก {remaining} รายการ — พิมพ์คำค้นให้แคบลง</p> : null}
+            </div>
+          );
+        })() : null}
 
         {block.manual_items.length === 0 ? (
           <p className="muted">ยังไม่มีรายการเลือกเอง ระบบจะใช้วิธีเลือกเนื้อหาตามที่ตั้งไว้</p>
@@ -729,6 +740,12 @@ export default function HomepageCuration({ token }) {
                   <input value={item.note} onChange={(event) => updateManualItem(index, itemIndex, { note: event.target.value })} placeholder="เหตุผลที่ต้องอยู่ในบล็อกนี้" />
                 </label>
                 <div className="actions">
+                  <button type="button" className="ghost tiny-btn" onClick={() => moveManualItem(index, itemIndex, -1)} disabled={itemIndex === 0}>
+                    ขึ้น
+                  </button>
+                  <button type="button" className="ghost tiny-btn" onClick={() => moveManualItem(index, itemIndex, 1)} disabled={itemIndex === block.manual_items.length - 1}>
+                    ลง
+                  </button>
                   <button type="button" className="danger tiny-btn" onClick={() => removeManualItem(index, itemIndex)}>
                     ลบ
                   </button>
@@ -1064,6 +1081,11 @@ export default function HomepageCuration({ token }) {
                       <option value={9}>9</option>
                     </select>
                   </label>
+                  {block.manual_items.length > block.max_items ? (
+                    <p className="homepage-curation-warning-text">
+                      มีรายการทั้งหมด {block.manual_items.length} รายการ แต่จะแสดงจริง {block.max_items} รายการ — รายการส่วนเกินจะไม่แสดงบนหน้าแรก กรุณาลบรายการที่ไม่ต้องการออก
+                    </p>
+                  ) : null}
                   <label className="homepage-curation-checkbox">
                     <input
                       type="checkbox"
