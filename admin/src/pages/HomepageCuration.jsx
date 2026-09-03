@@ -1081,6 +1081,11 @@ export default function HomepageCuration({ token }) {
                       <option value={9}>9</option>
                     </select>
                   </label>
+                  {block.manual_items.length > block.max_items ? (
+                    <p className="muted">
+                      มีรายการทั้งหมด {block.manual_items.length} รายการ แต่จะแสดงจริง {block.max_items} รายการ — รายการส่วนเกินจะไม่แสดงบนหน้าแรก กรุณาลบรายการที่ไม่ต้องการออก
+                    </p>
+                  ) : null}
                   <label className="homepage-curation-checkbox">
                     <input
                       type="checkbox"
