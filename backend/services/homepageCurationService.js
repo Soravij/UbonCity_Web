@@ -549,7 +549,7 @@ function sanitizeBlockByKey(block, fallbackBlock, position) {
   const forcedType = FIXED_BLOCK_TYPES[key];
   const sourceMode = String(block?.source_mode || fallbackBlock.source_mode || "manual-first-hybrid").trim().toLowerCase();
   const fallbackMode = String(block?.fallback_mode || fallbackBlock.fallback_mode || "latest-approved").trim().toLowerCase();
-  const minItems = Math.max(0, Number(block?.min_items ?? fallbackBlock.min_items ?? 0) || 0);
+  let minItems = Math.max(0, Number(block?.min_items ?? fallbackBlock.min_items ?? 0) || 0);
   let maxItems = Math.max(minItems, Number(block?.max_items ?? fallbackBlock.max_items ?? minItems) || minItems);
 
   if (key === "highlight") {
@@ -559,9 +559,9 @@ function sanitizeBlockByKey(block, fallbackBlock, position) {
     }
   }
 
-  if (block.key === 'featured_events') {
-    block.max_items = 5;
-    if (!(block.min_items >= 1)) block.min_items = 1;
+  if (key === 'featured_events') {
+    maxItems = 5;
+    minItems = 1;
   }
 
   const normalizedBlock = {
