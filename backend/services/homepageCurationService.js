@@ -63,7 +63,7 @@ function getDefaultBlockCopy(lang, key) {
   return dict[key] || { title: key, subtitle: "" };
 }
 
-function createDefaultBlocks(lang = "th") {
+export function createDefaultBlocks(lang = "th") {
   const activeLang = normalizeLang(lang);
   return [
     {
@@ -87,7 +87,7 @@ function createDefaultBlocks(lang = "th") {
     {
       key: "highlight",
       type: "place-list",
-      enabled: true,
+      enabled: false,
       position: 2,
       title: getDefaultBlockCopy(activeLang, "highlight").title,
       subtitle: getDefaultBlockCopy(activeLang, "highlight").subtitle,
@@ -550,7 +550,14 @@ function sanitizeBlockByKey(block, fallbackBlock, position) {
   const sourceMode = String(block?.source_mode || fallbackBlock.source_mode || "manual-first-hybrid").trim().toLowerCase();
   const fallbackMode = String(block?.fallback_mode || fallbackBlock.fallback_mode || "latest-approved").trim().toLowerCase();
   const minItems = Math.max(0, Number(block?.min_items ?? fallbackBlock.min_items ?? 0) || 0);
-  const maxItems = Math.max(minItems, Number(block?.max_items ?? fallbackBlock.max_items ?? minItems) || minItems);
+  let maxItems = Math.max(minItems, Number(block?.max_items ?? fallbackBlock.max_items ?? minItems) || minItems);
+
+  if (key === "highlight") {
+    const allowed = [3, 6, 9];
+    if (!allowed.includes(maxItems)) {
+      maxItems = allowed.reduce((best, v) => (v <= maxItems ? v : best), 3);
+    }
+  }
 
   const normalizedBlock = {
     key,
@@ -595,7 +602,7 @@ function sanitizeRuleConfig(input) {
   };
 }
 
-function sanitizeBlocks(blocks, lang = "th") {
+export function sanitizeBlocks(blocks, lang = "th") {
   const defaultBlockMap = createDefaultBlockMap(lang);
   const submittedByKey = new Map();
   const submittedKeysInOrder = [];
@@ -619,10 +626,12 @@ function sanitizeBlocks(blocks, lang = "th") {
     submittedKeysInOrder.push(key);
   }
 
-  const finalKeys = [
-    ...submittedKeysInOrder,
-    ...FIXED_BLOCK_ORDER.filter((key) => !submittedByKey.has(key)),
-  ];
+  const finalKeys = [...submittedKeysInOrder];
+  for (const key of FIXED_BLOCK_ORDER) {
+    if (submittedByKey.has(key)) continue;
+    const at = Math.min(FIXED_BLOCK_ORDER.indexOf(key), finalKeys.length);
+    finalKeys.splice(at, 0, key);
+  }
 
   return finalKeys.map((key, index) =>
     sanitizeBlockByKey(submittedByKey.get(key) || defaultBlockMap.get(key), defaultBlockMap.get(key), index + 1)
