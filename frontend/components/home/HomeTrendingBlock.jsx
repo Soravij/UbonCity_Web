@@ -29,7 +29,7 @@ function getEventCardItems(events, total = 5) {
   return items;
 }
 
-export default function HomeTrendingBlock({ activeLang, copy, decisionCopy, latestEvents }) {
+export default function HomeTrendingBlock({ activeLang, copy, decisionCopy, latestEvents, title, subtitle }) {
   const eventCards = getEventCardItems(latestEvents, 5);
   const featured = eventCards[0];
   const secondary = eventCards.slice(1, 5);
@@ -52,12 +52,12 @@ export default function HomeTrendingBlock({ activeLang, copy, decisionCopy, late
         {isFeatured ? (
           <p className="text-sm font-bold text-[color:var(--theme-text)]">
             {event.isPlaceholder
-              ? decisionCopy.trendingEvents
+              ? decisionCopy?.trendingEvents ?? ""
               : formatUpdatedAt(event.approved_at || event.updated_at, activeLang)}
           </p>
         ) : null}
         <h3 className={`line-clamp-2 font-semibold tracking-[-0.03em] text-[color:var(--theme-text)] ${isFeatured ? "mt-3 text-2xl md:text-[2rem]" : "text-sm md:text-[15px]"}`}>
-          {event.isPlaceholder ? copy.latestEventsEmpty : event.title || "-"}
+          {event.isPlaceholder ? (copy?.latestEventsEmpty ?? "") : event.title || "-"}
         </h3>
         <span className={`home-event-arrow ${event.isPlaceholder ? "opacity-40" : ""}`} aria-hidden="true">
           {"\u203A"}
@@ -79,7 +79,7 @@ export default function HomeTrendingBlock({ activeLang, copy, decisionCopy, late
         key={event.id}
         href={`/${activeLang}/events/${event.id}`}
         className={`home-event-card group block ${className}`.trim()}
-        aria-label={event.title || decisionCopy.trendingEvents}
+        aria-label={event.title || (decisionCopy?.trendingEvents ?? "")}
       >
         {media}
         {panel}
@@ -92,9 +92,9 @@ export default function HomeTrendingBlock({ activeLang, copy, decisionCopy, late
       <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-end">
         <div className="home-section-header">
           <p className="eyebrow-label">Latest</p>
-          <h2 className="section-heading">{decisionCopy.trendingTitle}</h2>
+          <h2 className="section-heading">{title || (decisionCopy?.trendingTitle ?? "")}</h2>
         </div>
-        <p className="section-copy max-w-2xl">{decisionCopy.trendingSubtitle}</p>
+        <p className="section-copy max-w-2xl">{subtitle || (decisionCopy?.trendingSubtitle ?? "")}</p>
       </div>
       <div className="home-events-layout grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {renderEventCard(featured, "home-event-card--featured", true)}

@@ -129,8 +129,8 @@ export function createDefaultBlocks(lang = "th") {
       subtitle: getDefaultBlockCopy(activeLang, "featured_events").subtitle,
       source_mode: "manual-first-hybrid",
       fallback_mode: "latest-approved",
-      min_items: 2,
-      max_items: 4,
+      min_items: 1,
+      max_items: 5,
       manual_items: [],
       rule_config: {
         category_scope: [],
@@ -549,7 +549,7 @@ function sanitizeBlockByKey(block, fallbackBlock, position) {
   const forcedType = FIXED_BLOCK_TYPES[key];
   const sourceMode = String(block?.source_mode || fallbackBlock.source_mode || "manual-first-hybrid").trim().toLowerCase();
   const fallbackMode = String(block?.fallback_mode || fallbackBlock.fallback_mode || "latest-approved").trim().toLowerCase();
-  const minItems = Math.max(0, Number(block?.min_items ?? fallbackBlock.min_items ?? 0) || 0);
+  let minItems = Math.max(0, Number(block?.min_items ?? fallbackBlock.min_items ?? 0) || 0);
   let maxItems = Math.max(minItems, Number(block?.max_items ?? fallbackBlock.max_items ?? minItems) || minItems);
 
   if (key === "highlight") {
@@ -557,6 +557,11 @@ function sanitizeBlockByKey(block, fallbackBlock, position) {
     if (!allowed.includes(maxItems)) {
       maxItems = allowed.reduce((best, v) => (v <= maxItems ? v : best), 3);
     }
+  }
+
+  if (key === 'featured_events') {
+    maxItems = 5;
+    minItems = 1;
   }
 
   const normalizedBlock = {
