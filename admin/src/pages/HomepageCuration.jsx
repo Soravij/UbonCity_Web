@@ -1222,6 +1222,7 @@ export default function HomepageCuration({ token }) {
                         .filter(([, value]) => value === true)
                         .map(([taxonomyKey]) => taxonomyCatalog.find((entry) => entry.key === taxonomyKey)?.label || taxonomyKey)
                         .join(", ");
+                      return (
                         <tr key={`pool-${candidate.entity_type}-${candidate.id}`}>
                           <td>
                             <input
