@@ -35,8 +35,9 @@ const FIXED_BLOCK_TYPES = {
 };
 const TAB_LAYOUT = "layout";
 const TAB_HIGHLIGHT = "highlight";
-const TAB_SIGNALS = "signals";
 const TAB_SITUATIONS = "situations";
+const TAB_EVENTS = "events";
+const TAB_SIGNALS = "signals";
 
 const SOURCE_MODE_OPTIONS = [
   { value: "manual-first-hybrid", label: "เลือกเองก่อน แล้วระบบช่วยเติม" },
@@ -814,19 +815,29 @@ export default function HomepageCuration({ token }) {
 
       {message ? <p className="status">{message}</p> : null}
 
-      <div className="actions">
-        <button type="button" className={activeTab === TAB_LAYOUT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_LAYOUT)}>
-          Layout
-        </button>
-        <button type="button" className={activeTab === TAB_HIGHLIGHT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_HIGHLIGHT)}>
-          ไฮไลต์
-        </button>
-        <button type="button" className={activeTab === TAB_SIGNALS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SIGNALS)}>
-          Signals / Content Pool
-        </button>
-        <button type="button" className={activeTab === TAB_SITUATIONS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SITUATIONS)}>
-          สถานการณ์
-        </button>
+      <div className="actions" style={{ display: "flex", flexWrap: "wrap" }}>
+        <div>
+          <button type="button" className={activeTab === TAB_LAYOUT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_LAYOUT)}>
+            Layout
+          </button>
+          <button type="button" className={activeTab === TAB_HIGHLIGHT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_HIGHLIGHT)}>
+            ไฮไลต์
+          </button>
+          <button type="button" className={activeTab === TAB_SITUATIONS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SITUATIONS)}>
+            สถานการณ์
+          </button>
+          <button type="button" className={activeTab === TAB_EVENTS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_EVENTS)}>
+            อีเวนต์
+          </button>
+        </div>
+        <div style={{ marginLeft: "auto" }}>
+          <button type="button" className={activeTab === TAB_SIGNALS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SIGNALS)}>
+            Signals
+          </button>
+          <button type="button" className={activeTab === TAB_SIGNALS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SIGNALS)}>
+            Content Pool
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -1103,6 +1114,49 @@ export default function HomepageCuration({ token }) {
         </div>
       ) : activeTab === TAB_SITUATIONS ? (
         <Situations token={token} />
+      ) : activeTab === TAB_EVENTS ? (
+        <div className="homepage-curation-block-list">
+          {(() => {
+            const eventIndex = blocks.findIndex((b) => b.key === "featured_events");
+            if (eventIndex < 0) return <p className="muted">ไม่พบบล็อกอีเวนต์</p>;
+            const block = blocks[eventIndex];
+            return (
+              <article className="homepage-curation-block-card">
+                <div className="homepage-curation-block-head">
+                  <div>
+                    <p className="homepage-curation-block-kicker">{getBlockTypeLabel(block.type)}</p>
+                    <h3>{block.title || block.key}</h3>
+                    <p className="muted">{block.subtitle || "อีเวนต์ที่อยากแนะนำ"}</p>
+                  </div>
+                </div>
+
+                <div className="grid two homepage-curation-grid">
+                  <label>
+                    ชื่อบล็อก
+                    <input value={block.title} onChange={(event) => updateBlock(eventIndex, { title: event.target.value })} />
+                  </label>
+                  <label>
+                    คำอธิบายย่อย
+                    <input value={block.subtitle} onChange={(event) => updateBlock(eventIndex, { subtitle: event.target.value })} />
+                  </label>
+                  <p className="muted full">บล็อกนี้แสดง 5 รายการเสมอ (การ์ดใหญ่ 1 + เล็ก 4)</p>
+                  <label className="homepage-curation-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(block.enabled)}
+                      onChange={(event) => updateBlock(eventIndex, { enabled: event.target.checked })}
+                    />
+                    <span>เปิดใช้งานบล็อกนี้</span>
+                  </label>
+                </div>
+
+                <p className="muted" style={{ marginBottom: "0.5rem" }}>รายการที่เลือกเองตัวแรก = การ์ดใหญ่ ที่เหลือเรียงจากอีเวนต์ที่อนุมัติล่าสุดอัตโนมัติ</p>
+
+                {renderBlockEditor(block, eventIndex)}
+              </article>
+            );
+          })()}
+        </div>
       ) : (
         <div className="homepage-curation-block-list">
           <article className="homepage-curation-block-card">
