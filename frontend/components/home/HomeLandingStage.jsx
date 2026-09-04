@@ -24,6 +24,7 @@ export default function HomeLandingStage({
   weather,
   quickActions,
   featuredStripPlaces,
+  heroBlock = null,
 }) {
   const weatherLabelKey = weather?.codeKey || "unknown";
   const weatherLabel = copy.weatherLabel?.[weatherLabelKey] || copy.weatherLabel?.unknown || "-";
@@ -44,8 +45,8 @@ export default function HomeLandingStage({
           <div className="home-landing-left">
             <div className="home-landing-headline-group">
               <p className="hero-banner-eyebrow editorial-kicker">{copy.siteTitle}</p>
-              <h1 className="hero-banner-title editorial-title max-w-4xl">{decisionCopy.heroHeading}</h1>
-              <p className="hero-banner-copy editorial-subtitle max-w-2xl">{decisionCopy.heroHint}</p>
+              <h1 className="hero-banner-title editorial-title max-w-4xl">{heroBlock?.title || decisionCopy?.heroHeading}</h1>
+              <p className="hero-banner-copy editorial-subtitle max-w-2xl">{heroBlock?.subtitle || decisionCopy?.heroHint}</p>
             </div>
 
             <div className="home-landing-search-panel rounded-[24px] p-5 md:p-6">
