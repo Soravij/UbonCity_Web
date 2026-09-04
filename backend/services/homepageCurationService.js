@@ -588,7 +588,7 @@ function sanitizeBlockByKey(block, fallbackBlock, position) {
     normalizedBlock.manual_items = normalizedBlock.manual_items.map((item) => ({
       ...item,
       entity_type: "event",
-    }));
+    })).slice(0, 1);
   } else if (forcedType !== "event-list") {
     normalizedBlock.manual_items = normalizedBlock.manual_items.filter((item) => item.entity_type !== "event");
   }
