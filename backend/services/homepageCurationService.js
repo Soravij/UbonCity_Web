@@ -348,6 +348,8 @@ async function loadApprovedPlacesForHomepage(lang = "th") {
        COALESCE(pt_req.meta_title, pt_th.meta_title) AS meta_title,
        COALESCE(pt_req.meta_description, pt_th.meta_description) AS meta_description,
        p.image,
+       p.decision_cover_image,
+       p.decision_thumbnail_image,
        p.decision_featured_score,
        p.decision_scenario_tags
      FROM places p
@@ -360,11 +362,17 @@ async function loadApprovedPlacesForHomepage(lang = "th") {
     [normalizedLang, normalizedLang]
   );
 
-  return rows.map((row) => ({
-    ...row,
-    entity_type: "place",
-    decision_scenario_tags_list: parseTagList(row?.decision_scenario_tags),
-  }));
+  return rows.map((row) => {
+    const effectiveCover = row?.decision_cover_image || row?.image || null;
+    const effectiveThumb = row?.decision_thumbnail_image || effectiveCover || row?.image || null;
+    return {
+      ...row,
+      entity_type: "place",
+      decision_scenario_tags_list: parseTagList(row?.decision_scenario_tags),
+      effective_cover_image: effectiveCover,
+      effective_thumbnail_image: effectiveThumb,
+    };
+  });
 }
 
 async function loadApprovedEventsForHomepage(lang = "th") {

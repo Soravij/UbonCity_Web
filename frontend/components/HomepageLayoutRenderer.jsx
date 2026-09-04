@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import HomeFeaturedStrip from "@/components/home/HomeFeaturedStrip";
 import HomeTrendingBlock from "@/components/home/HomeTrendingBlock";
 
 function buildPlaceHref(lang, place) {
@@ -43,34 +44,7 @@ function getScenarioBadge(place, decisionCopy, block) {
 
 function renderPlaceListBlock(block, props) {
   const { activeLang, copy } = props;
-  const items = Array.isArray(block.resolved_items) ? block.resolved_items : [];
-  if (!items.length) return null;
-  return (
-    <section key={block.key} className="editorial-section space-y-6">
-      <div className="space-y-2">
-        <p className="eyebrow-label">Places</p>
-        <h2 className="section-heading">{block.title || "Featured Places"}</h2>
-        {block.subtitle ? <p className="section-copy max-w-2xl">{block.subtitle}</p> : null}
-      </div>
-      <div className="editorial-open-grid grid gap-0 sm:grid-cols-2 lg:grid-cols-3">
-        {items.map((place) => {
-          const href = buildPlaceHref(activeLang, place);
-          const categoryLabel = copy.nav?.[place.category] || place.category || "-";
-          if (!href) return null;
-          return (
-            <Link
-              key={`${block.key}-${place.id}`}
-              href={href}
-              className="editorial-open-cell home-clickable-surface block p-5 transition hover:bg-white/30 md:p-6"
-            >
-              <p className="eyebrow-label mb-2">{categoryLabel}</p>
-              <p className="line-clamp-1 font-semibold">{place.title || "-"}</p>
-            </Link>
-          );
-        })}
-      </div>
-    </section>
-  );
+  return <HomeFeaturedStrip places={block.resolved_items || []} activeLang={activeLang} copy={copy} />;
 }
 
 function renderEventListBlock(block, props) {
