@@ -151,13 +151,17 @@ Known open gaps (not fixed in this change set):
 - หน้า Homepage Curation แยกเป็นแท็บต่องาน; แท็บ Layout เหลือเป็นแดชบอร์ด (preview + ลำดับ + enabled + ปุ่มเผยแพร่กลาง) — ปุ่มเผยแพร่ยังเป็นปุ่มเดียวทั้งหน้า, no draft/published per block.
 - ตัวแก้ manual items (`renderBlockEditor` ใช้ร่วมทุก block): เพิ่มปุ่มขึ้น/ลงต่อ item, ค้นหาต้องพิมพ์ก่อนจึงแสดงผล, จำกัด 8 รายการ, ซ่อนตัวที่เลือกแล้ว, ลบปุ่ม "เพิ่มแถวว่าง" ออก; จำนวน item ถูกจำกัดด้วย `max_items` ของ block.
 - class ใหม่ `.homepage-curation-warning-text` (`App.css`) ใช้ `var(--theme-danger)`.
-- ยังไม่มี layout ไหนถูกเผยแพร่ (`published_at = null` ทั้ง 4 ภาษา) — หน้าแรกยังใช้ `HomeLandingStage` เดิม; การกดเผยแพร่จะสลับหน้าแรกไปใช้ `HomepageLayoutRenderer` ทั้งหน้า; ยังไม่ได้ตรวจว่า hero/อากาศ/ช่องค้นหาครบหรือไม่ (งานค้าง).
+- ยังไม่มี layout ไหนถูกเผยแพร่ (`published_at = null` ทั้ง 4 ภาษา) — ยังไม่มี unpublish endpoint ต้องแก้ DB มือ
 - `renderEventListBlock` (`HomepageLayoutRenderer.jsx`) ตอนนี้ reuse `HomeTrendingBlock` (1 การ์ดใหญ่ + 4 เล็ก) แทน markup เดิมที่ตัดที่ 3 การ์ด; `featured_events` ถูก clamp เป็น `max_items` 5 / `min_items` 1 ฝั่ง server (`homepageCurationService.js` sanitizeBlockByKey).
-- ยังไม่เผยแพร่ layout เพราะการกดเผยแพร่จะสลับทั้งหน้า (`page.js:155`) ทำให้การ์ดอากาศ/AQI, featured strip, HomeSelectedBlock, explore grid หายทั้งหมด; ไม่มี unpublish endpoint ต้องแก้ DB มือ
+
 - แท็บ "อีเวนต์" ในหน้า Homepage Curation คุม block `featured_events`: ปักหมุดได้ 1 อีเวนต์เท่านั้น (แทนที่ตัวเดิมเมื่อกดเพิ่ม), ไม่มีช่องหัวข้อ/คำโปรย (หน้าเว็บใช้ `decisionCopy.trendingTitle` / `decisionCopy.trendingSubtitle`), ไม่มีปุ่มเปิด/ปิด (backend บังคับ `enabled=true`), ไม่มีตัวเลือกจำนวน (บังคับ `max_items=5` / `min_items=1`); `manual_items` ของ `featured_events` ถูก clamp เหลือ 1 ที่ `sanitizeBlockByKey` (`.map(...).slice(0, 1)`).
 - เมนูแท็บหน้า Homepage Curation แยก 2 กลุ่ม: ซ้าย = Layout, ไฮไลต์, สถานการณ์, อีเวนต์ (ตามลำดับหน้าแรก); ขวา = Signals / Content Pool.
 - ทุก block ถูกบังคับ `enabled=true` ที่ `sanitizeBlockByKey` (`homepageCurationService.js:552`) — ไม่มีปุ่มเปิด/ปิดบล็อกในหน้า admin อีกต่อไป (checkbox ถูกออกจากแท็บไฮไลต์และแท็บ Layout แล้ว)
 - ตัวกรอง `Boolean(block?.enabled)` ที่ `buildResolvedBlocks` (`:496`) ยังคงไว้ — preview เส้นทางเดียวกัน
+- หน้าแรกเลิกสลับทั้งหน้าแล้ว: HomeLandingStage (hero + การ์ดอากาศ/AQI + featured strip) และ explore grid render เสมอทั้งสองทาง
+- ternary เหลือคุมแค่ 3 block กลาง: เผยแพร่แล้ว HomeSelectedBlock / HomeScenariosBlock / HomeTrendingBlock ถูกแทนด้วย highlight / scenarios / featured_events
+- renderHeroBlock ถูกลบ hero block ใน renderer คืน null; หัวข้อ/คำโปรยของ hero ส่งเข้า HomeLandingStage ผ่าน prop heroBlock และส่งต่อเมื่อเผยแพร่แล้วเท่านั้น (draft ไม่มีผลกับหน้าจริง)
+- ผลข้างเคียงที่ยอมรับแล้ว: เผยแพร่แล้วไม่มี hero banner รูปพื้นหลังอีก ใช้ HomeLandingStage ตลอด
 
 ## Confirmed Direction
 

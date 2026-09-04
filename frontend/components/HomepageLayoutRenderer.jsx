@@ -1,5 +1,5 @@
 import Link from "next/link";
-import DecisionSearchBar from "@/components/DecisionSearchBar";
+
 import HomeTrendingBlock from "@/components/home/HomeTrendingBlock";
 
 function buildPlaceHref(lang, place) {
@@ -39,49 +39,6 @@ function getScenarioBadge(place, decisionCopy, block) {
   const matched = preferredTags.find((tag) => itemTags.includes(tag)) || itemTags[0] || "";
   if (!matched) return "";
   return scenarioMap.get(matched) || matched;
-}
-
-function renderHeroBlock(block, props) {
-  const {
-    activeLang,
-    decisionCopy,
-    copy,
-    quickActions,
-  } = props;
-
-  return (
-    <section
-      key={block.key}
-      className="editorial-section home-hero hero-banner rounded-[36px] border border-orange-200 p-6 shadow-[0_22px_54px_rgba(91,37,43,0.18)] min-h-[520px] md:min-h-[680px] md:p-10"
-      style={{
-        backgroundImage:
-          "linear-gradient(135deg, rgba(32,14,8,0.42), rgba(87,35,20,0.24)), url('/hero-uboncity.jpg')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-      }}
-    >
-      <div className="home-hero-content flex h-full flex-col justify-between gap-10">
-        <div className="max-w-4xl space-y-5 pt-4 md:pt-10">
-          <p className="hero-banner-eyebrow editorial-kicker">{copy.siteTitle}</p>
-          <h1 className="hero-banner-title editorial-title max-w-4xl" style={{ letterSpacing: "0.01em" }}>
-            {block.title || decisionCopy.heroHeading}
-          </h1>
-          <p className="hero-banner-copy editorial-subtitle max-w-2xl">
-            {block.subtitle || decisionCopy.heroHint}
-          </p>
-        </div>
-
-        <div className="editorial-panel max-w-3xl rounded-[30px] p-4 md:p-5">
-          <DecisionSearchBar
-            lang={activeLang}
-            placeholder={decisionCopy.searchPlaceholder}
-            submitLabel={decisionCopy.searchLabel}
-            quickActions={quickActions}
-          />
-        </div>
-      </div>
-    </section>
-  );
 }
 
 function renderPlaceListBlock(block, props) {
@@ -172,7 +129,7 @@ export default function HomepageLayoutRenderer({
   return (
     <section className="editorial-shell space-y-14 md:space-y-20">
       {(Array.isArray(blocks) ? blocks : []).map((block) => {
-        if (block.type === "hero") return renderHeroBlock(block, { activeLang, copy, decisionCopy, quickActions });
+        if (block.type === "hero") return null;
         if (block.type === "place-list") return renderPlaceListBlock(block, { activeLang, copy });
         if (block.type === "event-list") return renderEventListBlock(block, { activeLang, locale, copy, decisionCopy });
         if (block.type === "scenario-grid") return renderScenarioGridBlock(block, { activeLang, copy, decisionCopy });
