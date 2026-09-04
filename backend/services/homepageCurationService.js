@@ -362,11 +362,17 @@ async function loadApprovedPlacesForHomepage(lang = "th") {
     [normalizedLang, normalizedLang]
   );
 
-  return rows.map((row) => ({
-    ...row,
-    entity_type: "place",
-    decision_scenario_tags_list: parseTagList(row?.decision_scenario_tags),
-  }));
+  return rows.map((row) => {
+    const effectiveCover = row?.decision_cover_image || row?.image || null;
+    const effectiveThumb = row?.decision_thumbnail_image || effectiveCover || row?.image || null;
+    return {
+      ...row,
+      entity_type: "place",
+      decision_scenario_tags_list: parseTagList(row?.decision_scenario_tags),
+      effective_cover_image: effectiveCover,
+      effective_thumbnail_image: effectiveThumb,
+    };
+  });
 }
 
 async function loadApprovedEventsForHomepage(lang = "th") {
