@@ -3225,13 +3225,13 @@ a {
 /* -- HomeLandingStage -- */
 .home-landing-stage {
   position: relative;
-  min-height: 420px;
+  min-height: 0;
   isolation: isolate;
 }
 
 @media (min-width: 768px) {
   .home-landing-stage {
-    min-height: 520px;
+    min-height: 0;
   }
 }
 
@@ -3247,8 +3247,8 @@ a {
   display: flex;
   flex-direction: column;
   gap: 2.5rem;
-  padding: 4rem var(--site-shell-padding-x) 5rem;
-  flex: 1;
+  padding: 3rem var(--site-shell-padding-x) 3rem;
+  flex: 0 1 auto;
   justify-content: center;
   width: min(100%, var(--site-shell-max-width));
   margin: 0 auto;

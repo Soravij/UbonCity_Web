@@ -43,8 +43,17 @@ function getScenarioBadge(place, decisionCopy, block) {
 }
 
 function renderPlaceListBlock(block, props) {
-  const { activeLang, copy } = props;
-  return <HomeFeaturedStrip places={block.resolved_items || []} activeLang={activeLang} copy={copy} />;
+  const { activeLang, copy, decisionCopy } = props;
+  return (
+    <section key={block.key} className="editorial-section space-y-6">
+      <div className="space-y-2">
+        <p className="eyebrow-label">Scenarios</p>
+        <h2 className="section-heading">{decisionCopy.highlightTitle}</h2>
+        <p className="section-copy max-w-2xl">{decisionCopy.highlightSubtitle}</p>
+      </div>
+      <HomeFeaturedStrip places={block.resolved_items || []} activeLang={activeLang} copy={copy} />
+    </section>
+  );
 }
 
 function renderEventListBlock(block, props) {
@@ -104,7 +113,7 @@ export default function HomepageLayoutRenderer({
     <section className="editorial-shell space-y-14 md:space-y-20">
       {(Array.isArray(blocks) ? blocks : []).map((block) => {
         if (block.type === "hero") return null;
-        if (block.type === "place-list") return renderPlaceListBlock(block, { activeLang, copy });
+        if (block.type === "place-list") return renderPlaceListBlock(block, { activeLang, copy, decisionCopy });
         if (block.type === "event-list") return renderEventListBlock(block, { activeLang, locale, copy, decisionCopy });
         if (block.type === "scenario-grid") return renderScenarioGridBlock(block, { activeLang, copy, decisionCopy });
         return null;

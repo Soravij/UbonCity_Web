@@ -1067,14 +1067,6 @@ export default function HomepageCuration({ token }) {
 
                 <div className="grid two homepage-curation-grid">
                   <label>
-                    ชื่อบล็อก
-                    <input value={block.title} onChange={(event) => updateBlock(highlightIndex, { title: event.target.value })} />
-                  </label>
-                  <label>
-                    คำอธิบายย่อย
-                    <input value={block.subtitle} onChange={(event) => updateBlock(highlightIndex, { subtitle: event.target.value })} />
-                  </label>
-                  <label>
                     จำนวนรายการที่แสดง
                     <select value={block.max_items} onChange={(event) => updateBlock(highlightIndex, { max_items: Number(event.target.value) })}>
                       <option value={3}>3</option>
