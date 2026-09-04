@@ -1335,7 +1335,7 @@ a {
 .home-flow-section {
   position: relative;
   z-index: 1;
-  padding: 4.75rem 0 2rem;
+  padding: 3rem 0 2rem;
 }
 
 .home-flow-section > .editorial-section,
@@ -1373,13 +1373,13 @@ a {
 
 @media (min-width: 768px) {
   .home-flow-section {
-    padding: 5.25rem 0 2.75rem;
+    padding: 3.3rem 0 2.75rem;
   }
 }
 
 @media (min-width: 1024px) {
   .home-flow-section {
-    padding: 5.75rem 0 3rem;
+    padding: 3.6rem 0 3rem;
   }
 }
 
@@ -3260,7 +3260,7 @@ a {
     grid-template-columns: minmax(0, 1fr) 280px;
     align-items: start;
     gap: 2rem;
-    padding: 4rem var(--site-shell-padding-x) 3rem;
+    padding: 3rem var(--site-shell-padding-x) 1rem;
   }
 }
 
