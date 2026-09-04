@@ -6,7 +6,7 @@ function buildPlaceHref(lang, place) {
   return `/${lang}/${place.category}/${place.slug}`;
 }
 
-export default function HomeFeaturedStrip({ places = [], activeLang }) {
+export default function HomeFeaturedStrip({ places = [], activeLang, copy }) {
   if (!places.length) {
     return null;
   }
@@ -17,7 +17,7 @@ export default function HomeFeaturedStrip({ places = [], activeLang }) {
         const href = buildPlaceHref(activeLang, place);
         const title = place.title || "-";
         const { coverImage, coverAlt } = resolveCardCoverVisual(place);
-        const categoryLabel = place.category || "place";
+        const categoryLabel = copy?.nav?.[place.category] || place.category || "place";
         const subtitle = place.district || place.location_name || place.province || "";
 
         if (!href) {

@@ -5,7 +5,7 @@ import { buildHomeDecisionSelections } from "@/lib/phase56-decision-helpers.mjs"
 import { getDecisionCopy } from "@/lib/home-copy";
 import HomepageLayoutRenderer from "@/components/HomepageLayoutRenderer";
 import HomeLandingStage from "@/components/home/HomeLandingStage";
-import HomeSelectedBlock from "@/components/home/HomeSelectedBlock";
+import HomeFeaturedStrip from "@/components/home/HomeFeaturedStrip";
 import HomeScenariosBlock from "@/components/home/HomeScenariosBlock";
 import HomeTrendingBlock from "@/components/home/HomeTrendingBlock";
 
@@ -83,7 +83,7 @@ export default async function LangHome({ params }) {
   const decisionCategories = homeCategories;
   const allPlaces = decisionCategories.flatMap((category) => placesByCategory[category] || []);
   const latestEvents = events.slice(0, 5);
-  const { topTenPlaces, topCafePlaces, eveningSpots } = buildHomeDecisionSelections({
+  const { topTenPlaces } = buildHomeDecisionSelections({
     allPlaces,
     placesByCategory,
   });
@@ -159,7 +159,6 @@ export default async function LangHome({ params }) {
           decisionCopy={decisionCopy}
           weather={weather}
           quickActions={quickActions}
-          featuredStripPlaces={featuredStripPlaces}
           heroBlock={hasPublishedCurationLayout
             ? (resolvedBlocks?.find((b) => b.type === "hero") || null)
             : null}
@@ -179,13 +178,10 @@ export default async function LangHome({ params }) {
       ) : (
         <>
           <div className="home-flow-section home-flow-section--surface-1 home-flow-section--bridge">
-            <HomeSelectedBlock
+            <HomeFeaturedStrip
+              places={featuredStripPlaces}
               activeLang={activeLang}
               copy={copy}
-              decisionCopy={decisionCopy}
-              topTenPlaces={topTenPlaces}
-              topCafePlaces={topCafePlaces}
-              eveningSpots={eveningSpots}
             />
           </div>
 
