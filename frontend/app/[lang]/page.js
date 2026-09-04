@@ -160,7 +160,9 @@ export default async function LangHome({ params }) {
           weather={weather}
           quickActions={quickActions}
           featuredStripPlaces={featuredStripPlaces}
-          heroBlock={resolvedBlocks?.find((b) => b.type === "hero") || null}
+          heroBlock={hasPublishedCurationLayout
+            ? (resolvedBlocks?.find((b) => b.type === "hero") || null)
+            : null}
         />
       </div>
 
