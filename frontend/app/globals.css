@@ -3260,7 +3260,7 @@ a {
     grid-template-columns: minmax(0, 1fr) 280px;
     align-items: start;
     gap: 2rem;
-    padding: 3rem var(--site-shell-padding-x) 1rem;
+    padding: 3rem var(--site-shell-padding-x) 1.4rem;
   }
 }
 
