@@ -1340,7 +1340,9 @@ a {
 
 .home-flow-section > .editorial-section,
 .home-flow-section > .editorial-shell {
-  max-width: var(--site-shell-max-width);
+  max-width: calc(var(--site-shell-max-width) + 2 * var(--site-shell-padding-x));
+  padding-left: var(--site-shell-padding-x);
+  padding-right: var(--site-shell-padding-x);
   margin: 0 auto;
 }
 
