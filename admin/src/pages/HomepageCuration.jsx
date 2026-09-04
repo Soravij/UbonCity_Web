@@ -935,14 +935,6 @@ export default function HomepageCuration({ token }) {
                       <p className="muted">{block.key} | {Array.isArray(block.manual_items) ? block.manual_items.length : 0} รายการเลือกเอง</p>
                     </div>
                     <div className="actions">
-                      <label className="homepage-curation-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(block.enabled)}
-                          onChange={(event) => updateBlock(index, { enabled: event.target.checked })}
-                        />
-                        <span>เปิดใช้งาน</span>
-                      </label>
                       <button type="button" className="ghost tiny-btn" onClick={() => moveBlock(index, -1)} disabled={index === 0}>
                         ขึ้น
                       </button>
@@ -984,15 +976,6 @@ export default function HomepageCuration({ token }) {
                     คำอธิบายย่อย
                     <input value={block.subtitle} onChange={(event) => updateBlock(index, { subtitle: event.target.value })} />
                   </label>
-                  <label className="homepage-curation-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(block.enabled)}
-                      onChange={(event) => updateBlock(index, { enabled: event.target.checked })}
-                    />
-                    <span>เปิดใช้งานบล็อกนี้</span>
-                  </label>
-
                   {!hero ? (
                     <>
                       <label>
@@ -1104,14 +1087,6 @@ export default function HomepageCuration({ token }) {
                       มีรายการทั้งหมด {block.manual_items.length} รายการ แต่จะแสดงจริง {block.max_items} รายการ — รายการส่วนเกินจะไม่แสดงบนหน้าแรก กรุณาลบรายการที่ไม่ต้องการออก
                     </p>
                   ) : null}
-                  <label className="homepage-curation-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(block.enabled)}
-                      onChange={(event) => updateBlock(highlightIndex, { enabled: event.target.checked })}
-                    />
-                    <span>เปิดใช้งานบล็อกนี้</span>
-                  </label>
                 </div>
 
                 {renderBlockEditor(block, highlightIndex)}

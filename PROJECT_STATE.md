@@ -156,6 +156,8 @@ Known open gaps (not fixed in this change set):
 - ยังไม่เผยแพร่ layout เพราะการกดเผยแพร่จะสลับทั้งหน้า (`page.js:155`) ทำให้การ์ดอากาศ/AQI, featured strip, HomeSelectedBlock, explore grid หายทั้งหมด; ไม่มี unpublish endpoint ต้องแก้ DB มือ
 - แท็บ "อีเวนต์" ในหน้า Homepage Curation คุม block `featured_events`: ปักหมุดได้ 1 อีเวนต์เท่านั้น (แทนที่ตัวเดิมเมื่อกดเพิ่ม), ไม่มีช่องหัวข้อ/คำโปรย (หน้าเว็บใช้ `decisionCopy.trendingTitle` / `decisionCopy.trendingSubtitle`), ไม่มีปุ่มเปิด/ปิด (backend บังคับ `enabled=true`), ไม่มีตัวเลือกจำนวน (บังคับ `max_items=5` / `min_items=1`); `manual_items` ของ `featured_events` ถูก clamp เหลือ 1 ที่ `sanitizeBlockByKey` (`.map(...).slice(0, 1)`).
 - เมนูแท็บหน้า Homepage Curation แยก 2 กลุ่ม: ซ้าย = Layout, ไฮไลต์, สถานการณ์, อีเวนต์ (ตามลำดับหน้าแรก); ขวา = Signals / Content Pool.
+- ทุก block ถูกบังคับ `enabled=true` ที่ `sanitizeBlockByKey` (`homepageCurationService.js:552`) — ไม่มีปุ่มเปิด/ปิดบล็อกในหน้า admin อีกต่อไป (checkbox ถูกออกจากแท็บไฮไลต์และแท็บ Layout แล้ว)
+- ตัวกรอง `Boolean(block?.enabled)` ที่ `buildResolvedBlocks` (`:496`) ยังคงไว้ — preview เส้นทางเดียวกัน
 
 ## Confirmed Direction
 
