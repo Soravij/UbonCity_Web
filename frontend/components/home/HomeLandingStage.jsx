@@ -1,5 +1,4 @@
 import DecisionSearchBar from "@/components/DecisionSearchBar";
-import HomeFeaturedStrip from "./HomeFeaturedStrip";
 
 function roundValue(value) {
   const n = Number(value);
@@ -23,7 +22,6 @@ export default function HomeLandingStage({
   decisionCopy,
   weather,
   quickActions,
-  featuredStripPlaces,
   heroBlock = null,
 }) {
   const weatherLabelKey = weather?.codeKey || "unknown";
@@ -94,9 +92,6 @@ export default function HomeLandingStage({
           </div>
         </div>
 
-        <div className="home-landing-bottom">
-          <HomeFeaturedStrip places={featuredStripPlaces} activeLang={activeLang} />
-        </div>
       </div>
     </section>
   );
