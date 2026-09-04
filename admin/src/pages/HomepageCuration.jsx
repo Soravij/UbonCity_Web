@@ -832,10 +832,7 @@ export default function HomepageCuration({ token }) {
         </div>
         <div style={{ marginLeft: "auto" }}>
           <button type="button" className={activeTab === TAB_SIGNALS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SIGNALS)}>
-            Signals
-          </button>
-          <button type="button" className={activeTab === TAB_SIGNALS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SIGNALS)}>
-            Content Pool
+            Signals / Content Pool
           </button>
         </div>
       </div>
