@@ -47,7 +47,7 @@ function renderPlaceListBlock(block, props) {
   return (
     <section key={block.key} className="editorial-section space-y-6">
       <div className="space-y-2">
-        <p className="eyebrow-label">Scenarios</p>
+        <p className="eyebrow-label">Places</p>
         <h2 className="section-heading">{decisionCopy.highlightTitle}</h2>
         <p className="section-copy max-w-2xl">{decisionCopy.highlightSubtitle}</p>
       </div>
