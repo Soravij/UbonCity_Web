@@ -1335,12 +1335,12 @@ a {
 .home-flow-section {
   position: relative;
   z-index: 1;
-  padding: 4.75rem var(--site-shell-padding-x) 2rem;
+  padding: 4.75rem 0 2rem;
 }
 
 .home-flow-section > .editorial-section,
 .home-flow-section > .editorial-shell {
-  max-width: calc(var(--site-shell-max-width) + 2 * var(--site-shell-padding-x));
+  max-width: var(--site-shell-max-width);
   padding-left: var(--site-shell-padding-x);
   padding-right: var(--site-shell-padding-x);
   margin: 0 auto;
@@ -1373,13 +1373,13 @@ a {
 
 @media (min-width: 768px) {
   .home-flow-section {
-    padding: 5.25rem var(--site-shell-padding-x) 2.75rem;
+    padding: 5.25rem 0 2.75rem;
   }
 }
 
 @media (min-width: 1024px) {
   .home-flow-section {
-    padding: 5.75rem var(--site-shell-padding-x) 3rem;
+    padding: 5.75rem 0 3rem;
   }
 }
 
@@ -3027,6 +3027,10 @@ a {
 :root[data-theme="dark"] .editorial-panel,
 :root[data-theme="dark"] .editorial-card {
   background: color-mix(in srgb, var(--theme-surface) 88%, rgba(22, 18, 21, 0.7));
+}
+
+:root[data-theme="dark"] .editorial-shell::before {
+  background: none;
 }
 
 .aqi-pill {
