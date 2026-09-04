@@ -1338,7 +1338,8 @@ a {
   padding: 4.75rem var(--site-shell-padding-x) 2rem;
 }
 
-.home-flow-section > .editorial-section {
+.home-flow-section > .editorial-section,
+.home-flow-section > .editorial-shell {
   max-width: var(--site-shell-max-width);
   margin: 0 auto;
 }
