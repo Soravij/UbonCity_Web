@@ -816,7 +816,7 @@ export default function HomepageCuration({ token }) {
       {message ? <p className="status">{message}</p> : null}
 
       <div className="actions" style={{ display: "flex", flexWrap: "wrap" }}>
-        <div>
+        <div style={{ display: "flex", gap: "8px" }}>
           <button type="button" className={activeTab === TAB_LAYOUT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_LAYOUT)}>
             Layout
           </button>
@@ -830,7 +830,7 @@ export default function HomepageCuration({ token }) {
             อีเวนต์
           </button>
         </div>
-        <div style={{ marginLeft: "auto" }}>
+        <div style={{ display: "flex", gap: "8px", marginLeft: "auto" }}>
           <button type="button" className={activeTab === TAB_SIGNALS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SIGNALS)}>
             Signals / Content Pool
           </button>
