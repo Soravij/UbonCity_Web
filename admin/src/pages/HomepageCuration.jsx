@@ -438,10 +438,13 @@ export default function HomepageCuration({ token }) {
       current.map((block, index) => {
         if (index !== blockIndex) return block;
         const candidateType = getDefaultCandidateEntityType(block);
-        const dup = block.manual_items.some(
-          (item) => Number(item?.entity_id || 0) === candidateId && String(item?.entity_type || "") === candidateType
-        );
-        if (dup) return block;
+        const eventBlock = isEventBlock(block);
+        if (!eventBlock) {
+          const dup = block.manual_items.some(
+            (item) => Number(item?.entity_id || 0) === candidateId && String(item?.entity_type || "") === candidateType
+          );
+          if (dup) return block;
+        }
 
         const nextItem = {
           entity_type: candidateType,
@@ -453,7 +456,7 @@ export default function HomepageCuration({ token }) {
         };
         return {
           ...block,
-          manual_items: [...block.manual_items, nextItem],
+          manual_items: eventBlock ? [nextItem] : [...block.manual_items, nextItem],
         };
       })
     );
@@ -635,10 +638,11 @@ export default function HomepageCuration({ token }) {
     return (
       <div className="homepage-curation-rule-panel">
         <div className="card-title-row">
-          <h4>รายการเลือกเอง</h4>
+          <h4>{eventBlock ? "อีเวนต์ปักหมุด" : "รายการเลือกเอง"}</h4>
         </div>
 
         <div className="grid two">
+          {!eventBlock ? (
           <label>
             ประเภทรายการ
             <select value={getDefaultCandidateEntityType(block)} disabled>
@@ -649,6 +653,7 @@ export default function HomepageCuration({ token }) {
               ))}
             </select>
           </label>
+          ) : null}
           <label>
             ค้นหารายการ
             <input
@@ -690,7 +695,7 @@ export default function HomepageCuration({ token }) {
                   </div>
                   <div className="actions">
                     <button type="button" className="ghost tiny-btn" onClick={() => addManualCandidate(index, candidate)} disabled={maxReached}>
-                      เพิ่มเข้ารายการเลือกเอง
+                      {eventBlock ? "เพิ่มเข้ารายการปักหมุด" : "เพิ่มเข้ารายการเลือกเอง"}
                     </button>
                   </div>
                 </div>
@@ -701,25 +706,26 @@ export default function HomepageCuration({ token }) {
         })() : null}
 
         {block.manual_items.length === 0 ? (
-          <p className="muted">ยังไม่มีรายการเลือกเอง ระบบจะใช้วิธีเลือกเนื้อหาตามที่ตั้งไว้</p>
+          <p className="muted">{eventBlock ? "ยังไม่ได้ปักหมุด ระบบจะเรียงอัตโนมัติทั้ง 5 การ์ด" : "ยังไม่มีรายการเลือกเอง ระบบจะใช้วิธีเลือกเนื้อหาตามที่ตั้งไว้"}</p>
         ) : (
           <div className="homepage-curation-manual-list">
             {block.manual_items.map((item, itemIndex) => (
               <div key={`${block.key}-manual-${itemIndex}`} className="homepage-curation-manual-row">
+                {!eventBlock ? (
                 <label>
                   ประเภท
                   <select
-                    value={eventBlock ? "event" : item.entity_type}
-                    disabled={eventBlock}
+                    value={item.entity_type}
                     onChange={(event) => updateManualItem(index, itemIndex, { entity_type: event.target.value })}
                   >
-                    {(eventBlock ? ENTITY_TYPE_OPTIONS.filter((option) => option.value === "event") : ENTITY_TYPE_OPTIONS).map((option) => (
+                    {ENTITY_TYPE_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
                     ))}
                   </select>
                 </label>
+                ) : null}
                 <label>
                   รหัสรายการ
                   <input value={item.entity_id} onChange={(event) => updateManualItem(index, itemIndex, { entity_id: event.target.value })} placeholder="123" />
@@ -741,12 +747,16 @@ export default function HomepageCuration({ token }) {
                   <input value={item.note} onChange={(event) => updateManualItem(index, itemIndex, { note: event.target.value })} placeholder="เหตุผลที่ต้องอยู่ในบล็อกนี้" />
                 </label>
                 <div className="actions">
-                  <button type="button" className="ghost tiny-btn" onClick={() => moveManualItem(index, itemIndex, -1)} disabled={itemIndex === 0}>
-                    ขึ้น
-                  </button>
-                  <button type="button" className="ghost tiny-btn" onClick={() => moveManualItem(index, itemIndex, 1)} disabled={itemIndex === block.manual_items.length - 1}>
-                    ลง
-                  </button>
+                  {!eventBlock ? (
+                    <>
+                      <button type="button" className="ghost tiny-btn" onClick={() => moveManualItem(index, itemIndex, -1)} disabled={itemIndex === 0}>
+                        ขึ้น
+                      </button>
+                      <button type="button" className="ghost tiny-btn" onClick={() => moveManualItem(index, itemIndex, 1)} disabled={itemIndex === block.manual_items.length - 1}>
+                        ลง
+                      </button>
+                    </>
+                  ) : null}
                   <button type="button" className="danger tiny-btn" onClick={() => removeManualItem(index, itemIndex)}>
                     ลบ
                   </button>
@@ -1128,26 +1138,10 @@ export default function HomepageCuration({ token }) {
                 </div>
 
                 <div className="grid two homepage-curation-grid">
-                  <label>
-                    ชื่อบล็อก
-                    <input value={block.title} onChange={(event) => updateBlock(eventIndex, { title: event.target.value })} />
-                  </label>
-                  <label>
-                    คำอธิบายย่อย
-                    <input value={block.subtitle} onChange={(event) => updateBlock(eventIndex, { subtitle: event.target.value })} />
-                  </label>
                   <p className="muted full">บล็อกนี้แสดง 5 รายการเสมอ (การ์ดใหญ่ 1 + เล็ก 4)</p>
-                  <label className="homepage-curation-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(block.enabled)}
-                      onChange={(event) => updateBlock(eventIndex, { enabled: event.target.checked })}
-                    />
-                    <span>เปิดใช้งานบล็อกนี้</span>
-                  </label>
                 </div>
 
-                <p className="muted" style={{ marginBottom: "0.5rem" }}>รายการที่เลือกเองตัวแรก = การ์ดใหญ่ ที่เหลือเรียงจากอีเวนต์ที่อนุมัติล่าสุดอัตโนมัติ</p>
+                <p className="muted" style={{ marginBottom: "0.5rem" }}>ปักหมุดได้ 1 อีเวนต์ จะแสดงเป็นการ์ดใหญ่ ที่เหลืออีก 4 เรียงจากอีเวนต์ที่อนุมัติล่าสุดอัตโนมัติ</p>
 
                 {renderBlockEditor(block, eventIndex)}
               </article>

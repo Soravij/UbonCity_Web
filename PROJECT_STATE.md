@@ -153,7 +153,9 @@ Known open gaps (not fixed in this change set):
 - class ใหม่ `.homepage-curation-warning-text` (`App.css`) ใช้ `var(--theme-danger)`.
 - ยังไม่มี layout ไหนถูกเผยแพร่ (`published_at = null` ทั้ง 4 ภาษา) — หน้าแรกยังใช้ `HomeLandingStage` เดิม; การกดเผยแพร่จะสลับหน้าแรกไปใช้ `HomepageLayoutRenderer` ทั้งหน้า; ยังไม่ได้ตรวจว่า hero/อากาศ/ช่องค้นหาครบหรือไม่ (งานค้าง).
 - `renderEventListBlock` (`HomepageLayoutRenderer.jsx`) ตอนนี้ reuse `HomeTrendingBlock` (1 การ์ดใหญ่ + 4 เล็ก) แทน markup เดิมที่ตัดที่ 3 การ์ด; `featured_events` ถูก clamp เป็น `max_items` 5 / `min_items` 1 ฝั่ง server (`homepageCurationService.js` sanitizeBlockByKey).
-- ยังไม่เผยแพร่ layout เพราะการกดเผยแพร่จะสลับทั้งหน้า (`page.js:155`) ทำให้การ์ดอากาศ/AQI, featured strip, HomeSelectedBlock, explore grid หายทั้งหมด; ไม่มี unpublish endpoint ต้องแก้ DB มือ.
+- ยังไม่เผยแพร่ layout เพราะการกดเผยแพร่จะสลับทั้งหน้า (`page.js:155`) ทำให้การ์ดอากาศ/AQI, featured strip, HomeSelectedBlock, explore grid หายทั้งหมด; ไม่มี unpublish endpoint ต้องแก้ DB มือ
+- แท็บ "อีเวนต์" ในหน้า Homepage Curation คุม block `featured_events`: ปักหมุดได้ 1 อีเวนต์เท่านั้น (แทนที่ตัวเดิมเมื่อกดเพิ่ม), ไม่มีช่องหัวข้อ/คำโปรย (หน้าเว็บใช้ `decisionCopy.trendingTitle` / `decisionCopy.trendingSubtitle`), ไม่มีปุ่มเปิด/ปิด (backend บังคับ `enabled=true`), ไม่มีตัวเลือกจำนวน (บังคับ `max_items=5` / `min_items=1`); `manual_items` ของ `featured_events` ถูก clamp เหลือ 1 ที่ `sanitizeBlockByKey` (`.map(...).slice(0, 1)`).
+- เมนูแท็บหน้า Homepage Curation แยก 2 กลุ่ม: ซ้าย = Layout, ไฮไลต์, สถานการณ์, อีเวนต์ (ตามลำดับหน้าแรก); ขวา = Signals / Content Pool.
 
 ## Confirmed Direction
 
