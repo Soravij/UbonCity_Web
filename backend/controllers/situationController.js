@@ -12,6 +12,7 @@ import {
   listPlacesBySituation,
   addPlacesToSituation,
   removePlaceFromSituation,
+  reorderSituationPlace,
 } from "../repositories/situationPlaceRepository.js";
 import { validateSituationCreatePayload, validateSituationUpdatePayload } from "../validators/situationValidator.js";
 import logger from "../middleware/logger.js";
@@ -168,6 +169,36 @@ export async function removeSituationPlace(req, res) {
     return res.json({ message: "Place removed" });
   } catch (err) {
     logger.error("removeSituationPlace failed", { err });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function reorderSituationPlaceHandler(req, res) {
+  const slug = String(req.params?.slug || "").trim().toLowerCase();
+  const placeId = Number(req.body?.place_id);
+  const direction = String(req.body?.direction || "").trim().toLowerCase();
+
+  if (!slug) {
+    return res.status(400).json({ error: "slug is required" });
+  }
+  if (!placeId) {
+    return res.status(400).json({ error: "place_id is required" });
+  }
+  if (direction !== "up" && direction !== "down") {
+    return res.status(400).json({ error: "direction must be up or down" });
+  }
+
+  try {
+    const situation = await getSituationBySlug(slug);
+    if (!situation) return res.status(404).json({ error: "Situation not found" });
+
+    const result = await reorderSituationPlace(situation.id, placeId, direction);
+    if (result === null) {
+      return res.status(404).json({ error: "Place not found in situation" });
+    }
+    return res.json({ moved: result.moved });
+  } catch (err) {
+    logger.error("reorderSituationPlace failed", { err });
     return res.status(500).json({ error: "Internal server error" });
   }
 }

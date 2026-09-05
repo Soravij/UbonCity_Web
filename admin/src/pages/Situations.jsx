@@ -35,6 +35,8 @@ export default function Situations({ token }) {
   const [form, setForm] = useState(emptyForm);
   const [expandedSlug, setExpandedSlug] = useState(null);
   const [drawerTranslations, setDrawerTranslations] = useState(null);
+  const [drawerPlaces, setDrawerPlaces] = useState({});
+  const [drawerPlacesLoading, setDrawerPlacesLoading] = useState(false);
 
   async function loadList() {
     setLoading(true);
@@ -84,8 +86,21 @@ export default function Situations({ token }) {
       }
       setDrawerTranslations(translations);
       setExpandedSlug(slug);
+      loadDrawerPlaces(slug);
     } catch {
       setMessage("โหลดข้อมูลไม่สำเร็จ");
+    }
+  }
+
+  async function loadDrawerPlaces(slug) {
+    setDrawerPlacesLoading(true);
+    try {
+      const res = await api.get(`/situations/${slug}/places`);
+      setDrawerPlaces((prev) => ({ ...prev, [slug]: res.data?.items || [] }));
+    } catch {
+      setDrawerPlaces((prev) => ({ ...prev, [slug]: [] }));
+    } finally {
+      setDrawerPlacesLoading(false);
     }
   }
 
@@ -176,6 +191,25 @@ export default function Situations({ token }) {
     }
   }
 
+  async function handlePlaceReorder(slug, placeId, direction) {
+    try {
+      await api.post(`/situations/${slug}/places/reorder`, { place_id: placeId, direction }, { headers: authHeaders(token) });
+      loadDrawerPlaces(slug);
+    } catch {
+      setMessage("สลับลำดับ place ไม่สำเร็จ");
+    }
+  }
+
+  async function handlePlaceDelete(slug, placeId) {
+    if (!window.confirm("ลบ place ออกจาก situation นี้?")) return;
+    try {
+      await api.delete(`/situations/${slug}/places/${placeId}`, { headers: authHeaders(token) });
+      loadDrawerPlaces(slug);
+    } catch {
+      setMessage("ลบ place ไม่สำเร็จ");
+    }
+  }
+
   return (
     <div>
       <h2>Situations</h2>
@@ -263,6 +297,57 @@ export default function Situations({ token }) {
                             </button>
                           </div>
                         </form>
+
+                        <div style={{ marginTop: "1.5rem" }}>
+                          <h4>Places ใน situation นี้</h4>
+                          {drawerPlacesLoading ? (
+                            <p className="muted">กำลังโหลด places...</p>
+                          ) : !(drawerPlaces[expandedSlug]?.length) ? (
+                            <p className="muted">ยังไม่มีรายการ</p>
+                          ) : (
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>ลำดับ</th>
+                                  <th>ชื่อ</th>
+                                  <th>หมวด</th>
+                                  <th>จัดการ</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {drawerPlaces[expandedSlug].map((p, pIdx) => {
+                                  const quota = item.sort_order === 1 ? 5 : 3;
+                                  const overQuota = pIdx >= quota;
+                                  return (
+                                    <tr
+                                      key={p.id}
+                                      style={overQuota ? { borderTop: "1px solid var(--theme-danger)", opacity: 0.55 } : undefined}
+                                    >
+                                      <td>{p.sort_order}</td>
+                                      <td>{p.title}</td>
+                                      <td>{p.category}</td>
+                                      <td>
+                                        {pIdx > 0 ? (
+                                          <button type="button" className="ghost" onClick={() => handlePlaceReorder(expandedSlug, p.id, "up")}>
+                                            ↑
+                                          </button>
+                                        ) : null}{" "}
+                                        {pIdx < drawerPlaces[expandedSlug].length - 1 ? (
+                                          <button type="button" className="ghost" onClick={() => handlePlaceReorder(expandedSlug, p.id, "down")}>
+                                            ↓
+                                          </button>
+                                        ) : null}{" "}
+                                        <button type="button" className="danger" onClick={() => handlePlaceDelete(expandedSlug, p.id)}>
+                                          ลบ
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ) : null}
