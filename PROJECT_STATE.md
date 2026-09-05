@@ -166,6 +166,9 @@ Known open gaps (not fixed in this change set):
 - gradient ของ .editorial-shell::before ถูกปิดในธีม dark เฉพาะหน้าแรก (selector มี .page-stack--home คั่น เพื่อไม่กระทบ /category/* และ /contact)
 - หัวข้อ/คำโปรยของบล็อกไฮไลต์ hardcode 4 ภาษาใน home-copy.js (คีย์ highlightTitle / highlightSubtitle) ไม่ใช่ block.title/subtitle; แท็บไฮไลต์จึงไม่มีช่องกรอกหัวข้อแล้ว
 - ระยะใต้ hero ปรับให้เท่ากับระยะระหว่างบล็อก (padding-bottom ของ .home-landing-mid @media ≥1024px ลดจาก 1.4rem เป็น 0 เพื่อไม่ซ้ำกับ padding ของ .home-landing-search-panel)
+- block scenarios เลิกใช้ place กรองด้วย scenario tags แล้ว; `renderScenarioGridBlock` เรนเดอร์ `HomeSituationsBlock` อ่านจากตาราง `situations`
+- situations ส่งเข้า `HomepageLayoutRenderer` ผ่าน prop `situations` ทั้งสองทาง (published + fallback) ใช้ component เดียวกันและส่ง `copy={decisionCopy}` คีย์ `situationsTitle` / `situationsSubtitle`
+- ยังเหลืองานหน้าตา: จัด layout การ์ด 7 ใบ (ใหญ่ 1 + เล็ก 2 บน, 4 ล่าง) ยังไม่ verify ด้วยตา
 
 ## Confirmed Direction
 
