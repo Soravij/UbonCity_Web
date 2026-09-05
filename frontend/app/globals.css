@@ -3029,7 +3029,7 @@ a {
   background: color-mix(in srgb, var(--theme-surface) 88%, rgba(22, 18, 21, 0.7));
 }
 
-:root[data-theme="dark"] .editorial-shell::before {
+:root[data-theme="dark"] .page-stack--home .editorial-shell::before {
   background: none;
 }
 
