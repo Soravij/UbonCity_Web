@@ -55,13 +55,30 @@ function Test-ProcessAlive {
 function Invoke-ProcessTreeStop {
   param([int]$ProcessId)
 
-  $output = & taskkill.exe /PID $ProcessId /T /F 2>&1
-  $exitCode = $LASTEXITCODE
+  $savedEAP = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+
+  $output = ""
+  $exitCode = -1
+
+  try {
+    $output = & taskkill.exe /PID $ProcessId /T /F 2>&1 | Out-String
+    $exitCode = $LASTEXITCODE
+  } catch {
+    $exitCode = $LASTEXITCODE
+    Write-Warning ("taskkill exception for pid {0}: {1}" -f $ProcessId, $_.Exception.Message)
+  } finally {
+    $ErrorActionPreference = $savedEAP
+  }
+
+  if ($exitCode -ne 0) {
+    Write-Warning ("taskkill exit code {0} for pid {1}" -f $exitCode, $ProcessId)
+  }
 
   return [pscustomobject]@{
     ok = ($exitCode -eq 0)
     exitCode = $exitCode
-    output = (($output | Out-String).Trim())
+    output = ($output.Trim())
   }
 }
 
