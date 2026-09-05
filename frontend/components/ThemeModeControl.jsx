@@ -34,6 +34,10 @@ export default function ThemeModeControl() {
   const [mode, setMode] = useState(() => readInitialMode());
 
   useEffect(() => {
+    setMode(readInitialMode());
+  }, []);
+
+  useEffect(() => {
     function handleThemeChange(event) {
       const nextMode = sanitizeMode(event?.detail?.resolvedTheme) || readInitialMode();
       setMode(nextMode);
