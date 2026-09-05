@@ -93,7 +93,7 @@ export default async function LangHome({ params }) {
             />
           </div>
 
-          <HomeSituationsBlock situations={homepageLayout?.situations ?? []} lang={activeLang} copy={copy} />
+          <HomeSituationsBlock situations={homepageLayout?.situations ?? []} lang={activeLang} copy={decisionCopy} />
 
           <HomeTrendingBlock
             activeLang={activeLang}
