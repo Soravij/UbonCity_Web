@@ -248,23 +248,23 @@ export default function Situations({ token }) {
                         ) : !(drawerPlaces[expandedSlug]?.length) ? (
                           <p className="muted">ยังไม่มีรายการ</p>
                         ) : (
-                          <table>
+                          <table style={{ tableLayout: "fixed", width: "100%" }}>
                               <thead>
                                 <tr>
-                                  <th>ลำดับ</th>
+                                  <th style={{ width: "60px" }}>ลำดับ</th>
                                   <th>ชื่อ</th>
-                                  <th>หมวด</th>
-                                  <th>จัดการ</th>
+                                  <th style={{ width: "120px" }}>หมวด</th>
+                                  <th style={{ width: "200px" }}>จัดการ</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {drawerPlaces[expandedSlug].map((p, pIdx) => {
                                   const quota = item.sort_order === 1 ? 5 : 3;
                                   const overQuota = pIdx >= quota;
-                                  const borderTd = overQuota ? { borderTop: "1px solid var(--theme-danger)" } : undefined;
+                                  const borderTd = overQuota ? { borderTop: "2px solid var(--theme-danger)" } : undefined;
                                   const nameTd = overQuota
-                                    ? { borderTop: "1px solid var(--theme-danger)", maxWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
-                                    : { maxWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+                                    ? { borderTop: "2px solid var(--theme-danger)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+                                    : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
                                   return (
                                     <tr
                                       key={p.id}
