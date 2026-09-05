@@ -1227,22 +1227,24 @@ export default function HomepageCuration({ token }) {
                 <fieldset className="full">
                   <legend>Situation</legend>
                   {situationsList.length ? (
-                    situationsList.map((s) => (
-                      <label key={s.slug} style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", marginRight: "1rem" }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedSituationSlugs.includes(s.slug)}
-                          onChange={() => {
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                      {situationsList.map((s) => (
+                        <button
+                          key={s.slug}
+                          type="button"
+                          className={selectedSituationSlugs.includes(s.slug) ? "primary" : "ghost"}
+                          onClick={() => {
                             setSelectedSituationSlugs((current) =>
                               current.includes(s.slug)
                                 ? current.filter((x) => x !== s.slug)
                                 : [...current, s.slug]
                             );
                           }}
-                        />
-                        {s.title || s.slug}
-                      </label>
-                    ))
+                        >
+                          {s.title || s.slug}
+                        </button>
+                      ))}
+                    </div>
                   ) : (
                     <span className="muted">ไม่มี situation</span>
                   )}
