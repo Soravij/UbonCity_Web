@@ -1,4 +1,5 @@
 import HomeFeaturedStrip from "@/components/home/HomeFeaturedStrip";
+import HomeSituationsBlock from "@/components/home/HomeSituationsBlock";
 import HomeTrendingBlock from "@/components/home/HomeTrendingBlock";
 
 function renderPlaceListBlock(block, props) {
@@ -30,12 +31,25 @@ function renderEventListBlock(block, props) {
   );
 }
 
+function renderScenarioGridBlock(block, props) {
+  const { activeLang, situations, decisionCopy } = props;
+  return (
+    <HomeSituationsBlock
+      key={block.key}
+      situations={situations}
+      lang={activeLang}
+      copy={decisionCopy}
+    />
+  );
+}
+
 export default function HomepageLayoutRenderer({
   blocks,
   activeLang,
   copy,
   decisionCopy,
   quickActions,
+  situations = [],
   locale = "en-US",
 }) {
   return (
@@ -44,6 +58,7 @@ export default function HomepageLayoutRenderer({
         if (block.type === "hero") return null;
         if (block.type === "place-list") return renderPlaceListBlock(block, { activeLang, copy, decisionCopy });
         if (block.type === "event-list") return renderEventListBlock(block, { activeLang, locale, copy, decisionCopy });
+        if (block.type === "scenario-grid") return renderScenarioGridBlock(block, { activeLang, situations, decisionCopy });
         return null;
       })}
     </section>

@@ -80,10 +80,11 @@ export default async function LangHome({ params }) {
             copy={copy}
             decisionCopy={decisionCopy}
             quickActions={quickActions}
+            situations={homepageLayout?.situations ?? []}
           />
         </div>
       ) : (
-        <div className="home-flow-section home-flow-section--surface-1">
+          <>
           <div className="home-flow-section home-flow-section--bridge">
             <HomeFeaturedStrip
               places={featuredStripPlaces}
@@ -100,7 +101,7 @@ export default async function LangHome({ params }) {
             decisionCopy={decisionCopy}
             latestEvents={latestEvents}
           />
-        </div>
+          </>
       )}
 
       <div className="home-flow-section home-flow-section--surface-1">
