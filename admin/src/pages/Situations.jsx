@@ -32,8 +32,9 @@ export default function Situations({ token }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-  const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [expandedSlug, setExpandedSlug] = useState(null);
+  const [drawerTranslations, setDrawerTranslations] = useState(null);
 
   async function loadList() {
     setLoading(true);
@@ -65,29 +66,56 @@ export default function Situations({ token }) {
     }));
   }
 
-  async function handleEdit(slug) {
+  async function toggleRow(slug) {
+    if (expandedSlug === slug) {
+      setExpandedSlug(null);
+      setDrawerTranslations(null);
+      return;
+    }
     try {
       const res = await api.get(`/situations/${slug}`);
       const item = res.data?.item;
       if (!item) return;
-
       const translations = JSON.parse(JSON.stringify(EMPTY_TRANSLATIONS));
       for (const t of item.translations || []) {
         if (translations[t.lang]) {
-          translations[t.lang] = {
-            title: t.title || "",
-            description: t.description || "",
-          };
+          translations[t.lang] = { title: t.title || "", description: t.description || "" };
         }
       }
-
-      setForm({
-        translations,
-      });
-      setEditing(item.slug);
-      setMessage("");
+      setDrawerTranslations(translations);
+      setExpandedSlug(slug);
     } catch {
       setMessage("โหลดข้อมูลไม่สำเร็จ");
+    }
+  }
+
+  function updateDrawerTranslation(lang, field, value) {
+    setDrawerTranslations((prev) => ({
+      ...prev,
+      [lang]: { ...prev[lang], [field]: value },
+    }));
+  }
+
+  async function handleDrawerSubmit(e) {
+    e.preventDefault();
+    setSaving(true);
+    setMessage("");
+    const translations = {};
+    for (const lang of LANGS) {
+      const entry = drawerTranslations[lang.code];
+      translations[lang.code] = { title: entry?.title?.trim() ?? "", description: entry?.description?.trim() ?? "" };
+    }
+    try {
+      const headers = { ...authHeaders(token), "Content-Type": "application/json" };
+      await api.put(`/situations/${expandedSlug}`, { translations }, { headers });
+      setMessage("อัปเดตสำเร็จ");
+      setExpandedSlug(null);
+      setDrawerTranslations(null);
+      loadList();
+    } catch (err) {
+      setMessage(err.response?.data?.error || "บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -122,15 +150,9 @@ export default function Situations({ token }) {
 
     try {
       const headers = { ...authHeaders(token), "Content-Type": "application/json" };
-      if (editing) {
-        await api.put(`/situations/${editing}`, body, { headers });
-        setMessage("อัปเดตสำเร็จ");
-      } else {
-        await api.post("/situations", { ...body, slug: slugFromEnTitle(form.translations.en?.title) }, { headers });
-        setMessage("สร้างสำเร็จ");
-      }
+      await api.post("/situations", { ...body, slug: slugFromEnTitle(form.translations.en?.title) }, { headers });
+      setMessage("สร้างสำเร็จ");
       setForm(emptyForm());
-      setEditing(null);
       loadList();
     } catch (err) {
       const serverError = err.response?.data?.error;
@@ -142,7 +164,6 @@ export default function Situations({ token }) {
 
   function handleCancel() {
     setForm(emptyForm());
-    setEditing(null);
     setMessage("");
   }
 
@@ -170,40 +191,86 @@ export default function Situations({ token }) {
                 <th>ลำดับ</th>
                 <th>Slug</th>
                 <th>ชื่อ</th>
-                <th>สถานะ</th>
                 <th>จัดการ</th>
               </tr>
             </thead>
             <tbody>
               {list.map((item, idx) => (
-                <tr key={item.id}>
-                  <td>{item.sort_order}</td>
-                  <td>{item.slug}</td>
-                  <td>{item.title}</td>
-                  <td>{item.is_active ? "เปิด" : "ปิด"}</td>
-                  <td>
-                    <button type="button" className="ghost" onClick={() => handleEdit(item.slug)}>
-                      แก้ไข
-                    </button>{" "}
-                    <button type="button" className="danger" onClick={() => handleDelete(item.slug)}>
-                      ลบ
-                    </button>{" "}
-                    {idx > 0 ? (
-                      <button type="button" className="ghost" onClick={() => handleReorder(item.slug, "up")}>
-                        ↑
-                      </button>
-                    ) : null}{" "}
-                    {idx < list.length - 1 ? (
-                      <button type="button" className="ghost" onClick={() => handleReorder(item.slug, "down")}>
-                        ↓
-                      </button>
-                    ) : null}
-                  </td>
-                </tr>
+                <>
+                  <tr
+                    key={item.id}
+                    onClick={() => toggleRow(item.slug)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <td>{item.sort_order}</td>
+                    <td>{item.slug}</td>
+                    <td>{item.title}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button type="button" className="danger" onClick={() => handleDelete(item.slug)}>
+                        ลบ
+                      </button>{" "}
+                      {idx > 0 ? (
+                        <button type="button" className="ghost" onClick={() => handleReorder(item.slug, "up")}>
+                          ↑
+                        </button>
+                      ) : null}{" "}
+                      {idx < list.length - 1 ? (
+                        <button type="button" className="ghost" onClick={() => handleReorder(item.slug, "down")}>
+                          ↓
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                  {expandedSlug === item.slug && drawerTranslations ? (
+                    <tr key={`${item.id}-drawer`}>
+                      <td colSpan={4}>
+                        <form onSubmit={handleDrawerSubmit}>
+                          {LANGS.map((lang) => (
+                            <fieldset key={lang.code}>
+                              <legend>
+                                {lang.label}
+                                {lang.code === "en" ? " (จำเป็น)" : ""}
+                              </legend>
+                              <label>
+                                Title
+                                <input
+                                  type="text"
+                                  value={drawerTranslations[lang.code].title}
+                                  onChange={(e) => updateDrawerTranslation(lang.code, "title", e.target.value)}
+                                  required={lang.code === "en"}
+                                />
+                              </label>
+                              <label>
+                                Description
+                                <textarea
+                                  value={drawerTranslations[lang.code].description}
+                                  onChange={(e) => updateDrawerTranslation(lang.code, "description", e.target.value)}
+                                  rows={2}
+                                />
+                              </label>
+                            </fieldset>
+                          ))}
+                          <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
+                            <button
+                              type="submit"
+                              className="primary"
+                              disabled={saving || !drawerTranslations.en.title.trim()}
+                            >
+                              {saving ? "กำลังบันทึก..." : "อัปเดต"}
+                            </button>
+                            <button type="button" className="ghost" onClick={() => { setExpandedSlug(null); setDrawerTranslations(null); }}>
+                              ยกเลิก
+                            </button>
+                          </div>
+                        </form>
+                      </td>
+                    </tr>
+                  ) : null}
+                </>
               ))}
               {!list.length && (
                 <tr>
-                  <td colSpan={5} className="muted">ยังไม่มีรายการ</td>
+                  <td colSpan={4} className="muted">ยังไม่มีรายการ</td>
                 </tr>
               )}
             </tbody>
@@ -212,7 +279,7 @@ export default function Situations({ token }) {
       </div>
 
       <div className="admin-card">
-        <h3>{editing ? "แก้ไข situation" : "เพิ่ม situation ใหม่"}</h3>
+        <h3>เพิ่ม situation ใหม่</h3>
 
         {message ? <p className="status">{message}</p> : null}
 
@@ -251,7 +318,7 @@ export default function Situations({ token }) {
               className="primary"
               disabled={saving || !form.translations.en.title.trim()}
             >
-              {saving ? "กำลังบันทึก..." : editing ? "อัปเดต" : "สร้าง"}
+              {saving ? "กำลังบันทึก..." : "สร้าง"}
             </button>
             <button type="button" className="ghost" onClick={handleCancel}>
               ยกเลิก
