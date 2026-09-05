@@ -169,6 +169,9 @@ Known open gaps (not fixed in this change set):
 - block scenarios เลิกใช้ place กรองด้วย scenario tags แล้ว; `renderScenarioGridBlock` เรนเดอร์ `HomeSituationsBlock` อ่านจากตาราง `situations`
 - situations ส่งเข้า `HomepageLayoutRenderer` ผ่าน prop `situations` ทั้งสองทาง (published + fallback) ใช้ component เดียวกันและส่ง `copy={decisionCopy}` คีย์ `situationsTitle` / `situationsSubtitle`
 - ยังเหลืองานหน้าตา: จัด layout การ์ด 7 ใบ (ใหญ่ 1 + เล็ก 2 บน, 4 ล่าง) ยังไม่ verify ด้วยตา
+- แท็บสถานการณ์: ลิสต์เป็น drawer กดแถวแล้วขยายแก้ชื่อ/คำอธิบาย 4 ภาษาในที่เดียว (pattern เดียวกับ Approvals.jsx) จัดเรียงด้วยปุ่ม ↑↓ ผ่าน POST /situations/reorder
+- ลบคอลัมน์สถานะออก (is_active แก้ผ่าน UI ไม่ได้อยู่แล้ว ทุกแถวเป็น 1 เสมอ ตัวกรอง is_active ที่ homepageCurationService ยังคงไว้)
+- ยังเหลือ: drawer ต้องแสดง list ของ place ในแต่ละ situation ด้วย แต่ต้องรอตารางเชื่อม situation_places และระบบคัดใน Signals ก่อน
 
 ## Confirmed Direction
 
