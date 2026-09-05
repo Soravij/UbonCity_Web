@@ -261,15 +261,19 @@ export default function Situations({ token }) {
                                 {drawerPlaces[expandedSlug].map((p, pIdx) => {
                                   const quota = item.sort_order === 1 ? 5 : 3;
                                   const overQuota = pIdx >= quota;
+                                  const borderTd = overQuota ? { borderTop: "1px solid var(--theme-danger)" } : undefined;
+                                  const nameTd = overQuota
+                                    ? { borderTop: "1px solid var(--theme-danger)", maxWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+                                    : { maxWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
                                   return (
                                     <tr
                                       key={p.id}
-                                      style={overQuota ? { borderTop: "1px solid var(--theme-danger)", opacity: 0.55 } : undefined}
+                                      style={overQuota ? { opacity: 0.55 } : undefined}
                                     >
-                                      <td>{p.sort_order}</td>
-                                      <td>{p.title}</td>
-                                      <td>{p.category}</td>
-                                      <td>
+                                      <td style={borderTd}>{p.sort_order}</td>
+                                      <td style={nameTd} title={p.title}>{p.title}</td>
+                                      <td style={borderTd}>{p.category}</td>
+                                      <td style={borderTd}>
                                         {pIdx > 0 ? (
                                           <button type="button" className="ghost" onClick={() => handlePlaceReorder(expandedSlug, p.id, "up")}>
                                             ↑
