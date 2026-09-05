@@ -60,6 +60,7 @@ function renderEventListBlock(block, props) {
   const { activeLang, locale, copy, decisionCopy } = props;
   return (
     <HomeTrendingBlock
+      key={block.key}
       activeLang={activeLang}
       copy={copy}
       decisionCopy={decisionCopy}
