@@ -33,8 +33,8 @@ export default function Situations({ token }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [form, setForm] = useState(emptyForm);
+  const [editing, setEditing] = useState(null);
   const [expandedSlug, setExpandedSlug] = useState(null);
-  const [drawerTranslations, setDrawerTranslations] = useState(null);
   const [drawerPlaces, setDrawerPlaces] = useState({});
   const [drawerPlacesLoading, setDrawerPlacesLoading] = useState(false);
 
@@ -71,25 +71,10 @@ export default function Situations({ token }) {
   async function toggleRow(slug) {
     if (expandedSlug === slug) {
       setExpandedSlug(null);
-      setDrawerTranslations(null);
       return;
     }
-    try {
-      const res = await api.get(`/situations/${slug}`);
-      const item = res.data?.item;
-      if (!item) return;
-      const translations = JSON.parse(JSON.stringify(EMPTY_TRANSLATIONS));
-      for (const t of item.translations || []) {
-        if (translations[t.lang]) {
-          translations[t.lang] = { title: t.title || "", description: t.description || "" };
-        }
-      }
-      setDrawerTranslations(translations);
-      setExpandedSlug(slug);
-      loadDrawerPlaces(slug);
-    } catch {
-      setMessage("โหลดข้อมูลไม่สำเร็จ");
-    }
+    setExpandedSlug(slug);
+    loadDrawerPlaces(slug);
   }
 
   async function loadDrawerPlaces(slug) {
@@ -104,33 +89,22 @@ export default function Situations({ token }) {
     }
   }
 
-  function updateDrawerTranslation(lang, field, value) {
-    setDrawerTranslations((prev) => ({
-      ...prev,
-      [lang]: { ...prev[lang], [field]: value },
-    }));
-  }
-
-  async function handleDrawerSubmit(e) {
-    e.preventDefault();
-    setSaving(true);
-    setMessage("");
-    const translations = {};
-    for (const lang of LANGS) {
-      const entry = drawerTranslations[lang.code];
-      translations[lang.code] = { title: entry?.title?.trim() ?? "", description: entry?.description?.trim() ?? "" };
-    }
+  async function handleEdit(slug) {
     try {
-      const headers = { ...authHeaders(token), "Content-Type": "application/json" };
-      await api.put(`/situations/${expandedSlug}`, { translations }, { headers });
-      setMessage("อัปเดตสำเร็จ");
-      setExpandedSlug(null);
-      setDrawerTranslations(null);
-      loadList();
-    } catch (err) {
-      setMessage(err.response?.data?.error || "บันทึกไม่สำเร็จ");
-    } finally {
-      setSaving(false);
+      const res = await api.get(`/situations/${slug}`);
+      const item = res.data?.item;
+      if (!item) return;
+      const translations = JSON.parse(JSON.stringify(EMPTY_TRANSLATIONS));
+      for (const t of item.translations || []) {
+        if (translations[t.lang]) {
+          translations[t.lang] = { title: t.title || "", description: t.description || "" };
+        }
+      }
+      setForm({ translations });
+      setEditing(item.slug);
+      setMessage("");
+    } catch {
+      setMessage("โหลดข้อมูลไม่สำเร็จ");
     }
   }
 
@@ -165,9 +139,15 @@ export default function Situations({ token }) {
 
     try {
       const headers = { ...authHeaders(token), "Content-Type": "application/json" };
-      await api.post("/situations", { ...body, slug: slugFromEnTitle(form.translations.en?.title) }, { headers });
-      setMessage("สร้างสำเร็จ");
+      if (editing) {
+        await api.put(`/situations/${editing}`, body, { headers });
+        setMessage("อัปเดตสำเร็จ");
+      } else {
+        await api.post("/situations", { ...body, slug: slugFromEnTitle(form.translations.en?.title) }, { headers });
+        setMessage("สร้างสำเร็จ");
+      }
       setForm(emptyForm());
+      setEditing(null);
       loadList();
     } catch (err) {
       const serverError = err.response?.data?.error;
@@ -179,6 +159,7 @@ export default function Situations({ token }) {
 
   function handleCancel() {
     setForm(emptyForm());
+    setEditing(null);
     setMessage("");
   }
 
@@ -240,6 +221,9 @@ export default function Situations({ token }) {
                     <td>{item.slug}</td>
                     <td>{item.title}</td>
                     <td onClick={(e) => e.stopPropagation()}>
+                      <button type="button" className="ghost" onClick={() => handleEdit(item.slug)}>
+                        แก้ไข
+                      </button>{" "}
                       <button type="button" className="danger" onClick={() => handleDelete(item.slug)}>
                         ลบ
                       </button>{" "}
@@ -255,57 +239,16 @@ export default function Situations({ token }) {
                       ) : null}
                     </td>
                   </tr>
-                  {expandedSlug === item.slug && drawerTranslations ? (
+                  {expandedSlug === item.slug ? (
                     <tr key={`${item.id}-drawer`}>
                       <td colSpan={4}>
-                        <form onSubmit={handleDrawerSubmit}>
-                          {LANGS.map((lang) => (
-                            <fieldset key={lang.code}>
-                              <legend>
-                                {lang.label}
-                                {lang.code === "en" ? " (จำเป็น)" : ""}
-                              </legend>
-                              <label>
-                                Title
-                                <input
-                                  type="text"
-                                  value={drawerTranslations[lang.code].title}
-                                  onChange={(e) => updateDrawerTranslation(lang.code, "title", e.target.value)}
-                                  required={lang.code === "en"}
-                                />
-                              </label>
-                              <label>
-                                Description
-                                <textarea
-                                  value={drawerTranslations[lang.code].description}
-                                  onChange={(e) => updateDrawerTranslation(lang.code, "description", e.target.value)}
-                                  rows={2}
-                                />
-                              </label>
-                            </fieldset>
-                          ))}
-                          <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
-                            <button
-                              type="submit"
-                              className="primary"
-                              disabled={saving || !drawerTranslations.en.title.trim()}
-                            >
-                              {saving ? "กำลังบันทึก..." : "อัปเดต"}
-                            </button>
-                            <button type="button" className="ghost" onClick={() => { setExpandedSlug(null); setDrawerTranslations(null); }}>
-                              ยกเลิก
-                            </button>
-                          </div>
-                        </form>
-
-                        <div style={{ marginTop: "1.5rem" }}>
-                          <h4>Places ใน situation นี้</h4>
-                          {drawerPlacesLoading ? (
-                            <p className="muted">กำลังโหลด places...</p>
-                          ) : !(drawerPlaces[expandedSlug]?.length) ? (
-                            <p className="muted">ยังไม่มีรายการ</p>
-                          ) : (
-                            <table>
+                        <h4 style={{ marginBottom: "0.5rem" }}>Places ใน situation นี้</h4>
+                        {drawerPlacesLoading ? (
+                          <p className="muted">กำลังโหลด places...</p>
+                        ) : !(drawerPlaces[expandedSlug]?.length) ? (
+                          <p className="muted">ยังไม่มีรายการ</p>
+                        ) : (
+                          <table>
                               <thead>
                                 <tr>
                                   <th>ลำดับ</th>
@@ -347,7 +290,6 @@ export default function Situations({ token }) {
                               </tbody>
                             </table>
                           )}
-                        </div>
                       </td>
                     </tr>
                   ) : null}
@@ -364,7 +306,7 @@ export default function Situations({ token }) {
       </div>
 
       <div className="admin-card">
-        <h3>เพิ่ม situation ใหม่</h3>
+        <h3>{editing ? "แก้ไข situation" : "เพิ่ม situation ใหม่"}</h3>
 
         {message ? <p className="status">{message}</p> : null}
 
@@ -403,7 +345,7 @@ export default function Situations({ token }) {
               className="primary"
               disabled={saving || !form.translations.en.title.trim()}
             >
-              {saving ? "กำลังบันทึก..." : "สร้าง"}
+              {saving ? "กำลังบันทึก..." : editing ? "อัปเดต" : "สร้าง"}
             </button>
             <button type="button" className="ghost" onClick={handleCancel}>
               ยกเลิก
