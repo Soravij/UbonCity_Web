@@ -162,6 +162,10 @@ Known open gaps (not fixed in this change set):
 - ternary เหลือคุมแค่ 3 block กลาง: เผยแพร่แล้ว HomeSelectedBlock / HomeScenariosBlock / HomeTrendingBlock ถูกแทนด้วย highlight / scenarios / featured_events
 - renderHeroBlock ถูกลบ hero block ใน renderer คืน null; หัวข้อ/คำโปรยของ hero ส่งเข้า HomeLandingStage ผ่าน prop heroBlock และส่งต่อเมื่อเผยแพร่แล้วเท่านั้น (draft ไม่มีผลกับหน้าจริง)
 - ผลข้างเคียงที่ยอมรับแล้ว: เผยแพร่แล้วไม่มี hero banner รูปพื้นหลังอีก ใช้ HomeLandingStage ตลอด
+- ความกว้างทุกส่วนบนหน้าแรกตรงกันที่ 1280px + padding 1rem/2rem (.editorial-shell / .editorial-section ได้ padding บนตัวเอง, .home-flow-section padding แนวนอน = 0)
+- gradient ของ .editorial-shell::before ถูกปิดในธีม dark เฉพาะหน้าแรก (selector มี .page-stack--home คั่น เพื่อไม่กระทบ /category/* และ /contact)
+- หัวข้อ/คำโปรยของบล็อกไฮไลต์ hardcode 4 ภาษาใน home-copy.js (คีย์ highlightTitle / highlightSubtitle) ไม่ใช่ block.title/subtitle; แท็บไฮไลต์จึงไม่มีช่องกรอกหัวข้อแล้ว
+- ระยะใต้ hero ปรับให้เท่ากับระยะระหว่างบล็อก (padding-bottom ของ .home-landing-mid @media ≥1024px ลดจาก 1.4rem เป็น 0 เพื่อไม่ซ้ำกับ padding ของ .home-landing-search-panel)
 
 ## Confirmed Direction
 
