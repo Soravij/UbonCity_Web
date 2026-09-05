@@ -4,11 +4,8 @@ import Situations from "./Situations";
 import {
   EVENT_BLOCK_KEY,
   HERO_BLOCK_KEY,
-  addCandidateToBlocks,
-  addCandidatesToBlocks,
   applyPoolEntityTypeChange,
   buildPoolCandidateParams,
-  canUseCandidateInBlock,
   candidateSelectionKey,
   clearPoolTaxonomySelection,
   isEventBlock,
@@ -256,10 +253,12 @@ export default function HomepageCuration({ token }) {
   const [candidateByBlock, setCandidateByBlock] = useState({});
   const [previewBlocks, setPreviewBlocks] = useState([]);
   const [poolState, setPoolState] = useState(createCandidateState("place"));
-  const [poolTargetBlockKey, setPoolTargetBlockKey] = useState("");
   const [taxonomyCatalog, setTaxonomyCatalog] = useState([]);
   const [taxonomyCatalogError, setTaxonomyCatalogError] = useState("");
   const [poolSelectedCandidateKeys, setPoolSelectedCandidateKeys] = useState([]);
+  const [situationsList, setSituationsList] = useState([]);
+  const [selectedSituationSlugs, setSelectedSituationSlugs] = useState([]);
+  const [poolSituationStatus, setPoolSituationStatus] = useState("");
   const previewRequestSeq = useRef(0);
 
   const serializedDraft = useMemo(() => serializeBlocks(blocks), [blocks]);
@@ -267,11 +266,6 @@ export default function HomepageCuration({ token }) {
   const publishedBlockCount = useMemo(
     () => (Array.isArray(layoutMeta?.published_blocks) ? layoutMeta.published_blocks.length : 0),
     [layoutMeta]
-  );
-
-  const eligiblePoolBlocks = useMemo(
-    () => blocks.filter((block) => canUseCandidateInBlock(block, poolState.entity_type)),
-    [blocks, poolState.entity_type]
   );
 
   const selectedPoolCandidates = useMemo(() => {
@@ -304,14 +298,18 @@ export default function HomepageCuration({ token }) {
   }, [poolState.entity_type, token]);
 
   useEffect(() => {
-    if (!eligiblePoolBlocks.length) {
-      setPoolTargetBlockKey("");
-      return;
+    let active = true;
+    async function loadSituations() {
+      try {
+        const res = await api.get("/situations");
+        if (active) setSituationsList(Array.isArray(res.data?.items) ? res.data.items : []);
+      } catch {
+        if (active) setSituationsList([]);
+      }
     }
-    if (!eligiblePoolBlocks.some((block) => block.key === poolTargetBlockKey)) {
-      setPoolTargetBlockKey(eligiblePoolBlocks[0].key);
-    }
-  }, [eligiblePoolBlocks, poolTargetBlockKey]);
+    loadSituations();
+    return () => { active = false; };
+  }, []);
 
   const resetCandidateState = useCallback((nextBlocks) => {
     const nextState = {};
@@ -567,15 +565,55 @@ export default function HomepageCuration({ token }) {
     }
   }
 
-  function addSelectedPoolCandidatesToBlock() {
-    if (!poolTargetBlockKey || !selectedPoolCandidates.length) return;
-    setBlocks((current) => addCandidatesToBlocks(current, poolTargetBlockKey, selectedPoolCandidates));
+  async function addSelectedPoolCandidatesToSituations() {
+    if (!selectedSituationSlugs.length || !selectedPoolCandidates.length) return;
+    const placeIds = selectedPoolCandidates
+      .filter((c) => String(c.entity_type || "").toLowerCase() === "place")
+      .map((c) => Number(c.id))
+      .filter(Boolean);
+    if (!placeIds.length) {
+      setPoolSituationStatus("รายการที่เลือกไม่มีสถานที่");
+      return;
+    }
+    setPoolSituationStatus("กำลังบันทึก...");
+    let ok = 0;
+    let fail = 0;
+    for (const slug of selectedSituationSlugs) {
+      try {
+        await api.post(`/situations/${slug}/places`, { place_ids: placeIds }, { headers: authHeaders(token) });
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setPoolSituationStatus(
+      fail === 0
+        ? `เพิ่ม ${placeIds.length} สถานที่เข้า ${ok} situation แล้ว`
+        : `สำเร็จ ${ok} ล้มเหลว ${fail} — ตรวจสอบอีกครั้ง`
+    );
     setPoolSelectedCandidateKeys([]);
   }
 
-  function addPoolCandidateToBlock(candidate) {
-    if (!poolTargetBlockKey) return;
-    setBlocks((current) => addCandidateToBlocks(current, poolTargetBlockKey, candidate));
+  async function addPoolCandidateToSituations(candidate) {
+    if (!selectedSituationSlugs.length) return;
+    const placeId = Number(candidate?.id);
+    if (!placeId || String(candidate?.entity_type || "").toLowerCase() !== "place") return;
+    setPoolSituationStatus("กำลังบันทึก...");
+    let ok = 0;
+    let fail = 0;
+    for (const slug of selectedSituationSlugs) {
+      try {
+        await api.post(`/situations/${slug}/places`, { place_ids: [placeId] }, { headers: authHeaders(token) });
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setPoolSituationStatus(
+      fail === 0
+        ? `เพิ่มเข้า ${ok} situation แล้ว`
+        : `สำเร็จ ${ok} ล้มเหลว ${fail}`
+    );
   }
 
   async function onSaveDraft() {
@@ -1130,7 +1168,7 @@ export default function HomepageCuration({ token }) {
 
             <div className="homepage-curation-rule-panel">
               <p className="muted">
-                การเพิ่มรายการจากแท็บนี้เป็นการเตรียมในหน้านี้เท่านั้น หากต้องการบันทึก ให้กลับไปแท็บ Layout แล้วกดบันทึกฉบับร่าง
+                เลือก situation แล้วกดเพิ่ม ระบบบันทึกทันที
               </p>
               <div className="grid two">
                 <label>
@@ -1143,7 +1181,7 @@ export default function HomepageCuration({ token }) {
                     }}
                   >
                     {ENTITY_TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
+                      <option key={option.value} value={option.value} disabled={option.value === "event"}>
                         {option.label}
                       </option>
                     ))}
@@ -1186,20 +1224,29 @@ export default function HomepageCuration({ token }) {
                     ))}
                   </div>
                 ) : null}
-                <label className="full">
-                  ใช้ในบล็อก
-                  <select value={poolTargetBlockKey} onChange={(event) => setPoolTargetBlockKey(event.target.value)} disabled={!eligiblePoolBlocks.length}>
-                    {eligiblePoolBlocks.length ? (
-                      eligiblePoolBlocks.map((block) => (
-                        <option key={block.key} value={block.key}>
-                          {block.title || block.key}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="">ไม่มีบล็อกที่รองรับ</option>
-                    )}
-                  </select>
-                </label>
+                <fieldset className="full">
+                  <legend>Situation</legend>
+                  {situationsList.length ? (
+                    situationsList.map((s) => (
+                      <label key={s.slug} style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", marginRight: "1rem" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedSituationSlugs.includes(s.slug)}
+                          onChange={() => {
+                            setSelectedSituationSlugs((current) =>
+                              current.includes(s.slug)
+                                ? current.filter((x) => x !== s.slug)
+                                : [...current, s.slug]
+                            );
+                          }}
+                        />
+                        {s.title || s.slug}
+                      </label>
+                    ))
+                  ) : (
+                    <span className="muted">ไม่มี situation</span>
+                  )}
+                </fieldset>
               </div>
 
               {taxonomyCatalogError ? <p className="status">{taxonomyCatalogError}</p> : null}
@@ -1222,11 +1269,12 @@ export default function HomepageCuration({ token }) {
                   <button
                     type="button"
                     className="primary"
-                    onClick={addSelectedPoolCandidatesToBlock}
-                    disabled={!poolTargetBlockKey || !selectedPoolCandidates.length}
+                    onClick={addSelectedPoolCandidatesToSituations}
+                    disabled={!selectedSituationSlugs.length || !selectedPoolCandidates.length}
                   >
-                    เพิ่มรายการที่เลือกเข้า Block
+                    เพิ่มรายการที่เลือกเข้า situation
                   </button>
+                  {poolSituationStatus ? <span className="muted">{poolSituationStatus}</span> : null}
                 </div>
                 <div className="table-wrap">
                 <table>
@@ -1250,8 +1298,6 @@ export default function HomepageCuration({ token }) {
                   <tbody>
                     {poolState.items.map((candidate) => {
                       const key = candidateSelectionKey(candidate);
-                      const targetBlock = blocks.find((block) => block.key === poolTargetBlockKey);
-                      const canUseInTargetBlock = canUseCandidateInBlock(targetBlock, candidate.entity_type);
                       const matches = Object.entries(candidate.taxonomy_summary || {})
                         .filter(([, value]) => value === true)
                         .map(([taxonomyKey]) => taxonomyCatalog.find((entry) => entry.key === taxonomyKey)?.label || taxonomyKey)
@@ -1274,10 +1320,10 @@ export default function HomepageCuration({ token }) {
                             <button
                               type="button"
                               className="ghost tiny-btn"
-                              onClick={() => addPoolCandidateToBlock(candidate)}
-                              disabled={!canUseInTargetBlock}
+                              onClick={() => addPoolCandidateToSituations(candidate)}
+                              disabled={!selectedSituationSlugs.length || String(candidate.entity_type || "").toLowerCase() !== "place"}
                             >
-                              ใช้ในบล็อก
+                              เพิ่มเข้า situation
                             </button>
                           </td>
                         </tr>
