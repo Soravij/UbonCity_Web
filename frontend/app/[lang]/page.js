@@ -83,8 +83,8 @@ export default async function LangHome({ params }) {
           />
         </div>
       ) : (
-        <>
-          <div className="home-flow-section home-flow-section--surface-1 home-flow-section--bridge">
+        <div className="home-flow-section home-flow-section--surface-1">
+          <div className="home-flow-section home-flow-section--bridge">
             <HomeFeaturedStrip
               places={featuredStripPlaces}
               activeLang={activeLang}
@@ -92,18 +92,16 @@ export default async function LangHome({ params }) {
             />
           </div>
 
-          <div className="home-flow-section home-flow-section--surface-2">
-            <HomeTrendingBlock
-              activeLang={activeLang}
-              copy={copy}
-              decisionCopy={decisionCopy}
-              latestEvents={latestEvents}
-            />
-          </div>
-        </>
-      )}
+          <HomeSituationsBlock situations={homepageLayout?.situations ?? []} lang={activeLang} copy={copy} />
 
-      <HomeSituationsBlock situations={homepageLayout?.situations ?? []} lang={activeLang} />
+          <HomeTrendingBlock
+            activeLang={activeLang}
+            copy={copy}
+            decisionCopy={decisionCopy}
+            latestEvents={latestEvents}
+          />
+        </div>
+      )}
 
       <div className="home-flow-section home-flow-section--surface-1">
         <section className="editorial-section space-y-6">

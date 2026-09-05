@@ -23,7 +23,7 @@ function SituationCard({ situation, maxPlaces }) {
   );
 }
 
-export default function HomeSituationsBlock({ situations = [], lang }) {
+export default function HomeSituationsBlock({ situations = [], lang, copy }) {
   if (!situations.length) return null;
 
   const first = situations[0];
@@ -32,24 +32,29 @@ export default function HomeSituationsBlock({ situations = [], lang }) {
   const rest = situations.slice(3, 7);
 
   return (
-    <section className="home-flow-section">
-      <div className="editorial-shell">
-        <div className="grid gap-6 lg:grid-cols-2">
-          <SituationCard situation={first} maxPlaces={5} />
-          <div className="grid gap-6">
-            {second && <SituationCard situation={second} maxPlaces={3} />}
-            {third && <SituationCard situation={third} maxPlaces={3} />}
-          </div>
+    <section className="editorial-section space-y-6">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-end">
+        <div className="home-section-header">
+          <p className="eyebrow-label">Situations</p>
+          <h2 className="section-heading">{copy?.situationsTitle ?? ""}</h2>
         </div>
-
-        {rest.length > 0 && (
-          <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {rest.map((situation, index) => (
-              <SituationCard key={situation.id ?? index} situation={situation} maxPlaces={3} />
-            ))}
-          </div>
-        )}
+        <p className="section-copy max-w-2xl">{copy?.situationsSubtitle ?? ""}</p>
       </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <SituationCard situation={first} maxPlaces={5} />
+        <div className="grid gap-6">
+          {second && <SituationCard situation={second} maxPlaces={3} />}
+          {third && <SituationCard situation={third} maxPlaces={3} />}
+        </div>
+      </div>
+
+      {rest.length > 0 && (
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {rest.map((situation, index) => (
+            <SituationCard key={situation.id ?? index} situation={situation} maxPlaces={3} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
