@@ -8,6 +8,11 @@ import {
   deleteSituationBySlug,
   reorderSituation,
 } from "../repositories/situationRepository.js";
+import {
+  listPlacesBySituation,
+  addPlacesToSituation,
+  removePlaceFromSituation,
+} from "../repositories/situationPlaceRepository.js";
 import { validateSituationCreatePayload, validateSituationUpdatePayload } from "../validators/situationValidator.js";
 import logger from "../middleware/logger.js";
 
@@ -111,6 +116,58 @@ export async function reorderSituationHandler(req, res) {
     return res.json({ moved: result.moved });
   } catch (err) {
     logger.error("reorderSituation failed", { err });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function getSituationPlaces(req, res) {
+  try {
+    const slug = String(req.params?.slug || "").trim().toLowerCase();
+    const situation = await getSituationBySlug(slug);
+    if (!situation) return res.status(404).json({ error: "Situation not found" });
+
+    const lang = normalizeContentLang(req.query?.lang, "en");
+    const items = await listPlacesBySituation(situation.id, lang);
+    return res.json({ items });
+  } catch (err) {
+    logger.error("getSituationPlaces failed", { err });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function addSituationPlaces(req, res) {
+  try {
+    const slug = String(req.params?.slug || "").trim().toLowerCase();
+    const situation = await getSituationBySlug(slug);
+    if (!situation) return res.status(404).json({ error: "Situation not found" });
+
+    const placeIds = req.body?.place_ids;
+    if (!Array.isArray(placeIds) || !placeIds.length) {
+      return res.status(400).json({ error: "place_ids must be a non-empty array" });
+    }
+
+    const inserted = await addPlacesToSituation(situation.id, placeIds);
+    return res.json({ message: "Places added", inserted });
+  } catch (err) {
+    logger.error("addSituationPlaces failed", { err });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function removeSituationPlace(req, res) {
+  try {
+    const slug = String(req.params?.slug || "").trim().toLowerCase();
+    const situation = await getSituationBySlug(slug);
+    if (!situation) return res.status(404).json({ error: "Situation not found" });
+
+    const placeId = Number(req.params?.placeId);
+    if (!placeId) return res.status(400).json({ error: "Invalid placeId" });
+
+    const removed = await removePlaceFromSituation(situation.id, placeId);
+    if (!removed) return res.status(404).json({ error: "Place not found in situation" });
+    return res.json({ message: "Place removed" });
+  } catch (err) {
+    logger.error("removeSituationPlace failed", { err });
     return res.status(500).json({ error: "Internal server error" });
   }
 }
