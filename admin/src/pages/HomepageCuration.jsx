@@ -1060,20 +1060,12 @@ export default function HomepageCuration({ token }) {
                 <div className="homepage-curation-block-head">
                   <div>
                     <p className="homepage-curation-block-kicker">{getBlockTypeLabel(block.type)}</p>
-                    <h3>{block.title || block.key}</h3>
-                    <p className="muted">{block.subtitle || "สถานที่เด่นที่อยากแนะนำ"}</p>
+                    <h3>ไฮไลต์</h3>
+                    <p className="muted">หัวข้อและคำโปรยบนหน้าเว็บกำหนดไว้ในโค้ด แก้ที่นี่ไม่ได้</p>
                   </div>
                 </div>
 
                 <div className="grid two homepage-curation-grid">
-                  <label>
-                    ชื่อบล็อก
-                    <input value={block.title} onChange={(event) => updateBlock(highlightIndex, { title: event.target.value })} />
-                  </label>
-                  <label>
-                    คำอธิบายย่อย
-                    <input value={block.subtitle} onChange={(event) => updateBlock(highlightIndex, { subtitle: event.target.value })} />
-                  </label>
                   <label>
                     จำนวนรายการที่แสดง
                     <select value={block.max_items} onChange={(event) => updateBlock(highlightIndex, { max_items: Number(event.target.value) })}>
