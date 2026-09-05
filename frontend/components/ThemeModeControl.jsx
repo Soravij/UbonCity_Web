@@ -32,8 +32,10 @@ function readInitialMode() {
 export default function ThemeModeControl() {
   const toggleId = useId();
   const [mode, setMode] = useState(() => readInitialMode());
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     setMode(readInitialMode());
   }, []);
 
@@ -65,6 +67,7 @@ export default function ThemeModeControl() {
     <div className="theme-mode-control theme-switch-control" role="group" aria-label="Theme mode">
       <label className="switch" htmlFor={toggleId}>
         <input
+          key={mounted ? "mounted" : "ssr"}
           id={toggleId}
           type="checkbox"
           checked={mode === "dark"}
