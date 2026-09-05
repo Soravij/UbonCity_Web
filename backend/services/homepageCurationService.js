@@ -3,6 +3,7 @@ import {
   SUPPORTED_TAXONOMY_CATEGORIES,
   getTaxonomyCatalogEntriesForCategory,
 } from "../../shared/taxonomy/taxonomy-catalog.mjs";
+import { listSituations } from "../repositories/situationRepository.js";
 
 const VALID_SOURCE_MODES = new Set(["manual-first-hybrid", "manual-only", "rule-only"]);
 const VALID_FALLBACK_MODES = new Set(["latest-approved", "featured", "none"]);
@@ -775,6 +776,8 @@ export async function getPublishedHomepageLayout(layoutKey = "home", lang = "th"
     loadApprovedEventsForHomepage(layout.lang),
   ]);
   const resolvedBlocks = buildResolvedBlocks(publishedBlocks, allPlaces, allEvents);
+  const allSituations = await listSituations(layout.lang);
+  const situations = allSituations.filter((s) => s.is_active === 1);
 
   return {
     layout_key: layout.layout_key,
@@ -782,6 +785,7 @@ export async function getPublishedHomepageLayout(layoutKey = "home", lang = "th"
     source: Array.isArray(layout.published_blocks) && layout.published_blocks.length ? "published" : "draft_fallback",
     blocks: publishedBlocks,
     resolved_blocks: resolvedBlocks,
+    situations,
     published_at: layout.published_at,
     updated_at: layout.updated_at,
   };
