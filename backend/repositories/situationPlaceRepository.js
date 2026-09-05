@@ -55,3 +55,52 @@ export async function removePlaceFromSituation(situationId, placeId) {
   );
   return result.affectedRows;
 }
+
+export async function reorderSituationPlace(situationId, placeId, direction) {
+  if (direction !== "up" && direction !== "down") return null;
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query(
+      "SELECT place_id, sort_order FROM situation_places WHERE situation_id = ? ORDER BY sort_order ASC, id ASC FOR UPDATE",
+      [situationId]
+    );
+    for (let i = 0; i < rows.length; i += 1) {
+      await conn.query(
+        "UPDATE situation_places SET sort_order = ? WHERE situation_id = ? AND place_id = ?",
+        [i + 1, situationId, rows[i].place_id]
+      );
+    }
+
+    const idx = rows.findIndex((r) => Number(r.place_id) === Number(placeId));
+    if (idx === -1) {
+      await conn.rollback();
+      return null;
+    }
+
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= rows.length) {
+      await conn.commit();
+      return { moved: false };
+    }
+
+    await conn.query(
+      "UPDATE situation_places SET sort_order = ? WHERE situation_id = ? AND place_id = ?",
+      [swapIdx + 1, situationId, rows[idx].place_id]
+    );
+    await conn.query(
+      "UPDATE situation_places SET sort_order = ? WHERE situation_id = ? AND place_id = ?",
+      [idx + 1, situationId, rows[swapIdx].place_id]
+    );
+
+    await conn.commit();
+    return { moved: true };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}

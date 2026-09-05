@@ -1718,6 +1718,7 @@ th {
 :root[data-theme="dark"] .muted,
 :root[data-theme="dark"] th {
   color: var(--theme-text-muted);
+  background: var(--theme-surface);
 }
 
 :root[data-theme="dark"] .sidebar,
