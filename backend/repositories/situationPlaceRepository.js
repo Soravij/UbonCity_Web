@@ -24,6 +24,39 @@ export async function listPlacesBySituation(situationId, lang = "en") {
   return rows;
 }
 
+export async function listPlacesForSituations(situationIds, lang = "en") {
+  if (!Array.isArray(situationIds) || situationIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = situationIds.map(() => "?").join(",");
+  const [rows] = await pool.query(
+    `SELECT sp.situation_id, p.id,
+       COALESCE(NULLIF(TRIM(p.slug),''), CONCAT('place-', p.id)) AS slug,
+       COALESCE(pt_req.title, pt_th.title) AS title,
+       c.slug AS category, sp.sort_order
+     FROM situation_places sp
+     JOIN places p ON p.id = sp.place_id
+     JOIN categories c ON c.id = p.category_id
+     LEFT JOIN place_translations pt_req ON pt_req.place_id = p.id AND pt_req.lang = ?
+     LEFT JOIN place_translations pt_th  ON pt_th.place_id  = p.id AND pt_th.lang  = 'th'
+     WHERE sp.situation_id IN (${placeholders})
+     ORDER BY sp.situation_id ASC, sp.sort_order ASC, p.id ASC`,
+    [lang, ...situationIds]
+  );
+
+  const grouped = new Map();
+  for (const row of rows) {
+    const list = grouped.get(row.situation_id);
+    if (list) {
+      list.push(row);
+    } else {
+      grouped.set(row.situation_id, [row]);
+    }
+  }
+  return grouped;
+}
+
 export async function addPlacesToSituation(situationId, placeIds) {
   if (!Array.isArray(placeIds) || !placeIds.length) return 0;
 

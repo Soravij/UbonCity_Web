@@ -1,4 +1,6 @@
-function SituationCard({ situation, maxPlaces }) {
+import Link from "next/link";
+
+function SituationCard({ situation, maxPlaces, lang }) {
   const places = situation.places ?? [];
   const limitedPlaces = places.slice(0, maxPlaces);
   const showPlaces = limitedPlaces.length > 0;
@@ -14,7 +16,7 @@ function SituationCard({ situation, maxPlaces }) {
           {limitedPlaces.map((place, index) => (
             <li key={place.id ?? index} className="editorial-list-line">
               <span className="home-number-chip">{index + 1}</span>
-              <span className="line-clamp-1 text-sm font-medium">{place.title || "-"}</span>
+              <Link href={`/${lang}/${place.category}/${place.slug}`} className="line-clamp-1 text-sm font-medium hover:underline">{place.title || "-"}</Link>
             </li>
           ))}
         </ol>
@@ -41,17 +43,17 @@ export default function HomeSituationsBlock({ situations = [], lang, copy }) {
         <p className="section-copy max-w-2xl">{copy?.situationsSubtitle ?? ""}</p>
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
-        <SituationCard situation={first} maxPlaces={5} />
+        <SituationCard situation={first} maxPlaces={5} lang={lang} />
         <div className="grid gap-6">
-          {second && <SituationCard situation={second} maxPlaces={3} />}
-          {third && <SituationCard situation={third} maxPlaces={3} />}
+          {second && <SituationCard situation={second} maxPlaces={3} lang={lang} />}
+          {third && <SituationCard situation={third} maxPlaces={3} lang={lang} />}
         </div>
       </div>
 
       {rest.length > 0 && (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {rest.map((situation, index) => (
-            <SituationCard key={situation.id ?? index} situation={situation} maxPlaces={3} />
+            <SituationCard key={situation.id ?? index} situation={situation} maxPlaces={3} lang={lang} />
           ))}
         </div>
       )}

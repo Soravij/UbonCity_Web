@@ -4,6 +4,7 @@ import {
   getTaxonomyCatalogEntriesForCategory,
 } from "../../shared/taxonomy/taxonomy-catalog.mjs";
 import { listSituations } from "../repositories/situationRepository.js";
+import { listPlacesForSituations } from "../repositories/situationPlaceRepository.js";
 
 const VALID_SOURCE_MODES = new Set(["manual-first-hybrid", "manual-only", "rule-only"]);
 const VALID_FALLBACK_MODES = new Set(["latest-approved", "featured", "none"]);
@@ -777,7 +778,15 @@ export async function getPublishedHomepageLayout(layoutKey = "home", lang = "th"
   ]);
   const resolvedBlocks = buildResolvedBlocks(publishedBlocks, allPlaces, allEvents);
   const allSituations = await listSituations(layout.lang);
-  const situations = allSituations.filter((s) => s.is_active === 1);
+  const activeSituations = allSituations.filter((s) => s.is_active === 1);
+  const placesBySituation = await listPlacesForSituations(
+    activeSituations.map((s) => s.id),
+    lang
+  );
+  const situations = activeSituations.map((s) => ({
+    ...s,
+    places: (placesBySituation.get(s.id) ?? []).slice(s.sort_order === 1 ? 0 : 0, s.sort_order === 1 ? 5 : 3),
+  }));
 
   return {
     layout_key: layout.layout_key,
