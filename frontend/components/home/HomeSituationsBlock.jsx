@@ -11,15 +11,22 @@ function SituationCard({ situation, maxPlaces, lang }) {
       {situation.description != null && (
         <p className="mt-2 text-sm leading-7 text-[color:var(--muted)]">{situation.description}</p>
       )}
-      {showPlaces && (
+      {showPlaces ? (
         <ol className="mt-4 space-y-2">
           {limitedPlaces.map((place, index) => (
-            <li key={place.id ?? index} className="editorial-list-line">
-              <span className="home-number-chip">{index + 1}</span>
-              <Link href={`/${lang}/${place.category}/${place.slug}`} className="line-clamp-1 text-sm font-medium hover:underline">{place.title || "-"}</Link>
+            <li key={place.id ?? index} className="editorial-list-line flex items-start gap-3">
+              <span className="home-number-chip shrink-0">{index + 1}</span>
+              <Link
+                href={`/${lang}/${place.category}/${place.slug}`}
+                className="line-clamp-2 min-w-0 text-sm font-medium leading-6 hover:underline md:text-[15px]"
+              >
+                {place.title || "-"}
+              </Link>
             </li>
           ))}
         </ol>
+      ) : (
+        <p className="mt-4 text-sm text-[color:var(--muted)]">{copy.situationEmpty}</p>
       )}
     </article>
   );
