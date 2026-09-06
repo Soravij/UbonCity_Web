@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-function SituationCard({ situation, maxPlaces, lang, copy, large = false }) {
+function SituationCard({ situation, maxPlaces, lang, copy, large = false, compact = false }) {
   const places = situation.places ?? [];
   const limitedPlaces = places.slice(0, maxPlaces);
   const showPlaces = limitedPlaces.length > 0;
@@ -26,7 +26,7 @@ function SituationCard({ situation, maxPlaces, lang, copy, large = false }) {
               <span className="text-xs font-bold uppercase tracking-[0.16em] text-[color:var(--accent)]">
                 {String(index + 1).padStart(2, "0")}
               </span>
-              <span className="line-clamp-2 text-sm font-medium leading-6 md:text-[15px]">
+              <span className={`line-clamp-2 font-medium ${compact ? "text-[13px] leading-5" : "text-sm leading-6 md:text-[15px]"}`}>
                 {place.title || "-"}
               </span>
             </Link>
@@ -67,7 +67,7 @@ export default function HomeSituationsBlock({ situations = [], lang, copy }) {
       {rest.length > 0 && (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {rest.map((situation, index) => (
-            <SituationCard key={situation.id ?? index} situation={situation} maxPlaces={3} lang={lang} copy={copy} />
+            <SituationCard key={situation.id ?? index} situation={situation} maxPlaces={3} lang={lang} copy={copy} compact />
           ))}
         </div>
       )}
