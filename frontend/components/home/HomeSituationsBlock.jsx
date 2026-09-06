@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-function SituationCard({ situation, maxPlaces, lang }) {
+function SituationCard({ situation, maxPlaces, lang, copy }) {
   const places = situation.places ?? [];
   const limitedPlaces = places.slice(0, maxPlaces);
   const showPlaces = limitedPlaces.length > 0;
@@ -50,17 +50,17 @@ export default function HomeSituationsBlock({ situations = [], lang, copy }) {
         <p className="section-copy max-w-2xl">{copy?.situationsSubtitle ?? ""}</p>
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
-        <SituationCard situation={first} maxPlaces={5} lang={lang} />
+        <SituationCard situation={first} maxPlaces={5} lang={lang} copy={copy} />
         <div className="grid gap-6">
-          {second && <SituationCard situation={second} maxPlaces={3} lang={lang} />}
-          {third && <SituationCard situation={third} maxPlaces={3} lang={lang} />}
+          {second && <SituationCard situation={second} maxPlaces={3} lang={lang} copy={copy} />}
+          {third && <SituationCard situation={third} maxPlaces={3} lang={lang} copy={copy} />}
         </div>
       </div>
 
       {rest.length > 0 && (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {rest.map((situation, index) => (
-            <SituationCard key={situation.id ?? index} situation={situation} maxPlaces={3} lang={lang} />
+            <SituationCard key={situation.id ?? index} situation={situation} maxPlaces={3} lang={lang} copy={copy} />
           ))}
         </div>
       )}
