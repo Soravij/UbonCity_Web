@@ -7,26 +7,33 @@ function SituationCard({ situation, maxPlaces, lang, copy }) {
 
   return (
     <article className="home-content-card">
-      <h3 className="text-xl font-semibold tracking-[-0.03em]">{situation.title}</h3>
+      <div className="relative z-10 mb-3">
+        <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--accent)]">
+          {situation.title}
+        </h3>
+      </div>
       {situation.description != null && (
-        <p className="mt-2 text-sm leading-7 text-[color:var(--muted)]">{situation.description}</p>
+        <p className="mb-3 text-sm leading-7 text-[color:var(--muted)]">{situation.description}</p>
       )}
       {showPlaces ? (
-        <ol className="mt-4 space-y-2">
+        <div className="space-y-0">
           {limitedPlaces.map((place, index) => (
-            <li key={place.id ?? index} className="editorial-list-line flex items-start gap-3">
-              <span className="home-number-chip shrink-0">{index + 1}</span>
-              <Link
-                href={`/${lang}/${place.category}/${place.slug}`}
-                className="line-clamp-2 min-w-0 text-sm font-medium leading-6 hover:underline md:text-[15px]"
-              >
+            <Link
+              key={place.id ?? index}
+              href={`/${lang}/${place.category}/${place.slug}`}
+              className="editorial-list-line grid grid-cols-[44px_minmax(0,1fr)] gap-3 py-3 transition hover:translate-x-1 hover:text-[color:var(--accent)]"
+            >
+              <span className="text-xs font-bold uppercase tracking-[0.16em] text-[color:var(--accent)]">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <span className="line-clamp-2 text-sm font-medium leading-6 md:text-[15px]">
                 {place.title || "-"}
-              </Link>
-            </li>
+              </span>
+            </Link>
           ))}
-        </ol>
+        </div>
       ) : (
-        <p className="mt-4 text-sm text-[color:var(--muted)]">{copy.situationEmpty}</p>
+        <p className="text-sm text-[color:var(--muted)]">{copy.situationEmpty}</p>
       )}
     </article>
   );
