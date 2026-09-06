@@ -1,12 +1,12 @@
 import Link from "next/link";
 
-function SituationCard({ situation, maxPlaces, lang, copy }) {
+function SituationCard({ situation, maxPlaces, lang, copy, large = false }) {
   const places = situation.places ?? [];
   const limitedPlaces = places.slice(0, maxPlaces);
   const showPlaces = limitedPlaces.length > 0;
 
   return (
-    <article className="home-content-card">
+    <article className={`home-content-card relative ${large ? "p-6 md:p-7" : "p-5"}`}>
       <div className="relative z-10 mb-3">
         <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--accent)]">
           {situation.title}
@@ -57,7 +57,7 @@ export default function HomeSituationsBlock({ situations = [], lang, copy }) {
         <p className="section-copy max-w-2xl">{copy?.situationsSubtitle ?? ""}</p>
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
-        <SituationCard situation={first} maxPlaces={5} lang={lang} copy={copy} />
+        <SituationCard situation={first} maxPlaces={5} lang={lang} copy={copy} large />
         <div className="grid gap-6">
           {second && <SituationCard situation={second} maxPlaces={3} lang={lang} copy={copy} />}
           {third && <SituationCard situation={third} maxPlaces={3} lang={lang} copy={copy} />}
