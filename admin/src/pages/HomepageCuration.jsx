@@ -86,10 +86,6 @@ function getBlockTypeLabel(value) {
   return BLOCK_TYPE_LABEL[String(value || "").trim().toLowerCase()] || "บล็อก";
 }
 
-function getSourceModeLabel(value) {
-  return SOURCE_MODE_LABEL[String(value || "").trim().toLowerCase()] || "ไม่ระบุ";
-}
-
 function normalizeFixedBlocksInCurrentOrder(blocks) {
   const seenKeys = new Set();
   const normalized = [];
@@ -253,6 +249,7 @@ export default function HomepageCuration({ token }) {
   const [blocks, setBlocks] = useState([]);
   const [candidateByBlock, setCandidateByBlock] = useState({});
   const [previewBlocks, setPreviewBlocks] = useState([]);
+  const [previewSituations, setPreviewSituations] = useState([]);
   const [poolState, setPoolState] = useState(createCandidateState("place"));
   const [taxonomyCatalog, setTaxonomyCatalog] = useState([]);
   const [taxonomyCatalogError, setTaxonomyCatalogError] = useState("");
@@ -363,6 +360,7 @@ export default function HomepageCuration({ token }) {
       );
       if (previewRequestSeq.current !== requestId) return;
       setPreviewBlocks(Array.isArray(res.data?.item?.resolved_blocks) ? res.data.item.resolved_blocks : []);
+      setPreviewSituations(Array.isArray(res.data?.item?.situations) ? res.data.item.situations : []);
     } catch (error) {
       if (previewRequestSeq.current !== requestId) return;
       setPreviewBlocks([]);
@@ -884,41 +882,113 @@ export default function HomepageCuration({ token }) {
           {previewError ? <p className="status">{previewError}</p> : null}
           {previewLoading ? <p className="muted">กำลังประมวลผลตัวอย่าง...</p> : null}
 
-          <div className="homepage-curation-mock">
-            {FIXED_BLOCK_ORDER.map((blockKey) => {
-              const block = (previewBlocks || []).find((b) => b.key === blockKey) || {};
-              const isHero = blockKey === "hero";
-              const isHighlightOrFeatured = blockKey === "highlight" || blockKey === "featured_events";
-              const manualSet = new Set(
-                (block.hydrated_manual_items || []).map((m) => `${m.entity_type}:${Number(m.id)}`)
-              );
-              const items = isHero
-                ? []
-                : isHighlightOrFeatured
-                  ? (block.resolved_items || []).filter((it) => manualSet.has(`${it.entity_type}:${Number(it.id)}`))
-                  : (block.resolved_items || []);
-              const misses = Array.isArray(block.manual_misses) ? block.manual_misses : [];
+          {(() => {
+            const heroBlock = (previewBlocks || []).find((b) => b.key === "hero") || {};
+            const highlightBlock = (previewBlocks || []).find((b) => b.key === "highlight") || {};
+            const scenariosBlock = (previewBlocks || []).find((b) => b.key === "scenarios") || {};
+            const eventsBlock = (previewBlocks || []).find((b) => b.key === "featured_events") || {};
 
-              return (
-                <div key={blockKey}>
-                  <div className={`homepage-curation-mock-slot${isHero ? " is-locked" : ""}`}>
-                    <strong>{block.title || blockKey}</strong>
-                    {block.subtitle ? <p className="muted">{block.subtitle}</p> : null}
-                    {!isHero && items.length ? (
-                      <ul style={{ margin: "6px 0 0", paddingLeft: "18px" }}>
-                        {items.map((item, idx) => (
-                          <li key={`${blockKey}-${item.entity_type}-${item.id}-${idx}`}>{item.title || "-"}</li>
-                        ))}
-                      </ul>
-                    ) : null}
+            const hlManualSet = new Set(
+              (highlightBlock.hydrated_manual_items || []).map((m) => `${m.entity_type}:${Number(m.id)}`)
+            );
+            const hlItems = (highlightBlock.resolved_items || []).filter((it) => hlManualSet.has(`${it.entity_type}:${Number(it.id)}`));
+
+            const evManualSet = new Set(
+              (eventsBlock.hydrated_manual_items || []).map((m) => `${m.entity_type}:${Number(m.id)}`)
+            );
+            const evItems = (eventsBlock.resolved_items || []).filter((it) => evManualSet.has(`${it.entity_type}:${Number(it.id)}`));
+            const evSlots = Array.from({ length: 5 }, (_, i) => evItems[i] || null);
+
+            return (
+              <div className="homepage-curation-mock">
+                <div className="hcm-hero">
+                  <div className="hcm-hero-left">
+                    <h3 className="hcm-hero-title">{heroBlock.title || "hero"}</h3>
+                    <p className="hcm-hero-sub">{heroBlock.subtitle || ""}</p>
+                    <div className="hcm-searchbar" />
                   </div>
-                  {misses.length ? (
-                    <p className="homepage-curation-warning-text">รายการเลือกเองที่ไม่พบ {misses.length}</p>
-                  ) : null}
+                  <div className="hcm-hero-right">
+                    <div className="hcm-info-card" />
+                    <div className="hcm-info-card" />
+                    <div className="hcm-info-card" />
+                  </div>
                 </div>
-              );
-            })}
-          </div>
+
+                <section className="hcm-section">
+                  <p className="hcm-eyebrow">Places</p>
+                  <h4 className="hcm-heading">{highlightBlock.title || "highlight"}</h4>
+                  <div className="hcm-strip">
+                    {hlItems.map((item) => {
+                      const cover = item.effective_thumbnail_image || item.effective_cover_image || item.image || "";
+                      return (
+                        <div key={`hl-${item.entity_type}-${item.id}`} className="hcm-place">
+                          <div className="hcm-place-media">
+                            {cover ? <img src={cover} alt="" onError={(e) => { e.target.style.display = "none"; }} /> : null}
+                          </div>
+                          <div className="hcm-place-info">
+                            <span className="hcm-place-label">{item.category || ""}</span>
+                            <span className="hcm-place-title">{item.title || "-"}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="hcm-section">
+                  <p className="hcm-eyebrow">Situations</p>
+                  <h4 className="hcm-heading">{scenariosBlock.title || "scenarios"}</h4>
+                  <div className="hcm-situations">
+                    {(previewSituations || []).map((s, si) => (
+                      <article key={s.id || si} className={`hcm-sit${si === 0 ? " is-large" : ""}`}>
+                        <h5 className="hcm-sit-title">{s.title || s.slug || "-"}</h5>
+                        <p className="hcm-sit-desc">{s.description || ""}</p>
+                        <ol className="hcm-sit-list">
+                          {(s.places || []).map((p, pi) => (
+                            <li key={p.id || pi}>
+                              <span className="hcm-sit-num">{String(pi + 1).padStart(2, "0")}</span>
+                              <span>{p.title || "-"}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="hcm-section">
+                  <p className="hcm-eyebrow">Latest</p>
+                  <h4 className="hcm-heading">{eventsBlock.title || "featured_events"}</h4>
+                  <div className="hcm-events">
+                    {evSlots[0] ? (
+                      <div className="hcm-event is-featured">
+                        <div className="hcm-event-media">
+                          {evSlots[0].image ? <img src={evSlots[0].image} alt="" onError={(e) => { e.target.style.display = "none"; }} /> : null}
+                        </div>
+                        <div className="hcm-event-panel"><h5>{evSlots[0].title || "-"}</h5></div>
+                      </div>
+                    ) : (
+                      <div className="hcm-event is-featured is-empty" />
+                    )}
+                    <div className="hcm-events-grid">
+                      {evSlots.slice(1, 5).map((item, i) => (
+                        item ? (
+                          <div key={`ev-${item.entity_type}-${item.id}-${i}`} className="hcm-event">
+                            <div className="hcm-event-media">
+                              {item.image ? <img src={item.image} alt="" onError={(e) => { e.target.style.display = "none"; }} /> : null}
+                            </div>
+                            <div className="hcm-event-panel"><h5>{item.title || "-"}</h5></div>
+                          </div>
+                        ) : (
+                          <div key={`ev-empty-${i}`} className="hcm-event is-empty" />
+                        )
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              </div>
+            );
+          })()}
 
           {(() => {
             const heroBlock = (previewBlocks || []).find((b) => b.key === "hero") || blocks.find((b) => b.key === "hero") || {};
@@ -942,121 +1012,6 @@ export default function HomepageCuration({ token }) {
               </div>
             );
           })()}
-
-          {blocks.map((block, index) => {
-            const hero = isHeroBlock(block);
-            const eventBlock = isEventBlock(block);
-            const isHighlight = block.key === "highlight";
-
-            if (isHighlight) {
-              return (
-                <article key={block.key || index} className="homepage-curation-block-card">
-                  <div className="homepage-curation-block-head">
-                    <div>
-                      <p className="homepage-curation-block-kicker">
-                        {getBlockTypeLabel(block.type)} | ลำดับ #{index + 1}
-                      </p>
-                      <h3>{block.title || block.key}</h3>
-                      <p className="muted">{block.key} | {Array.isArray(block.manual_items) ? block.manual_items.length : 0} รายการเลือกเอง</p>
-                    </div>
-                  </div>
-                </article>
-              );
-            }
-
-            return (
-              <article key={block.key || index} className="homepage-curation-block-card">
-                <div className="homepage-curation-block-head">
-                  <div>
-                    <p className="homepage-curation-block-kicker">
-                      {getBlockTypeLabel(block.type)} | ลำดับ #{index + 1}
-                    </p>
-                    <h3>{block.title || block.key}</h3>
-                    <p className="muted">{block.key}</p>
-                  </div>
-                </div>
-
-                <div className="grid two homepage-curation-grid">
-                  <label>
-                    ชื่อบล็อก
-                    <input value={block.title} onChange={(event) => updateBlock(index, { title: event.target.value })} />
-                  </label>
-                  <label>
-                    คำอธิบายย่อย
-                    <input value={block.subtitle} onChange={(event) => updateBlock(index, { subtitle: event.target.value })} />
-                  </label>
-                  {!hero ? (
-                    <>
-                      <label>
-                        วิธีเลือกเนื้อหา
-                        <select value={block.source_mode} onChange={(event) => updateBlock(index, { source_mode: event.target.value })}>
-                          {SOURCE_MODE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        รายการสำรอง
-                        <select value={block.fallback_mode} onChange={(event) => updateBlock(index, { fallback_mode: event.target.value })}>
-                          {FALLBACK_MODE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        จำนวนขั้นต่ำ
-                        <input type="number" min="0" value={block.min_items} onChange={(event) => updateBlock(index, { min_items: event.target.value })} />
-                      </label>
-                      <label>
-                        จำนวนสูงสุด
-                        <input type="number" min="0" value={block.max_items} onChange={(event) => updateBlock(index, { max_items: event.target.value })} />
-                      </label>
-                    </>
-                  ) : null}
-                </div>
-
-                {!hero ? (
-                  <div className="homepage-curation-rule-panel">
-                    <h4>ตั้งค่ากฎ</h4>
-                    <div className="grid two">
-                      <label>
-                        ขอบเขตหมวดหมู่
-                        <input
-                          value={block.rule_config?.category_scope || ""}
-                          onChange={(event) => updateRuleConfig(index, { category_scope: event.target.value })}
-                          placeholder="เช่น attractions, cafes, restaurants"
-                        />
-                      </label>
-                      <label>
-                        แท็กสถานการณ์
-                        <input
-                          value={block.rule_config?.scenario_tags || ""}
-                          onChange={(event) => updateRuleConfig(index, { scenario_tags: event.target.value })}
-                          placeholder="เช่น day-trip, budget-500, family"
-                        />
-                      </label>
-                      <label className="full">
-                        วิธีเรียงลำดับ
-                        <select value={block.rule_config?.sort_by || "featured_then_recent"} onChange={(event) => updateRuleConfig(index, { sort_by: event.target.value })}>
-                          {SORT_BY_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                  </div>
-                ) : null}
-
-                {!hero ? renderBlockEditor(block, index) : null}
-              </article>
-            );
-          })}
         </div>
       ) : activeTab === TAB_HIGHLIGHT ? (
         <div className="homepage-curation-block-list">
@@ -1096,7 +1051,98 @@ export default function HomepageCuration({ token }) {
           })()}
         </div>
       ) : activeTab === TAB_SITUATIONS ? (
-        <Situations token={token} />
+        <div className="homepage-curation-block-list">
+          {(() => {
+            const scenariosIndex = blocks.findIndex((b) => b.key === "scenarios");
+            if (scenariosIndex < 0) return null;
+            const block = blocks[scenariosIndex];
+            return (
+              <article className="homepage-curation-block-card">
+                <div className="homepage-curation-block-head">
+                  <div>
+                    <p className="homepage-curation-block-kicker">{getBlockTypeLabel(block.type)}</p>
+                    <h3>{block.title || block.key}</h3>
+                    <p className="muted">{block.key}</p>
+                  </div>
+                </div>
+
+                <div className="grid two homepage-curation-grid">
+                  <label>
+                    ชื่อบล็อก
+                    <input value={block.title} onChange={(event) => updateBlock(scenariosIndex, { title: event.target.value })} />
+                  </label>
+                  <label>
+                    คำอธิบายย่อย
+                    <input value={block.subtitle} onChange={(event) => updateBlock(scenariosIndex, { subtitle: event.target.value })} />
+                  </label>
+                  <label>
+                    วิธีเลือกเนื้อหา
+                    <select value={block.source_mode} onChange={(event) => updateBlock(scenariosIndex, { source_mode: event.target.value })}>
+                      {SOURCE_MODE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    รายการสำรอง
+                    <select value={block.fallback_mode} onChange={(event) => updateBlock(scenariosIndex, { fallback_mode: event.target.value })}>
+                      {FALLBACK_MODE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    จำนวนขั้นต่ำ
+                    <input type="number" min="0" value={block.min_items} onChange={(event) => updateBlock(scenariosIndex, { min_items: event.target.value })} />
+                  </label>
+                  <label>
+                    จำนวนสูงสุด
+                    <input type="number" min="0" value={block.max_items} onChange={(event) => updateBlock(scenariosIndex, { max_items: event.target.value })} />
+                  </label>
+                </div>
+
+                <div className="homepage-curation-rule-panel">
+                  <h4>ตั้งค่ากฎ</h4>
+                  <div className="grid two">
+                    <label>
+                      ขอบเขตหมวดหมู่
+                      <input
+                        value={block.rule_config?.category_scope || ""}
+                        onChange={(event) => updateRuleConfig(scenariosIndex, { category_scope: event.target.value })}
+                        placeholder="เช่น attractions, cafes, restaurants"
+                      />
+                    </label>
+                    <label>
+                      แท็กสถานการณ์
+                      <input
+                        value={block.rule_config?.scenario_tags || ""}
+                        onChange={(event) => updateRuleConfig(scenariosIndex, { scenario_tags: event.target.value })}
+                        placeholder="เช่น day-trip, budget-500, family"
+                      />
+                    </label>
+                    <label className="full">
+                      วิธีเรียงลำดับ
+                      <select value={block.rule_config?.sort_by || "featured_then_recent"} onChange={(event) => updateRuleConfig(scenariosIndex, { sort_by: event.target.value })}>
+                        {SORT_BY_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                {renderBlockEditor(block, scenariosIndex)}
+              </article>
+            );
+          })()}
+          <Situations token={token} />
+        </div>
       ) : activeTab === TAB_EVENTS ? (
         <div className="homepage-curation-block-list">
           {(() => {

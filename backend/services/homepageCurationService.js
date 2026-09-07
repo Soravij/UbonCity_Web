@@ -863,11 +863,23 @@ export async function previewHomepageCurationLayout({
     loadApprovedEventsForHomepage(normalizedLang),
   ]);
 
+  const allSituations = await listSituations(normalizedLang);
+  const activeSituations = allSituations.filter((s) => s.is_active === 1);
+  const placesBySituation = await listPlacesForSituations(
+    activeSituations.map((s) => s.id),
+    normalizedLang
+  );
+  const situations = activeSituations.map((s) => ({
+    ...s,
+    places: (placesBySituation.get(s.id) ?? []).slice(s.sort_order === 1 ? 0 : 0, s.sort_order === 1 ? 5 : 3),
+  }));
+
   return {
     layout_key: normalizedKey,
     lang: normalizedLang,
     blocks: effectiveBlocks,
     resolved_blocks: buildResolvedBlocks(effectiveBlocks, allPlaces, allEvents, { include_hidden_blocks: true }),
+    situations,
   };
 }
 
