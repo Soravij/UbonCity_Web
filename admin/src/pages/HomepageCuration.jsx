@@ -888,15 +888,15 @@ export default function HomepageCuration({ token }) {
             const scenariosBlock = (previewBlocks || []).find((b) => b.key === "scenarios") || {};
             const eventsBlock = (previewBlocks || []).find((b) => b.key === "featured_events") || {};
 
+            const hlItems = highlightBlock.resolved_items || [];
             const hlManualSet = new Set(
               (highlightBlock.hydrated_manual_items || []).map((m) => `${m.entity_type}:${Number(m.id)}`)
             );
-            const hlItems = (highlightBlock.resolved_items || []).filter((it) => hlManualSet.has(`${it.entity_type}:${Number(it.id)}`));
 
+            const evItems = eventsBlock.resolved_items || [];
             const evManualSet = new Set(
               (eventsBlock.hydrated_manual_items || []).map((m) => `${m.entity_type}:${Number(m.id)}`)
             );
-            const evItems = (eventsBlock.resolved_items || []).filter((it) => evManualSet.has(`${it.entity_type}:${Number(it.id)}`));
             const evSlots = Array.from({ length: 5 }, (_, i) => evItems[i] || null);
 
             return (
@@ -920,8 +920,8 @@ export default function HomepageCuration({ token }) {
                   <div className="hcm-strip">
                     {hlItems.map((item) => {
                       const cover = item.effective_thumbnail_image || item.effective_cover_image || item.image || "";
-                      return (
-                        <div key={`hl-${item.entity_type}-${item.id}`} className="hcm-place">
+                        return (
+                          <div key={`hl-${item.entity_type}-${item.id}`} className={`hcm-place${hlManualSet.has(`${item.entity_type}:${Number(item.id)}`) ? " is-manual" : ""}`}>
                           <div className="hcm-place-media">
                             {cover ? <img src={cover} alt="" onError={(e) => { e.target.style.display = "none"; }} /> : null}
                           </div>
@@ -943,14 +943,18 @@ export default function HomepageCuration({ token }) {
                       <article key={s.id || si} className={`hcm-sit${si === 0 ? " is-large" : ""}`}>
                         <h5 className="hcm-sit-title">{s.title || s.slug || "-"}</h5>
                         <p className="hcm-sit-desc">{s.description || ""}</p>
-                        <ol className="hcm-sit-list">
-                          {(s.places || []).map((p, pi) => (
-                            <li key={p.id || pi}>
-                              <span className="hcm-sit-num">{String(pi + 1).padStart(2, "0")}</span>
-                              <span>{p.title || "-"}</span>
-                            </li>
-                          ))}
-                        </ol>
+                        {(s.places || []).length > 0 ? (
+                          <ol className="hcm-sit-list">
+                            {(s.places || []).map((p, pi) => (
+                              <li key={p.id || pi}>
+                                <span className="hcm-sit-num">{String(pi + 1).padStart(2, "0")}</span>
+                                <span>{p.title || "-"}</span>
+                              </li>
+                            ))}
+                          </ol>
+                        ) : (
+                          <p className="hcm-sit-empty">ยังไม่ได้เลือกสถานที่</p>
+                        )}
                       </article>
                     ))}
                   </div>
@@ -961,7 +965,7 @@ export default function HomepageCuration({ token }) {
                   <h4 className="hcm-heading">{eventsBlock.title || "featured_events"}</h4>
                   <div className="hcm-events">
                     {evSlots[0] ? (
-                      <div className="hcm-event is-featured">
+                      <div className={`hcm-event is-featured${evManualSet.has(`${evSlots[0].entity_type}:${Number(evSlots[0].id)}`) ? " is-manual" : ""}`}>
                         <div className="hcm-event-media">
                           {evSlots[0].image ? <img src={evSlots[0].image} alt="" onError={(e) => { e.target.style.display = "none"; }} /> : null}
                         </div>
@@ -973,7 +977,7 @@ export default function HomepageCuration({ token }) {
                     <div className="hcm-events-grid">
                       {evSlots.slice(1, 5).map((item, i) => (
                         item ? (
-                          <div key={`ev-${item.entity_type}-${item.id}-${i}`} className="hcm-event">
+                          <div key={`ev-${item.entity_type}-${item.id}-${i}`} className={`hcm-event${evManualSet.has(`${item.entity_type}:${Number(item.id)}`) ? " is-manual" : ""}`}>
                             <div className="hcm-event-media">
                               {item.image ? <img src={item.image} alt="" onError={(e) => { e.target.style.display = "none"; }} /> : null}
                             </div>
@@ -986,6 +990,8 @@ export default function HomepageCuration({ token }) {
                     </div>
                   </div>
                 </section>
+
+                <div className="hcm-explore" />
               </div>
             );
           })()}
