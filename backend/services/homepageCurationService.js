@@ -760,7 +760,8 @@ export async function publishHomepageCurationLayout({
 } = {}) {
   await ensureHomepageCurationTables();
   const sourceLang = normalizeLang(lang);
-  const source = await getHomepageCurationLayout(layoutKey, sourceLang);
+  const key = normalizeLayoutKey(layoutKey);
+  const source = await getHomepageCurationLayout(key, sourceLang);
   const publishedAt = new Date();
 
   const conn = await pool.getConnection();
@@ -787,7 +788,7 @@ export async function publishHomepageCurationLayout({
            updated_by = VALUES(updated_by),
            published_by = VALUES(published_by),
            published_at = VALUES(published_at)`,
-        [layoutKey, targetLang, json, json, actorId, actorId, publishedAt]
+        [key, targetLang, json, json, actorId, actorId, publishedAt]
       );
     }
     await conn.commit();
@@ -798,7 +799,7 @@ export async function publishHomepageCurationLayout({
     conn.release();
   }
 
-  return getHomepageCurationLayout(layoutKey, sourceLang);
+  return getHomepageCurationLayout(key, sourceLang);
 }
 
 export async function getPublishedHomepageLayout(layoutKey = "home", lang = "th") {
