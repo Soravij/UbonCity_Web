@@ -6,6 +6,8 @@ import {
 import { listSituations } from "../repositories/situationRepository.js";
 import { listPlacesForSituations } from "../repositories/situationPlaceRepository.js";
 
+const PUBLISH_LANGS = ["th", "en", "zh", "lo"];
+
 const VALID_SOURCE_MODES = new Set(["manual-first-hybrid", "manual-only", "rule-only"]);
 const VALID_FALLBACK_MODES = new Set(["latest-approved", "featured", "none"]);
 const VALID_ENTITY_TYPES = new Set(["place", "event"]);
@@ -755,16 +757,49 @@ export async function publishHomepageCurationLayout({
   layoutKey = "home",
   lang = "th",
   actorId = null,
-}) {
+} = {}) {
   await ensureHomepageCurationTables();
-  const layout = await getHomepageCurationLayout(layoutKey, lang);
-  await pool.query(
-    `UPDATE homepage_curation_layouts
-      SET published_blocks_json=?, published_by=?, published_at=NOW()
-      WHERE layout_key=? AND lang=?`,
-    [JSON.stringify(layout.draft_blocks), actorId, layout.layout_key, layout.lang]
-  );
-  return getHomepageCurationLayout(layout.layout_key, layout.lang);
+  const sourceLang = normalizeLang(lang);
+  const key = normalizeLayoutKey(layoutKey);
+  const source = await getHomepageCurationLayout(key, sourceLang);
+  const publishedAt = new Date();
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (const targetLang of PUBLISH_LANGS) {
+      const blocks = (source.draft_blocks || []).map((block) => {
+        if (targetLang === sourceLang) return block;
+        const copy = getDefaultBlockCopy(targetLang, block.key) || {};
+        return {
+          ...block,
+          title: copy.title ?? "",
+          subtitle: copy.subtitle ?? "",
+        };
+      });
+      const json = JSON.stringify(blocks);
+      await conn.query(
+        `INSERT INTO homepage_curation_layouts
+           (layout_key, lang, draft_blocks_json, published_blocks_json, updated_by, published_by, published_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           draft_blocks_json = VALUES(draft_blocks_json),
+           published_blocks_json = VALUES(published_blocks_json),
+           updated_by = VALUES(updated_by),
+           published_by = VALUES(published_by),
+           published_at = VALUES(published_at)`,
+        [key, targetLang, json, json, actorId, actorId, publishedAt]
+      );
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+
+  return getHomepageCurationLayout(key, sourceLang);
 }
 
 export async function getPublishedHomepageLayout(layoutKey = "home", lang = "th") {
