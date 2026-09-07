@@ -253,6 +253,9 @@ export default function HomepageCuration({ token }) {
   const [situationsList, setSituationsList] = useState([]);
   const [selectedSituationSlugs, setSelectedSituationSlugs] = useState([]);
   const [poolSituationStatus, setPoolSituationStatus] = useState("");
+  const [shortcutsList, setShortcutsList] = useState([]);
+  const [selectedShortcutSlugs, setSelectedShortcutSlugs] = useState([]);
+  const [poolShortcutStatus, setPoolShortcutStatus] = useState("");
   const previewRequestSeq = useRef(0);
 
   const serializedDraft = useMemo(() => serializeBlocks(blocks), [blocks]);
@@ -302,6 +305,20 @@ export default function HomepageCuration({ token }) {
       }
     }
     loadSituations();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function loadShortcuts() {
+      try {
+        const res = await api.get("/shortcuts");
+        if (active) setShortcutsList(Array.isArray(res.data?.items) ? res.data.items : []);
+      } catch {
+        if (active) setShortcutsList([]);
+      }
+    }
+    loadShortcuts();
     return () => { active = false; };
   }, []);
 
@@ -596,6 +613,58 @@ export default function HomepageCuration({ token }) {
     setPoolSituationStatus(
       fail === 0
         ? `เพิ่มเข้า ${ok} situation แล้ว`
+        : `สำเร็จ ${ok} ล้มเหลว ${fail}`
+    );
+  }
+
+  async function addSelectedPoolCandidatesToShortcuts() {
+    if (!selectedShortcutSlugs.length || !selectedPoolCandidates.length) return;
+    const placeIds = selectedPoolCandidates
+      .filter((c) => String(c.entity_type || "").toLowerCase() === "place")
+      .map((c) => Number(c.id))
+      .filter(Boolean);
+    if (!placeIds.length) {
+      setPoolShortcutStatus("รายการที่เลือกไม่มีสถานที่");
+      return;
+    }
+    setPoolShortcutStatus("กำลังบันทึก...");
+    let ok = 0;
+    let fail = 0;
+    for (const slug of selectedShortcutSlugs) {
+      try {
+        await api.post(`/shortcuts/${slug}/places`, { place_ids: placeIds }, { headers: authHeaders(token) });
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setPoolShortcutStatus(
+      fail === 0
+        ? `เพิ่ม ${placeIds.length} สถานที่เข้า ${ok} ทางลัดแล้ว`
+        : `สำเร็จ ${ok} ล้มเหลว ${fail} — ตรวจสอบอีกครั้ง`
+    );
+    setPoolSelectedCandidateKeys([]);
+    setSelectedShortcutSlugs([]);
+  }
+
+  async function addPoolCandidateToShortcuts(candidate) {
+    if (!selectedShortcutSlugs.length) return;
+    const placeId = Number(candidate?.id);
+    if (!placeId || String(candidate?.entity_type || "").toLowerCase() !== "place") return;
+    setPoolShortcutStatus("กำลังบันทึก...");
+    let ok = 0;
+    let fail = 0;
+    for (const slug of selectedShortcutSlugs) {
+      try {
+        await api.post(`/shortcuts/${slug}/places`, { place_ids: [placeId] }, { headers: authHeaders(token) });
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setPoolShortcutStatus(
+      fail === 0
+        ? `เพิ่มเข้า ${ok} ทางลัดแล้ว`
         : `สำเร็จ ${ok} ล้มเหลว ${fail}`
     );
   }
@@ -1290,6 +1359,31 @@ export default function HomepageCuration({ token }) {
                     <span className="muted">ไม่มี situation</span>
                   )}
                 </fieldset>
+                <fieldset className="full">
+                  <legend>ทางลัด</legend>
+                  {shortcutsList.length ? (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                      {shortcutsList.map((s) => (
+                        <button
+                          key={s.slug}
+                          type="button"
+                          className={selectedShortcutSlugs.includes(s.slug) ? "primary" : "ghost"}
+                          onClick={() => {
+                            setSelectedShortcutSlugs((current) =>
+                              current.includes(s.slug)
+                                ? current.filter((x) => x !== s.slug)
+                                : [...current, s.slug]
+                            );
+                          }}
+                        >
+                          {s.title || s.slug}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="muted">ไม่มีทางลัด</span>
+                  )}
+                </fieldset>
               </div>
 
               {taxonomyCatalogError ? <p className="status">{taxonomyCatalogError}</p> : null}
@@ -1318,6 +1412,15 @@ export default function HomepageCuration({ token }) {
                     เพิ่มรายการที่เลือกเข้า situation
                   </button>
                   {poolSituationStatus ? <span className="muted">{poolSituationStatus}</span> : null}
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={addSelectedPoolCandidatesToShortcuts}
+                    disabled={!selectedShortcutSlugs.length || !selectedPoolCandidates.length}
+                  >
+                    เพิ่มรายการที่เลือกเข้าทางลัด
+                  </button>
+                  {poolShortcutStatus ? <span className="muted">{poolShortcutStatus}</span> : null}
                 </div>
                 <div className="table-wrap">
                 <table>
@@ -1367,6 +1470,14 @@ export default function HomepageCuration({ token }) {
                               disabled={!selectedSituationSlugs.length || String(candidate.entity_type || "").toLowerCase() !== "place"}
                             >
                               เพิ่มเข้า situation
+                            </button>{" "}
+                            <button
+                              type="button"
+                              className="ghost tiny-btn"
+                              onClick={() => addPoolCandidateToShortcuts(candidate)}
+                              disabled={!selectedShortcutSlugs.length || String(candidate.entity_type || "").toLowerCase() !== "place"}
+                            >
+                              เพิ่มเข้าทางลัด
                             </button>
                           </td>
                         </tr>

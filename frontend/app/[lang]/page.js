@@ -40,16 +40,24 @@ export default async function LangHome({ params }) {
   });
   const featuredStripPlaces = topTenPlaces.slice(0, 3);
 
-  const quickActions = decisionCopy.quickActions.map((action) => {
-    const prebuiltHref = String(action?.href || "").trim();
-    if (prebuiltHref) {
-      return { label: action.label, href: `/${activeLang}/${prebuiltHref}` };
-    }
-    return {
-      label: action.label,
-      href: `/${activeLang}/${action.category}?scenario=${encodeURIComponent(action.scenario)}`,
-    };
-  });
+  const shortcutRows = Array.isArray(homepageLayout?.shortcuts)
+    ? homepageLayout.shortcuts
+    : [];
+  const quickActions = shortcutRows.length
+    ? shortcutRows.map((s) => ({
+        label: s.title,
+        href: `/${activeLang}/shortcut/${s.slug}`,
+      }))
+    : decisionCopy.quickActions.map((action) => {
+        const prebuiltHref = String(action?.href || "").trim();
+        if (prebuiltHref) {
+          return { label: action.label, href: `/${activeLang}/${prebuiltHref}` };
+        }
+        return {
+          label: action.label,
+          href: `/${activeLang}/${action.category}?scenario=${encodeURIComponent(action.scenario)}`,
+        };
+      });
 
   const resolvedBlocks = Array.isArray(homepageLayout?.resolved_blocks) ? homepageLayout.resolved_blocks : [];
   const hasPublishedCurationLayout =
