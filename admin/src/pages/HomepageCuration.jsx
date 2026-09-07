@@ -827,7 +827,7 @@ export default function HomepageCuration({ token }) {
                 {saving ? "กำลังบันทึก..." : "บันทึกฉบับร่าง"}
               </button>
               <button type="button" className="primary" onClick={onPublish} disabled={loading || publishing || saving}>
-                {publishing ? "กำลังเผยแพร่..." : "เผยแพร่เลย์เอาต์"}
+                {publishing ? "กำลังเผยแพร่..." : "เผยแพร่ทุกภาษา"}
               </button>
             </>
           ) : null}
