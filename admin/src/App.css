@@ -1356,7 +1356,7 @@ th {
   max-height: 70vh;
   overflow-y: auto;
   overflow-x: hidden;
-  background: var(--theme-surface);
+  background: color-mix(in srgb, var(--theme-surface) 92%, var(--theme-bg));
   border: 1px solid var(--theme-border);
   border-radius: 14px;
   padding: 14px;

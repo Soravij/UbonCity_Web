@@ -879,6 +879,37 @@ export default function HomepageCuration({ token }) {
             ))}
           </div>
 
+          {(() => {
+            const heroBlock = (previewBlocks || []).find((b) => b.key === "hero") || blocks.find((b) => b.key === "hero") || {};
+            const heroIndex = blocks.findIndex((b) => b.key === "hero");
+            return (
+              <article className="homepage-curation-block-card">
+                <div className="homepage-curation-block-head">
+                  <div>
+                    <p className="homepage-curation-block-kicker">ส่วนหัวหน้าแรก</p>
+                    <h3>ข้อความ Hero</h3>
+                  </div>
+                </div>
+                <div className="grid two homepage-curation-grid">
+                  <label>
+                    หัวข้อ
+                    <input
+                      value={heroBlock.title || ""}
+                      onChange={(event) => { if (heroIndex >= 0) updateBlock(heroIndex, { title: event.target.value }); }}
+                    />
+                  </label>
+                  <label>
+                    คำอธิบาย
+                    <input
+                      value={heroBlock.subtitle || ""}
+                      onChange={(event) => { if (heroIndex >= 0) updateBlock(heroIndex, { subtitle: event.target.value }); }}
+                    />
+                  </label>
+                </div>
+              </article>
+            );
+          })()}
+
           {previewError ? <p className="status">{previewError}</p> : null}
           {previewLoading ? <p className="muted">กำลังประมวลผลตัวอย่าง...</p> : null}
 
@@ -992,29 +1023,6 @@ export default function HomepageCuration({ token }) {
                 </section>
 
                 <div className="hcm-explore" />
-              </div>
-            );
-          })()}
-
-          {(() => {
-            const heroBlock = (previewBlocks || []).find((b) => b.key === "hero") || blocks.find((b) => b.key === "hero") || {};
-            const heroIndex = blocks.findIndex((b) => b.key === "hero");
-            return (
-              <div className="grid two homepage-curation-grid">
-                <label>
-                  ชื่อบล็อก hero
-                  <input
-                    value={heroBlock.title || ""}
-                    onChange={(event) => { if (heroIndex >= 0) updateBlock(heroIndex, { title: event.target.value }); }}
-                  />
-                </label>
-                <label>
-                  คำอธิบายย่อย hero
-                  <input
-                    value={heroBlock.subtitle || ""}
-                    onChange={(event) => { if (heroIndex >= 0) updateBlock(heroIndex, { subtitle: event.target.value }); }}
-                  />
-                </label>
               </div>
             );
           })()}
