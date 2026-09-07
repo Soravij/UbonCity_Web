@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, authHeaders } from "../api/api";
 import Situations from "./Situations";
+import Shortcuts from "./Shortcuts";
 import {
   EVENT_BLOCK_KEY,
   HERO_BLOCK_KEY,
@@ -34,6 +35,7 @@ const FIXED_BLOCK_TYPES = {
 const TAB_LAYOUT = "layout";
 const TAB_HIGHLIGHT = "highlight";
 const TAB_SITUATIONS = "situations";
+const TAB_SHORTCUTS = "shortcuts";
 const TAB_EVENTS = "events";
 const TAB_SIGNALS = "signals";
 
@@ -846,6 +848,9 @@ export default function HomepageCuration({ token }) {
           <button type="button" className={activeTab === TAB_SITUATIONS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SITUATIONS)}>
             สถานการณ์
           </button>
+          <button type="button" className={activeTab === TAB_SHORTCUTS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SHORTCUTS)}>
+            ทางลัด
+          </button>
           <button type="button" className={activeTab === TAB_EVENTS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_EVENTS)}>
             อีเวนต์
           </button>
@@ -1152,6 +1157,10 @@ export default function HomepageCuration({ token }) {
             );
           })()}
           <Situations token={token} />
+        </div>
+      ) : activeTab === TAB_SHORTCUTS ? (
+        <div className="homepage-curation-block-list">
+          <Shortcuts token={token} />
         </div>
       ) : activeTab === TAB_EVENTS ? (
         <div className="homepage-curation-block-list">
