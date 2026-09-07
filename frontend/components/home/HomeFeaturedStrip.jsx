@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { resolveCardCoverVisual } from "@/lib/phase56-decision-helpers.mjs";
+import ImageWithFallback from "../ImageWithFallback";
 
 function buildPlaceHref(lang, place) {
   if (!place?.category || !place?.slug) return null;
@@ -27,7 +28,7 @@ export default function HomeFeaturedStrip({ places = [], activeLang, copy }) {
               className="home-featured-place"
             >
               <div className="home-featured-place-media">
-                <img src={coverImage} alt={coverAlt} loading="lazy" />
+                <ImageWithFallback src={coverImage} alt={coverAlt} loading="lazy" fallbackSrc="/default-lotus.svg" />
               </div>
               <div className="home-featured-place-info">
                 <span className="home-featured-place-label">
@@ -47,7 +48,7 @@ export default function HomeFeaturedStrip({ places = [], activeLang, copy }) {
             className="home-featured-place"
           >
             <div className="home-featured-place-media">
-              <img src={coverImage} alt={coverAlt} loading="lazy" />
+              <ImageWithFallback src={coverImage} alt={coverAlt} loading="lazy" fallbackSrc="/default-lotus.svg" />
             </div>
             <div className="home-featured-place-info">
               <span className="home-featured-place-label">

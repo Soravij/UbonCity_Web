@@ -1,6 +1,7 @@
 ﻿import Link from "next/link";
 import { resolveCardCoverVisual } from "@/lib/phase56-decision-helpers.mjs";
 import { getLangContent } from "@/lib/site";
+import ImageWithFallback from "./ImageWithFallback";
 
 function normalizeRotation(rotation) {
   const n = Number(rotation);
@@ -79,9 +80,22 @@ function parseDescriptionBlocks(text) {
   return blocks;
 }
 
+const stripHtml = (value) =>
+  String(value || "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+
 function getSummary(place, copy) {
   const blocks = parseDescriptionBlocks(place?.description || "");
-  const textBlock = blocks.find((b) => b.type === "text")?.value || "";
+  const textBlock = stripHtml(blocks.find((b) => b.type === "text")?.value || "");
   if (!textBlock) return copy.empty;
   return textBlock.length > 120 ? `${textBlock.slice(0, 120)}...` : textBlock;
 }
@@ -98,12 +112,13 @@ export default function Card({ place, lang = "th" }) {
   const cardContent = (
     <>
       <div className="h-44 w-full overflow-hidden sm:h-48">
-        <img
+        <ImageWithFallback
           src={coverImage}
           alt={coverAlt}
           className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04]"
           style={{ transform: rotationTransform(coverRotation), transformOrigin: "center center" }}
           loading="lazy"
+          fallbackSrc="/default-lotus.svg"
         />
       </div>
 
