@@ -72,12 +72,6 @@ const BLOCK_TYPE_LABEL = {
   "event-list": "รายการอีเวนต์",
 };
 
-const SOURCE_MODE_LABEL = {
-  "manual-first-hybrid": "เลือกเองก่อน แล้วระบบช่วยเติม",
-  "manual-only": "ใช้เฉพาะรายการที่เลือกเอง",
-  "rule-only": "ให้ระบบเลือกจากเงื่อนไข",
-};
-
 function getEntityTypeLabel(value) {
   return ENTITY_TYPE_LABEL[String(value || "").trim().toLowerCase()] || "รายการ";
 }
@@ -364,6 +358,7 @@ export default function HomepageCuration({ token }) {
     } catch (error) {
       if (previewRequestSeq.current !== requestId) return;
       setPreviewBlocks([]);
+      setPreviewSituations([]);
       setPreviewError(error.response?.data?.error || "Failed to preview homepage curation layout");
     } finally {
       if (previewRequestSeq.current === requestId) setPreviewLoading(false);
@@ -880,8 +875,9 @@ export default function HomepageCuration({ token }) {
           </div>
 
           {(() => {
-            const heroBlock = (previewBlocks || []).find((b) => b.key === "hero") || blocks.find((b) => b.key === "hero") || {};
             const heroIndex = blocks.findIndex((b) => b.key === "hero");
+            if (heroIndex < 0) return null;
+            const heroBlock = blocks[heroIndex];
             return (
               <article className="homepage-curation-block-card">
                 <div className="homepage-curation-block-head">
@@ -895,14 +891,14 @@ export default function HomepageCuration({ token }) {
                     หัวข้อ
                     <input
                       value={heroBlock.title || ""}
-                      onChange={(event) => { if (heroIndex >= 0) updateBlock(heroIndex, { title: event.target.value }); }}
+                      onChange={(event) => updateBlock(heroIndex, { title: event.target.value })}
                     />
                   </label>
                   <label>
                     คำอธิบาย
                     <input
                       value={heroBlock.subtitle || ""}
-                      onChange={(event) => { if (heroIndex >= 0) updateBlock(heroIndex, { subtitle: event.target.value }); }}
+                      onChange={(event) => updateBlock(heroIndex, { subtitle: event.target.value })}
                     />
                   </label>
                 </div>

@@ -1260,86 +1260,10 @@ th {
   gap: 10px;
 }
 
-.homepage-curation-preview-list {
-  display: grid;
-  gap: 10px;
-}
-
-.homepage-curation-preview-card {
-  border: 1px solid var(--theme-border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--theme-surface) 94%, var(--theme-bg));
-  padding: 10px;
-  display: grid;
-  gap: 10px;
-}
-
-.homepage-curation-preview-head {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.homepage-curation-preview-warning {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--theme-danger) 12%, var(--theme-surface));
-  border: 1px solid color-mix(in srgb, var(--theme-danger) 32%, var(--theme-border));
-  color: var(--theme-text);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
 .homepage-curation-warning-text {
   color: var(--theme-danger);
   margin-top: 4px;
   font-size: 0.85rem;
-}
-
-.homepage-curation-preview-misses {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.homepage-curation-preview-misses span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, #f59e0b 10%, var(--theme-surface));
-  border: 1px solid color-mix(in srgb, #f59e0b 34%, var(--theme-border));
-  color: var(--theme-text);
-  font-size: 0.78rem;
-}
-
-.homepage-curation-preview-items {
-  display: grid;
-  gap: 8px;
-}
-
-.homepage-curation-preview-item {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-}
-
-.homepage-curation-preview-item > span {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--theme-primary) 14%, var(--theme-surface));
-  border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, var(--theme-border));
-  font-size: 0.78rem;
-  font-weight: 700;
 }
 
 .homepage-curation-manual-row {
@@ -1360,6 +1284,11 @@ th {
   border: 1px solid var(--theme-border);
   border-radius: 14px;
   padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.homepage-curation-mock .hcm-section {
   display: grid;
   gap: 14px;
 }

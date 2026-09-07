@@ -7,6 +7,7 @@ import { listSituations } from "../repositories/situationRepository.js";
 import { listPlacesForSituations } from "../repositories/situationPlaceRepository.js";
 
 const PUBLISH_LANGS = ["th", "en", "zh", "lo"];
+const DRAFT_SOURCE_LANG = "th";
 
 const VALID_SOURCE_MODES = new Set(["manual-first-hybrid", "manual-only", "rule-only"]);
 const VALID_FALLBACK_MODES = new Set(["latest-approved", "featured", "none"]);
@@ -847,7 +848,7 @@ export async function previewHomepageCurationLayout({
     normalizedLang
   );
 
-  const effectiveBlocks = normalizedLang !== "th"
+  const effectiveBlocks = normalizedLang !== DRAFT_SOURCE_LANG
     ? blocks.map((block) => {
         const copy = getDefaultBlockCopy(normalizedLang, block.key) || {};
         return {
