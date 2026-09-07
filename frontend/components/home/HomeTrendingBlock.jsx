@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LOCALE_MAP } from "@/lib/home-copy";
+import ImageWithFallback from "../ImageWithFallback";
 
 function formatUpdatedAt(value, lang) {
   if (!value) return "-";
@@ -38,11 +39,12 @@ export default function HomeTrendingBlock({ activeLang, copy, decisionCopy, late
     const cardToneClass = isFeatured ? "is-featured" : "is-secondary";
     const media = (
       <div className={`home-event-media ${cardToneClass}${event.isPlaceholder ? " is-placeholder-media" : ""}`}>
-        <img
+        <ImageWithFallback
           src={String(event.image || "/empty-event-art.svg")}
           alt={event.title || "Event"}
           className={`h-full w-full object-cover transition duration-500 group-hover:scale-[1.05]${event.isPlaceholder ? " is-placeholder" : ""}`}
           loading="lazy"
+          fallbackSrc="/empty-event-art.svg"
         />
       </div>
     );
