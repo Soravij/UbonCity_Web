@@ -846,6 +846,18 @@ export async function previewHomepageCurationLayout({
     Array.isArray(draftBlocks) ? draftBlocks : (await getHomepageCurationLayout(normalizedKey, normalizedLang)).draft_blocks,
     normalizedLang
   );
+
+  const effectiveBlocks = normalizedLang !== "th"
+    ? blocks.map((block) => {
+        const copy = getDefaultBlockCopy(normalizedLang, block.key) || {};
+        return {
+          ...block,
+          title: copy.title ?? "",
+          subtitle: copy.subtitle ?? "",
+        };
+      })
+    : blocks;
+
   const [allPlaces, allEvents] = await Promise.all([
     loadApprovedPlacesForHomepage(normalizedLang),
     loadApprovedEventsForHomepage(normalizedLang),
@@ -854,8 +866,8 @@ export async function previewHomepageCurationLayout({
   return {
     layout_key: normalizedKey,
     lang: normalizedLang,
-    blocks,
-    resolved_blocks: buildResolvedBlocks(blocks, allPlaces, allEvents, { include_hidden_blocks: true }),
+    blocks: effectiveBlocks,
+    resolved_blocks: buildResolvedBlocks(effectiveBlocks, allPlaces, allEvents, { include_hidden_blocks: true }),
   };
 }
 

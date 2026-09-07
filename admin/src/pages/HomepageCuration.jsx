@@ -24,6 +24,7 @@ const LANGUAGE_OPTIONS = [
 ];
 
 const FIXED_BLOCK_ORDER = ["hero", "highlight", "scenarios", "featured_events"];
+const EDIT_LANG = "th";
 const FIXED_BLOCK_TYPES = {
   hero: "hero",
   highlight: "place-list",
@@ -241,7 +242,7 @@ function getDefaultCandidateEntityType(block) {
 
 export default function HomepageCuration({ token }) {
   const [activeTab, setActiveTab] = useState(TAB_LAYOUT);
-  const [lang, setLang] = useState("th");
+  const [previewLang, setPreviewLang] = useState("th");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -319,12 +320,12 @@ export default function HomepageCuration({ token }) {
     setCandidateByBlock(nextState);
   }, []);
 
-  const loadLayout = useCallback(async (nextLang = lang) => {
+  const loadLayout = useCallback(async () => {
     setLoading(true);
     setMessage("");
     try {
       const res = await api.get("/homepage-curation/layout", {
-        params: { layout_key: "home", lang: nextLang },
+        params: { layout_key: "home", lang: EDIT_LANG },
         headers: authHeaders(token),
       });
       const item = res.data?.item || null;
@@ -339,13 +340,13 @@ export default function HomepageCuration({ token }) {
     } finally {
       setLoading(false);
     }
-  }, [lang, resetCandidateState, token]);
+  }, [resetCandidateState, token]);
 
   useEffect(() => {
-    loadLayout(lang);
-  }, [lang, loadLayout]);
+    loadLayout();
+  }, [loadLayout]);
 
-  const loadPreview = useCallback(async (draftBlocks = serializedDraft, nextLang = lang) => {
+  const loadPreview = useCallback(async (draftBlocks = serializedDraft, nextLang = previewLang) => {
     const requestId = previewRequestSeq.current + 1;
     previewRequestSeq.current = requestId;
     setPreviewLoading(true);
@@ -369,15 +370,15 @@ export default function HomepageCuration({ token }) {
     } finally {
       if (previewRequestSeq.current === requestId) setPreviewLoading(false);
     }
-  }, [lang, serializedDraft, token]);
+  }, [previewLang, serializedDraft, token]);
 
   useEffect(() => {
     if (loading) return undefined;
     const timer = window.setTimeout(() => {
-      loadPreview(serializedDraft, lang);
+      loadPreview(serializedDraft, previewLang);
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [lang, loadPreview, loading, serializedDraft]);
+  }, [previewLang, loadPreview, loading, serializedDraft]);
 
   function updateBlock(index, patch) {
     setBlocks((current) =>
@@ -399,18 +400,6 @@ export default function HomepageCuration({ token }) {
           : block
       )
     );
-  }
-
-  function moveBlock(index, direction) {
-    setBlocks((current) => {
-      const next = [...current];
-      const target = index + direction;
-      if (target < 0 || target >= next.length) return current;
-      const temp = next[index];
-      next[index] = next[target];
-      next[target] = temp;
-      return next.map((block, blockIndex) => ({ ...block, position: blockIndex + 1 }));
-    });
   }
 
   function moveManualItem(blockIndex, itemIndex, direction) {
@@ -513,7 +502,7 @@ export default function HomepageCuration({ token }) {
       const res = await api.get("/homepage-curation/candidates", {
         params: {
           entity_type: getDefaultCandidateEntityType(block),
-          lang,
+          lang: EDIT_LANG,
           q: state.q,
           limit: 20,
         },
@@ -543,7 +532,7 @@ export default function HomepageCuration({ token }) {
       const res = await api.get("/homepage-curation/candidates", {
         params: buildPoolCandidateParams({
           entityType: poolState.entity_type,
-          lang,
+          lang: EDIT_LANG,
           q: poolState.q,
           limit: 20,
           taxonomyTrue: selectedTaxonomyLookupKeys(poolState.taxonomy_true),
@@ -624,7 +613,7 @@ export default function HomepageCuration({ token }) {
         "/homepage-curation/layout",
         {
           layout_key: "home",
-          lang,
+          lang: EDIT_LANG,
           draft_blocks: serializeBlocks(blocks),
         },
         { headers: authHeaders(token) }
@@ -635,7 +624,7 @@ export default function HomepageCuration({ token }) {
       setBlocks(nextBlocks);
       resetCandidateState(nextBlocks);
       setMessage("บันทึกฉบับร่างแล้ว");
-      loadPreview(item?.draft_blocks || serializeBlocks(nextBlocks), lang);
+      loadPreview(item?.draft_blocks || serializeBlocks(nextBlocks), previewLang);
     } catch (error) {
       setMessage(error.response?.data?.error || "บันทึกหน้าแรกไม่สำเร็จ");
     } finally {
@@ -651,7 +640,7 @@ export default function HomepageCuration({ token }) {
         "/homepage-curation/layout/publish",
         {
           layout_key: "home",
-          lang,
+          lang: EDIT_LANG,
         },
         { headers: authHeaders(token) }
       );
@@ -661,7 +650,7 @@ export default function HomepageCuration({ token }) {
       setBlocks(nextBlocks);
       resetCandidateState(nextBlocks);
       setMessage("เผยแพร่เลย์เอาต์แล้ว");
-      loadPreview(item?.draft_blocks || serializeBlocks(nextBlocks), lang);
+      loadPreview(item?.draft_blocks || serializeBlocks(nextBlocks), previewLang);
     } catch (error) {
       setMessage(error.response?.data?.error || "เผยแพร่หน้าแรกไม่สำเร็จ");
     } finally {
@@ -815,12 +804,12 @@ export default function HomepageCuration({ token }) {
           <p className="muted">จัดลำดับและเลือกวิธีแสดงผลของช่องคงที่บนหน้าแรก โดยไม่แก้ข้อมูลคอนเทนต์จริง</p>
         </div>
         <div className="homepage-curation-head-actions">
-          <button type="button" className="ghost" onClick={() => loadLayout(lang)} disabled={loading}>
+          <button type="button" className="ghost" onClick={() => loadLayout()} disabled={loading}>
             รีเฟรช
           </button>
           {activeTab === TAB_LAYOUT ? (
             <>
-              <button type="button" className="ghost" onClick={() => loadPreview(serializedDraft, lang)} disabled={loading || previewLoading}>
+              <button type="button" className="ghost" onClick={() => loadPreview(serializedDraft, previewLang)} disabled={loading || previewLoading}>
                 {previewLoading ? "กำลังประมวลผล..." : "รีเฟรชตัวอย่าง"}
               </button>
               <button type="button" className="primary" onClick={onSaveDraft} disabled={loading || saving}>
@@ -835,16 +824,6 @@ export default function HomepageCuration({ token }) {
       </div>
 
       <div className="homepage-curation-toolbar">
-        <label>
-          ภาษา
-          <select value={lang} onChange={(event) => setLang(event.target.value)} disabled={loading}>
-            {LANGUAGE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
         <div className="homepage-curation-summary-grid">
           <div className="homepage-curation-summary-card">
             <span>บล็อกฉบับร่าง</span>
@@ -889,74 +868,82 @@ export default function HomepageCuration({ token }) {
         <p className="muted">กำลังโหลดข้อมูลหน้าแรก...</p>
       ) : activeTab === TAB_LAYOUT ? (
         <div className="homepage-curation-block-list">
-          <article className="homepage-curation-block-card">
-            <div className="homepage-curation-block-head">
-              <div>
-                <p className="homepage-curation-block-kicker">ตัวอย่างผลลัพธ์</p>
-                <h3>ตัวอย่างหน้าแรก</h3>
-                <p className="muted">ผลลัพธ์จากการจัดวางช่องคงที่หลังรวมรายการเลือกเอง กฎ และรายการสำรอง</p>
-              </div>
-            </div>
+          <div className="actions" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {LANGUAGE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={previewLang === option.value ? "primary" : "ghost"}
+                onClick={() => setPreviewLang(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
 
-            {previewError ? <p className="status">{previewError}</p> : null}
-            {previewLoading ? <p className="muted">กำลังประมวลผลตัวอย่าง...</p> : null}
-            {!previewLoading && !previewBlocks.length && !previewError ? (
-              <p className="muted">ยังไม่พบบล็อกที่แสดงผลได้ในฉบับร่างปัจจุบัน</p>
-            ) : null}
+          {previewError ? <p className="status">{previewError}</p> : null}
+          {previewLoading ? <p className="muted">กำลังประมวลผลตัวอย่าง...</p> : null}
 
-            {previewBlocks.length ? (
-              <div className="homepage-curation-preview-list">
-                {previewBlocks.map((block) => (
-                  <div key={`preview-${block.key}`} className="homepage-curation-preview-card">
-                    <div className="homepage-curation-preview-head">
-                      <div>
-                        <strong>{block.title || block.key}</strong>
-                        <p className="muted">
-                          {getBlockTypeLabel(block.type)} | {getSourceModeLabel(block.source_mode)} | {Array.isArray(block.resolved_items) ? block.resolved_items.length : 0} รายการ
-                        </p>
-                      </div>
-                      {Array.isArray(block.manual_misses) && block.manual_misses.length ? (
-                        <span className="homepage-curation-preview-warning">รายการเลือกเองที่ไม่พบ {block.manual_misses.length}</span>
-                      ) : null}
-                    </div>
+          <div className="homepage-curation-mock">
+            {FIXED_BLOCK_ORDER.map((blockKey) => {
+              const block = (previewBlocks || []).find((b) => b.key === blockKey) || {};
+              const isHero = blockKey === "hero";
+              const isHighlightOrFeatured = blockKey === "highlight" || blockKey === "featured_events";
+              const manualSet = new Set(
+                (block.hydrated_manual_items || []).map((m) => `${m.entity_type}:${Number(m.id)}`)
+              );
+              const items = isHero
+                ? []
+                : isHighlightOrFeatured
+                  ? (block.resolved_items || []).filter((it) => manualSet.has(`${it.entity_type}:${Number(it.id)}`))
+                  : (block.resolved_items || []);
+              const misses = Array.isArray(block.manual_misses) ? block.manual_misses : [];
 
-                    {Array.isArray(block.manual_misses) && block.manual_misses.length ? (
-                      <div className="homepage-curation-preview-misses">
-                        {block.manual_misses.map((item) => (
-                          <span key={`${block.key}-miss-${item.entity_type}-${item.entity_id}`}>
-                            {getEntityTypeLabel(item.entity_type)} #{item.entity_id}{item.slug ? ` | รหัส: ${item.slug}` : ""}
-                          </span>
+              return (
+                <div key={blockKey}>
+                  <div className={`homepage-curation-mock-slot${isHero ? " is-locked" : ""}`}>
+                    <strong>{block.title || blockKey}</strong>
+                    {block.subtitle ? <p className="muted">{block.subtitle}</p> : null}
+                    {!isHero && items.length ? (
+                      <ul style={{ margin: "6px 0 0", paddingLeft: "18px" }}>
+                        {items.map((item, idx) => (
+                          <li key={`${blockKey}-${item.entity_type}-${item.id}-${idx}`}>{item.title || "-"}</li>
                         ))}
-                      </div>
+                      </ul>
                     ) : null}
-
-                    {Array.isArray(block.resolved_items) && block.resolved_items.length ? (
-                      <div className="homepage-curation-preview-items">
-                        {block.resolved_items.slice(0, 8).map((item, itemIndex) => (
-                          <div key={`${block.key}-resolved-${item.entity_type}-${item.id}`} className="homepage-curation-preview-item">
-                            <span>{itemIndex + 1}</span>
-                            <div>
-                              <strong>{item.title || "-"}</strong>
-                              <p className="muted">
-                                {getEntityTypeLabel(item.entity_type)} #{item.id}
-                                {item.category ? ` | ${item.category}` : ""}
-                                {item.slug ? ` | รหัส: ${item.slug}` : ""}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="muted">บล็อกนี้จะไม่แสดงผลในฉบับร่างปัจจุบัน</p>
-                    )}
                   </div>
-                ))}
+                  {misses.length ? (
+                    <p className="homepage-curation-warning-text">รายการเลือกเองที่ไม่พบ {misses.length}</p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+
+          {(() => {
+            const heroBlock = (previewBlocks || []).find((b) => b.key === "hero") || blocks.find((b) => b.key === "hero") || {};
+            const heroIndex = blocks.findIndex((b) => b.key === "hero");
+            return (
+              <div className="grid two homepage-curation-grid">
+                <label>
+                  ชื่อบล็อก hero
+                  <input
+                    value={heroBlock.title || ""}
+                    onChange={(event) => { if (heroIndex >= 0) updateBlock(heroIndex, { title: event.target.value }); }}
+                  />
+                </label>
+                <label>
+                  คำอธิบายย่อย hero
+                  <input
+                    value={heroBlock.subtitle || ""}
+                    onChange={(event) => { if (heroIndex >= 0) updateBlock(heroIndex, { subtitle: event.target.value }); }}
+                  />
+                </label>
               </div>
-            ) : null}
-          </article>
+            );
+          })()}
 
           {blocks.map((block, index) => {
-            const candidateState = candidateByBlock[block.key] || createCandidateState(getDefaultCandidateEntityType(block));
             const hero = isHeroBlock(block);
             const eventBlock = isEventBlock(block);
             const isHighlight = block.key === "highlight";
@@ -972,14 +959,6 @@ export default function HomepageCuration({ token }) {
                       <h3>{block.title || block.key}</h3>
                       <p className="muted">{block.key} | {Array.isArray(block.manual_items) ? block.manual_items.length : 0} รายการเลือกเอง</p>
                     </div>
-                    <div className="actions">
-                      <button type="button" className="ghost tiny-btn" onClick={() => moveBlock(index, -1)} disabled={index === 0}>
-                        ขึ้น
-                      </button>
-                      <button type="button" className="ghost tiny-btn" onClick={() => moveBlock(index, 1)} disabled={index === blocks.length - 1}>
-                        ลง
-                      </button>
-                    </div>
                   </div>
                 </article>
               );
@@ -994,14 +973,6 @@ export default function HomepageCuration({ token }) {
                     </p>
                     <h3>{block.title || block.key}</h3>
                     <p className="muted">{block.key}</p>
-                  </div>
-                  <div className="actions">
-                    <button type="button" className="ghost tiny-btn" onClick={() => moveBlock(index, -1)} disabled={index === 0}>
-                      ขึ้น
-                    </button>
-                    <button type="button" className="ghost tiny-btn" onClick={() => moveBlock(index, 1)} disabled={index === blocks.length - 1}>
-                      ลง
-                    </button>
                   </div>
                 </div>
 
@@ -1137,13 +1108,18 @@ export default function HomepageCuration({ token }) {
                 <div className="homepage-curation-block-head">
                   <div>
                     <p className="homepage-curation-block-kicker">{getBlockTypeLabel(block.type)}</p>
-                    <h3>{block.title || block.key}</h3>
-                    <p className="muted">{block.subtitle || "อีเวนต์ที่อยากแนะนำ"}</p>
                   </div>
                 </div>
 
                 <div className="grid two homepage-curation-grid">
-                  <p className="muted full">บล็อกนี้แสดง 5 รายการเสมอ (การ์ดใหญ่ 1 + เล็ก 4)</p>
+                  <label>
+                    ชื่อบล็อก
+                    <input value={block.title} onChange={(event) => updateBlock(eventIndex, { title: event.target.value })} />
+                  </label>
+                  <label>
+                    คำอธิบายย่อย
+                    <input value={block.subtitle} onChange={(event) => updateBlock(eventIndex, { subtitle: event.target.value })} />
+                  </label>
                 </div>
 
                 <p className="muted" style={{ marginBottom: "0.5rem" }}>ปักหมุดได้ 1 อีเวนต์ จะแสดงเป็นการ์ดใหญ่ ที่เหลืออีก 4 เรียงจากอีเวนต์ที่อนุมัติล่าสุดอัตโนมัติ</p>
