@@ -41,6 +41,9 @@ status, not durable policy; the durable rule (no hard block before late-stage ga
 - AI-filled versus needs-verification state
 - readiness gates before review and acceptance
 - consistent propagation from assignment return -> field pack -> review -> publishable data
+- publish เขียนทับ draft ทุกภาษา เป็นพฤติกรรมที่ตั้งใจ ไม่ใช่บั๊ก
+- shortcuts: entity + admin CRUD + chips หน้าแรก + route `/{lang}/shortcut/{slug}` ครบแล้ว (เพดาน 6 ดู backend/PROJECT_POLICY.md)
+- collection slug routes: `/{lang}/shortcut/{slug}` และ `/{lang}/situation/{slug}` ใช้ CollectionPlacesPage ร่วมกัน; การ์ด situation หน้าแรกกดเข้าหน้านี้ได้แล้ว
 
 ## CTA / Contact Milestone
 
