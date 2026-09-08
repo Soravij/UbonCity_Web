@@ -249,3 +249,31 @@ export async function getUbonWeather() {
   }
 }
 
+export async function getCollectionDetail(kind, slug, lang = "en") {
+  const apiUrl = getApiUrl();
+
+  try {
+    const data = await fetchJsonWithTimeout(
+      `${apiUrl}/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}?lang=${encodeURIComponent(lang)}`,
+      { cache: "no-store" }
+    );
+    return data?.item || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getCollectionPlaces(kind, slug, lang = "en") {
+  const apiUrl = getApiUrl();
+
+  try {
+    const data = await fetchJsonWithTimeout(
+      `${apiUrl}/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}/places?lang=${encodeURIComponent(lang)}`,
+      { cache: "no-store" }
+    );
+    return Array.isArray(data?.items) ? data.items : [];
+  } catch {
+    return [];
+  }
+}
+
