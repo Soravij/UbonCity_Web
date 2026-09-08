@@ -172,6 +172,9 @@ Known open gaps (not fixed in this change set):
 - แท็บสถานการณ์: ลิสต์เป็น drawer กดแถวแล้วขยายแก้ชื่อ/คำอธิบาย 4 ภาษาในที่เดียว (pattern เดียวกับ Approvals.jsx) จัดเรียงด้วยปุ่ม ↑↓ ผ่าน POST /situations/reorder
 - ลบคอลัมน์สถานะออก (is_active แก้ผ่าน UI ไม่ได้อยู่แล้ว ทุกแถวเป็น 1 เสมอ ตัวกรอง is_active ที่ homepageCurationService ยังคงไว้)
 - ยังเหลือ: drawer ต้องแสดง list ของ place ในแต่ละ situation ด้วย แต่ต้องรอตารางเชื่อม situation_places และระบบคัดใน Signals ก่อน
+- publish เขียนทับ draft ทุกภาษา เป็นพฤติกรรมที่ตั้งใจ ไม่ใช่บั๊ก
+- shortcuts: entity + admin CRUD + chips หน้าแรก + route `/{lang}/shortcut/{slug}` ครบแล้ว (เพดาน 6 ดู backend/PROJECT_POLICY.md)
+- collection slug routes: `/{lang}/shortcut/{slug}` และ `/{lang}/situation/{slug}` ใช้ CollectionPlacesPage ร่วมกัน; การ์ด situation หน้าแรกกดเข้าหน้านี้ได้แล้ว
 
 ## Confirmed Direction
 
