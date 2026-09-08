@@ -11,7 +11,7 @@ function SituationCard({ situation, maxPlaces, lang, copy, large = false, compac
         <h3>
           <Link
             href={`/${lang}/situation/${situation.slug}`}
-            className="text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--accent)] hover:underline hover:underline-offset-4 hover:decoration-[color:var(--accent)]/40"
+            className="text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--accent)] hover:underline hover:underline-offset-4 hover:decoration-[color:var(--accent)]"
           >
             {situation.title}
           </Link>
@@ -40,9 +40,9 @@ function SituationCard({ situation, maxPlaces, lang, copy, large = false, compac
           </div>
           <Link
             href={`/${lang}/situation/${situation.slug}`}
-            className="inline-block mt-3 rounded-lg border border-[color:var(--theme-border)] bg-[color:var(--theme-card)] px-4 py-2 text-sm font-semibold text-[color:var(--theme-text)] transition-all duration-200 hover:outline-2 hover:outline-[color:var(--theme-primary-strong)] hover:outline-offset-2 hover:border-[color:var(--theme-border-strong)] hover:bg-[color:var(--theme-card-hover)] hover:-translate-y-0.5 hover:shadow-lg"
+            className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-[color:var(--accent)] transition hover:translate-x-1"
           >
-            ดูทั้งหมด
+            {copy.situationSeeAll ?? "ดูทั้งหมด"}
           </Link>
         </>
       ) : (
