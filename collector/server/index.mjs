@@ -4473,7 +4473,7 @@ async function finalizeArticleProcessReadyForSync(req, item, currentStatus, note
 }
 
 function ensureComposerMediaEditAccess(req, res, item) {
-  return ensureItemMutationAccess(req, res, item);
+  return ensureItemMutationAccess(req, res, item, { allowAssignedSelf: true });
 }
 
 function normalizeArticleProcessStatus(value, fallback = "") {
@@ -13109,7 +13109,7 @@ app.patch("/api/items/:id/reference-media/:referenceMediaId/selected", requireRo
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  if (!ensureItemMutationAccess(req, res, item)) {
+  if (!ensureItemMutationAccess(req, res, item, { allowAssignedSelf: true })) {
     return;
   }
 
@@ -13584,7 +13584,7 @@ app.patch("/api/items/:id/assets/:assetId/selected", requireRole("owner", "admin
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  if (!ensureItemMutationAccess(req, res, item)) {
+  if (!ensureItemMutationAccess(req, res, item, { allowAssignedSelf: true })) {
     return;
   }
   const targetAsset = repo.listContentAssetsByItem(id, { onlySelected: false }).find((row) => Number(row?.asset_id || 0) === assetId) || null;
@@ -13621,7 +13621,7 @@ app.patch("/api/items/:id/assets/:assetId/role", requireRole("owner", "admin", "
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  if (!ensureItemMutationAccess(req, res, item)) {
+  if (!ensureItemMutationAccess(req, res, item, { allowAssignedSelf: true })) {
     return;
   }
   const targetAsset = repo.listContentAssetsByItem(id, { onlySelected: false }).find((row) => Number(row?.asset_id || 0) === assetId) || null;
@@ -13661,7 +13661,7 @@ app.patch("/api/items/:id/assets/:assetId/caption", requireRole("owner", "admin"
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  if (!ensureItemMutationAccess(req, res, item)) return;
+  if (!ensureItemMutationAccess(req, res, item, { allowAssignedSelf: true })) return;
   try {
     const asset = repo.setContentAssetCaption(id, assetId, req.body?.caption);
     repo.logAudit(actorEmail(req), "asset.caption", "content_item", String(id), { assetId, caption: asset?.caption || null });
