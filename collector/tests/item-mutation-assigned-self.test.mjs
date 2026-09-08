@@ -98,7 +98,7 @@ ${ensureItemMutationAccessSrc}
 function createContext() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-mutation-access-"));
   const dbPath = path.join(tempDir, "test.sqlite");
-  const db = openDatabase(dbPath, path.resolve("collector/database/schema.sql"));
+  const db = openDatabase(dbPath, path.join(root, "database", "schema.sql"));
   const repo = createRepository(db);
 
   const createdItemIds = [];
