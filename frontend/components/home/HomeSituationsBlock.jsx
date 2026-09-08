@@ -8,30 +8,43 @@ function SituationCard({ situation, maxPlaces, lang, copy, large = false, compac
   return (
     <article className={`home-content-card relative ${large ? "p-6 md:p-7" : "p-5"}`}>
       <div className="relative z-10 mb-3">
-        <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--accent)]">
-          {situation.title}
+        <h3>
+          <Link
+            href={`/${lang}/situation/${situation.slug}`}
+            className="text-sm font-bold uppercase tracking-[0.08em] text-[color:var(--accent)] hover:underline hover:underline-offset-4 hover:decoration-[color:var(--accent)]"
+          >
+            {situation.title}
+          </Link>
         </h3>
       </div>
       {situation.description != null && (
         <p className="mb-3 text-sm leading-7 text-[color:var(--muted)]">{situation.description}</p>
       )}
       {showPlaces ? (
-        <div className="space-y-0">
-          {limitedPlaces.map((place, index) => (
-            <Link
-              key={place.id ?? index}
-              href={`/${lang}/${place.category}/${place.slug}`}
-              className="editorial-list-line grid grid-cols-[44px_minmax(0,1fr)] gap-3 py-3 transition hover:translate-x-1 hover:text-[color:var(--accent)]"
-            >
-              <span className="text-xs font-bold uppercase tracking-[0.16em] text-[color:var(--accent)]">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <span className={`line-clamp-2 font-medium ${compact ? "text-[13px] leading-5" : "text-sm leading-6 md:text-[15px]"}`}>
-                {place.title || "-"}
-              </span>
-            </Link>
-          ))}
-        </div>
+        <>
+          <div className="space-y-0">
+            {limitedPlaces.map((place, index) => (
+              <Link
+                key={place.id ?? index}
+                href={`/${lang}/${place.category}/${place.slug}`}
+                className="editorial-list-line grid grid-cols-[44px_minmax(0,1fr)] gap-3 py-3 transition hover:translate-x-1 hover:text-[color:var(--accent)]"
+              >
+                <span className="text-xs font-bold uppercase tracking-[0.16em] text-[color:var(--accent)]">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span className={`line-clamp-2 font-medium ${compact ? "text-[13px] leading-5" : "text-sm leading-6 md:text-[15px]"}`}>
+                  {place.title || "-"}
+                </span>
+              </Link>
+            ))}
+          </div>
+          <Link
+            href={`/${lang}/situation/${situation.slug}`}
+            className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-[color:var(--accent)] transition hover:translate-x-1"
+          >
+            {copy.situationSeeAll ?? "ดูทั้งหมด"}
+          </Link>
+        </>
       ) : (
         <p className="text-sm text-[color:var(--muted)]">{copy.situationEmpty}</p>
       )}
