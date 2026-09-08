@@ -20,5 +20,5 @@ export async function generateMetadata({ params }) {
 
 export default async function Page({ params }) {
   const { lang, slug } = await params;
-  return <CollectionPlacesPage kind="situations" lang={lang} slug={slug} label="Situation" />;
+  return <CollectionPlacesPage kind="situations" lang={lang} slug={slug} />;
 }

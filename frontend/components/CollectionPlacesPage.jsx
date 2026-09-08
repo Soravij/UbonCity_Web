@@ -5,18 +5,22 @@ import { normalizeLang } from "@/lib/site";
 
 const COLLECTION_PAGE_COPY = {
   en: {
+    notFoundTitle: "Not found",
     notFound: "This page could not be found.",
     noPlaces: "No places found.",
   },
   th: {
+    notFoundTitle: "ไม่พบหน้านี้",
     notFound: "ไม่พบหน้านี้",
     noPlaces: "ยังไม่มีสถานที่",
   },
   zh: {
+    notFoundTitle: "未找到",
     notFound: "未找到此页面。",
     noPlaces: "暂无地点",
   },
   lo: {
+    notFoundTitle: "ບໍ່ພົບ",
     notFound: "ບໍ່ພົບໜ້ານີ້",
     noPlaces: "ຍັງບໍ່ມີສະຖານທີ່",
   },
@@ -44,7 +48,7 @@ export default async function CollectionPlacesPage({ kind, lang, slug }) {
   if (!item) {
     return (
       <section className="mx-auto max-w-3xl space-y-4">
-        <h1 className="section-heading">{kind}</h1>
+        <h1 className="section-heading">{copy.notFoundTitle}</h1>
         <p className="text-[15px] leading-7 text-slate-700 md:text-base">
           {copy.notFound}
         </p>
