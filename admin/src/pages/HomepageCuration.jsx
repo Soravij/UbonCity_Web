@@ -912,16 +912,16 @@ export default function HomepageCuration({ token }) {
             Layout
           </button>
           <button type="button" className={activeTab === TAB_HERO ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_HERO)}>
-            ฮีโร่
+            Hero
           </button>
           <button type="button" className={activeTab === TAB_HIGHLIGHT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_HIGHLIGHT)}>
-            ไฮไลต์
+            Highlight
           </button>
           <button type="button" className={activeTab === TAB_SITUATIONS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SITUATIONS)}>
-            สถานการณ์
+            Situation
           </button>
           <button type="button" className={activeTab === TAB_EVENTS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_EVENTS)}>
-            อีเวนต์
+            Events
           </button>
         </div>
         <div style={{ display: "flex", gap: "8px", marginLeft: "auto" }}>
