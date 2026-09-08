@@ -1,4 +1,4 @@
-import CollectionPlacesPage from "@/components/CollectionPlacesPage";
+import CollectionPlacesPage, { pickTranslation } from "@/components/CollectionPlacesPage";
 import { getCollectionDetail } from "@/lib/api";
 import { normalizeLang } from "@/lib/site";
 
@@ -6,11 +6,12 @@ export async function generateMetadata({ params }) {
   const { lang, slug } = await params;
   const activeLang = normalizeLang(lang);
   const item = await getCollectionDetail("situations", slug, activeLang);
-  const titleBase = String(item?.title || "Situation").trim();
+  const tr = pickTranslation(item, activeLang);
+  const titleBase = String(tr.title || "Situation").trim();
 
   return {
     title: `${titleBase} | UBONCITY.COM`,
-    description: item?.description || "",
+    description: tr.description || "",
     alternates: {
       canonical: `/${activeLang}/situation/${slug}`,
     },
@@ -19,5 +20,5 @@ export async function generateMetadata({ params }) {
 
 export default async function Page({ params }) {
   const { lang, slug } = await params;
-  return <CollectionPlacesPage kind="situations" lang={lang} slug={slug} />;
+  return <CollectionPlacesPage kind="situations" lang={lang} slug={slug} label="Situation" />;
 }
