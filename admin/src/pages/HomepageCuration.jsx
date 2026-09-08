@@ -35,7 +35,7 @@ const FIXED_BLOCK_TYPES = {
 const TAB_LAYOUT = "layout";
 const TAB_HIGHLIGHT = "highlight";
 const TAB_SITUATIONS = "situations";
-const TAB_SHORTCUTS = "shortcuts";
+const TAB_HERO = "hero";
 const TAB_EVENTS = "events";
 const TAB_SIGNALS = "signals";
 
@@ -640,7 +640,7 @@ export default function HomepageCuration({ token }) {
     }
     setPoolShortcutStatus(
       fail === 0
-        ? `เพิ่ม ${placeIds.length} สถานที่เข้า ${ok} ทางลัดแล้ว`
+        ? `เพิ่ม ${placeIds.length} สถานที่เข้า ${ok} Shortcut แล้ว`
         : `สำเร็จ ${ok} ล้มเหลว ${fail} — ตรวจสอบอีกครั้ง`
     );
     setPoolSelectedCandidateKeys([]);
@@ -664,7 +664,7 @@ export default function HomepageCuration({ token }) {
     }
     setPoolShortcutStatus(
       fail === 0
-        ? `เพิ่มเข้า ${ok} ทางลัดแล้ว`
+        ? `เพิ่มเข้า ${ok} Shortcut แล้ว`
         : `สำเร็จ ${ok} ล้มเหลว ${fail}`
     );
   }
@@ -871,7 +871,7 @@ export default function HomepageCuration({ token }) {
           <button type="button" className="ghost" onClick={() => loadLayout()} disabled={loading}>
             รีเฟรช
           </button>
-          {activeTab === TAB_LAYOUT ? (
+          {activeTab === TAB_LAYOUT || activeTab === TAB_HERO ? (
             <>
               <button type="button" className="ghost" onClick={() => loadPreview(serializedDraft, previewLang)} disabled={loading || previewLoading}>
                 {previewLoading ? "กำลังประมวลผล..." : "รีเฟรชตัวอย่าง"}
@@ -911,14 +911,14 @@ export default function HomepageCuration({ token }) {
           <button type="button" className={activeTab === TAB_LAYOUT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_LAYOUT)}>
             Layout
           </button>
+          <button type="button" className={activeTab === TAB_HERO ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_HERO)}>
+            ฮีโร่
+          </button>
           <button type="button" className={activeTab === TAB_HIGHLIGHT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_HIGHLIGHT)}>
             ไฮไลต์
           </button>
           <button type="button" className={activeTab === TAB_SITUATIONS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SITUATIONS)}>
             สถานการณ์
-          </button>
-          <button type="button" className={activeTab === TAB_SHORTCUTS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SHORTCUTS)}>
-            ทางลัด
           </button>
           <button type="button" className={activeTab === TAB_EVENTS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_EVENTS)}>
             อีเวนต์
@@ -947,38 +947,6 @@ export default function HomepageCuration({ token }) {
               </button>
             ))}
           </div>
-
-          {(() => {
-            const heroIndex = blocks.findIndex((b) => b.key === "hero");
-            if (heroIndex < 0) return null;
-            const heroBlock = blocks[heroIndex];
-            return (
-              <article className="homepage-curation-block-card">
-                <div className="homepage-curation-block-head">
-                  <div>
-                    <p className="homepage-curation-block-kicker">ส่วนหัวหน้าแรก</p>
-                    <h3>ข้อความ Hero</h3>
-                  </div>
-                </div>
-                <div className="grid two homepage-curation-grid">
-                  <label>
-                    หัวข้อ
-                    <input
-                      value={heroBlock.title || ""}
-                      onChange={(event) => updateBlock(heroIndex, { title: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    คำอธิบาย
-                    <input
-                      value={heroBlock.subtitle || ""}
-                      onChange={(event) => updateBlock(heroIndex, { subtitle: event.target.value })}
-                    />
-                  </label>
-                </div>
-              </article>
-            );
-          })()}
 
           {previewError ? <p className="status">{previewError}</p> : null}
           {previewLoading ? <p className="muted">กำลังประมวลผลตัวอย่าง...</p> : null}
@@ -1227,8 +1195,40 @@ export default function HomepageCuration({ token }) {
           })()}
           <Situations token={token} />
         </div>
-      ) : activeTab === TAB_SHORTCUTS ? (
+      ) : activeTab === TAB_HERO ? (
         <div className="homepage-curation-block-list">
+          {(() => {
+            const heroIndex = blocks.findIndex((b) => b.key === "hero");
+            if (heroIndex < 0) return null;
+            const heroBlock = blocks[heroIndex];
+            return (
+              <article className="homepage-curation-block-card">
+                <div className="homepage-curation-block-head">
+                  <div>
+                    <p className="homepage-curation-block-kicker">ส่วนหัวหน้าแรก</p>
+                    <h3>ข้อความ Hero</h3>
+                  </div>
+                </div>
+                <div className="grid two homepage-curation-grid">
+                  <label>
+                    หัวข้อ
+                    <input
+                      value={heroBlock.title || ""}
+                      onChange={(event) => updateBlock(heroIndex, { title: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    คำอธิบาย
+                    <input
+                      value={heroBlock.subtitle || ""}
+                      onChange={(event) => updateBlock(heroIndex, { subtitle: event.target.value })}
+                    />
+                  </label>
+                </div>
+              </article>
+            );
+          })()}
+          <h3>Shortcuts</h3>
           <Shortcuts token={token} />
         </div>
       ) : activeTab === TAB_EVENTS ? (
@@ -1278,7 +1278,7 @@ export default function HomepageCuration({ token }) {
 
             <div className="homepage-curation-rule-panel">
               <p className="muted">
-                เลือก situation แล้วกดเพิ่ม ระบบบันทึกทันที
+                เลือก situation หรือ shortcut แล้วกดเพิ่ม ระบบบันทึกทันที
               </p>
               <div className="grid two">
                 <label>
@@ -1360,7 +1360,7 @@ export default function HomepageCuration({ token }) {
                   )}
                 </fieldset>
                 <fieldset className="full">
-                  <legend>ทางลัด</legend>
+                  <legend>Shortcut</legend>
                   {shortcutsList.length ? (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                       {shortcutsList.map((s) => (
@@ -1381,7 +1381,7 @@ export default function HomepageCuration({ token }) {
                       ))}
                     </div>
                   ) : (
-                    <span className="muted">ไม่มีทางลัด</span>
+                    <span className="muted">ไม่มี Shortcut</span>
                   )}
                 </fieldset>
               </div>
@@ -1418,7 +1418,7 @@ export default function HomepageCuration({ token }) {
                     onClick={addSelectedPoolCandidatesToShortcuts}
                     disabled={!selectedShortcutSlugs.length || !selectedPoolCandidates.length}
                   >
-                    เพิ่มรายการที่เลือกเข้าทางลัด
+                    เพิ่มรายการที่เลือกเข้า Shortcut
                   </button>
                   {poolShortcutStatus ? <span className="muted">{poolShortcutStatus}</span> : null}
                 </div>
@@ -1477,7 +1477,7 @@ export default function HomepageCuration({ token }) {
                               onClick={() => addPoolCandidateToShortcuts(candidate)}
                               disabled={!selectedShortcutSlugs.length || String(candidate.entity_type || "").toLowerCase() !== "place"}
                             >
-                              เพิ่มเข้าทางลัด
+                              เพิ่มเข้า Shortcut
                             </button>
                           </td>
                         </tr>
