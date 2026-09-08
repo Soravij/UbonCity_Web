@@ -74,9 +74,9 @@ export default function DecisionSearchBar({
       </form>
 
       <div className="flex flex-wrap gap-2.5">
-        {quickActions.map((action) => (
+        {quickActions.map((action, index) => (
           <Link
-            key={action.href}
+            key={`${action.href}-${index}`}
             href={action.href}
             className="interactive-tile rounded-full px-3.5 py-2 text-xs font-semibold tracking-[0.012em] text-[color:var(--theme-text)] transition hover:-translate-y-0.5"
           >

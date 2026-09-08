@@ -4,6 +4,7 @@ import {
   getTaxonomyCatalogEntriesForCategory,
 } from "../../shared/taxonomy/taxonomy-catalog.mjs";
 import { listSituations } from "../repositories/situationRepository.js";
+import { listShortcuts } from "../repositories/shortcutRepository.js";
 import { listPlacesForSituations } from "../repositories/situationPlaceRepository.js";
 
 const PUBLISH_LANGS = ["th", "en", "zh", "lo"];
@@ -823,6 +824,7 @@ export async function getPublishedHomepageLayout(layoutKey = "home", lang = "th"
     ...s,
     places: (placesBySituation.get(s.id) ?? []).slice(s.sort_order === 1 ? 0 : 0, s.sort_order === 1 ? 5 : 3),
   }));
+  const shortcuts = await listShortcuts(layout.lang);
 
   return {
     layout_key: layout.layout_key,
@@ -831,6 +833,7 @@ export async function getPublishedHomepageLayout(layoutKey = "home", lang = "th"
     blocks: publishedBlocks,
     resolved_blocks: resolvedBlocks,
     situations,
+    shortcuts,
     published_at: layout.published_at,
     updated_at: layout.updated_at,
   };
@@ -874,6 +877,7 @@ export async function previewHomepageCurationLayout({
     ...s,
     places: (placesBySituation.get(s.id) ?? []).slice(s.sort_order === 1 ? 0 : 0, s.sort_order === 1 ? 5 : 3),
   }));
+  const shortcuts = await listShortcuts(normalizedLang);
 
   return {
     layout_key: normalizedKey,
@@ -881,6 +885,7 @@ export async function previewHomepageCurationLayout({
     blocks: effectiveBlocks,
     resolved_blocks: buildResolvedBlocks(effectiveBlocks, allPlaces, allEvents, { include_hidden_blocks: true }),
     situations,
+    shortcuts,
   };
 }
 

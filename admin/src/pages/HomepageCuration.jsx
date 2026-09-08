@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, authHeaders } from "../api/api";
 import Situations from "./Situations";
+import Shortcuts from "./Shortcuts";
 import {
   EVENT_BLOCK_KEY,
   HERO_BLOCK_KEY,
@@ -34,6 +35,7 @@ const FIXED_BLOCK_TYPES = {
 const TAB_LAYOUT = "layout";
 const TAB_HIGHLIGHT = "highlight";
 const TAB_SITUATIONS = "situations";
+const TAB_HERO = "hero";
 const TAB_EVENTS = "events";
 const TAB_SIGNALS = "signals";
 
@@ -251,6 +253,9 @@ export default function HomepageCuration({ token }) {
   const [situationsList, setSituationsList] = useState([]);
   const [selectedSituationSlugs, setSelectedSituationSlugs] = useState([]);
   const [poolSituationStatus, setPoolSituationStatus] = useState("");
+  const [shortcutsList, setShortcutsList] = useState([]);
+  const [selectedShortcutSlugs, setSelectedShortcutSlugs] = useState([]);
+  const [poolShortcutStatus, setPoolShortcutStatus] = useState("");
   const previewRequestSeq = useRef(0);
 
   const serializedDraft = useMemo(() => serializeBlocks(blocks), [blocks]);
@@ -300,6 +305,20 @@ export default function HomepageCuration({ token }) {
       }
     }
     loadSituations();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function loadShortcuts() {
+      try {
+        const res = await api.get("/shortcuts");
+        if (active) setShortcutsList(Array.isArray(res.data?.items) ? res.data.items : []);
+      } catch {
+        if (active) setShortcutsList([]);
+      }
+    }
+    loadShortcuts();
     return () => { active = false; };
   }, []);
 
@@ -598,6 +617,58 @@ export default function HomepageCuration({ token }) {
     );
   }
 
+  async function addSelectedPoolCandidatesToShortcuts() {
+    if (!selectedShortcutSlugs.length || !selectedPoolCandidates.length) return;
+    const placeIds = selectedPoolCandidates
+      .filter((c) => String(c.entity_type || "").toLowerCase() === "place")
+      .map((c) => Number(c.id))
+      .filter(Boolean);
+    if (!placeIds.length) {
+      setPoolShortcutStatus("รายการที่เลือกไม่มีสถานที่");
+      return;
+    }
+    setPoolShortcutStatus("กำลังบันทึก...");
+    let ok = 0;
+    let fail = 0;
+    for (const slug of selectedShortcutSlugs) {
+      try {
+        await api.post(`/shortcuts/${slug}/places`, { place_ids: placeIds }, { headers: authHeaders(token) });
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setPoolShortcutStatus(
+      fail === 0
+        ? `เพิ่ม ${placeIds.length} สถานที่เข้า ${ok} Shortcut แล้ว`
+        : `สำเร็จ ${ok} ล้มเหลว ${fail} — ตรวจสอบอีกครั้ง`
+    );
+    setPoolSelectedCandidateKeys([]);
+    setSelectedShortcutSlugs([]);
+  }
+
+  async function addPoolCandidateToShortcuts(candidate) {
+    if (!selectedShortcutSlugs.length) return;
+    const placeId = Number(candidate?.id);
+    if (!placeId || String(candidate?.entity_type || "").toLowerCase() !== "place") return;
+    setPoolShortcutStatus("กำลังบันทึก...");
+    let ok = 0;
+    let fail = 0;
+    for (const slug of selectedShortcutSlugs) {
+      try {
+        await api.post(`/shortcuts/${slug}/places`, { place_ids: [placeId] }, { headers: authHeaders(token) });
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setPoolShortcutStatus(
+      fail === 0
+        ? `เพิ่มเข้า ${ok} Shortcut แล้ว`
+        : `สำเร็จ ${ok} ล้มเหลว ${fail}`
+    );
+  }
+
   async function onSaveDraft() {
     setSaving(true);
     setMessage("");
@@ -800,7 +871,7 @@ export default function HomepageCuration({ token }) {
           <button type="button" className="ghost" onClick={() => loadLayout()} disabled={loading}>
             รีเฟรช
           </button>
-          {activeTab === TAB_LAYOUT ? (
+          {activeTab === TAB_LAYOUT || activeTab === TAB_HERO ? (
             <>
               <button type="button" className="ghost" onClick={() => loadPreview(serializedDraft, previewLang)} disabled={loading || previewLoading}>
                 {previewLoading ? "กำลังประมวลผล..." : "รีเฟรชตัวอย่าง"}
@@ -840,14 +911,17 @@ export default function HomepageCuration({ token }) {
           <button type="button" className={activeTab === TAB_LAYOUT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_LAYOUT)}>
             Layout
           </button>
+          <button type="button" className={activeTab === TAB_HERO ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_HERO)}>
+            Hero
+          </button>
           <button type="button" className={activeTab === TAB_HIGHLIGHT ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_HIGHLIGHT)}>
-            ไฮไลต์
+            Highlight
           </button>
           <button type="button" className={activeTab === TAB_SITUATIONS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_SITUATIONS)}>
-            สถานการณ์
+            Situation
           </button>
           <button type="button" className={activeTab === TAB_EVENTS ? "primary" : "ghost"} onClick={() => setActiveTab(TAB_EVENTS)}>
-            อีเวนต์
+            Events
           </button>
         </div>
         <div style={{ display: "flex", gap: "8px", marginLeft: "auto" }}>
@@ -873,38 +947,6 @@ export default function HomepageCuration({ token }) {
               </button>
             ))}
           </div>
-
-          {(() => {
-            const heroIndex = blocks.findIndex((b) => b.key === "hero");
-            if (heroIndex < 0) return null;
-            const heroBlock = blocks[heroIndex];
-            return (
-              <article className="homepage-curation-block-card">
-                <div className="homepage-curation-block-head">
-                  <div>
-                    <p className="homepage-curation-block-kicker">ส่วนหัวหน้าแรก</p>
-                    <h3>ข้อความ Hero</h3>
-                  </div>
-                </div>
-                <div className="grid two homepage-curation-grid">
-                  <label>
-                    หัวข้อ
-                    <input
-                      value={heroBlock.title || ""}
-                      onChange={(event) => updateBlock(heroIndex, { title: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    คำอธิบาย
-                    <input
-                      value={heroBlock.subtitle || ""}
-                      onChange={(event) => updateBlock(heroIndex, { subtitle: event.target.value })}
-                    />
-                  </label>
-                </div>
-              </article>
-            );
-          })()}
 
           {previewError ? <p className="status">{previewError}</p> : null}
           {previewLoading ? <p className="muted">กำลังประมวลผลตัวอย่าง...</p> : null}
@@ -1153,6 +1195,42 @@ export default function HomepageCuration({ token }) {
           })()}
           <Situations token={token} />
         </div>
+      ) : activeTab === TAB_HERO ? (
+        <div className="homepage-curation-block-list">
+          {(() => {
+            const heroIndex = blocks.findIndex((b) => b.key === "hero");
+            if (heroIndex < 0) return null;
+            const heroBlock = blocks[heroIndex];
+            return (
+              <article className="homepage-curation-block-card">
+                <div className="homepage-curation-block-head">
+                  <div>
+                    <p className="homepage-curation-block-kicker">ส่วนหัวหน้าแรก</p>
+                    <h3>ข้อความ Hero</h3>
+                  </div>
+                </div>
+                <div className="grid two homepage-curation-grid">
+                  <label>
+                    หัวข้อ
+                    <input
+                      value={heroBlock.title || ""}
+                      onChange={(event) => updateBlock(heroIndex, { title: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    คำอธิบาย
+                    <input
+                      value={heroBlock.subtitle || ""}
+                      onChange={(event) => updateBlock(heroIndex, { subtitle: event.target.value })}
+                    />
+                  </label>
+                </div>
+              </article>
+            );
+          })()}
+          <h3>Shortcuts</h3>
+          <Shortcuts token={token} />
+        </div>
       ) : activeTab === TAB_EVENTS ? (
         <div className="homepage-curation-block-list">
           {(() => {
@@ -1200,7 +1278,7 @@ export default function HomepageCuration({ token }) {
 
             <div className="homepage-curation-rule-panel">
               <p className="muted">
-                เลือก situation แล้วกดเพิ่ม ระบบบันทึกทันที
+                เลือก situation หรือ shortcut แล้วกดเพิ่ม ระบบบันทึกทันที
               </p>
               <div className="grid two">
                 <label>
@@ -1281,6 +1359,31 @@ export default function HomepageCuration({ token }) {
                     <span className="muted">ไม่มี situation</span>
                   )}
                 </fieldset>
+                <fieldset className="full">
+                  <legend>Shortcut</legend>
+                  {shortcutsList.length ? (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                      {shortcutsList.map((s) => (
+                        <button
+                          key={s.slug}
+                          type="button"
+                          className={selectedShortcutSlugs.includes(s.slug) ? "primary" : "ghost"}
+                          onClick={() => {
+                            setSelectedShortcutSlugs((current) =>
+                              current.includes(s.slug)
+                                ? current.filter((x) => x !== s.slug)
+                                : [...current, s.slug]
+                            );
+                          }}
+                        >
+                          {s.title || s.slug}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="muted">ไม่มี Shortcut</span>
+                  )}
+                </fieldset>
               </div>
 
               {taxonomyCatalogError ? <p className="status">{taxonomyCatalogError}</p> : null}
@@ -1309,6 +1412,15 @@ export default function HomepageCuration({ token }) {
                     เพิ่มรายการที่เลือกเข้า situation
                   </button>
                   {poolSituationStatus ? <span className="muted">{poolSituationStatus}</span> : null}
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={addSelectedPoolCandidatesToShortcuts}
+                    disabled={!selectedShortcutSlugs.length || !selectedPoolCandidates.length}
+                  >
+                    เพิ่มรายการที่เลือกเข้า Shortcut
+                  </button>
+                  {poolShortcutStatus ? <span className="muted">{poolShortcutStatus}</span> : null}
                 </div>
                 <div className="table-wrap">
                 <table>
@@ -1358,6 +1470,14 @@ export default function HomepageCuration({ token }) {
                               disabled={!selectedSituationSlugs.length || String(candidate.entity_type || "").toLowerCase() !== "place"}
                             >
                               เพิ่มเข้า situation
+                            </button>{" "}
+                            <button
+                              type="button"
+                              className="ghost tiny-btn"
+                              onClick={() => addPoolCandidateToShortcuts(candidate)}
+                              disabled={!selectedShortcutSlugs.length || String(candidate.entity_type || "").toLowerCase() !== "place"}
+                            >
+                              เพิ่มเข้า Shortcut
                             </button>
                           </td>
                         </tr>
