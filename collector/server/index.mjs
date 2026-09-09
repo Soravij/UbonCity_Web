@@ -4238,7 +4238,7 @@ function ensureArticleProcessTransitionAccess(req, res, item, nextStatus) {
     return false;
   }
   if (nextStatus === "ready_for_review") {
-    const allowedStates = new Set(["submitted", "resubmitted"]);
+    const allowedStates = new Set(["assigned", "in_progress", "revision_requested", "submitted", "resubmitted"]);
     if (hasEditorialAssignmentAccess(req, item, allowedStates)) {
       return true;
     }
