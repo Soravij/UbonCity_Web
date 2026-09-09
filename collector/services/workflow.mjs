@@ -1812,6 +1812,8 @@ export async function runCleanStage(repo, actorEmail) {
       source_name: item.source_name,
       source_url: item.source_url,
       source_type: "manual",
+      meta_title: item.meta_title,
+      meta_description: item.meta_description,
     },
     actorEmail
   );
