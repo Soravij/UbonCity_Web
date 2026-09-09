@@ -155,7 +155,7 @@ function testContext() {
     fs.rmSync(tempDir, { recursive: true, force: true });
   };
 
-  return { db, repo, createUser, createPlaceItem, createFieldPack, createEditorialAssignment, cleanup, dbPath };
+  return { db, repo, createUser, createPlaceItem, createFieldPack, createEditorialAssignment, createdItemIds, cleanup, dbPath };
 }
 
 test("return-to-clean assignment guard", async (t) => {
@@ -230,7 +230,7 @@ test("return-to-clean assignment guard", async (t) => {
     }
   });
 
-  await t.test("field assignment state=accepted → POST return-to-clean returns 409", async () => {
+  await t.test("editorial assignment state=accepted → POST return-to-clean returns 409", async () => {
     const ctx = testContext();
     try {
       const user = ctx.createUser("accepted", "owner");
@@ -247,6 +247,44 @@ test("return-to-clean assignment guard", async (t) => {
           body: JSON.stringify({ comment: "test return" }),
         });
         assert.equal(res.status, 409, `expected 409 for accepted assignment, got ${res.status}`);
+      });
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  await t.test("place item in_review + editorial assignment state=submitted → POST return-to-clean returns 409", async () => {
+    const ctx = testContext();
+    try {
+      const user = ctx.createUser("in-review", "owner");
+      const result = ctx.repo.createItemWithWorkflowHead(
+        {
+          type: "place",
+          category: "test",
+          title: `${TEST_PREFIX}in-review-${Date.now()}`,
+          description_raw: "test",
+          source_type: "manual",
+          source_name: "test",
+        },
+        { production_state: "in_review" }
+      );
+      const item = ctx.repo.getItem(result.item.id);
+      ctx.repo.claimItem(item.id, user.id);
+      ctx.createdItemIds.push(item.id);
+      ctx.createFieldPack(item.id);
+      ctx.createEditorialAssignment(item.id, user.id, "submitted");
+      ctx.db.close();
+
+      await withServer(ctx.dbPath, async (baseUrl) => {
+        const token = makeToken(user.id, user.email, "owner");
+        const res = await fetch(`${baseUrl}/api/items/${item.id}/field-pack/return-to-clean`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ comment: "test return in_review" }),
+        });
+        assert.equal(res.status, 409, `expected 409 for in_review with open assignment, got ${res.status}`);
+        const body = await res.json();
+        assert.match(body.error, /assignment/i, "error should mention assignment");
       });
     } finally {
       ctx.cleanup();

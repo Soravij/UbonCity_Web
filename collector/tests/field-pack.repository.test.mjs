@@ -798,7 +798,7 @@ test("field pack regeneration preserves the previous pack and return-to-clean ar
     assert.deepEqual(countChildren(regenerated.id), { checklists: 1, references: 1, media_hints: 1, assignments: 1 });
 
     ctx.db.prepare("UPDATE content_workflow_models SET production_state='analyzed', current_field_pack_id=? WHERE content_item_id=?").run(regenerated.id, item.id);
-    ctx.db.prepare("INSERT INTO content_assignments (assignment_uid, content_item_id, assignment_kind, state) VALUES (?, ?, 'field', 'assigned')").run(`active-${item.id}`, item.id);
+    ctx.db.prepare("INSERT INTO content_assignments (assignment_uid, content_item_id, assignment_kind, state) VALUES (?, ?, 'field', 'closed')").run(`active-${item.id}`, item.id);
     const returned = ctx.repo.returnFieldPackToCleanAtomic(item.id, "archive current pack", "tester@local");
     assert.equal(returned.ok, true);
     assert.equal(countPacks(), 2);

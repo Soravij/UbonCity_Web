@@ -10031,7 +10031,7 @@ export function createRepository(db) {
         throw new Error("cannot return to clean from publish-ready or published state");
       }
 
-      const blockingAssignments = listAssignmentsByItem(contentItemId)
+      const blockingAssignments = listAssignmentsByItem(itemId)
         .filter((assignment) => OPEN_FIELD_ROUND_STATES.has(String(assignment?.state || "").trim().toLowerCase()));
       if (blockingAssignments.length > 0) {
         const err = new Error("cannot return to clean while an assignment is still open");
