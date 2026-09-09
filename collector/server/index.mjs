@@ -13758,7 +13758,7 @@ app.post("/api/items/:id/field-pack/return-to-clean", requireRole("owner", "admi
       ? 404
       : /notes\/reason is required|content_item_id is required/i.test(msg)
         ? 400
-        : /publish-ready|published state/i.test(msg)
+        : err?.code === "OPEN_ASSIGNMENT_BLOCKS_RETURN_TO_CLEAN" || /publish-ready|published state/i.test(msg)
           ? 409
           : 400;
     res.status(status).json({ error: msg });

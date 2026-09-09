@@ -10031,6 +10031,14 @@ export function createRepository(db) {
         throw new Error("cannot return to clean from publish-ready or published state");
       }
 
+      const blockingAssignments = listAssignmentsByItem(contentItemId)
+        .filter((assignment) => OPEN_FIELD_ROUND_STATES.has(String(assignment?.state || "").trim().toLowerCase()));
+      if (blockingAssignments.length > 0) {
+        const err = new Error("cannot return to clean while an assignment is still open");
+        err.code = "OPEN_ASSIGNMENT_BLOCKS_RETURN_TO_CLEAN";
+        throw err;
+      }
+
       // Resolve every legal hop before archiving. Place may only travel through the explicit
       // backward metadata; it never writes analyzed as a shortcut.
       const returnPath = [];
