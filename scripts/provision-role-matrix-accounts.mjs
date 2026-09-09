@@ -25,6 +25,12 @@ function logStep(step, detail = "") {
   console.error(`[${nowIso()}] provision step=${step}${detail ? ` ${detail}` : ""}`);
 }
 
+function userIdFromToken(token) {
+  const seg = String(token).split(".")[1];
+  const json = JSON.parse(Buffer.from(seg, "base64url").toString("utf8"));
+  return Number(json.id ?? json.userId ?? json.sub ?? 0) || 0;
+}
+
 async function requestJson(url, { method = "POST", token, body } = {}) {
   const headers = { "content-type": "application/json" };
   if (token) headers.authorization = `Bearer ${token}`;
@@ -60,7 +66,7 @@ async function main() {
     });
     assert(ownerLogin.ok, `owner login failed: ${JSON.stringify(ownerLogin.payload)}`);
     accounts.owner.token = ownerLogin.payload.token;
-    accounts.owner.userId = Number(ownerLogin.payload.id || ownerLogin.payload.user?.id || 0) || 0;
+    accounts.owner.userId = userIdFromToken(ownerLogin.payload.token);
     assert(accounts.owner.userId > 0, "owner userId missing");
 
     logStep("create.admin");
@@ -123,7 +129,7 @@ async function main() {
       });
       assert(login.ok, `${key} login failed: ${JSON.stringify(login.payload)}`);
       accounts[key].token = login.payload.token;
-      accounts[key].userId = accounts[key].userId || Number(login.payload.id || login.payload.user?.id || 0) || 0;
+      accounts[key].userId = accounts[key].userId || userIdFromToken(login.payload.token);
       logStep(`${key}.logged_in`);
     }
 
