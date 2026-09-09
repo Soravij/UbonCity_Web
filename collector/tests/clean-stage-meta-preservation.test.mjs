@@ -12,6 +12,44 @@ import { runCleanStage } from "../services/workflow.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const collectorRoot = path.dirname(__dirname);
 
+test("runCleanStage preserves summary", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "clean-summary-"));
+  const dbPath = path.join(tempDir, "test.sqlite");
+  const schemaPath = path.join(collectorRoot, "database", "schema.sql");
+  const db = openDatabase(dbPath, schemaPath);
+  try {
+    const repo = createRepository(db);
+    const result = repo.createItemWithWorkflowHead(
+      {
+        type: "place",
+        category: "attractions",
+        title: "Summary Preserve Test",
+        description_raw: "some description",
+        source_type: "manual",
+        source_name: "manual",
+        source_url: "https://example.test/summary",
+      },
+      { production_state: "collected" }
+    );
+    const itemId = result.item.id;
+
+    db.prepare(
+      "UPDATE content_items SET summary=? WHERE id=?"
+    ).run("Short summary text", itemId);
+
+    const before = db.prepare("SELECT summary FROM content_items WHERE id=?").get(itemId);
+    assert.equal(before.summary, "Short summary text");
+
+    await runCleanStage(repo, "test@local");
+
+    const after = db.prepare("SELECT summary FROM content_items WHERE id=?").get(itemId);
+    assert.equal(after.summary, "Short summary text", "summary must survive runCleanStage");
+  } finally {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runCleanStage preserves meta_title and meta_description", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "clean-meta-"));
   const dbPath = path.join(tempDir, "test.sqlite");
