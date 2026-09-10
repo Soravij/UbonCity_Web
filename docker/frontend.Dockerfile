@@ -1,0 +1,15 @@
+FROM node:20-bookworm-slim
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend ./
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_SITE_URL
+ARG NEXT_PUBLIC_INDEXING=false
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_INDEXING=$NEXT_PUBLIC_INDEXING
+ENV NODE_ENV=production
+RUN npm run build
+EXPOSE 3000
+CMD ["npm","run","start"]

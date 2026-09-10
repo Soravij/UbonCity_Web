@@ -82,3 +82,8 @@ audit/gate-*.txt
 # Role-matrix provisioning tokens (contain live secrets)
 scripts/tmp-role-matrix-tokens.json
 scripts/tmp-role-matrix-tokens-v2.json
+
+# Docker local env (1 ไฟล์ = 1 site)
+.env.docker
+.env.docker.*
+!.env.docker.example
