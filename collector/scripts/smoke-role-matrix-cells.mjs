@@ -333,14 +333,20 @@ function testContext() {
   createDraft(itemEditorial.id, "ร้านอาหารไทย editorial draft", "ร้านอาหารไทยเป็นร้านอาหารที่มีชื่อเสียงในอุบลราชธานี ".repeat(5));
   const assignEdA1Editorial = createAssignment(itemEditorial.id, editorA1.id, "editorial", "in_progress");
 
+  // Separate item for D2.8 submit-review② × Ea (D2.7 transition② pollutes assignment state)
+  const itemEditorial2 = createItem("ร้านอาหาร editorial2", managerA1.id, "content_in_progress");
+  createFieldPack(itemEditorial2.id);
+  createDraft(itemEditorial2.id, "editorial2 draft", "บทความทดสอบ ".repeat(5));
+  const assignEdA1Editorial2 = createAssignment(itemEditorial2.id, editorA1.id, "editorial", "in_progress");
+
   // Extra assignment for submissions ②
   const assignFlA1ForSubmissions = createAssignment(itemA1.id, freelanceA1.id, "field", "assigned");
 
   const users = { owner, adminA, adminB, managerA1, managerA2, managerB1, managerB2, editorA1, freelanceA1, editorA2, freelanceA2, editorB1, freelanceB1, editorB2, freelanceB2 };
-  const items = { itemA1, itemB1, itemClean, itemInReview, itemRejected, itemPublished, itemEditorial };
+  const items = { itemA1, itemB1, itemClean, itemInReview, itemRejected, itemPublished, itemEditorial, itemEditorial2 };
   const assets = { assetA1, assetB1 };
   const refMedia = { refMediaA1 };
-  const assignments = { assignEdA1, assignFlA1, assignEdB1, assignFlB1, assignEdA1Editorial, assignFlA1ForSubmissions };
+  const assignments = { assignEdA1, assignFlA1, assignEdB1, assignFlB1, assignEdA1Editorial, assignEdA1Editorial2, assignFlA1ForSubmissions };
 
   const cleanup = () => {
     for (const id of createdAssetIds) {
@@ -541,11 +547,12 @@ async function fireD3Group1(baseUrl, ctx) {
   const fB = ctx.assignments.assignFlB1;
 
   // ── Row 1: PUT assignments/:id/draft ──
+  // hasAssignmentDraftAccess only allows assignee — O/A✓/U✓ are not assignee → 403
   const draftBody = { draft: { body: "smoke draft body" } };
-  await assertCell(baseUrl, "D3.1 draft × O", "PUT", `/api/assignments/${eA}/draft`, t.owner, "non403", draftBody);
-  await assertCell(baseUrl, "D3.1 draft × A✓", "PUT", `/api/assignments/${eA}/draft`, t.adminA, "non403", draftBody);
+  await assertCell(baseUrl, "D3.1 draft × O", "PUT", `/api/assignments/${eA}/draft`, t.owner, 403, draftBody);
+  await assertCell(baseUrl, "D3.1 draft × A✓", "PUT", `/api/assignments/${eA}/draft`, t.adminA, 403, draftBody);
   await assertCell(baseUrl, "D3.1 draft × A✗", "PUT", `/api/assignments/${eB}/draft`, t.adminA, 403, draftBody);
-  await assertCell(baseUrl, "D3.1 draft × U✓", "PUT", `/api/assignments/${eA}/draft`, t.managerA1, "non403", draftBody);
+  await assertCell(baseUrl, "D3.1 draft × U✓", "PUT", `/api/assignments/${eA}/draft`, t.managerA1, 403, draftBody);
   await assertCell(baseUrl, "D3.1 draft × Ea", "PUT", `/api/assignments/${eA}/draft`, t.editorA1, "non403", draftBody);
   await assertCell(baseUrl, "D3.1 draft × F", "PUT", `/api/assignments/${fA}/draft`, t.freelanceA1, "non403", draftBody);
   await assertCell(baseUrl, "D3.1 draft × Eu", "PUT", `/api/assignments/${eB}/draft`, t.editorA1, 403, draftBody);
@@ -565,7 +572,7 @@ async function fireD3Group1(baseUrl, ctx) {
   await testAssignUpload("D3.3 assign-upload × A✓", t.adminA, eA, "non403");
   await testAssignUpload("D3.3 assign-upload × A✗", t.adminA, eB, 403);
   await testAssignUpload("D3.3 assign-upload × U✓", t.managerA1, eA, "non403");
-  await testAssignUpload("D3.3 assign-upload × Ea", t.editorA1, eA, "non403");
+  await testAssignUpload("D3.3 assign-upload × Ea", t.editorA1, eA, 403);
   await testAssignUpload("D3.3 assign-upload × F", t.freelanceA1, fA, "non403");
   await testAssignUpload("D3.3 assign-upload × Eu", t.editorA1, eB, 403);
 
@@ -593,7 +600,7 @@ async function fireD3Group1(baseUrl, ctx) {
   await assertCell(baseUrl, "§5 GET item × U✓", "GET", `/api/items/${iA}`, t.managerA1, "non403");
   await assertCell(baseUrl, "§5 GET item × U✗", "GET", `/api/items/${iB}`, t.managerA1, 403);
   await assertCell(baseUrl, "§5 GET item × Ea", "GET", `/api/items/${iA}`, t.editorA1, "non403");
-  await assertCell(baseUrl, "§5 GET item × F", "GET", `/api/items/${iA}`, t.freelanceA1, "non403");
+  await assertCell(baseUrl, "§5 GET item × F", "GET", `/api/items/${iA}`, t.freelanceA1, 403);
   await assertCell(baseUrl, "§5 GET item × Eu", "GET", `/api/items/${iB}`, t.editorA1, 403);
 
   // §5-10 POST /api/items/:id/field-pack/return-to-clean
@@ -604,7 +611,7 @@ async function fireD3Group1(baseUrl, ctx) {
   await assertCell(baseUrl, "§5 return-to-clean × U✗", "POST", `/api/items/${iB}/field-pack/return-to-clean`, t.managerA1, 403);
 
   // §5-16 POST /api/items/:id/assignments (scope: assignee must be in assigner's downline)
-  const assignBodyInLine = { assignee_user_id: ctx.users.freelanceA2.id, assignment_kind: "field" };
+  const assignBodyInLine = { assignee_user_id: ctx.users.freelanceA1.id, assignment_kind: "field" };
   const assignBodyCrossLine = { assignee_user_id: ctx.users.editorB1.id, assignment_kind: "editorial" };
   await assertCell(baseUrl, "§5 assignments × A✓", "POST", `/api/items/${iA}/assignments`, t.adminA, "non403", assignBodyInLine);
   await assertCell(baseUrl, "§5 assignments × A✗", "POST", `/api/items/${iA}/assignments`, t.adminA, 403, assignBodyCrossLine);
@@ -612,7 +619,7 @@ async function fireD3Group1(baseUrl, ctx) {
   await assertCell(baseUrl, "§5 assignments × U✗", "POST", `/api/items/${iA}/assignments`, t.managerA1, 403, assignBodyCrossLine);
 
   // §5-17 POST /api/items/:id/article-editorial-assignments
-  const edAssignBodyInLine = { assignee_user_id: ctx.users.editorA2.id };
+  const edAssignBodyInLine = { assignee_user_id: ctx.users.editorA1.id };
   const edAssignBodyCrossLine = { assignee_user_id: ctx.users.editorB1.id };
   await assertCell(baseUrl, "§5 article-ed-assign × A✓", "POST", `/api/items/${iA}/article-editorial-assignments`, t.adminA, "non403", edAssignBodyInLine);
   await assertCell(baseUrl, "§5 article-ed-assign × A✗", "POST", `/api/items/${iA}/article-editorial-assignments`, t.adminA, 403, edAssignBodyCrossLine);
@@ -649,7 +656,7 @@ async function fireD1Group2(baseUrl, ctx) {
 async function fireD2Group2(baseUrl, ctx) {
   const t = ctx.tokens;
   const iE = ctx.items.itemEditorial.id;
-  const eEd = ctx.assignments.assignEdA1Editorial;
+  const iE2 = ctx.items.itemEditorial2.id;
 
   // D2.6 editor-work②: O, A✓, U✓, Ea on itemEditorial (state=content_in_progress + editorial assignment)
   const edWorkBody = { draft: { body: "ทดสอบเขียนบทความ " + "ก".repeat(200), draft_title: "บททดสอบ" } };
@@ -658,6 +665,10 @@ async function fireD2Group2(baseUrl, ctx) {
   await assertCell(baseUrl, "D2.6 editor-work② × U✓", "PUT", `/api/items/${iE}/editor-work`, t.managerA1, "non403", edWorkBody);
   await assertCell(baseUrl, "D2.6 editor-work② × Ea", "PUT", `/api/items/${iE}/editor-work`, t.editorA1, "non403", edWorkBody);
 
+  // D2.8 submit-review② × Ea — fires BEFORE D2.7 on a SEPARATE item (itemEditorial2)
+  // because D2.7 transition② changes assignment state to "submitted" which breaks Gate B
+  await assertCell(baseUrl, "D2.8 submit-review② × Ea", "POST", `/api/items/${iE2}/article-process/submit-review`, t.editorA1, "non403");
+
   // D2.7 transition②: O, A✓, U✓, Ea — drafting→drafting (no-op, state stays content_in_progress)
   const transBody2 = { status: "drafting" };
   await assertCell(baseUrl, "D2.7 transition② × O", "POST", `/api/items/${iE}/article-process/transition`, t.owner, "non403", transBody2);
@@ -665,11 +676,10 @@ async function fireD2Group2(baseUrl, ctx) {
   await assertCell(baseUrl, "D2.7 transition② × U✓", "POST", `/api/items/${iE}/article-process/transition`, t.managerA1, "non403", transBody2);
   await assertCell(baseUrl, "D2.7 transition② × Ea", "POST", `/api/items/${iE}/article-process/transition`, t.editorA1, "non403", transBody2);
 
-  // D2.8 submit-review②: O, A✓, U✓, Ea on itemEditorial (drafting + editorial assignment + draft)
+  // D2.8 submit-review②: O, A✓, U✓ on itemEditorial (Ea already fired above on itemEditorial2)
   await assertCell(baseUrl, "D2.8 submit-review② × O", "POST", `/api/items/${iE}/article-process/submit-review`, t.owner, "non403");
   await assertCell(baseUrl, "D2.8 submit-review② × A✓", "POST", `/api/items/${iE}/article-process/submit-review`, t.adminA, "non403");
   await assertCell(baseUrl, "D2.8 submit-review② × U✓", "POST", `/api/items/${iE}/article-process/submit-review`, t.managerA1, "non403");
-  await assertCell(baseUrl, "D2.8 submit-review② × Ea", "POST", `/api/items/${iE}/article-process/submit-review`, t.editorA1, "non403");
 }
 
 async function fireD3Group2(baseUrl, ctx) {
@@ -683,8 +693,7 @@ async function fireD3Group2(baseUrl, ctx) {
   await assertCell(baseUrl, "D3.2 submissions② × O", "POST", `/api/assignments/${fSub}/submissions`, t.owner, "non403", subBody2);
   await assertCell(baseUrl, "D3.2 submissions② × A✓", "POST", `/api/assignments/${fSub}/submissions`, t.adminA, "non403", subBody2);
   await assertCell(baseUrl, "D3.2 submissions② × U✓", "POST", `/api/assignments/${fSub}/submissions`, t.managerA1, "non403", subBody2);
-  // Ea: code at :11361 blocks editors — grid says 200, verify actual
-  await assertCell(baseUrl, "D3.2 submissions② × Ea", "POST", `/api/assignments/${eA}/submissions`, t.editorA1, "non403", subBody2);
+  await assertCell(baseUrl, "D3.2 submissions② × Ea", "POST", `/api/assignments/${eA}/submissions`, t.editorA1, 403, subBody2);
   await assertCell(baseUrl, "D3.2 submissions② × F", "POST", `/api/assignments/${fSub}/submissions`, t.freelanceA1, "non403", subBody2);
 }
 
