@@ -78,3 +78,7 @@ test-out.txt
 # Gate output artifacts
 .gate-summary.json
 audit/gate-*.txt
+
+# Role-matrix provisioning tokens (contain live secrets)
+scripts/tmp-role-matrix-tokens.json
+scripts/tmp-role-matrix-tokens-v2.json
