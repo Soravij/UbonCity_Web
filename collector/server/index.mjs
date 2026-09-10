@@ -14298,7 +14298,7 @@ app.post("/api/run/quality", requireRole("admin"), workflowRateLimit, safeAsync(
 app.post("/api/review/action", requireRole("admin"), (req, res) => {
   try {
     const result = applyReviewAction(repo, actorEmail(req), req.body || {});
-    res.json({ ...result, cleanup });
+    res.json(result);
   } catch (err) {
     const msg = String(err?.message || "Cannot apply review action");
     const status = err?.code === "INVALID_TRANSITION" || err?.code === "INVALID_PRODUCTION_TRANSITION" || /cannot transition|Invalid review action payload|review prerequisite missing|latest review report is required|review governance conflict/i.test(msg) ? 409 : 400;
