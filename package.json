@@ -5,5 +5,8 @@
   "scripts": {
     "test:all": "node scripts/testAll.mjs",
     "gate": "node scripts/gate.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
   }
 }
