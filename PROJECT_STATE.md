@@ -1,12 +1,34 @@
 ﻿# UbonCity Project State
 
-Last Updated: 2026-09-03
+Last Updated: 2026-09-11
 
 ## Current Branch
 
 - `main`
 - CTA/contact baseline is present on main
 - CTA documentation baseline inherited from `1d08fb1`
+
+## Docker Deploy (local server)
+
+- backend, frontend, admin run as Docker containers on the Runtime box; Collector stays on Windows outside Docker
+- MySQL runs as a container (`mysql:8.0`); the Collector DB is unaffected
+- ports: backend 5000, frontend 3000, admin 8080 (nginx static), mysql 3307 -> 3306
+- compose requires `--env-file .env.docker` on every invocation; compose does not read that file on its own
+- `.env.docker` is gitignored and exists only on the Runtime box; `.env.docker.example` is the tracked template
+- `NEXT_PUBLIC_*` and `VITE_*` are baked at build time, so each site needs its own image; a second site means a new env file plus a rebuild
+- backend reaches Collector at `http://host.docker.internal:5070`; Collector reaches backend at `http://127.0.0.1:5000/api`
+- Collector port is 5070; the 5062 default in `transportController.js` is a stale fallback and is overridden by env
+- public access is unchanged: Cloudflare tunnel `uboncity-test`, config at `C:\cloudflared\config.yml`
+- `ops/windows/test-stack.ps1` starts containers first, then Collector and cloudflared; it no longer starts dev servers
+- the scheduled task `UbonCity Test Stack Startup` runs at boot with a 3-minute delay; Windows auto-login is required because Docker Desktop needs a user session
+- `scripts/smoke-deploy-check.mjs` verifies the deploy: health, owner login, auth rejection, public routes, readiness on both sides
+
+## Docker Deploy Open Items
+
+- the database was started empty on purpose; no data was migrated from the previous stack
+- `032_fix_category_translations.sql` is recorded as manual and skipped: it writes to a `name` column dropped by 025, so category translations are absent
+- `TRANSLATION_TARGET_LANGS` is empty, which disables the en/zh/lo gate; other-language pages stay off until it is set
+- `.env.docker` has no backup anywhere
 
 ## Completed Media Workflow
 
