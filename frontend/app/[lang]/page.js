@@ -101,14 +101,18 @@ export default async function LangHome({ params }) {
             />
           </div>
 
-          <HomeSituationsBlock situations={homepageLayout?.situations ?? []} lang={activeLang} copy={decisionCopy} />
+          <div className="home-flow-section">
+            <HomeSituationsBlock situations={homepageLayout?.situations ?? []} lang={activeLang} copy={decisionCopy} />
+          </div>
 
-          <HomeTrendingBlock
-            activeLang={activeLang}
-            copy={copy}
-            decisionCopy={decisionCopy}
-            latestEvents={latestEvents}
-          />
+          <div className="home-flow-section">
+            <HomeTrendingBlock
+              activeLang={activeLang}
+              copy={copy}
+              decisionCopy={decisionCopy}
+              latestEvents={latestEvents}
+            />
+          </div>
           </>
       )}
 
