@@ -30,6 +30,13 @@ Last Updated: 2026-09-11
 - `TRANSLATION_TARGET_LANGS` is empty, which disables the en/zh/lo gate; other-language pages stay off until it is set
 - `.env.docker` has no backup anywhere
 
+## 2026-09-11 Frontend Homepage Layout Fix (Docker deploy)
+
+- root cause: `frontend/app/[lang]/page.js` fallback branch wrapped `HomeSituationsBlock` / `HomeTrendingBlock` without `home-flow-section` div, so both blocks rendered full-viewport instead of centered at 1280px; `--bridge` wrapper also rendered an empty 3rem padding gap when `HomeFeaturedStrip` returned null
+- fix 1 (`f5123ac`): added missing `home-flow-section` wrapper div around both blocks
+- fix 2 (`e230da7`): conditional render `{featuredStripPlaces.length > 0 && (...)}` — wrapper div omitted when strip has no data
+- result: `main` = `e230da7`, verified light/dark theme at `test.uboncity.com`
+
 ## Completed Media Workflow
 
 - assignment revision media retention is allowed when the matching reset flag is false
