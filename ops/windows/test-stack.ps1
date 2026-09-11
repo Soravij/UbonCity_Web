@@ -291,16 +291,6 @@ $logDir = Join-Path $runtimeDir "logs"
 
 $services = @(
   @{
-    Name = "backend"
-    WorkDir = Join-Path $root "backend"
-    Command = "npm.cmd start"
-    PidFile = Join-Path $pidDir "backend.pid.json"
-    StdoutFile = Join-Path $logDir "backend.out.log"
-    StderrFile = Join-Path $logDir "backend.err.log"
-    HealthUrl = "http://127.0.0.1:5000/api/health"
-    RestartForever = $false
-  },
-  @{
     Name = "collector"
     WorkDir = Join-Path $root "collector"
     Command = "npm.cmd start"
@@ -309,28 +299,6 @@ $services = @(
     StderrFile = Join-Path $logDir "collector.err.log"
     HealthUrl = "http://127.0.0.1:5070/api/health"
     RestartForever = $false
-  },
-  @{
-    Name = "frontend"
-    WorkDir = Join-Path $root "frontend"
-    Command = "npm.cmd run dev -- --hostname 127.0.0.1 --port 3000"
-    PidFile = Join-Path $pidDir "frontend.pid.json"
-    StdoutFile = Join-Path $logDir "frontend.out.log"
-    StderrFile = Join-Path $logDir "frontend.err.log"
-    HealthUrl = "http://127.0.0.1:3000"
-    RestartForever = $true
-    RestartDelaySeconds = 5
-  },
-  @{
-    Name = "admin"
-    WorkDir = Join-Path $root "admin"
-    Command = "npm.cmd run dev -- --host 127.0.0.1 --port 5173"
-    PidFile = Join-Path $pidDir "admin.pid.json"
-    StdoutFile = Join-Path $logDir "admin.out.log"
-    StderrFile = Join-Path $logDir "admin.err.log"
-    HealthUrl = "http://127.0.0.1:5173"
-    RestartForever = $true
-    RestartDelaySeconds = 5
   },
   @{
     Name = "cloudflared"
@@ -349,6 +317,11 @@ $services = @(
 switch ($Action) {
   "start" {
     Assert-CloudflaredConfigReady -ConfigPath $CloudflaredConfig -ExpectedTunnelName $TunnelName
+    Push-Location $root
+    try {
+      & docker compose --env-file .env.docker up -d 2>&1 | Write-Host
+      if ($LASTEXITCODE -ne 0) { Write-Warning "[docker] compose up exited $LASTEXITCODE" }
+    } finally { Pop-Location }
     foreach ($service in $services) {
       Start-ManagedProcess `
         -Name $service.Name `
