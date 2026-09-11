@@ -93,13 +93,15 @@ export default async function LangHome({ params }) {
         </div>
       ) : (
           <>
-          <div className="home-flow-section home-flow-section--bridge">
-            <HomeFeaturedStrip
-              places={featuredStripPlaces}
-              activeLang={activeLang}
-              copy={copy}
-            />
-          </div>
+          {featuredStripPlaces.length > 0 && (
+            <div className="home-flow-section home-flow-section--bridge">
+              <HomeFeaturedStrip
+                places={featuredStripPlaces}
+                activeLang={activeLang}
+                copy={copy}
+              />
+            </div>
+          )}
 
           <div className="home-flow-section">
             <HomeSituationsBlock situations={homepageLayout?.situations ?? []} lang={activeLang} copy={decisionCopy} />
