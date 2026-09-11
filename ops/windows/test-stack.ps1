@@ -318,10 +318,17 @@ switch ($Action) {
   "start" {
     Assert-CloudflaredConfigReady -ConfigPath $CloudflaredConfig -ExpectedTunnelName $TunnelName
     Push-Location $root
+    $savedEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
-      & docker compose --env-file .env.docker up -d 2>&1 | Write-Host
+      & docker compose --env-file .env.docker up -d 2>&1 | ForEach-Object { Write-Host $_ }
       if ($LASTEXITCODE -ne 0) { Write-Warning "[docker] compose up exited $LASTEXITCODE" }
-    } finally { Pop-Location }
+    } catch {
+      Write-Warning ("[docker] compose up failed: {0}" -f $_.Exception.Message)
+    } finally {
+      $ErrorActionPreference = $savedEAP
+      Pop-Location
+    }
     foreach ($service in $services) {
       Start-ManagedProcess `
         -Name $service.Name `
