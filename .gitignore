@@ -87,3 +87,4 @@ scripts/tmp-role-matrix-tokens-v2.json
 .env.docker
 .env.docker.*
 !.env.docker.example
+docker-compose.override.yml
