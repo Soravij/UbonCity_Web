@@ -15302,7 +15302,7 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
       res.status(500).json({ error: "Cannot allocate upload asset name" });
       return;
     }
-    const relativePath = path.relative(dirs.mediaDir, finalAbsolutePath);
+    const relativePath = normalizeRelativeStoragePath(path.relative(dirs.mediaDir, finalAbsolutePath));
     const assetUid = crypto.randomUUID();
     let assetId = 0;
     let transactionBegun = false;
