@@ -11,6 +11,7 @@ import { createCollectorAuthIntegration } from "./auth-integration.mjs";
 import { createCollectorMcpPublicTestRouter, createCollectorMcpRouter } from "./mcp/index.mjs";
 import { createTransportV2Router } from "./transport-v2-router.mjs";
 import { allocateAssignmentAssetSequence, formatAssignmentAssetFileName } from "./assignment-asset-naming.mjs";
+import { itemAssetDir, placeIntoItemAssetDir } from "./item-asset-dir.mjs";
 import {
   assertCollectorIntegrationReadiness,
   getCollectorIntegrationReadiness,
@@ -6441,25 +6442,6 @@ function buildRemoteFileName(url) {
 function resolveStoragePath(storagePath) {
   if (path.isAbsolute(storagePath)) return storagePath;
   return path.join(dirs.mediaDir, storagePath);
-}
-
-function itemAssetDir(contentItemId) {
-  return path.join(dirs.mediaDir, "itemsAsset", String(contentItemId));
-}
-
-async function placeIntoItemAssetDir(currentAbsPath, contentItemId, fileName) {
-  const dir = itemAssetDir(contentItemId);
-  await fs.mkdir(dir, { recursive: true });
-  const ext = path.extname(fileName);
-  const base = path.basename(fileName, ext);
-  let target = path.join(dir, fileName);
-  let n = 2;
-  while (fsSync.existsSync(target)) {
-    target = path.join(dir, `${base}-${n}${ext}`);
-    n += 1;
-  }
-  await fs.rename(currentAbsPath, target);
-  return target;
 }
 
 function parseJsonLike(raw) {
@@ -15028,7 +15010,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
     res.status(500).json({ error: "Cannot allocate upload asset name" });
     return;
   }
-  const finalDirPath = itemAssetDir(contentItemId);
+  const finalDirPath = itemAssetDir(dirs.mediaDir, contentItemId);
   const safeName = storedFileName;
   const ext = path.extname(safeName);
   const base = path.basename(safeName, ext);
@@ -15040,6 +15022,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   }
   const finalRelativePath = normalizeRelativeStoragePath(path.relative(dirs.mediaDir, finalAbsolutePath));
   const assemblingAbsolutePath = `${finalAbsolutePath}.assembling`;
+  let finalFileName = path.basename(finalAbsolutePath);
   await fs.mkdir(finalDirPath, { recursive: true });
 
   let checksum = "";
@@ -15098,7 +15081,9 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
   }
 
   try {
-    await fs.rename(assemblingAbsolutePath, finalAbsolutePath);
+    const placed = await placeIntoItemAssetDir(dirs.mediaDir, assemblingAbsolutePath, contentItemId, path.basename(finalAbsolutePath));
+    finalAbsolutePath = placed.absolutePath;
+    finalFileName = placed.fileName;
   } catch {
     await fs.unlink(assemblingAbsolutePath).catch(() => {});
     await removeAssignmentUploadSessionTempDir(assignmentId, uploadId).catch(() => {});
@@ -15137,7 +15122,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
       assignmentId,
       assignmentRound,
       contentItemId,
-      fileName: safeName,
+      fileName: finalFileName,
       mediaType,
       assignmentSyncBatchId: syncBatchId,
     });
@@ -15145,7 +15130,7 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
       assetUid,
       "local",
       finalRelativePath,
-      safeName,
+      finalFileName,
       normalizedMime,
       expectedTotalSize,
       checksum
@@ -15300,6 +15285,7 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
     const checksum = crypto.createHash("sha256").update(fileBuffer).digest("hex");
     let storedFileName;
     let finalAbsolutePath;
+    let finalStoredFileName;
     try {
       const sequence = allocateAssignmentAssetSequence(db, contentItemId);
       storedFileName = formatAssignmentAssetFileName({
@@ -15308,7 +15294,9 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
         contentItemId,
         sequence,
       });
-      finalAbsolutePath = await placeIntoItemAssetDir(file.path, contentItemId, storedFileName);
+      const placed = await placeIntoItemAssetDir(dirs.mediaDir, file.path, contentItemId, storedFileName);
+      finalAbsolutePath = placed.absolutePath;
+      finalStoredFileName = placed.fileName;
     } catch (err) {
       await fs.unlink(file.path).catch(() => {});
       res.status(500).json({ error: "Cannot allocate upload asset name" });
@@ -15325,11 +15313,11 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
         assignmentId,
         assignmentRound,
         contentItemId,
-        fileName: storedFileName,
+        fileName: finalStoredFileName,
         mediaType,
         assignmentSyncBatchId: syncBatchId,
       });
-      const result = insert.run(assetUid, "local", relativePath, storedFileName, normalizedMime, file.size, checksum);
+      const result = insert.run(assetUid, "local", relativePath, finalStoredFileName, normalizedMime, file.size, checksum);
       assetId = Number(result.lastInsertRowid);
       const assetRole = "unused";
       const placementType = "unused";

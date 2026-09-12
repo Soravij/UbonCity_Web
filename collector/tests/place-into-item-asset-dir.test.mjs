@@ -4,24 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-function itemAssetDir(mediaDir, contentItemId) {
-  return path.join(mediaDir, "itemsAsset", String(contentItemId));
-}
-
-async function placeIntoItemAssetDir(mediaDir, currentAbsPath, contentItemId, fileName) {
-  const dir = itemAssetDir(mediaDir, contentItemId);
-  await fs.promises.mkdir(dir, { recursive: true });
-  const ext = path.extname(fileName);
-  const base = path.basename(fileName, ext);
-  let target = path.join(dir, fileName);
-  let n = 2;
-  while (fs.existsSync(target)) {
-    target = path.join(dir, `${base}-${n}${ext}`);
-    n += 1;
-  }
-  await fs.promises.rename(currentAbsPath, target);
-  return target;
-}
+import { itemAssetDir, placeIntoItemAssetDir } from "../server/item-asset-dir.mjs";
 
 test("placeIntoItemAssetDir creates directory and moves file", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "item-asset-dir-"));
@@ -33,10 +16,11 @@ test("placeIntoItemAssetDir creates directory and moves file", async () => {
 
     const result = await placeIntoItemAssetDir(tmpDir, srcFile, 42, "photo.jpg");
 
-    assert.ok(result.endsWith(path.join("itemsAsset", "42", "photo.jpg")), `unexpected path: ${result}`);
-    assert.ok(fs.existsSync(result), "target file should exist");
+    assert.ok(result.absolutePath.endsWith(path.join("itemsAsset", "42", "photo.jpg")), `unexpected path: ${result.absolutePath}`);
+    assert.ok(fs.existsSync(result.absolutePath), "target file should exist");
     assert.ok(!fs.existsSync(srcFile), "source file should be removed");
-    assert.equal(fs.readFileSync(result, "utf8"), "fake-image-data");
+    assert.equal(fs.readFileSync(result.absolutePath, "utf8"), "fake-image-data");
+    assert.equal(result.fileName, path.basename(result.absolutePath));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -56,10 +40,11 @@ test("placeIntoItemAssetDir handles filename collision with -2 suffix", async ()
 
     const result = await placeIntoItemAssetDir(tmpDir, srcFile, 99, "shot__pic-item99-01-20260912.jpg");
 
-    assert.ok(result.endsWith("-2.jpg"), `expected -2 suffix, got: ${result}`);
-    assert.ok(fs.existsSync(result), "collision file should exist");
-    assert.equal(fs.readFileSync(result, "utf8"), "new-data");
+    assert.ok(result.absolutePath.endsWith("-2.jpg"), `expected -2 suffix, got: ${result.absolutePath}`);
+    assert.ok(fs.existsSync(result.absolutePath), "collision file should exist");
+    assert.equal(fs.readFileSync(result.absolutePath, "utf8"), "new-data");
     assert.equal(fs.readFileSync(path.join(itemDir, "shot__pic-item99-01-20260912.jpg"), "utf8"), "existing");
+    assert.equal(result.fileName, path.basename(result.absolutePath));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -80,8 +65,9 @@ test("placeIntoItemAssetDir increments suffix on repeated collisions", async () 
 
     const result = await placeIntoItemAssetDir(tmpDir, srcFile, 7, "a.jpg");
 
-    assert.ok(result.endsWith("a-3.jpg"), `expected a-3.jpg, got: ${result}`);
-    assert.equal(fs.readFileSync(result, "utf8"), "v3");
+    assert.ok(result.absolutePath.endsWith("a-3.jpg"), `expected a-3.jpg, got: ${result.absolutePath}`);
+    assert.equal(fs.readFileSync(result.absolutePath, "utf8"), "v3");
+    assert.equal(result.fileName, path.basename(result.absolutePath));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
