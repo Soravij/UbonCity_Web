@@ -6443,6 +6443,25 @@ function resolveStoragePath(storagePath) {
   return path.join(dirs.mediaDir, storagePath);
 }
 
+function itemAssetDir(contentItemId) {
+  return path.join(dirs.mediaDir, "itemsAsset", String(contentItemId));
+}
+
+async function placeIntoItemAssetDir(currentAbsPath, contentItemId, fileName) {
+  const dir = itemAssetDir(contentItemId);
+  await fs.mkdir(dir, { recursive: true });
+  const ext = path.extname(fileName);
+  const base = path.basename(fileName, ext);
+  let target = path.join(dir, fileName);
+  let n = 2;
+  while (fsSync.existsSync(target)) {
+    target = path.join(dir, `${base}-${n}${ext}`);
+    n += 1;
+  }
+  await fs.rename(currentAbsPath, target);
+  return target;
+}
+
 function parseJsonLike(raw) {
   const text = String(raw || "").trim();
   if (!text) return null;
@@ -15009,16 +15028,17 @@ app.post("/api/assignments/:id/assets/uploads/:uploadId/finalize", requireRole("
     res.status(500).json({ error: "Cannot allocate upload asset name" });
     return;
   }
-  const finalRelativeDir = normalizeRelativeStoragePath(path.join(
-    "assignment-originals",
-    String(now.getFullYear()),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    `assignment-${assignmentId}`
-  ));
+  const finalDirPath = itemAssetDir(contentItemId);
   const safeName = storedFileName;
-  const finalRelativePath = normalizeRelativeStoragePath(path.join(finalRelativeDir, safeName));
-  const finalDirPath = resolveStoragePath(finalRelativeDir);
-  const finalAbsolutePath = resolveStoragePath(finalRelativePath);
+  const ext = path.extname(safeName);
+  const base = path.basename(safeName, ext);
+  let finalAbsolutePath = path.join(finalDirPath, safeName);
+  let dupN = 2;
+  while (fsSync.existsSync(finalAbsolutePath)) {
+    finalAbsolutePath = path.join(finalDirPath, `${base}-${dupN}${ext}`);
+    dupN += 1;
+  }
+  const finalRelativePath = normalizeRelativeStoragePath(path.relative(dirs.mediaDir, finalAbsolutePath));
   const assemblingAbsolutePath = `${finalAbsolutePath}.assembling`;
   await fs.mkdir(finalDirPath, { recursive: true });
 
@@ -15288,8 +15308,7 @@ app.post("/api/assignments/:id/assets/upload", requireRole("owner", "admin", "ed
         contentItemId,
         sequence,
       });
-      finalAbsolutePath = path.join(path.dirname(file.path), storedFileName);
-      await fs.rename(file.path, finalAbsolutePath);
+      finalAbsolutePath = await placeIntoItemAssetDir(file.path, contentItemId, storedFileName);
     } catch (err) {
       await fs.unlink(file.path).catch(() => {});
       res.status(500).json({ error: "Cannot allocate upload asset name" });
