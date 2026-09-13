@@ -4,6 +4,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Collector - Place</title>
     <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <script>
+      try {
+        var t = sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "";
+        if (t) document.documentElement.classList.add("pre-auth");
+      } catch (e) {}
+    </script>
     <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
     <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
     <style>

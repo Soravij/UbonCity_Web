@@ -1443,6 +1443,12 @@ body.is-authenticated #btn-logout {
   min-width: 0;
 }
 
+html.pre-auth body:not(.is-authenticated) .auth-box,
+html.pre-auth body:not(.is-authenticated) .auth-badge,
+html.pre-auth body:not(.is-authenticated) .auth-points {
+  visibility: hidden;
+}
+
 .card {
   background: var(--card);
   border: 1px solid var(--line);
