@@ -77,7 +77,7 @@ html.is-authenticated .auth-actions {
 }
 
 html.is-authenticated #workspace-auth-status {
-  min-height: 18px;
+  min-height: 1.65em;
 }
 
 html.is-authenticated .auth-badge,
