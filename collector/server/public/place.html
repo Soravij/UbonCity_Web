@@ -3,10 +3,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chanisorn Content Hub - Place</title>
-    <link rel="icon" href="/favicon.ico" sizes="any" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!--CH_HEAD-->
     <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
     <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
     <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
@@ -85,43 +82,6 @@
         }
       }
 
-      body.is-authenticated .auth-field,
-      body.is-authenticated #btn-login {
-        display: none;
-      }
-
-      body.is-authenticated .auth-box {
-        display: block;
-      }
-
-      .brand-lockup {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-      }
-
-      .brand-logo {
-        height: 64px;
-        width: auto;
-        display: block;
-      }
-
-      .brand-text h1 {
-        margin: 0;
-        line-height: 1.15;
-      }
-
-      :root:not([data-theme="dark"]) .brand-text h1 {
-        color: var(--theme-primary-strong);
-      }
-
-      .brand-sub {
-        margin: 2px 0 0;
-        font-size: 0.9rem;
-        color: var(--theme-text-muted, inherit);
-        opacity: 0.75;
-      }
     </style>
   </head>
   <body>
@@ -129,15 +89,7 @@
       <header class="header">
         <div class="auth-row">
           <div class="auth-intro">
-            <div class="brand-lockup">
-              <img class="brand-logo" src="/chanisorn-logo-color.png"
-                   srcset="/chanisorn-logo-color.png 1x, /chanisorn-logo-color@2x.png 2x"
-                   alt="Chanisorn Group" />
-              <div class="brand-text">
-                <h1>Content Hub</h1>
-                <p class="brand-sub">ระบบจัดการคอนเทนต์</p>
-              </div>
-            </div>
+            <!--CH_BRAND-->
           </div>
           <div class="auth-box">
             <label class="auth-field">
