@@ -11,7 +11,6 @@ function qs(id) {
 function applyAuthUI() {
   const isAuthenticated = Boolean(String(state.token || "").trim() && state.user);
   document.body.classList.toggle("is-authenticated", isAuthenticated);
-  document.documentElement.classList.remove("pre-auth");
   const emailInput = qs("auth-email");
   if (emailInput && state.user?.email) {
     emailInput.value = state.user.email;

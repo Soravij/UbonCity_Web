@@ -4,7 +4,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Collector - Place</title>
     <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
-    <script src="/pre-auth-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
     <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
     <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
     <style>
@@ -81,6 +80,15 @@
           grid-template-columns: auto minmax(0, 1fr);
         }
       }
+
+      body.is-authenticated .auth-field,
+      body.is-authenticated #btn-login {
+        display: none;
+      }
+
+      body.is-authenticated .auth-box {
+        display: block;
+      }
     </style>
   </head>
   <body>
@@ -88,20 +96,9 @@
       <header class="header">
         <div class="auth-row">
           <div class="auth-intro">
-            <span class="auth-badge">Collector Workspace</span>
             <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
-            <div class="auth-points">
-              <div class="auth-point">
-                <strong>Place Process Home</strong>
-                <span>ใช้หน้านี้เป็นจุดเริ่มของ flow place เพื่อเลือกเข้ากระบวนการตามลำดับงาน ตั้งแต่เตรียมคอนเทนต์ ส่งงาน ไปจนถึงเขียนงานก่อนส่งตรวจ</span>
-              </div>
-            </div>
           </div>
           <div class="auth-box">
-            <div class="auth-box-head">
-              <h2>เข้าสู่ระบบ</h2>
-              <p>ระบบจะพาไปทำงานตามสิทธิ์โดยอัตโนมัติ</p>
-            </div>
             <label class="auth-field">
               <span>อีเมล</span>
               <input id="auth-email" placeholder="อีเมลบัญชีที่ตั้งไว้ในระบบ" />
@@ -114,7 +111,6 @@
               <button class="primary" id="btn-login">เข้าสู่ระบบ</button>
               <button id="btn-logout">ออกจากระบบ</button>
             </div>
-            <p class="auth-note">ถ้ามีลิงก์ที่ต้องการเปิด ระบบจะกลับไปหน้าปลายทางหลังเข้าสู่ระบบ และต้องใช้อีเมล/รหัสผ่านของบัญชีที่ถูกตั้งไว้ใน collector instance นี้</p>
           </div>
         </div>
         <p class="muted" id="workspace-auth-status"></p>
