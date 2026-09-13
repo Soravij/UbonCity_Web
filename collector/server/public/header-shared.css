@@ -8,6 +8,15 @@ body.is-authenticated #btn-login {
 html.is-authenticated .auth-box,
 body.is-authenticated .auth-box {
   display: block;
+  width: auto;
+  min-width: 280px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
 }
 
 .brand-lockup {
@@ -69,4 +78,25 @@ html.is-authenticated .auth-actions {
 
 html.is-authenticated #workspace-auth-status {
   min-height: 18px;
+}
+
+html.is-authenticated .auth-badge,
+html.is-authenticated .auth-points,
+html.is-authenticated .auth-box-head,
+html.is-authenticated .auth-note,
+html.is-authenticated .auth-field span {
+  display: none;
+}
+
+html.is-authenticated #btn-login,
+html.is-authenticated #btn-logout {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  html.is-authenticated .auth-box,
+  body.is-authenticated .auth-box {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
 }
