@@ -62,3 +62,11 @@ html.is-authenticated #btn-logout,
 html.is-authenticated .app-shell {
   display: revert;
 }
+
+html.is-authenticated .auth-actions {
+  display: contents;
+}
+
+html.is-authenticated #workspace-auth-status {
+  min-height: 18px;
+}
