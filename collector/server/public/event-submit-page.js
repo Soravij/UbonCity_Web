@@ -484,7 +484,7 @@ function applyActionGuards() {
 function applyStaticCopy() {
   const headerTitle = document.querySelector(".header h1");
   if (headerTitle) headerTitle.textContent = "Review Event ก่อนส่งต่อ";
-  const headerHelp = document.querySelector(".header .auth-row p");
+  const headerHelp = document.getElementById("page-subtitle");
   if (headerHelp) headerHelp.textContent = "ตรวจความพร้อมของ event และ self-check ก่อนส่งเข้า Admin Review";
   const backHomeBtn = qs("btn-back-home");
   if (backHomeBtn) backHomeBtn.textContent = "Home";
@@ -505,7 +505,7 @@ function repairVisibleCopy() {
   const headerTitle = document.querySelector(".header h1");
   if (headerTitle) headerTitle.textContent = "Review Event \u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e15\u0e48\u0e2d";
 
-  const headerHelp = document.querySelector(".header .auth-row p");
+  const headerHelp = document.getElementById("page-subtitle");
   if (headerHelp) headerHelp.textContent = "\u0e15\u0e23\u0e27\u0e08\u0e04\u0e27\u0e32\u0e21\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e02\u0e2d\u0e07 event \u0e41\u0e25\u0e30 self-check \u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e40\u0e02\u0e49\u0e32 Admin Review";
 
   const backHomeBtn = qs("btn-back-home");

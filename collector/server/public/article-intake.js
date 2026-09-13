@@ -142,9 +142,9 @@ function articleIntakeFallbackUrl() {
 function applyEditorWorkerView() {
   if (!isEditorUser()) return;
   document.title = "Collector - งานเขียนของฉัน";
-  const heading = document.querySelector(".header .auth-row h1");
+  const heading = document.getElementById("page-title");
   if (heading) heading.textContent = "งานเขียนของฉัน";
-  const subheading = document.querySelector(".header .auth-row p");
+  const subheading = document.getElementById("page-subtitle");
   if (subheading) subheading.textContent = "เปิดงานที่กำลังเขียน แล้วทำต่อจากหน้านี้ได้ทันที";
   const processBar = qs("article-process-bar");
   if (processBar) processBar.classList.add("hidden");
