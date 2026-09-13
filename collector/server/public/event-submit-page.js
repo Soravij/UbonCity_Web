@@ -482,7 +482,7 @@ function applyActionGuards() {
 }
 
 function applyStaticCopy() {
-  const headerTitle = document.querySelector(".header h1");
+  const headerTitle = document.getElementById("page-title");
   if (headerTitle) headerTitle.textContent = "Review Event ก่อนส่งต่อ";
   const headerHelp = document.getElementById("page-subtitle");
   if (headerHelp) headerHelp.textContent = "ตรวจความพร้อมของ event และ self-check ก่อนส่งเข้า Admin Review";
@@ -502,7 +502,7 @@ function hasBrokenCopy(text) {
 function repairVisibleCopy() {
   const status = getArticleStatus();
   const alreadySubmitted = status === "submitted_for_admin_review";
-  const headerTitle = document.querySelector(".header h1");
+  const headerTitle = document.getElementById("page-title");
   if (headerTitle) headerTitle.textContent = "Review Event \u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e15\u0e48\u0e2d";
 
   const headerHelp = document.getElementById("page-subtitle");
