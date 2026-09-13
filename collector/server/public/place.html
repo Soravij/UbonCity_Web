@@ -89,25 +89,26 @@
     <main class="container article-page-shell">
       <header class="header">
         <div class="auth-row">
+          <!--CH_BRAND-->
           <div class="auth-intro">
-            <!--CH_BRAND-->
-          </div>
-          <div class="auth-box">
-            <label class="auth-field">
-              <span>อีเมล</span>
-              <input id="auth-email" placeholder="อีเมลบัญชีที่ตั้งไว้ในระบบ" />
-            </label>
-            <label class="auth-field">
-              <span>รหัสผ่าน</span>
-              <input id="auth-password" type="password" placeholder="รหัสผ่าน" />
-            </label>
-            <div class="auth-actions">
-              <button class="primary" id="btn-login">เข้าสู่ระบบ</button>
-              <button id="btn-logout">ออกจากระบบ</button>
+            <h1>ระบบจัดการคอนเทนต์</h1>
+            <div class="auth-box">
+              <label class="auth-field">
+                <span>อีเมล</span>
+                <input id="auth-email" placeholder="อีเมลบัญชีที่ตั้งไว้ในระบบ" />
+              </label>
+              <label class="auth-field">
+                <span>รหัสผ่าน</span>
+                <input id="auth-password" type="password" placeholder="รหัสผ่าน" />
+              </label>
+              <div class="auth-actions">
+                <button class="primary" id="btn-login">เข้าสู่ระบบ</button>
+                <button id="btn-logout">ออกจากระบบ</button>
+              </div>
             </div>
+            <p class="muted" id="workspace-auth-status"></p>
           </div>
         </div>
-        <p class="muted" id="workspace-auth-status"></p>
         <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
       </header>
 
