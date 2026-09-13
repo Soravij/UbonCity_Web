@@ -11286,24 +11286,25 @@ function wireAssignments() {
     const assignmentId = Number(state.assignments.selectedId || 0) || 0;
     const mode = String(target.getAttribute("data-capture-mode") || "").trim().toLowerCase();
     setAssignmentCaptureLoading(assignmentId, slug, true);
-    renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId)));
-    const files = Array.from(target.files || []).filter((file) => {
-      const mimeType = String(file?.type || "").trim().toLowerCase();
-      if (mode === "image") return mimeType.startsWith("image/");
-      if (mode === "video") return mimeType.startsWith("video/");
-      return mimeType.startsWith("image/") || mimeType.startsWith("video/");
-    });
-    appendAssignmentCaptureFiles(assignmentId, slug, files);
-    target.value = "";
-    syncAssignmentSubmissionDraftFromForm();
-    renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId)));
-    renderAssignmentSubmissionFileList();
-    window.setTimeout(() => {
+    try {
+      renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId)));
+      const files = Array.from(target.files || []).filter((file) => {
+        const mimeType = String(file?.type || "").trim().toLowerCase();
+        if (mode === "image") return mimeType.startsWith("image/");
+        if (mode === "video") return mimeType.startsWith("video/");
+        return mimeType.startsWith("image/") || mimeType.startsWith("video/");
+      });
+      appendAssignmentCaptureFiles(assignmentId, slug, files);
+      target.value = "";
+      syncAssignmentSubmissionDraftFromForm();
+      renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId)));
+      renderAssignmentSubmissionFileList();
+    } finally {
       setAssignmentCaptureLoading(assignmentId, slug, false);
       if (Number(state.assignments.selectedId || 0) === assignmentId) {
         renderAssignmentSubmissionForm(getAssignmentSubmissionFormAssignment(getAssignmentById(assignmentId)));
       }
-    }, 1400);
+    }
   });
   qs("assignment-submission-capture-guide")?.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-capture-remove-file]");
