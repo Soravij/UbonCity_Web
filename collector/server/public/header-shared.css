@@ -1,8 +1,11 @@
+html.is-authenticated .auth-field,
+html.is-authenticated #btn-login,
 body.is-authenticated .auth-field,
 body.is-authenticated #btn-login {
   display: none;
 }
 
+html.is-authenticated .auth-box,
 body.is-authenticated .auth-box {
   display: block;
 }
