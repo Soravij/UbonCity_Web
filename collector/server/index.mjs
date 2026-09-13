@@ -11,7 +11,7 @@ import { createCollectorAuthIntegration } from "./auth-integration.mjs";
 import { createCollectorMcpPublicTestRouter, createCollectorMcpRouter } from "./mcp/index.mjs";
 import { createTransportV2Router } from "./transport-v2-router.mjs";
 import { allocateAssignmentAssetSequence, formatAssignmentAssetFileName } from "./assignment-asset-naming.mjs";
-import { COLLECTOR_HEAD_PARTIAL, COLLECTOR_BRAND_PARTIAL } from "./header-partials.mjs";
+import { COLLECTOR_HEAD_PARTIAL, COLLECTOR_BRAND_PARTIAL, COLLECTOR_HEAD_CSS_PARTIAL } from "./header-partials.mjs";
 import { itemAssetDir, placeIntoItemAssetDir } from "./item-asset-dir.mjs";
 import {
   assertCollectorIntegrationReadiness,
@@ -248,7 +248,8 @@ function withVersionQuery(specifier, importerPath = "") {
 function rewriteCollectorHtmlAssetUrls(htmlText, htmlFilePath) {
   let html = htmlText
     .replaceAll("<!--CH_HEAD-->", COLLECTOR_HEAD_PARTIAL)
-    .replaceAll("<!--CH_BRAND-->", COLLECTOR_BRAND_PARTIAL);
+    .replaceAll("<!--CH_BRAND-->", COLLECTOR_BRAND_PARTIAL)
+    .replaceAll("<!--CH_HEAD_CSS-->", COLLECTOR_HEAD_CSS_PARTIAL);
   return html.replace(
     /((?:src|href)=["'])([^"']+)(["'])/gi,
     (match, prefix, specifier, suffix) => `${prefix}${withVersionQuery(specifier, htmlFilePath)}${suffix}`
