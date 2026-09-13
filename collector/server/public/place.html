@@ -3,10 +3,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chanisorn Content Hub - Place</title>
-    <link rel="icon" href="/favicon.ico?v=__COLLECTOR_ASSET_VERSION__" sizes="any" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=__COLLECTOR_ASSET_VERSION__" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=__COLLECTOR_ASSET_VERSION__" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=__COLLECTOR_ASSET_VERSION__" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
     <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
     <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
@@ -96,12 +96,13 @@
 
       .brand-lockup {
         display: flex;
-        align-items: center;
-        gap: 14px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
       }
 
       .brand-logo {
-        height: 40px;
+        height: 64px;
         width: auto;
         display: none;
       }
@@ -133,14 +134,14 @@
         <div class="auth-row">
           <div class="auth-intro">
             <div class="brand-lockup">
-              <img class="brand-logo" src="/chanisorn-logo-dark.png?v=__COLLECTOR_ASSET_VERSION__"
-                   srcset="/chanisorn-logo-dark.png?v=__COLLECTOR_ASSET_VERSION__ 1x, /chanisorn-logo-dark@2x.png?v=__COLLECTOR_ASSET_VERSION__ 2x"
+              <img class="brand-logo" src="/chanisorn-logo-dark.png"
+                   srcset="/chanisorn-logo-dark.png 1x, /chanisorn-logo-dark@2x.png 2x"
                    alt="Chanisorn Group" />
-              <img class="brand-logo brand-logo-light" src="/chanisorn-logo-light.png?v=__COLLECTOR_ASSET_VERSION__"
-                   srcset="/chanisorn-logo-light.png?v=__COLLECTOR_ASSET_VERSION__ 1x, /chanisorn-logo-light@2x.png?v=__COLLECTOR_ASSET_VERSION__ 2x"
+              <img class="brand-logo brand-logo-light" src="/chanisorn-logo-light.png"
+                   srcset="/chanisorn-logo-light.png 1x, /chanisorn-logo-light@2x.png 2x"
                    alt="Chanisorn Group" />
               <div class="brand-text">
-                <h1>Chanisorn Content Hub</h1>
+                <h1>Content Hub</h1>
                 <p class="brand-sub">ระบบจัดการคอนเทนต์</p>
               </div>
             </div>
