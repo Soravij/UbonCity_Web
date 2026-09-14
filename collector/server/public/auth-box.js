@@ -116,15 +116,8 @@ export async function initAuthBox(options = {}) {
       syncToken(result?.token || "");
       state.user = result?.user || null;
       if (allowRoles && !roleAllowed(allowRoles)) {
-        sessionStorage.setItem("collector_return_to", location.pathname + location.search);
         const redirectUrl = (redirectFor && redirectFor(currentRole())) || rolePortalUrl(currentRole());
         window.location.replace(redirectUrl);
-        return;
-      }
-      const returnTo = sessionStorage.getItem("collector_return_to");
-      if (returnTo && returnTo !== location.pathname + location.search) {
-        sessionStorage.removeItem("collector_return_to");
-        location.replace(returnTo);
         return;
       }
       applyAuthUI();
@@ -146,7 +139,6 @@ export async function initAuthBox(options = {}) {
     }
     syncToken("");
     state.user = null;
-    sessionStorage.removeItem("collector_return_to");
     applyAuthUI();
     window.location.replace("/");
   });
@@ -161,16 +153,9 @@ export async function initAuthBox(options = {}) {
     const me = await authApi("/api/auth/me");
     state.user = me?.user || null;
     if (allowRoles && !roleAllowed(allowRoles)) {
-      sessionStorage.setItem("collector_return_to", location.pathname + location.search);
       const redirectUrl = (redirectFor && redirectFor(currentRole())) || rolePortalUrl(currentRole());
       window.location.replace(redirectUrl);
       return null;
-    }
-    const returnTo = sessionStorage.getItem("collector_return_to");
-    if (returnTo && returnTo !== location.pathname + location.search) {
-      sessionStorage.removeItem("collector_return_to");
-      location.replace(returnTo);
-      return state.user;
     }
     applyAuthUI();
     setAuthStatus(
