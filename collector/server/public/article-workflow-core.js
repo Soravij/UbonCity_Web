@@ -873,7 +873,7 @@ export function setBanner(message, kind = "success") {
   if (!text) {
     node.textContent = "";
     node.classList.add("hidden");
-    node.classList.remove("is-loading", "is-success", "is-error");
+    node.classList.remove("hidden", "is-loading", "is-success", "is-error", "fail");
     return;
   }
   node.textContent = text;

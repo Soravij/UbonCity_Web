@@ -1225,6 +1225,7 @@ function wire() {
 }
 
 async function init() {
+  await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
   wire();
   if (currentRole() === "freelance") {
     window.location.replace(eventFallbackUrl());
@@ -1241,7 +1242,6 @@ async function init() {
         return;
       }
     }
-    await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
     await loadWorkspace();
     if (!ensureEventItem()) return;
     if (!canEditArticle()) {
