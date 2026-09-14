@@ -11,6 +11,7 @@ import {
   renderWorkflowBackwardTransitionControls,
   resolveBackwardResumePath,
 } from "./workflow-state-catalog.js";
+import { initAuthBox, getAuthUser } from "./auth-box.js";
 const ASSIGNMENT_REQUIRED_STATUSES = ["content_in_progress", "needs_revision"];
 const DIRECTORY_SYNC_TTL_MS = 5 * 60 * 1000;
 const DIRECTORY_SYNC_CACHE_KEY = "collector_users_last_directory_sync_at";
@@ -22,8 +23,13 @@ const INTAKE_GROUPS = [
   { key: "done", label: "เสร็จแล้ว", empty: "ยังไม่มีงานที่เสร็จแล้ว" },
 ];
 
+function readToken() {
+  try {
+    return sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "";
+  } catch { return ""; }
+}
+
 const state = {
-  token: sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "",
   user: null,
   workflowStates: null,
   workflowStateLogKeys: new Set(),
@@ -67,7 +73,8 @@ async function api(path, options = {}) {
   if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const token = readToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: "Request failed" }));
@@ -84,11 +91,11 @@ function setBanner(message, kind = "success") {
   if (!text) {
     node.textContent = "";
     node.classList.add("hidden");
-    node.classList.remove("is-loading", "is-success", "is-error");
+    node.classList.remove("is-loading", "is-success", "is-error", "fail");
     return;
   }
   node.textContent = text;
-  node.classList.remove("hidden", "is-loading", "is-success", "is-error");
+  node.classList.remove("hidden", "is-loading", "is-success", "is-error", "fail");
   if (kind === "loading") node.classList.add("is-loading");
   else if (kind === "error") node.classList.add("is-error");
   else node.classList.add("is-success");
@@ -784,6 +791,10 @@ async function prefetchProcessSummaries() {
 }
 
 async function loadIntake() {
+  await initAuthBox({
+    allowRoles: ["owner", "admin", "editor", "user", "freelance"],
+    onReady: () => { state.user = getAuthUser(); },
+  });
   const [me, workflowStates] = await Promise.all([api("/api/auth/me"), api("/api/workflow-states").catch(() => null)]);
   state.user = me?.user || null;
   state.workflowStates = workflowStates;
