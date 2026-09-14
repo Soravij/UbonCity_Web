@@ -93,3 +93,11 @@ html.is-authenticated #btn-logout {
 #page-subtitle {
   min-height: 1.5em;
 }
+
+.auth-intro {
+  align-content: end;
+}
+
+.auth-box {
+  padding-top: 6px;
+}

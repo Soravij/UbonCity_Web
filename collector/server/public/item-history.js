@@ -93,10 +93,11 @@ export function initItemHistory(options = {}) {
   getItemId = typeof options?.getItemId === "function" ? options.getItemId : () => 0;
   const header = document.querySelector("header.header");
   if (!header || typeof fetchJson !== "function") return;
+  const target = document.querySelector(".auth-actions") || header;
   const button = document.createElement("button");
   button.id = "btn-item-history";
   button.textContent = "ประวัติ";
-  header.appendChild(button);
+  target.appendChild(button);
   document.body.insertAdjacentHTML("beforeend", MODAL_HTML);
   button.addEventListener("click", () => { openPanel(); });
   document.getElementById("btn-item-history-close")?.addEventListener("click", () => setOpen(false));
