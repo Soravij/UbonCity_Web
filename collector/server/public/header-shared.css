@@ -96,6 +96,7 @@ html.is-authenticated #btn-logout {
 
 .auth-intro {
   align-self: stretch;
+  grid-auto-rows: max-content;
   align-content: end;
 }
 
