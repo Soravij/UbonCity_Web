@@ -1760,10 +1760,8 @@ function setWorkspaceBanner(message, kind = "success", options = {}) {
 function applyEditorWorkspaceView() {
   if (!isEditorWorkspaceUser()) return;
   document.title = "Collector - \u0e40\u0e02\u0e35\u0e22\u0e19\u0e1a\u0e17\u0e04\u0e27\u0e32\u0e21";
-  const heading = document.getElementById("page-title");
-  if (heading) heading.textContent = "\u0e40\u0e02\u0e35\u0e22\u0e19\u0e1a\u0e17\u0e04\u0e27\u0e32\u0e21";
   const subheading = document.getElementById("page-subtitle");
-  if (subheading) subheading.textContent = "\u0e41\u0e01\u0e49\u0e44\u0e02\u0e41\u0e25\u0e30\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e07\u0e32\u0e19\u0e40\u0e02\u0e35\u0e22\u0e19\u0e02\u0e2d\u0e07\u0e04\u0e38\u0e13";
+  if (subheading) subheading.textContent = "เขียนบทความ — แก้ไขและบันทึกงานเขียนของคุณ";
   const processBar = qs("article-process-bar");
   if (processBar) processBar.classList.add("hidden");
   const authStatus = qs("workspace-auth-status");

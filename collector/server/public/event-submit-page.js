@@ -482,10 +482,8 @@ function applyActionGuards() {
 }
 
 function applyStaticCopy() {
-  const headerTitle = document.getElementById("page-title");
-  if (headerTitle) headerTitle.textContent = "Review Event ก่อนส่งต่อ";
   const headerHelp = document.getElementById("page-subtitle");
-  if (headerHelp) headerHelp.textContent = "ตรวจความพร้อมของ event และ self-check ก่อนส่งเข้า Admin Review";
+  if (headerHelp) headerHelp.textContent = "Review Event ก่อนส่งต่อ — ตรวจความพร้อมของ event และ self-check ก่อนส่งเข้า Admin Review";
   const backHomeBtn = qs("btn-back-home");
   if (backHomeBtn) backHomeBtn.textContent = "Home";
   const openIntakeBtn = qs("btn-open-intake");
@@ -502,11 +500,8 @@ function hasBrokenCopy(text) {
 function repairVisibleCopy() {
   const status = getArticleStatus();
   const alreadySubmitted = status === "submitted_for_admin_review";
-  const headerTitle = document.getElementById("page-title");
-  if (headerTitle) headerTitle.textContent = "Review Event \u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e15\u0e48\u0e2d";
-
   const headerHelp = document.getElementById("page-subtitle");
-  if (headerHelp) headerHelp.textContent = "\u0e15\u0e23\u0e27\u0e08\u0e04\u0e27\u0e32\u0e21\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e02\u0e2d\u0e07 event \u0e41\u0e25\u0e30 self-check \u0e01\u0e48\u0e2d\u0e19\u0e2a\u0e48\u0e07\u0e40\u0e02\u0e49\u0e32 Admin Review";
+  if (headerHelp) headerHelp.textContent = "Review Event ก่อนส่งต่อ — ตรวจความพร้อมของ event และ self-check ก่อนส่งเข้า Admin Review";
 
   const backHomeBtn = qs("btn-back-home");
   if (backHomeBtn) backHomeBtn.textContent = "\u0e01\u0e25\u0e31\u0e1a";

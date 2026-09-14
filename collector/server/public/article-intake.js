@@ -142,10 +142,8 @@ function articleIntakeFallbackUrl() {
 function applyEditorWorkerView() {
   if (!isEditorUser()) return;
   document.title = "Collector - งานเขียนของฉัน";
-  const heading = document.getElementById("page-title");
-  if (heading) heading.textContent = "งานเขียนของฉัน";
   const subheading = document.getElementById("page-subtitle");
-  if (subheading) subheading.textContent = "เปิดงานที่กำลังเขียน แล้วทำต่อจากหน้านี้ได้ทันที";
+  if (subheading) subheading.textContent = "งานเขียนของฉัน — เปิดงานที่กำลังเขียน แล้วทำต่อจากหน้านี้ได้ทันที";
   const processBar = qs("article-process-bar");
   if (processBar) processBar.classList.add("hidden");
   const statusCard = qs("article-process-summary")?.closest(".article-card-status") || null;
