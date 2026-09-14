@@ -872,8 +872,8 @@ export function setBanner(message, kind = "success") {
   const text = String(message || "").trim();
   if (!text) {
     node.textContent = "";
+    node.classList.remove("is-loading", "is-success", "is-error", "fail");
     node.classList.add("hidden");
-    node.classList.remove("hidden", "is-loading", "is-success", "is-error", "fail");
     return;
   }
   node.textContent = text;
