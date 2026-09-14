@@ -11,3 +11,18 @@ export const COLLECTOR_BRAND_PARTIAL = `<div class="brand-lockup">
                      srcset="/chanisorn-logo-color.png 1x, /chanisorn-logo-color@2x.png 2x"
                      alt="Chanisorn Group" />
               </div>`;
+
+export const COLLECTOR_AUTH_PARTIAL = `<div class="auth-box">
+              <label class="auth-field">
+                <span>อีเมล</span>
+                <input id="auth-email" placeholder="อีเมลบัญชีที่ตั้งไว้ในระบบ" />
+              </label>
+              <label class="auth-field">
+                <span>รหัสผ่าน</span>
+                <input id="auth-password" type="password" placeholder="รหัสผ่าน" />
+              </label>
+              <div class="auth-actions">
+                <button class="primary" id="btn-login">เข้าสู่ระบบ</button>
+                <button id="btn-logout">ออกจากระบบ</button>
+              </div>
+            </div>`;
