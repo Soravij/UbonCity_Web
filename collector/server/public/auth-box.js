@@ -48,6 +48,18 @@ function currentRole(user = state.user) {
   return String(user?.role || "").trim().toLowerCase();
 }
 
+function rolePortalUrl(role) {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  if (normalizedRole === "editor") return "/editor-home.html";
+  if (normalizedRole === "freelance") return "/freelance-home.html";
+  return "/";
+}
+
+function roleAllowed(allowRoles) {
+  if (!Array.isArray(allowRoles) || allowRoles.length === 0) return true;
+  return allowRoles.map((r) => String(r).toLowerCase()).includes(currentRole());
+}
+
 export async function authApi(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (state.token) headers.authorization = `Bearer ${state.token}`;
@@ -86,6 +98,7 @@ export async function initAuthBox(options = {}) {
   if (options.statusId) statusId = options.statusId;
   if (options.bannerId) bannerId = options.bannerId;
   const onReady = typeof options.onReady === "function" ? options.onReady : null;
+  const allowRoles = Array.isArray(options.allowRoles) ? options.allowRoles : null;
 
   qs("btn-login")?.addEventListener("click", async () => {
     try {
@@ -97,6 +110,10 @@ export async function initAuthBox(options = {}) {
       });
       syncToken(result?.token || "");
       state.user = result?.user || null;
+      if (allowRoles && !roleAllowed(allowRoles)) {
+        window.location.replace(rolePortalUrl(currentRole()));
+        return;
+      }
       applyAuthUI();
       setAuthStatus(
         `เข้าสู่ระบบเป็น ${state.user?.display_name || state.user?.email || "-"} (${currentRole()})`
@@ -129,6 +146,10 @@ export async function initAuthBox(options = {}) {
   try {
     const me = await authApi("/api/auth/me");
     state.user = me?.user || null;
+    if (allowRoles && !roleAllowed(allowRoles)) {
+      window.location.replace(rolePortalUrl(currentRole()));
+      return null;
+    }
     applyAuthUI();
     setAuthStatus(
       `เข้าสู่ระบบเป็น ${state.user?.display_name || state.user?.email || "-"} (${currentRole()})`
