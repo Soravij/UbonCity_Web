@@ -9,12 +9,14 @@ export {
   renderWorkflowBackwardTransitionControls,
 } from "./workflow-backward-transitions.js";
 
+export function readToken() {
+  try {
+    return sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "";
+  } catch { return ""; }
+}
+
 export const state = {
-  token: (
-    (typeof sessionStorage !== "undefined" && sessionStorage.getItem("collector_token"))
-    || (typeof localStorage !== "undefined" && localStorage.getItem("collector_token"))
-    || ""
-  ),
+  token: readToken(),
   user: null,
   itemId: Number(new URLSearchParams(window.location.search).get("id") || 0),
   item: null,
@@ -854,7 +856,7 @@ export async function api(path, options = {}) {
   if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  if (readToken()) headers.Authorization = `Bearer ${readToken()}`;
   const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: "Request failed" }));
@@ -875,7 +877,7 @@ export function setBanner(message, kind = "success") {
     return;
   }
   node.textContent = text;
-  node.classList.remove("hidden", "is-loading", "is-success", "is-error");
+  node.classList.remove("hidden", "is-loading", "is-success", "is-error", "fail");
   if (kind === "loading") node.classList.add("is-loading");
   else if (kind === "error") node.classList.add("is-error");
   else node.classList.add("is-success");
@@ -908,9 +910,7 @@ export function renderProcessBar() {
 }
 
 export function renderAuthStatus() {
-  const authNode = qs("workspace-auth-status");
-  if (!authNode) return;
-  authNode.textContent = "";
+  return;
 }
 
 export function renderStatusChip() {

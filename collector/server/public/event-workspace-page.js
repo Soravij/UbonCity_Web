@@ -24,6 +24,7 @@
   slugify,
   state,
 } from "./article-workflow-core.js";
+import { initAuthBox } from "./auth-box.js";
 
 const workspaceState = {
   bodyBlocks: [],
@@ -1240,6 +1241,7 @@ async function init() {
         return;
       }
     }
+    await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
     await loadWorkspace();
     if (!ensureEventItem()) return;
     if (!canEditArticle()) {

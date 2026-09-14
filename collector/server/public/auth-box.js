@@ -41,6 +41,7 @@ function setBanner(message = "", isError = false) {
   if (!node) return;
   node.textContent = String(message || "").trim();
   node.classList.toggle("hidden", !message);
+  node.classList.remove("is-loading", "is-success", "is-error");
   node.classList.toggle("fail", Boolean(message && isError));
 }
 

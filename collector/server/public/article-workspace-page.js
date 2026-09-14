@@ -45,6 +45,7 @@
   validateWorkspace,
 } from "./article-workflow-core.js";
 import { initItemHistory } from "./item-history.js";
+import { initAuthBox } from "./auth-box.js";
 
 const workspaceState = {
   bodyBlocks: [],
@@ -2419,6 +2420,7 @@ async function init() {
     getItemId: () => Number(state?.item?.id || 0) || 0,
   });
   try {
+    await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
     await loadWorkspace();
     await refreshBackwardTransitions();
     if (!canEditArticle()) {
