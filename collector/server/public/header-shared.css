@@ -89,3 +89,7 @@ html.is-authenticated #btn-logout {
 :root:not([data-theme="dark"]) .header h1 {
   color: var(--theme-primary-strong);
 }
+
+#page-subtitle {
+  min-height: 1.5em;
+}

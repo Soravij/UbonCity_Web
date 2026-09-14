@@ -57,7 +57,7 @@ function setLabel(forId, text) {
 }
 
 function applyStaticEventCopy() {
-  setText("#page-title", "ระบบจัดการคอนเทนต์ UbonCity.com");
+  setText("#page-title", "ระบบจัดการคอนเทนต์");
   setText("#page-subtitle", "หน้าทำงาน Event สำหรับเขียน event editorial ด้วย composer เดิมในฟอร์มเฉพาะ event");
   setText("#btn-back-home", "โฮม");
   setText("#btn-open-events", "กลับหน้าแรก");
