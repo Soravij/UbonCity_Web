@@ -95,6 +95,7 @@ html.is-authenticated #btn-logout {
 }
 
 .auth-intro {
+  align-self: stretch;
   align-content: end;
 }
 
