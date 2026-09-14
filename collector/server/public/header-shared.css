@@ -98,6 +98,8 @@ html.is-authenticated #btn-logout {
   align-self: stretch;
   grid-auto-rows: max-content;
   align-content: end;
+  justify-items: end;
+  text-align: right;
 }
 
 .auth-box {
