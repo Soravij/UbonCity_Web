@@ -4,45 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Freelance Portal</title>
+    <!--CH_HEAD-->
     <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
     <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <!--CH_HEAD_CSS-->
     <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
   </head>
   <body>
     <main class="container article-page-shell">
       <header class="header">
         <div class="auth-row">
-          <div class="auth-intro">
-            <span class="auth-badge">Freelance Portal</span>
-            <h1>ทางเข้างาน Freelance</h1>
-            <div class="auth-points">
-              <div class="auth-point">
-                <strong>หน้านี้เป็น launcher เท่านั้น</strong>
-                <span>เข้าไปทำงานใน work page ของตัวเอง แล้วเลือกงานจากรายการของคุณในหน้านั้น</span>
-              </div>
-            </div>
-          </div>
-          <div class="auth-box">
-            <div class="auth-box-head">
-              <h2>เข้าสู่ระบบ</h2>
-              <p>ระบบจะพาไปทำงานตามสิทธิ์ โดยอัตโนมัติ</p>
-            </div>
-            <label class="auth-field">
-              <span>อีเมล</span>
-              <input id="auth-email" placeholder="อีเมลบัญชีที่ตั้งไว้ในระบบ" />
-            </label>
-            <label class="auth-field">
-              <span>รหัสผ่าน</span>
-              <input id="auth-password" type="password" placeholder="รหัสผ่าน" />
-            </label>
-            <div class="auth-actions">
-              <button class="primary" id="btn-login">เข้าสู่ระบบ</button>
-              <button id="btn-logout">ออกจากระบบ</button>
-            </div>
-            <p class="auth-note">ถ้ามีลิงก์ที่ต้องการเปิด ระบบจะกลับไปหน้าปลายทางหลังเข้าสู่ระบบ และต้องใช้อีเมล/รหัสผ่านของบัญชีที่ถูกตั้งไว้ใน collector instance นี้</p>
-          </div>
+          <!--CH_BRAND-->
+          <h1>ทางเข้างาน Freelance</h1>
+          <!--CH_AUTH-->
+          <p id="workspace-auth-status" class="auth-status"></p>
         </div>
-        <p class="muted" id="portal-auth-status">กำลังตรวจสิทธิ์...</p>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
       </header>
 
       <section class="card article-work-card">
