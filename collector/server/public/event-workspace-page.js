@@ -24,6 +24,7 @@
   slugify,
   state,
 } from "./article-workflow-core.js";
+import { initAuthBox } from "./auth-box.js";
 
 const workspaceState = {
   bodyBlocks: [],
@@ -1224,6 +1225,7 @@ function wire() {
 }
 
 async function init() {
+  await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
   wire();
   if (currentRole() === "freelance") {
     window.location.replace(eventFallbackUrl());
