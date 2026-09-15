@@ -57,6 +57,12 @@ async function api(path, options = {}) {
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  if (res.status === 401) {
+    sessionStorage.removeItem("collector_token");
+    localStorage.removeItem("collector_token");
+    window.location.reload();
+    return;
+  }
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: "คำขอล้มเหลว" }));
     throw new Error(data.error || "คำขอล้มเหลว");
@@ -515,9 +521,6 @@ function wire() {
       statusId: "brief-auth-status",
       bannerId: "brief-status",
       allowRoles: ["owner","admin","editor","user","freelance"],
-      redirectFor: (role) => role === "freelance"
-        ? buildAssignmentWorkUrl(state.itemId, state.assignmentId)
-        : undefined,
     });
     if (!user) return;
     state.user = user;
