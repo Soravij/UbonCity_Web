@@ -1,4 +1,4 @@
-import { initAuthBox, rolePortalUrl } from "./auth-box.js";
+import { initAuthBox } from "./auth-box.js";
 
 function qs(id) {
   return document.getElementById(id);
