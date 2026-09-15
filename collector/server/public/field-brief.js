@@ -1,5 +1,6 @@
-﻿const state = {
-  token: sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "",
+﻿import { initAuthBox, rolePortalUrl } from "./auth-box.js";
+
+const state = {
   user: null,
   itemId: Number(new URLSearchParams(window.location.search).get("id") || 0),
   assignmentId: Number(new URLSearchParams(window.location.search).get("assignment_id") || 0),
@@ -10,8 +11,6 @@
   evidenceBlocks: [],
   approvedContextBlocks: [],
 };
-
-const AUTH_RETURN_TO_KEY = "collector_return_to";
 
 function qs(id) {
   return document.getElementById(id);
@@ -34,12 +33,6 @@ function sanitizeUrl(value) {
   return "";
 }
 
-function sanitizeRelativeReturnTo(value) {
-  const raw = String(value || "").trim();
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "";
-  return raw;
-}
-
 function parsePositiveInt(value) {
   const n = Number(value || 0);
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
@@ -55,43 +48,17 @@ function buildAssignmentWorkUrl(itemId, assignmentId = 0) {
   return `/?${params.toString()}`;
 }
 
-function rolePortalUrl(role) {
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  if (normalizedRole === "editor") return "/editor-home.html";
-  if (normalizedRole === "freelance") return buildAssignmentWorkUrl(state.itemId, state.assignmentId);
-  return "/";
-}
-
-function getCurrentReturnToPath() {
-  return sanitizeRelativeReturnTo(`${window.location.pathname || "/"}${window.location.search || ""}`);
-}
-
-function redirectToLoginWithReturnTo(target = getCurrentReturnToPath()) {
-  const safeTarget = sanitizeRelativeReturnTo(target);
-  try {
-    if (safeTarget) sessionStorage.setItem(AUTH_RETURN_TO_KEY, safeTarget);
-  } catch {
-    // ignore storage failures
-  }
-  const params = new URLSearchParams();
-  if (safeTarget) params.set("return_to", safeTarget);
-  const query = params.toString();
-  window.location.assign(`/${query ? `?${query}` : ""}`);
-}
-
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const token = sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "";
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(path, { ...options, headers, credentials: "same-origin" });
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: "คำขอล้มเหลว" }));
-    if (res.status === 401 && path !== "/api/auth/login") {
-      redirectToLoginWithReturnTo();
-    }
     throw new Error(data.error || "คำขอล้มเหลว");
   }
   const contentType = res.headers.get("content-type") || "";
@@ -542,11 +509,19 @@ function wire() {
 
 (async () => {
   try {
-    const me = await api("/api/auth/me");
-    state.user = me.user;
-    qs("brief-auth-status").textContent = "";
-
     wire();
+
+    const user = await initAuthBox({
+      statusId: "brief-auth-status",
+      bannerId: "brief-status",
+      allowRoles: ["owner","admin","editor","user","freelance"],
+      redirectFor: (role) => role === "freelance"
+        ? buildAssignmentWorkUrl(state.itemId, state.assignmentId)
+        : undefined,
+    });
+    if (!user) return;
+    state.user = user;
+
     if (state.assignmentId > 0) {
       const assignmentRes = await api(`/api/assignments/${state.assignmentId}`);
       state.assignment = assignmentRes?.assignment || null;
@@ -580,6 +555,3 @@ function wire() {
     setStatus(err.message, true);
   }
 })();
-
-
-
