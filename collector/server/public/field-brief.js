@@ -87,7 +87,9 @@ function setStatus(text, isError = false) {
   const node = qs("brief-status");
   if (!node) return;
   node.textContent = String(text || "");
-  node.style.color = isError ? "#b42318" : "#1f8a52";
+  node.classList.remove("hidden","fail","is-loading","is-success","is-error");
+  if (!text) { node.classList.add("hidden"); return; }
+  node.classList.add(isError ? "is-error" : "is-success");
 }
 
 function formatDateTime(value) {
