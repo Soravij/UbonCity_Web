@@ -15,12 +15,14 @@
       <header class="header">
         <div class="auth-row">
           <!--CH_BRAND-->
-          <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
-          <p>สรุปหน้างาน สำหรับพิมพ์หรือส่งต่อเป็น brief ให้ทีมภาคสนาม</p>
-          <!--CH_AUTH-->
+          <div class="auth-intro">
+            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+            <p id="page-subtitle">สรุปหน้างาน สำหรับพิมพ์หรือส่งต่อเป็น brief ให้ทีมภาคสนาม</p>
+            <!--CH_AUTH-->
+            <p class="muted" id="brief-auth-status"></p>
+          </div>
         </div>
-        <p class="muted" id="brief-auth-status"></p>
-        <p class="status result-banner hidden" id="brief-status"></p>
+        <div class="result-banner hidden" id="brief-status" role="status" aria-live="polite"></div>
       </header>
       <div class="card page-actions-strip print-hidden">
         <div class="toolbar">
