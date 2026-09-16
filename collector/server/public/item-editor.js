@@ -1,12 +1,10 @@
-const token = sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "";
-const AUTH_RETURN_TO_KEY = "collector_return_to";
+import { initAuthBox, rolePortalUrl } from "./auth-box.js";
 import {
   reportUnknownWorkflowState,
   loadWorkflowBackwardTransitions,
   renderWorkflowBackwardTransitionControls,
 } from "./workflow-state-catalog.js";
 const state = {
-  token,
   user: null,
   workflowStates: null,
   workflowStateLogKeys: new Set(),
@@ -280,13 +278,6 @@ function parsePositiveInt(value) {
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
 }
 
-function rolePortalUrl(role) {
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  if (normalizedRole === "editor") return "/editor-home.html";
-  if (normalizedRole === "freelance") return "/freelance-home.html";
-  return "/";
-}
-
 function buildFreelanceWorkUrl(itemId, assignmentId) {
   const params = new URLSearchParams();
   params.set("tab", "work");
@@ -319,23 +310,6 @@ async function getBackNavigationUrl() {
     return resolveFreelanceEditorExitUrl();
   }
   return rolePortalUrl(role);
-}
-
-function getCurrentReturnToPath() {
-  return sanitizeRelativeReturnTo(`${window.location.pathname || "/"}${window.location.search || ""}`);
-}
-
-function redirectToLoginWithReturnTo(target = getCurrentReturnToPath()) {
-  const safeTarget = sanitizeRelativeReturnTo(target);
-  try {
-    if (safeTarget) sessionStorage.setItem(AUTH_RETURN_TO_KEY, safeTarget);
-  } catch {
-    // ignore storage failures
-  }
-  const params = new URLSearchParams();
-  if (safeTarget) params.set("return_to", safeTarget);
-  const query = params.toString();
-  window.location.assign(`/${query ? `?${query}` : ""}`);
 }
 
 function setImageWithFallback(img, url, onError = null) {
@@ -434,14 +408,18 @@ async function api(path, options = {}) {
   if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const token = sessionStorage.getItem("collector_token") || localStorage.getItem("collector_token") || "";
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  if (res.status === 401) {
+    sessionStorage.removeItem("collector_token");
+    localStorage.removeItem("collector_token");
+    window.location.reload();
+    return;
+  }
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: "คำขอไม่สำเร็จ" }));
-    // Keep editor pages in-place on auth failures.
-    // Auto-redirect here can bounce between return_to and home, which turns into
-    // repeated document requests and eventually hits the rate limiter.
     throw new Error(data.error || "เกิดข้อผิดพลาด");
   }
 
@@ -522,16 +500,15 @@ function renderItemClaimBanner() {
 
 function setStatus(text, isError = false) {
   const node = qs("editor-status");
-  const mirrorNode = qs("draft-preview-status");
   const message = text || "";
-  const color = isError ? "#b42318" : "#1f8a52";
   if (node) {
     node.textContent = message;
-    node.style.color = color;
-  }
-  if (mirrorNode) {
-    mirrorNode.textContent = message;
-    mirrorNode.style.color = color;
+    node.classList.remove("hidden", "is-error", "is-success");
+    if (!message) {
+      node.classList.add("hidden");
+    } else {
+      node.classList.add(isError ? "is-error" : "is-success");
+    }
   }
 }
 
@@ -6102,19 +6079,21 @@ function wire() {
 }
 (async () => {
   try {
-    const [me, workflowStates] = await Promise.all([api("/api/auth/me"), api("/api/workflow-states").catch(() => null)]);
-    state.user = me.user;
-    state.workflowStates = workflowStates;
-    qs("editor-auth-status").textContent = "";
+    wire();
+
+    const user = await initAuthBox({
+      statusId: "editor-auth-status",
+      bannerId: "editor-status",
+      allowRoles: ["owner", "admin", "user"],
+      redirectFor: (role) => role === "freelance" ? resolveFreelanceEditorExitUrl() : undefined,
+    });
+    if (!user) return;
+    state.user = user;
+
+    state.workflowStates = await api("/api/workflow-states").catch(() => null);
 
     if (!state.itemId) throw new Error("Missing item id");
 
-    if (String(state.user?.role || "").trim().toLowerCase() === "freelance") {
-      window.location.replace(await resolveFreelanceEditorExitUrl());
-      return;
-    }
-
-    wire();
     const item = await api(`/api/items/${state.itemId}`);
     state.item = item;
     await refreshBackwardTransitions();
