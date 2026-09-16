@@ -126,6 +126,7 @@ export async function initAuthBox(options = {}) {
       );
       setBanner(qs(bannerId), "");
       if (onReady) onReady(state.user);
+      window.location.reload();
     } catch (err) {
       setBanner(qs(bannerId), `ตรวจสิทธิ์ไม่สำเร็จ: ${err.message || "เข้าสู่ระบบไม่สำเร็จ"}`, "error");
     }
