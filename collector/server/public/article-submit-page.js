@@ -33,6 +33,14 @@
   validateWorkspace,
   workspaceUrl,
 } from "./article-workflow-core.js";
+import { initAuthBox } from "./auth-box.js";
+
+function redirectForRole(role) {
+  const id = Number(state.itemId || 0) || 0;
+  if (role === "editor") return workspaceUrl(id);
+  if (role === "freelance") return id > 0 ? `/?tab=work&item_id=${id}` : "/?tab=work";
+  return "/";
+}
 
 let backwardTransitions = null;
 
@@ -1473,30 +1481,21 @@ function wire() {
 }
 
 async function init() {
+  const user = await initAuthBox({
+    allowRoles: ["owner", "admin"],
+    redirectFor: redirectForRole,
+    statusId: "workspace-auth-status",
+    bannerId: "workspace-status",
+  });
+  if (!user) return;
+  state.user = user;
   wire();
-  if (currentRole() === "editor") {
-    window.location.replace(workspaceUrl(state.itemId));
-    return;
-  }
   try {
     await loadWorkspace();
     await refreshBackwardTransitions();
     await reloadCurrentReadinessSoft();
-    if (!canApproveArticle()) {
-      window.location.replace(roleArticleFallbackUrl());
-      return;
-    }
     renderAll({ syncFields: true });
   } catch (err) {
-    const role = currentRole();
-    if (
-      /forbidden|ไม่มีสิทธิ์/i.test(String(err?.message || ""))
-      || role === "editor"
-      || role === "freelance"
-    ) {
-      window.location.replace(roleArticleFallbackUrl());
-      return;
-    }
     setBanner(err.message, "error");
   }
 }
