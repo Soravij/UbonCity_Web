@@ -10,6 +10,7 @@ const state = {
 };
 
 import { reportUnknownWorkflowState } from "./workflow-state-catalog.js";
+import { initAuthBox } from "./auth-box.js";
 
 function qs(id) {
   return document.getElementById(id);
@@ -31,6 +32,12 @@ async function api(path, options = {}) {
   }
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  if (response.status === 401) {
+    sessionStorage.removeItem("collector_token");
+    localStorage.removeItem("collector_token");
+    window.location.reload();
+    return null;
+  }
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: "Request failed" }));
     throw new Error(error.error || "Request failed");
@@ -204,12 +211,6 @@ function renderEventsTable() {
 }
 
 async function loadPage() {
-  const me = await api("/api/auth/me");
-  state.user = me?.user || null;
-  if (!isPrivilegedEventUser()) {
-    window.location.replace("/");
-    return;
-  }
   const [items, assignableUsers, workflowStates] = await Promise.all([
     api("/api/items"),
     api("/api/users/assignable?kind=editorial"),
@@ -230,8 +231,6 @@ async function loadPage() {
     }
   }));
   state.processByItemId = Object.fromEntries(processes);
-  const authNode = qs("workspace-auth-status");
-  if (authNode) authNode.textContent = `ล็อกอินเป็น ${state.user?.display_name || state.user?.email || "-"} (${currentRole()})`;
   renderCreateAssigneeOptions();
   renderEventsTable();
 }
@@ -312,7 +311,16 @@ function wire() {
   });
 }
 
-wire();
-loadPage().catch((err) => {
-  setBanner(err.message, "error");
-});
+async function init() {
+  const user = await initAuthBox({ allowRoles: ["owner", "admin", "user"] });
+  if (!user) return;
+  state.user = user;
+  wire();
+  try {
+    await loadPage();
+  } catch (err) {
+    setBanner(err.message, "error");
+  }
+}
+
+init();
