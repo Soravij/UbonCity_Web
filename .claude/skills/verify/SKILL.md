@@ -14,8 +14,9 @@ description: Procedure for verifying a UbonCity_Web change on Runtime via proces
 - If StartTime < newest mtime: STOP. Report "process older than code — Sor must restart". Do not restart it yourself.
 
 ## Step 2 — Measure (numbers/text only)
+- First call tabs_context_mcp to get tabId (create a tab with tabs_create_mcp only if none). Pass that tabId to every browser tool.
 - DOM: javascript_tool querySelector / textContent / counts / computed style values.
-- Console: errors only.
+- Console: errors only. Always pass a pattern to read_console_messages (e.g. "error|Error|Uncaught").
 - Network: URL + status code.
 - Do NOT judge visual appearance or "how it looks". That is Sor's job.
 
