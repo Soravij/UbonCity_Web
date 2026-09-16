@@ -6079,15 +6079,19 @@ function wire() {
 }
 (async () => {
   try {
-    wire();
-
     const user = await initAuthBox({
       statusId: "editor-auth-status",
       bannerId: "editor-status",
-      allowRoles: ["owner", "admin", "user"],
-      redirectFor: (role) => role === "freelance" ? resolveFreelanceEditorExitUrl() : undefined,
+      allowRoles: ["owner", "admin", "user", "freelance"],
     });
     if (!user) return;
+
+    if (String(user.role || "").toLowerCase() === "freelance") {
+      window.location.replace(await resolveFreelanceEditorExitUrl());
+      return;
+    }
+
+    wire();
     state.user = user;
 
     state.workflowStates = await api("/api/workflow-states").catch(() => null);
