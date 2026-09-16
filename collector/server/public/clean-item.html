@@ -10,22 +10,18 @@
   </head>
   <body class="clean-item-page">
     <main class="container article-page-shell">
-      <header class="header">
-        <div class="auth-row">
-          <div class="auth-intro">
-            <span class="auth-badge">Collector Workspace</span>
-            <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
-            <div class="auth-points">
-              <div class="auth-point">
-                <strong>Clean</strong>
-                <span>คัดและจัดข้อมูลตั้งต้นให้พร้อมก่อนส่งเข้า Agent และส่งต่อไปขั้นตรวจแก้เนื้อหา</span>
-              </div>
-            </div>
-          </div>
+    <header class="header">
+      <div class="auth-row">
+        <!--CH_BRAND-->
+        <div class="auth-intro">
+          <h1>ระบบจัดการคอนเทนต์ UbonCity.com</h1>
+          <p id="page-subtitle">Clean — คัดและจัดข้อมูลตั้งต้นให้พร้อมก่อนส่งเข้า Agent และส่งต่อไปขั้นตรวจแก้เนื้อหา</p>
+          <!--CH_AUTH-->
+          <p class="muted" id="editor-auth-status"></p>
         </div>
-        <p class="muted" id="editor-auth-status"></p>
-        <p class="status" id="editor-status"></p>
-      </header>
+      </div>
+      <div class="result-banner hidden" id="editor-status" role="status" aria-live="polite"></div>
+    </header>
 <div class="card page-actions-strip raw-process-actions">
   <div class="toolbar">
     <button id="btn-back" class="utility-action btn-home">Home</button>
