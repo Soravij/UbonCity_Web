@@ -1,4 +1,5 @@
 import { initAuthBox, rolePortalUrl } from "./auth-box.js";
+import { initItemHistory } from "./item-history.js";
 import {
   reportUnknownWorkflowState,
   loadWorkflowBackwardTransitions,
@@ -6085,6 +6086,7 @@ function wire() {
       allowRoles: ["owner", "admin", "user", "freelance"],
     });
     if (!user) return;
+    initItemHistory({ fetchJson: api, getItemId: () => Number(state.itemId || 0) || 0 });
 
     if (String(user.role || "").toLowerCase() === "freelance") {
       window.location.replace(await resolveFreelanceEditorExitUrl());

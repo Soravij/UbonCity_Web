@@ -1,4 +1,5 @@
 import {
+  api,
   getArticleStatus,
   latestDraft,
   loadWorkspace,
@@ -9,6 +10,7 @@ import {
   workspaceUrl,
 } from "./article-workflow-core.js";
 import { initAuthBox } from "./auth-box.js";
+import { initItemHistory } from "./item-history.js";
 
 function redirectForRole(role) {
   const id = Number(state.itemId || 0) || 0;
@@ -46,6 +48,7 @@ async function init() {
     bannerId: "workspace-status",
   });
   if (!user) return;
+  initItemHistory({ fetchJson: api, getItemId: () => Number(state.itemId || 0) || 0 });
   state.user = user;
   wire();
   try {
