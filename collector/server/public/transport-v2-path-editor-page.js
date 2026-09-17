@@ -1,4 +1,5 @@
-import { api, requireAdminShell, setBanner } from "./transport-v2-common.js";
+import { api, setBanner } from "./transport-v2-common.js";
+import { initAuthBox } from "./auth-box.js";
 import { mountPathEditor } from "./transport-v2-path-editor.js";
 
 const state = {
@@ -19,8 +20,16 @@ async function render() {
 }
 
 async function init() {
+  const user = await initAuthBox({
+    allowRoles: ["owner", "admin", "user"],
+    statusId: "path-editor-status",
+    bannerId: "path-editor-status",
+  });
+  if (!user) {
+    window.location.replace("/transport-v2-routes.html");
+    return;
+  }
   try {
-    await requireAdminShell("path-editor-status", "");
     await loadBaseMaps();
     await render();
   } catch (error) {

@@ -1,4 +1,5 @@
-import { api, escapeHtml, qs, requireAdminShell, setBanner } from "./transport-v2-common.js";
+import { api, escapeHtml, qs, setBanner } from "./transport-v2-common.js";
+import { initAuthBox } from "./auth-box.js";
 import {
   computeBaseRenderedImageRect,
   computeRenderedImageRect,
@@ -2522,12 +2523,12 @@ function syncGeneratedBaseMapSummaryToggle() {
 }
 
 async function init() {
+  const user = await initAuthBox({
+    allowRoles: ["owner"],
+    redirectFor: (role) => (role === "admin" || role === "user" ? "/transport-v2-routes.html" : ""),
+  });
+  if (!user) return;
   try {
-    const { role } = await requireAdminShell();
-    if (role !== "owner") {
-      window.location.replace("/transport-v2-routes.html");
-      return;
-    }
     await refresh();
   } catch (error) {
     setBanner("workspace-status", error.message || "Failed to load page", true);

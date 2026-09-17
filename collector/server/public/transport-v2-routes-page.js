@@ -1,4 +1,5 @@
-import { api, escapeHtml, qs, requireAdminShell, setBanner } from "./transport-v2-common.js";
+import { api, escapeHtml, qs, setBanner } from "./transport-v2-common.js";
+import { initAuthBox } from "./auth-box.js";
 
 const READY_BASE_MAP_STATUSES = new Set(["ready", "active", "published", "reviewed"]);
 
@@ -247,9 +248,10 @@ function openPathEditor(routeId = 0) {
 
 async function init() {
   if (handleLegacyModeRedirect()) return;
+  const user = await initAuthBox({ allowRoles: ["owner", "admin", "user"] });
+  if (!user) return;
+  state.role = String(user.role || "").trim().toLowerCase();
   try {
-    const { role } = await requireAdminShell();
-    state.role = role;
     await refresh();
   } catch (error) {
     setBanner("workspace-status", error.message || "Failed to load page", true);

@@ -1,4 +1,5 @@
-import { api, escapeHtml, qs, requireAdminShell, setBanner } from "/transport-v2-common.js";
+import { api, escapeHtml, qs, setBanner } from "/transport-v2-common.js";
+import { initAuthBox } from "./auth-box.js";
 
 const state = { itemId: Number(new URLSearchParams(window.location.search).get("id") || 0) || 0, route: null, readiness: null };
 
@@ -23,8 +24,9 @@ async function load() {
 }
 
 async function init() {
+  const user = await initAuthBox({ allowRoles: ["owner", "admin", "user"] });
+  if (!user) return;
   try {
-    await requireAdminShell();
     await load();
   } catch (error) {
     setBanner("workspace-status", error.message || "โหลดหน้าไม่สำเร็จ", true);
