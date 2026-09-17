@@ -1,16 +1,21 @@
 import {
-  canApproveArticle,
   getArticleStatus,
   latestDraft,
   loadWorkspace,
-  currentRole,
   qs,
   renderPreview,
-  roleArticleFallbackUrl,
   setBanner,
   state,
   workspaceUrl,
 } from "./article-workflow-core.js";
+import { initAuthBox } from "./auth-box.js";
+
+function redirectForRole(role) {
+  const id = Number(state.itemId || 0) || 0;
+  if (role === "editor") return workspaceUrl(id);
+  if (role === "freelance") return id > 0 ? `/?tab=work&item_id=${id}` : "/?tab=work";
+  return "/";
+}
 
 function applyPreviewMode(mode) {
   state.previewMode = mode === "mobile" ? "mobile" : "desktop";
@@ -34,25 +39,20 @@ function wire() {
 }
 
 async function init() {
+  const user = await initAuthBox({
+    allowRoles: ["owner", "admin"],
+    redirectFor: redirectForRole,
+    statusId: "workspace-auth-status",
+    bannerId: "workspace-status",
+  });
+  if (!user) return;
+  state.user = user;
   wire();
-  if (currentRole() === "editor") {
-    window.location.replace(workspaceUrl(state.itemId));
-    return;
-  }
   try {
     await loadWorkspace();
-    if (!canApproveArticle()) {
-      window.location.replace(roleArticleFallbackUrl());
-      return;
-    }
     renderPreviewHeader();
     applyPreviewMode(getArticleStatus() === "ready_for_review" ? "desktop" : state.previewMode);
   } catch (err) {
-    const role = currentRole();
-    if (role === "editor" || role === "freelance" || /forbidden|ไม่มีสิทธิ์/i.test(String(err?.message || ""))) {
-      window.location.replace(roleArticleFallbackUrl());
-      return;
-    }
     setBanner(String(err?.message || "ไม่สามารถเปิดหน้า preview ได้"), "error");
   }
 }

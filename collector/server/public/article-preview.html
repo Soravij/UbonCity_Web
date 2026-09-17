@@ -1,19 +1,32 @@
 <html lang="th">
   <head>
     <meta charset="UTF-8" />
+    <!--CH_HEAD-->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Collector - Internal Review Preview</title>
     <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
     <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <!--CH_HEAD_CSS-->
     <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
   </head>
   <body>
     <main class="container article-page-shell article-preview-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <!--CH_BRAND-->
+          <div class="auth-intro">
+            <h1>ระบบจัดการคอนเทนต์</h1>
+            <p id="page-subtitle">ตรวจพรีวิวบทความก่อนอนุมัติ</p>
+            <!--CH_AUTH-->
+            <p class="muted" id="workspace-auth-status"></p>
+          </div>
+        </div>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
       <div class="article-preview-mode-controls toolbar compact-toolbar" aria-label="preview viewport controls">
           <button id="btn-preview-page-desktop" type="button" class="active">Desktop</button>
           <button id="btn-preview-page-mobile" type="button">Mobile</button>
       </div>
-      <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
 
       <section class="article-preview-stage">
         <div class="article-shell-placeholder article-shell-placeholder-nav" aria-hidden="true">

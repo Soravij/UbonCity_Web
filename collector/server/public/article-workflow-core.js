@@ -1168,8 +1168,10 @@ export async function loadWorkspace() {
   if (!state.itemId) throw new Error("Missing content item id");
   ensurePreviewGalleryLightbox();
   mirrorCollectorTokenToLocalStorage();
-  const me = await api("/api/auth/me");
-  state.user = me?.user || null;
+  if (!state.user) {
+    const me = await api("/api/auth/me");
+    state.user = me?.user || null;
+  }
   const [item, processPayload, fieldPackPayload, assets, translations] = await Promise.all([
     api(`/api/items/${state.itemId}`),
     api(`/api/items/${state.itemId}/article-process`),
