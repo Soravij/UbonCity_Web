@@ -1,4 +1,5 @@
-import { api, requireAdminShell, setBanner } from "./transport-v2-common.js";
+import { api, setBanner } from "./transport-v2-common.js";
+import { initAuthBox } from "./auth-box.js";
 import { mountRoutesReview } from "./transport-v2-routes-review.js";
 
 const state = {
@@ -50,8 +51,16 @@ async function render() {
 }
 
 async function init() {
+  const user = await initAuthBox({
+    allowRoles: ["owner", "admin", "user"],
+    statusId: "review-status",
+    bannerId: "review-status",
+  });
+  if (!user) {
+    window.location.replace("/transport-v2-routes.html");
+    return;
+  }
   try {
-    await requireAdminShell("review-status", "");
     state.selectedRouteIds = parseSelectedIds();
     await load();
     await render();

@@ -2,17 +2,26 @@
 <html lang="th">
   <head>
     <meta charset="UTF-8" />
+    <!--CH_HEAD-->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Collector - Transport V2 Review</title>
     <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
     <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <!--CH_HEAD_CSS-->
     <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
   </head>
   <body>
     <main class="container article-page-shell">
       <header class="header">
-        <div class="auth-row"><div class="auth-intro"><span class="auth-badge">Collector Workspace</span><h1>Transport Map V2 Review</h1><p>ตรวจ readiness และ preview poster ของ route</p></div></div>
-        <p class="muted" id="workspace-auth-status"></p>
+        <div class="auth-row">
+          <!--CH_BRAND-->
+          <div class="auth-intro">
+            <h1>ระบบจัดการคอนเทนต์</h1>
+            <p id="page-subtitle">ตรวจ readiness และ preview poster ของ route</p>
+            <!--CH_AUTH-->
+            <p class="muted" id="workspace-auth-status"></p>
+          </div>
+        </div>
         <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
       </header>
       <div class="card page-actions-strip"><div class="toolbar"><button id="btn-back-home" class="utility-action btn-home">Home</button><button id="btn-open-manager" class="utility-action">กลับหน้า routes</button><button id="btn-open-workspace" class="utility-action">กลับหน้าเขียน</button></div></div>
