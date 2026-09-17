@@ -77,6 +77,7 @@ function loadHarness(options = {}) {
   const elements = new Map();
   const source = read("server/public/article-submit-page.js")
     .replace(/^\uFEFF?import[\s\S]+?from "\.\/article-workflow-core\.js";\s*/u, "")
+    .replace(/^import\s*\{\s*initAuthBox\s*\}\s*from\s*["']\.\/auth-box\.js["'];?[ \t]*$/m, "")
     .replace(
       /\binit\(\);\s*$/u,
       `
@@ -182,6 +183,7 @@ globalThis.__articleSubmitTestHooks = {
     },
     isOtherTransportItem: () => false,
     loadWorkflowBackwardTransitions: async () => null,
+    initAuthBox: async () => ({ id: 1, role: "admin", display_name: "test" }),
     renderWorkflowBackwardTransitionControls() {},
     validateWorkspace: () => ({ ok: true, missing: [] }),
     workspaceUrl: () => "/article-workspace.html?id=48",
