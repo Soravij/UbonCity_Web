@@ -865,7 +865,8 @@ async function init() {
     return;
   }
   try {
-    await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
+    const user = await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
+    if (!user) return;
     initItemHistory({ fetchJson: api, getItemId: () => Number(state.itemId || 0) || 0 });
     await loadWorkspace();
     if (!ensureEventItem()) return;

@@ -1226,7 +1226,8 @@ function wire() {
 }
 
 async function init() {
-  await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
+  const user = await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
+  if (!user) return;
   initItemHistory({ fetchJson: api, getItemId: () => Number(state.itemId || 0) || 0 });
   wire();
   if (currentRole() === "freelance") {
