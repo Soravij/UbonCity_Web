@@ -69,7 +69,9 @@ Commit ที่ปิดงาน:
 - `/api/auth/me` ยิงซ้ำ + 401 ใน `api()` ของ `article-workflow-core`
 - freelance ล็อกอินแล้วลง `/?tab=work` (`rolePortalTarget` ใน `app.js`)
 - รวมกลไก `collector_return_to` และย้าย `index.html` ไปใช้ `initAuthBox`
-- `/api/review-queue`, `/api/published`, `/api/quality`, `/api/staging`, `/api/exports` ไม่มี auth guard
+- `/api/review-queue`, `/api/published`, `/api/quality`, `/api/staging`, `/api/exports` มี global auth
+  gate อยู่แล้ว (`collector/server/index.mjs:7362-7410`) เพิ่ม role guard ต่อ route แล้ว (`requireRole`
+  ที่ `index.mjs:14326,14543,14640,14644,14648`)
 - dead code
 - ไฟล์ untracked บน Runtime
 
