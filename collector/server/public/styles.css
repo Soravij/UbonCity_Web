@@ -175,6 +175,10 @@
   align-items: stretch;
 }
 
+.article-workspace-main {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .article-intake-side,
 .article-workspace-side-rail,
 .article-review-side {
@@ -343,6 +347,14 @@
 .article-brief-doc {
   display: grid;
   gap: 0.9rem;
+  grid-template-columns: minmax(0, 1fr);
+  overflow-wrap: anywhere;
+}
+
+.article-brief-doc pre {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .article-brief-section {
@@ -350,6 +362,7 @@
   gap: 0.45rem;
   padding-bottom: 0.7rem;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 58%, transparent);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .article-brief-section:last-child {
