@@ -924,6 +924,8 @@ async function maybeApplyEditorLanding(returnTo = "") {
   }
   const intakeTarget = await resolveEditorLandingUrl();
   if (intakeTarget) {
+    const here = window.location.pathname + window.location.search;
+    if (intakeTarget === here) return false;
     window.location.assign(intakeTarget);
     return true;
   }
