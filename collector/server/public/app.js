@@ -10685,7 +10685,7 @@ function wireAuth() {
         return;
       }
       const portalTarget = rolePortalTarget(currentRole(), parsePositiveInt(new URLSearchParams(window.location.search).get("item_id"), 0), parsePositiveInt(new URLSearchParams(window.location.search).get("assignment_id"), 0));
-      if (portalTarget && String(window.location.pathname || "/") === "/" && !requestedTab) {
+      if (portalTarget && String(window.location.pathname || "/") === "/") {
         window.location.assign(portalTarget);
         return;
       }
