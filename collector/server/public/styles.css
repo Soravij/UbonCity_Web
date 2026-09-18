@@ -175,6 +175,10 @@
   align-items: stretch;
 }
 
+.article-workspace-main {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .article-intake-side,
 .article-workspace-side-rail,
 .article-review-side {
@@ -343,6 +347,13 @@
 .article-brief-doc {
   display: grid;
   gap: 0.9rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.article-brief-doc pre {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .article-brief-section {
