@@ -924,6 +924,15 @@ async function maybeApplyEditorLanding(returnTo = "") {
   }
   const intakeTarget = await resolveEditorLandingUrl();
   if (intakeTarget) {
+    const targetPath = new URL(intakeTarget, window.location.origin).pathname;
+    if (targetPath === window.location.pathname) {
+      const portalTarget = rolePortalTarget(currentRole(), parsePositiveInt(params.get("item_id"), 0), parsePositiveInt(params.get("assignment_id"), 0));
+      if (portalTarget && new URL(portalTarget, window.location.origin).pathname !== window.location.pathname) {
+        window.location.assign(portalTarget);
+        return true;
+      }
+      return false;
+    }
     window.location.assign(intakeTarget);
     return true;
   }
@@ -10671,7 +10680,6 @@ function wireAuth() {
       const preferredSeed = requestedTab || state.preferredTab || getDefaultLandingTabForRole(currentRole());
       const resolvedLanding = resolveRequestedLandingState({ requestedTab: preferredSeed, fallbackTab: preferredSeed });
       state.preferredTab = resolvedLanding.resolvedPreferredTab;
-      updateAuthUI();
       if (effectiveReturnTo && effectiveReturnTo !== getCurrentReturnToPath()) {
         window.location.assign(effectiveReturnTo);
         return;
@@ -10681,6 +10689,7 @@ function wireAuth() {
         window.location.assign(portalTarget);
         return;
       }
+      updateAuthUI();
       await refreshAll();
       if (await maybeApplyEditorLanding(effectiveReturnTo)) {
         return;
