@@ -1,4 +1,5 @@
 ﻿import { initAuthBox, rolePortalUrl } from "./auth-box.js";
+import { initItemHistory } from "./item-history.js";
 
 const state = {
   user: null,
@@ -525,6 +526,7 @@ function wire() {
       allowRoles: ["owner","admin","editor","user","freelance"],
     });
     if (!user) return;
+    initItemHistory({ fetchJson: api, getItemId: () => Number(state.itemId || 0) || 0 });
     state.user = user;
 
     if (state.assignmentId > 0) {

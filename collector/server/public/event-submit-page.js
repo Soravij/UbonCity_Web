@@ -25,6 +25,7 @@
   state,
 } from "./article-workflow-core.js";
 import { initAuthBox } from "./auth-box.js";
+import { initItemHistory } from "./item-history.js";
 
 function preferredRevisionAssignment() {
   const rows = [];
@@ -864,7 +865,9 @@ async function init() {
     return;
   }
   try {
-    await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
+    const user = await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
+    if (!user) return;
+    initItemHistory({ fetchJson: api, getItemId: () => Number(state.itemId || 0) || 0 });
     await loadWorkspace();
     if (!ensureEventItem()) return;
     if (!canApproveArticle()) {

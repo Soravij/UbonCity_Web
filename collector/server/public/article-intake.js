@@ -12,6 +12,7 @@ import {
   resolveBackwardResumePath,
 } from "./workflow-state-catalog.js";
 import { initAuthBox, getAuthUser } from "./auth-box.js";
+import { initItemHistory } from "./item-history.js";
 const ASSIGNMENT_REQUIRED_STATUSES = ["content_in_progress", "needs_revision"];
 const DIRECTORY_SYNC_TTL_MS = 5 * 60 * 1000;
 const DIRECTORY_SYNC_CACHE_KEY = "collector_users_last_directory_sync_at";
@@ -795,6 +796,7 @@ async function loadIntake() {
     allowRoles: ["owner", "admin", "editor", "user", "freelance"],
     onReady: () => { state.user = getAuthUser(); },
   });
+  initItemHistory({ fetchJson: api, getItemId: () => Number(state.itemId || 0) || 0 });
   const [me, workflowStates] = await Promise.all([api("/api/auth/me"), api("/api/workflow-states").catch(() => null)]);
   state.user = me?.user || null;
   state.workflowStates = workflowStates;

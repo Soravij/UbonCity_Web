@@ -25,6 +25,7 @@
   state,
 } from "./article-workflow-core.js";
 import { initAuthBox } from "./auth-box.js";
+import { initItemHistory } from "./item-history.js";
 
 const workspaceState = {
   bodyBlocks: [],
@@ -1225,7 +1226,9 @@ function wire() {
 }
 
 async function init() {
-  await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
+  const user = await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
+  if (!user) return;
+  initItemHistory({ fetchJson: api, getItemId: () => Number(state.itemId || 0) || 0 });
   wire();
   if (currentRole() === "freelance") {
     window.location.replace(eventFallbackUrl());
