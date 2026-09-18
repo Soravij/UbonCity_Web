@@ -1,6 +1,6 @@
 ﻿# UbonCity Project State
 
-Last Updated: 2026-09-11
+Last Updated: 2026-09-18
 
 ## Current Branch
 
@@ -36,6 +36,42 @@ Last Updated: 2026-09-11
 - fix 1 (`f5123ac`): added missing `home-flow-section` wrapper div around both blocks
 - fix 2 (`e230da7`): conditional render `{featuredStripPlaces.length > 0 && (...)}` — wrapper div omitted when strip has no data
 - result: `main` = `e230da7`, verified light/dark theme at `test.uboncity.com`
+
+## งาน header มาตรฐาน (ปิดแล้ว)
+
+- ทุกหน้า admin (20 หน้า HTML ใน `collector/server/public/`) ใช้ header แบบ `place.html`:
+  `<!--CH_HEAD-->` / `<!--CH_HEAD_CSS-->` / `<!--CH_BRAND-->` / `<!--CH_AUTH-->` (ตัวอย่าง
+  `collector/server/public/place.html:6,9,92,96`) — server แทนที่ผ่าน
+  `rewriteCollectorHtmlAssetUrls()` (`collector/server/index.mjs:248-253`), partial ตัวจริง import
+  จาก `collector/server/header-partials.mjs` ที่ `collector/server/index.mjs:14`
+- ฟอร์ม auth ใช้ `initAuthBox` (`collector/server/public/auth-box.js`) ทุกหน้า ยกเว้น `index.html`
+  ที่ยังใช้ IIFE ใน `app.js:11657-11698` — ผูกกับ `AUTH_RETURN_TO_KEY = "collector_return_to"`
+  (`app.js:307`) และ `rolePortalTarget()` (`app.js:656`)
+- `collector/server/public/auth-boot.js:1-9` ตั้ง `html.is-authenticated` ก่อน paint (โหลดเป็น
+  head script ผ่าน `COLLECTOR_HEAD_PARTIAL`, `header-partials.mjs:5`); `header-shared.css:1-77`
+  ซ่อนฟอร์ม/ปุ่ม login เมื่อ login แล้ว (`html.is-authenticated .auth-field`, `#btn-login` เป็นต้น
+  ที่บรรทัด 1-4)
+- ปุ่ม "ประวัติ" ถูก `initItemHistory()` (`collector/server/public/item-history.js:91-100`) แทรกเข้า
+  `.auth-actions` (fallback เป็น `header.header` ถ้าไม่เจอ `.auth-actions`, บรรทัด 94, 96)
+
+Commit ที่ปิดงาน:
+- `8eab79b` — ปุ่มประวัติครบ 9 หน้า
+- `9e287bc` — `index.html` เข้ามาตรฐาน header; คง IIFE เพราะผูก `collector_return_to`/`rolePortalTarget`
+  (งานแยก); `setAuthStatus()` (`app.js:1093`) แทน inline color; toggle `is-authenticated` บน `<html>`
+  คู่กับ `<body>` (`app.js:4848-4849`)
+- `834e337` — article-workspace การ์ดล้น `.container`: `grid-template-columns: minmax(0, 1fr)` ที่
+  `.article-workspace-main` (`styles.css:178-180`), `.article-brief-doc` (`styles.css:347-352`),
+  `.article-brief-section` (`styles.css:360-366`) + `overflow-wrap: anywhere` บน `.article-brief-doc`
+  และ `.article-brief-doc pre` ตัดบรรทัดยาว (`styles.css:354-358`)
+
+ค้าง:
+- เฟส transport (รวม transport-v2-review ปุ่มประวัติ)
+- `/api/auth/me` ยิงซ้ำ + 401 ใน `api()` ของ `article-workflow-core`
+- freelance ล็อกอินแล้วลง `/?tab=work` (`rolePortalTarget` ใน `app.js`)
+- รวมกลไก `collector_return_to` และย้าย `index.html` ไปใช้ `initAuthBox`
+- `/api/review-queue`, `/api/published`, `/api/quality`, `/api/staging`, `/api/exports` ไม่มี auth guard
+- dead code
+- ไฟล์ untracked บน Runtime
 
 ## Completed Media Workflow
 
