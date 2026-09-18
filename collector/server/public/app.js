@@ -10671,7 +10671,6 @@ function wireAuth() {
       const preferredSeed = requestedTab || state.preferredTab || getDefaultLandingTabForRole(currentRole());
       const resolvedLanding = resolveRequestedLandingState({ requestedTab: preferredSeed, fallbackTab: preferredSeed });
       state.preferredTab = resolvedLanding.resolvedPreferredTab;
-      updateAuthUI();
       if (effectiveReturnTo && effectiveReturnTo !== getCurrentReturnToPath()) {
         window.location.assign(effectiveReturnTo);
         return;
@@ -10681,6 +10680,7 @@ function wireAuth() {
         window.location.assign(portalTarget);
         return;
       }
+      updateAuthUI();
       await refreshAll();
       if (await maybeApplyEditorLanding(effectiveReturnTo)) {
         return;
