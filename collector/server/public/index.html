@@ -2,47 +2,25 @@
 <html lang="th">
   <head>
     <meta charset="UTF-8" />
+    <!--CH_HEAD-->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>แดชบอร์ด Collector</title>
     <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
     <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <!--CH_HEAD_CSS-->
     <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
   </head>
   <body>
     <main class="container">
       <header class="header">
         <div class="auth-row">
+          <!--CH_BRAND-->
           <div class="auth-intro">
-            <span class="auth-badge">Collector Workspace</span>
-            <h1>UbonCity Content Workspace</h1>
-            <div class="auth-points">
-              <div class="auth-point">
-                <strong>พื้นที่ทำงานของทีมคอนเทนต์และปฏิบัติการ</strong>
-                <span>เลือกส่วนงานที่ต้องดูแล แล้วเข้าไปทำงานต่อได้ทันที</span>
-              </div>
-            </div>
-          </div>
-          <div class="auth-box">
-            <div class="auth-box-head">
-              <h2>เข้าสู่ระบบ</h2>
-              <p>ระบบจะพาไปทำงานตามสิทธิ์ โดยอัตโนมัติ</p>
-            </div>
-            <label class="auth-field">
-              <span>อีเมล</span>
-              <input id="auth-email" placeholder="อีเมลบัญชีที่ตั้งไว้ในระบบ" />
-            </label>
-            <label class="auth-field">
-              <span>รหัสผ่าน</span>
-              <input id="auth-password" type="password" placeholder="รหัสผ่าน" />
-            </label>
-            <div class="auth-actions">
-              <button class="primary" id="btn-login">เข้าสู่ระบบ</button>
-              <button id="btn-logout">ออกจากระบบ</button>
-            </div>
-            <p class="auth-note">ถ้ามีลิงก์ที่ต้องการเปิด ระบบจะกลับไปหน้าปลายทางหลังเข้าสู่ระบบ และต้องใช้อีเมล/รหัสผ่านของบัญชีที่ถูกตั้งไว้ใน collector instance นี้</p>
+            <h1>ระบบจัดการคอนเทนต์</h1>
+            <!--CH_AUTH-->
+            <p id="auth-status" class="muted"></p>
           </div>
         </div>
-        <p class="muted" id="auth-status">ยังไม่ได้เข้าสู่ระบบ</p>
       </header>
 
       <div class="card app-shell" id="app-shell">

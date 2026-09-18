@@ -371,7 +371,7 @@ function applyAuthLandingNotice() {
   const params = new URLSearchParams(window.location.search);
   const authState = String(params.get("auth") || "").trim().toLowerCase();
   if (authState !== "expired") return;
-  setStatus("auth-status", "เซสชันหมดอายุหรือ token ใช้ไม่ได้ กรุณาเข้าสู่ระบบใหม่", true);
+  setAuthStatus("เซสชันหมดอายุหรือ token ใช้ไม่ได้ กรุณาเข้าสู่ระบบใหม่", true);
   qs("auth-email")?.focus();
 }
 
@@ -1088,6 +1088,13 @@ function setStatus(id, text, isError = false) {
     }
   }
   node.style.color = isError ? "#b42318" : "#1f8a52";
+}
+
+function setAuthStatus(message, isError = false) {
+  const node = document.getElementById("auth-status");
+  if (!node) return;
+  node.textContent = message;
+  node.classList.toggle("is-error", Boolean(isError));
 }
 
 async function withButtonLoading(btn, pendingLabel, action) {
@@ -4776,6 +4783,7 @@ function updateAssignmentActionControls(assignment) {
 
 function applyLogoutUI() {
   document.body.classList.remove("is-authenticated");
+  document.documentElement.classList.remove("is-authenticated");
   state.token = "";
   state.user = null;
   state.visibleUsers = [];
@@ -4798,7 +4806,7 @@ function applyLogoutUI() {
   localStorage.removeItem("collector_token");
   localStorage.removeItem("collector_login_at");
   state.loginAt = "";
-  setStatus("auth-status", "ยังไม่ได้เข้าสู่ระบบ", true);
+  setAuthStatus("ยังไม่ได้เข้าสู่ระบบ", true);
   setStatus("assignment-status", "");
   setStatus("assignment-create-status", "");
   setUserManagementVisibility(false);
@@ -4822,7 +4830,8 @@ function applyLogoutUI() {
 function updateAuthUI() {
   if (!state.user) {
     document.body.classList.remove("is-authenticated");
-    setStatus("auth-status", "ยังไม่ได้เข้าสู่ระบบ", true);
+    document.documentElement.classList.remove("is-authenticated");
+    setAuthStatus("ยังไม่ได้เข้าสู่ระบบ", true);
     qs("btn-home-users")?.classList.add("hidden");
     setUserManagementVisibility(false);
     state.cleanup = { rows: [] };
@@ -4837,6 +4846,7 @@ function updateAuthUI() {
     return;
   }
   document.body.classList.add("is-authenticated");
+  document.documentElement.classList.add("is-authenticated");
   let loginTimeText = "";
   if (state.loginAt) {
     const loginDate = new Date(state.loginAt);
@@ -4847,8 +4857,7 @@ function updateAuthUI() {
       });
     }
   }
-  setStatus(
-    "auth-status",
+  setAuthStatus(
     `เข้าสู่ระบบแล้ว: ${state.user.email} (${state.user.role})${loginTimeText ? ` | เวลา login: ${loginTimeText}` : ""} - กด "ออกจากระบบ" เพื่อจบเซสชันนี้`
   );
   qs("btn-home-users")?.classList.toggle("hidden", !canAccessContributorManagementSurface());
@@ -10684,7 +10693,7 @@ function wireAuth() {
         reason: "login-complete",
       });
     } catch (err) {
-      setStatus("auth-status", err.message, true);
+      setAuthStatus(err.message, true);
     }
   });
 
