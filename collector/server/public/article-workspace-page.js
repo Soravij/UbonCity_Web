@@ -2421,7 +2421,8 @@ async function init() {
     getItemId: () => Number(state?.item?.id || 0) || 0,
   });
   try {
-    await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
+    const user = await initAuthBox({ allowRoles: ["owner", "admin", "editor", "user", "freelance"] });
+    if (user) state.user = user;
     await loadWorkspace();
     await refreshBackwardTransitions();
     if (!canEditArticle()) {
