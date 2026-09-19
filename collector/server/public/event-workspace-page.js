@@ -1235,6 +1235,7 @@ async function init() {
     return;
   }
   try {
+    if (user) state.user = user;
     if (!state.itemId) {
       const me = await api("/api/auth/me");
       state.user = me?.user || null;
