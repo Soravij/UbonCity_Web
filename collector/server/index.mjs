@@ -3075,7 +3075,7 @@ function canSeeManagedWorkForUser(authUser, targetUserId, options) {
   return canAssignToUserByManagementLine(authUser, targetId);
 }
 
-function canSeeAssignmentByManagementLine(authUser, assignment) {
+function canSeeAssignmentByManagementLine(authUser, assignment, options) {
   if (!assignment || typeof assignment !== "object") return false;
   if (isOwnerUser(authUser)) return true;
   const actorId = getAuthUserId(authUser);
@@ -3083,14 +3083,14 @@ function canSeeAssignmentByManagementLine(authUser, assignment) {
   const assigneeUserId = Number(assignment?.assignee_user_id || 0) || 0;
   const assignedByUserId = Number(assignment?.assigned_by_user_id || 0) || 0;
 
-  if (assigneeUserId > 0) return canSeeManagedWorkForUser(authUser, assigneeUserId);
+  if (assigneeUserId > 0) return canSeeManagedWorkForUser(authUser, assigneeUserId, options);
   if (!assignedByUserId) return false;
   return assignedByUserId === actorId;
 }
 
-function filterAssignmentsByManagementLine(authUser, assignments = []) {
+function filterAssignmentsByManagementLine(authUser, assignments = [], options) {
   if (isOwnerUser(authUser)) return Array.isArray(assignments) ? assignments : [];
-  return (Array.isArray(assignments) ? assignments : []).filter((assignment) => canSeeAssignmentByManagementLine(authUser, assignment));
+  return (Array.isArray(assignments) ? assignments : []).filter((assignment) => canSeeAssignmentByManagementLine(authUser, assignment, options));
 }
 
 function hasAssignmentAccess(req, assignment, role = actorPolicyRole(req)) {
@@ -10980,7 +10980,8 @@ app.get("/api/assignments/mine", requireRole("owner", "admin", "editor", "freela
   }
   const assignments = filterAssignmentsByManagementLine(
     req.authUser,
-    dropClosedAssignments(repo.listAssignmentsByAssignee(assigneeId, limit))
+    dropClosedAssignments(repo.listAssignmentsByAssignee(assigneeId, limit)),
+    { allowSelf: true }
   );
   res.json({ assignments });
 });
