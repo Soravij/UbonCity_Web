@@ -140,7 +140,7 @@ function formatDateTime(value) {
 
 async function loadEditorEventAssignments() {
   const mine = await api("/api/assignments/mine");
-  const rows = Array.isArray(mine) ? mine : [];
+  const rows = Array.isArray(mine?.assignments) ? mine.assignments : [];
   const editorialRows = rows.filter((row) => String(row?.assignment_kind || "").trim().toLowerCase() === "editorial");
   const itemIds = Array.from(
     new Set(
