@@ -312,3 +312,21 @@ Known open gaps (not fixed in this change set):
 - Production deployment policy
 - Backup/restore policy
 - Automated test coverage policy
+
+## 19 ก.ย. 2026 — รอบ auth / role guard (ปิดครบ ไม่มีงานเปิดค้าง)
+
+Commit ที่ merge แล้ว
+- ade368a role guard 5 endpoint
+- 8cc5ae3 editor flicker
+- c3372d3 freelance ค้าง /?tab=work
+- 8537833 /api/auth/me ไม่ยิงซ้ำ — 3 เพจไม่ assign state.user จากค่าที่ initAuthBox คืน แก้ที่ article-workspace-page.js:2425, event-submit-page.js:871, event-workspace-page.js:1238
+- 3ae2496 ตาราง "ตารางงานเขียน Event" ว่าง — event-workspace-page.js:143 ใช้ Array.isArray(mine) แต่ server ส่ง {assignments:[...]} แก้เป็น mine?.assignments
+- 46aa732 editor เห็น assignment ตัวเองผ่าน /api/assignments/mine?assignee_user_id=<ตัวเอง> — index.mjs:10981 ไม่ส่ง allowSelf แก้โดย thread options ผ่าน index.mjs:3078, 3086, 3091, 3093 แล้วส่ง { allowSelf: true } ที่ :10984 ไม่เปลี่ยน default ของ canSeeManagedWorkForUser
+
+ตัดสินแล้ว
+- editor เข้า / ไป /editor-home.html เสมอ เป็นพฤติกรรมที่ตั้งใจ (app.js:11687-11691)
+
+ค้างไว้ (ไม่ใช่ regression)
+1. event-workspace-page.js:1240 path ไม่มี itemId ยังยิง /api/auth/me 2 ครั้ง (request ส่วนเกิน)
+2. admin/user ที่ยิง assignee_user_id เป็นตัวเอง ทางโค้ดน่าจะได้ผลเหมือน editor (index.mjs:3038 reject self) ยังไม่ทดสอบสด
+3. assignment-ui-scope.test.mjs fail 33/68 เท่ากันบน main และ branch = ของเดิม
