@@ -284,6 +284,34 @@ function Assert-CloudflaredConfigReady {
   Write-Host ("[cloudflared] config ready: {0}" -f $ConfigPath)
 }
 
+function Assert-MediaDrive {
+  param([string]$CollectorDir)
+  $envFile = Join-Path $CollectorDir ".env"
+  $line = Get-Content $envFile -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\s*MEDIA_DIR\s*=' } | Select-Object -Last 1
+  if (-not $line) { return }
+  $value = ($line -split '=', 2)[1].Trim().Trim('"').Trim("'")
+  $qualifier = Split-Path -Path $value -Qualifier -ErrorAction SilentlyContinue
+  if (-not $qualifier) { return }
+  $root = "$qualifier\"
+  $deadline = (Get-Date).AddSeconds(60)
+  while (-not (Test-Path -LiteralPath $root)) {
+    if ((Get-Date) -gt $deadline) {
+      throw "MEDIA_DIR drive $qualifier not found after 60s - check the USB dock is powered on. Collector not started."
+    }
+    Write-Host "Waiting for media drive $qualifier ..."
+    Start-Sleep -Seconds 5
+  }
+  $share = Get-SmbShare -Name "UbonMedia" -ErrorAction SilentlyContinue
+  if (-not $share) {
+    try {
+      New-SmbShare -Name "UbonMedia" -Path $root -ReadAccess "ubonshare" -FullAccess $env:USERNAME -ErrorAction Stop | Out-Null
+      Write-Host "Re-created SMB share UbonMedia -> $root"
+    } catch {
+      Write-Warning "SMB share UbonMedia missing and could not be re-created: $($_.Exception.Message). Collector will still start."
+    }
+  }
+}
+
 $root = Resolve-RuntimeRoot -ExplicitRoot $RuntimeRoot
 $runtimeDir = Join-Path $root "runtime\test-stack"
 $pidDir = Join-Path $runtimeDir "pids"
@@ -317,6 +345,7 @@ $services = @(
 switch ($Action) {
   "start" {
     Assert-CloudflaredConfigReady -ConfigPath $CloudflaredConfig -ExpectedTunnelName $TunnelName
+    Assert-MediaDrive -CollectorDir (Join-Path $root "collector")
     Push-Location $root
     $savedEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
