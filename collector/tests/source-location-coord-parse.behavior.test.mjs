@@ -112,3 +112,11 @@ test("DMS pair with S/W hemispheres yields negative values", () => {
 test("DMS pair with latitude out of range for its axis returns null", () => {
   assert.equal(parseCoordinatePasteText(`15°13'53.7"N 16°00'00"S`), null);
 });
+
+test("Google Maps search URL with +space-less lng", () => {
+  assertPair(parseCoordinatePasteText("https://www.google.com/maps/search/15.2447,+104.8472"), 15.2447, 104.8472);
+});
+
+test("Google Maps URL with q=loc: prefix", () => {
+  assertPair(parseCoordinatePasteText("https://maps.google.com/?q=loc:15.2447,104.8472"), 15.2447, 104.8472);
+});

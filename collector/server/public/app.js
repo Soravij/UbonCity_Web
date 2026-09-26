@@ -1867,7 +1867,8 @@ function parseCoordinatePasteText(rawText) {
     let decoded = text;
     try { decoded = decodeURIComponent(text); } catch { /* keep raw */ }
     const m = decoded.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/)
-      || decoded.match(/[?&](?:q|query|ll|center|destination)=(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/)
+      || decoded.match(/[?&](?:q|query|ll|center|destination)=(?:loc:)?(-?\d+(?:\.\d+)?)\s*,\s*\+?(-?\d+(?:\.\d+)?)/)
+      || decoded.match(/\/(?:maps\/)?search\/(-?\d+(?:\.\d+)?),\s*\+?(-?\d+(?:\.\d+)?)/)
       || decoded.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
     if (!m) return null;
     const lat = Number(m[1]);
@@ -10979,7 +10980,7 @@ function wireSourceCollect() {
       if (!pair || !isValidCoordPair(pair.lat, pair.lng)) throw new Error("ไม่พบพิกัดในลิงก์หรือ plus code นี้");
       writeSourceLocationPair(pair.lat, pair.lng);
     } catch (err) {
-      window.alert(`แปลงพิกัดไม่สำเร็จ: ${err?.message || err}`);
+      showSourceLocationPanelError(`แปลงพิกัดไม่สำเร็จ: ${err?.message || err}`);
     }
   }
 
