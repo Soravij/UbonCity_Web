@@ -273,6 +273,14 @@ async function fetchPlaceDetails(place, options) {
   return response.json().catch(() => null);
 }
 
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
 async function fetchTextSearchNew(query, options) {
   const body = {
     textQuery: query,
@@ -323,8 +331,21 @@ async function fetchTextSearchNew(query, options) {
     throw new Error(`Google Places (New) error: ${message}`);
   }
 
-  const places = Array.isArray(payload?.places) ? payload.places : [];
+  let places = Array.isArray(payload?.places) ? payload.places : [];
   const enriched = [];
+
+  // locationBias only weights results; enforce the radius here, before spending quota on details.
+  if (options.location && Number.isFinite(options.location.lat) && Number.isFinite(options.location.lng) && options.radius > 0) {
+    places = places.filter((place) => {
+      const lat = toNumber(place?.location?.latitude);
+      const lng = toNumber(place?.location?.longitude);
+      if (lat == null || lng == null) {
+        console.warn(`google-maps: dropping place ${String(place?.id || "").trim() || "(no id)"} without lat/lng`);
+        return false;
+      }
+      return haversineMeters(options.location.lat, options.location.lng, lat, lng) <= options.radius;
+    });
+  }
 
   // Enrich per-place details to increase photos/review material when available.
   for (const place of places) {
