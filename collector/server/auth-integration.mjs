@@ -63,8 +63,8 @@ export function createCollectorAuthIntegration({
     }
   }
 
-  function buildBackendIdentityProfileJson(existingProfileJson, identity, displayName) {
-    const syncedAt = new Date().toISOString();
+  function buildBackendIdentityProfileJson(existingProfileJson, identity, displayName, syncedAtOverride = null) {
+    const syncedAt = syncedAtOverride || new Date().toISOString();
     const baseProfile = normalizeUserProfilePayload(existingProfileJson, { allowPic: true });
     const merged = mergeReservedUserProfileFields(existingProfileJson, {
       ...baseProfile,
@@ -211,7 +211,13 @@ export function createCollectorAuthIntegration({
       : null;
 
     if (existing) {
-      const nextProfileJson = buildBackendIdentityProfileJson(existing.profile_json, identity, displayName);
+      const existingAuthSync = parseObjectJson(parseObjectJson(existing.profile_json)?._auth_sync);
+      const candidateProfileJson = buildBackendIdentityProfileJson(
+        existing.profile_json,
+        identity,
+        displayName,
+        existingAuthSync?.synced_at || null
+      );
       const existingRole = String(existing.role || "").trim().toLowerCase();
       const existingDisplayName = String(existing.display_name || "").trim();
       const projectedManagedByUserId = identity.manager_claim_present
@@ -220,8 +226,11 @@ export function createCollectorAuthIntegration({
       const hasChanges =
         existingDisplayName !== displayName
         || existingRole !== role
-        || String(existing.profile_json || "") !== nextProfileJson
+        || String(existing.profile_json || "") !== candidateProfileJson
         || Number(existing.managed_by_user_id || 0) !== Number(projectedManagedByUserId || 0);
+      const nextProfileJson = hasChanges
+        ? buildBackendIdentityProfileJson(existing.profile_json, identity, displayName)
+        : existing.profile_json;
 
       if (hasChanges) {
         db.prepare(
