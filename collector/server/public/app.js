@@ -1828,6 +1828,85 @@ function extractCoordinatePairFromText(value) {
   return { latitude, longitude };
 }
 
+const PLUS_CODE_ALPHABET = "23456789CFGHJMPQRVWX";
+
+function decodeFullPlusCode(raw) {
+  const code = String(raw || "").trim().toUpperCase();
+  if (!/^[23456789CFGHJMPQRVWX]{8}\+[23456789CFGHJMPQRVWX]{2,}$/.test(code)) return null;
+  const digits = code.replace("+", "").slice(0, 10);
+  const res = [20, 1, 0.05, 0.0025, 0.000125];
+  let lat = -90;
+  let lng = -180;
+  for (let p = 0; p < 5; p += 1) {
+    lat += PLUS_CODE_ALPHABET.indexOf(digits[p * 2]) * res[p];
+    lng += PLUS_CODE_ALPHABET.indexOf(digits[p * 2 + 1]) * res[p];
+  }
+  return { lat: lat + res[4] / 2, lng: lng + res[4] / 2 };
+}
+
+function roundCoord(n) {
+  return Math.round(n * 1e6) / 1e6;
+}
+
+function isValidCoordPair(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+}
+
+function parseCoordinatePasteText(rawText) {
+  const text = String(rawText || "").trim()
+    .replace(/[˚º]/g, "°")
+    .replace(/[′’]/g, "'")
+    .replace(/[″”]|''/g, '"');
+  if (!text) return null;
+
+  if (/^https?:\/\/(maps\.app\.goo\.gl|goo\.gl\/maps)\//i.test(text)) {
+    return { needsResolve: "short_link", text };
+  }
+
+  if (/^https?:\/\//i.test(text)) {
+    let decoded = text;
+    try { decoded = decodeURIComponent(text); } catch { /* keep raw */ }
+    const m = decoded.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/)
+      || decoded.match(/[?&](?:q|query|ll|center|destination)=(?:loc:)?(-?\d+(?:\.\d+)?)\s*,\s*\+?(-?\d+(?:\.\d+)?)/)
+      || decoded.match(/\/(?:maps\/)?search\/(-?\d+(?:\.\d+)?),\s*\+?(-?\d+(?:\.\d+)?)/)
+      || decoded.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+    if (!m) return null;
+    const lat = Number(m[1]);
+    const lng = Number(m[2]);
+    return isValidCoordPair(lat, lng) ? { lat: roundCoord(lat), lng: roundCoord(lng) } : null;
+  }
+
+  const firstToken = text.split(/\s+/)[0].toUpperCase();
+  if (/^[23456789CFGHJMPQRVWX]{8}\+/.test(firstToken)) {
+    const p = decodeFullPlusCode(firstToken);
+    return p ? { lat: roundCoord(p.lat), lng: roundCoord(p.lng) } : null;
+  }
+  if (/^[23456789CFGHJMPQRVWX]{4,6}\+[23456789CFGHJMPQRVWX]{2,}$/.test(firstToken)) {
+    return { needsResolve: "plus_code_short", text };
+  }
+
+  const dec = text.match(/^(-?\d{1,3}(?:\.\d+)?)\s*[,\s]\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  if (dec) {
+    let lat = Number(dec[1]);
+    let lng = Number(dec[2]);
+    if (Math.abs(lat) > 90 && Math.abs(lng) <= 90) [lat, lng] = [lng, lat];
+    return isValidCoordPair(lat, lng) ? { lat: roundCoord(lat), lng: roundCoord(lng) } : null;
+  }
+
+  const dms = text.match(/^(.+?[NSEW])\s*,?\s*(.+?[NSEW])$/i);
+  if (dms) {
+    const a = dms[1].trim();
+    const b = dms[2].trim();
+    const aIsLat = /[NS]$/i.test(a);
+    const bIsLat = /[NS]$/i.test(b);
+    if (aIsLat === bIsLat) return null;
+    const lat = parseDmsCoordinate(aIsLat ? a : b, "latitude");
+    const lng = parseDmsCoordinate(aIsLat ? b : a, "longitude");
+    return isValidCoordPair(lat, lng) ? { lat: roundCoord(lat), lng: roundCoord(lng) } : null;
+  }
+  return null;
+}
+
 function normalizeSourceLocationPairInputs() {
   const elements = getSourceLocationPanelElements();
   if (!elements.latitude || !elements.longitude) return;
@@ -10875,6 +10954,57 @@ function wireSourceCollect() {
     normalizeSourceLocationPairInputs();
     clearSourceLocationPanelError();
     syncSourceLocationPanelSummary();
+  });
+  function writeSourceLocationPair(lat, lng) {
+    const latEl = document.getElementById("source-location-latitude");
+    const lngEl = document.getElementById("source-location-longitude");
+    if (!latEl || !lngEl) return;
+    latEl.value = String(lat);
+    lngEl.value = String(lng);
+    latEl.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  async function resolveAndApplySourceLocation(parsed) {
+    try {
+      const data = await api("/api/geo/resolve-coordinate", {
+        method: "POST",
+        body: JSON.stringify({ kind: parsed.needsResolve, text: parsed.text }),
+      });
+      let pair = null;
+      if (data && Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
+        pair = { lat: roundCoord(Number(data.lat)), lng: roundCoord(Number(data.lng)) };
+      } else if (data && data.url) {
+        const fromUrl = parseCoordinatePasteText(data.url);
+        if (fromUrl && !fromUrl.needsResolve) pair = fromUrl;
+      }
+      if (!pair || !isValidCoordPair(pair.lat, pair.lng)) throw new Error("ไม่พบพิกัดในลิงก์หรือ plus code นี้");
+      writeSourceLocationPair(pair.lat, pair.lng);
+    } catch (err) {
+      showSourceLocationPanelError(`แปลงพิกัดไม่สำเร็จ: ${err?.message || err}`);
+    }
+  }
+
+  function applyCoordinateTextToSourceLocation(text) {
+    const parsed = parseCoordinatePasteText(text);
+    if (!parsed) return false;
+    if (parsed.needsResolve) {
+      void resolveAndApplySourceLocation(parsed);
+      return true;
+    }
+    writeSourceLocationPair(parsed.lat, parsed.lng);
+    return true;
+  }
+
+  ["source-location-latitude", "source-location-longitude"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("paste", (event) => {
+      const text = event.clipboardData?.getData("text") || "";
+      if (applyCoordinateTextToSourceLocation(text)) event.preventDefault();
+    });
+    el.addEventListener("change", () => {
+      applyCoordinateTextToSourceLocation(el.value);
+    });
   });
   qs("source-manual-place-latitude")?.addEventListener("input", (event) => {
     splitManualPlaceCoordinatePair(event.currentTarget);
