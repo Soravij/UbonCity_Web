@@ -10954,15 +10954,43 @@ function wireSourceCollect() {
     clearSourceLocationPanelError();
     syncSourceLocationPanelSummary();
   });
-  function applyCoordinateTextToSourceLocation(text) {
-    const parsed = parseCoordinatePasteText(text);
-    if (!parsed || parsed.needsResolve) return false;
+  function writeSourceLocationPair(lat, lng) {
     const latEl = document.getElementById("source-location-latitude");
     const lngEl = document.getElementById("source-location-longitude");
-    if (!latEl || !lngEl) return false;
-    latEl.value = String(parsed.lat);
-    lngEl.value = String(parsed.lng);
+    if (!latEl || !lngEl) return;
+    latEl.value = String(lat);
+    lngEl.value = String(lng);
     latEl.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  async function resolveAndApplySourceLocation(parsed) {
+    try {
+      const data = await api("/api/geo/resolve-coordinate", {
+        method: "POST",
+        body: JSON.stringify({ kind: parsed.needsResolve, text: parsed.text }),
+      });
+      let pair = null;
+      if (data && Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
+        pair = { lat: roundCoord(Number(data.lat)), lng: roundCoord(Number(data.lng)) };
+      } else if (data && data.url) {
+        const fromUrl = parseCoordinatePasteText(data.url);
+        if (fromUrl && !fromUrl.needsResolve) pair = fromUrl;
+      }
+      if (!pair || !isValidCoordPair(pair.lat, pair.lng)) throw new Error("ไม่พบพิกัดในลิงก์หรือ plus code นี้");
+      writeSourceLocationPair(pair.lat, pair.lng);
+    } catch (err) {
+      window.alert(`แปลงพิกัดไม่สำเร็จ: ${err?.message || err}`);
+    }
+  }
+
+  function applyCoordinateTextToSourceLocation(text) {
+    const parsed = parseCoordinatePasteText(text);
+    if (!parsed) return false;
+    if (parsed.needsResolve) {
+      void resolveAndApplySourceLocation(parsed);
+      return true;
+    }
+    writeSourceLocationPair(parsed.lat, parsed.lng);
     return true;
   }
 
