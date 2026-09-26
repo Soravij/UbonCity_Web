@@ -39,6 +39,7 @@ import {
   resolveActiveAssignmentWorkBatchRows,
 } from "../db/repository.mjs";
 import { hasOpenAssignment } from "../services/publishable-assignment-candidate.mjs";
+import { resolveTextQueryLocation, resolveMapsShortLink } from "../collector/sources/adapters/google-maps.mjs";
 import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/index.mjs";
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import { resolveExtractedArticle } from "../collector/sources/extracted-article.mjs";
@@ -13962,6 +13963,28 @@ app.get("/api/source-raw-items", requireRole("owner", "admin", "user"), (req, re
   const limit = Number(req.query.limit || 200);
   res.json({ items: repo.listRawSourceItems(batchUid, limit) });
 });
+
+app.post("/api/geo/resolve-coordinate", requireRole("owner", "admin", "user"), workflowRateLimit, safeAsync(async (req, res) => {
+  const kind = String(req.body?.kind || "");
+  const text = String(req.body?.text || "").trim().slice(0, 500);
+  if (!text) { res.status(400).json({ error: "text is required" }); return; }
+  if (kind === "plus_code_short") {
+    const loc = await resolveTextQueryLocation(text);
+    if (!loc) { res.status(404).json({ error: "ไม่พบพิกัดจาก plus code นี้" }); return; }
+    res.json({ lat: loc.lat, lng: loc.lng });
+    return;
+  }
+  if (kind === "short_link") {
+    try {
+      const url = await resolveMapsShortLink(text);
+      res.json({ url });
+    } catch (err) {
+      res.status(400).json({ error: `ลิงก์ใช้ไม่ได้: ${err?.message || err}` });
+    }
+    return;
+  }
+  res.status(400).json({ error: "unsupported kind" });
+}));
 
 app.post("/api/source-raw-items/import", requireRole("admin"), workflowRateLimit, (req, res) => {
   try {

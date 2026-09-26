@@ -576,3 +576,43 @@ export async function collectFromGoogleMapsPayload(payload = []) {
 
   return [];
 }
+
+export async function resolveTextQueryLocation(textQuery, apiKey) {
+  const key = String(apiKey || process.env.GOOGLE_MAPS_API_KEY || "").trim();
+  if (!key) throw new Error("Missing GOOGLE_MAPS_API_KEY");
+  const res = await fetchWithTimeout("https://places.googleapis.com/v1/places:searchText", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": key,
+      "X-Goog-FieldMask": "places.location",
+    },
+    body: JSON.stringify({ textQuery: String(textQuery || ""), maxResultCount: 1, languageCode: "th" }),
+  });
+  if (!res.ok) throw new Error(`Google Places (New) error: ${res.status}`);
+  const data = await res.json();
+  const loc = data?.places?.[0]?.location;
+  const lat = Number(loc?.latitude);
+  const lng = Number(loc?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+const SHORT_LINK_ALLOWED_HOSTS = new Set(["maps.app.goo.gl", "goo.gl", "www.google.com", "google.com", "maps.google.com"]);
+
+export async function resolveMapsShortLink(rawUrl) {
+  let current = String(rawUrl || "").trim();
+  for (let hop = 0; hop < 5; hop += 1) {
+    let parsed;
+    try { parsed = new URL(current); } catch { throw new Error("invalid_url"); }
+    const host = parsed.hostname.toLowerCase();
+    if (parsed.protocol !== "https:" || !SHORT_LINK_ALLOWED_HOSTS.has(host)) throw new Error("host_not_allowed");
+    if (host === "goo.gl" && !parsed.pathname.startsWith("/maps/")) throw new Error("host_not_allowed");
+    if (host !== "maps.app.goo.gl" && host !== "goo.gl") return parsed.toString();
+    const res = await fetchWithTimeout(parsed.toString(), { method: "GET", redirect: "manual" });
+    const location = res.headers.get("location");
+    if (!location) throw new Error("no_redirect");
+    current = new URL(location, parsed).toString();
+  }
+  throw new Error("too_many_redirects");
+}
