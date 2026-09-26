@@ -765,6 +765,18 @@ Placeholders:
 - การเพิ่มหรือลบ column ทุกกรณีต้องใช้ dynamic DDL ที่ guard ด้วย `information_schema.COLUMNS` ตาม pattern ของ migration 019 และ 021
 - กฎนี้เป็นข้อบังคับหลังพบ runtime failure ซ้ำ 2 รอบ: Phase 3 migration 019 และ review-submission migration 021
 
+## 10B. Location / Radius Restriction
+
+**English**
+
+- "Restrict results by location and radius" means results are actually dropped when the haversine distance exceeds the radius (meters), not merely biased toward the location.
+- The contract is guarded by collector/tests/google-maps-radius-filter.behavior.test.mjs.
+
+**ภาษาไทย**
+
+- "จำกัดผลตามพิกัดและรัศมี" หมายถึงกรองทิ้งจริงเมื่อระยะ haversine เกิน radius (เมตร) ไม่ใช่แค่ bias ไปทางพิกัด
+- test ที่คุมสัญญานี้คือ collector/tests/google-maps-radius-filter.behavior.test.mjs
+
 ## 11. Documentation Policy
 
 **English**

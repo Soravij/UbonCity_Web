@@ -330,3 +330,25 @@ Commit ที่ merge แล้ว
 1. event-workspace-page.js:1240 path ไม่มี itemId ยังยิง /api/auth/me 2 ครั้ง (request ส่วนเกิน)
 2. admin/user ที่ยิง assignee_user_id เป็นตัวเอง ทางโค้ดน่าจะได้ผลเหมือน editor (index.mjs:3038 reject self) ยังไม่ทดสอบสด
 3. assignment-ui-scope.test.mjs fail 33/68 เท่ากันบน main และ branch = ของเดิม
+
+## 26 ก.ย. 2026 — Location/radius filter และ coordinate input
+
+Location/radius filter (merged dc934a6)
+- Text Search ส่ง locationBias ซึ่งแค่ถ่วงน้ำหนัก จึงเพิ่ม haversine post-filter ใน fetchTextSearchNew ก่อน loop fetchPlaceDetails
+- radius 0 = ไม่กรอง
+- place ที่ไม่มีพิกัดถูกทิ้งพร้อม console.warn
+
+Coordinate input (merged 88aa0a3)
+- ช่อง lat/lng รับ decimal, DMS (เดี่ยว/คู่ สลับลำดับได้), คู่ในช่องเดียว, plus code เต็ม, URL Google Maps (@, !3d!4d, q=/loc:, /search/) แปลงฝั่ง client ไม่เสียโควตา
+- plus code สั้น ใช้ POST /api/geo/resolve-coordinate → Google Text Search 1 ครั้งต่อการวาง
+- ลิงก์สั้น maps.app.goo.gl resolve ด้วย allowlist host + สูงสุด 5 hop
+
+ตัดสินใจไม่ทำ (26 ก.ย. 2026)
+- ลิงก์แชร์หน้าสถานที่ที่ไม่มีพิกัดใน URL — ไม่ทำ fallback ค้นด้วยชื่อเพราะเสียโควตา ระบบแสดง error ใน panel
+
+Known debt
+- (a) photo proxy route index.mjs:~2769 อยู่ก่อน auth ใครก็ใช้โควตา Google ได้
+- (b) queue-bucket-follows-state.test.mjs ประกอบพาธจาก cwd ได้ ENOENT เมื่อรันจากบางไดเรกทอรี
+- (c) snippet test ใน assignment-ui-scope.test.mjs ผูกกับ CRLF ใน worktree
+
+gate ที่ 88aa0a3: tests=1215 pass=1082 fail=132 skipped=1
