@@ -104,3 +104,11 @@ test("single number and garbage return null", () => {
   assert.equal(parseCoordinatePasteText("15.2447"), null);
   assert.equal(parseCoordinatePasteText("abc"), null);
 });
+
+test("DMS pair with S/W hemispheres yields negative values", () => {
+  assertPair(parseCoordinatePasteText(`15°13'53.7"S 104°51'31.6"W`), -15.231583, -104.858778);
+});
+
+test("DMS pair with latitude out of range for its axis returns null", () => {
+  assert.equal(parseCoordinatePasteText(`15°13'53.7"N 16°00'00"S`), null);
+});

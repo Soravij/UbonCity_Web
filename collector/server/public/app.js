@@ -1899,8 +1899,8 @@ function parseCoordinatePasteText(rawText) {
     const aIsLat = /[NS]$/i.test(a);
     const bIsLat = /[NS]$/i.test(b);
     if (aIsLat === bIsLat) return null;
-    const lat = parseDmsCoordinate(aIsLat ? a : b);
-    const lng = parseDmsCoordinate(aIsLat ? b : a);
+    const lat = parseDmsCoordinate(aIsLat ? a : b, "latitude");
+    const lng = parseDmsCoordinate(aIsLat ? b : a, "longitude");
     return isValidCoordPair(lat, lng) ? { lat: roundCoord(lat), lng: roundCoord(lng) } : null;
   }
   return null;
