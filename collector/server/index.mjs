@@ -13964,12 +13964,26 @@ app.get("/api/source-raw-items", requireRole("owner", "admin", "user"), (req, re
   res.json({ items: repo.listRawSourceItems(batchUid, limit) });
 });
 
-app.post("/api/geo/resolve-coordinate", requireRole("owner", "admin", "user"), workflowRateLimit, safeAsync(async (req, res) => {
+const SHORT_LINK_ERROR_TH = {
+  invalid_url: "ลิงก์ไม่ถูกต้อง",
+  host_not_allowed: "ลิงก์นี้ไม่ได้พาไปที่ Google Maps โดยตรง (อาจติดหน้ายืนยันของ Google) ให้เปิดลิงก์ในเบราว์เซอร์แล้วคัดลอก URL เต็มมาแทน",
+  no_redirect: "ลิงก์สั้นนี้ไม่ได้พาไปยังตำแหน่งใด",
+  too_many_redirects: "ลิงก์ส่งต่อหลายทอดเกินไป",
+};
+
+app.post("/api/geo/resolve-coordinate",requireRole("owner", "admin", "user"), workflowRateLimit, safeAsync(async (req, res) => {
   const kind = String(req.body?.kind || "");
   const text = String(req.body?.text || "").trim().slice(0, 500);
   if (!text) { res.status(400).json({ error: "text is required" }); return; }
   if (kind === "plus_code_short") {
-    const loc = await resolveTextQueryLocation(text);
+    let loc;
+    try {
+      loc = await resolveTextQueryLocation(text);
+    } catch (err) {
+      console.error("[geo.resolve-coordinate]", err);
+      res.status(502).json({ error: "ค้นหา plus code ไม่สำเร็จ (บริการแผนที่ไม่พร้อมใช้งาน)" });
+      return;
+    }
     if (!loc) { res.status(404).json({ error: "ไม่พบพิกัดจาก plus code นี้" }); return; }
     res.json({ lat: loc.lat, lng: loc.lng });
     return;
@@ -13979,7 +13993,8 @@ app.post("/api/geo/resolve-coordinate", requireRole("owner", "admin", "user"), w
       const url = await resolveMapsShortLink(text);
       res.json({ url });
     } catch (err) {
-      res.status(400).json({ error: `ลิงก์ใช้ไม่ได้: ${err?.message || err}` });
+      const code = String(err?.message || "");
+      res.status(400).json({ error: SHORT_LINK_ERROR_TH[code] || "ลิงก์ใช้ไม่ได้" });
     }
     return;
   }
