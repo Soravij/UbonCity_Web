@@ -95,6 +95,7 @@ import {
   mergeConfirmedDraftMetadata,
 } from "./endpoint-schema-mapping.mjs";
 import { buildReviewIngestContentPayload } from "./review-ingest-mapping.mjs";
+import { createGooglePhotoStore } from "./google-photo-store.mjs";
 
 const ARTICLE_AGENT_KEY = "article_agent";
 const DEFAULT_ARTICLE_AGENT_PROFILE = [
@@ -2734,6 +2735,7 @@ await fs.mkdir(dirs.stagingDir, { recursive: true });
 await fs.mkdir(dirs.exportDir, { recursive: true });
 await fs.mkdir(dirs.mediaDir, { recursive: true });
 await fs.mkdir(path.join(dirs.mediaDir, "uploads"), { recursive: true });
+const googlePhotoStore = createGooglePhotoStore({ mediaDir: dirs.mediaDir });
 
 app.set("trust proxy", 1);
 app.use(applyCollectorSecurityHeaders);
@@ -2776,33 +2778,19 @@ app.get(
       return;
     }
 
-    const apiKey = String(process.env.GOOGLE_MAPS_API_KEY || "").trim();
-    if (!apiKey) {
-      res.status(503).json({ error: "GOOGLE_MAPS_API_KEY is missing" });
-      return;
-    }
-
     const maxWidthPx = toPositiveIntWithinRange(req.query?.maxWidthPx, 1400, 1, 1600);
     const maxHeightPx = toPositiveIntWithinRange(req.query?.maxHeightPx, 1400, 1, 1600);
-    const googleUrl = new URL(`https://places.googleapis.com/v1/${name}/media`);
-    googleUrl.searchParams.set("maxWidthPx", String(maxWidthPx));
-    googleUrl.searchParams.set("maxHeightPx", String(maxHeightPx));
-    googleUrl.searchParams.set("key", apiKey);
-
-    const upstream = await fetch(googleUrl, { method: "GET", redirect: "follow" });
-    if (!upstream.ok) {
-      res.status(upstream.status).json({ error: "Unable to fetch Google photo" });
-      return;
+    try {
+      const photo = await googlePhotoStore.getOrFetch(name, maxWidthPx, maxHeightPx);
+      res.setHeader("Content-Type", photo.contentType);
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      res.setHeader("X-Photo-Cache", photo.cache);
+      res.setHeader("Content-Length", String(photo.body.length));
+      res.send(photo.body);
+    } catch (err) {
+      const status = Number(err?.status || 0) || 502;
+      res.status(status).json({ error: String(err?.message || "Unable to fetch Google photo") });
     }
-
-    const contentType = String(upstream.headers.get("content-type") || "").trim();
-    const cacheControl = String(upstream.headers.get("cache-control") || "").trim();
-    const body = Buffer.from(await upstream.arrayBuffer());
-
-    if (contentType) res.setHeader("Content-Type", contentType);
-    if (cacheControl) res.setHeader("Cache-Control", cacheControl);
-    res.setHeader("Content-Length", String(body.length));
-    res.send(body);
   })
 );
 
@@ -11217,6 +11205,17 @@ app.patch("/api/assignments/:id/state", requireRole("owner", "admin", "user"), a
           );
         }
       }
+      try {
+        const refUrls = repo.collectReferenceMediaCandidatesByItem(contentItemId).map((c) => c.url);
+        const acceptedItem = repo.getItem(contentItemId);
+        if (acceptedItem?.image_url) refUrls.push(acceptedItem.image_url);
+        void googlePhotoStore
+          .deleteUrls(refUrls)
+          .then((r) => console.info("[google-photo-store.delete]", contentItemId, JSON.stringify(r)))
+          .catch((err) => console.error("[google-photo-store.delete]", contentItemId, err?.message || err));
+      } catch (err) {
+        console.error("[google-photo-store.delete]", contentItemId, err?.message || err);
+      }
     }
     repo.logAudit(actorEmail(req), "assignment.state.update", "content_item", String(assignment?.content_item_id || ""), {
       assignment_id: assignmentId,
@@ -14075,6 +14074,17 @@ app.post("/api/source-raw-items/import", requireRole("admin"), workflowRateLimit
       reference_media_count: result.reference_media_count,
       results: result.results,
     });
+    const prefetchRawIds = prepared
+      .filter((row) => row.mode !== "skip")
+      .map((row) => Number(row.rawItem?.id || 0))
+      .filter(Boolean);
+    if (prefetchRawIds.length) {
+      const photoUrls = repo.listRawSourceMediaUrlsByRawItemIds(prefetchRawIds);
+      void googlePhotoStore
+        .prefetchUrls(photoUrls)
+        .then((r) => console.info("[google-photo-store.prefetch]", batchUid, JSON.stringify(r)))
+        .catch((err) => console.error("[google-photo-store.prefetch]", batchUid, err?.message || err));
+    }
   } catch (err) {
     res.status(400).json({ error: String(err?.message || "import failed").trim() || "import failed" });
   }
