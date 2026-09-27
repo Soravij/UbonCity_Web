@@ -777,6 +777,26 @@ Placeholders:
 - "จำกัดผลตามพิกัดและรัศมี" หมายถึงกรองทิ้งจริงเมื่อระยะ haversine เกิน radius (เมตร) ไม่ใช่แค่ bias ไปทางพิกัด
 - test ที่คุมสัญญานี้คือ collector/tests/google-maps-radius-filter.behavior.test.mjs
 
+## 10C. Google Reference Photo File Store
+
+**English**
+
+- Google Maps photos are reference-only and never published.
+- GET /api/google-maps/photo serves from {MEDIA_DIR}/googleRef/ first and only calls Google on a miss, storing the result.
+- Photos are prefetched when an owner/admin imports raw items, and deleted when the field assignment is accepted (ready_for_writer).
+- Raw/evidence rows are kept so return-to-clean still works; a later view refetches (quota is spent only on revision).
+- Approved exception to the media-pipeline freeze (collector/PROJECT_POLICY.md:132-135), 27 Sep 2026.
+- The contract is guarded by collector/tests/google-photo-store.behavior.test.mjs.
+
+**ภาษาไทย**
+
+- รูป Google Maps ใช้เป็น reference เท่านั้น และไม่เผยแพร่เด็ดขาด
+- GET /api/google-maps/photo อ่านจาก {MEDIA_DIR}/googleRef/ ก่อน และเรียก Google เฉพาะเมื่อไม่พบไฟล์ (miss) แล้วเก็บผลลัพธ์ไว้
+- รูปถูก prefetch เมื่อ owner/admin import raw items และถูกลบเมื่อ field assignment ถูก accept (ready_for_writer)
+- แถว raw/evidence ยังเก็บไว้ เพื่อให้ return-to-clean ยังทำงานได้ การเปิดดูภายหลังจะดึงใหม่ (เสียโควตาเฉพาะตอน revision)
+- เป็นข้อยกเว้นที่ได้รับอนุมัติจาก media-pipeline freeze (collector/PROJECT_POLICY.md:132-135) เมื่อ 27 ก.ย. 2026
+- test ที่คุมสัญญานี้คือ collector/tests/google-photo-store.behavior.test.mjs
+
 ## 11. Documentation Policy
 
 **English**

@@ -9513,6 +9513,16 @@ export function createRepository(db) {
     return Number(result.lastInsertRowid || 0);
   }
 
+  function listRawSourceMediaUrlsByRawItemIds(rawItemIds = []) {
+    const ids = [...new Set((Array.isArray(rawItemIds) ? rawItemIds : []).map((v) => Number(v) || 0).filter(Boolean))];
+    if (!ids.length) return [];
+    const placeholders = ids.map(() => "?").join(",");
+    return db
+      .prepare(`SELECT media_url FROM source_raw_media WHERE raw_item_id IN (${placeholders}) AND media_url IS NOT NULL AND media_url <> ''`)
+      .all(...ids)
+      .map((row) => String(row.media_url));
+  }
+
   function listSourceIngestions(limit = 100) {
     return db.prepare("SELECT * FROM source_ingestions ORDER BY id DESC LIMIT ?").all(Number(limit || 100));
   }
@@ -12890,6 +12900,7 @@ export function createRepository(db) {
     finishSourceIngestion,
     addRawSourceItem,
     addRawSourceMedia,
+    listRawSourceMediaUrlsByRawItemIds,
     listSourceIngestions,
     listRawSourceItems,
     listSourceRecordsByItem,
