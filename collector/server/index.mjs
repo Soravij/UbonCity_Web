@@ -14074,16 +14074,20 @@ app.post("/api/source-raw-items/import", requireRole("admin"), workflowRateLimit
       reference_media_count: result.reference_media_count,
       results: result.results,
     });
-    const prefetchRawIds = prepared
-      .filter((row) => row.mode !== "skip")
-      .map((row) => Number(row.rawItem?.id || 0))
-      .filter(Boolean);
-    if (prefetchRawIds.length) {
-      const photoUrls = repo.listRawSourceMediaUrlsByRawItemIds(prefetchRawIds);
-      void googlePhotoStore
-        .prefetchUrls(photoUrls)
-        .then((r) => console.info("[google-photo-store.prefetch]", batchUid, JSON.stringify(r)))
-        .catch((err) => console.error("[google-photo-store.prefetch]", batchUid, err?.message || err));
+    try {
+      const prefetchRawIds = prepared
+        .filter((row) => row.mode !== "skip")
+        .map((row) => Number(row.rawItem?.id || 0))
+        .filter(Boolean);
+      if (prefetchRawIds.length) {
+        const photoUrls = repo.listRawSourceMediaUrlsByRawItemIds(prefetchRawIds);
+        void googlePhotoStore
+          .prefetchUrls(photoUrls)
+          .then((r) => console.info("[google-photo-store.prefetch]", batchUid, JSON.stringify(r)))
+          .catch((err) => console.error("[google-photo-store.prefetch]", batchUid, err?.message || err));
+      }
+    } catch (err) {
+      console.error("[google-photo-store.prefetch]", batchUid, err?.message || err);
     }
   } catch (err) {
     res.status(400).json({ error: String(err?.message || "import failed").trim() || "import failed" });
