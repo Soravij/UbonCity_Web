@@ -80,3 +80,26 @@ test("upstream 404 throws status 404 and writes no file", async () => {
   await assert.rejects(() => store.getOrFetch("places/A/photos/B", 800, 600), (e) => e.status === 404);
   assert.deepEqual(await listRef(tmp), []);
 });
+
+test("concurrent getOrFetch for the same photo fetches once", async () => {
+  const { calls, store } = await setup();
+  const [a, b] = await Promise.all([
+    store.getOrFetch("places/A/photos/B", 800, 600),
+    store.getOrFetch("places/A/photos/B", 800, 600),
+  ]);
+  assert.equal(calls.fetch, 1);
+  assert.deepEqual(a.body, b.body);
+});
+
+test("unwritable mediaDir does not break getOrFetch", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "gphoto-"));
+  const notADir = path.join(tmp, "plain-file");
+  await fs.writeFile(notADir, "x");
+  const store = createGooglePhotoStore({
+    mediaDir: notADir,
+    apiKeyProvider: () => "k",
+    fetchImpl: async () => new Response(Buffer.from([1, 2, 3]), { headers: { "content-type": "image/jpeg" } }),
+  });
+  const photo = await store.getOrFetch("places/A/photos/B", 800, 600);
+  assert.deepEqual([...photo.body], [1, 2, 3]);
+});

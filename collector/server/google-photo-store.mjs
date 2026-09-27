@@ -31,6 +31,7 @@ const TYPE_BY_EXT = { ".jpg": "image/jpeg", ".png": "image/png", ".webp": "image
 
 export function createGooglePhotoStore({ mediaDir, apiKeyProvider = () => process.env.GOOGLE_MAPS_API_KEY, fetchImpl = fetch } = {}) {
   const dir = path.join(mediaDir, "googleRef");
+  const inflight = new Map();
 
   function keyOf(name, w, h) {
     return crypto.createHash("sha256").update(`${name}|${w}|${h}`).digest("hex").slice(0, 40);
@@ -43,7 +44,7 @@ export function createGooglePhotoStore({ mediaDir, apiKeyProvider = () => proces
         const body = await fs.readFile(path.join(dir, key + ext));
         return { body, contentType: TYPE_BY_EXT[ext] };
       } catch (err) {
-        if (err?.code !== "ENOENT") throw err;
+        if (err?.code !== "ENOENT") console.error("[google-photo-store.read]", name, err?.message || err);
       }
     }
     return null;
@@ -70,11 +71,16 @@ export function createGooglePhotoStore({ mediaDir, apiKeyProvider = () => proces
     const body = Buffer.from(await upstream.arrayBuffer());
     const ext = EXT_BY_TYPE[contentType];
     if (ext && body.length) {
-      await fs.mkdir(dir, { recursive: true });
       const target = path.join(dir, keyOf(name, w, h) + ext);
-      const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-      await fs.writeFile(tmp, body);
-      await fs.rename(tmp, target);
+      const tmp = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
+      try {
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(tmp, body);
+        await fs.rename(tmp, target);
+      } catch (err) {
+        await fs.unlink(tmp).catch(() => {});
+        console.error("[google-photo-store.write]", name, err?.message || err);
+      }
     }
     return { body, contentType: contentType || "image/jpeg" };
   }
@@ -82,7 +88,13 @@ export function createGooglePhotoStore({ mediaDir, apiKeyProvider = () => proces
   async function getOrFetch(name, w, h) {
     const cached = await readCached(name, w, h);
     if (cached) return { ...cached, cache: "hit" };
-    const fresh = await fetchAndStore(name, w, h);
+    const key = keyOf(name, w, h);
+    let pending = inflight.get(key);
+    if (!pending) {
+      pending = fetchAndStore(name, w, h).finally(() => inflight.delete(key));
+      inflight.set(key, pending);
+    }
+    const fresh = await pending;
     return { ...fresh, cache: "miss" };
   }
 
