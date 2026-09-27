@@ -352,3 +352,14 @@ Known debt
 - (c) snippet test ใน assignment-ui-scope.test.mjs ผูกกับ CRLF ใน worktree
 
 gate ที่ 88aa0a3: tests=1215 pass=1082 fail=132 skipped=1
+
+## 27 ก.ย. 2026 — Google reference photo file store (merged 4fec279)
+
+- รูปจาก Google Maps เป็นภาพอ้างอิงเท่านั้น ไม่ขึ้นเว็บ
+- GET /api/google-maps/photo เสิร์ฟจาก {MEDIA_DIR}/googleRef/ ก่อน ยิง Google เฉพาะตอนไม่มีไฟล์แล้วเก็บไว้ (header X-Photo-Cache: hit/miss) request พร้อมกันรูปเดียวกันยิง Google ครั้งเดียว cache เขียน/อ่านพังไม่ทำให้ request พัง
+- prefetch ตอน owner/admin คัดรับเข้า raw (/api/source-raw-items/import) เฉพาะรายการที่ไม่ skip ทำเบื้องหลัง
+- ลบไฟล์ตอน accept field assignment (ready_for_writer) โดยเก็บ raw/evidence ไว้ ถ้า return-to-clean ภายหลังจะดึงจาก Google ใหม่ตอนเปิดดู
+- ตัดสินใจไม่ทำ: rate limit/เพดาน (กระทบงาน), จำกัด route ให้ owner อย่างเดียว (คน clean ต้องเห็นรูป), backfill รูปทดสอบเก่า ~480 รูป (ดึงตอนเปิดดูครั้งแรกแทน)
+- Verified บน Runtime: prefetch 90/90 ไฟล์, หน้า clean ได้ hit, ไม่มี console error
+- ยังไม่ verify กับงานจริง: การลบตอน accept field pack — ให้ดู log [google-photo-store.delete] เมื่อมี item แรกถึงขั้นนั้น
+- ค้างจากรอบ audit: global rate limiter (index.mjs:~2609) ใช้ x-forwarded-for ดิบเป็น key
