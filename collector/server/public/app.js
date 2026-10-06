@@ -1612,12 +1612,21 @@ const SOURCE_INPUT_CONFIG = Object.freeze({
     placeholder: "https://www.tiktok.com/...",
     multiline: true,
   }),
+  json: Object.freeze({
+    label: "วาง JSON รายการสถานที่",
+    help: "วาง JSON ตามรูปแบบ uboncity.places.v1 ระบบจะเปิดหน้าต่างคัดรับเข้า raw ตามกระบวนการเดิม",
+    placeholder: '{"schema":"uboncity.places.v1","places":[{"name":"...","address":"...","latitude":15.24,"longitude":104.85}]}',
+    multiline: true,
+  }),
 });
 
 function getAllowedSourceAdaptersForRole(role = currentRole()) {
   const normalizedRole = String(role || "").trim().toLowerCase();
   if (normalizedRole === "owner") {
-    return ["google_maps", "manual", "manual_place", "facebook", "tiktok"];
+    return ["google_maps", "manual", "manual_place", "facebook", "tiktok", "json"];
+  }
+  if (normalizedRole === "admin") {
+    return ["manual", "manual_place", "facebook", "tiktok", "json"];
   }
   return ["manual", "manual_place", "facebook", "tiktok"];
 }
@@ -6338,6 +6347,9 @@ function renderUsersTable(rows) {
 function normalizeCollectPayload(adapter) {
   if (adapter === "manual_place") {
     return normalizeManualPlacePayload();
+  }
+  if (adapter === "json") {
+    return String(document.getElementById("source-query-textarea")?.value || "").trim();
   }
   if (adapter !== "google_maps" && adapter !== "manual") return [];
 
