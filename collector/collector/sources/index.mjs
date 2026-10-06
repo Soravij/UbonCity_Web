@@ -3,6 +3,7 @@ import { collectFromFacebookPayload } from "./adapters/facebook.mjs";
 import { collectFromTikTokPayload } from "./adapters/tiktok.mjs";
 import { collectFromGoogleMapsPayload } from "./adapters/google-maps.mjs";
 import { collectFromGoogleSearchPayload } from "./adapters/google-search.mjs";
+import { collectFromJsonPayload } from "./adapters/json.mjs";
 
 const ADAPTERS = {
   manual: collectFromManualPayload,
@@ -10,6 +11,7 @@ const ADAPTERS = {
   tiktok: collectFromTikTokPayload,
   google_maps: collectFromGoogleMapsPayload,
   google_search: collectFromGoogleSearchPayload,
+  json: collectFromJsonPayload,
 };
 
 export function listSourceAdapters() {
