@@ -6838,7 +6838,7 @@ function importCollectedRawItemsTxn(payloads) {
   }
 }
 
-const EVIDENCE_SOURCE_TYPES = new Set(["manual", "google_maps", "google_search", "editor", "import", "future_social", "json"]);
+const EVIDENCE_SOURCE_TYPES = new Set(["manual", "google_maps", "google_search", "editor", "import", "future_social"]);
 
 function normalizeEvidenceSourceType(value) {
   const raw = String(value || "").trim().toLowerCase();
