@@ -1133,7 +1133,7 @@ function scorePlaceInterestingness(item = {}, sourceRecords = []) {
       payload?.page_profile,
       normalized?.page_profile
     ).toLowerCase();
-    const isGoogle = sourceType === "google_maps" || /(?:^|\.)google\./i.test(host) || /places\.googleapis\.com/i.test(sourceUrl);
+    const isGoogle = sourceType !== "json" && (sourceType === "google_maps" || /(?:^|\.)google\./i.test(host) || /places\.googleapis\.com/i.test(sourceUrl));
     const isWongnai = sourceType === "wongnai" || /(?:^|\.)wongnai\.com$/i.test(host);
     const isInstitutional = pageProfile === "institutional" || /\.go\.th$/i.test(host);
     const isOfficial = looksLikeOfficialSupportRecord(record);
