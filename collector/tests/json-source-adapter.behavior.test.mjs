@@ -78,6 +78,20 @@ test("source_url differs per row even with identical found_at and never uses pho
   for (const row of out) assert.ok(!row.source_url.includes("/api/google-maps/photo"));
 });
 
+test("same-name rows without address or place id but distinct coordinates get distinct source_url", async () => {
+  const out = await collectFromJsonPayload([
+    { name: "7-Eleven", latitude: 15.24, longitude: 104.84 },
+    { name: "7-Eleven", latitude: 15.3, longitude: 104.9 },
+  ]);
+  assert.equal(out.length, 2);
+  assert.notEqual(out[0].source_url, out[1].source_url);
+});
+
+test("empty or whitespace string payload gives a clear error", async () => {
+  await assert.rejects(collectFromJsonPayload(""), /ยังไม่ได้วาง JSON/);
+  await assert.rejects(collectFromJsonPayload("   "), /ยังไม่ได้วาง JSON/);
+});
+
 test("found_at drops photo-proxy and non-http(s) urls", async () => {
   const out = await collectFromJsonPayload([
     {

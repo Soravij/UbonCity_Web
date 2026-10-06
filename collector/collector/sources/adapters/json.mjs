@@ -20,6 +20,9 @@ function isUsableHttpUrl(value) {
 
 export function extractJsonPlaceRows(payload) {
   let data = payload;
+  if (typeof data === "string" && !data.trim()) {
+    throw new Error("ยังไม่ได้วาง JSON");
+  }
   if (typeof data === "string") {
     try {
       data = JSON.parse(data);
@@ -100,7 +103,7 @@ export async function collectFromJsonPayload(payload = []) {
     const mapsQuery = `${name} ${address}`.trim();
     const sourceUrl =
       `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQuery)}` +
-      (placeId ? `&query_place_id=${encodeURIComponent(placeId)}` : "");
+      (placeId ? `&query_place_id=${encodeURIComponent(placeId)}` : `&uboncity_ref=${encodeURIComponent(ref)}`);
 
     out.push(
       normalizeRawItem(
