@@ -3,6 +3,14 @@ import { normalizeRawItem } from "../normalize.mjs";
 
 export const JSON_PLACES_SCHEMA = "uboncity.places.v1";
 const MAX_ROWS = 500;
+const CATEGORY_ALIASES = {
+  attractions: "attractions", attraction: "attractions", "ที่เที่ยว": "attractions", "สถานที่ท่องเที่ยว": "attractions",
+  activities: "activities", activity: "activities", "กิจกรรม": "activities",
+  hotels: "hotels", hotel: "hotels", "ที่พัก": "hotels", "โรงแรม": "hotels",
+  cafes: "cafes", cafe: "cafes", coffee: "cafes", "คาเฟ่": "cafes", "ร้านกาแฟ": "cafes",
+  restaurants: "restaurants", restaurant: "restaurants", "ร้านอาหาร": "restaurants",
+  transport: "transport", "การเดินทาง": "transport",
+};
 
 function str(value, max = 2000) {
   return String(value ?? "").trim().slice(0, max);
@@ -84,7 +92,7 @@ export async function collectFromJsonPayload(payload = []) {
     const phone = str(input.phone, 50);
     const placeId = str(input.google_place_id, 200);
     const website = str(input.website_url ?? input.website, 1000);
-    const category = str(input.category, 100);
+    const category = CATEGORY_ALIASES[str(input.category, 100).toLowerCase()] || "";
     const description = str(input.description, 4000);
     const foundAtInput = Array.isArray(input.found_at) ? input.found_at : [input.found_at ?? input.source_url];
     const foundAt = foundAtInput.map((u) => str(u, 1000)).filter(isUsableHttpUrl).slice(0, 10);
@@ -131,6 +139,7 @@ export async function collectFromJsonPayload(payload = []) {
             found_at: foundAt,
             confidence,
             notes: str(input.notes, 2000) || null,
+            national_phone_number: phone || null,
             extracted_metadata: {
               title: name,
               description: description || null,

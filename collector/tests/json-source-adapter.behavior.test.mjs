@@ -92,6 +92,20 @@ test("empty or whitespace string payload gives a clear error", async () => {
   await assert.rejects(collectFromJsonPayload("   "), /ยังไม่ได้วาง JSON/);
 });
 
+test("phone is exposed as national_phone_number in inner payload_json", async () => {
+  const out = await collectFromJsonPayload([{ name: "A", phone: "065-9254526" }]);
+  assert.equal(out[0].payload_json.payload_json.national_phone_number, "065-9254526");
+});
+
+test("category maps to system values; unknown falls back to default", async () => {
+  const cat = async (category) =>
+    (await collectFromJsonPayload([{ name: "A", category }]))[0].normalized_json.category;
+  assert.equal(await cat("cafe"), "cafes");
+  assert.equal(await cat("คาเฟ่"), "cafes");
+  assert.equal(await cat("Restaurant"), "restaurants");
+  assert.equal(await cat("xyz"), "attractions");
+});
+
 test("found_at drops photo-proxy and non-http(s) urls", async () => {
   const out = await collectFromJsonPayload([
     {
