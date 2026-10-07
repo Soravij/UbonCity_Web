@@ -2096,7 +2096,7 @@ function mergeSourceRecordsIntoMaster(masterId, sourceId, mergeItemIds) {
           skipped += 1;
           continue;
         }
-        throw new Error(`?? source URL ???????????? #${existingItemId}: ${sourceUrl}`);
+        throw new Error(`มี source URL นี้ผูกกับรายการ #${existingItemId} อยู่แล้ว: ${sourceUrl}`);
       }
     }
 
@@ -2232,12 +2232,12 @@ function mergeContentItems({ masterItemId, sourceItemIds, actorEmailValue }) {
 
   const master = repo.getItem(masterId);
   if (!master) {
-    throw new Error("???????????????????????");
+    throw new Error("ไม่พบรายการหลักที่จะรวม");
   }
 
   const sources = sourceIds.map((id) => repo.getItem(id));
   if (sources.some((item) => !item)) {
-    throw new Error("?????????????????????????????????");
+    throw new Error("ไม่พบรายการต้นทางบางรายการที่จะรวม");
   }
 
   const blockers = [];
@@ -2253,7 +2253,7 @@ function mergeContentItems({ masterItemId, sourceItemIds, actorEmailValue }) {
     }
   }
   if (blockers.length) {
-    throw new Error(`??? merge ?????? ???????????????? dependency ?????: ${formatItemBlockerSummary(blockers)}`);
+    throw new Error(`ยัง merge ไม่ได้ เพราะรายการต้นทางมี dependency ค้างอยู่: ${formatItemBlockerSummary(blockers)}`);
   }
 
   const mergeItemIds = new Set([masterId, ...sourceIds]);
@@ -6723,7 +6723,7 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
     const existingItemId = Number(targetItemId || 0);
     const existingItem = repo.getItem(existingItemId);
     if (!existingItem) {
-      throw new Error(`???????????????????????? merge (#${existingItemId || 0})`);
+      throw new Error(`ไม่พบรายการเดิมที่จะ merge (#${existingItemId || 0})`);
     }
 
     attachCollectedSourceRecord(existingItemId, rawItem, adapter);
@@ -8103,14 +8103,14 @@ app.get("/api/items/blocker-summary", requireRole("owner", "admin", "user"), (re
 app.post("/api/items/bulk-delete", requireRole("admin", "owner"), (req, res) => {
   const ids = toUniquePositiveIds(req.body?.ids);
   if (!ids.length) {
-    res.status(400).json({ error: "?????????????????? 1 ??????" });
+    res.status(400).json({ error: "เลือกอย่างน้อย 1 รายการ" });
     return;
   }
 
   const rows = ids.map((id) => repo.getItem(id));
   const missing = ids.filter((id, index) => !rows[index]);
   if (missing.length) {
-    res.status(404).json({ error: `???????????: ${missing.join(", ")}` });
+    res.status(404).json({ error: `ไม่พบรายการ: ${missing.join(", ")}` });
     return;
   }
 
@@ -8217,7 +8217,7 @@ app.post("/api/items/bulk-merge", requireRole("admin", "owner"), (req, res) => {
     return;
   }
   if (sourceItemIds.includes(masterItemId)) {
-    res.status(400).json({ error: "????????????????????????????????" });
+    res.status(400).json({ error: "รายการหลักต้องไม่อยู่ในรายการต้นทาง" });
     return;
   }
 
@@ -14021,7 +14021,7 @@ app.post("/api/source-raw-items/import", requireRole("admin"), workflowRateLimit
 
     for (const rawItemId of rawItemIds) {
       if (!rawMap.has(rawItemId)) {
-        res.status(400).json({ error: `????? raw item #${rawItemId} ?? batch ???` });
+        res.status(400).json({ error: `ไม่พบ raw item #${rawItemId} ใน batch นี้` });
         return;
       }
     }
@@ -14034,19 +14034,19 @@ app.post("/api/source-raw-items/import", requireRole("admin"), workflowRateLimit
       const mode = String(decision?.decision || "skip").trim().toLowerCase();
       const rawItem = rawMap.get(rawItemId);
       if (!rawItem) {
-        res.status(400).json({ error: `????? raw item #${rawItemId} ?? batch ???` });
+        res.status(400).json({ error: `ไม่พบ raw item #${rawItemId} ใน batch นี้` });
         return;
       }
 
       const targetItemId = Number(decision?.existing_item_id || 0);
       if (mode === "merge") {
         if (!targetItemId) {
-          res.status(400).json({ error: `?????????????????????????? raw #${rawItemId}` });
+          res.status(400).json({ error: `เลือกรายการเดิมที่จะรวมให้ raw #${rawItemId}` });
           return;
         }
         const existingItem = repo.getItem(targetItemId);
         if (!existingItem) {
-          res.status(400).json({ error: `???????????????????????? merge (#${targetItemId})` });
+          res.status(400).json({ error: `ไม่พบรายการเดิมที่จะ merge (#${targetItemId})` });
           return;
         }
       }
