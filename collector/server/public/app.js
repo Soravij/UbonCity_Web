@@ -6166,6 +6166,15 @@ function sourceIntakeRowMatchesFilter(candidate, filter) {
   return true;
 }
 
+function safeHttpUrl(url) {
+  try {
+    const parsed = new URL(String(url || "").trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "";
+  } catch {
+    return "";
+  }
+}
+
 function renderSourceIntakeRow(candidate, forcedExistingItemId = 0) {
   const rawItemId = Number(candidate.rawItemId || 0);
   const suggested = candidate.merge?.suggested || null;
@@ -6201,9 +6210,10 @@ function renderSourceIntakeRow(candidate, forcedExistingItemId = 0) {
   } else if (candidate.menuUrl) {
     factRows.push(`<div><strong>เมนู:</strong> <span class="intake-inline-ellipsis" title="${escapeHtml(candidate.menuUrl)}">${escapeHtml(candidate.menuUrl)}</span></div>`);
   }
-  const sourceLink = candidate.sourceUrl
-    ? `<a href="${escapeHtml(candidate.sourceUrl)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(candidate.sourceUrl)}">${escapeHtml(shortSourceUrlLabel(candidate.sourceUrl))}</a>`
-    : "-";
+  const safeUrl = safeHttpUrl(candidate.sourceUrl);
+  const sourceLink = safeUrl
+    ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(safeUrl)}">${escapeHtml(shortSourceUrlLabel(safeUrl))}</a>`
+    : escapeHtml(candidate.sourceUrl || "-");
   const recommendText = candidate.recommendedDecision === "merge" ? "รวมกับรายการเดิม" : candidate.recommendedDecision === "new" ? "รับเป็นรายการใหม่" : "ตรวจเพิ่มหรือข้าม";
   return `
     <div class="intake-row" data-raw-item-id="${rawItemId}">
@@ -6225,6 +6235,7 @@ function renderSourceIntakeRow(candidate, forcedExistingItemId = 0) {
           <div><strong>คำอธิบาย:</strong> ${escapeHtml(candidate.snippet || "-")}</div>
           <div><strong>คำแนะนำระบบ:</strong> ${escapeHtml(recommendText)}</div>
           <div><strong>เหตุผลที่ระบบเทียบ:</strong> ${escapeHtml(mergeReasons.length ? mergeReasons.join(" | ") : "-")}</div>
+          <div><strong>เหตุผลความน่ารับ:</strong> ${escapeHtml(candidate.priority?.reasons?.length ? candidate.priority.reasons.join(" | ") : "-")}</div>
           ${factRows.join("")}
         </div>
       </details>

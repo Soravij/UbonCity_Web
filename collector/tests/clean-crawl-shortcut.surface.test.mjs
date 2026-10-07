@@ -46,6 +46,12 @@ test("Raw intake per-row decisions build the same payload shape and honor the fo
   const buildDecisions = load("buildSourceIntakeDecisions");
   const shortLabel = load("shortSourceUrlLabel");
   const matchesFilter = load("sourceIntakeRowMatchesFilter");
+  const safeUrl = load("safeHttpUrl");
+
+  assert.equal(safeUrl("javascript:alert(1)"), "");
+  assert.equal(safeUrl("data:text/html,x"), "");
+  assert.ok(safeUrl("https://www.google.com/maps/search/?api=1").startsWith("https://www.google.com/maps/search/"));
+  assert.equal(safeUrl(""), "");
 
   const rows = [
     { rawItemId: 1, selectedDecision: "new" },
