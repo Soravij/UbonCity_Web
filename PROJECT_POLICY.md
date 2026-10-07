@@ -122,7 +122,7 @@ gate: the cost of being wrong differs per path, because only purge destroys data
   blocker are skipped into `blocked_rows` with per-item reasons, the rest are deleted, and the
   response reports both. When *every* selected item is blocked it must fail (400), never report
   success with 0 deleted.
-- **Merge** (`mergeContentItems`) keeps the **full dependency gate** (`getMergeBlockersForItem`).
+- **Merge** (`mergeContentItems`) keeps the **full dependency gate** (`getMergeBlockersForItem`). Exception (7 Oct 2026): a raw-stage source (getRawOnlyHardDeleteEligibility eligible) skips only the five import-created blockers (source_records, evidence_blocks, content_assets, content_workflow_models, content_workflow_transitions); its source records, evidence, assets and reference selections move to the master, its workflow model/transitions are deleted, and the source is soft-deleted. Every other blocker still applies.
 - **Purge** (`POST /api/admin/deleted-items/:id/purge`, `DELETE FROM content_items`, irreversible)
   classifies every reference group into exactly one of three tiers:
   - `hard_blocker` — always rejected (409). No override exists, at any role. Exactly three groups:
@@ -200,7 +200,7 @@ as any intentional change to the rules above:
 - **Bulk soft delete** (`POST /api/items/bulk-delete`) เป็นแบบ **partial success**: item ที่ติด NEVER
   ถูกข้ามไปอยู่ใน `blocked_rows` พร้อมเหตุผลรายตัว ที่เหลือลบตามปกติ และ response ต้องรายงานทั้งสองฝั่ง
   ถ้าติดบล็อก**ทุกตัว** ต้องตอบ fail (400) ห้ามรายงานว่าสำเร็จทั้งที่ลบได้ 0 รายการ
-- **Merge** (`mergeContentItems`) ยังใช้ **เกณฑ์เต็ม** (`getMergeBlockersForItem`) ตามเดิม
+- **Merge** (`mergeContentItems`) ยังใช้ **เกณฑ์เต็ม** (`getMergeBlockersForItem`) ตามเดิม ข้อยกเว้น (7 ต.ค. 2026): รายการต้นทางที่ยังอยู่ขั้น raw (ผ่าน getRawOnlyHardDeleteEligibility) ข้ามเฉพาะ blocker 5 ตัวที่ import สร้างเอง; แหล่งข้อมูล evidence รูป และรูปอ้างอิงที่เลือกถูกย้ายไปรายการหลัก, workflow model/transitions ของต้นทางถูกลบ แล้ว soft delete ต้นทาง; blocker อื่นยังบังคับเหมือนเดิม
 - **Purge** (`POST /api/admin/deleted-items/:id/purge`, `DELETE FROM content_items`, กู้คืนไม่ได้)
   จัดกลุ่มข้อมูลอ้างอิงทุกกลุ่มเป็น 1 ใน 3 ชั้น:
   - `hard_blocker` — ปฏิเสธเสมอ (409) ไม่มี override ไม่ว่า role ไหน มีแค่ 3 กลุ่ม:
