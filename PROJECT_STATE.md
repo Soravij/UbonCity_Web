@@ -363,3 +363,10 @@ gate ที่ 88aa0a3: tests=1215 pass=1082 fail=132 skipped=1
 - Verified บน Runtime: prefetch 90/90 ไฟล์, หน้า clean ได้ hit, ไม่มี console error
 - ยังไม่ verify กับงานจริง: การลบตอน accept field pack — ให้ดู log [google-photo-store.delete] เมื่อมี item แรกถึงขั้นนั้น
 - ค้างจากรอบ audit: global rate limiter (index.mjs:~2609) ใช้ x-forwarded-for ดิบเป็น key
+
+## 6–7 ต.ค. 2026 — JSON place source + raw intake per-row (merged 74ceba0, ef112a8)
+
+- แหล่งข้อมูลใหม่ "นำเข้า JSON" (adapter json, collector/collector/sources/adapters/json.mjs) schema uboncity.places.v1: รับ array หรือ {schema, places}; ต้องมี name; พิกัดไม่บังคับ (ผิดช่วง = ทิ้งพิกัด เก็บแถว); ตัดซ้ำในไฟล์ด้วย place id / ชื่อ+พิกัด / ชื่อ+ที่อยู่; สูงสุด 500 แถว; category แปลงผ่าน alias เป็น 6 ค่าของระบบ; phone ใส่ national_phone_number ชั้นบนของ payload เพื่อให้ match_phone ทำงาน; source_url สร้างไม่ซ้ำต่อแถว (maps search + uboncity_ref); URL แหล่งที่มาเก็บใน found_at; ไม่รับรูป ไม่เรียก Google; evidence ติดป้าย import; owner/admin เท่านั้น
+- หน้าคัดรับเข้า raw: เลือกต่อแถว รับใหม่ / รวม (เลือกปลายทางจาก list ลอย) / ข้าม แทนการเลือกปลายทางทั้งชุด — แก้บั๊กที่แถว "รับใหม่" ถูก merge เงียบ ๆ เมื่อชุดอยู่ในโหมด merge; โหมด crawl merge จากหน้า Clean ยังบังคับรวมเข้า item เดียว; แถวบรรทัดเดียว คอลัมน์คงที่ รายละเอียดพับเก็บ; ลิงก์แหล่งข้อมูลแสดงแบบย่อและเปิดได้เฉพาะ http(s); ตัวกรอง ทั้งหมด/น่าจะซ้ำ/รับใหม่/รวม/ข้าม + ปุ่มตั้งค่าทุกแถวที่แสดง; แถวจาก JSON ไม่ใช้คะแนนความน่ารับ (default รับใหม่ หรือรวมเมื่อเจอรายการที่เกี่ยวข้องมาก)
+- CSS class ใหม่ (อนุญาตโดย Sor): intake-row, intake-row-main, intake-ellipsis, intake-merge-pick
+- ค้าง: ข้อความ error ใน server/index.mjs (~6726, ~14024-14049) เป็น ????? ; buildSourceIntakeExistingItemOptions ไม่ได้ใช้แล้วแต่ test clean-crawl-shortcut ยังอ้างข้อความในฟังก์ชัน; ขั้น B (adapter ค้นด้วย AI ใช้ schema เดียวกัน) รอตัดสินใจ
