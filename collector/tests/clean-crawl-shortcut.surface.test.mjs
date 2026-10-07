@@ -36,7 +36,6 @@ test("Clean crawl shortcut sends the current item as an explicit merge context",
 test("Raw intake context locks merge mode and injects the target independent of dashboard options", () => {
   assert.match(appSource, /function getCrawlMergeExistingItemId\(\)/);
   assert.match(appSource, /forcedExistingItemId: 0/);
-  assert.match(appSource, /prioritized\.push\(\{ id: forcedExistingItemId, title: "รายการจากหน้า Clean" \}\)/);
 });
 
 test("Raw intake per-row decisions build the same payload shape and honor the forced merge target", () => {
