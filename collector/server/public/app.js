@@ -243,6 +243,7 @@ const state = {
     rawReviewCollapsed: false,
     rawSort: "interestingness",
     rawStageFilter: "all",
+    rawSearch: "",
     rawReviewFilter: "all",
     rawSelectedIds: new Set(),
     rawMergeOpen: false,
@@ -5460,7 +5461,7 @@ function renderRawBulkToolbar(items = state.items) {
   const canManage = canManageBulkContentItems();
   const selected = getSelectedRawItems(items);
   const selectedCount = selected.length;
-  toolbar.classList.toggle("hidden", !canManage || selectedCount === 0);
+  toolbar.classList.toggle("hidden", !canManage);
   if (!canManage) return;
 
   summary.textContent = selectedCount
@@ -5799,10 +5800,29 @@ async function annotateRawTableBlockers() {
   }
 }
 
+function rawItemMatchesSearch(item, query) {
+  const text = String(query || "").trim().toLowerCase();
+  if (!text) return true;
+  const terms = text.split(/\s+/).filter(Boolean);
+  const haystack = [
+    item?.id != null ? `#${item.id} ${item.id}` : "",
+    item?.title,
+    item?.normalized_title,
+    item?.description_raw,
+    item?.location_text,
+    item?.category,
+    Array.isArray(item?.tags) ? item.tags.join(" ") : "",
+  ].join(" ").toLowerCase();
+  return terms.every((term) => haystack.includes(term));
+}
+
 function renderRawTable(items) {
   const tableWrap = qs("raw-table-wrap");
   if (!tableWrap) return;
-  const list = sortRawItems(getPreparationQueueItems(items));
+  const fullList = sortRawItems(getPreparationQueueItems(items));
+  const fullIntake = splitRawIntakeAndCleanPrep(splitRawQueueByFieldPack(fullList).intake).rawIntake;
+  const rawSearch = String(state.dashboard.rawSearch || "");
+  const list = fullList.filter((item) => rawItemMatchesSearch(item, rawSearch));
   const workflowSplit = splitRawQueueByFieldPack(list);
   const split = splitRawIntakeAndCleanPrep(workflowSplit.intake);
   const canManage = canManageBulkContentItems();
@@ -5822,7 +5842,7 @@ function renderRawTable(items) {
       return true;
     });
   const visibleRawIntake = state.dashboard.rawShowAll ? split.rawIntake : split.rawIntake.slice(0, state.dashboard.rawLimit);
-  pruneRawSelection(split.rawIntake);
+  pruneRawSelection(fullIntake);
 
   tableWrap.innerHTML = `
     <div class="card">
@@ -5943,7 +5963,7 @@ function renderRawTable(items) {
     };
   }
 
-  renderRawBulkToolbar(split.rawIntake);
+  renderRawBulkToolbar(fullIntake);
 
   const selectAll = qs("raw-select-all");
   const syncIntakeSelectionUi = () => {
@@ -5953,7 +5973,7 @@ function renderRawTable(items) {
       selectAll.checked = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
       selectAll.indeterminate = selectableIds.some((id) => selectedIds.has(id)) && !selectAll.checked;
     }
-    renderRawBulkToolbar(split.rawIntake);
+    renderRawBulkToolbar(fullIntake);
   };
   if (selectAll) {
     const selectableIds = visibleRawIntake.map((item) => Number(item?.id || 0)).filter(Boolean);
@@ -10863,6 +10883,11 @@ function wireRawTableControls() {
 
   qs("raw-sort")?.addEventListener("change", (event) => {
     state.dashboard.rawSort = String(event.target?.value || "interestingness").trim() || "interestingness";
+    renderRawTable(state.items);
+  });
+
+  qs("raw-search")?.addEventListener("input", (event) => {
+    state.dashboard.rawSearch = String(event.target?.value || "");
     renderRawTable(state.items);
   });
 
