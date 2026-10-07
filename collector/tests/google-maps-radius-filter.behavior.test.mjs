@@ -49,7 +49,11 @@ test("places outside radius are dropped before place details are fetched", async
     place("nogeo", null),
   ]);
 
-  assert.equal(searchBodies[0].locationBias.circle.radius, 5000);
+  assert.equal(searchBodies[0].locationBias, undefined);
+  const rect = searchBodies[0].locationRestriction.rectangle;
+  assert.ok(rect.low.latitude < 15.2447 && rect.high.latitude > 15.2447);
+  assert.ok(rect.low.longitude < 104.8472 && rect.high.longitude > 104.8472);
+  assert.ok(Math.abs((rect.high.latitude - rect.low.latitude) / 2 * 111320 - 5000) < 1);
   assert.equal(items.length, 1);
   assert.match(items[0].normalized_json.title, /Place near/);
   assert.equal(detailCalls.length, 1);
