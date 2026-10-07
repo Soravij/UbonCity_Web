@@ -2509,7 +2509,13 @@ function normalizeRawCandidate(row, query) {
 
   const priority = scoreIntakePriority(candidate, query);
   const merge = findCandidateMatches(candidate, state.items);
-  const recommendedDecision = shouldRecommendMerge(merge) ? "merge" : priority.rank >= 1 ? "new" : "skip";
+  const isJsonSource = candidate.sourceType === "json";
+  const recommendedDecision =
+    shouldRecommendMerge(merge) || (isJsonSource && Number(merge?.rank || 0) >= 2)
+      ? "merge"
+      : isJsonSource || priority.rank >= 1
+        ? "new"
+        : "skip";
 
   return {
     ...candidate,
@@ -6175,6 +6181,25 @@ function safeHttpUrl(url) {
   }
 }
 
+function buildSourceIntakeMergePickList(candidate) {
+  const seen = new Set();
+  const rows = [];
+  for (const match of Array.isArray(candidate?.merge?.matches) ? candidate.merge.matches : []) {
+    const id = Number(match?.item?.id || 0);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    rows.push({ id, title: String(match.item?.title || ""), score: Number(match.score || 0) || 0 });
+  }
+  for (const item of Array.isArray(state.items) ? state.items : []) {
+    if (rows.length >= 30) break;
+    const id = Number(item?.id || 0);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    rows.push({ id, title: String(item?.title || ""), score: null });
+  }
+  return rows;
+}
+
 function renderSourceIntakeRow(candidate, forcedExistingItemId = 0) {
   const rawItemId = Number(candidate.rawItemId || 0);
   const suggested = candidate.merge?.suggested || null;
@@ -6219,14 +6244,24 @@ function renderSourceIntakeRow(candidate, forcedExistingItemId = 0) {
     <div class="intake-row" data-raw-item-id="${rawItemId}">
       <div class="intake-row-main">
         <strong class="intake-ellipsis" title="${escapeHtml(candidate.title)}">${escapeHtml(candidate.title)}</strong>
-        <span class="muted intake-ellipsis">${escapeHtml([candidate.categoryLabel, compactText(candidate.address || "", 80)].filter(Boolean).join(" · "))}</span>
-        ${candidate.phone ? `<span class="muted">${escapeHtml(candidate.phone)}</span>` : ""}
-        <span class="intake-badge ${intakePriorityClass(candidate.priority.label)}">${escapeHtml(candidate.priority.label)}</span>
-        <span class="intake-badge intake-ellipsis ${intakeMergeClass(candidate.merge.label)}" title="${escapeHtml(mergeReasons.join(" | "))}">${escapeHtml(matchLabel)}</span>
+        <span class="muted intake-ellipsis" title="${escapeHtml(candidate.address || "")}">${escapeHtml([candidate.categoryLabel, compactText(candidate.address || "", 80)].filter(Boolean).join(" · "))}</span>
+        <span class="muted intake-ellipsis">${escapeHtml(candidate.phone || "")}</span>
+        ${candidate.sourceType === "json" ? "<span></span>" : `<span class="intake-badge ${intakePriorityClass(candidate.priority.label)}">${escapeHtml(candidate.priority.label)}</span>`}
+        ${!forcedExistingItemId && choice === "merge" ? (() => {
+          const pickRows = buildSourceIntakeMergePickList(candidate);
+          const selectedId = Number(candidate.selectedMergeItemId || 0) || 0;
+          const selectedRow = pickRows.find((row) => row.id === selectedId);
+          const pickLabel = selectedId ? `รวมเข้า #${selectedId} ${selectedRow?.title || ""}` : "เลือกรายการเดิม";
+          return `<details class="intake-merge-pick">
+            <summary class="intake-badge intake-ellipsis merge-exact" title="${escapeHtml(pickLabel)}">${escapeHtml(pickLabel)} ▾</summary>
+            <div>
+              ${pickRows.map((row) => `<button type="button" class="raw-stage-filter ${row.id === selectedId ? "is-active" : ""}" data-intake-merge-pick="${row.id}" data-raw-item-id="${rawItemId}">#${row.id} ${escapeHtml(row.title)}${row.score != null ? ` <span>${row.score}</span>` : ""}</button>`).join("")}
+            </div>
+          </details>`;
+        })() : `<span class="intake-badge intake-ellipsis ${intakeMergeClass(candidate.merge.label)}" title="${escapeHtml(mergeReasons.join(" | "))}">${escapeHtml(matchLabel)}</span>`}
       </div>
       <div class="raw-stage-filter-row">
         ${choiceDefs.map(([key, label]) => `<button type="button" class="raw-stage-filter ${choice === key ? "is-active" : ""}" data-intake-choice="${key}" data-raw-item-id="${rawItemId}">${escapeHtml(label)}</button>`).join("")}
-        ${!forcedExistingItemId && choice === "merge" ? `<select data-intake-merge-target="${rawItemId}"><option value="">เลือกรายการเดิม</option>${buildSourceIntakeExistingItemOptions(candidate.selectedMergeItemId, [candidate])}</select>` : ""}
       </div>
       <details class="raw-json-toggle">
         <summary>รายละเอียด</summary>
@@ -11170,6 +11205,16 @@ function wireSourceIntakeModal() {
   });
 
   qs("source-intake-list")?.addEventListener("click", (event) => {
+    const pick = event.target.closest("[data-intake-merge-pick]");
+    if (pick) {
+      const pickRawId = Number(pick.getAttribute("data-raw-item-id") || 0);
+      const pickCandidate = state.sourceIntake.candidates.find((row) => row.rawItemId === pickRawId);
+      if (pickCandidate) {
+        pickCandidate.selectedMergeItemId = Number(pick.getAttribute("data-intake-merge-pick") || 0) || 0;
+        renderSourceIntakeModal();
+      }
+      return;
+    }
     const button = event.target.closest("[data-intake-choice]");
     if (!button) return;
     const rawItemId = Number(button.getAttribute("data-raw-item-id") || 0);
@@ -11177,15 +11222,6 @@ function wireSourceIntakeModal() {
     if (!candidate) return;
     candidate.selectedDecision = String(button.getAttribute("data-intake-choice") || "skip");
     renderSourceIntakeModal();
-  });
-
-  qs("source-intake-list")?.addEventListener("change", (event) => {
-    const select = event.target.closest("[data-intake-merge-target]");
-    if (!select) return;
-    const rawItemId = Number(select.getAttribute("data-intake-merge-target") || 0);
-    const candidate = state.sourceIntake.candidates.find((row) => row.rawItemId === rawItemId);
-    if (!candidate) return;
-    candidate.selectedMergeItemId = Number(select.value || 0) || 0;
   });
 
   qs("source-intake-destination")?.addEventListener("click", (event) => {
