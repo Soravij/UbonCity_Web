@@ -2581,6 +2581,104 @@ th {
   white-space: normal;
 }
 
+.intake-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  padding: 8px 12px;
+  min-width: 0;
+}
+
+.intake-row-main {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr) 100px auto 220px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.intake-row-main > .intake-badge {
+  justify-self: start;
+  max-width: 100%;
+}
+
+.intake-row .intake-badge,
+.intake-row .raw-stage-filter {
+  white-space: nowrap;
+}
+
+.intake-ellipsis {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.intake-row .raw-stage-filter-row {
+  margin: 0;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.intake-row .raw-json-toggle {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+.intake-row .raw-json-toggle > summary {
+  margin-bottom: 0;
+  font-size: 12px;
+}
+
+.intake-list:has(.intake-row) {
+  gap: 6px;
+}
+
+.intake-merge-pick {
+  position: relative;
+  min-width: 0;
+}
+
+.intake-merge-pick > summary {
+  list-style: none;
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.intake-merge-pick > summary::-webkit-details-marker {
+  display: none;
+}
+
+.intake-merge-pick > div {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  display: grid;
+  gap: 4px;
+  width: 320px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--text) 18%, transparent);
+}
+
+.intake-merge-pick > div .raw-stage-filter {
+  justify-content: space-between;
+  width: 100%;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .raw-select-cell {
   width: 42px;
   text-align: center;
@@ -3962,6 +4060,18 @@ body.field-brief-page #brief-document .article-brief-doc a {
   .intake-summary-grid,
   .intake-decision-grid {
     grid-template-columns: 1fr;
+  }
+
+  .intake-row {
+    grid-template-columns: 1fr;
+  }
+
+  .intake-row-main {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .intake-row .raw-stage-filter-row {
+    flex-wrap: wrap;
   }
 
   .frontend-preview .preview-title {
