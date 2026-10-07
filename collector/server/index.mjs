@@ -2220,6 +2220,16 @@ function mergeContentAssetsIntoMaster(masterId, sourceId) {
   return { moved, merged };
 }
 
+// Rows the raw intake creates for every imported item. A raw-stage source carries nothing else,
+// so merging it moves these to the master (or drops the workflow rows) instead of blocking.
+const RAW_MERGE_ALLOWED_BLOCKER_KEYS = new Set([
+  "source_records",
+  "evidence_blocks",
+  "content_assets",
+  "content_workflow_models",
+  "content_workflow_transitions",
+]);
+
 function mergeContentItems({ masterItemId, sourceItemIds, actorEmailValue }) {
   const masterId = Number(masterItemId || 0);
   const sourceIds = toUniquePositiveIds(sourceItemIds).filter((id) => id !== masterId);
@@ -2234,16 +2244,27 @@ function mergeContentItems({ masterItemId, sourceItemIds, actorEmailValue }) {
   if (!master) {
     throw new Error("ไม่พบรายการหลักที่จะรวม");
   }
+  if (Number(master.is_deleted || 0) !== 0) {
+    throw new Error("รายการหลักถูกลบไปแล้ว");
+  }
 
   const sources = sourceIds.map((id) => repo.getItem(id));
   if (sources.some((item) => !item)) {
     throw new Error("ไม่พบรายการต้นทางบางรายการที่จะรวม");
   }
+  if (sources.some((item) => Number(item?.is_deleted || 0) !== 0)) {
+    throw new Error("รายการต้นทางบางรายการถูกลบไปแล้ว");
+  }
 
   const blockers = [];
+  const rawMergeSourceIds = new Set();
   for (const item of sources) {
     const itemId = Number(item?.id || 0);
-    const itemBlockers = getMergeBlockersForItem(itemId);
+    let itemBlockers = getMergeBlockersForItem(itemId);
+    if (repo.getRawOnlyHardDeleteEligibility(itemId)?.eligible) {
+      rawMergeSourceIds.add(itemId);
+      itemBlockers = itemBlockers.filter((entry) => !RAW_MERGE_ALLOWED_BLOCKER_KEYS.has(String(entry?.key || "")));
+    }
     if (itemBlockers.length) {
       blockers.push({
         item_id: itemId,
@@ -2274,6 +2295,9 @@ function mergeContentItems({ masterItemId, sourceItemIds, actorEmailValue }) {
     content_direction_reports_moved: 0,
     content_assets_moved: 0,
     content_assets_merged: 0,
+    source_records_deleted: 0,
+    reference_selections_moved: 0,
+    workflow_rows_deleted: 0,
   };
 
   let txStarted = false;
@@ -2286,6 +2310,15 @@ function mergeContentItems({ masterItemId, sourceItemIds, actorEmailValue }) {
 
     for (const source of sources) {
       const sourceId = Number(source?.id || 0);
+      const isRawSource = rawMergeSourceIds.has(sourceId);
+      let rawWorkflowModel = null;
+      if (isRawSource) {
+        const recheck = repo.getRawOnlyHardDeleteEligibility(sourceId);
+        if (!recheck?.eligible) {
+          throw new Error(`รายการ #${sourceId} ไม่อยู่ในขั้น raw แล้ว กรุณาลองใหม่`);
+        }
+        rawWorkflowModel = recheck.workflow_model || null;
+      }
       const preserveStats = preserveSecondaryItemFacts(master, source);
       counts.source_snapshots_added += preserveStats.source_snapshot_added;
       counts.master_fields_filled += preserveStats.master_fields_filled;
@@ -2307,9 +2340,32 @@ function mergeContentItems({ masterItemId, sourceItemIds, actorEmailValue }) {
       counts.content_assets_moved += assetStats.moved;
       counts.content_assets_merged += assetStats.merged;
 
+      counts.reference_selections_moved += Number(
+        db.prepare("UPDATE OR IGNORE content_reference_media_selections SET content_item_id=? WHERE content_item_id=?").run(masterId, sourceId)?.changes || 0
+      );
+      db.prepare("DELETE FROM content_reference_media_selections WHERE content_item_id=?").run(sourceId);
+
+      let rawCleanup = null;
+      if (isRawSource) {
+        const sourceRecordsDeleted = Number(db.prepare("DELETE FROM source_records WHERE content_item_id=?").run(sourceId)?.changes || 0);
+        const transitionsDeleted = Number(db.prepare("DELETE FROM content_workflow_transitions WHERE content_item_id=?").run(sourceId)?.changes || 0);
+        const modelsDeleted = Number(db.prepare("DELETE FROM content_workflow_models WHERE content_item_id=?").run(sourceId)?.changes || 0);
+        counts.source_records_deleted += sourceRecordsDeleted;
+        counts.workflow_rows_deleted += transitionsDeleted + modelsDeleted;
+        rawCleanup = {
+          previous_production_state: rawWorkflowModel?.production_state || null,
+          previous_publication_state: rawWorkflowModel?.publication_state || null,
+          source_records_deleted: sourceRecordsDeleted,
+          workflow_transitions_deleted: transitionsDeleted,
+          workflow_models_deleted: modelsDeleted,
+        };
+      }
+
       db.prepare("UPDATE content_items SET is_deleted=1, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(sourceId);
       repo.logAudit(actorEmailValue, "item.merge.into_master", "content_item", String(sourceId), {
         master_item_id: masterId,
+        raw_stage_merge: isRawSource,
+        raw_cleanup: rawCleanup,
       });
     }
 
