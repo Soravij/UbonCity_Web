@@ -6153,7 +6153,7 @@ function shortSourceUrlLabel(url) {
 }
 
 function sourceIntakeRowMatchesFilter(candidate, filter) {
-  if (filter === "dup") return Number(candidate?.merge?.rank || 0) > 0;
+  if (filter === "dup") return Number(candidate?.merge?.rank || 0) >= 2;
   if (filter === "new" || filter === "merge" || filter === "skip") return candidate?.selectedDecision === filter;
   return true;
 }

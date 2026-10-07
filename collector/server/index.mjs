@@ -821,7 +821,7 @@ function getItemBulkPreview(itemId) {
     };
   }
   return {
-    source_count: Number(db.prepare("SELECT COUNT(*) AS c FROM source_records WHERE content_item_id=?").get(id)?.c || 0),
+    source_count: Number(db.prepare("SELECT COUNT(*) AS c FROM source_records WHERE content_item_id=? AND COALESCE(source_type,'') <> 'merge_snapshot'").get(id)?.c || 0),
     media_count: Number(db.prepare("SELECT COUNT(*) AS c FROM content_assets WHERE content_item_id=?").get(id)?.c || 0),
     evidence_count: Number(db.prepare("SELECT COUNT(*) AS c FROM evidence_blocks WHERE content_item_id=?").get(id)?.c || 0),
     approved_context_count: Number(db.prepare("SELECT COUNT(*) AS c FROM approved_context_blocks WHERE content_item_id=?").get(id)?.c || 0),

@@ -85,6 +85,7 @@ test("Raw intake per-row decisions build the same payload shape and honor the fo
 
   assert.equal(matchesFilter({ merge: { rank: 2 } }, "dup"), true);
   assert.equal(matchesFilter({ merge: { rank: 0 } }, "dup"), false);
+  assert.equal(matchesFilter({ merge: { rank: 1 } }, "dup"), false);
   assert.equal(matchesFilter({ selectedDecision: "skip" }, "skip"), true);
   assert.equal(matchesFilter({ selectedDecision: "new" }, "all"), true);
 });
