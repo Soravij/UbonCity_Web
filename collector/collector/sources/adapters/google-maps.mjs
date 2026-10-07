@@ -281,32 +281,27 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
   return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
-async function fetchTextSearchNew(query, options) {
-  const body = {
-    textQuery: query,
-    languageCode: options.language,
-    regionCode: options.region,
-    maxResultCount: options.maxResultsPerQuery,
+const MAX_TEXT_SEARCH_PAGES = 3;
+
+function buildLocationRestrictionRect(lat, lng, radiusMeters) {
+  const dLat = radiusMeters / 111320;
+  const cosLat = Math.max(0.01, Math.cos((lat * Math.PI) / 180));
+  const dLng = radiusMeters / (111320 * cosLat);
+  return {
+    rectangle: {
+      low: { latitude: lat - dLat, longitude: lng - dLng },
+      high: { latitude: lat + dLat, longitude: lng + dLng },
+    },
   };
+}
 
-  if (options.location && Number.isFinite(options.location.lat) && Number.isFinite(options.location.lng) && options.radius > 0) {
-    body.locationBias = {
-      circle: {
-        center: {
-          latitude: options.location.lat,
-          longitude: options.location.lng,
-        },
-        radius: options.radius,
-      },
-    };
-  }
-
+async function postTextSearch(body, options) {
   let response = await fetchWithTimeout("https://places.googleapis.com/v1/places:searchText", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": options.apiKey,
-      "X-Goog-FieldMask": RICH_FIELD_MASK.join(","),
+      "X-Goog-FieldMask": [...RICH_FIELD_MASK, "nextPageToken"].join(","),
     },
     body: JSON.stringify(body),
   }, "Google Places search request");
@@ -319,7 +314,7 @@ async function fetchTextSearchNew(query, options) {
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": options.apiKey,
-        "X-Goog-FieldMask": BASIC_FIELD_MASK.join(","),
+        "X-Goog-FieldMask": [...BASIC_FIELD_MASK, "nextPageToken"].join(","),
       },
       body: JSON.stringify(body),
     }, "Google Places search fallback request");
@@ -330,11 +325,42 @@ async function fetchTextSearchNew(query, options) {
     const message = extractGoogleErrorMessage(payload, response.statusText || "Unknown error");
     throw new Error(`Google Places (New) error: ${message}`);
   }
+  return payload;
+}
 
-  let places = Array.isArray(payload?.places) ? payload.places : [];
+async function fetchTextSearchNew(query, options) {
+  const hasArea =
+    options.location && Number.isFinite(options.location.lat) && Number.isFinite(options.location.lng) && options.radius > 0;
+  const baseBody = {
+    textQuery: query,
+    languageCode: options.language,
+    regionCode: options.region,
+    pageSize: Math.min(20, options.maxResultsPerQuery),
+  };
+  if (hasArea) {
+    baseBody.locationRestriction = buildLocationRestrictionRect(options.location.lat, options.location.lng, options.radius);
+  }
+
+  let places = [];
+  let pageToken = "";
+  for (let page = 0; page < MAX_TEXT_SEARCH_PAGES && places.length < options.maxResultsPerQuery; page += 1) {
+    const body = pageToken ? { ...baseBody, pageToken } : baseBody;
+    let payload;
+    try {
+      payload = await postTextSearch(body, options);
+    } catch (err) {
+      if (page === 0) throw err;
+      console.warn(`google-maps: stop paging "${query}" at page ${page + 1}: ${err?.message || err}`);
+      break;
+    }
+    if (Array.isArray(payload?.places)) places.push(...payload.places);
+    pageToken = String(payload?.nextPageToken || "").trim();
+    if (!pageToken) break;
+  }
+  places = places.slice(0, options.maxResultsPerQuery);
   const enriched = [];
 
-  // locationBias only weights results; enforce the radius here, before spending quota on details.
+  // locationRestriction is a rectangle; drop the corners outside the radius before spending quota on details.
   if (options.location && Number.isFinite(options.location.lat) && Number.isFinite(options.location.lng) && options.radius > 0) {
     places = places.filter((place) => {
       const lat = toNumber(place?.location?.latitude);
@@ -532,7 +558,7 @@ async function collectFromGoogleMapsQueryPayload(payload = {}) {
     throw new Error("google_maps payload requires query or queries[]");
   }
 
-  const maxResultsPerQuery = Math.max(1, Math.min(20, Number(payload?.max_results_per_query || 10)));
+  const maxResultsPerQuery = Math.max(1, Math.min(60, Number(payload?.max_results_per_query || 10)));
   const maxImagesPerPlace = toLimitedInt(payload?.max_images_per_place, 25, 1, 25);
   const maxReviewSnippetsPerPlace = toLimitedInt(payload?.max_review_snippets_per_place, 100, 1, 100);
   const options = {
