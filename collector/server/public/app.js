@@ -6064,40 +6064,6 @@ function setSourceIntakeOpen(open) {
   modal.setAttribute("aria-hidden", open ? "false" : "true");
 }
 
-function buildSourceIntakeExistingItemOptions(selectedId, candidates = []) {
-  const prioritized = [];
-  const seen = new Set();
-  const forcedExistingItemId = getForcedSourceIntakeExistingItemId();
-
-  if (forcedExistingItemId) {
-    seen.add(forcedExistingItemId);
-    prioritized.push({ id: forcedExistingItemId, title: "รายการจากหน้า Clean" });
-  }
-
-  for (const candidate of Array.isArray(candidates) ? candidates : []) {
-    for (const match of Array.isArray(candidate?.merge?.matches) ? candidate.merge.matches : []) {
-      const itemId = Number(match?.item?.id || 0);
-      if (!itemId || seen.has(itemId)) continue;
-      seen.add(itemId);
-      prioritized.push(match.item);
-    }
-  }
-
-  for (const item of Array.isArray(state.items) ? state.items : []) {
-    const itemId = Number(item?.id || 0);
-    if (!itemId || seen.has(itemId)) continue;
-    seen.add(itemId);
-    prioritized.push(item);
-    if (prioritized.length >= 50) break;
-  }
-
-  return prioritized.map((item) => {
-    const itemId = Number(item?.id || 0);
-    const label = `#${itemId} ${String(item?.title || "(ไม่มีชื่อ)")}`;
-    return `<option value="${itemId}" ${itemId === Number(selectedId || 0) ? "selected" : ""}>${escapeHtml(label)}</option>`;
-  }).join("");
-}
-
 function getCrawlMergeExistingItemId() {
   return parsePositiveInt(new URLSearchParams(window.location.search).get("crawl_merge_item_id"), 0);
 }
