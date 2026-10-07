@@ -296,8 +296,7 @@ const state = {
     adapter: "",
     sourceLabel: "",
     query: "",
-    selectedMode: "new",
-    selectedExistingItemId: 0,
+    filter: "all",
     forcedBatchUid: "",
     forcedExistingItemId: 0,
     candidates: [],
@@ -2517,7 +2516,8 @@ function normalizeRawCandidate(row, query) {
     priority,
     merge,
     recommendedDecision,
-    selectedDecision: recommendedDecision === "skip" ? "skip" : "accept",
+    selectedDecision: recommendedDecision,
+    selectedMergeItemId: Number(merge?.suggested?.item?.id || 0) || 0,
   };
 }
 
@@ -6117,24 +6117,119 @@ function getForcedSourceIntakeExistingItemId() {
   return Number(state.sourceIntake.forcedExistingItemId || 0) || 0;
 }
 
-function chooseDefaultSourceIntakeMode(candidates = []) {
-  const mergeRecommended = candidates.filter((candidate) => candidate?.recommendedDecision === "merge").length;
-  return mergeRecommended > 0 ? "merge" : "new";
+function getDefaultSourceIntakeChoice(candidate, forcedExistingItemId = 0) {
+  const recommended = String(candidate?.recommendedDecision || "skip");
+  if (forcedExistingItemId) return recommended === "skip" ? "skip" : "merge";
+  return recommended === "merge" || recommended === "new" ? recommended : "skip";
 }
 
-function chooseDefaultSourceIntakeExistingItemId(candidates = []) {
-  const suggestedIds = Array.isArray(candidates)
-    ? candidates
-        .map((candidate) => Number(candidate?.merge?.suggested?.item?.id || 0) || 0)
-        .filter((id) => id > 0)
-    : [];
+function findSourceIntakeMissingMergeTarget(candidates = [], forcedExistingItemId = 0) {
+  if (forcedExistingItemId) return null;
+  return (Array.isArray(candidates) ? candidates : []).find(
+    (candidate) => candidate?.selectedDecision === "merge" && !(Number(candidate?.selectedMergeItemId || 0) > 0)
+  ) || null;
+}
 
-  if (!suggestedIds.length) {
-    return 0;
+function buildSourceIntakeDecisions(candidates = [], forcedExistingItemId = 0) {
+  return (Array.isArray(candidates) ? candidates : []).map((candidate) => {
+    const rawItemId = Number(candidate?.rawItemId || 0);
+    const choice = String(candidate?.selectedDecision || "skip");
+    if (choice !== "new" && choice !== "merge") {
+      return { raw_item_id: rawItemId, decision: "skip", existing_item_id: null };
+    }
+    if (forcedExistingItemId) {
+      return { raw_item_id: rawItemId, decision: "merge", existing_item_id: forcedExistingItemId };
+    }
+    if (choice === "merge") {
+      return { raw_item_id: rawItemId, decision: "merge", existing_item_id: Number(candidate?.selectedMergeItemId || 0) || null };
+    }
+    return { raw_item_id: rawItemId, decision: "new", existing_item_id: null };
+  });
+}
+
+function shortSourceUrlLabel(url) {
+  const text = String(url || "").trim();
+  if (!text) return "";
+  try {
+    const parsed = new URL(text);
+    const host = parsed.hostname.replace(/^www\./, "");
+    const pathPart = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname.split("/").slice(0, 3).join("/") : "";
+    return `${host}${pathPart}`;
+  } catch {
+    return text.slice(0, 60);
   }
+}
 
-  const uniqueIds = new Set(suggestedIds);
-  return uniqueIds.size === 1 ? suggestedIds[0] : 0;
+function sourceIntakeRowMatchesFilter(candidate, filter) {
+  if (filter === "dup") return Number(candidate?.merge?.rank || 0) > 0;
+  if (filter === "new" || filter === "merge" || filter === "skip") return candidate?.selectedDecision === filter;
+  return true;
+}
+
+function renderSourceIntakeRow(candidate, forcedExistingItemId = 0) {
+  const rawItemId = Number(candidate.rawItemId || 0);
+  const suggested = candidate.merge?.suggested || null;
+  const mergeReasons = suggested?.reasons || [];
+  const choice = candidate.selectedDecision;
+  const choiceDefs = forcedExistingItemId
+    ? [["merge", `รวมเข้า #${forcedExistingItemId}`], ["skip", "ข้าม"]]
+    : [["new", "รับใหม่"], ["merge", "รวม"], ["skip", "ข้าม"]];
+  const matchLabel = suggested
+    ? `#${Number(suggested.item?.id || 0)} ${suggested.item?.title || ""} (${Number(suggested.score || 0) || 0})`
+    : "ไม่พบรายการเดิม";
+  const factRows = [];
+  if (candidate.address) {
+    factRows.push(`<div><strong>ที่อยู่:</strong> ${escapeHtml(compactText(candidate.address, 160))}</div>`);
+  }
+  if (candidate.phone) {
+    factRows.push(`<div><strong>เบอร์โทร:</strong> ${escapeHtml(candidate.phone)}</div>`);
+  }
+  if (candidate.openingHours?.length) {
+    factRows.push(`<div><strong>เวลาเปิด:</strong> ${escapeHtml(formatFactList(candidate.openingHours, 160))}</div>`);
+  }
+  if (candidate.serviceFacts?.length) {
+    factRows.push(`<div><strong>บริการ:</strong> ${escapeHtml(formatFactList(candidate.serviceFacts, 160))}</div>`);
+  }
+  if (candidate.priceSignals?.length) {
+    factRows.push(`<div><strong>ราคา:</strong> ${escapeHtml(formatFactList(candidate.priceSignals, 120))}</div>`);
+  }
+  if (candidate.menuSections?.length) {
+    factRows.push(`<div><strong>หมวดเมนู:</strong> ${escapeHtml(formatFactList(candidate.menuSections, 160))}</div>`);
+  }
+  if (candidate.menuHighlights?.length) {
+    factRows.push(`<div><strong>เมนูเด่น:</strong> ${escapeHtml(formatFactList(candidate.menuHighlights, 160))}</div>`);
+  } else if (candidate.menuUrl) {
+    factRows.push(`<div><strong>เมนู:</strong> <span class="intake-inline-ellipsis" title="${escapeHtml(candidate.menuUrl)}">${escapeHtml(candidate.menuUrl)}</span></div>`);
+  }
+  const sourceLink = candidate.sourceUrl
+    ? `<a href="${escapeHtml(candidate.sourceUrl)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(candidate.sourceUrl)}">${escapeHtml(shortSourceUrlLabel(candidate.sourceUrl))}</a>`
+    : "-";
+  const recommendText = candidate.recommendedDecision === "merge" ? "รวมกับรายการเดิม" : candidate.recommendedDecision === "new" ? "รับเป็นรายการใหม่" : "ตรวจเพิ่มหรือข้าม";
+  return `
+    <div class="intake-row" data-raw-item-id="${rawItemId}">
+      <div class="intake-row-main">
+        <strong class="intake-ellipsis" title="${escapeHtml(candidate.title)}">${escapeHtml(candidate.title)}</strong>
+        <span class="muted intake-ellipsis">${escapeHtml([candidate.categoryLabel, compactText(candidate.address || "", 80)].filter(Boolean).join(" · "))}</span>
+        ${candidate.phone ? `<span class="muted">${escapeHtml(candidate.phone)}</span>` : ""}
+        <span class="intake-badge ${intakePriorityClass(candidate.priority.label)}">${escapeHtml(candidate.priority.label)}</span>
+        <span class="intake-badge intake-ellipsis ${intakeMergeClass(candidate.merge.label)}" title="${escapeHtml(mergeReasons.join(" | "))}">${escapeHtml(matchLabel)}</span>
+      </div>
+      <div class="raw-stage-filter-row">
+        ${choiceDefs.map(([key, label]) => `<button type="button" class="raw-stage-filter ${choice === key ? "is-active" : ""}" data-intake-choice="${key}" data-raw-item-id="${rawItemId}">${escapeHtml(label)}</button>`).join("")}
+        ${!forcedExistingItemId && choice === "merge" ? `<select data-intake-merge-target="${rawItemId}"><option value="">เลือกรายการเดิม</option>${buildSourceIntakeExistingItemOptions(candidate.selectedMergeItemId, [candidate])}</select>` : ""}
+      </div>
+      <details class="raw-json-toggle">
+        <summary>รายละเอียด</summary>
+        <div class="intake-summary-grid">
+          <div><strong>แหล่งข้อมูล:</strong> ${sourceLink}</div>
+          <div><strong>คำอธิบาย:</strong> ${escapeHtml(candidate.snippet || "-")}</div>
+          <div><strong>คำแนะนำระบบ:</strong> ${escapeHtml(recommendText)}</div>
+          <div><strong>เหตุผลที่ระบบเทียบ:</strong> ${escapeHtml(mergeReasons.length ? mergeReasons.join(" | ") : "-")}</div>
+          ${factRows.join("")}
+        </div>
+      </details>
+    </div>
+  `;
 }
 
 function renderSourceIntakeModal() {
@@ -6145,119 +6240,44 @@ function renderSourceIntakeModal() {
   if (!summaryNode || !statusNode || !listNode || !destinationNode) return;
 
   const candidates = Array.isArray(state.sourceIntake.candidates) ? state.sourceIntake.candidates : [];
+  const forcedExistingItemId = getForcedSourceIntakeExistingItemId();
+  const filter = String(state.sourceIntake.filter || "all");
   const queryText = state.sourceIntake.query ? ` จากคำค้น "${state.sourceIntake.query}"` : "";
   summaryNode.textContent = candidates.length
-    ? `พบ ${candidates.length} รายการ${queryText} สำหรับ place เดียว เลือกปลายทางทั้งชุดครั้งเดียว แล้วเลือกรายการที่รับหรือข้าม`
+    ? forcedExistingItemId
+      ? `พบ ${candidates.length} รายการ${queryText} แถวที่รับจะรวมเข้า #${forcedExistingItemId} (จากหน้า Clean)`
+      : `พบ ${candidates.length} รายการ${queryText} เลือกต่อแถว: รับใหม่ / รวมกับรายการเดิม / ข้าม`
     : "ยังไม่มีรายการให้คัดรับ";
   statusNode.textContent = "";
 
-  const forcedExistingItemId = getForcedSourceIntakeExistingItemId();
-  const existingOptions = buildSourceIntakeExistingItemOptions(state.sourceIntake.selectedExistingItemId, candidates);
-  const mergeMode = forcedExistingItemId || state.sourceIntake.selectedMode === "merge";
+  const counts = {
+    all: candidates.length,
+    dup: candidates.filter((c) => sourceIntakeRowMatchesFilter(c, "dup")).length,
+    new: candidates.filter((c) => c.selectedDecision === "new").length,
+    merge: candidates.filter((c) => c.selectedDecision === "merge").length,
+    skip: candidates.filter((c) => c.selectedDecision === "skip").length,
+  };
+  const filterDefs = [
+    ["all", "ทั้งหมด"],
+    ["dup", "น่าจะซ้ำ"],
+    ["new", "รับใหม่"],
+    ["merge", "รวม"],
+    ["skip", "ข้าม"],
+  ].filter(([key]) => !(forcedExistingItemId && key === "new"));
   destinationNode.innerHTML = `
-    <div class="intake-decision-grid">
-      <div>
-        <label>ปลายทางข้อมูลทั้งชุด</label>
-        <select id="source-intake-mode" ${forcedExistingItemId ? "disabled" : ""}>
-          <option value="new" ${!mergeMode ? "selected" : ""}>รับเป็นรายการใหม่ (place เดียว)</option>
-          <option value="merge" ${mergeMode ? "selected" : ""}>รวมเข้ารายการเดิม (id เดียวทั้งชุด)</option>
-        </select>
-      </div>
-      <div id="source-intake-existing-wrap" class="${mergeMode ? "" : "hidden"}">
-        <label>เลือกรายการเดิม (ใช้ทั้งชุด)</label>
-        <select id="source-intake-existing-item" ${forcedExistingItemId ? "disabled" : ""}>
-          <option value="">เลือกรายการเดิม</option>
-          ${existingOptions}
-        </select>
-      </div>
+    <div class="raw-stage-filter-row">
+      ${filterDefs.map(([key, label]) => `<button type="button" class="raw-stage-filter ${filter === key ? "is-active" : ""}" data-intake-filter="${key}">${escapeHtml(label)} <span>${counts[key]}</span></button>`).join("")}
+    </div>
+    <div class="toolbar compact-toolbar">
+      ${forcedExistingItemId ? "" : `<button type="button" data-intake-bulk="new">รับใหม่ทุกแถวที่แสดง</button>`}
+      <button type="button" data-intake-bulk="skip">ข้ามทุกแถวที่แสดง</button>
     </div>
   `;
 
-  listNode.innerHTML = candidates.map((candidate) => {
-    const mergeSuggested = candidate.merge?.suggested?.item;
-    const mergeReasons = candidate.merge?.suggested?.reasons || [];
-    const factRows = [];
-    if (candidate.address) {
-      factRows.push(`<div><strong>ที่อยู่:</strong> ${escapeHtml(compactText(candidate.address, 160))}</div>`);
-    }
-    if (candidate.phone) {
-      factRows.push(`<div><strong>เบอร์โทร:</strong> ${escapeHtml(candidate.phone)}</div>`);
-    }
-    if (candidate.openingHours?.length) {
-      factRows.push(`<div><strong>เวลาเปิด:</strong> ${escapeHtml(formatFactList(candidate.openingHours, 160))}</div>`);
-    }
-    if (candidate.serviceFacts?.length) {
-      factRows.push(`<div><strong>บริการ:</strong> ${escapeHtml(formatFactList(candidate.serviceFacts, 160))}</div>`);
-    }
-    if (candidate.priceSignals?.length) {
-      factRows.push(`<div><strong>ราคา:</strong> ${escapeHtml(formatFactList(candidate.priceSignals, 120))}</div>`);
-    }
-    if (candidate.menuSections?.length) {
-      factRows.push(`<div><strong>หมวดเมนู:</strong> ${escapeHtml(formatFactList(candidate.menuSections, 160))}</div>`);
-    }
-    if (candidate.menuHighlights?.length) {
-      factRows.push(`<div><strong>เมนูเด่น:</strong> ${escapeHtml(formatFactList(candidate.menuHighlights, 160))}</div>`);
-    } else if (candidate.menuUrl) {
-      factRows.push(`<div><strong>เมนู:</strong> <span class="intake-inline-ellipsis" title="${escapeHtml(candidate.menuUrl)}">${escapeHtml(candidate.menuUrl)}</span></div>`);
-    }
-    const decisionRows = [];
-    decisionRows.push(`<label>คัดรับรายการนี้</label>
-      <select data-intake-decision="${candidate.rawItemId}">
-        <option value="accept" ${candidate.selectedDecision === "accept" ? "selected" : ""}>รับรายการนี้</option>
-        <option value="skip" ${candidate.selectedDecision === "skip" ? "selected" : ""}>ข้ามรายการนี้</option>
-      </select>`);
-
-    return `
-      <article class="intake-card" data-raw-item-id="${candidate.rawItemId}">
-        <div class="intake-card-header">
-          <div>
-            <h4>${escapeHtml(candidate.title)}</h4>
-            <p class="muted">${escapeHtml(candidate.categoryLabel)} | ${escapeHtml(buildRawCandidateSummary(candidate))}</p>
-          </div>
-          <div class="intake-badges">
-            <span class="intake-badge ${intakePriorityClass(candidate.priority.label)}">${escapeHtml(candidate.priority.label)}</span>
-            <span class="intake-badge ${intakeMergeClass(candidate.merge.label)}">${escapeHtml(candidate.merge.label)}</span>
-          </div>
-        </div>
-        <div class="intake-chip-row">
-          ${candidate.priority.reasons.map((reason) => `<span class="intake-chip">${escapeHtml(reason)}</span>`).join("")}
-          ${mergeReasons.map((reason) => `<span class="intake-chip intake-chip-merge">${escapeHtml(reason)}</span>`).join("")}
-        </div>
-        <div class="intake-summary-grid">
-          <div><strong>แหล่งข้อมูล:</strong> <span class="intake-inline-ellipsis" title="${escapeHtml(candidate.sourceUrl || "-")}">${escapeHtml(candidate.sourceUrl || "-")}</span></div>
-          <div><strong>คำอธิบาย:</strong> ${escapeHtml(candidate.snippet || "-")}</div>
-          <div><strong>คำแนะนำระบบ:</strong> ${escapeHtml(candidate.recommendedDecision === "merge" ? "รวมกับรายการเดิม" : candidate.recommendedDecision === "new" ? "รับเป็นรายการใหม่" : "ตรวจเพิ่มหรือข้าม")}</div>
-          <div><strong>รายการเดิมที่ใกล้สุด:</strong> ${escapeHtml(mergeSuggested ? `#${Number(mergeSuggested.id || 0)} ${mergeSuggested.title || ""}` : "-")}</div>
-          <div><strong>เหตุผลที่ระบบเทียบ:</strong> ${escapeHtml(mergeReasons.length ? mergeReasons.join(" | ") : "-")}</div>
-          <div><strong>คะแนนเทียบ:</strong> ${escapeHtml(candidate.merge?.suggested ? String(Number(candidate.merge.suggested.score || 0) || 0) : "-")}</div>
-          ${factRows.join("")}
-        </div>
-        <div class="intake-decision-grid">
-          ${decisionRows.join("")}
-        </div>
-      </article>
-    `;
-  }).join("");
-
-  listNode.querySelectorAll("select[data-intake-decision]").forEach((select) => {
-    select.addEventListener("change", (event) => {
-      const rawItemId = Number(event.target.getAttribute("data-intake-decision") || 0);
-      const candidate = state.sourceIntake.candidates.find((row) => row.rawItemId === rawItemId);
-      if (!candidate) return;
-      candidate.selectedDecision = String(event.target.value || "skip").trim() === "accept" ? "accept" : "skip";
-    });
-  });
-
-  qs("source-intake-mode")?.addEventListener("change", (event) => {
-    if (getForcedSourceIntakeExistingItemId()) return;
-    state.sourceIntake.selectedMode = String(event.target?.value || "new").trim().toLowerCase() === "merge" ? "merge" : "new";
-    renderSourceIntakeModal();
-  });
-
-  qs("source-intake-existing-item")?.addEventListener("change", (event) => {
-    if (getForcedSourceIntakeExistingItemId()) return;
-    state.sourceIntake.selectedExistingItemId = Number(event.target?.value || 0) || 0;
-  });
+  const visible = candidates.filter((c) => sourceIntakeRowMatchesFilter(c, filter));
+  listNode.innerHTML = visible.length
+    ? visible.map((candidate) => renderSourceIntakeRow(candidate, forcedExistingItemId)).join("")
+    : `<p class="muted">ไม่มีรายการในตัวกรองนี้</p>`;
 }
 
 function openSourceIntakeModal({ batchUid, adapter, sourceLabel, query, rawItems, forcedMergeContext = null }) {
@@ -6274,6 +6294,11 @@ function openSourceIntakeModal({ batchUid, adapter, sourceLabel, query, rawItems
       if (b.merge.rank !== a.merge.rank) return b.merge.rank - a.merge.rank;
       return ((b.userRatingCount ?? b.reviewCount) || 0) - ((a.userRatingCount ?? a.reviewCount) || 0);
     });
+  if (forcedExistingItemId) {
+    for (const candidate of candidates) {
+      candidate.selectedDecision = getDefaultSourceIntakeChoice(candidate, forcedExistingItemId);
+    }
+  }
 
   state.sourceIntake = {
     open: true,
@@ -6281,8 +6306,7 @@ function openSourceIntakeModal({ batchUid, adapter, sourceLabel, query, rawItems
     adapter,
     sourceLabel,
     query: scoringQuery,
-    selectedMode: forcedExistingItemId ? "merge" : chooseDefaultSourceIntakeMode(candidates),
-    selectedExistingItemId: forcedExistingItemId || chooseDefaultSourceIntakeExistingItemId(candidates),
+    filter: "all",
     forcedBatchUid: forcedExistingItemId ? forcedBatchUid : "",
     forcedExistingItemId,
     candidates,
@@ -6298,8 +6322,7 @@ function buildClosedSourceIntakeState() {
     adapter: "",
     sourceLabel: "",
     query: "",
-    selectedMode: "new",
-    selectedExistingItemId: 0,
+    filter: "all",
     forcedBatchUid: "",
     forcedExistingItemId: 0,
     candidates: [],
@@ -11128,16 +11151,45 @@ function wireSourceIntakeModal() {
 
   qs("btn-source-intake-accept-recommended")?.addEventListener("click", () => {
     const forcedExistingItemId = getForcedSourceIntakeExistingItemId();
-    const hasMergeRecommendation = state.sourceIntake.candidates.some((candidate) => candidate.recommendedDecision === "merge");
-    state.sourceIntake.selectedMode = forcedExistingItemId || hasMergeRecommendation ? "merge" : "new";
-    if (forcedExistingItemId) {
-      state.sourceIntake.selectedExistingItemId = forcedExistingItemId;
-    }
-    if (state.sourceIntake.selectedMode === "merge" && !Number(state.sourceIntake.selectedExistingItemId || 0)) {
-      state.sourceIntake.selectedExistingItemId = chooseDefaultSourceIntakeExistingItemId(state.sourceIntake.candidates);
-    }
     for (const candidate of state.sourceIntake.candidates) {
-      candidate.selectedDecision = candidate.recommendedDecision === "skip" ? "skip" : "accept";
+      candidate.selectedDecision = getDefaultSourceIntakeChoice(candidate, forcedExistingItemId);
+      candidate.selectedMergeItemId = Number(candidate?.merge?.suggested?.item?.id || 0) || 0;
+    }
+    renderSourceIntakeModal();
+  });
+
+  qs("source-intake-list")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-intake-choice]");
+    if (!button) return;
+    const rawItemId = Number(button.getAttribute("data-raw-item-id") || 0);
+    const candidate = state.sourceIntake.candidates.find((row) => row.rawItemId === rawItemId);
+    if (!candidate) return;
+    candidate.selectedDecision = String(button.getAttribute("data-intake-choice") || "skip");
+    renderSourceIntakeModal();
+  });
+
+  qs("source-intake-list")?.addEventListener("change", (event) => {
+    const select = event.target.closest("[data-intake-merge-target]");
+    if (!select) return;
+    const rawItemId = Number(select.getAttribute("data-intake-merge-target") || 0);
+    const candidate = state.sourceIntake.candidates.find((row) => row.rawItemId === rawItemId);
+    if (!candidate) return;
+    candidate.selectedMergeItemId = Number(select.value || 0) || 0;
+  });
+
+  qs("source-intake-destination")?.addEventListener("click", (event) => {
+    const filterButton = event.target.closest("[data-intake-filter]");
+    if (filterButton) {
+      state.sourceIntake.filter = String(filterButton.getAttribute("data-intake-filter") || "all");
+      renderSourceIntakeModal();
+      return;
+    }
+    const bulkButton = event.target.closest("[data-intake-bulk]");
+    if (!bulkButton) return;
+    const choice = String(bulkButton.getAttribute("data-intake-bulk") || "skip");
+    const filter = String(state.sourceIntake.filter || "all");
+    for (const candidate of state.sourceIntake.candidates) {
+      if (sourceIntakeRowMatchesFilter(candidate, filter)) candidate.selectedDecision = choice;
     }
     renderSourceIntakeModal();
   });
@@ -11145,22 +11197,16 @@ function wireSourceIntakeModal() {
   qs("btn-source-intake-confirm")?.addEventListener("click", async () => {
     try {
       const forcedExistingItemId = getForcedSourceIntakeExistingItemId();
-      const mergeMode = Boolean(forcedExistingItemId) || state.sourceIntake.selectedMode === "merge";
-      const existingItemId = forcedExistingItemId || Number(state.sourceIntake.selectedExistingItemId || 0) || 0;
-      const decisions = state.sourceIntake.candidates.map((candidate) => ({
-        raw_item_id: candidate.rawItemId,
-        decision: candidate.selectedDecision === "accept" ? (mergeMode ? "merge" : "new") : "skip",
-        existing_item_id: candidate.selectedDecision === "accept" && mergeMode ? existingItemId : null,
-      }));
+      const missingTarget = findSourceIntakeMissingMergeTarget(state.sourceIntake.candidates, forcedExistingItemId);
+      if (missingTarget) {
+        setStatus("source-intake-status", `เลือกรายการเดิมที่จะรวมให้ "${missingTarget.title}" ก่อนยืนยัน`, true);
+        return;
+      }
+      const decisions = buildSourceIntakeDecisions(state.sourceIntake.candidates, forcedExistingItemId);
 
       const actionable = decisions.filter((row) => row.decision !== "skip");
       if (!actionable.length) {
         setStatus("source-intake-status", "ยังไม่มีรายการที่เลือกให้รับเข้า raw", true);
-        return;
-      }
-
-      if (mergeMode && !existingItemId) {
-        setStatus("source-intake-status", "เลือกปลายทางรายการเดิมก่อนยืนยัน merge ทั้งชุด", true);
         return;
       }
 

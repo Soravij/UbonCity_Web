@@ -37,12 +37,51 @@ test("Raw intake context locks merge mode and injects the target independent of 
   assert.match(appSource, /function getCrawlMergeExistingItemId\(\)/);
   assert.match(appSource, /forcedExistingItemId: 0/);
   assert.match(appSource, /prioritized\.push\(\{ id: forcedExistingItemId, title: "รายการจากหน้า Clean" \}\)/);
-  assert.match(appSource, /selectedMode: forcedExistingItemId \? "merge"/);
-  assert.match(appSource, /selectedExistingItemId: forcedExistingItemId \|\| chooseDefaultSourceIntakeExistingItemId/);
-  assert.match(appSource, /<select id="source-intake-mode" \$\{forcedExistingItemId \? "disabled" : ""\}>/);
-  assert.match(appSource, /<select id="source-intake-existing-item" \$\{forcedExistingItemId \? "disabled" : ""\}>/);
-  assert.match(appSource, /state\.sourceIntake\.selectedMode = forcedExistingItemId \|\| hasMergeRecommendation \? "merge" : "new";/);
-  assert.match(appSource, /const existingItemId = forcedExistingItemId \|\| Number\(state\.sourceIntake\.selectedExistingItemId \|\| 0\) \|\| 0;/);
+});
+
+test("Raw intake per-row decisions build the same payload shape and honor the forced merge target", () => {
+  const load = (name) => Function(`return (${extractFunctionSource(appSource, name)});`)();
+  const getDefaultChoice = load("getDefaultSourceIntakeChoice");
+  const findMissingTarget = load("findSourceIntakeMissingMergeTarget");
+  const buildDecisions = load("buildSourceIntakeDecisions");
+  const shortLabel = load("shortSourceUrlLabel");
+  const matchesFilter = load("sourceIntakeRowMatchesFilter");
+
+  const rows = [
+    { rawItemId: 1, selectedDecision: "new" },
+    { rawItemId: 2, selectedDecision: "merge", selectedMergeItemId: 7 },
+    { rawItemId: 3, selectedDecision: "skip" },
+  ];
+  assert.deepEqual(buildDecisions(rows, 0), [
+    { raw_item_id: 1, decision: "new", existing_item_id: null },
+    { raw_item_id: 2, decision: "merge", existing_item_id: 7 },
+    { raw_item_id: 3, decision: "skip", existing_item_id: null },
+  ]);
+  assert.deepEqual(buildDecisions(rows, 42), [
+    { raw_item_id: 1, decision: "merge", existing_item_id: 42 },
+    { raw_item_id: 2, decision: "merge", existing_item_id: 42 },
+    { raw_item_id: 3, decision: "skip", existing_item_id: null },
+  ]);
+
+  assert.equal(getDefaultChoice({ recommendedDecision: "new" }, 42), "merge");
+  assert.equal(getDefaultChoice({ recommendedDecision: "skip" }, 42), "skip");
+  assert.equal(getDefaultChoice({ recommendedDecision: "merge" }, 0), "merge");
+  assert.equal(getDefaultChoice({ recommendedDecision: "new" }, 0), "new");
+  assert.equal(getDefaultChoice({}, 0), "skip");
+
+  const unresolved = [{ rawItemId: 5, selectedDecision: "merge", selectedMergeItemId: 0, title: "A" }];
+  assert.equal(findMissingTarget(unresolved, 0).title, "A");
+  assert.equal(findMissingTarget(unresolved, 42), null);
+  assert.equal(findMissingTarget([{ ...unresolved[0], selectedMergeItemId: 9 }], 0), null);
+
+  assert.equal(shortLabel("https://www.google.com/maps/search/?api=1&query=%E0%B8%81"), "google.com/maps/search");
+  assert.equal(shortLabel(""), "");
+  assert.equal(shortLabel("not a url"), "not a url");
+
+  assert.equal(matchesFilter({ merge: { rank: 2 } }, "dup"), true);
+  assert.equal(matchesFilter({ merge: { rank: 0 } }, "dup"), false);
+  assert.equal(matchesFilter({ selectedDecision: "skip" }, "skip"), true);
+  assert.equal(matchesFilter({ selectedDecision: "new" }, "all"), true);
 });
 
 test("Crawl merge context is consumed by one batch and expires for the next crawl", () => {
