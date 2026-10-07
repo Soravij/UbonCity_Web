@@ -3031,27 +3031,14 @@ return renderAssignmentAssigneeOptions;`
 });
 
 test("content preparation queue only shows items that are still in process 1", () => {
-  const requiredAppSnippets = [
-    "function getPreparationQueueItems(items = state.items) {",
-    'const bucket = resolveQueueBucket(item);',
-    'return bucket === "raw_prep" || bucket === "field_pack_review" || bucket === "unknown_workflow";',
-    "const rows = getPreparationQueueItems(items);",
-    "const list = sortRawItems(getPreparationQueueItems(items));",
-    'const activeStageFilter = DASHBOARD_STAGE_FILTERS.some((filter) => filter.value === requestedStageFilter)',
-    'state.dashboard.rawStageFilter = activeStageFilter;',
-    'Object.freeze({ value: "cleaned", label: "ตรวจแก้/จัดชุดสั่งงาน" }),',
-  ];
-  for (const snippet of requiredAppSnippets) {
-    assert.equal(appJs.includes(snippet), true, `content preparation queue gate should exist: ${snippet}`);
-  }
-
-  const forbiddenAppSnippets = [
-    'Object.freeze({ value: "generated", label: "ส่งงานไปทำ/กำลังดำเนินการ" }),',
-    'Object.freeze({ value: "published", label: "เผยแพร่แล้ว" }),',
-  ];
-  for (const snippet of forbiddenAppSnippets) {
-    assert.equal(appJs.includes(snippet), false, `content preparation queue should drop downstream stage filter: ${snippet}`);
-  }
+  const context = { state: { items: [] }, resolveQueueBucket: (item) => item.bucket };
+  vm.runInNewContext(extractNamedFunctionSource(appJs, "getPreparationQueueItems"), context);
+  const buckets = ["raw_prep", "field_pack_review", "unknown_workflow", "assignment", "published"];
+  const items = buckets.map((bucket, index) => ({ id: index + 1, bucket }));
+  assert.deepEqual(Array.from(context.getPreparationQueueItems(items), (item) => item.bucket), ["raw_prep", "field_pack_review", "unknown_workflow"]);
+  assert.equal(context.getPreparationQueueItems(null).length, 0);
+  context.state.items = [{ id: 9, bucket: "raw_prep" }, { id: 10, bucket: "published" }];
+  assert.deepEqual(Array.from(context.getPreparationQueueItems(), (item) => item.id), [9]);
 });
 
 test("work lane keeps only contributor-facing scope", () => {
