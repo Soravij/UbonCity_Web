@@ -47,3 +47,21 @@ test("empty or null normalized returns null", () => {
   assert.equal(findSourceRecordForNormalized(records, {}), null);
   assert.equal(findSourceRecordForNormalized(records, null), null);
 });
+
+test("place id wins over exact source_url match on another record", () => {
+  const records = [
+    { id: 1, source_entity_id: "PX", source_url: "https://maps.google.com/?cid=1&g_mp=x" },
+    { id: 2, source_entity_id: "PA", source_url: "https://maps.google.com/?cid=2&g_mp=x" },
+  ];
+  const found = findSourceRecordForNormalized(records, {
+    google_place_id: "PA",
+    source_url: "https://maps.google.com/?cid=1&g_mp=x",
+  });
+  assert.equal(found?.id, 2);
+});
+
+test("loose match via source_entity_id returns the single record", () => {
+  const records = [{ id: 7, source_entity_id: "https://www.wongnai.com/place/9", source_url: "" }];
+  const found = findSourceRecordForNormalized(records, { source_url: "https://wongnai.com/place/9?ref=x" });
+  assert.equal(found?.id, 7);
+});

@@ -47,7 +47,7 @@ import { resolveExtractedArticle } from "../collector/sources/extracted-article.
 import { buildFilteredMediaList, isJunkMediaUrl } from "../collector/sources/media-filter.mjs";
 import { buildNormalizedFromExtractedPayload, hasUsableNormalizedKeys, pickNormalizedFromSourceRecords } from "../collector/sources/extracted-payload-normalizer.mjs";
 import { makeEvidenceSignature } from "./evidence-signature.mjs";
-import { buildEvidenceCandidatesForNormalized, normalizeUrlForComparison } from "./evidence-candidates.mjs";
+import { buildEvidenceCandidatesForNormalized } from "./evidence-candidates.mjs";
 import { findSourceRecordForNormalized } from "./evidence-source-match.mjs";
 import {
   getCurrentTranslationSourceFingerprint,
