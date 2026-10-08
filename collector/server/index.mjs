@@ -98,6 +98,7 @@ import {
 import { buildReviewIngestContentPayload } from "./review-ingest-mapping.mjs";
 import { createGooglePhotoStore } from "./google-photo-store.mjs";
 import { findLiveItemByGooglePlaceId } from "./import-dedupe.mjs";
+import { pruneGooglePhotoEvidence } from "./evidence-media-prune.mjs";
 
 const ARTICLE_AGENT_KEY = "article_agent";
 const DEFAULT_ARTICLE_AGENT_PROFILE = [
@@ -7060,6 +7061,8 @@ function seedEvidenceBlocksForItem(item, options = {}) {
     seen.add(signature);
     added += 1;
   }
+
+  if (added > 0) pruneGooglePhotoEvidence(db, contentItemId);
 
   return { added, skipped, total_candidates: allCandidates.length };
 }
