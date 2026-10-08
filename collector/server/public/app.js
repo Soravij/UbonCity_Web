@@ -6422,7 +6422,7 @@ function normalizeCollectPayload(adapter) {
     language: "th",
     region: "th",
     max_results_per_query: Number(readSourceLocationPanelState().maxResultsPerQuery) || 20,
-    category: "attractions",
+    category: String(document.getElementById("source-collect-category")?.value || "").trim() || "attractions",
   };
 
   if (adapter !== "google_maps") {
