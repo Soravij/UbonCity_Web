@@ -34,6 +34,9 @@ export function normalizeCategoryHint(hint) {
 export function applyGoogleCategory(item, hint) {
   const n = item?.normalized_json;
   if (!n || typeof n !== "object") return;
-  const p = item.payload_json || {};
-  n.category = mapGoogleTypesToCategory(p.primaryType, p.types ?? n.tags) || normalizeCategoryHint(hint) || "attractions";
+  const p = item.payload_json && typeof item.payload_json === "object" ? item.payload_json : {};
+  const inner = p.payload_json && typeof p.payload_json === "object" ? p.payload_json : {};
+  const primaryType = inner.primaryType ?? p.primaryType;
+  const types = inner.types ?? p.types ?? n.tags;
+  n.category = mapGoogleTypesToCategory(primaryType, types) || normalizeCategoryHint(hint) || "attractions";
 }

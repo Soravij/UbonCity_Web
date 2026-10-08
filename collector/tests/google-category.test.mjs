@@ -3,8 +3,11 @@ import test from "node:test";
 
 import { applyGoogleCategory } from "../collector/sources/google-category.mjs";
 
-function run(payload_json, hint) {
-  const item = { normalized_json: {}, payload_json };
+function run(inner, hint, tags = []) {
+  const item = {
+    payload_json: inner === null ? {} : { payload_json: inner },
+    normalized_json: { category: "attractions", tags },
+  };
   applyGoogleCategory(item, hint);
   return item.normalized_json.category;
 }
@@ -32,4 +35,16 @@ test("google types win over hint", () => {
 test("item without normalized_json does not throw", () => {
   assert.doesNotThrow(() => applyGoogleCategory({ payload_json: { primaryType: "cafe" } }, "cafes"));
   assert.doesNotThrow(() => applyGoogleCategory(null, "cafes"));
+});
+
+test("primaryType wins over types", () => {
+  assert.equal(run({ primaryType: "cafe", types: ["tourist_attraction", "cafe"] }), "cafes");
+});
+
+test("falls back to normalized_json.tags when no nested payload", () => {
+  assert.equal(run(null, undefined, ["restaurant", "food"]), "restaurants");
+});
+
+test("hint is trimmed and lowercased", () => {
+  assert.equal(run({ types: ["foo"] }, "  Restaurants "), "restaurants");
 });
