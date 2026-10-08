@@ -11233,40 +11233,43 @@ function wireSourceIntakeModal() {
   });
 
   qs("btn-source-intake-confirm")?.addEventListener("click", async () => {
-    try {
-      const forcedExistingItemId = getForcedSourceIntakeExistingItemId();
-      const missingTarget = findSourceIntakeMissingMergeTarget(state.sourceIntake.candidates, forcedExistingItemId);
-      if (missingTarget) {
-        setStatus("source-intake-status", `เลือกรายการเดิมที่จะรวมให้ "${missingTarget.title}" ก่อนยืนยัน`, true);
-        return;
+    const confirmBtn = qs("btn-source-intake-confirm");
+    await withButtonLoading(confirmBtn, "กำลังรับเข้า...", async () => {
+      try {
+        const forcedExistingItemId = getForcedSourceIntakeExistingItemId();
+        const missingTarget = findSourceIntakeMissingMergeTarget(state.sourceIntake.candidates, forcedExistingItemId);
+        if (missingTarget) {
+          setStatus("source-intake-status", `เลือกรายการเดิมที่จะรวมให้ "${missingTarget.title}" ก่อนยืนยัน`, true);
+          return;
+        }
+        const decisions = buildSourceIntakeDecisions(state.sourceIntake.candidates, forcedExistingItemId);
+
+        const actionable = decisions.filter((row) => row.decision !== "skip");
+        if (!actionable.length) {
+          setStatus("source-intake-status", "ยังไม่มีรายการที่เลือกให้รับเข้า raw", true);
+          return;
+        }
+
+        setStatus("source-intake-status", "กำลังรับรายการเข้าระบบ... อาจใช้เวลาหลายวินาที อย่ากดซ้ำ");
+        const result = await api("/api/source-raw-items/import", {
+          method: "POST",
+          body: JSON.stringify({
+            batch_uid: state.sourceIntake.batchUid,
+            adapter: state.sourceIntake.adapter,
+            decisions,
+          }),
+        });
+
+        closeSourceIntakeModal();
+        setStatus(
+          "source-status",
+          `รับเข้าระบบแล้ว ${result.imported_count || 0} รายการ (สร้างใหม่ ${result.new_count || 0}, merge ${result.merged_count || 0}, ข้าม ${result.skipped_count || 0})`
+        );
+        await refreshAll();
+      } catch (err) {
+        setStatus("source-intake-status", err.message, true);
       }
-      const decisions = buildSourceIntakeDecisions(state.sourceIntake.candidates, forcedExistingItemId);
-
-      const actionable = decisions.filter((row) => row.decision !== "skip");
-      if (!actionable.length) {
-        setStatus("source-intake-status", "ยังไม่มีรายการที่เลือกให้รับเข้า raw", true);
-        return;
-      }
-
-      setStatus("source-intake-status", "กำลังรับรายการเข้าระบบ...");
-      const result = await api("/api/source-raw-items/import", {
-        method: "POST",
-        body: JSON.stringify({
-          batch_uid: state.sourceIntake.batchUid,
-          adapter: state.sourceIntake.adapter,
-          decisions,
-        }),
-      });
-
-      closeSourceIntakeModal();
-      setStatus(
-        "source-status",
-        `รับเข้าระบบแล้ว ${result.imported_count || 0} รายการ (สร้างใหม่ ${result.new_count || 0}, merge ${result.merged_count || 0}, ข้าม ${result.skipped_count || 0})`
-      );
-      await refreshAll();
-    } catch (err) {
-      setStatus("source-intake-status", err.message, true);
-    }
+    });
   });
 }
 
