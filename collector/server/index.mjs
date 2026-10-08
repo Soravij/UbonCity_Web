@@ -47,7 +47,8 @@ import { resolveExtractedArticle } from "../collector/sources/extracted-article.
 import { buildFilteredMediaList, isJunkMediaUrl } from "../collector/sources/media-filter.mjs";
 import { buildNormalizedFromExtractedPayload, hasUsableNormalizedKeys, pickNormalizedFromSourceRecords } from "../collector/sources/extracted-payload-normalizer.mjs";
 import { makeEvidenceSignature } from "./evidence-signature.mjs";
-import { buildEvidenceCandidatesForNormalized, normalizeUrlForComparison } from "./evidence-candidates.mjs";
+import { buildEvidenceCandidatesForNormalized } from "./evidence-candidates.mjs";
+import { findSourceRecordForNormalized } from "./evidence-source-match.mjs";
 import {
   getCurrentTranslationSourceFingerprint,
   isTranslationRowStale as isWorkflowTranslationRowStale,
@@ -6988,10 +6989,7 @@ function seedEvidenceBlocksForItem(item, options = {}) {
   let allCandidates = [];
 
   if (options.normalized) {
-    const normalizedUrl = normalizeUrlForComparison(options.normalized.source_url);
-    const sourceRecord = normalizedUrl
-      ? sourceRecords.find((r) => normalizeUrlForComparison(r?.source_url) === normalizedUrl || normalizeUrlForComparison(r?.source_entity_id) === normalizedUrl) || null
-      : null;
+    const sourceRecord = findSourceRecordForNormalized(sourceRecords, options.normalized);
     const base = {
       source_type: normalizeEvidenceSourceType(options.sourceType || sourceRecord?.source_type || item?.source_type || "import"),
       source_record_type: sourceRecord ? "source_records" : null,
@@ -7029,10 +7027,7 @@ function seedEvidenceBlocksForItem(item, options = {}) {
     if (allCandidates.length === 0) {
       const fallback = buildFallbackNormalizedFromItem(item);
       if (fallback) {
-        const fallbackUrl = normalizeUrlForComparison(fallback.source_url || item?.source_url);
-        const sourceRecord = fallbackUrl
-          ? sourceRecords.find((r) => normalizeUrlForComparison(r?.source_url) === fallbackUrl || normalizeUrlForComparison(r?.source_entity_id) === fallbackUrl) || null
-          : null;
+        const sourceRecord = findSourceRecordForNormalized(sourceRecords, { google_place_id: fallback.google_place_id || item?.google_place_id, source_url: fallback.source_url || item?.source_url });
         const base = {
           source_type: normalizeEvidenceSourceType(options.sourceType || sourceRecord?.source_type || item?.source_type || "import"),
           source_record_type: sourceRecord ? "source_records" : null,
