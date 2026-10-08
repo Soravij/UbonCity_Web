@@ -97,6 +97,7 @@ import {
 } from "./endpoint-schema-mapping.mjs";
 import { buildReviewIngestContentPayload } from "./review-ingest-mapping.mjs";
 import { createGooglePhotoStore } from "./google-photo-store.mjs";
+import { findLiveItemByGooglePlaceId } from "./import-dedupe.mjs";
 
 const ARTICLE_AGENT_KEY = "article_agent";
 const DEFAULT_ARTICLE_AGENT_PROFILE = [
@@ -6803,6 +6804,17 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
     };
   }
 
+  const existingLive = findLiveItemByGooglePlaceId(db, itemInput?.google_place_id);
+  if (existingLive) {
+    return {
+      mode: "duplicate",
+      item: { id: existingLive.id, title: existingLive.title },
+      seeded_evidence_count: 0,
+      bridged_image_count: 0,
+      reference_media_count: 0,
+    };
+  }
+
   const { item: savedItem } = repo.createItemWithWorkflowHead(
     itemInput,
     {
@@ -6863,6 +6875,17 @@ function importCollectedRawItemsTxn(payloads) {
       payload.targetItemId,
       payload.actor
     );
+
+    if (imported.mode === "duplicate") {
+      skippedCount += 1;
+      results.push({
+        raw_item_id: rawItemId,
+        decision: "already_imported",
+        item_id: Number(imported.item?.id || 0) || null,
+        item_title: imported.item?.title || "",
+      });
+      continue;
+    }
 
     importedCount += 1;
     if (imported.mode === "merge") mergedCount += 1;
