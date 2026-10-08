@@ -15627,7 +15627,7 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-export { buildCollectedImportSeed, importCollectedRawItem, importCollectedRawItemsTxn, buildNormalizedFromExtractedPayload, makeEvidenceSignature, buildEvidenceCandidatesForNormalized, assertFieldPackReadyProductionGate };
+export { buildCollectedImportSeed, importCollectedRawItem, importCollectedRawItemsTxn, hydrateRawSourceItems, buildNormalizedFromExtractedPayload, makeEvidenceSignature, buildEvidenceCandidatesForNormalized, assertFieldPackReadyProductionGate };
 
 process.once("exit", () => {
   try {
