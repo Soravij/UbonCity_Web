@@ -185,6 +185,15 @@
             <div style="grid-column: 1 / -1;">
               <label id="source-input-label">คำค้นหาสถานที่</label>
               <input id="source-query-input" placeholder="เช่น วัดหนองบัว อุบลราชธานี" />
+              <select id="source-collect-category" aria-label="หมวดของรอบ collect นี้">
+                <option value="">หมวด: ตาม Google (ไม่ชัด = ที่เที่ยว)</option>
+                <option value="attractions">ที่เที่ยว</option>
+                <option value="activities">กิจกรรม</option>
+                <option value="hotels">ที่พัก</option>
+                <option value="cafes">คาเฟ่</option>
+                <option value="restaurants">ร้านอาหาร</option>
+                <option value="transport">การเดินทาง</option>
+              </select>
               <textarea id="source-query-textarea" class="hidden" rows="4" placeholder="1 URL ต่อ 1 บรรทัด&#10;https://example.com/place-1&#10;https://example.com/place-2"></textarea>
               <div id="source-manual-place-form" class="grid hidden" style="margin-top:8px;">
                 <div style="grid-column: 1 / -1;">

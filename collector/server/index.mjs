@@ -41,6 +41,7 @@ import {
 import { hasOpenAssignment } from "../services/publishable-assignment-candidate.mjs";
 import { resolveTextQueryLocation, resolveMapsShortLink } from "../collector/sources/adapters/google-maps.mjs";
 import { collectRawFromAdapter, listSourceAdapters } from "../collector/sources/index.mjs";
+import { applyGoogleCategory, normalizeCategoryHint } from "../collector/sources/google-category.mjs";
 import { dedupeMediaEntries, normalizeMediaUrl } from "../collector/sources/media.mjs";
 import { resolveExtractedArticle } from "../collector/sources/extracted-article.mjs";
 import { buildFilteredMediaList, isJunkMediaUrl } from "../collector/sources/media-filter.mjs";
@@ -14182,6 +14183,7 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
         : [];
 
     const payload = normalizeCollectPayload(payloadInput, adapter, aiQueries, req.body?.topic || req.body?.query || "");
+    const categoryHint = normalizeCategoryHint(req.body?.category ?? req.body?.payload?.category);
     const batchUid = repo.startSourceIngestion(adapter, sourceLabel, "collecting", "Collect started");
 
     let rawCount = 0;
@@ -14197,6 +14199,7 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
 
       let junkMediaSkipped = 0;
       for (const item of collected) {
+        if (adapter === "google_maps") applyGoogleCategory(item, categoryHint);
         const rawItemId = repo.addRawSourceItem(batchUid, item);
         rawCount += 1;
 
