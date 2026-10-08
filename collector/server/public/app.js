@@ -2245,16 +2245,28 @@ function intakeMergeClass(label) {
 
 function shouldRecommendMerge(merge) {
   const suggested = merge?.suggested || null;
-  const reasons = Array.isArray(suggested?.reasons) ? suggested.reasons : [];
-  const score = Number(suggested?.score || 0) || 0;
+  if (!suggested || suggested.placeIdConflict) return false;
+  const reasons = Array.isArray(suggested.allReasons)
+    ? suggested.allReasons
+    : Array.isArray(suggested.reasons)
+      ? suggested.reasons
+      : [];
+  const score = Number(suggested.score || 0) || 0;
   const hasSourceIdentity = reasons.includes("source URL ตรงกัน") || reasons.includes("source entity ตรงกัน");
   const hasCorroboration =
     reasons.includes("ชื่อรายการตรงกัน") ||
     reasons.includes("ชื่อใกล้เคียง") ||
     reasons.includes("พิกัดใกล้กัน");
+  const hasStrongEvidence =
+    hasSourceIdentity ||
+    reasons.includes("ชื่อรายการตรงกัน") ||
+    reasons.includes("ชื่อใกล้เคียง") ||
+    reasons.includes("ชื่อทางเลือกตรงกัน") ||
+    reasons.includes("ชื่อทางเลือกใกล้เคียง") ||
+    reasons.includes("เบอร์โทรตรงกัน");
 
   if (hasSourceIdentity && hasCorroboration) return true;
-  if (score >= 14) return true;
+  if (score >= 14 && hasStrongEvidence) return true;
   return false;
 }
 
@@ -2400,6 +2412,13 @@ function findCandidateMatches(candidate, items) {
       item,
       score,
       reasons: reasons.slice(0, 3),
+      allReasons: reasons.slice(),
+      placeIdConflict: Boolean(
+        candidate.sourceType === "google_maps" &&
+          candidateEntityId &&
+          String(item?.google_place_id || "").trim() &&
+          candidateEntityId !== String(item?.google_place_id || "").trim().toLowerCase()
+      ),
     };
   }).filter((row) => row.score > 0)
     .sort((a, b) => b.score - a.score)
