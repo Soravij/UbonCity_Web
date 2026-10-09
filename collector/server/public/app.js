@@ -6322,6 +6322,7 @@ function renderSourceIntakeModal() {
     <div class="toolbar compact-toolbar">
       ${forcedExistingItemId ? "" : `<button type="button" data-intake-bulk="new">รับใหม่ทุกแถวที่แสดง</button>`}
       <button type="button" data-intake-bulk="skip">ข้ามทุกแถวที่แสดง</button>
+      ${forcedExistingItemId ? "" : `<input id="source-intake-bulk-merge-id" type="number" min="1" inputmode="numeric" placeholder="id รายการเดิม"><button type="button" data-intake-bulk="merge">รวมทุกแถวที่แสดงเข้า #</button>`}
     </div>
   `;
 
@@ -11245,6 +11246,21 @@ function wireSourceIntakeModal() {
     if (!bulkButton) return;
     const choice = String(bulkButton.getAttribute("data-intake-bulk") || "skip");
     const filter = String(state.sourceIntake.filter || "all");
+    if (choice === "merge") {
+      const targetId = Number(document.getElementById("source-intake-bulk-merge-id")?.value || 0);
+      if (!Number.isInteger(targetId) || targetId <= 0) {
+        setStatus("source-intake-status", "ใส่ id ของรายการเดิมก่อน", true);
+        return;
+      }
+      for (const candidate of state.sourceIntake.candidates) {
+        if (!sourceIntakeRowMatchesFilter(candidate, filter)) continue;
+        if (String(candidate.sourceType || "") === "google_maps") continue;
+        candidate.selectedDecision = "merge";
+        candidate.selectedMergeItemId = targetId;
+      }
+      renderSourceIntakeModal();
+      return;
+    }
     for (const candidate of state.sourceIntake.candidates) {
       if (sourceIntakeRowMatchesFilter(candidate, filter)) candidate.selectedDecision = choice;
     }
