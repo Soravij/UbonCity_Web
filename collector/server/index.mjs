@@ -49,6 +49,7 @@ import { buildNormalizedFromExtractedPayload, hasUsableNormalizedKeys, pickNorma
 import { makeEvidenceSignature } from "./evidence-signature.mjs";
 import { buildEvidenceCandidatesForNormalized } from "./evidence-candidates.mjs";
 import { findSourceRecordForNormalized } from "./evidence-source-match.mjs";
+import { upsertSourceRecordForItem } from "../db/source-record-upsert.mjs";
 import {
   getCurrentTranslationSourceFingerprint,
   isTranslationRowStale as isWorkflowTranslationRowStale,
@@ -6746,33 +6747,7 @@ function attachCollectedSourceRecord(contentItemId, rawItem, adapter) {
 
   if (!sourceParams.content_item_id) return;
 
-  if (!sourceParams.source_url) {
-    db.prepare(
-      `INSERT INTO source_records (content_item_id, source_type, source_name, source_url, source_entity_id, payload_json)
-       VALUES (@content_item_id, @source_type, @source_name, @source_url, @source_entity_id, @payload_json)`
-    ).run(sourceParams);
-    return;
-  }
-
-  const existing = db.prepare("SELECT id FROM source_records WHERE source_url=? LIMIT 1").get(sourceParams.source_url);
-  if (existing) {
-    db.prepare(
-      `UPDATE source_records
-       SET content_item_id=@content_item_id,
-           source_type=@source_type,
-           source_name=@source_name,
-           source_entity_id=@source_entity_id,
-           payload_json=@payload_json,
-           updated_at=CURRENT_TIMESTAMP
-       WHERE source_url=@source_url`
-    ).run(sourceParams);
-    return;
-  }
-
-  db.prepare(
-    `INSERT INTO source_records (content_item_id, source_type, source_name, source_url, source_entity_id, payload_json)
-     VALUES (@content_item_id, @source_type, @source_name, @source_url, @source_entity_id, @payload_json)`
-  ).run(sourceParams);
+  upsertSourceRecordForItem(db, sourceParams);
 }
 
 function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, actor) {
