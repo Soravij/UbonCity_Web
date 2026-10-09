@@ -11,6 +11,7 @@ import {
 } from "../services/publishable-assignment-candidate.mjs";
 import { assertAssignmentStateMigrationApplied, assertPlaceReviewFlagMigrationApplied } from "./workflow-head-schema.mjs";
 import { isJunkMediaUrl } from "../collector/sources/media-filter.mjs";
+import { upsertSourceRecordForItem } from "./source-record-upsert.mjs";
 
 function parseTags(raw) {
   if (!raw) return [];
@@ -4323,19 +4324,7 @@ export function createRepository(db) {
   }
 
   function upsertSource(data, contentItemId) {
-    const sourceParams = toSourceSqlParams(data, contentItemId);
-    if (!sourceParams.source_url) {
-      insertSourceStmt.run(sourceParams);
-      return;
-    }
-
-    const existing = sourceByUrlStmt.get(sourceParams.source_url);
-    if (existing) {
-      updateSourceByUrlStmt.run(sourceParams);
-      return;
-    }
-
-    insertSourceStmt.run(sourceParams);
+    upsertSourceRecordForItem(db, toSourceSqlParams(data, contentItemId));
   }
 
   function saveItemInternal(data, actorEmail = "system@local") {
