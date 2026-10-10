@@ -6969,6 +6969,7 @@ function seedEvidenceBlocksForItem(item, options = {}) {
   if (options.normalized) {
     if (String(options.normalized?.metadata_fetch_error || "").trim()) skippedForFetchError = true;
     const sourceRecord = findSourceRecordForNormalized(sourceRecords, options.normalized);
+    if (String(parseObjectCandidate(sourceRecord?.payload_json)?.metadata_fetch_error || "").trim()) skippedForFetchError = true;
     const base = {
       source_type: normalizeEvidenceSourceType(options.sourceType || sourceRecord?.source_type || item?.source_type || "import"),
       source_record_type: sourceRecord ? "source_records" : null,
@@ -6979,7 +6980,9 @@ function seedEvidenceBlocksForItem(item, options = {}) {
       attribution_text: "Collected source signal",
       status: "active",
     };
-    allCandidates = buildEvidenceCandidatesForNormalized(options.normalized, base);
+    if (!skippedForFetchError) {
+      allCandidates = buildEvidenceCandidatesForNormalized(options.normalized, base);
+    }
   } else {
     for (const sourceRecord of sourceRecords) {
       if (String(parseObjectCandidate(sourceRecord?.payload_json)?.metadata_fetch_error || "").trim()) { skippedForFetchError = true; continue; }
