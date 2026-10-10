@@ -6964,8 +6964,10 @@ function seedEvidenceBlocksForItem(item, options = {}) {
   })));
 
   let allCandidates = [];
+  let skippedForFetchError = false;
 
   if (options.normalized) {
+    if (String(options.normalized?.metadata_fetch_error || "").trim()) skippedForFetchError = true;
     const sourceRecord = findSourceRecordForNormalized(sourceRecords, options.normalized);
     const base = {
       source_type: normalizeEvidenceSourceType(options.sourceType || sourceRecord?.source_type || item?.source_type || "import"),
@@ -6980,6 +6982,7 @@ function seedEvidenceBlocksForItem(item, options = {}) {
     allCandidates = buildEvidenceCandidatesForNormalized(options.normalized, base);
   } else {
     for (const sourceRecord of sourceRecords) {
+      if (String(parseObjectCandidate(sourceRecord?.payload_json)?.metadata_fetch_error || "").trim()) { skippedForFetchError = true; continue; }
       const payload = parseObjectCandidate(sourceRecord?.payload_json);
       if (!payload) continue;
       const normalized = parseObjectCandidate(payload?.normalized_json)
@@ -7001,7 +7004,7 @@ function seedEvidenceBlocksForItem(item, options = {}) {
       allCandidates.push(...candidates);
     }
 
-    if (allCandidates.length === 0) {
+    if (allCandidates.length === 0 && !skippedForFetchError) {
       const fallback = buildFallbackNormalizedFromItem(item);
       if (fallback) {
         const sourceRecord = findSourceRecordForNormalized(sourceRecords, { google_place_id: fallback.google_place_id || item?.google_place_id, source_url: fallback.source_url || item?.source_url });

@@ -12,7 +12,13 @@ console.log(JSON.stringify({ target_blocks: total, approved_refs: refs }));
 if (apply) {
   if (refs > 0) { console.error("STOP: approved_context_blocks reference target rows"); process.exit(2); }
   db.exec("BEGIN");
-  const del = db.prepare(`DELETE FROM evidence_blocks WHERE id IN (${TARGET})`).run().changes;
-  db.exec("COMMIT");
-  console.log(JSON.stringify({ deleted: del, after: db.prepare(`SELECT COUNT(*) AS c FROM (${TARGET})`).get().c }));
+  try {
+    const del = db.prepare(`DELETE FROM evidence_blocks WHERE id IN (${TARGET})`).run().changes;
+    db.exec("COMMIT");
+    console.log(JSON.stringify({ deleted: del, after: db.prepare(`SELECT COUNT(*) AS c FROM (${TARGET})`).get().c }));
+  } catch (err) {
+    db.exec("ROLLBACK");
+    console.error("ROLLBACK:", err?.message || err);
+    process.exit(3);
+  }
 }
