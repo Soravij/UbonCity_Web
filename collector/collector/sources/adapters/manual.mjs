@@ -1544,6 +1544,7 @@ function extractWikipediaEnrichment(generic, finalUrl, page) {
   const hasCoords = coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon);
   const image = page.original?.source ? String(page.original.source).replace(/\?.*$/, "") : "";
   const baseMedia = Array.isArray(generic.mediaUrls) ? generic.mediaUrls : [];
+  const { section_texts: _genericSections, ...genericArticleRest } = generic.article || {};
   return {
     ...generic,
     title,
@@ -1553,7 +1554,7 @@ function extractWikipediaEnrichment(generic, finalUrl, page) {
     mediaUrls: image ? [image, ...baseMedia.filter((u) => u !== image)] : baseMedia,
     ...(hasCoords ? { latitude: coords.lat, longitude: coords.lon } : {}),
     article: mergeArticleData(
-      { ...generic.article, headline: title, excerpt, page_title: title },
+      { ...genericArticleRest, headline: title, excerpt, page_title: title },
       sections, title, { limit: MAX_ARTICLE_SECTION_ITEMS },
     ),
   };
