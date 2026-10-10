@@ -75,6 +75,7 @@ export function normalizeUrlForComparison(url) {
 }
 
 export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {}) {
+  if (String(normalized?.metadata_fetch_error || "").trim()) return [];
   if (!hasUsableNormalizedKeys(normalized)) return [];
   const out = [];
   const title = String(normalized.title || normalized.name || "").trim();

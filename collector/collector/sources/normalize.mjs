@@ -137,6 +137,7 @@ export function normalizeRawItem(input = {}, sourceType = "social") {
       article_body_text: articleBodyText,
       article_section_texts: articleSectionTexts,
       media,
+      metadata_fetch_error: toStringValue(input.metadata_fetch_error || input?.payload_json?.metadata_fetch_error),
     },
     media,
   };
