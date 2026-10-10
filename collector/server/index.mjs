@@ -6908,6 +6908,8 @@ function normalizeEvidenceSourceType(value) {
 }
 
 function toFiniteNumberOrNull(value) {
+  if (value == null) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -15600,7 +15602,7 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-export { buildCollectedImportSeed, importCollectedRawItem, importCollectedRawItemsTxn, buildNormalizedFromExtractedPayload, makeEvidenceSignature, buildEvidenceCandidatesForNormalized, assertFieldPackReadyProductionGate };
+export { buildCollectedImportSeed, importCollectedRawItem, importCollectedRawItemsTxn, buildNormalizedFromExtractedPayload, makeEvidenceSignature, buildEvidenceCandidatesForNormalized, assertFieldPackReadyProductionGate, pickFirstFiniteNumber };
 
 process.once("exit", () => {
   try {
