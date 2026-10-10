@@ -5,7 +5,9 @@ function parseObjectCandidate(value) {
   return value;
 }
 
-function toFiniteNumberOrNull(value) {
+export function toFiniteNumberOrNull(value) {
+  if (value == null) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
