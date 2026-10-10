@@ -1469,6 +1469,96 @@ function extractGenericMetadata(html, sourceUrl, finalUrl) {
   };
 }
 
+const WIKIPEDIA_HOST_RE = /(^|\.)wikipedia\.org$/i;
+const WIKI_MIN_SECTION_CHARS = 60;
+const WIKI_SKIP_HEADINGS = /^(ดูเพิ่ม|อ้างอิง|แหล่งข้อมูลอื่น|เชิงอรรถ|บรรณานุกรม|see also|references|external links|notes|further reading)$/i;
+
+function wikipediaApiUrlFor(pageUrl) {
+  let u;
+  try { u = new URL(pageUrl); } catch { return null; }
+  const host = u.hostname.toLowerCase();
+  if (!WIKIPEDIA_HOST_RE.test(host)) return null;
+  const m = u.pathname.match(/^\/wiki\/(.+)$/);
+  if (!m) return null;
+  let title;
+  try { title = decodeURIComponent(m[1]).replace(/_/g, " ").trim(); } catch { return null; }
+  if (!title) return null;
+  const lang = host.split(".")[0];
+  const api = new URL(`https://${lang}.wikipedia.org/w/api.php`);
+  api.search = new URLSearchParams({
+    action: "query", format: "json", formatversion: "2", redirects: "1",
+    prop: "extracts|coordinates|pageimages", explaintext: "1", piprop: "original", titles: title,
+  }).toString();
+  return api.toString();
+}
+
+async function fetchWikipediaApi(pageUrl) {
+  const apiUrl = wikipediaApiUrlFor(pageUrl);
+  if (!apiUrl) return null;
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { "user-agent": "UbonCityCollector/1.0 (+manual-url-intake)", accept: "application/json" },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const page = data?.query?.pages?.[0];
+    if (!page || page.missing || typeof page.extract !== "string" || !page.extract.trim()) return null;
+    return page;
+  } catch { return null; }
+}
+
+function splitWikipediaExtract(extract) {
+  const lead = [];
+  const sections = [];
+  let cur = null;
+  let skipping = false;
+  for (const raw of String(extract || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    const h = line.match(/^(={2,6})\s*(.+?)\s*\1$/);
+    if (h) {
+      if (cur) sections.push(cur);
+      if (h[1].length === 2) skipping = WIKI_SKIP_HEADINGS.test(h[2]);
+      cur = skipping ? null : { heading: h[2], parts: [] };
+      continue;
+    }
+    if (!line || skipping) continue;
+    (cur ? cur.parts : lead).push(line);
+  }
+  if (cur) sections.push(cur);
+  const texts = sections
+    .map((s) => ({ heading: s.heading, text: s.parts.join(" ") }))
+    .filter((s) => s.text.length >= WIKI_MIN_SECTION_CHARS)
+    .map((s) => `${s.heading}: ${s.text}`);
+  return { lead: lead.join(" "), sections: texts };
+}
+
+function extractWikipediaEnrichment(generic, finalUrl, page) {
+  if (!page) return generic;
+  const { lead, sections } = splitWikipediaExtract(page.extract);
+  const title = firstNonEmpty(page.title, generic.title);
+  const excerpt = lead;
+  const coords = Array.isArray(page.coordinates)
+    ? (page.coordinates.find((c) => c.primary) || page.coordinates[0])
+    : null;
+  const hasCoords = coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon);
+  const image = page.original?.source ? String(page.original.source).replace(/\?.*$/, "") : "";
+  const baseMedia = Array.isArray(generic.mediaUrls) ? generic.mediaUrls : [];
+  return {
+    ...generic,
+    title,
+    description: firstNonEmpty(excerpt, generic.description),
+    sourceName: "wikipedia.org",
+    image: firstNonEmpty(image, generic.image),
+    mediaUrls: image ? [image, ...baseMedia.filter((u) => u !== image)] : baseMedia,
+    ...(hasCoords ? { latitude: coords.lat, longitude: coords.lon } : {}),
+    article: mergeArticleData(
+      { ...generic.article, headline: title, excerpt, page_title: title },
+      sections, title, { limit: MAX_ARTICLE_SECTION_ITEMS },
+    ),
+  };
+}
+
 function extractWongnaiEnrichment(html, finalUrl, generic, options = {}) {
   const title = normalizeAliasText(
     firstNonEmpty(
@@ -1603,6 +1693,7 @@ function resolveDomainMetadata(html, finalUrl, sourceUrl, options = {}) {
   })();
   const generic = extractGenericMetadata(html, sourceUrl, finalUrl);
   if (host.includes("wongnai.com")) return extractWongnaiEnrichment(html, finalUrl, generic, options);
+  if (WIKIPEDIA_HOST_RE.test(host)) return extractWikipediaEnrichment(generic, finalUrl, options.wikipediaPage);
   if (isRecognizedGoogleMapsUrl(finalUrl || sourceUrl) || isRecognizedGoogleMapsUrl(sourceUrl)) {
     return extractGoogleMapsLinkEnrichment(finalUrl || sourceUrl, generic);
   }
@@ -1705,8 +1796,10 @@ async function fetchUrlMetadata(sourceUrl) {
   const html = mainDoc.html || "";
   let photosHtml = "";
   let photosUrl = "";
+  let wikipediaPage = null;
   try {
     const host = toHostLabel(new URL(finalUrl).hostname);
+    wikipediaPage = WIKIPEDIA_HOST_RE.test(host) ? await fetchWikipediaApi(finalUrl) : null;
     if (host.includes("wongnai.com")) {
       const targetPhotosUrl = buildWongnaiPhotosUrl(finalUrl);
       if (targetPhotosUrl) {
@@ -1723,7 +1816,7 @@ async function fetchUrlMetadata(sourceUrl) {
   }
   return {
     finalUrl,
-    metadata: resolveDomainMetadata(html, finalUrl, sourceUrl, { photosHtml, photosUrl }),
+    metadata: resolveDomainMetadata(html, finalUrl, sourceUrl, { photosHtml, photosUrl, wikipediaPage }),
     contentType,
   };
 }
