@@ -47,6 +47,7 @@ import { resolveExtractedArticle } from "../collector/sources/extracted-article.
 import { buildFilteredMediaList, isJunkMediaUrl } from "../collector/sources/media-filter.mjs";
 import { buildNormalizedFromExtractedPayload, hasUsableNormalizedKeys, pickNormalizedFromSourceRecords } from "../collector/sources/extracted-payload-normalizer.mjs";
 import { makeEvidenceSignature } from "./evidence-signature.mjs";
+import { singletonEvidenceKey } from "./evidence-singleton.mjs";
 import { buildEvidenceCandidatesForNormalized } from "./evidence-candidates.mjs";
 import { findSourceRecordForNormalized } from "./evidence-source-match.mjs";
 import { upsertSourceRecordForItem } from "../db/source-record-upsert.mjs";
@@ -6962,6 +6963,9 @@ function seedEvidenceBlocksForItem(item, options = {}) {
     list_value: Array.isArray(row.list_value_json) ? row.list_value_json : [],
     source_record_id: row.source_record_id,
   })));
+  const seenSingleton = new Set(
+    existing.map((row) => singletonEvidenceKey(row, row.payload_json ?? row.payload)).filter(Boolean),
+  );
 
   let allCandidates = [];
   let skippedForFetchError = false;
@@ -7031,12 +7035,11 @@ function seedEvidenceBlocksForItem(item, options = {}) {
 
   for (const candidate of allCandidates) {
     const signature = makeEvidenceSignature(candidate);
-    if (seen.has(signature)) {
-      skipped += 1;
-      continue;
-    }
+    const singletonKey = singletonEvidenceKey(candidate, candidate.payload_json);
+    if (seen.has(signature) || (singletonKey && seenSingleton.has(singletonKey))) { skipped += 1; continue; }
     repo.addEvidenceBlock(contentItemId, candidate);
     seen.add(signature);
+    if (singletonKey) seenSingleton.add(singletonKey);
     added += 1;
   }
 
