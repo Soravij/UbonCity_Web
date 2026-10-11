@@ -12,10 +12,13 @@ export function evidenceFieldOf(payload) {
 export function singletonEvidenceKey(block = {}, payload) {
   const field = evidenceFieldOf(payload);
   if (!SINGLETON_EVIDENCE_FIELDS.has(field)) return "";
-  return [
+  const parts = [
     String(block.block_type || "").trim().toLowerCase(),
     String(block.source_record_type || "").trim(),
     String(block.source_record_id || "").trim(),
     field,
-  ].join("|");
+  ];
+  // location: text คือที่อยู่หรือ "Location link available" แยกตามข้อความ เพื่อไม่ให้ block ลิงก์ไปบังที่อยู่ที่เพิ่งได้มา
+  if (field === "location") parts.push(String(block.text_value || "").trim());
+  return parts.join("|");
 }

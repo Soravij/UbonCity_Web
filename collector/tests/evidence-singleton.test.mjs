@@ -36,3 +36,22 @@ test("D: different records with same field yield different keys", () => {
   );
   assert.notEqual(mk(531), mk(532));
 });
+
+test("E1: location with different text in the same record yields different keys", () => {
+  const mk = (text) => singletonEvidenceKey(
+    { block_type: "fact", source_record_type: "source_records", source_record_id: 531, text_value: text },
+    { field: "location" },
+  );
+  assert.notEqual(mk("Location link available"), mk("61-63 ถนนยุทธภัณฑ์"));
+});
+
+test("E2: location with the same text but different list yields the same key", () => {
+  const block = {
+    block_type: "fact", source_record_type: "source_records", source_record_id: 531,
+    text_value: "61-63 ถนนยุทธภัณฑ์",
+  };
+  const a = singletonEvidenceKey(block, { field: "location", value: ["a"] });
+  const b = singletonEvidenceKey(block, { field: "location", value: ["b", "c"] });
+  assert.notEqual(a, "");
+  assert.equal(a, b);
+});
