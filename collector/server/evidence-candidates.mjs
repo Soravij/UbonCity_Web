@@ -3,6 +3,8 @@ import { hasUsableNormalizedKeys } from "../collector/sources/extracted-payload-
 
 // ให้ตรงกับ MAX_ARTICLE_SECTION_ITEMS ใน manual.mjs (extractor เก็บ section ได้สูงสุด 10)
 const MAX_ARTICLE_SECTION_EVIDENCE = 10;
+// หน้า Google Maps ที่ fetch ผ่าน manual ได้แค่ SPA shell ซึ่งมี title นี้ ไม่ใช่ชื่อสถานที่
+const GOOGLE_MAPS_SHELL_TITLE_RE = /^(google maps|google แผนที่)$/i;
 
 export function toFiniteNumberOrNull(value) {
   if (value == null) return null;
@@ -81,7 +83,8 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
   if (String(normalized?.metadata_fetch_error || "").trim()) return [];
   if (!hasUsableNormalizedKeys(normalized)) return [];
   const out = [];
-  const title = String(normalized.title || normalized.name || "").trim();
+  const rawTitle = String(normalized.title || normalized.name || "").trim();
+  const title = GOOGLE_MAPS_SHELL_TITLE_RE.test(rawTitle) ? "" : rawTitle;
   const description = String(normalized.description || "").trim();
   const category = String(normalized.category || "").trim();
   const type = String(normalized.type || "").trim();
