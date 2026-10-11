@@ -1211,7 +1211,15 @@ function extractInstitutionalArticleSections(html, limit = MAX_ARTICLE_SECTION_I
   return sections.slice(0, maxItems);
 }
 
-function isUsefulArticleSection(value, options = {}) {
+function articleNameKeys(options = {}) {
+  const names = [
+    toText(options.title),
+    toText(options.headline).split(/\s+[|\-–—]\s+/)[0],
+  ].map((n) => n.replace(/^(รูปทั้งหมดร้าน|ร้าน|รูป)\s*/, ""));
+  return [...new Set(names.map((n) => normalizeArticleSectionKey(n)).filter((k) => k && k.length >= 6))];
+}
+
+export function isUsefulArticleSection(value, options = {}) {
   const text = toText(value);
   if (text.length < 35) return false;
   if (/^(โทร|phone|tel|อ่าน|รีวิว|rating|open|ปิดทุกวัน)/i.test(text)) return false;
@@ -1222,6 +1230,11 @@ function isUsefulArticleSection(value, options = {}) {
   const excerptKey = normalizeArticleSectionKey(options.excerpt);
   if (headlineKey && key === headlineKey) return false;
   if (excerptKey && key === excerptKey) return false;
+  if (text.length < 60) {
+    for (const nameKey of articleNameKeys(options)) {
+      if (key.includes(nameKey) || nameKey.includes(key)) return false;
+    }
+  }
   return true;
 }
 
@@ -1234,7 +1247,7 @@ function mergeArticleData(baseArticle, extraSections = [], fallbackHeadline = ""
     ...(Array.isArray(base.section_texts) ? base.section_texts : []),
     ...(Array.isArray(extraSections) ? extraSections : []),
   ])
-    .filter((text) => isUsefulArticleSection(text, { headline, excerpt }))
+    .filter((text) => isUsefulArticleSection(text, { headline, excerpt, title: fallbackHeadline }))
     .slice(0, limit);
 
   return {

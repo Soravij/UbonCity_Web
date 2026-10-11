@@ -1,6 +1,9 @@
 import { buildFilteredMediaList } from "../collector/sources/media-filter.mjs";
 import { hasUsableNormalizedKeys } from "../collector/sources/extracted-payload-normalizer.mjs";
 
+// ให้ตรงกับ MAX_ARTICLE_SECTION_ITEMS ใน manual.mjs (extractor เก็บ section ได้สูงสุด 10)
+const MAX_ARTICLE_SECTION_EVIDENCE = 10;
+
 export function toFiniteNumberOrNull(value) {
   if (value == null) return null;
   if (typeof value === "string" && value.trim() === "") return null;
@@ -202,7 +205,7 @@ export function buildEvidenceCandidatesForNormalized(normalized = {}, base = {})
     }
   }
 
-  for (const section of articleSections.slice(0, 5)) {
+  for (const section of articleSections.slice(0, MAX_ARTICLE_SECTION_EVIDENCE)) {
     const articleBase = base.article_source_record_id ? { ...base, source_record_id: base.article_source_record_id, source_record_type: "source_records" } : base;
     pushEvidenceCandidate(out, {
       ...articleBase,
