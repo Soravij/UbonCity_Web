@@ -12,20 +12,41 @@ const db = new DatabaseSync(DB_PATH, { readOnly: !APPLY });
 const q = (sql, ...a) => db.prepare(sql).all(...a);
 const ph = (n) => Array(n).fill("?").join(",");
 
-const dupRows = q(`
-  WITH f AS (
-    SELECT id, content_item_id, block_type,
-           COALESCE(source_record_type,'') AS srt, COALESCE(CAST(source_record_id AS TEXT),'') AS sri,
-           json_extract(payload_json,'$.field') AS field
-    FROM evidence_blocks
-    WHERE json_valid(payload_json) AND json_extract(payload_json,'$.field') IN (${ph(SINGLETON_FIELDS.length)})
-  ), g AS (
-    SELECT MIN(id) AS keep_id, content_item_id, block_type, srt, sri, field
-    FROM f GROUP BY content_item_id, block_type, srt, sri, field HAVING COUNT(*) > 1
-  )
-  SELECT f.id, f.content_item_id, f.field, g.keep_id
-  FROM f JOIN g USING (content_item_id, block_type, srt, sri, field)
-  WHERE f.id <> g.keep_id ORDER BY f.id`, ...SINGLETON_FIELDS);
+const KEEP_NEWEST = new Set(["opening_hours_weekday_text", "user_rating_count"]);
+const LINK_TEXT = "Location link available";
+
+const rows = q(`
+  SELECT id, content_item_id, block_type,
+         COALESCE(source_record_type,'') AS srt, COALESCE(CAST(source_record_id AS TEXT),'') AS sri,
+         json_extract(payload_json,'$.field') AS field, TRIM(COALESCE(text_value,'')) AS txt
+  FROM evidence_blocks
+  WHERE json_valid(payload_json) AND json_extract(payload_json,'$.field') IN (${ph(SINGLETON_FIELDS.length)})
+  ORDER BY id`, ...SINGLETON_FIELDS);
+
+const recKey = (r) => [r.content_item_id, r.block_type, r.srt, r.sri].join("|");
+const groups = new Map();
+for (const r of rows) {
+  const k = r.field === "location" ? `${recKey(r)}|location|${r.txt}` : `${recKey(r)}|${r.field}`;
+  if (!groups.has(k)) groups.set(k, []);
+  groups.get(k).push(r);
+}
+const dupRows = [];
+for (const g of groups.values()) {
+  if (g.length < 2) continue;
+  const keep = KEEP_NEWEST.has(g[0].field) ? g[g.length - 1] : g[0];
+  for (const r of g) if (r !== keep) dupRows.push({ ...r, keep_id: keep.id, reason: "dup" });
+}
+// location: ถ้า record เดียวกันมีที่อยู่แล้ว ให้ลบ block "Location link available"
+const recHasAddress = new Set(
+  rows.filter((r) => r.field === "location" && r.txt && r.txt !== LINK_TEXT).map(recKey),
+);
+const already = new Set(dupRows.map((r) => Number(r.id)));
+for (const r of rows) {
+  if (r.field !== "location" || r.txt !== LINK_TEXT) continue;
+  if (!recHasAddress.has(recKey(r)) || already.has(Number(r.id))) continue;
+  dupRows.push({ ...r, keep_id: null, reason: "link_superseded_by_address" });
+}
+dupRows.sort((a, b) => Number(a.id) - Number(b.id));
 
 const shellRows = q(`
   SELECT id, content_item_id, text_value FROM evidence_blocks
@@ -65,6 +86,7 @@ console.log(JSON.stringify({
   dup_excess_by_field: byField, dup_excess_total: dupRows.length,
   shell_title_total: shellRows.length, target_total: targetIds.length,
   refs, shell_ids: shellRows.map((r) => r.id), dup_ids: dupRows.map((r) => r.id),
+  location_rows: dupRows.filter((r) => r.field === "location").map((r) => ({ id: r.id, keep_id: r.keep_id, reason: r.reason })),
 }, null, 2));
 
 if (!APPLY) process.exit(0);
