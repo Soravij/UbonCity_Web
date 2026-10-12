@@ -6753,10 +6753,10 @@ function attachCollectedSourceRecord(contentItemId, rawItem, adapter) {
 
 // raw ที่ไม่มี google_place_id (เช่น ลิงก์ Google Maps ผ่าน manual) ใช้ระยะพิกัดกันการรวมผิด item
 const MERGE_MAX_DISTANCE_M = 1000;
-function toMergeCoord(v) {
+function toMergeCoord(v, limit) {
   if (v === null || v === undefined || v === "") return NaN;
   const n = Number(v);
-  return Number.isFinite(n) ? n : NaN;
+  return Number.isFinite(n) && Math.abs(n) <= limit ? n : NaN;
 }
 function mergeDistanceMeters(lat1, lng1, lat2, lng2) {
   const R = 6371000;
@@ -6785,10 +6785,10 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
       return { mode: "place_id_conflict", item: existingItem, raw_place_id: rawPlaceId, item_place_id: itemPlaceId };
     }
 
-    const rawLat = toMergeCoord(itemInput?.latitude);
-    const rawLng = toMergeCoord(itemInput?.longitude);
-    const itemLat = toMergeCoord(existingItem.latitude);
-    const itemLng = toMergeCoord(existingItem.longitude);
+    const rawLat = toMergeCoord(itemInput?.latitude, 90);
+    const rawLng = toMergeCoord(itemInput?.longitude, 180);
+    const itemLat = toMergeCoord(existingItem.latitude, 90);
+    const itemLng = toMergeCoord(existingItem.longitude, 180);
     if (!options.allowPlaceIdConflict && [rawLat, rawLng, itemLat, itemLng].every(Number.isFinite)
         && !(rawLat === 0 && rawLng === 0) && !(itemLat === 0 && itemLng === 0)) {
       const distanceM = mergeDistanceMeters(rawLat, rawLng, itemLat, itemLng);
