@@ -6746,12 +6746,12 @@ function attachCollectedSourceRecord(contentItemId, rawItem, adapter) {
     payload_json: payloadJson == null ? null : JSON.stringify(payloadJson),
   };
 
-  if (!sourceParams.content_item_id) return;
+  if (!sourceParams.content_item_id) return null;
 
-  upsertSourceRecordForItem(db, sourceParams);
+  return upsertSourceRecordForItem(db, sourceParams);
 }
 
-function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, actor) {
+function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, actor, options = {}) {
   const { normalized, itemInput } = buildCollectedImportSeed(rawItem, adapter);
   const mode = String(targetMode || "new").trim().toLowerCase();
 
@@ -6762,7 +6762,17 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
       throw new Error(`ไม่พบรายการเดิมที่จะ merge (#${existingItemId || 0})`);
     }
 
-    attachCollectedSourceRecord(existingItemId, rawItem, adapter);
+    const rawNormalized = parseObjectCandidate(rawItem?.normalized_json) || {};
+    const rawPlaceId = String(rawNormalized.google_place_id || "").trim().toLowerCase();
+    const itemPlaceId = String(existingItem.google_place_id || "").trim().toLowerCase();
+    if (rawPlaceId && itemPlaceId && rawPlaceId !== itemPlaceId && !options.allowPlaceIdConflict) {
+      return { mode: "place_id_conflict", item: existingItem, raw_place_id: rawPlaceId, item_place_id: itemPlaceId };
+    }
+
+    const attached = attachCollectedSourceRecord(existingItemId, rawItem, adapter);
+    if (attached?.status === "skipped_owned_by_other") {
+      return { mode: "owned_by_other", item: existingItem, owner_item_id: Number(attached.owner_item_id || 0) || null };
+    }
     const backfill = backfillMergedItemLocationAndMapUrl(existingItemId, itemInput);
     const mergedItem = backfill?.item || repo.getItem(existingItemId);
     const sourceRecords = repo.listSourceRecordsByItem(existingItemId);
@@ -6851,7 +6861,8 @@ function importCollectedRawItemsTxn(payloads) {
       payload.adapter,
       mode,
       payload.targetItemId,
-      payload.actor
+      payload.actor,
+      { allowPlaceIdConflict: payload.allowPlaceIdConflict === true }
     );
 
     if (imported.mode === "duplicate") {
@@ -6861,6 +6872,19 @@ function importCollectedRawItemsTxn(payloads) {
         decision: "already_imported",
         item_id: Number(imported.item?.id || 0) || null,
         item_title: imported.item?.title || "",
+      });
+      continue;
+    }
+
+    if (imported.mode === "place_id_conflict" || imported.mode === "owned_by_other") {
+      skippedCount += 1;
+      results.push({
+        raw_item_id: rawItemId,
+        decision: imported.mode,
+        item_id: Number(imported.item?.id || 0) || null,
+        item_title: imported.item?.title || "",
+        ...(imported.mode === "owned_by_other" ? { owner_item_id: imported.owner_item_id } : {}),
+        ...(imported.mode === "place_id_conflict" ? { raw_place_id: imported.raw_place_id, item_place_id: imported.item_place_id } : {}),
       });
       continue;
     }
@@ -14121,6 +14145,7 @@ app.post("/api/source-raw-items/import", requireRole("admin"), workflowRateLimit
         targetItemId,
         adapter: adapter || String(rawItem?.source_type || "manual").trim().toLowerCase(),
         actor: actorEmail(req),
+        allowPlaceIdConflict: decision?.allow_place_id_conflict === true,
       });
     }
 
