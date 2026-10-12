@@ -2525,13 +2525,15 @@ function normalizeRawCandidate(row, query) {
     hasServiceFacts: serviceFacts.length > 0,
     hasPriceSignals: priceSignals.length > 0,
     hasMenuFacts: menuSections.length > 0 || menuHighlights.length > 0 || Boolean(String(extractedMetadata.menu_url || "").trim()),
+    fetchError: String(normalized?.metadata_fetch_error || payload?.payload_json?.metadata_fetch_error || payload?.metadata_fetch_error || "").trim(),
   };
 
   const priority = scoreIntakePriority(candidate, query);
   const merge = findCandidateMatches(candidate, state.items);
   const isJsonSource = candidate.sourceType === "json";
-  const recommendedDecision =
-    shouldRecommendMerge(merge) || (isJsonSource && Number(merge?.rank || 0) >= 2)
+  const recommendedDecision = candidate.fetchError
+    ? "skip"
+    : shouldRecommendMerge(merge) || (isJsonSource && Number(merge?.rank || 0) >= 2)
       ? "merge"
       : isJsonSource || priority.rank >= 1
         ? "new"
@@ -6251,7 +6253,7 @@ function renderSourceIntakeRow(candidate, forcedExistingItemId = 0) {
         <strong class="intake-ellipsis" title="${escapeHtml(candidate.title)}">${escapeHtml(candidate.title)}</strong>
         <span class="muted intake-ellipsis" title="${escapeHtml(candidate.address || "")}">${escapeHtml([candidate.categoryLabel, compactText(candidate.address || "", 80)].filter(Boolean).join(" · "))}</span>
         <span class="muted intake-ellipsis">${escapeHtml(candidate.phone || "")}</span>
-        ${candidate.sourceType === "json" ? "<span></span>" : `<span class="intake-badge ${intakePriorityClass(candidate.priority.label)}">${escapeHtml(candidate.priority.label)}</span>`}
+        ${candidate.sourceType === "json" ? "<span></span>" : `<span class="intake-badge ${intakePriorityClass(candidate.priority.label)}">${escapeHtml(candidate.priority.label)}</span>`}${candidate.fetchError ? `<span class="intake-badge priority-low" title="${escapeHtml(candidate.fetchError)}">ดึงข้อมูลไม่ได้</span>` : ""}
         ${!forcedExistingItemId && choice === "merge" ? (() => {
           const pickRows = buildSourceIntakeMergePickList(candidate);
           const selectedId = Number(candidate.selectedMergeItemId || 0) || 0;
