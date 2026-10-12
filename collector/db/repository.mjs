@@ -3021,22 +3021,6 @@ export function createRepository(db) {
     WHERE id=? AND is_deleted=0
   `);
 
-  const insertSourceStmt = db.prepare(`
-    INSERT INTO source_records (content_item_id, source_type, source_name, source_url, source_entity_id, payload_json)
-    VALUES (@content_item_id, @source_type, @source_name, @source_url, @source_entity_id, @payload_json)
-  `);
-  const updateSourceByUrlStmt = db.prepare(`
-    UPDATE source_records SET
-      content_item_id=@content_item_id,
-      source_type=@source_type,
-      source_name=@source_name,
-      source_entity_id=@source_entity_id,
-      payload_json=@payload_json,
-      updated_at=CURRENT_TIMESTAMP
-    WHERE source_url=@source_url
-  `);
-  const sourceByUrlStmt = db.prepare("SELECT id FROM source_records WHERE source_url=?");
-  const deleteSourceByItemStmt = db.prepare("DELETE FROM source_records WHERE content_item_id=?");
   const listSourceByItemStmt = db.prepare("SELECT * FROM source_records WHERE content_item_id=? ORDER BY id DESC");
 
   const clearQualityStmt = db.prepare("DELETE FROM quality_checks WHERE content_item_id=?");
@@ -4330,8 +4314,9 @@ export function createRepository(db) {
   function saveItemInternal(data, actorEmail = "system@local") {
     if (data.id > 0) {
       updateItemStmt.run(toItemUpdateParams(data));
-      deleteSourceByItemStmt.run(data.id);
-      upsertSource(data, data.id);
+      // ห้ามลบ source_records ของ item: แต่ละแถวคือหลักฐานจากต้นทางคนละแหล่ง
+      // upsert เฉพาะเมื่อ caller ส่ง source_url มาจริง (url เป็น null จะ INSERT แถว manual เปล่าซ้ำทุกครั้ง)
+      if (data.source_url) upsertSource(data, data.id);
       logAudit(actorEmail, "item.update", "content_item", String(data.id), { title: data.title });
       return getItem(data.id);
     }
