@@ -6212,8 +6212,13 @@ function renderSourceIntakeRow(candidate, forcedExistingItemId = 0) {
   const suggested = candidate.merge?.suggested || null;
   const mergeReasons = suggested?.reasons || [];
   const choice = candidate.selectedDecision;
+  const forcedTitle = forcedExistingItemId
+    ? String(findLoadedItemById(forcedExistingItemId)?.title
+      || (candidate.merge?.matches || []).find((m) => Number(m?.item?.id || 0) === forcedExistingItemId)?.item?.title
+      || "").trim()
+    : "";
   const choiceDefs = forcedExistingItemId
-    ? [["merge", `รวมเข้า #${forcedExistingItemId}`], ["skip", "ข้าม"]]
+    ? [["merge", `รวมเข้า #${forcedExistingItemId}${forcedTitle ? ` ${compactText(forcedTitle, 28)}` : ""}`], ["skip", "ข้าม"]]
     : [["new", "รับใหม่"], ["merge", "รวม"], ["skip", "ข้าม"]];
   const matchLabel = suggested
     ? `#${Number(suggested.item?.id || 0)} ${suggested.item?.title || ""} (${Number(suggested.score || 0) || 0})`
