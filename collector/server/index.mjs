@@ -6783,6 +6783,17 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
   const { normalized, itemInput } = buildCollectedImportSeed(rawItem, adapter);
   const mode = String(targetMode || "new").trim().toLowerCase();
 
+  // raw ที่ fetch หน้าเว็บไม่ได้ ไม่มีข้อมูลจริง (title เป็นแค่ชื่อ host): ห้ามรับใหม่และห้ามรวม
+  const rawFetchError = String(
+    parseObjectCandidate(rawItem?.normalized_json)?.metadata_fetch_error
+    || rawItem?.payload_json?.payload_json?.metadata_fetch_error
+    || rawItem?.payload_json?.metadata_fetch_error
+    || ""
+  ).trim();
+  if (rawFetchError) {
+    return { mode: "fetch_error", item: null, fetch_error: rawFetchError };
+  }
+
   if (mode === "merge") {
     const existingItemId = Number(targetItemId || 0);
     const existingItem = repo.getItem(existingItemId);
@@ -6929,7 +6940,7 @@ function importCollectedRawItemsTxn(payloads) {
       continue;
     }
 
-    if (imported.mode === "place_id_conflict" || imported.mode === "owned_by_other" || imported.mode === "location_conflict") {
+    if (imported.mode === "place_id_conflict" || imported.mode === "owned_by_other" || imported.mode === "location_conflict" || imported.mode === "fetch_error") {
       skippedCount += 1;
       results.push({
         raw_item_id: rawItemId,
@@ -6939,6 +6950,7 @@ function importCollectedRawItemsTxn(payloads) {
         ...(imported.mode === "owned_by_other" ? { owner_item_id: imported.owner_item_id } : {}),
         ...(imported.mode === "place_id_conflict" ? { raw_place_id: imported.raw_place_id, item_place_id: imported.item_place_id } : {}),
         ...(imported.mode === "location_conflict" ? { distance_m: imported.distance_m } : {}),
+        ...(imported.mode === "fetch_error" ? { fetch_error: imported.fetch_error } : {}),
       });
       continue;
     }
