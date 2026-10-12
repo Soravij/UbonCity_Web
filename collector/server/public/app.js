@@ -11317,10 +11317,61 @@ function wireSourceIntakeModal() {
           }),
         });
 
+        // แถวที่ server ข้ามเพราะอาจรวมผิดสถานที่: ให้ผู้ใช้ยืนยันรวมซ้ำได้ (เช่น ตั้งใจรวมเป็นกลุ่ม)
+        const firstRows = Array.isArray(result.results) ? result.results : [];
+        const conflicts = firstRows.filter((r) => r.decision === "place_id_conflict" || r.decision === "location_conflict");
+        let finalResult = result;
+        if (conflicts.length) {
+          const lines = conflicts.map((r) => {
+            const why = r.decision === "location_conflict" ? `ห่าง ${Number(r.distance_m || 0).toLocaleString()} ม.` : "place ไม่ตรง";
+            return `- raw #${r.raw_item_id} → #${r.item_id || "?"} ${r.item_title || ""}: ${why}`;
+          }).join("\n");
+          const ok = window.confirm(
+            `${conflicts.length} รายการถูกข้ามเพราะอาจรวมผิดสถานที่:\n${lines}\n\nกด OK เพื่อรวมรายการเหล่านี้แม้ไม่ตรง (เช่น ตั้งใจรวมเป็นกลุ่ม) หรือ Cancel เพื่อข้าม`
+          );
+          if (ok) {
+            const conflictIds = new Set(conflicts.map((r) => Number(r.raw_item_id)));
+            const retryDecisions = decisions
+              .filter((d) => conflictIds.has(Number(d.raw_item_id)))
+              .map((d) => ({ ...d, allow_place_id_conflict: true }));
+            const retry = await api("/api/source-raw-items/import", {
+              method: "POST",
+              body: JSON.stringify({
+                batch_uid: state.sourceIntake.batchUid,
+                adapter: state.sourceIntake.adapter,
+                decisions: retryDecisions,
+              }),
+            });
+            finalResult = {
+              imported_count: Number(result.imported_count || 0) + Number(retry.imported_count || 0),
+              new_count: Number(result.new_count || 0) + Number(retry.new_count || 0),
+              merged_count: Number(result.merged_count || 0) + Number(retry.merged_count || 0),
+              skipped_count: Number(result.skipped_count || 0) - conflicts.length + Number(retry.skipped_count || 0),
+              results: [
+                ...firstRows.filter((r) => !conflictIds.has(Number(r.raw_item_id))),
+                ...(Array.isArray(retry.results) ? retry.results : []),
+              ],
+            };
+          }
+        }
+
+        const reasonLabel = {
+          place_id_conflict: "place ไม่ตรง",
+          location_conflict: "ไกลเกิน",
+          fetch_error: "ดึงข้อมูลไม่ได้",
+          owned_by_other: "ลิงก์เป็นของรายการอื่น",
+          already_imported: "เคยรับแล้ว",
+        };
+        const reasonCounts = {};
+        for (const r of Array.isArray(finalResult.results) ? finalResult.results : []) {
+          if (reasonLabel[r.decision]) reasonCounts[r.decision] = (reasonCounts[r.decision] || 0) + 1;
+        }
+        const reasonText = Object.entries(reasonCounts).map(([k, n]) => `${reasonLabel[k]} ${n}`).join(", ");
+
         closeSourceIntakeModal();
         setStatus(
           "source-status",
-          `รับเข้าระบบแล้ว ${result.imported_count || 0} รายการ (สร้างใหม่ ${result.new_count || 0}, merge ${result.merged_count || 0}, ข้าม ${result.skipped_count || 0})`
+          `รับเข้าระบบแล้ว ${finalResult.imported_count || 0} รายการ (สร้างใหม่ ${finalResult.new_count || 0}, merge ${finalResult.merged_count || 0}, ข้าม ${finalResult.skipped_count || 0}${reasonText ? ` — ${reasonText}` : ""})`
         );
         await refreshAll();
       } catch (err) {
