@@ -431,6 +431,7 @@ export const REFERENCE_HARD_BLOCKER_DEFS = Object.freeze([
   { key: "published_articles", label_th: "เผยแพร่ขึ้นเว็บแล้ว", sql: "SELECT COUNT(*) AS c FROM published_articles WHERE content_item_id=?", hint: "ต้อง unpublish จาก backend ก่อน" },
   { key: "review_actions", label_th: "มีประวัติ action จาก review อยู่", sql: "SELECT COUNT(*) AS c FROM review_actions WHERE content_item_id=?", hint: "ประวัติ audit ห้ามลบ — purge รายการนี้ไม่ได้" },
   { key: "translations_published", label_th: "มีงานแปลที่ผูกกับบทความที่เผยแพร่แล้ว", sql: "SELECT COUNT(*) AS c FROM content_translations WHERE source_content_item_id=? AND source_published_article_id IS NOT NULL", hint: "ต้อง unpublish บทความต้นทางก่อน" },
+  { key: "review_submission_snapshots", label_th: "เคยส่งเข้า admin review แล้ว", sql: "SELECT COUNT(*) AS c FROM review_submission_snapshots WHERE content_item_id=?", hint: "snapshot การส่งรีวิวเป็นหลักฐาน ลบไม่ได้ จึง purge รายการนี้ไม่ได้" },
 ]);
 const REFERENCE_ALL_GROUP_KEYS = new Set([
   ...REFERENCE_CLEANUP_CANDIDATE_DEFS.map((entry) => entry.key),
@@ -4536,6 +4537,7 @@ export function createRepository(db) {
       ["social_momentum_snapshots", "SELECT COUNT(*) AS c FROM social_momentum_snapshots WHERE content_item_id=?"],
       ["content_direction_reports", "SELECT COUNT(*) AS c FROM content_direction_reports WHERE content_item_id=?"],
       ["review_actions", "SELECT COUNT(*) AS c FROM review_actions WHERE content_item_id=?"],
+      ["review_submission_snapshots", "SELECT COUNT(*) AS c FROM review_submission_snapshots WHERE content_item_id=?"],
       ["content_intelligence_models", "SELECT COUNT(*) AS c FROM content_intelligence_models WHERE content_item_id=?"],
       ["internal_link_sources", "SELECT COUNT(*) AS c FROM internal_link_suggestions WHERE content_item_id=?"],
       ["internal_link_targets", "SELECT COUNT(*) AS c FROM internal_link_suggestions WHERE target_content_item_id=?"],
