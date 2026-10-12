@@ -6751,6 +6751,22 @@ function attachCollectedSourceRecord(contentItemId, rawItem, adapter) {
   return upsertSourceRecordForItem(db, sourceParams);
 }
 
+// raw ที่ไม่มี google_place_id (เช่น ลิงก์ Google Maps ผ่าน manual) ใช้ระยะพิกัดกันการรวมผิด item
+const MERGE_MAX_DISTANCE_M = 1000;
+function toMergeCoord(v) {
+  if (v === null || v === undefined || v === "") return NaN;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
+}
+function mergeDistanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, actor, options = {}) {
   const { normalized, itemInput } = buildCollectedImportSeed(rawItem, adapter);
   const mode = String(targetMode || "new").trim().toLowerCase();
@@ -6767,6 +6783,18 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
     const itemPlaceId = String(existingItem.google_place_id || "").trim().toLowerCase();
     if (rawPlaceId && itemPlaceId && rawPlaceId !== itemPlaceId && !options.allowPlaceIdConflict) {
       return { mode: "place_id_conflict", item: existingItem, raw_place_id: rawPlaceId, item_place_id: itemPlaceId };
+    }
+
+    const rawLat = toMergeCoord(itemInput?.latitude);
+    const rawLng = toMergeCoord(itemInput?.longitude);
+    const itemLat = toMergeCoord(existingItem.latitude);
+    const itemLng = toMergeCoord(existingItem.longitude);
+    if (!options.allowPlaceIdConflict && [rawLat, rawLng, itemLat, itemLng].every(Number.isFinite)
+        && !(rawLat === 0 && rawLng === 0) && !(itemLat === 0 && itemLng === 0)) {
+      const distanceM = mergeDistanceMeters(rawLat, rawLng, itemLat, itemLng);
+      if (distanceM > MERGE_MAX_DISTANCE_M) {
+        return { mode: "location_conflict", item: existingItem, distance_m: Math.round(distanceM) };
+      }
     }
 
     const attached = attachCollectedSourceRecord(existingItemId, rawItem, adapter);
@@ -6876,7 +6904,7 @@ function importCollectedRawItemsTxn(payloads) {
       continue;
     }
 
-    if (imported.mode === "place_id_conflict" || imported.mode === "owned_by_other") {
+    if (imported.mode === "place_id_conflict" || imported.mode === "owned_by_other" || imported.mode === "location_conflict") {
       skippedCount += 1;
       results.push({
         raw_item_id: rawItemId,
@@ -6885,6 +6913,7 @@ function importCollectedRawItemsTxn(payloads) {
         item_title: imported.item?.title || "",
         ...(imported.mode === "owned_by_other" ? { owner_item_id: imported.owner_item_id } : {}),
         ...(imported.mode === "place_id_conflict" ? { raw_place_id: imported.raw_place_id, item_place_id: imported.item_place_id } : {}),
+        ...(imported.mode === "location_conflict" ? { distance_m: imported.distance_m } : {}),
       });
       continue;
     }

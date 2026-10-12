@@ -337,3 +337,42 @@ test("merge with a matching google_place_id proceeds", () => {
   assert.equal(result.imported1?.merged_count, 1);
   assert.equal(result.imported1?.skipped_count, 0);
 });
+
+function runLocationCase(caseId, rawCoords, allow) {
+  return executeScenario({
+    case_id: caseId,
+    mode: "merge",
+    allow_place_id_conflict: allow === true,
+    initial_item: {
+      title: "Location target",
+      description_raw: "Location raw",
+      description_clean: "Location clean",
+      category: "attractions",
+      source_url: buildSourceUrl("location-target"),
+      latitude: 15.2302,
+      longitude: 104.8573,
+    },
+    source: {
+      submittedUrl: buildSourceUrl("location-incoming"),
+      sourceRef: "location-incoming-ref",
+      latitude: rawCoords[0],
+      longitude: rawCoords[1],
+    },
+  });
+}
+
+test("merge of a raw without place_id far from the target item is skipped as location_conflict", () => {
+  const result = runLocationCase("location-far", [15.1588, 104.8290], false);
+  assert.equal(result.imported1?.results?.[0]?.decision, "location_conflict");
+  assert.equal(result.imported1?.merged_count, 0);
+});
+
+test("merge of a raw without place_id near the target item proceeds", () => {
+  const result = runLocationCase("location-near", [15.2305, 104.8575], false);
+  assert.equal(result.imported1?.merged_count, 1);
+});
+
+test("merge far from the target item proceeds when allow flag is set", () => {
+  const result = runLocationCase("location-far-allowed", [15.1588, 104.8290], true);
+  assert.equal(result.imported1?.merged_count, 1);
+});
