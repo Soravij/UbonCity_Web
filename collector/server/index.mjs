@@ -15654,6 +15654,14 @@ app.delete("/api/assets/:id", requireRole("owner"), async (req, res) => {
     return;
   }
 
+  const deliverableRefs = Number(
+    db.prepare("SELECT COUNT(*) AS c FROM content_assignment_submission_deliverables WHERE source_asset_id=?").get(id)?.c || 0
+  );
+  if (deliverableRefs > 0) {
+    res.status(409).json({ error: "Asset is referenced by submission deliverables", blocked_references: ["content_assignment_submission_deliverables"] });
+    return;
+  }
+
   db.prepare("DELETE FROM content_assets WHERE asset_id=?").run(id);
   db.prepare("DELETE FROM asset_variants WHERE asset_id=?").run(id);
   db.prepare("DELETE FROM assets WHERE id=?").run(id);
@@ -15702,7 +15710,7 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-export { buildCollectedImportSeed, importCollectedRawItem, importCollectedRawItemsTxn, buildNormalizedFromExtractedPayload, makeEvidenceSignature, buildEvidenceCandidatesForNormalized, assertFieldPackReadyProductionGate, pickFirstFiniteNumber };
+export { buildCollectedImportSeed, importCollectedRawItem, importCollectedRawItemsTxn, buildNormalizedFromExtractedPayload, makeEvidenceSignature, buildEvidenceCandidatesForNormalized, assertFieldPackReadyProductionGate, pickFirstFiniteNumber, scorePlaceInterestingness };
 
 process.once("exit", () => {
   try {

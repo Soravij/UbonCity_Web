@@ -12,7 +12,9 @@ another, repeatedly, on the Assignment Work flow. Read this before touching
 - Tests must not hardcode either path. Resolve paths from `import.meta.url`. (14 test
   files under `collector/tests/` were fixed for this on 2026-07-10 — don't reintroduce
   absolute paths when adding new tests.)
-- Test runner: `node --test "collector/tests/*.test.mjs"` (must be run from `collector/`)
+- Test runner: run from the repo root (`D:\UbonRuntime\repos\UbonCity_Web`):
+  `node --test "collector/tests/*.test.mjs"` for the full suite, or
+  `node --test collector/tests/<file>.test.mjs` for a single file.
 
 ## Assignment Work behavior contract
 These behaviors must keep working across any change. If a change would affect one of
@@ -56,7 +58,7 @@ Suggested allowlists by concern:
 - Do not mix UI and validation changes in the same patch.
 
 ## Before calling anything "done"
-1. Run the full suite: `node --test "collector/tests/*.test.mjs"` from `collector/`
+1. Run the full suite from the repo root: `node --test "collector/tests/*.test.mjs"`
 2. Confirm the failure count didn't go up vs. before your change (note the before/after
    pass count in your summary)
 3. If a test fails and you believe it's a stale snippet-test (asserts on a literal

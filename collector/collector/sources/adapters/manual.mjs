@@ -1238,6 +1238,15 @@ export function isUsefulArticleSection(value, options = {}) {
   return true;
 }
 
+function isLikelyPromoOrSeoSection(value) {
+  const text = toText(value);
+  if (!text) return false;
+  if (/(?:\b(?:home|about|menu|promotion|reward|wallet|contact)\b\s+){3,}/i.test(`${text} `)) return true;
+  if (/[❗✅]|เติมเงิน|ลดเพิ่ม\s*\d|#สั่งผ่าน/.test(text)) return true;
+  if (text.length < 120 && (text.match(/(?:ร้าน|คาเฟ่)\S*อุบล/g) || []).length >= 2) return true;
+  return false;
+}
+
 function mergeArticleData(baseArticle, extraSections = [], fallbackHeadline = "", options = {}) {
   const base = baseArticle && typeof baseArticle === "object" ? baseArticle : {};
   const headline = toText(base.headline || fallbackHeadline);
@@ -1392,6 +1401,7 @@ function extractGenericMetadata(html, sourceUrl, finalUrl) {
         minLength: 35,
         maxLength: 500,
         filterBoilerplate: true,
+        filterFn: isLikelyPromoOrSeoSection,
       });
   const factBlocks = pageProfile === PAGE_PROFILE_INSTITUTIONAL
     ? extractInstitutionalFactBlocks(html, 80)
