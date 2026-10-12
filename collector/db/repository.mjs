@@ -11277,7 +11277,21 @@ export function createRepository(db) {
       }
     }
 
-    const rawMediaRows = db.prepare(`
+    const matchUrlList = [...matchUrls].filter(Boolean);
+    const matchEntityList = [...matchEntities].filter(Boolean);
+    const matchClauses = [];
+    const matchParams = [];
+    if (matchUrlList.length) {
+      matchClauses.push(`TRIM(COALESCE(sri.source_url, '')) IN (${matchUrlList.map(() => "?").join(",")})`);
+      matchParams.push(...matchUrlList);
+    }
+    if (matchEntityList.length) {
+      const ph = matchEntityList.map(() => "?").join(",");
+      matchClauses.push(`TRIM(COALESCE(sri.source_ref, '')) IN (${ph})`);
+      matchClauses.push(`TRIM(COALESCE(CASE WHEN json_valid(sri.normalized_json) THEN json_extract(sri.normalized_json, '$.google_place_id') END, '')) IN (${ph})`);
+      matchParams.push(...matchEntityList, ...matchEntityList);
+    }
+    const rawMediaRows = matchClauses.length ? db.prepare(`
       SELECT
         srm.id,
         srm.media_url,
@@ -11290,8 +11304,9 @@ export function createRepository(db) {
       JOIN source_raw_items sri ON sri.id = srm.raw_item_id
       WHERE srm.media_url IS NOT NULL
         AND srm.media_url <> ''
+        AND (${matchClauses.join(" OR ")})
       ORDER BY srm.id DESC
-    `).all();
+    `).all(...matchParams) : [];
 
     for (const row of rawMediaRows) {
       const sourceUrl = String(row?.source_url || "").trim();
