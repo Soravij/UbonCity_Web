@@ -11117,10 +11117,24 @@ function wireSourceCollect() {
   syncSourceLocationPanelSummary();
   syncSourceLocationPanelToggleLabel();
 
+  let sourceCollectInFlight = false;
   qs("btn-source-collect")?.addEventListener("click", async () => {
+    // กันกดซ้ำระหว่างที่ request ยังทำงาน
+    if (sourceCollectInFlight) return;
+    const collectBtn = qs("btn-source-collect");
+    const collectBtnLabel = collectBtn ? collectBtn.textContent : "";
+    sourceCollectInFlight = true;
+    if (collectBtn) {
+      collectBtn.disabled = true;
+      collectBtn.textContent = "กำลังดึง…";
+    }
     try {
       const selectedAdapter = syncSourceAdapterOptionsForRole();
       const query = getSourceQueryValue();
+      if (selectedAdapter !== "manual_place" && !String(query || "").trim()) {
+        setStatus("source-status", "วาง URL หรือพิมพ์คำค้นก่อนกดดึงข้อมูล", true);
+        return;
+      }
       const adapter =
         selectedAdapter === "manual_place"
           ? "manual"
@@ -11197,6 +11211,12 @@ function wireSourceCollect() {
       await refreshAll();
     } catch (err) {
       setStatus("source-status", err.message, true);
+    } finally {
+      sourceCollectInFlight = false;
+      if (collectBtn) {
+        collectBtn.disabled = false;
+        collectBtn.textContent = collectBtnLabel;
+      }
     }
   });
 }
