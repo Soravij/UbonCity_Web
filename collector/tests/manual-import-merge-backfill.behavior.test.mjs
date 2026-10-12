@@ -362,8 +362,8 @@ test("existing coordinate and map_url policy stays conservative and independent"
       name: "existing pair preserved and empty map_url backfilled",
       initial_item: { latitude: 13.123456, longitude: 100.654321, map_url: "" },
       source: {
-        latitude: 14.4422717,
-        longitude: 105.2741437,
+        latitude: 13.1236,
+        longitude: 100.6545,
         mapUrl: "https://www.google.com/maps/place/Test/@14.111,105.222,12z",
       },
       expected: { latitude: 13.123456, longitude: 100.654321, mapUrl: "https://www.google.com/maps/place/Test/@14.111,105.222,12z" },
@@ -382,8 +382,8 @@ test("existing coordinate and map_url policy stays conservative and independent"
       name: "existing map_url never overwritten",
       initial_item: { latitude: 13.123456, longitude: 100.654321, map_url: "https://www.google.com/maps/place/Existing/@13.1,100.6,12z" },
       source: {
-        latitude: 14.4422717,
-        longitude: 105.2741437,
+        latitude: 13.1236,
+        longitude: 100.6545,
         mapUrl: "https://www.google.com/maps/place/Test/@14.111,105.222,12z",
       },
       expected: { latitude: 13.123456, longitude: 100.654321, mapUrl: "https://www.google.com/maps/place/Existing/@13.1,100.6,12z" },
@@ -588,8 +588,8 @@ test("merge preserves workflow, claim, field pack, and approved context invarian
     source: {
       submittedUrl: "https://www.google.com/maps/place/Test/@14.111,105.222,12z",
       fetchedUrl: "https://www.google.com/maps/place/Test/@14.111,105.222,12z",
-      latitude: 14.4422717,
-      longitude: 105.2741437,
+      latitude: 13.1236,
+      longitude: 100.6545,
       mapUrl: "https://www.google.com/maps/place/Test/@14.111,105.222,12z",
     },
   });

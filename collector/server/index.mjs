@@ -6746,12 +6746,40 @@ function attachCollectedSourceRecord(contentItemId, rawItem, adapter) {
     payload_json: payloadJson == null ? null : JSON.stringify(payloadJson),
   };
 
-  if (!sourceParams.content_item_id) return;
+  if (!sourceParams.content_item_id) return null;
 
-  upsertSourceRecordForItem(db, sourceParams);
+  return upsertSourceRecordForItem(db, sourceParams);
 }
 
-function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, actor) {
+// raw ที่ไม่มี google_place_id (เช่น ลิงก์ Google Maps ผ่าน manual) ใช้ระยะพิกัดกันการรวมผิด item
+const MERGE_MAX_DISTANCE_M = 1000;
+function toMergeCoord(v, limit) {
+  if (v === null || v === undefined || v === "") return NaN;
+  const n = Number(v);
+  return Number.isFinite(n) && Math.abs(n) <= limit ? n : NaN;
+}
+function mergeDistanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// CID ของสถานที่ Google: ?cid=<ตัวเลข> หรือครึ่งหลังของ feature id !1s0x…:0x<hex> (แปลง hex → ทศนิยม)
+function cidFromGoogleMapsUrl(url) {
+  const s = String(url || "");
+  let m = s.match(/[?&]cid=(\d+)/);
+  if (m) return m[1];
+  m = s.match(/!1s0x[0-9a-f]+:0x([0-9a-f]+)/i);
+  if (m) {
+    try { return BigInt("0x" + m[1]).toString(10); } catch { return ""; }
+  }
+  return "";
+}
+
+function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, actor, options = {}) {
   const { normalized, itemInput } = buildCollectedImportSeed(rawItem, adapter);
   const mode = String(targetMode || "new").trim().toLowerCase();
 
@@ -6762,7 +6790,42 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
       throw new Error(`ไม่พบรายการเดิมที่จะ merge (#${existingItemId || 0})`);
     }
 
-    attachCollectedSourceRecord(existingItemId, rawItem, adapter);
+    const rawNormalized = parseObjectCandidate(rawItem?.normalized_json) || {};
+    const rawPlaceId = String(rawNormalized.google_place_id || "").trim().toLowerCase();
+    const itemPlaceId = String(existingItem.google_place_id || "").trim().toLowerCase();
+    if (rawPlaceId && itemPlaceId && rawPlaceId !== itemPlaceId && !options.allowPlaceIdConflict) {
+      return { mode: "place_id_conflict", item: existingItem, raw_place_id: rawPlaceId, item_place_id: itemPlaceId };
+    }
+
+    const rawCid = cidFromGoogleMapsUrl(rawNormalized.source_url || rawItem?.source_url)
+      || cidFromGoogleMapsUrl(rawNormalized.map_url);
+    if (rawCid && !options.allowPlaceIdConflict) {
+      const itemCids = new Set(
+        [existingItem.map_url, ...repo.listSourceRecordsByItem(existingItemId).map((r) => r?.source_url)]
+          .map(cidFromGoogleMapsUrl)
+          .filter(Boolean)
+      );
+      if (itemCids.size && !itemCids.has(rawCid)) {
+        return { mode: "place_id_conflict", item: existingItem, raw_place_id: `cid:${rawCid}`, item_place_id: [...itemCids].map((c) => `cid:${c}`).join(",") };
+      }
+    }
+
+    const rawLat = toMergeCoord(itemInput?.latitude, 90);
+    const rawLng = toMergeCoord(itemInput?.longitude, 180);
+    const itemLat = toMergeCoord(existingItem.latitude, 90);
+    const itemLng = toMergeCoord(existingItem.longitude, 180);
+    if (!options.allowPlaceIdConflict && [rawLat, rawLng, itemLat, itemLng].every(Number.isFinite)
+        && !(rawLat === 0 && rawLng === 0) && !(itemLat === 0 && itemLng === 0)) {
+      const distanceM = mergeDistanceMeters(rawLat, rawLng, itemLat, itemLng);
+      if (distanceM > MERGE_MAX_DISTANCE_M) {
+        return { mode: "location_conflict", item: existingItem, distance_m: Math.round(distanceM) };
+      }
+    }
+
+    const attached = attachCollectedSourceRecord(existingItemId, rawItem, adapter);
+    if (attached?.status === "skipped_owned_by_other") {
+      return { mode: "owned_by_other", item: existingItem, owner_item_id: Number(attached.owner_item_id || 0) || null };
+    }
     const backfill = backfillMergedItemLocationAndMapUrl(existingItemId, itemInput);
     const mergedItem = backfill?.item || repo.getItem(existingItemId);
     const sourceRecords = repo.listSourceRecordsByItem(existingItemId);
@@ -6851,7 +6914,8 @@ function importCollectedRawItemsTxn(payloads) {
       payload.adapter,
       mode,
       payload.targetItemId,
-      payload.actor
+      payload.actor,
+      { allowPlaceIdConflict: payload.allowPlaceIdConflict === true }
     );
 
     if (imported.mode === "duplicate") {
@@ -6861,6 +6925,20 @@ function importCollectedRawItemsTxn(payloads) {
         decision: "already_imported",
         item_id: Number(imported.item?.id || 0) || null,
         item_title: imported.item?.title || "",
+      });
+      continue;
+    }
+
+    if (imported.mode === "place_id_conflict" || imported.mode === "owned_by_other" || imported.mode === "location_conflict") {
+      skippedCount += 1;
+      results.push({
+        raw_item_id: rawItemId,
+        decision: imported.mode,
+        item_id: Number(imported.item?.id || 0) || null,
+        item_title: imported.item?.title || "",
+        ...(imported.mode === "owned_by_other" ? { owner_item_id: imported.owner_item_id } : {}),
+        ...(imported.mode === "place_id_conflict" ? { raw_place_id: imported.raw_place_id, item_place_id: imported.item_place_id } : {}),
+        ...(imported.mode === "location_conflict" ? { distance_m: imported.distance_m } : {}),
       });
       continue;
     }
@@ -14121,6 +14199,7 @@ app.post("/api/source-raw-items/import", requireRole("admin"), workflowRateLimit
         targetItemId,
         adapter: adapter || String(rawItem?.source_type || "manual").trim().toLowerCase(),
         actor: actorEmail(req),
+        allowPlaceIdConflict: decision?.allow_place_id_conflict === true,
       });
     }
 

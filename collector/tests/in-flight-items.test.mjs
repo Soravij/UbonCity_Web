@@ -3,17 +3,20 @@ import test from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { openDatabase } from "../db/client.mjs";
 import { ASSIGNMENT_STATES, createRepository, PLACE_REVIEW_FLAGS, PRODUCTION_STATES, PUBLICATION_STATES } from "../db/repository.mjs";
 import { reportUnknownWorkflowState } from "../server/public/workflow-state-catalog.js";
+
+const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 process.env.OWNER_PASSWORD = process.env.OWNER_PASSWORD || "InFlight!Test1";
 
 function createTestContext() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "collector-in-flight-"));
   const dbPath = path.join(tempDir, "test.sqlite");
-  const schemaPath = path.resolve(process.cwd(), "collector", "database", "schema.sql");
+  const schemaPath = path.resolve(TEST_DIR, "..", "database", "schema.sql");
   const db = openDatabase(dbPath, schemaPath);
   const repo = createRepository(db);
 
@@ -193,7 +196,7 @@ test("listItems is unchanged by the in-flight filter (default list keeps every s
 // two display contracts that regressed before: no raw English state string may reach the status
 // column, and the stalled-age tone boundaries must match the documented bands.
 
-const APP_JS_PATH = path.resolve(process.cwd(), "collector", "server", "public", "app.js");
+const APP_JS_PATH = path.resolve(TEST_DIR, "..", "server", "public", "app.js");
 
 function loadAppHelpers() {
   const src = fs.readFileSync(APP_JS_PATH, "utf8");
