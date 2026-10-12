@@ -6767,6 +6767,18 @@ function mergeDistanceMeters(lat1, lng1, lat2, lng2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
+// CID ของสถานที่ Google: ?cid=<ตัวเลข> หรือครึ่งหลังของ feature id !1s0x…:0x<hex> (แปลง hex → ทศนิยม)
+function cidFromGoogleMapsUrl(url) {
+  const s = String(url || "");
+  let m = s.match(/[?&]cid=(\d+)/);
+  if (m) return m[1];
+  m = s.match(/!1s0x[0-9a-f]+:0x([0-9a-f]+)/i);
+  if (m) {
+    try { return BigInt("0x" + m[1]).toString(10); } catch { return ""; }
+  }
+  return "";
+}
+
 function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, actor, options = {}) {
   const { normalized, itemInput } = buildCollectedImportSeed(rawItem, adapter);
   const mode = String(targetMode || "new").trim().toLowerCase();
@@ -6783,6 +6795,19 @@ function importCollectedRawItem(rawItem, adapter, targetMode, targetItemId, acto
     const itemPlaceId = String(existingItem.google_place_id || "").trim().toLowerCase();
     if (rawPlaceId && itemPlaceId && rawPlaceId !== itemPlaceId && !options.allowPlaceIdConflict) {
       return { mode: "place_id_conflict", item: existingItem, raw_place_id: rawPlaceId, item_place_id: itemPlaceId };
+    }
+
+    const rawCid = cidFromGoogleMapsUrl(rawNormalized.source_url || rawItem?.source_url)
+      || cidFromGoogleMapsUrl(rawNormalized.map_url);
+    if (rawCid && !options.allowPlaceIdConflict) {
+      const itemCids = new Set(
+        [existingItem.map_url, ...repo.listSourceRecordsByItem(existingItemId).map((r) => r?.source_url)]
+          .map(cidFromGoogleMapsUrl)
+          .filter(Boolean)
+      );
+      if (itemCids.size && !itemCids.has(rawCid)) {
+        return { mode: "place_id_conflict", item: existingItem, raw_place_id: `cid:${rawCid}`, item_place_id: [...itemCids].map((c) => `cid:${c}`).join(",") };
+      }
     }
 
     const rawLat = toMergeCoord(itemInput?.latitude, 90);

@@ -376,3 +376,48 @@ test("merge far from the target item proceeds when allow flag is set", () => {
   const result = runLocationCase("location-far-allowed", [15.1588, 104.8290], true);
   assert.equal(result.imported1?.merged_count, 1);
 });
+
+const CID_ITEM_URL = "https://maps.google.com/?cid=581784839549946491";
+const CID_MATCH_URL = "https://www.google.com/maps/place/x/data=!4m6!3m5!1s0x311689daea89d0a3:0x0812ea3aa9150a7b!8m2";
+const CID_OTHER_URL = "https://www.google.com/maps/place/y/data=!4m6!3m5!1s0x311689daea89d0a3:0xd893ac1942771ee6!8m2";
+
+function runCidCase(caseId, rawUrl, allow) {
+  return executeScenario({
+    case_id: caseId,
+    mode: "merge",
+    allow_place_id_conflict: allow === true,
+    initial_item: {
+      title: "Cid target",
+      description_raw: "Cid raw",
+      description_clean: "Cid clean",
+      category: "attractions",
+      source_type: "google_maps",
+      source_name: "google_maps",
+      source_url: CID_ITEM_URL,
+      latitude: 15.2302,
+      longitude: 104.8573,
+    },
+    source: {
+      submittedUrl: rawUrl,
+      sourceRef: "cid-incoming-ref",
+      latitude: 15.2303,
+      longitude: 104.8574,
+    },
+  });
+}
+
+test("merge proceeds when raw feature-id CID matches the item's ?cid source", () => {
+  const result = runCidCase("cid-match", CID_MATCH_URL, false);
+  assert.equal(result.imported1?.merged_count, 1);
+});
+
+test("merge is skipped as place_id_conflict when raw CID differs from the item's CID", () => {
+  const result = runCidCase("cid-mismatch", CID_OTHER_URL, false);
+  assert.equal(result.imported1?.results?.[0]?.decision, "place_id_conflict");
+  assert.equal(result.imported1?.merged_count, 0);
+});
+
+test("merge with a different CID proceeds when allow flag is set", () => {
+  const result = runCidCase("cid-mismatch-allowed", CID_OTHER_URL, true);
+  assert.equal(result.imported1?.merged_count, 1);
+});
