@@ -131,6 +131,7 @@ function insertAssignment(db, itemId) {
 // The keys the soft-delete gate is contractually allowed to report. Anything else appearing here means
 // a reversible delete started being barred by something a workflow action could have cleared.
 const EXPECTED_NEVER_KEYS = Object.freeze(["published_articles", "review_actions", "translations_published"]);
+const EXPECTED_PURGE_ONLY_HARD_KEYS = Object.freeze(["review_submission_snapshots"]);
 const ASSIGNMENT_FAMILY_KEYS = Object.freeze([
   "assignments",
   "content_assignment_submissions",
@@ -188,7 +189,11 @@ test("every NEVER key still resolves to a live hard_blocker def", () => {
   for (const key of EXPECTED_NEVER_KEYS) {
     assert.ok(hardKeys.has(key), `${key} must still exist in REFERENCE_HARD_BLOCKER_DEFS or the gate drops it`);
   }
-  assert.equal(hardKeys.size, EXPECTED_NEVER_KEYS.length, "hard_blocker tier must not carry non-NEVER groups");
+  assert.deepEqual(
+    [...hardKeys].sort(),
+    [...EXPECTED_NEVER_KEYS, ...EXPECTED_PURGE_ONLY_HARD_KEYS].sort(),
+    "hard_blocker tier = NEVER keys + listed purge-only keys; a new hard_blocker must be listed here on purpose",
+  );
 });
 
 test("blocker-summary, purge gate and soft-delete gate agree on one item carrying every tier", () => {
