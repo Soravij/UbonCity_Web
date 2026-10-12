@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { planBulkItemDelete, getNeverOverrideBlockersForItem } from "../services/raw-delete.mjs";
+import { planBulkItemDelete, getNeverOverrideBlockersForItem, classifyPurgeGroups, planDeletedItemPurge } from "../services/raw-delete.mjs";
 import { openDatabase } from "../db/client.mjs";
 import { createRepository, REFERENCE_HARD_BLOCKER_DEFS } from "../db/repository.mjs";
 
@@ -527,6 +527,39 @@ test("(b2) soft delete is blocked when item has review actions", () => {
   }
 });
 
+test("(b3) purge is refused with 409 when item has a review submission snapshot", () => {
+  const ctx = createTestContext();
+  try {
+    const id = Number(ctx.createRawItem("Submitted Item")?.id || 0);
+    // Drop the workflow rows createItemWithWorkflowHead writes so only the snapshot group is under test.
+    ctx.db.prepare("DELETE FROM content_workflow_models WHERE content_item_id=?").run(id);
+    ctx.db.prepare("DELETE FROM content_workflow_transitions WHERE content_item_id=?").run(id);
+    ctx.db.prepare("DELETE FROM source_records WHERE content_item_id=?").run(id);
+    ctx.db
+      .prepare(
+        "INSERT INTO review_submission_snapshots (submission_id, content_item_id, manifest_json, manifest_hash, submitted_by) VALUES (?,?,?,?,?)"
+      )
+      .run(`sub-${id}`, id, "{}", "0".repeat(64), "test@local");
+    ctx.repo.deleteItem(id, "test@local");
+
+    const groups = ctx.repo.getDeletedItemReferenceGroups(id)?.groups || [];
+    const plan = planDeletedItemPurge(classifyPurgeGroups(groups), []);
+    assert.equal(plan.ok, false);
+    assert.equal(plan.status, 409);
+    assert.ok(
+      plan.blockers.some((entry) => entry.key === "review_submission_snapshots" && entry.category === "hard_blocker"),
+      "review_submission_snapshots is reported as a hard blocker"
+    );
+    assert.equal(
+      Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM content_items WHERE id=?").get(id)?.c || 0),
+      1,
+      "item is still present"
+    );
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("(c) translations block soft delete only when bound to a published article", () => {
   const ctx = createTestContext();
   try {
@@ -556,10 +589,10 @@ test("(c) translations block soft delete only when bound to a published article"
 // The soft-delete gate is derived from REFERENCE_HARD_BLOCKER_DEFS, so moving a def between tiers can
 // silently widen or narrow it. These two lock the resulting set from both ends: the tier list itself,
 // and what an item carrying *every* candidate dependency actually reports.
-test("the hard_blocker tier is exactly the three permanent groups", () => {
+test("the hard_blocker tier is exactly the four permanent groups", () => {
   assert.deepEqual(
     REFERENCE_HARD_BLOCKER_DEFS.map((def) => def.key).sort(),
-    ["published_articles", "review_actions", "translations_published"],
+    ["published_articles", "review_actions", "review_submission_snapshots", "translations_published"],
     "a group that a workflow action can clear must be confirm_required, not a hard blocker"
   );
   for (const def of REFERENCE_HARD_BLOCKER_DEFS) {
