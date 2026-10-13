@@ -10650,12 +10650,21 @@ export function createRepository(db) {
     const normalizedPayload = normalizePayloadInput(payload.payload_json);
     const payloadJson = normalizedPayload == null ? null : JSON.stringify(normalizedPayload);
 
+    const sourceRecordId = String(payload.source_record_id || "").trim() || null;
+    if (sourceRecordId) {
+      // evidence may only cite a source record owned by the same content item
+      const ownedRecord = db
+        .prepare("SELECT 1 AS ok FROM source_records WHERE CAST(id AS TEXT)=? AND content_item_id=? LIMIT 1")
+        .get(sourceRecordId, contentItemId);
+      if (!ownedRecord) throw new Error("source_record_id does not belong to this item");
+    }
+
     const result = insertEvidenceBlockStmt.run(
       contentItemId,
       blockType,
       sourceType,
       String(payload.source_record_type || "").trim() || null,
-      String(payload.source_record_id || "").trim() || null,
+      sourceRecordId,
       String(payload.source_url || "").trim() || null,
       String(payload.source_label || "").trim() || null,
       String(payload.lang || "").trim() || null,

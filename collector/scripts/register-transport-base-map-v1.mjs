@@ -1,9 +1,15 @@
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
-const db = new DatabaseSync(path.resolve("collector", "data", "collector.db"));
+// Resolve from this file, not process.cwd() (same idiom as cleanup-evidence-dupes.mjs:5-6).
+const here = path.dirname(fileURLToPath(import.meta.url));
+const collectorRoot = path.resolve(here, "..");
+const DB_PATH = process.env.COLLECTOR_DB || path.join(collectorRoot, "data", "collector.db");
+
+const db = new DatabaseSync(DB_PATH);
 
 const BASE_MAP = {
   key: "ubon-city-base-map-v1",
@@ -25,8 +31,8 @@ const BASE_MAP = {
   projection_type: "linear-bbox-fit",
 };
 
-const svgFullPath = path.resolve("collector", "media", "generated", "transport-v2", "base-maps", "ubon-city-base-map-v1-r1.svg");
-const metaFullPath = path.resolve("collector", "media", "generated", "transport-v2", "base-maps", "ubon-city-base-map-v1-r1.meta.json");
+const svgFullPath = path.join(collectorRoot, "media", "generated", "transport-v2", "base-maps", "ubon-city-base-map-v1-r1.svg");
+const metaFullPath = path.join(collectorRoot, "media", "generated", "transport-v2", "base-maps", "ubon-city-base-map-v1-r1.meta.json");
 const storagePath = "generated/transport-v2/base-maps/ubon-city-base-map-v1-r1.svg";
 
 const svgBuffer = readFileSync(svgFullPath);
