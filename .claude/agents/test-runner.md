@@ -44,20 +44,20 @@ tools: Bash, Read
 
 ## 3. คำสั่งที่รันได้
 
-ทำงานที่ **repo root** เท่านั้น: `D:\UbonCity_Web`
+ทำงานที่ **repo root** เท่านั้น: `D:\UbonRuntime\repos\UbonCity_Web` (Sor เป็นคนจัดการ git เอง agent ห้าม fetch/checkout/pull)
 
 ```
-git fetch origin
-git checkout <branch ที่ได้รับคำสั่ง>
-git pull
 git status --short
 git log -1 --oneline
 npm run test:all
+node --test collector/tests/<file>.test.mjs
 ```
 
 **ไม่มีคำสั่งอื่น**
 
-หมายเหตุ: `npm run test:all` ต้องรันจาก repo root เท่านั้น — test บางตัวหา `collector/database/schema.sql` จาก `cwd` ถ้ารันจากที่อื่นตัวเลขจะผิด
+- `npm run test:all` ใช้รันชุดเต็ม เฉพาะเมื่อได้รับคำสั่งชัดเจนเท่านั้น
+- `node --test collector/tests/<file>.test.mjs` ใช้รันไฟล์เดียว ชื่อไฟล์ต้องขึ้นต้นด้วย `collector/tests/` และลงท้ายด้วย `.test.mjs` ห้ามใช้ wildcard ถ้าไม่ตรงรูปแบบนี้ให้หยุดและรายงาน
+- กรณีรันไฟล์เดียว ให้รายงานบรรทัด `# pass` / `# fail` จาก output พร้อมชื่อเทสที่ fail
 
 ---
 
