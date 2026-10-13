@@ -13568,6 +13568,23 @@ app.post("/api/items/:id/submit-admin-review", requireRole("admin", "owner"), wo
         reason_code: "article_process_admin_review_submitted",
       }
     );
+    try {
+      const rawPurge = repo.purgeRawRowsForSubmittedItem(id);
+      if (rawPurge.deleted_raw_ids.length) {
+        repo.logAudit(actorEmail(req), "raw_intake.purge_after_admin_submit", "content_item", String(id), {
+          deleted_raw_count: rawPurge.deleted_raw_ids.length,
+          unlink_media_count: rawPurge.unlink_media_urls.length,
+        });
+      }
+      if (rawPurge.unlink_media_urls.length) {
+        void googlePhotoStore
+          .deleteUrls(rawPurge.unlink_media_urls)
+          .then((r) => console.info("[google-photo-store.delete]", id, JSON.stringify(r)))
+          .catch((err) => console.error("[google-photo-store.delete]", id, err?.message || err));
+      }
+    } catch (err) {
+      console.error("[raw-intake.purge]", id, err?.message || err);
+    }
     const nextItem = repo.getItem(id) || item;
     res.json({
       ok: true,
