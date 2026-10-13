@@ -14434,11 +14434,6 @@ app.post("/api/run/ai-draft", requireRole("admin", "user"), workflowRateLimit, a
     return;
   }
 
-  const cleanup = purgeUnusedContentAssetsForItem(contentItemId);
-  if (cleanup.removed_links > 0 || cleanup.removed_assets > 0 || cleanup.removed_local_files > 0) {
-    repo.logAudit(actorEmail(req), "asset.cleanup.purge_unused_before_generate", "content_item", String(contentItemId), cleanup);
-  }
-
   // Clean / Field Pack Draft stage: this route's own gate (validateCleanMinimum) has no image condition.
   // runAiDraftStage (single-item) still requires at least one selected image (reference or local).
   // A cover is not required at this stage; media here is reference/evidence.
@@ -14452,9 +14447,15 @@ app.post("/api/run/ai-draft", requireRole("admin", "user"), workflowRateLimit, a
       content_item_id: contentItemId,
       completeness: preview?.completeness || null,
       minimum,
-      cleanup,
+      cleanup: null,
     });
     return;
+  }
+
+  // Purge only after the gate passes so a rejected request never deletes unselected assets/files.
+  const cleanup = purgeUnusedContentAssetsForItem(contentItemId);
+  if (cleanup.removed_links > 0 || cleanup.removed_assets > 0 || cleanup.removed_local_files > 0) {
+    repo.logAudit(actorEmail(req), "asset.cleanup.purge_unused_before_generate", "content_item", String(contentItemId), cleanup);
   }
 
   try {
