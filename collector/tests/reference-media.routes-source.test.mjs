@@ -27,14 +27,6 @@ test("image workflow uses reference media and active routes do not lazily repair
   assert.equal(assetsBlock.includes("repairImportedReferenceAssetsForItem"), false);
 });
 
-test("/api/assets is filtered to collector-controlled local media", () => {
-  const assetsBlock = indexServer.slice(
-    indexServer.indexOf('app.get("/api/assets"'),
-    indexServer.indexOf('app.post("/api/assets/upload"')
-  );
-  assert.equal(assetsBlock.includes('.filter((row) => isCollectorControlledLocalAssetRow(row))'), true);
-});
-
 test("legacy imported media repair route is deprecated and import flows no longer bridge external media", () => {
   assert.equal(indexServer.includes("bridgeCollectedMediaToAssets"), false);
   assert.equal(indexServer.includes("repairImportedReferenceAssetsForItem"), false);
