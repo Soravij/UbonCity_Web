@@ -11338,6 +11338,105 @@ export function createRepository(db) {
       });
   }
 
+  // Deletes raw intake rows (source_raw_items + source_raw_media) that only served items which have
+  // already been submitted to admin review (or are deleted). Matching mirrors
+  // collectReferenceMediaCandidatesByItem; unlike it, deleted items are still considered owners.
+  function purgeRawRowsForSubmittedItem(contentItemId) {
+    const itemId = Number(contentItemId || 0) || 0;
+    if (!itemId) throw new Error("invalid content_item_id");
+    const WS = "char(9)||char(10)||char(13)||char(160)||' '";
+    const trimText = (value) => String(value ?? "").trim();
+    const placeholders = (list) => list.map(() => "?").join(",");
+    const keysOfItem = (row) => {
+      const records = db.prepare("SELECT source_url, source_entity_id FROM source_records WHERE content_item_id=?").all(row.id);
+      return {
+        urls: new Set([row.map_url, ...records.map((r) => r.source_url)].map(trimText).filter(Boolean)),
+        entities: new Set([row.google_place_id, ...records.map((r) => r.source_entity_id)].map(trimText).filter(Boolean)),
+      };
+    };
+    const rawKeys = (row) => {
+      const normalized = parseJson(row?.normalized_json, null);
+      return {
+        url: trimText(row?.source_url),
+        ref: trimText(row?.source_ref),
+        place: trimText(normalized?.google_place_id),
+      };
+    };
+    const hits = (keys, owner) =>
+      Boolean((keys.url && owner.urls.has(keys.url)) || (keys.ref && owner.entities.has(keys.ref)) || (keys.place && owner.entities.has(keys.place)));
+    const isSubmittedOrDeleted = (row) =>
+      Number(row.is_deleted || 0) === 1
+      || String(row.production_state || "").trim().toLowerCase() === "submitted_for_admin_review"
+      || String(row.publication_state || "").trim().toLowerCase() === "published";
+
+    return runInTransaction(db, () => {
+      const target = db.prepare("SELECT id, map_url, google_place_id FROM content_items WHERE id=?").get(itemId);
+      if (!target) throw new Error("item not found");
+      const targetKeys = keysOfItem(target);
+      const urlList = [...targetKeys.urls];
+      const entityList = [...targetKeys.entities];
+      const clauses = [];
+      const params = [];
+      if (urlList.length) {
+        clauses.push(`TRIM(COALESCE(sri.source_url, ''), ${WS}) IN (${placeholders(urlList)})`);
+        params.push(...urlList);
+      }
+      if (entityList.length) {
+        const ph = placeholders(entityList);
+        clauses.push(`TRIM(COALESCE(sri.source_ref, ''), ${WS}) IN (${ph})`);
+        clauses.push(`TRIM(COALESCE(CASE WHEN json_valid(sri.normalized_json) THEN json_extract(sri.normalized_json, '$.google_place_id') END, ''), ${WS}) IN (${ph})`);
+        params.push(...entityList, ...entityList);
+      }
+      if (!clauses.length) return { deleted_raw_ids: [], unlink_media_urls: [] };
+      const matchedRaw = db
+        .prepare(`SELECT sri.id, sri.source_url, sri.source_ref, sri.normalized_json FROM source_raw_items sri WHERE ${clauses.join(" OR ")}`)
+        .all(...params)
+        .filter((row) => hits(rawKeys(row), targetKeys));
+      if (!matchedRaw.length) return { deleted_raw_ids: [], unlink_media_urls: [] };
+
+      // Every other item (deleted ones included) that could own one of the matched raw rows.
+      const owners = db
+        .prepare(`
+          SELECT i.id, i.is_deleted, i.map_url, i.google_place_id, w.production_state, w.publication_state
+          FROM content_items i
+          LEFT JOIN content_workflow_models w ON w.content_item_id = i.id
+          WHERE i.id <> ?
+        `)
+        .all(itemId)
+        .map((row) => ({ row, keys: keysOfItem(row) }));
+
+      const deletedRawIds = [];
+      for (const raw of matchedRaw) {
+        const keys = rawKeys(raw);
+        const blocked = owners.some((owner) => hits(keys, owner.keys) && !isSubmittedOrDeleted(owner.row));
+        if (!blocked) deletedRawIds.push(Number(raw.id));
+      }
+      if (!deletedRawIds.length) return { deleted_raw_ids: [], unlink_media_urls: [] };
+
+      const idPh = placeholders(deletedRawIds);
+      const candidateUrls = db
+        .prepare(`SELECT DISTINCT media_url FROM source_raw_media WHERE raw_item_id IN (${idPh}) AND media_url IS NOT NULL AND media_url <> ''`)
+        .all(...deletedRawIds)
+        .map((row) => String(row.media_url))
+        .filter((url) => url.includes("/api/google-maps/photo"));
+
+      db.prepare(`DELETE FROM source_raw_media WHERE raw_item_id IN (${idPh})`).run(...deletedRawIds);
+      db.prepare(`DELETE FROM source_raw_items WHERE id IN (${idPh})`).run(...deletedRawIds);
+
+      const stillUsed = new Set();
+      if (candidateUrls.length) {
+        const urlPh = placeholders(candidateUrls);
+        for (const row of db.prepare(`SELECT DISTINCT media_url FROM source_raw_media WHERE media_url IN (${urlPh})`).all(...candidateUrls)) {
+          stillUsed.add(String(row.media_url));
+        }
+      }
+      return {
+        deleted_raw_ids: deletedRawIds,
+        unlink_media_urls: candidateUrls.filter((url) => !stillUsed.has(url)),
+      };
+    });
+  }
+
   function listReferenceMediaByItem(contentItemId, options = {}) {
     const rows = collectReferenceMediaCandidatesByItem(contentItemId);
     const selectedOnly = options?.selectedOnly === true;
@@ -12964,6 +13063,7 @@ export function createRepository(db) {
     looksLikeReferenceImageUrl,
     collectReferenceMediaCandidatesByItem,
     listReferenceMediaByItem,
+    purgeRawRowsForSubmittedItem,
     setReferenceMediaSelected,
     listImportedReferenceAssetsByItem,
     repairImportedReferenceAssetsForItem,

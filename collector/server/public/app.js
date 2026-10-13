@@ -2444,6 +2444,13 @@ function findCandidateMatches(candidate, items) {
   };
 }
 
+function resolveInitialIntakeDecision(recommendedDecision, merge, fetchError) {
+  if (fetchError) return recommendedDecision;
+  const target = Number(merge?.suggested?.item?.id || 0) || 0;
+  if (Number(merge?.rank || 0) >= 2 && target > 0 && !merge?.suggested?.placeIdConflict) return "merge";
+  return recommendedDecision;
+}
+
 function normalizeRawCandidate(row, query) {
   const normalized = parseJsonSafe(row?.normalized_json, {}) || {};
   const payload = parseJsonSafe(row?.payload_json, {}) || {};
@@ -2544,7 +2551,7 @@ function normalizeRawCandidate(row, query) {
     priority,
     merge,
     recommendedDecision,
-    selectedDecision: recommendedDecision,
+    selectedDecision: resolveInitialIntakeDecision(recommendedDecision, merge, candidate.fetchError),
     selectedMergeItemId: Number(merge?.suggested?.item?.id || 0) || 0,
   };
 }
