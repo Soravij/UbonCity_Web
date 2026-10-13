@@ -1,6 +1,6 @@
 ﻿# UbonCity Project State
 
-Last Updated: 2026-09-18
+Last Updated: 2026-10-13
 
 ## Current Branch
 
@@ -370,3 +370,34 @@ gate ที่ 88aa0a3: tests=1215 pass=1082 fail=132 skipped=1
 - หน้าคัดรับเข้า raw: เลือกต่อแถว รับใหม่ / รวม (เลือกปลายทางจาก list ลอย) / ข้าม แทนการเลือกปลายทางทั้งชุด — แก้บั๊กที่แถว "รับใหม่" ถูก merge เงียบ ๆ เมื่อชุดอยู่ในโหมด merge; โหมด crawl merge จากหน้า Clean ยังบังคับรวมเข้า item เดียว; แถวบรรทัดเดียว คอลัมน์คงที่ รายละเอียดพับเก็บ; ลิงก์แหล่งข้อมูลแสดงแบบย่อและเปิดได้เฉพาะ http(s); ตัวกรอง ทั้งหมด/น่าจะซ้ำ/รับใหม่/รวม/ข้าม + ปุ่มตั้งค่าทุกแถวที่แสดง; แถวจาก JSON ไม่ใช้คะแนนความน่ารับ (default รับใหม่ หรือรวมเมื่อเจอรายการที่เกี่ยวข้องมาก)
 - CSS class ใหม่ (อนุญาตโดย Sor): intake-row, intake-row-main, intake-ellipsis, intake-merge-pick
 - ค้าง: ข้อความ error ใน server/index.mjs (~6726, ~14024-14049) เป็น ????? ; buildSourceIntakeExistingItemOptions ไม่ได้ใช้แล้วแต่ test clean-crawl-shortcut ยังอ้างข้อความในฟังก์ชัน; ขั้น B (adapter ค้นด้วย AI ใช้ schema เดียวกัน) รอตัดสินใจ
+
+## 10–13 ต.ค. 2026 — ปิดงานก้อน evidence / raw intake (main 0159db6)
+
+Merge เข้า main (git log --merges 702ff31..0159db6)
+- e2adfe1 fix/purge-snapshot-blocker — purge ไม่ได้เมื่อ item มี review_submission_snapshots (1997f64)
+- 9a39058 fix/batch-oct12 — asset ที่ deliverable อ้างอยู่ลบไม่ได้ (409, c495ea2), กรอง promo/SEO ตอนดึงบทความ, กรอง source_raw_media ใน SQL
+- a0405b2 fix/batch-oct13 — trim tab/newline/nbsp ใน raw-intake match (eddc0ee), เทส reference-media / promo-SEO / asset-delete
+- 055c9af feat/raw-purge-intake-default — ลบ raw ตอนส่ง admin review (88b4386), แถวน่าจะซ้ำ default = รวม (3289edf)
+- 699169d chore/test-cleanup-oct13 — เทส whitespace-padded source_url/source_ref, FK reference-defs
+- 45e0a95 chore/evidence-loose-dupes — สคริปต์ cleanup-evidence-loose-dupes + fix-item4-sr116 (dry-run default)
+- 5dc1f92 fix/paths-aidraft-trim — dbPath anchor ด้วย import.meta.url (5366aa4), purge ai-draft หลังผ่าน gate (cfa90f6), trim BOM/U+3000 (f5da38b)
+- f3a62a5 fix/merge-evidence-remap — merge ที่ข้าม URL ซ้ำ remap evidence ไปที่ record ที่เก็บไว้ (a4dc9a5), สคริปต์ fix-evidence-owner-mismatch-20261013
+- 0159db6 fix/evidence-guards-oct13 — POST evidence manual ต้องเป็น record ของ item นั้น (930ca97), merge guard evidence (a9e7a61), purge ai-draft หลัง stage สำเร็จ (1afbe31), paths test + เคส FEFF/U+3000 (0b4d3f7)
+
+ตัดสินแล้ว (Sor)
+- raw (source_raw_items/media) ถูกลบตอนส่งเข้า admin review สำเร็จ แทนกติกาเดิมที่ให้เก็บ raw ไว้
+- หน้าต่างคัดรับข้อมูลดิบ: แถว "น่าจะซ้ำ" ตั้งค่าเริ่มต้นเป็น "รวม" ยกเว้น place_id ชนกันหรือดึงข้อมูลไม่สำเร็จ
+- item ที่มี review_submission_snapshots purge ไม่ได้ (soft-delete ยังทำได้)
+- collect URL เดิมซ้ำ fetch ใหม่และ merge ได้ตามปกติ
+- เทสต้องรันจาก repo root; สคริปต์ใช้ dbPath ที่ resolve จาก import.meta.url
+
+ข้อมูลที่ถูกแก้/ลบในก้อนนี้ (backup อยู่ที่ D:\UbonRuntime\backups\<ชื่อชุด>\)
+- evidence-loose-dupes-20261013: 71 แถว + #4 sr116 19 แถว + dupes 3 แถว
+- evidence-owner-mismatch-20261013: 48 แถว
+- evidence-dupes-20261011: evidence ซ้ำ 45 + link ค้าง 3 แถว
+- remove-test-merge-20261012: source_records 537/538 + evidence 6 แถวใน #283
+
+งานค้าง
+- Sor ทำเอง: ร้านขนม 7 ร้าน (#339, #328, #312, #300, #299, #208, #144); ตัดสิน #250 / #278 / #285; ยืนยันการรวม #271; ปลด claim ของ #283
+- พักไว้: ททท., esanpedia, Facebook, trip.com/booking/เว็บร้าน
+- ยอมรับไว้: SQL TRIM แคบกว่า JS trim (VT, FF, U+2003 ฯลฯ) — แถวที่ padding ด้วยอักขระเหล่านี้หลุด pre-filter (collector/db/repository.mjs:11294-11300, :11356)
