@@ -14463,12 +14463,6 @@ app.post("/api/run/ai-draft", requireRole("admin", "user"), workflowRateLimit, a
     return;
   }
 
-  // Purge only after the gate passes so a rejected request never deletes unselected assets/files.
-  const cleanup = purgeUnusedContentAssetsForItem(contentItemId);
-  if (cleanup.removed_links > 0 || cleanup.removed_assets > 0 || cleanup.removed_local_files > 0) {
-    repo.logAudit(actorEmail(req), "asset.cleanup.purge_unused_before_generate", "content_item", String(contentItemId), cleanup);
-  }
-
   try {
     const aiConfig = getEffectiveAiConfig();
     const aiRuntime = buildAiFeatureRuntimeSnapshot(aiConfig);
@@ -14515,6 +14509,16 @@ app.post("/api/run/ai-draft", requireRole("admin", "user"), workflowRateLimit, a
         ...result,
       });
       return;
+    }
+
+    // Purge only after the stage succeeded (no blocked_items, not in catch) so any 400 never deletes unselected assets/files.
+    try {
+      const cleanup = purgeUnusedContentAssetsForItem(contentItemId);
+      if (cleanup.removed_links > 0 || cleanup.removed_assets > 0 || cleanup.removed_local_files > 0) {
+        repo.logAudit(actorEmail(req), "asset.cleanup.purge_unused_before_generate", "content_item", String(contentItemId), cleanup);
+      }
+    } catch (purgeErr) {
+      console.error("[ai-draft purge after success]", purgeErr?.message || purgeErr);
     }
 
     res.json({
