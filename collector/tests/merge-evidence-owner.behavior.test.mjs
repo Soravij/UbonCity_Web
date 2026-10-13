@@ -172,11 +172,19 @@ test("bulk-merge 2 items: every evidence row citing a moved record follows the r
 
     assert.deepEqual(mismatches(ctx.db), [], "fixture must start consistent");
     const totalBefore = Number(ctx.db.prepare("SELECT COUNT(*) AS c FROM evidence_blocks").get().c);
+    // saveItemInternal (repository.mjs:4327) seeds one manual source_records row per created item, so each
+    // source owns its seed row plus the fixture rows above. Count what the sources actually own instead of
+    // hardcoding it; every one of them has a distinct/NULL URL, so all must move and none may be skipped.
+    const sourceOwnedBefore = Number(
+      ctx.db.prepare("SELECT COUNT(*) AS c FROM source_records WHERE content_item_id IN (?, ?)").get(srcA, srcB).c
+    );
+    assert.ok(sourceOwnedBefore >= 3, "sources must own at least the 3 fixture records");
     ctx.db.close();
 
     await withServer(ctx.dbPath, async (baseUrl) => {
       const body = await bulkMerge(baseUrl, master, [srcA, srcB]);
-      assert.equal(body.counts.source_records_moved, 3);
+      assert.equal(body.counts.source_records_moved, sourceOwnedBefore);
+      assert.equal(body.counts.source_records_skipped, 0);
     });
 
     const after = openDatabase(ctx.dbPath, schemaPath);
