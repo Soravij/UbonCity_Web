@@ -274,3 +274,131 @@ test("collectReferenceMediaCandidatesByItem matches raw media whose source_ref h
     ctx.cleanup();
   }
 });
+
+// U+FEFF (BOM) and U+3000 (ideographic space) padding. The SQL side trims with an explicit
+// char(65279)/char(12288) set (repository.mjs:11285-11291); the JS side uses String.prototype.trim
+// (repository.mjs:11170-11182, 11312-11316), which also strips both.
+test("collectReferenceMediaCandidatesByItem matches raw source_url padded with U+FEFF and U+3000", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem({
+      source_url: "https://example.test/listing-feff",
+      map_url: "",
+      google_place_id: "",
+    });
+    const bomTrailing = ctx.insertRawItem({ sourceRef: "", sourceUrl: "https://example.test/listing-feff﻿", placeId: "" });
+    ctx.insertRawMedia(bomTrailing, "https://img.wongnai.com/p/1200x0/2024/01/01/feff-trailing-photo.jpg");
+    const ideoLeading = ctx.insertRawItem({ sourceRef: "", sourceUrl: "　https://example.test/listing-feff", placeId: "" });
+    ctx.insertRawMedia(ideoLeading, "https://img.wongnai.com/p/1200x0/2024/01/01/u3000-leading-photo.jpg");
+    const mixed = ctx.insertRawItem({ sourceRef: "", sourceUrl: "﻿　https://example.test/listing-feff　﻿ ", placeId: "" });
+    ctx.insertRawMedia(mixed, "https://img.wongnai.com/p/1200x0/2024/01/01/mixed-padding-photo.jpg");
+
+    const other = ctx.insertRawItem({ sourceRef: "", sourceUrl: "https://example.test/listing-other﻿　", placeId: "" });
+    ctx.insertRawMedia(other, "https://img.wongnai.com/p/1200x0/2024/01/01/feff-other-photo.jpg");
+
+    const rows = ctx.repo.collectReferenceMediaCandidatesByItem(item.id);
+    for (const name of ["feff-trailing-photo.jpg", "u3000-leading-photo.jpg", "mixed-padding-photo.jpg"]) {
+      const matched = rows.find((row) => row.url.includes(name));
+      assert.ok(matched, `${name} must be returned`);
+      assert.equal(matched.source_kind, "source_raw_media");
+    }
+    assert.equal(rows.some((row) => row.url.includes("feff-other-photo.jpg")), false, "unrelated padded raw media must not be returned");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("collectReferenceMediaCandidatesByItem does not match when U+FEFF or U+3000 sits inside the value", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem({
+      source_url: "https://example.test/listing-inner",
+      map_url: "",
+      google_place_id: "",
+    });
+    const innerBom = ctx.insertRawItem({ sourceRef: "", sourceUrl: "https://example.test/listing﻿-inner", placeId: "" });
+    ctx.insertRawMedia(innerBom, "https://img.wongnai.com/p/1200x0/2024/01/01/inner-feff-photo.jpg");
+    const innerIdeo = ctx.insertRawItem({ sourceRef: "", sourceUrl: "https://example.test/listing　-inner", placeId: "" });
+    ctx.insertRawMedia(innerIdeo, "https://img.wongnai.com/p/1200x0/2024/01/01/inner-u3000-photo.jpg");
+
+    assert.deepEqual(ctx.repo.collectReferenceMediaCandidatesByItem(item.id), []);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("collectReferenceMediaCandidatesByItem matches raw source_ref and normalized place id padded with U+3000 / U+FEFF", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem({
+      source_url: "https://example.test/item-ref-feff",
+      map_url: "",
+      google_place_id: "place-feff-1",
+      source_entity_id: "entity-feff-1",
+    });
+    const viaRef = ctx.insertRawItem({
+      sourceRef: "　entity-feff-1﻿",
+      sourceUrl: "https://example.test/raw-unrelated-a",
+      placeId: "place-unrelated-a",
+    });
+    ctx.insertRawMedia(viaRef, "https://img.wongnai.com/p/1200x0/2024/01/01/feff-ref-photo.jpg");
+    const viaPlace = ctx.insertRawItem({
+      sourceRef: "",
+      sourceUrl: "https://example.test/raw-unrelated-b",
+      placeId: "﻿place-feff-1　",
+    });
+    ctx.insertRawMedia(viaPlace, "https://img.wongnai.com/p/1200x0/2024/01/01/feff-place-photo.jpg");
+    const other = ctx.insertRawItem({
+      sourceRef: "　entity-other﻿",
+      sourceUrl: "https://example.test/raw-other",
+      placeId: "﻿place-other　",
+    });
+    ctx.insertRawMedia(other, "https://img.wongnai.com/p/1200x0/2024/01/01/feff-ref-other.jpg");
+
+    const rows = ctx.repo.collectReferenceMediaCandidatesByItem(item.id);
+    assert.ok(rows.find((row) => row.url.includes("feff-ref-photo.jpg")), "padded source_ref must match source_entity_id");
+    assert.ok(rows.find((row) => row.url.includes("feff-place-photo.jpg")), "padded normalized google_place_id must match");
+    assert.equal(rows.some((row) => row.url.includes("feff-ref-other.jpg")), false);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("collectReferenceMediaCandidatesByItem matches when the item's own url is padded with U+FEFF and U+3000", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem({
+      source_url: "﻿　https://example.test/listing-item-side　﻿",
+      map_url: "",
+      google_place_id: "",
+    });
+    const raw = ctx.insertRawItem({ sourceRef: "", sourceUrl: "https://example.test/listing-item-side", placeId: "" });
+    ctx.insertRawMedia(raw, "https://img.wongnai.com/p/1200x0/2024/01/01/item-side-photo.jpg");
+
+    const rows = ctx.repo.collectReferenceMediaCandidatesByItem(item.id);
+    assert.ok(rows.find((row) => row.url.includes("item-side-photo.jpg")), "item-side padded source_url must still match a clean raw url");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("collectReferenceMediaCandidatesByItem strips U+FEFF and U+3000 around the media_url itself", () => {
+  const ctx = createTestContext();
+  try {
+    const item = ctx.createItem();
+    const raw = ctx.insertRawItem({
+      sourceRef: "place-123",
+      sourceUrl: "https://maps.google.com/?cid=123",
+      placeId: "place-123",
+    });
+    const clean = "https://img.wongnai.com/p/1200x0/2024/01/01/padded-media-url.jpg";
+    ctx.insertRawMedia(raw, `﻿　${clean}　﻿`);
+
+    const rows = ctx.repo.collectReferenceMediaCandidatesByItem(item.id).filter((row) => row.url.includes("padded-media-url.jpg"));
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].url, clean, "candidate url must be normalized without BOM / ideographic space");
+    assert.match(rows[0].reference_media_id, /^rm:[0-9a-f]{16}$/);
+  } finally {
+    ctx.cleanup();
+  }
+});

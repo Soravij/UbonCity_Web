@@ -51,15 +51,15 @@ function createTestContext() {
     return item;
   }
 
-  function insertRaw({ sourceUrl = "", placeId = "", media = [] }) {
+  function insertRaw({ sourceUrl = "", sourceRef = "", placeId = "", media = [] }) {
     rawSeq += 1;
     const rawId = Number(
       db
         .prepare(`
           INSERT INTO source_raw_items (batch_uid, source_ref, source_url, source_type, title_raw, description_raw, payload_json, normalized_json, status)
-          VALUES (?, '', ?, 'google_maps', 'raw', 'raw', '{}', ?, 'raw')
+          VALUES (?, ?, ?, 'google_maps', 'raw', 'raw', '{}', ?, 'raw')
         `)
-        .run(`purge-batch-${rawSeq}`, sourceUrl, JSON.stringify(placeId ? { google_place_id: placeId } : {})).lastInsertRowid
+        .run(`purge-batch-${rawSeq}`, sourceRef, sourceUrl, JSON.stringify(placeId ? { google_place_id: placeId } : {})).lastInsertRowid
     );
     media.forEach((url, index) => {
       db.prepare(`
@@ -153,6 +153,91 @@ test("purgeRawRowsForSubmittedItem does not list a proxy URL that a retained raw
     assert.deepEqual(result.unlink_media_urls, [PHOTO("only-here")]);
     assert.equal(ctx.rawExists(retained), true);
     assert.equal(ctx.mediaCount(retained), 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+// U+FEFF (BOM) and U+3000 (ideographic space) padding. The SQL side trims with an explicit
+// char(65279)/char(12288) set (repository.mjs:11347, WS), the JS side with String.prototype.trim
+// (trimText, repository.mjs:11348), which also strips both.
+test("purgeRawRowsForSubmittedItem deletes raw rows whose source_url / source_ref / place id are padded with U+FEFF and U+3000", () => {
+  const ctx = createTestContext();
+  try {
+    const x = ctx.createItem({ url: "https://maps.google.com/?cid=x-5", placeId: "gp-x-5" });
+    const byUrlTrailing = ctx.insertRaw({ sourceUrl: "https://maps.google.com/?cid=x-5﻿", media: [PHOTO("w1")] });
+    const byUrlLeading = ctx.insertRaw({ sourceUrl: "　https://maps.google.com/?cid=x-5", media: [PHOTO("w2")] });
+    const byRef = ctx.insertRaw({ sourceUrl: "https://maps.google.com/?cid=unrelated-5a", sourceRef: "　gp-x-5﻿", media: [PHOTO("w3")] });
+    const byPlace = ctx.insertRaw({ sourceUrl: "https://maps.google.com/?cid=unrelated-5b", placeId: "﻿gp-x-5　", media: [PHOTO("w4")] });
+    const unrelated = ctx.insertRaw({ sourceUrl: "https://maps.google.com/?cid=other-5﻿　", media: [PHOTO("w9")] });
+
+    const result = ctx.repo.purgeRawRowsForSubmittedItem(x.id);
+
+    assert.deepEqual(
+      [...result.deleted_raw_ids].sort((a, b) => a - b),
+      [byUrlTrailing, byUrlLeading, byRef, byPlace].sort((a, b) => a - b)
+    );
+    for (const id of [byUrlTrailing, byUrlLeading, byRef, byPlace]) {
+      assert.equal(ctx.rawExists(id), false);
+      assert.equal(ctx.mediaCount(id), 0);
+    }
+    assert.equal(ctx.rawExists(unrelated), true, "unrelated padded raw row is untouched");
+    assert.equal(ctx.mediaCount(unrelated), 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("purgeRawRowsForSubmittedItem does not match when U+FEFF or U+3000 sits inside the key", () => {
+  const ctx = createTestContext();
+  try {
+    const x = ctx.createItem({ url: "https://maps.google.com/?cid=x-6", placeId: "gp-x-6" });
+    const innerBom = ctx.insertRaw({ sourceUrl: "https://maps.google.com/?cid=﻿x-6", media: [PHOTO("i1")] });
+    const innerIdeo = ctx.insertRaw({ sourceUrl: "https://maps.google.com/?cid=unrelated-6", placeId: "gp-x　-6", media: [PHOTO("i2")] });
+
+    const result = ctx.repo.purgeRawRowsForSubmittedItem(x.id);
+
+    assert.deepEqual(result, { deleted_raw_ids: [], unlink_media_urls: [] });
+    assert.equal(ctx.rawExists(innerBom), true);
+    assert.equal(ctx.rawExists(innerIdeo), true);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("purgeRawRowsForSubmittedItem still retains a padded raw row that matches an item not yet submitted", () => {
+  const ctx = createTestContext();
+  try {
+    const x = ctx.createItem({ url: "https://maps.google.com/?cid=x-7", placeId: "gp-x-7" });
+    ctx.createItem({ placeId: "gp-open-7", state: "content_in_progress" });
+    const shared = ctx.insertRaw({
+      sourceUrl: "﻿https://maps.google.com/?cid=x-7　",
+      placeId: "　gp-open-7﻿",
+      media: [PHOTO("k1")],
+    });
+
+    const result = ctx.repo.purgeRawRowsForSubmittedItem(x.id);
+
+    assert.deepEqual(result, { deleted_raw_ids: [], unlink_media_urls: [] });
+    assert.equal(ctx.rawExists(shared), true, "padded key must still be recognised as owned by the open item");
+    assert.equal(ctx.mediaCount(shared), 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("purgeRawRowsForSubmittedItem matches when the submitted item's own keys are padded with U+FEFF and U+3000", () => {
+  const ctx = createTestContext();
+  try {
+    const x = ctx.createItem({ url: "﻿　https://maps.google.com/?cid=x-8　﻿", placeId: "　gp-x-8﻿" });
+    const raw = ctx.insertRaw({ sourceUrl: "https://maps.google.com/?cid=x-8", media: [PHOTO("m1")] });
+    const rawByPlace = ctx.insertRaw({ sourceUrl: "https://maps.google.com/?cid=unrelated-8", placeId: "gp-x-8", media: [PHOTO("m2")] });
+
+    const result = ctx.repo.purgeRawRowsForSubmittedItem(x.id);
+
+    assert.deepEqual([...result.deleted_raw_ids].sort((a, b) => a - b), [raw, rawByPlace].sort((a, b) => a - b));
+    assert.equal(ctx.rawExists(raw), false);
+    assert.equal(ctx.rawExists(rawByPlace), false);
   } finally {
     ctx.cleanup();
   }
