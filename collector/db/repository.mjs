@@ -11282,13 +11282,13 @@ export function createRepository(db) {
     const matchClauses = [];
     const matchParams = [];
     if (matchUrlList.length) {
-      matchClauses.push(`TRIM(COALESCE(sri.source_url, ''), char(9)||char(10)||char(13)||char(160)||' ') IN (${matchUrlList.map(() => "?").join(",")})`);
+      matchClauses.push(`TRIM(COALESCE(sri.source_url, ''), char(9)||char(10)||char(13)||char(160)||char(65279)||char(12288)||' ') IN (${matchUrlList.map(() => "?").join(",")})`);
       matchParams.push(...matchUrlList);
     }
     if (matchEntityList.length) {
       const ph = matchEntityList.map(() => "?").join(",");
-      matchClauses.push(`TRIM(COALESCE(sri.source_ref, ''), char(9)||char(10)||char(13)||char(160)||' ') IN (${ph})`);
-      matchClauses.push(`TRIM(COALESCE(CASE WHEN json_valid(sri.normalized_json) THEN json_extract(sri.normalized_json, '$.google_place_id') END, ''), char(9)||char(10)||char(13)||char(160)||' ') IN (${ph})`);
+      matchClauses.push(`TRIM(COALESCE(sri.source_ref, ''), char(9)||char(10)||char(13)||char(160)||char(65279)||char(12288)||' ') IN (${ph})`);
+      matchClauses.push(`TRIM(COALESCE(CASE WHEN json_valid(sri.normalized_json) THEN json_extract(sri.normalized_json, '$.google_place_id') END, ''), char(9)||char(10)||char(13)||char(160)||char(65279)||char(12288)||' ') IN (${ph})`);
       matchParams.push(...matchEntityList, ...matchEntityList);
     }
     const rawMediaRows = matchClauses.length ? db.prepare(`
@@ -11344,7 +11344,7 @@ export function createRepository(db) {
   function purgeRawRowsForSubmittedItem(contentItemId) {
     const itemId = Number(contentItemId || 0) || 0;
     if (!itemId) throw new Error("invalid content_item_id");
-    const WS = "char(9)||char(10)||char(13)||char(160)||' '";
+    const WS = "char(9)||char(10)||char(13)||char(160)||char(65279)||char(12288)||' '";
     const trimText = (value) => String(value ?? "").trim();
     const placeholders = (list) => list.map(() => "?").join(",");
     const keysOfItem = (row) => {
