@@ -135,3 +135,20 @@ test("Clean crawl shortcut is absent for role user because it is created only fo
   assert.match(editorSource, /return role === "admin" \|\| role === "owner";/);
   assert.equal(cleanHtml.includes("btn-clean-crawl-merge"), false, "Clean HTML must not render a shortcut before role gating");
 });
+
+test("Raw intake opens dup rows (merge rank >= 2) as merge unless place id conflicts, leaving recommendedDecision untouched", () => {
+  const resolve = Function(`return (${extractFunctionSource(appSource, "resolveInitialIntakeDecision")});`)();
+  const dup = { rank: 2, suggested: { item: { id: 7 }, placeIdConflict: false } };
+
+  assert.equal(resolve("new", dup, ""), "merge");
+  assert.equal(resolve("skip", dup, ""), "merge");
+  assert.equal(resolve("merge", dup, ""), "merge");
+  assert.equal(resolve("new", { rank: 2, suggested: { item: { id: 7 }, placeIdConflict: true } }, ""), "new");
+  assert.equal(resolve("new", { rank: 1, suggested: { item: { id: 7 } } }, ""), "new");
+  assert.equal(resolve("skip", { rank: 0, suggested: null }, ""), "skip");
+  assert.equal(resolve("skip", dup, "fetch failed"), "skip");
+  assert.equal(resolve("new", { rank: 2, suggested: { item: { id: 0 } } }, ""), "new");
+
+  // the single call site keeps recommendedDecision separate, so "เลือกตามคำแนะนำระบบ" is unchanged
+  assert.match(appSource, /recommendedDecision,\s*\r?\n\s*selectedDecision: resolveInitialIntakeDecision\(recommendedDecision, merge, candidate\.fetchError\),/);
+});
