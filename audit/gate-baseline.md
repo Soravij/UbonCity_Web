@@ -10,17 +10,16 @@
 ## Result
 
 ```
-GATE tests=1040 pass=972 fail=67 skipped=1
+GATE tests=1040 pass=973 fail=66 skipped=1
 ```
 
-**67 failing tests.** This replaces the stale `59` in `docs/TEST_SUITE_BASELINE.md`
+**66 failing tests.** This replaces the stale `59` in `docs/TEST_SUITE_BASELINE.md`
 (that number was measured at 915 tests total, last touched 2026-08-09; the suite has since
 grown by ~125 tests).
 
-## Failing test names (sorted, 67)
+## Failing test names (sorted, 66)
 
 ```
-/api/assets is filtered to collector-controlled local media
 admin review shaping keeps the public scrubbing but adds the confirmed taxonomy Curation signal
 article intake html loads intake-focused shell
 article intake script supports queue selection and assignment flow

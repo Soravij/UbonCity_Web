@@ -206,3 +206,71 @@ test("collectReferenceMediaCandidatesByItem rejects invalid and unknown item ids
     ctx.cleanup();
   }
 });
+
+test("collectReferenceMediaCandidatesByItem matches raw media whose source_url has trailing newline padding", () => {
+  const ctx = createTestContext();
+  try {
+    // Only the item's source_url can match: map_url, place id and entity ids are empty.
+    const item = ctx.createItem({
+      source_url: "https://example.test/listing-ws",
+      map_url: "",
+      google_place_id: "",
+    });
+    const padded = ctx.insertRawItem({
+      sourceRef: "",
+      sourceUrl: "https://example.test/listing-ws\n",
+      placeId: "",
+    });
+    ctx.insertRawMedia(padded, "https://img.wongnai.com/p/1200x0/2024/01/01/padded-url-photo.jpg");
+
+    const other = ctx.insertRawItem({
+      sourceRef: "",
+      sourceUrl: "https://example.test/listing-other\n",
+      placeId: "",
+    });
+    ctx.insertRawMedia(other, "https://img.wongnai.com/p/1200x0/2024/01/01/padded-other-photo.jpg");
+
+    const rows = ctx.repo.collectReferenceMediaCandidatesByItem(item.id);
+    const matched = rows.find((row) => row.url.includes("padded-url-photo.jpg"));
+    assert.ok(matched, "raw media with trailing-newline source_url must be returned");
+    assert.equal(matched.source_kind, "source_raw_media");
+    assert.equal(rows.some((row) => row.url.includes("padded-other-photo.jpg")), false, "unrelated padded raw media must not be returned");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("collectReferenceMediaCandidatesByItem matches raw media whose source_ref has leading NBSP padding", () => {
+  const ctx = createTestContext();
+  try {
+    // Only the source_records.source_entity_id can match source_ref: item place id is empty and
+    // the raw source_url / normalized_json place id are unrelated to the item.
+    const item = ctx.createItem({
+      source_url: "https://example.test/item-ref",
+      map_url: "",
+      google_place_id: "",
+      source_entity_id: "entity-ws-1",
+    });
+    const padded = ctx.insertRawItem({
+      sourceRef: "\u00A0entity-ws-1",
+      sourceUrl: "https://example.test/raw-unrelated",
+      placeId: "place-unrelated",
+    });
+    ctx.insertRawMedia(padded, "https://img.wongnai.com/p/1200x0/2024/01/01/padded-ref-photo.jpg");
+
+    const other = ctx.insertRawItem({
+      sourceRef: "\u00A0entity-other",
+      sourceUrl: "https://example.test/raw-other",
+      placeId: "place-other",
+    });
+    ctx.insertRawMedia(other, "https://img.wongnai.com/p/1200x0/2024/01/01/padded-ref-other.jpg");
+
+    const rows = ctx.repo.collectReferenceMediaCandidatesByItem(item.id);
+    const matched = rows.find((row) => row.url.includes("padded-ref-photo.jpg"));
+    assert.ok(matched, "raw media with NBSP-padded source_ref must be returned");
+    assert.equal(matched.source_kind, "source_raw_media");
+    assert.equal(rows.some((row) => row.url.includes("padded-ref-other.jpg")), false, "unrelated padded raw media must not be returned");
+  } finally {
+    ctx.cleanup();
+  }
+});
