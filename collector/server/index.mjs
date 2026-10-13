@@ -2101,9 +2101,10 @@ function mergeSourceRecordsIntoMaster(masterId, sourceId, mergeItemIds) {
         if (existingItemId === masterId || mergeItemIds.has(existingItemId)) {
           // evidence ของ item ต้นทางจะถูกย้ายตาม content_item_id ที่ moveSimpleContentItemRows("evidence_blocks");
           // record นี้ไม่ถูกย้าย (และอาจถูกลบตอน raw cleanup) จึงต้องชี้ evidence ไปที่ record ที่ถือ URL เดียวกันแทน
+          // source_records.id เป็น PK global: ไม่กรอง content_item_id และ TRIM เพื่อให้ evidence ที่ owner ไม่ตรง/มีช่องว่างถูกชี้ใหม่ด้วย
           db.prepare(
-            "UPDATE evidence_blocks SET source_record_id=?, updated_at=CURRENT_TIMESTAMP WHERE content_item_id=? AND CAST(source_record_id AS TEXT)=? AND COALESCE(source_record_type, 'source_records')='source_records'"
-          ).run(String(existing.id), sourceId, String(row.id));
+            "UPDATE evidence_blocks SET source_record_id=?, updated_at=CURRENT_TIMESTAMP WHERE TRIM(CAST(source_record_id AS TEXT))=? AND COALESCE(source_record_type, 'source_records')='source_records'"
+          ).run(String(existing.id), String(row.id));
           skipped += 1;
           continue;
         }
@@ -2358,7 +2359,12 @@ function mergeContentItems({ masterItemId, sourceItemIds, actorEmailValue }) {
 
       let rawCleanup = null;
       if (isRawSource) {
-        const sourceRecordsDeleted = Number(db.prepare("DELETE FROM source_records WHERE content_item_id=?").run(sourceId)?.changes || 0);
+        // ไม่ลบ record ที่ยังมี evidence อ้างอยู่ (กันหลักฐานกำพร้า)
+        const sourceRecordsDeleted = Number(
+          db.prepare(
+            "DELETE FROM source_records WHERE content_item_id=? AND NOT EXISTS (SELECT 1 FROM evidence_blocks eb WHERE TRIM(CAST(eb.source_record_id AS TEXT))=CAST(source_records.id AS TEXT) AND COALESCE(eb.source_record_type, 'source_records')='source_records')"
+          ).run(sourceId)?.changes || 0
+        );
         const transitionsDeleted = Number(db.prepare("DELETE FROM content_workflow_transitions WHERE content_item_id=?").run(sourceId)?.changes || 0);
         const modelsDeleted = Number(db.prepare("DELETE FROM content_workflow_models WHERE content_item_id=?").run(sourceId)?.changes || 0);
         counts.source_records_deleted += sourceRecordsDeleted;
