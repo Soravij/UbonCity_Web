@@ -13,7 +13,7 @@ function abort(msg, extra) {
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = process.env.COLLECTOR_DB || path.resolve(here, "../data/collector.db");
+const DB_PATH = process.env.DB_PATH || path.resolve(here, "../data/collector.db");
 console.log("dbPath:", DB_PATH);
 const db = new DatabaseSync(DB_PATH, { readOnly: !APPLY });
 
