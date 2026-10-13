@@ -69,6 +69,7 @@ function extractFunction(name) {
 
 function loadRawIntakeHooks() {
   const splitSource = extractFunction("splitRawIntakeAndCleanPrep");
+  const searchSource = extractFunction("rawItemMatchesSearch");
   const bucketSplitSource = extractFunction("splitRawQueueByFieldPack");
   const renderSource = extractFunction("renderRawTable");
   const state = {
@@ -114,7 +115,7 @@ function loadRawIntakeHooks() {
     "getRawSelectedIds",
     "annotateRawTableBlockers",
     "document",
-    `${splitSource}\n${bucketSplitSource}\n${renderSource}\nreturn { splitRawIntakeAndCleanPrep, splitRawQueueByFieldPack, renderRawTable };`
+    `${splitSource}\n${bucketSplitSource}\n${searchSource}\n${renderSource}\nreturn { splitRawIntakeAndCleanPrep, splitRawQueueByFieldPack, renderRawTable };`
   )(
     state,
     qs,

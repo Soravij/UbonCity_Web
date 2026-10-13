@@ -1238,7 +1238,7 @@ export function isUsefulArticleSection(value, options = {}) {
   return true;
 }
 
-function isLikelyPromoOrSeoSection(value) {
+export function isLikelyPromoOrSeoSection(value) {
   const text = toText(value);
   if (!text) return false;
   if (/(?:\b(?:home|about|menu|promotion|reward|wallet|contact)\b\s+){3,}/i.test(`${text} `)) return true;
