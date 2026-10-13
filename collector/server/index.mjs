@@ -2099,6 +2099,11 @@ function mergeSourceRecordsIntoMaster(masterId, sourceId, mergeItemIds) {
       const existingItemId = Number(existing?.content_item_id || 0);
       if (existing && existingItemId !== sourceId) {
         if (existingItemId === masterId || mergeItemIds.has(existingItemId)) {
+          // evidence ของ item ต้นทางจะถูกย้ายตาม content_item_id ที่ moveSimpleContentItemRows("evidence_blocks");
+          // record นี้ไม่ถูกย้าย (และอาจถูกลบตอน raw cleanup) จึงต้องชี้ evidence ไปที่ record ที่ถือ URL เดียวกันแทน
+          db.prepare(
+            "UPDATE evidence_blocks SET source_record_id=?, updated_at=CURRENT_TIMESTAMP WHERE content_item_id=? AND CAST(source_record_id AS TEXT)=? AND COALESCE(source_record_type, 'source_records')='source_records'"
+          ).run(String(existing.id), sourceId, String(row.id));
           skipped += 1;
           continue;
         }
