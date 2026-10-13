@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 // placeholder texts ("Opening hours", "Place classification") carry the real value there.
 // Keep rule: a referenced row first (lowest referenced id), otherwise the lowest id.
 const here = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = process.env.COLLECTOR_DB || path.resolve(here, "../data/collector.db");
+const DB_PATH = process.env.DB_PATH || path.resolve(here, "../data/collector.db");
 const APPLY = process.argv.includes("--apply");
 const BLOCK_TYPE = "fact";
 

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { buildEvidenceCandidatesForNormalized, normalizeUrlForComparison } from "../server/evidence-candidates.mjs";
 import { findSourceRecordForNormalized } from "../server/evidence-source-match.mjs";
+import { singletonEvidenceKey } from "../server/evidence-singleton.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = path.resolve(__dirname, "..", "server", "index.mjs");
@@ -50,6 +51,7 @@ function createSeedFunction(repo, makeEvidenceSignature) {
     buildFallbackNormalizedFromItem,
     normalizeUrlForComparison,
     findSourceRecordForNormalized,
+    singletonEvidenceKey,
     pruneGooglePhotoEvidence: () => ({ deleted: 0 }),
     db: null,
     repo,

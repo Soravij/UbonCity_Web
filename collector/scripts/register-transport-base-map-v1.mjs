@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 // Resolve from this file, not process.cwd() (same idiom as cleanup-evidence-dupes.mjs:5-6).
 const here = path.dirname(fileURLToPath(import.meta.url));
 const collectorRoot = path.resolve(here, "..");
-const DB_PATH = process.env.COLLECTOR_DB || path.join(collectorRoot, "data", "collector.db");
+const DB_PATH = process.env.DB_PATH || path.join(collectorRoot, "data", "collector.db");
 
 const db = new DatabaseSync(DB_PATH);
 
