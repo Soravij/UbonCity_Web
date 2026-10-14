@@ -107,4 +107,57 @@
   window.visualViewport?.addEventListener("resize", lockControlViewportScale);
   window.visualViewport?.addEventListener("scroll", lockControlViewportScale);
   window.addEventListener("resize", lockControlViewportScale);
+
+  const TOP_BUTTON_ID = "back-to-top-button";
+  const TOP_BUTTON_STYLE = [
+    "position:fixed", "right:12px", "bottom:12px", "z-index:40",
+    "width:44px", "height:44px", "padding:0", "border-radius:50%",
+    "font-size:20px", "line-height:1", "opacity:0.92",
+  ].join(";");
+
+  function ensureTopButton() {
+    if (!document.body) return null;
+    let btn = document.getElementById(TOP_BUTTON_ID);
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = TOP_BUTTON_ID;
+      btn.type = "button";
+      btn.className = "hidden";
+      btn.textContent = "↑";
+      btn.setAttribute("aria-label", "กลับขึ้นบนสุดของหน้า");
+      btn.style.cssText = TOP_BUTTON_STYLE;
+      document.body.appendChild(btn);
+    }
+    return btn;
+  }
+
+  function syncTopButton() {
+    const btn = document.getElementById(TOP_BUTTON_ID);
+    if (!btn) return;
+    const scrolledPastOneScreen = Number(window.scrollY || 0) > Number(window.innerHeight || 0);
+    btn.classList.toggle("hidden", !scrolledPastOneScreen);
+  }
+
+  function mountTopButton() {
+    const btn = ensureTopButton();
+    if (!btn) return;
+    if (btn.dataset.topBound !== "1") {
+      btn.dataset.topBound = "1";
+      btn.addEventListener("click", () => {
+        const reduce = typeof window.matchMedia === "function"
+          && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+      });
+    }
+    syncTopButton();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", mountTopButton, { once: true });
+  } else {
+    mountTopButton();
+  }
+  window.addEventListener("scroll", syncTopButton, { passive: true });
+  window.addEventListener("resize", syncTopButton);
+  window.addEventListener("pageshow", mountTopButton);
 })();
