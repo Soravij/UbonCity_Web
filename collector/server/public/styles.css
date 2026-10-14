@@ -5570,6 +5570,14 @@ button.is-loading::before {
   }
 }
 
+#back-to-top-button:hover,
+#back-to-top-button:focus-visible {
+  --back-to-top-bg: var(--accent-2);
+  --back-to-top-fg: #fff;
+  outline: 3px solid var(--theme-focus-ring);
+  outline-offset: 2px;
+}
+
 .theme-mode-control {
   position: fixed;
   --theme-zoom-factor: 1;

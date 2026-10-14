@@ -112,8 +112,12 @@
   const TOP_BUTTON_ID = "back-to-top-button";
   const TOP_BUTTON_STYLE = [
     "position:fixed", "right:var(--floating-control-right, 12px)", "bottom:12px", "z-index:40",
-    "width:var(--floating-control-width, 52.8px)", "height:44px", "padding:0", "border-radius:22px",
-    "font-size:20px", "line-height:1", "opacity:0.92",
+    "width:var(--floating-control-width, 52.8px)", "height:var(--floating-control-width, 52.8px)",
+    "padding:0", "border-radius:50%", "box-sizing:border-box",
+    "border:5px solid var(--accent-2)", "background:var(--back-to-top-bg, #fff)",
+    "color:var(--back-to-top-fg, var(--accent-2))", "box-shadow:0 2px 8px var(--theme-overlay)",
+    "display:flex", "flex-direction:column", "align-items:center", "justify-content:center",
+    "white-space:pre", "font-size:13px", "font-weight:700", "line-height:1.1", "opacity:1",
   ].join(";");
 
   function ensureTopButton() {
@@ -124,7 +128,7 @@
       btn.id = TOP_BUTTON_ID;
       btn.type = "button";
       btn.className = "hidden";
-      btn.textContent = "↑";
+      btn.textContent = "\u25B2\nTOP";
       btn.setAttribute("aria-label", "กลับขึ้นบนสุดของหน้า");
       btn.style.cssText = TOP_BUTTON_STYLE;
       document.body.appendChild(btn);

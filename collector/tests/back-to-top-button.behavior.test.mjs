@@ -122,3 +122,29 @@ test("floating controls share one right offset var and width", () => {
   assert.match(css, /--floating-control-width:\s*calc\(0\.88 \* 60px\)/);
   assert.match(css, /\.theme-switch-control \{\s*--scale:\s*0\.88;/);
 });
+
+test("back-to-top button is a bordered circle with ▲ over TOP", () => {
+  const { button } = load();
+  const btn = button();
+  const style = btn.style.cssText;
+  assert.equal(btn.textContent, "\u25B2\nTOP");
+  assert.match(style, /width:var\(--floating-control-width/);
+  assert.match(style, /height:var\(--floating-control-width/);
+  assert.match(style, /border-radius:50%/);
+  assert.match(style, /border:5px solid var\(--accent-2\)/);
+  assert.match(style, /background:var\(--back-to-top-bg, #fff\)/);
+  assert.match(style, /color:var\(--back-to-top-fg, var\(--accent-2\)\)/);
+  assert.match(style, /box-shadow:/);
+  assert.match(style, /font-weight:700/);
+  assert.match(style, /opacity:1(;|$)/);
+  assert.match(style, /right:var\(--floating-control-right, 12px\)/);
+  assert.match(style, /z-index:40/);
+});
+
+test("back-to-top hover/focus rule swaps colors and shows a focus ring", () => {
+  const css = fs.readFileSync(path.join(publicDir, "styles.css"), "utf8");
+  const rule = /#back-to-top-button:hover,\s*#back-to-top-button:focus-visible \{[^}]*\}/.exec(css)?.[0] || "";
+  assert.match(rule, /--back-to-top-bg:\s*var\(--accent-2\)/);
+  assert.match(rule, /--back-to-top-fg:\s*#fff/);
+  assert.match(rule, /outline:\s*3px solid var\(--theme-focus-ring\)/);
+});
