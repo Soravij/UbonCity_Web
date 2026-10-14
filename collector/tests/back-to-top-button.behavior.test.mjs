@@ -111,3 +111,14 @@ test("button sits below modal layer (.modal z-index 50)", () => {
   assert.ok(Number.isFinite(modalZ) && Number.isFinite(buttonZ));
   assert.ok(buttonZ < modalZ);
 });
+
+test("floating controls share one right offset var and width", () => {
+  const { button } = load();
+  const css = fs.readFileSync(path.join(publicDir, "styles.css"), "utf8");
+  const themeBlock = /^\.theme-mode-control \{[^}]*\}/m.exec(css)?.[0] || "";
+  assert.match(themeBlock, /right:\s*var\(--floating-control-right,\s*12px\)/);
+  assert.match(button().style.cssText, /right:var\(--floating-control-right,\s*12px\)/);
+  assert.match(button().style.cssText, /width:var\(--floating-control-width/);
+  assert.match(css, /--floating-control-width:\s*calc\(0\.88 \* 60px\)/);
+  assert.match(css, /\.theme-switch-control \{\s*--scale:\s*0\.88;/);
+});

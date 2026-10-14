@@ -111,8 +111,8 @@
   const BACK_TO_TOP_THRESHOLD_PX = 300;
   const TOP_BUTTON_ID = "back-to-top-button";
   const TOP_BUTTON_STYLE = [
-    "position:fixed", "right:12px", "bottom:12px", "z-index:40",
-    "width:44px", "height:44px", "padding:0", "border-radius:50%",
+    "position:fixed", "right:var(--floating-control-right, 12px)", "bottom:12px", "z-index:40",
+    "width:var(--floating-control-width, 52.8px)", "height:44px", "padding:0", "border-radius:22px",
     "font-size:20px", "line-height:1", "opacity:0.92",
   ].join(";");
 
