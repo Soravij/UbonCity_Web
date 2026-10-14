@@ -388,7 +388,7 @@ function buildPhotoUrl(photoName) {
   return `/api/google-maps/photo?name=${encodeURIComponent(name)}&maxWidthPx=1400&maxHeightPx=1400`;
 }
 
-function mapResultToRawItem(result, apiKey, maxImagesPerPlace = 25, maxReviewSnippetsPerPlace = 100) {
+function mapResultToRawItem(result, apiKey, maxImagesPerPlace = 0, maxReviewSnippetsPerPlace = 100) {
   const placeId = String(result?.id || "").trim();
   const name = String(result?.displayName?.text || "").trim();
   const editorialSummary = String(result?.editorialSummary?.text || "").trim();
