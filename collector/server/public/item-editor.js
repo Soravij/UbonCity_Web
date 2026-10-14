@@ -443,8 +443,11 @@ function setPreparationEditingDisabled(disabled) {
     "evidence-filter-block-type",
     "evidence-filter-source-family",
     "evidence-sort",
+    "auth-email",
+    "auth-password",
   ]);
   editableNodes.forEach((node) => {
+    if (node.closest("#theme-mode-control") !== null) return;
     if (node.hasAttribute("readonly") || String(node.type || "").toLowerCase() === "hidden") return;
     if (keepEnabledIds.has(String(node.id || "").trim())) return;
     node.disabled = Boolean(disabled);
