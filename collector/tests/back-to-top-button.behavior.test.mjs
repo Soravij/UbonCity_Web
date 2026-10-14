@@ -84,10 +84,10 @@ test("back-to-top button is created hidden with a Thai aria-label", () => {
 
 test("button shows only after scrolling more than one screen", () => {
   const { window, button } = load({ innerHeight: 800 });
-  window.scrollY = 800;
+  window.scrollY = 300;
   window.fire("scroll");
-  assert.ok(button().classList.contains("hidden"), "exactly one screen stays hidden");
-  window.scrollY = 801;
+  assert.ok(button().classList.contains("hidden"), "exactly 300px stays hidden");
+  window.scrollY = 301;
   window.fire("scroll");
   assert.ok(!button().classList.contains("hidden"));
   window.scrollY = 0;

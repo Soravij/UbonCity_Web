@@ -108,6 +108,7 @@
   window.visualViewport?.addEventListener("scroll", lockControlViewportScale);
   window.addEventListener("resize", lockControlViewportScale);
 
+  const BACK_TO_TOP_THRESHOLD_PX = 300;
   const TOP_BUTTON_ID = "back-to-top-button";
   const TOP_BUTTON_STYLE = [
     "position:fixed", "right:12px", "bottom:12px", "z-index:40",
@@ -134,8 +135,8 @@
   function syncTopButton() {
     const btn = document.getElementById(TOP_BUTTON_ID);
     if (!btn) return;
-    const scrolledPastOneScreen = Number(window.scrollY || 0) > Number(window.innerHeight || 0);
-    btn.classList.toggle("hidden", !scrolledPastOneScreen);
+    const scrolledPastThreshold = Number(window.scrollY || 0) > BACK_TO_TOP_THRESHOLD_PX;
+    btn.classList.toggle("hidden", !scrolledPastThreshold);
   }
 
   function mountTopButton() {
