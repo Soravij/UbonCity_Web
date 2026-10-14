@@ -107,4 +107,62 @@
   window.visualViewport?.addEventListener("resize", lockControlViewportScale);
   window.visualViewport?.addEventListener("scroll", lockControlViewportScale);
   window.addEventListener("resize", lockControlViewportScale);
+
+  const BACK_TO_TOP_THRESHOLD_PX = 300;
+  const TOP_BUTTON_ID = "back-to-top-button";
+  const TOP_BUTTON_STYLE = [
+    "position:fixed", "right:var(--floating-control-right, 12px)", "bottom:12px", "z-index:40",
+    "width:var(--floating-control-width, 52.8px)", "height:var(--floating-control-width, 52.8px)",
+    "padding:0", "border-radius:50%", "box-sizing:border-box",
+    "border:5px solid var(--accent-2)", "background:var(--back-to-top-bg, #fff)",
+    "color:var(--back-to-top-fg, var(--accent-2))", "box-shadow:0 2px 8px var(--theme-overlay)",
+    "display:flex", "flex-direction:column", "align-items:center", "justify-content:center",
+    "white-space:pre", "font-size:13px", "font-weight:700", "line-height:1.1", "opacity:1",
+  ].join(";");
+
+  function ensureTopButton() {
+    if (!document.body) return null;
+    let btn = document.getElementById(TOP_BUTTON_ID);
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = TOP_BUTTON_ID;
+      btn.type = "button";
+      btn.className = "hidden";
+      btn.textContent = "\u25B2\nTOP";
+      btn.setAttribute("aria-label", "กลับขึ้นบนสุดของหน้า");
+      btn.style.cssText = TOP_BUTTON_STYLE;
+      document.body.appendChild(btn);
+    }
+    return btn;
+  }
+
+  function syncTopButton() {
+    const btn = document.getElementById(TOP_BUTTON_ID);
+    if (!btn) return;
+    const scrolledPastThreshold = Number(window.scrollY || 0) > BACK_TO_TOP_THRESHOLD_PX;
+    btn.classList.toggle("hidden", !scrolledPastThreshold);
+  }
+
+  function mountTopButton() {
+    const btn = ensureTopButton();
+    if (!btn) return;
+    if (btn.dataset.topBound !== "1") {
+      btn.dataset.topBound = "1";
+      btn.addEventListener("click", () => {
+        const reduce = typeof window.matchMedia === "function"
+          && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+      });
+    }
+    syncTopButton();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", mountTopButton, { once: true });
+  } else {
+    mountTopButton();
+  }
+  window.addEventListener("scroll", syncTopButton, { passive: true });
+  window.addEventListener("resize", syncTopButton);
+  window.addEventListener("pageshow", mountTopButton);
 })();

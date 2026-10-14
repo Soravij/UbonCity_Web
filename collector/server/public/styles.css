@@ -5547,10 +5547,41 @@ button.is-loading::before {
   background: #000;
 }
 
+/* Floating controls (theme toggle + back-to-top) share one right offset:
+   12px outside the main container, or 12px from the edge when no room.
+   Container widths mirror .container rules above (1200 / 1100 unauth / 1280 assignments).
+   100% resolves against the viewport (scrollbar excluded) where the var is used. */
+:root {
+  --floating-control-width: calc(0.88 * 60px); /* matches .theme-switch-control --scale */
+  --floating-control-right: max(12px, calc((100% - min(1200px, 92vw)) / 2 - var(--floating-control-width) - 12px));
+}
+
+:root:not(.is-authenticated) {
+  --floating-control-right: max(12px, calc((100% - min(1100px, 92vw)) / 2 - var(--floating-control-width) - 12px));
+}
+
+:root:has(.container #panel-assignments.active) {
+  --floating-control-right: max(12px, calc((100% - min(1280px, 100vw - 64px)) / 2 - var(--floating-control-width) - 12px));
+}
+
+@media (max-width: 900px) {
+  :root:has(.container #panel-assignments.active) {
+    --floating-control-right: max(12px, calc((100% - min(1280px, 100vw - 28px)) / 2 - var(--floating-control-width) - 12px));
+  }
+}
+
+#back-to-top-button:hover,
+#back-to-top-button:focus-visible {
+  --back-to-top-bg: var(--accent-2);
+  --back-to-top-fg: #fff;
+  outline: 3px solid var(--theme-focus-ring);
+  outline-offset: 2px;
+}
+
 .theme-mode-control {
   position: fixed;
   --theme-zoom-factor: 1;
-  right: 98px;
+  right: var(--floating-control-right, 12px);
   top: 12px;
   z-index: 180;
   display: flex;
