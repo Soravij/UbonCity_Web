@@ -388,7 +388,7 @@ function buildPhotoUrl(photoName) {
   return `/api/google-maps/photo?name=${encodeURIComponent(name)}&maxWidthPx=1400&maxHeightPx=1400`;
 }
 
-function mapResultToRawItem(result, apiKey, maxImagesPerPlace = 25, maxReviewSnippetsPerPlace = 100) {
+function mapResultToRawItem(result, apiKey, maxImagesPerPlace = 0, maxReviewSnippetsPerPlace = 100) {
   const placeId = String(result?.id || "").trim();
   const name = String(result?.displayName?.text || "").trim();
   const editorialSummary = String(result?.editorialSummary?.text || "").trim();
@@ -471,7 +471,8 @@ function mapResultToRawItem(result, apiKey, maxImagesPerPlace = 25, maxReviewSni
     height_px: photo.height_px,
     author_attributions: photo.author_attributions,
   }));
-  const media = dedupeMediaEntries(
+  const imageCap = Math.max(0, Math.min(25, Number(maxImagesPerPlace ?? 0)));
+  const media = imageCap === 0 ? [] : dedupeMediaEntries(
     photoItems
       .map((photo) => {
         const url = buildPhotoUrl(photo.photo_name);
@@ -493,7 +494,7 @@ function mapResultToRawItem(result, apiKey, maxImagesPerPlace = 25, maxReviewSni
       })
       .filter(Boolean),
     (entry) => entry?.url,
-    Math.max(1, Math.min(25, Number(maxImagesPerPlace || 25)))
+    imageCap
   );
   const photoUrl = media[0]?.url || "";
 
@@ -559,7 +560,7 @@ async function collectFromGoogleMapsQueryPayload(payload = {}) {
   }
 
   const maxResultsPerQuery = Math.max(1, Math.min(60, Number(payload?.max_results_per_query || 10)));
-  const maxImagesPerPlace = toLimitedInt(payload?.max_images_per_place, 25, 1, 25);
+  const maxImagesPerPlace = toLimitedInt(payload?.max_images_per_place, 0, 0, 25);
   const maxReviewSnippetsPerPlace = toLimitedInt(payload?.max_review_snippets_per_place, 100, 1, 100);
   const options = {
     apiKey,
