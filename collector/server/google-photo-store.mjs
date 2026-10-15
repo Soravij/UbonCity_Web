@@ -57,6 +57,11 @@ export function createGooglePhotoStore({ mediaDir, apiKeyProvider = () => proces
       e.status = 503;
       throw e;
     }
+    if (process.env.GOOGLE_PHOTO_FETCH !== "1") {
+      const e = new Error("Google photo fetch disabled");
+      e.status = 404;
+      throw e;
+    }
     const googleUrl = new URL(`https://places.googleapis.com/v1/${name}/media`);
     googleUrl.searchParams.set("maxWidthPx", String(w));
     googleUrl.searchParams.set("maxHeightPx", String(h));
