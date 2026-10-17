@@ -20,6 +20,18 @@ const AI_POLICY_CATALOG = Object.freeze({
     provider: "openai",
     model: "gpt-5.4-mini",
   }),
+  "openrouter-gemini-2.5-flash-lite": Object.freeze({
+    key: "openrouter-gemini-2.5-flash-lite",
+    label: "Gemini 2.5 Flash Lite (OpenRouter)",
+    provider: "openai",
+    model: "google/gemini-2.5-flash-lite",
+  }),
+  "openrouter-gemini-2.5-flash": Object.freeze({
+    key: "openrouter-gemini-2.5-flash",
+    label: "Gemini 2.5 Flash (OpenRouter)",
+    provider: "openai",
+    model: "google/gemini-2.5-flash",
+  }),
 });
 
 const AI_FEATURE_CATALOG = Object.freeze({

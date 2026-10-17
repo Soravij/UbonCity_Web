@@ -160,6 +160,7 @@ async function requestOpenAiJsonCompletion({ model, prompt, imageInputs = [] }) 
           content: buildOpenAiContent(prompt, imageInputs),
         },
       ],
+      response_format: { type: "json_object" },
     }),
   });
 
