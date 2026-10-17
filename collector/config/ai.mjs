@@ -1,7 +1,7 @@
 const KNOWN_PROVIDERS = new Set(["openai", "google"]);
 const AI_POLICY_DEFAULT_KEY = "gemini-2.5-flash-lite";
 
-const AI_POLICY_CATALOG = Object.freeze({
+const AI_POLICY_BASE_CATALOG = Object.freeze({
   "gemini-2.5-flash-lite": Object.freeze({
     key: "gemini-2.5-flash-lite",
     label: "Gemini 2.5 Flash-Lite (economy)",
@@ -20,7 +20,46 @@ const AI_POLICY_CATALOG = Object.freeze({
     provider: "openai",
     model: "gpt-5.4-mini",
   }),
+  "openrouter-gemini-2.5-flash-lite": Object.freeze({
+    key: "openrouter-gemini-2.5-flash-lite",
+    label: "Gemini 2.5 Flash Lite (OpenRouter)",
+    provider: "openai",
+    model: "google/gemini-2.5-flash-lite",
+  }),
+  "openrouter-gemini-2.5-flash": Object.freeze({
+    key: "openrouter-gemini-2.5-flash",
+    label: "Gemini 2.5 Flash (OpenRouter)",
+    provider: "openai",
+    model: "google/gemini-2.5-flash",
+  }),
 });
+
+export function parseExtraModels(raw) {
+  return String(raw || "")
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      const [model, label] = s.split("|").map((x) => (x || "").trim());
+      return model ? { model, label: label || model } : null;
+    })
+    .filter(Boolean);
+}
+
+function buildPolicyCatalog(baseCatalog, extraModels) {
+  const catalog = { ...baseCatalog };
+  for (const { model, label } of extraModels) {
+    const key = "or:" + model;
+    if (catalog[key]) continue;
+    catalog[key] = Object.freeze({ key, label, provider: "openai", model });
+  }
+  return Object.freeze(catalog);
+}
+
+const AI_POLICY_CATALOG = buildPolicyCatalog(
+  AI_POLICY_BASE_CATALOG,
+  parseExtraModels(process.env.COLLECTOR_EXTRA_AI_MODELS),
+);
 
 const AI_FEATURE_CATALOG = Object.freeze({
   fieldPack: Object.freeze({
