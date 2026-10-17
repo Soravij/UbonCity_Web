@@ -119,24 +119,6 @@ const BASIC_FIELD_MASK = [
   "places.websiteUri",
 ];
 
-const RICH_FIELD_MASK = [
-  ...BASIC_FIELD_MASK,
-  "places.primaryTypeDisplayName",
-  "places.rating",
-  "places.userRatingCount",
-  "places.businessStatus",
-  "places.nationalPhoneNumber",
-  "places.internationalPhoneNumber",
-  "places.regularOpeningHours.weekdayDescriptions",
-  "places.currentOpeningHours.weekdayDescriptions",
-  "places.currentOpeningHours.openNow",
-  "places.editorialSummary.text",
-  "places.reviews.rating",
-  "places.reviews.relativePublishTimeDescription",
-  "places.reviews.text.text",
-  "places.reviews.authorAttribution.displayName",
-];
-
 const ID_ONLY_SEARCH_MASK = "places.id,nextPageToken";
 
 const PLACE_DETAILS_FIELD_MASK = [
@@ -201,11 +183,6 @@ function mapPhotoMetadata(photo, index = 0) {
 
 function extractGoogleErrorMessage(payload, fallback = "Unknown error") {
   return String(payload?.error?.message || fallback || "Unknown error").trim();
-}
-
-function isLikelyFieldMaskError(payload = {}) {
-  const msg = extractGoogleErrorMessage(payload, "").toLowerCase();
-  return msg.includes("field mask") || msg.includes("fieldmask") || msg.includes("cannot find field") || msg.includes("invalid");
 }
 
 function mergePlaceData(base = {}, details = {}) {
@@ -582,10 +559,16 @@ async function collectFromGoogleMapsQueryPayload(payload = {}, adapterOptions = 
       details = await fetchPlaceDetails({ id }, options);
     } catch (e) {
       stats.details_failed++;
+      console.warn("[google_maps] details failed", id, e?.message);
+      continue;
+    }
+    if (!details) {
+      stats.details_failed++;
+      console.warn("[google_maps] details empty", id);
       continue;
     }
     stats.details_called++;
-    const place = mergePlaceData({ id }, details || null);
+    const place = mergePlaceData({ id }, details);
     if (!isWithinRadius(place, options)) continue;
     out.push(mapResultToRawItem(place, apiKey, maxImagesPerPlace, maxReviewSnippetsPerPlace));
   }

@@ -4,7 +4,7 @@ import test from "node:test";
 import { collectFromGoogleMapsPayload } from "../collector/sources/adapters/google-maps.mjs";
 
 // searchResponses: ordered searchText bodies; failDetailIds: place ids whose details fetch rejects.
-async function run(searchResponses, adapterOptions, failDetailIds = []) {
+async function run(searchResponses, adapterOptions, failDetailIds = [], emptyDetailIds = []) {
   const originalFetch = globalThis.fetch;
   const searchMasks = [];
   const detailIds = [];
@@ -19,6 +19,7 @@ async function run(searchResponses, adapterOptions, failDetailIds = []) {
     const id = href.split("/places/")[1].split("?")[0];
     detailIds.push(id);
     if (failDetailIds.includes(id)) throw new Error("network down");
+    if (emptyDetailIds.includes(id)) return { ok: false, status: 404, json: async () => ({}) };
     return { ok: true, status: 200, json: async () => ({ id, displayName: { text: `Place ${id}` }, formattedAddress: "addr" }) };
   };
   try {
@@ -56,6 +57,15 @@ test("a throwing place details call is counted and does not fail the request", a
   const { items, detailIds } = await run([ids("A", "B"), ids()], {}, ["A"]);
   assert.deepEqual(detailIds, ["A", "B"]);
   assert.equal(items.length, 1);
+  assert.equal(items.collect_stats.details_failed, 1);
+  assert.equal(items.collect_stats.details_called, 1);
+});
+
+test("a non-OK place details response drops the row and counts as failed", async () => {
+  const { items, detailIds } = await run([ids("A", "B"), ids()], {}, [], ["A"]);
+  assert.deepEqual(detailIds, ["A", "B"]);
+  assert.equal(items.length, 1);
+  assert.match(items[0].normalized_json.title, /Place B/);
   assert.equal(items.collect_stats.details_failed, 1);
   assert.equal(items.collect_stats.details_called, 1);
 });

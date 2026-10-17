@@ -57,7 +57,8 @@ test("places outside radius are dropped after place details supply the location"
   assert.ok(Math.abs((rect.high.latitude - rect.low.latitude) / 2 * 111320 - 5000) < 1);
   assert.equal(items.length, 1);
   assert.match(items[0].normalized_json.title, /Place near/);
-  assert.equal(detailCalls.length, 3);
+  assert.deepEqual(detailCalls.map((href) => new URL(href).pathname.split("/places/")[1]), ["near", "far", "nogeo"]);
+  assert.deepEqual(items.map((item) => item.source_ref), ["near"]);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /nogeo/);
 });

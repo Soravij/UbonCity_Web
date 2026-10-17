@@ -28,7 +28,8 @@ async function run(pages, extraPayload) {
         json: async () => page.body,
       };
     }
-    return { ok: false, status: 404, json: async () => ({}) };
+    const id = new URL(href).pathname.split("/places/")[1];
+    return { ok: true, status: 200, json: async () => ({ id, displayName: { text: `Place ${id}` }, formattedAddress: "addr" }) };
   };
   try {
     const items = await collectFromGoogleMapsPayload({

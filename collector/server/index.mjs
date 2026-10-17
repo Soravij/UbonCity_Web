@@ -14321,7 +14321,8 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
 
     try {
       const collected = await collectRawFromAdapter(adapter, payload, {
-        isKnownPlaceId: (id) => Boolean(findLiveItemByGooglePlaceId(db, id)),
+        isKnownPlaceId: (id) => Boolean(findLiveItemByGooglePlaceId(db, id))
+          || Boolean(db.prepare("SELECT 1 FROM source_raw_items WHERE source_ref = ? LIMIT 1").get(id)),
       });
       signalSummary = summarizeCollectSignals(collected);
 
