@@ -18,12 +18,12 @@ export function listSourceAdapters() {
   return Object.keys(ADAPTERS);
 }
 
-export async function collectRawFromAdapter(adapterKey, payload) {
+export async function collectRawFromAdapter(adapterKey, payload, options = {}) {
   const key = String(adapterKey || "manual").trim().toLowerCase();
   const runner = ADAPTERS[key];
   if (!runner) {
     throw new Error(`Unsupported adapter: ${adapterKey}`);
   }
 
-  return runner(payload);
+  return runner(payload, options);
 }

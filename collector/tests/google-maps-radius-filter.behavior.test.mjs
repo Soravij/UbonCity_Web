@@ -25,7 +25,8 @@ async function run(places, extraPayload) {
       return { ok: true, status: 200, json: async () => ({ places }) };
     }
     detailCalls.push(href);
-    return { ok: false, status: 404, json: async () => ({}) };
+    const found = places.find((p) => new URL(href).pathname.endsWith(`/places/${p.id}`));
+    return found ? { ok: true, status: 200, json: async () => found } : { ok: false, status: 404, json: async () => ({}) };
   };
   try {
     const items = await collectFromGoogleMapsPayload({
@@ -42,7 +43,7 @@ async function run(places, extraPayload) {
   }
 }
 
-test("places outside radius are dropped before place details are fetched", async () => {
+test("places outside radius are dropped after place details supply the location", async () => {
   const { items, detailCalls, searchBodies, warnings } = await run([
     place("near", 15.2450, 104.8475), // ~50 m
     place("far", 15.3447, 104.8472), // ~11 km
@@ -56,8 +57,7 @@ test("places outside radius are dropped before place details are fetched", async
   assert.ok(Math.abs((rect.high.latitude - rect.low.latitude) / 2 * 111320 - 5000) < 1);
   assert.equal(items.length, 1);
   assert.match(items[0].normalized_json.title, /Place near/);
-  assert.equal(detailCalls.length, 1);
-  assert.match(detailCalls[0], /near/);
+  assert.equal(detailCalls.length, 3);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /nogeo/);
 });

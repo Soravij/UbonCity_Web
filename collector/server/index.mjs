@@ -14320,7 +14320,9 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
     let seededEvidenceCount = 0;
 
     try {
-      const collected = await collectRawFromAdapter(adapter, payload);
+      const collected = await collectRawFromAdapter(adapter, payload, {
+        isKnownPlaceId: (id) => Boolean(findLiveItemByGooglePlaceId(db, id)),
+      });
       signalSummary = summarizeCollectSignals(collected);
 
       let junkMediaSkipped = 0;
@@ -14408,6 +14410,7 @@ app.post("/api/collect", requireAuth, workflowRateLimit, async (req, res, next) 
         reference_media_count: referenceMediaCount,
         seeded_evidence_count: seededEvidenceCount,
         signal_summary: signalSummary,
+        collect_stats: collected.collect_stats || null,
         auto_import: autoImport,
       });
     } catch (err) {

@@ -137,6 +137,8 @@ const RICH_FIELD_MASK = [
   "places.reviews.authorAttribution.displayName",
 ];
 
+const ID_ONLY_SEARCH_MASK = "places.id,nextPageToken";
+
 const PLACE_DETAILS_FIELD_MASK = [
   "id",
   "photos.name",
@@ -296,30 +298,17 @@ function buildLocationRestrictionRect(lat, lng, radiusMeters) {
 }
 
 async function postTextSearch(body, options) {
-  let response = await fetchWithTimeout("https://places.googleapis.com/v1/places:searchText", {
+  const response = await fetchWithTimeout("https://places.googleapis.com/v1/places:searchText", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": options.apiKey,
-      "X-Goog-FieldMask": [...RICH_FIELD_MASK, "nextPageToken"].join(","),
+      "X-Goog-FieldMask": ID_ONLY_SEARCH_MASK,
     },
     body: JSON.stringify(body),
   }, "Google Places search request");
 
-  let payload = await response.json().catch(() => ({}));
-
-  if (!response.ok && isLikelyFieldMaskError(payload)) {
-    response = await fetchWithTimeout("https://places.googleapis.com/v1/places:searchText", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": options.apiKey,
-        "X-Goog-FieldMask": [...BASIC_FIELD_MASK, "nextPageToken"].join(","),
-      },
-      body: JSON.stringify(body),
-    }, "Google Places search fallback request");
-    payload = await response.json().catch(() => ({}));
-  }
+  const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
     const message = extractGoogleErrorMessage(payload, response.statusText || "Unknown error");
@@ -341,9 +330,9 @@ async function fetchTextSearchNew(query, options) {
     baseBody.locationRestriction = buildLocationRestrictionRect(options.location.lat, options.location.lng, options.radius);
   }
 
-  let places = [];
+  const ids = [];
   let pageToken = "";
-  for (let page = 0; page < MAX_TEXT_SEARCH_PAGES && places.length < options.maxResultsPerQuery; page += 1) {
+  for (let page = 0; page < MAX_TEXT_SEARCH_PAGES && ids.length < options.maxResultsPerQuery; page += 1) {
     const body = pageToken ? { ...baseBody, pageToken } : baseBody;
     let payload;
     try {
@@ -353,33 +342,30 @@ async function fetchTextSearchNew(query, options) {
       console.warn(`google-maps: stop paging "${query}" at page ${page + 1}: ${err?.message || err}`);
       break;
     }
-    if (Array.isArray(payload?.places)) places.push(...payload.places);
+    if (Array.isArray(payload?.places)) {
+      for (const place of payload.places) {
+        const id = String(place?.id || "").trim();
+        if (id) ids.push(id);
+      }
+    }
     pageToken = String(payload?.nextPageToken || "").trim();
     if (!pageToken) break;
   }
-  places = places.slice(0, options.maxResultsPerQuery);
-  const enriched = [];
+  return ids.slice(0, options.maxResultsPerQuery);
+}
 
-  // locationRestriction is a rectangle; drop the corners outside the radius before spending quota on details.
-  if (options.location && Number.isFinite(options.location.lat) && Number.isFinite(options.location.lng) && options.radius > 0) {
-    places = places.filter((place) => {
-      const lat = toNumber(place?.location?.latitude);
-      const lng = toNumber(place?.location?.longitude);
-      if (lat == null || lng == null) {
-        console.warn(`google-maps: dropping place ${String(place?.id || "").trim() || "(no id)"} without lat/lng`);
-        return false;
-      }
-      return haversineMeters(options.location.lat, options.location.lng, lat, lng) <= options.radius;
-    });
+// locationRestriction is a rectangle; drop the corners outside the radius (checked after details supply the location).
+function isWithinRadius(place, options) {
+  if (!(options.location && Number.isFinite(options.location.lat) && Number.isFinite(options.location.lng) && options.radius > 0)) {
+    return true;
   }
-
-  // Enrich per-place details to increase photos/review material when available.
-  for (const place of places) {
-    const details = await fetchPlaceDetails(place, options);
-    enriched.push(mergePlaceData(place, details || null));
+  const lat = toNumber(place?.location?.latitude);
+  const lng = toNumber(place?.location?.longitude);
+  if (lat == null || lng == null) {
+    console.warn(`google-maps: dropping place ${String(place?.id || "").trim() || "(no id)"} without lat/lng`);
+    return false;
   }
-
-  return enriched;
+  return haversineMeters(options.location.lat, options.location.lng, lat, lng) <= options.radius;
 }
 
 function buildPhotoUrl(photoName) {
@@ -548,7 +534,7 @@ function mapResultToRawItem(result, apiKey, maxImagesPerPlace = 0, maxReviewSnip
   );
 }
 
-async function collectFromGoogleMapsQueryPayload(payload = {}) {
+async function collectFromGoogleMapsQueryPayload(payload = {}, adapterOptions = {}) {
   const apiKey = String(payload?.api_key || process.env.GOOGLE_MAPS_API_KEY || "").trim();
   if (!apiKey) {
     throw new Error("GOOGLE_MAPS_API_KEY is missing");
@@ -574,31 +560,48 @@ async function collectFromGoogleMapsQueryPayload(payload = {}) {
         : null,
   };
 
-  const dedupe = new Set();
+  const seen = new Set();
+  const stats = { search_ids: 0, skipped_duplicate: 0, skipped_known: 0, details_called: 0, details_failed: 0 };
+  const toFetch = [];
   const out = [];
 
   for (const query of queries) {
-    const places = await fetchTextSearchNew(query, options);
-    for (const place of places) {
-      const raw = mapResultToRawItem(place, apiKey, maxImagesPerPlace, maxReviewSnippetsPerPlace);
-      const key = raw.source_ref || raw.source_url || raw.normalized_json?.title;
-      if (!key || dedupe.has(key)) continue;
-      dedupe.add(key);
-      out.push(raw);
+    const ids = await fetchTextSearchNew(query, options);
+    for (const id of ids) {
+      stats.search_ids++;
+      if (seen.has(id)) { stats.skipped_duplicate++; continue; }
+      seen.add(id);
+      if (adapterOptions?.isKnownPlaceId && adapterOptions.isKnownPlaceId(id)) { stats.skipped_known++; continue; }
+      toFetch.push(id);
     }
   }
 
+  for (const id of toFetch) {
+    let details;
+    try {
+      details = await fetchPlaceDetails({ id }, options);
+    } catch (e) {
+      stats.details_failed++;
+      continue;
+    }
+    stats.details_called++;
+    const place = mergePlaceData({ id }, details || null);
+    if (!isWithinRadius(place, options)) continue;
+    out.push(mapResultToRawItem(place, apiKey, maxImagesPerPlace, maxReviewSnippetsPerPlace));
+  }
+
+  out.collect_stats = stats;
   return out;
 }
 
-export async function collectFromGoogleMapsPayload(payload = []) {
+export async function collectFromGoogleMapsPayload(payload = [], options = {}) {
   const rows = toArray(payload);
   if (rows.length) {
     return rows.map((row) => normalizeRawItem({ ...row, source_name: row.source_name || "google-maps" }, "google_maps"));
   }
 
   if (payload && typeof payload === "object") {
-    return collectFromGoogleMapsQueryPayload(payload);
+    return collectFromGoogleMapsQueryPayload(payload, options);
   }
 
   return [];
