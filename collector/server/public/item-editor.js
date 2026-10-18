@@ -548,6 +548,7 @@ function setFieldPackRegenerateStatus(text, isError = false) {
   node.textContent = text || "";
   node.style.color = isError ? "#b42318" : "#1f8a52";
 }
+let reelJsonDirty = false;
 function setReelStatus(text, isError = false) {
   const el = document.getElementById("fp-reel-status");
   if (!el) return;
@@ -565,15 +566,20 @@ function formatReelScript(script) {
   if (Array.isArray(script.hashtags) && script.hashtags.length) lines.push(script.hashtags.join(" "));
   return lines.join("\n");
 }
-function renderReelScript(data) {
+function renderReelScript(data, { force = false } = {}) {
   const script = data?.reel_script?.script_json || null;
   const preview = document.getElementById("fp-reel-preview");
   const json = document.getElementById("fp-reel-json");
   if (preview) preview.value = formatReelScript(script);
-  if (json) json.value = script ? JSON.stringify(script, null, 2) : "";
+  const keepEdits = reelJsonDirty && !force;
+  if (json && !keepEdits) {
+    json.value = script ? JSON.stringify(script, null, 2) : "";
+    reelJsonDirty = false;
+  }
   const src = data?.reel_script?.source_field_pack_id ?? null;
   const cur = data?.current_field_pack_id ?? null;
-  if (script && src && cur && src !== cur) setReelStatus("บทนี้สร้างจาก field pack เวอร์ชันเก่า", true);
+  if (keepEdits) setReelStatus("มีบทที่แก้ค้างไว้ ยังไม่ได้กดบันทึกบท", true);
+  else if (script && src && cur && src !== cur) setReelStatus("บทนี้สร้างจาก field pack เวอร์ชันเก่า", true);
   else setReelStatus("");
 }
 async function loadReelScript() {
@@ -5800,6 +5806,7 @@ function wire() {
     }
   });
 
+  document.getElementById("fp-reel-json")?.addEventListener("input", () => { reelJsonDirty = true; });
   document.getElementById("btn-reel-generate")?.addEventListener("click", (e) => withButtonLoading(e.currentTarget, "กำลังสร้างบท...", async () => {
     const editGuard = getEditPermissionGuard();
     if (!editGuard.allowed) {
@@ -5807,9 +5814,10 @@ function wire() {
       setReelStatus(editGuard.reason, true);
       return;
     }
+    if (reelJsonDirty && !window.confirm("บทที่แก้ค้างไว้จะถูกแทนที่ ต่อไหม?")) return;
     try {
       const data = await api(`/api/items/${state.itemId}/reel-script/generate`, { method: "POST", body: "{}" });
-      renderReelScript(data); setReelStatus("สร้างบทแล้ว");
+      renderReelScript(data, { force: true }); setReelStatus("สร้างบทแล้ว");
     } catch (err) { setReelStatus(err.message, true); }
   }));
   document.getElementById("btn-reel-save")?.addEventListener("click", (e) => withButtonLoading(e.currentTarget, "กำลังบันทึก...", async () => {
@@ -5824,7 +5832,7 @@ function wire() {
     catch { setReelStatus("JSON ไม่ถูกต้อง", true); return; }
     try {
       const data = await api(`/api/items/${state.itemId}/reel-script`, { method: "PUT", body: JSON.stringify({ script }) });
-      renderReelScript(data); setReelStatus("บันทึกแล้ว");
+      renderReelScript(data, { force: true }); setReelStatus("บันทึกแล้ว");
     } catch (err) { setReelStatus(err.message, true); }
   }));
 

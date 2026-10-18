@@ -921,7 +921,7 @@ const REEL_CAPTURE_TYPES = new Set(["photo", "video", "both"]);
 
 export function buildReelScriptPrompt(item, fieldPack) {
   const profile = String(item?.agent_profile?.profile_text || "").trim();
-  const packJson = JSON.stringify(fieldPack ?? {}).slice(0, 12000);
+  const packJson = JSON.stringify(fieldPack ?? {});
   return [
     profile ? `AGENT PROFILE:\n${profile}` : "",
     "TASK: Write a vertical (9:16) short Reel script in Thai for this place, 20-30 seconds total.",
@@ -939,8 +939,8 @@ export function buildReelScriptPrompt(item, fieldPack) {
 
 export function normalizeReelScript(raw) {
   if (!raw || typeof raw !== "object") return null;
-  const segs = Array.isArray(raw.segments) ? raw.segments : [];
-  const segments = segs.slice(0, REEL_SCRIPT_MAX_SEGMENTS).map((s) => {
+  const segs = Array.isArray(raw.segments) ? raw.segments.slice(0, 30) : [];
+  const mapped = segs.map((s) => {
     const start = Number(s?.start_sec);
     const end = Number(s?.end_sec);
     const shot = String(s?.shot || "").trim();
@@ -954,7 +954,14 @@ export function normalizeReelScript(raw) {
       voiceover: String(s?.voiceover || "").trim(),
       on_screen_text: String(s?.on_screen_text || "").trim(),
     };
-  }).filter(Boolean);
+  }).filter(Boolean).sort((a, b) => a.start_sec - b.start_sec);
+  const segments = [];
+  for (const seg of mapped) {
+    const prev = segments[segments.length - 1];
+    if (prev && seg.start_sec < prev.end_sec) continue;
+    segments.push(seg);
+    if (segments.length >= REEL_SCRIPT_MAX_SEGMENTS) break;
+  }
   if (!segments.length) return null;
   const hashtags = (Array.isArray(raw.hashtags) ? raw.hashtags : [])
     .map((h) => String(h || "").trim()).filter(Boolean)

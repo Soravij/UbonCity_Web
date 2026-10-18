@@ -25,3 +25,12 @@ test("buildReelScriptPrompt includes title and field pack", () => {
   assert.match(p, /Mighty Coffee/);
   assert.match(p, /hook-x/);
 });
+test("normalizeReelScript sorts and drops overlapping segments", () => {
+  const out = normalizeReelScript({ segments: [
+    { start_sec: 5, end_sec: 9, shot: "C" },
+    { start_sec: 0, end_sec: 5, shot: "A" },
+    { start_sec: 4, end_sec: 6, shot: "B" },
+  ] });
+  assert.deepEqual(out.segments.map((s) => s.shot), ["A", "C"]);
+  assert.equal(out.duration_sec, 9);
+});

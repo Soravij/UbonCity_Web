@@ -13049,6 +13049,10 @@ app.post("/api/items/:id/reel-script/generate", requireRole("owner", "admin", "u
   try {
     const aiConfig = getEffectiveAiConfig();
     const agentEngine = createAgentGenerationEngine(aiConfig);
+    if (typeof agentEngine?.generateReelScript !== "function") {
+      res.status(400).json({ error: "engine ปัจจุบัน (external) ยังไม่รองรับการสร้างบท Reel" });
+      return;
+    }
     const agentInput = { ...item, agent_profile: getEffectiveAgentProfile(FIELD_PACK_AGENT_KEY) };
     const script = await agentEngine.generateReelScript(agentInput, fieldPack, actorEmail(req));
     const saved = repo.upsertReelScript(id, { sourceFieldPackId: fieldPack.id, script, generatedBy: actorEmail(req), updatedBy: actorEmail(req) });
