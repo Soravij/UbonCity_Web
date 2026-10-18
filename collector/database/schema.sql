@@ -1249,3 +1249,15 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS field_pack_reel_scripts (
+  content_item_id INTEGER PRIMARY KEY,
+  source_field_pack_id INTEGER,
+  script_json TEXT NOT NULL DEFAULT '{}',
+  generated_by TEXT,
+  updated_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(content_item_id) REFERENCES content_items(id) ON DELETE CASCADE,
+  FOREIGN KEY(source_field_pack_id) REFERENCES field_packs(id) ON DELETE SET NULL
+);
