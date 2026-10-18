@@ -916,6 +916,52 @@ function createExternalAgentGenerationEngine(aiConfig) {
   };
 }
 
+const REEL_SCRIPT_MAX_SEGMENTS = 10;
+const REEL_CAPTURE_TYPES = new Set(["photo", "video", "both"]);
+
+export function buildReelScriptPrompt(item, fieldPack) {
+  const profile = String(item?.agent_profile?.profile_text || "").trim();
+  const packJson = JSON.stringify(fieldPack ?? {}).slice(0, 12000);
+  return [
+    profile ? `AGENT PROFILE:\n${profile}` : "",
+    "TASK: Write a vertical (9:16) short Reel script in Thai for this place, 20-30 seconds total.",
+    "Tone: relaxed, casual travel recommendation. Keep history/background to a minimum.",
+    "Use ONLY facts present in the field pack. Do not invent prices, parking, facilities, or anything listed as still to verify.",
+    "The first segment (starting at 0s, about 3s long) must be a hook shot with visible action.",
+    "Each segment is one concrete, filmable shot the field team must capture.",
+    "Voiceover lines must be short enough to speak within their segment.",
+    `PLACE: ${String(item?.title || "").trim()}`,
+    `FIELD PACK JSON:\n${packJson}`,
+    'Return JSON only: {"duration_sec":number,"segments":[{"start_sec":number,"end_sec":number,"shot":string,"capture_type":"video"|"photo"|"both","voiceover":string,"on_screen_text":string}],"caption":string,"hashtags":[string]}',
+    `Use 4-${REEL_SCRIPT_MAX_SEGMENTS} contiguous segments starting at 0.`,
+  ].filter(Boolean).join("\n\n");
+}
+
+export function normalizeReelScript(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const segs = Array.isArray(raw.segments) ? raw.segments : [];
+  const segments = segs.slice(0, REEL_SCRIPT_MAX_SEGMENTS).map((s) => {
+    const start = Number(s?.start_sec);
+    const end = Number(s?.end_sec);
+    const shot = String(s?.shot || "").trim();
+    if (!shot || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) return null;
+    const ct = String(s?.capture_type || "video").trim().toLowerCase();
+    return {
+      start_sec: Math.round(start * 10) / 10,
+      end_sec: Math.round(end * 10) / 10,
+      shot,
+      capture_type: REEL_CAPTURE_TYPES.has(ct) ? ct : "video",
+      voiceover: String(s?.voiceover || "").trim(),
+      on_screen_text: String(s?.on_screen_text || "").trim(),
+    };
+  }).filter(Boolean);
+  if (!segments.length) return null;
+  const hashtags = (Array.isArray(raw.hashtags) ? raw.hashtags : [])
+    .map((h) => String(h || "").trim()).filter(Boolean)
+    .map((h) => (h.startsWith("#") ? h : `#${h}`)).slice(0, 10);
+  return { duration_sec: segments[segments.length - 1].end_sec, segments, caption: String(raw.caption || "").trim(), hashtags };
+}
+
 export function createAgentGenerationEngine(aiConfig) {
   if (String(aiConfig?.agentEngine || "internal").trim().toLowerCase() === "external") {
     return createExternalAgentGenerationEngine(aiConfig);
@@ -980,6 +1026,16 @@ export function createAgentGenerationEngine(aiConfig) {
       if (!parsed) {
         throw new Error("AI response is not valid JSON field pack");
       }
+      return parsed;
+    },
+
+    async generateReelScript(item, fieldPack, actorEmail) {
+      if (!aiConfig?.enabled) throw new Error("backend AI proxy is not enabled");
+      const fullPrompt = buildReelScriptPrompt(item, fieldPack);
+      debugPrompt('reel_script', fullPrompt, { itemId: item?.id, title: String(item?.title || '').trim() });
+      const result = await executeBackendAiJson({ aiConfig, featureKey: "fieldPack", task: "reel_script", prompt: fullPrompt, actorEmail });
+      const parsed = normalizeReelScript(result.parsed || parseJsonLike(result.outputText));
+      if (!parsed) throw new Error("AI response is not valid reel script JSON");
       return parsed;
     },
 

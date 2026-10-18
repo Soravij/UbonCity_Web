@@ -75,6 +75,7 @@ import {
   FIELD_PACK_AGENT_KEY,
   MAX_REFERENCE_MEDIA_FOR_AI,
   createAgentGenerationEngine,
+  normalizeReelScript,
 } from "../services/agent-generation.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildArticleSuggestionPrompt, buildArticleSuggestionRequestContext, normalizeArticleSuggestion } from "../services/article-agent.mjs";
@@ -13024,6 +13025,52 @@ app.put("/api/field-packs/:fieldPackId", requireRole("owner", "admin", "user"), 
     const isNotFound = /field pack not found|item not found/i.test(msg);
     res.status(isNotFound ? 404 : isConflict ? 409 : 400).json({ error: msg });
   }
+});
+
+const reelScriptInFlight = new Set();
+
+app.get("/api/items/:id/reel-script", requireRole("owner", "admin", "user"), (req, res) => {
+  const id = Number(req.params.id) || 0;
+  const item = id ? repo.getItem(id) : null;
+  if (!item) { res.status(404).json({ error: "Item not found" }); return; }
+  const fieldPack = repo.getCurrentFieldPackByItem(id);
+  res.json({ ok: true, item_id: id, reel_script: repo.getReelScript(id), current_field_pack_id: fieldPack?.id ?? null });
+});
+
+app.post("/api/items/:id/reel-script/generate", requireRole("owner", "admin", "user"), workflowRateLimit, async (req, res) => {
+  const id = Number(req.params.id) || 0;
+  const item = id ? repo.getItem(id) : null;
+  if (!item) { res.status(404).json({ error: "Item not found" }); return; }
+  if (!ensureItemMutationAccess(req, res, item)) return;
+  const fieldPack = repo.getCurrentFieldPackByItem(id);
+  if (!fieldPack) { res.status(400).json({ error: "ยังไม่มี field pack" }); return; }
+  if (reelScriptInFlight.has(id)) { res.status(409).json({ error: "กำลังสร้างบทอยู่" }); return; }
+  reelScriptInFlight.add(id);
+  try {
+    const aiConfig = getEffectiveAiConfig();
+    const agentEngine = createAgentGenerationEngine(aiConfig);
+    const agentInput = { ...item, agent_profile: getEffectiveAgentProfile(FIELD_PACK_AGENT_KEY) };
+    const script = await agentEngine.generateReelScript(agentInput, fieldPack, actorEmail(req));
+    const saved = repo.upsertReelScript(id, { sourceFieldPackId: fieldPack.id, script, generatedBy: actorEmail(req), updatedBy: actorEmail(req) });
+    res.json({ ok: true, item_id: id, reel_script: saved, current_field_pack_id: fieldPack.id });
+  } catch (err) {
+    res.status(400).json({ error: String(err?.message || err) });
+  } finally {
+    reelScriptInFlight.delete(id);
+  }
+});
+
+app.put("/api/items/:id/reel-script", requireRole("owner", "admin", "user"), (req, res) => {
+  const id = Number(req.params.id) || 0;
+  const item = id ? repo.getItem(id) : null;
+  if (!item) { res.status(404).json({ error: "Item not found" }); return; }
+  if (!ensureItemMutationAccess(req, res, item)) return;
+  const script = normalizeReelScript(req.body?.script);
+  if (!script) { res.status(400).json({ error: "บทไม่ถูกต้อง (ต้องมี segments อย่างน้อย 1 ช่วง)" }); return; }
+  const existing = repo.getReelScript(id);
+  const saved = repo.upsertReelScript(id, { sourceFieldPackId: existing?.source_field_pack_id ?? null, script, updatedBy: actorEmail(req) });
+  const fieldPack = repo.getCurrentFieldPackByItem(id);
+  res.json({ ok: true, item_id: id, reel_script: saved, current_field_pack_id: fieldPack?.id ?? null });
 });
 
 app.post("/api/items/:id/field-pack/regenerate", requireRole("owner", "admin", "user"), workflowRateLimit, async (req, res) => {

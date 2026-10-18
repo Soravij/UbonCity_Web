@@ -3385,6 +3385,15 @@ export function createRepository(db) {
       updated_at=CURRENT_TIMESTAMP
   `);
 
+  const getReelScriptStmt = db.prepare(`SELECT * FROM field_pack_reel_scripts WHERE content_item_id=? LIMIT 1`);
+  const upsertReelScriptStmt = db.prepare(`
+    INSERT INTO field_pack_reel_scripts (content_item_id, source_field_pack_id, script_json, generated_by, updated_by, updated_at)
+    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(content_item_id) DO UPDATE SET source_field_pack_id=excluded.source_field_pack_id,
+      script_json=excluded.script_json,
+      generated_by=COALESCE(excluded.generated_by, field_pack_reel_scripts.generated_by),
+      updated_by=excluded.updated_by, updated_at=CURRENT_TIMESTAMP`);
+
   const listAiFeaturePoliciesStmt = db.prepare(`
     SELECT *
     FROM ai_feature_policies
@@ -9761,6 +9770,21 @@ export function createRepository(db) {
     return getAgentProfile(key);
   }
 
+  function getReelScript(contentItemId) {
+    const id = Number(contentItemId) || 0;
+    if (!id) return null;
+    const row = getReelScriptStmt.get(id);
+    return row ? { ...row, script_json: parseJson(row.script_json, {}) } : null;
+  }
+
+  function upsertReelScript(contentItemId, { sourceFieldPackId = null, script, generatedBy = null, updatedBy = null } = {}) {
+    const id = Number(contentItemId) || 0;
+    if (!id) throw new Error("content_item_id is required");
+    if (!script || typeof script !== "object") throw new Error("script is required");
+    upsertReelScriptStmt.run(id, Number(sourceFieldPackId) || null, JSON.stringify(script), generatedBy, updatedBy);
+    return getReelScript(id);
+  }
+
   function listAiFeaturePolicies() {
     return listAiFeaturePoliciesStmt.all().map(normalizeAiFeaturePolicyRow).filter(Boolean);
   }
@@ -13021,6 +13045,8 @@ export function createRepository(db) {
     listAgentProfiles,
     getAgentProfile,
     upsertAgentProfile,
+    getReelScript,
+    upsertReelScript,
     listAiFeaturePolicies,
     getAiFeaturePolicy,
     upsertAiFeaturePolicy,

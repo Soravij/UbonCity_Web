@@ -548,6 +548,39 @@ function setFieldPackRegenerateStatus(text, isError = false) {
   node.textContent = text || "";
   node.style.color = isError ? "#b42318" : "#1f8a52";
 }
+function setReelStatus(text, isError = false) {
+  const el = document.getElementById("fp-reel-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.style.color = isError ? "#b42318" : "#1f8a52";
+}
+function formatReelScript(script) {
+  if (!script || !Array.isArray(script.segments)) return "";
+  const lines = script.segments.map((s) => [
+    `[${s.start_sec}–${s.end_sec} วิ] ${s.shot} (${s.capture_type})`,
+    s.voiceover ? `  พากย์: ${s.voiceover}` : "",
+    s.on_screen_text ? `  ตัวหนังสือ: ${s.on_screen_text}` : "",
+  ].filter(Boolean).join("\n"));
+  if (script.caption) lines.push(`\nแคปชัน: ${script.caption}`);
+  if (Array.isArray(script.hashtags) && script.hashtags.length) lines.push(script.hashtags.join(" "));
+  return lines.join("\n");
+}
+function renderReelScript(data) {
+  const script = data?.reel_script?.script_json || null;
+  const preview = document.getElementById("fp-reel-preview");
+  const json = document.getElementById("fp-reel-json");
+  if (preview) preview.value = formatReelScript(script);
+  if (json) json.value = script ? JSON.stringify(script, null, 2) : "";
+  const src = data?.reel_script?.source_field_pack_id ?? null;
+  const cur = data?.current_field_pack_id ?? null;
+  if (script && src && cur && src !== cur) setReelStatus("บทนี้สร้างจาก field pack เวอร์ชันเก่า", true);
+  else setReelStatus("");
+}
+async function loadReelScript() {
+  if (!state.itemId) return;
+  try { renderReelScript(await api(`/api/items/${state.itemId}/reel-script`)); }
+  catch (err) { setReelStatus(err.message, true); }
+}
 async function withButtonLoading(btn, pendingLabel, action) {
   if (!btn) return action();
   if (btn.dataset.loading === "1") return null;
@@ -4137,6 +4170,7 @@ function fillFieldPackForm(fieldPack = null) {
   renderFieldPackMediaHintEditor(pack);
   autosizeFieldPackTextareas();
   renderFieldProgressControl();
+  loadReelScript();
 }
 
 function readFieldPackFormState() {
@@ -5765,6 +5799,34 @@ function wire() {
       setStatus(`ส่งกลับไป Clean ไม่สำเร็จ: ${err.message}`, true);
     }
   });
+
+  document.getElementById("btn-reel-generate")?.addEventListener("click", (e) => withButtonLoading(e.currentTarget, "กำลังสร้างบท...", async () => {
+    const editGuard = getEditPermissionGuard();
+    if (!editGuard.allowed) {
+      applyEditorActionGuards();
+      setReelStatus(editGuard.reason, true);
+      return;
+    }
+    try {
+      const data = await api(`/api/items/${state.itemId}/reel-script/generate`, { method: "POST", body: "{}" });
+      renderReelScript(data); setReelStatus("สร้างบทแล้ว");
+    } catch (err) { setReelStatus(err.message, true); }
+  }));
+  document.getElementById("btn-reel-save")?.addEventListener("click", (e) => withButtonLoading(e.currentTarget, "กำลังบันทึก...", async () => {
+    const editGuard = getEditPermissionGuard();
+    if (!editGuard.allowed) {
+      applyEditorActionGuards();
+      setReelStatus(editGuard.reason, true);
+      return;
+    }
+    let script;
+    try { script = JSON.parse(document.getElementById("fp-reel-json")?.value || "null"); }
+    catch { setReelStatus("JSON ไม่ถูกต้อง", true); return; }
+    try {
+      const data = await api(`/api/items/${state.itemId}/reel-script`, { method: "PUT", body: JSON.stringify({ script }) });
+      renderReelScript(data); setReelStatus("บันทึกแล้ว");
+    } catch (err) { setReelStatus(err.message, true); }
+  }));
 
   qs("btn-next-ai")?.addEventListener("click", async () => {
     try {
