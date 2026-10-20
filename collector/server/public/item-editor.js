@@ -548,45 +548,6 @@ function setFieldPackRegenerateStatus(text, isError = false) {
   node.textContent = text || "";
   node.style.color = isError ? "#b42318" : "#1f8a52";
 }
-let reelJsonDirty = false;
-function setReelStatus(text, isError = false) {
-  const el = document.getElementById("fp-reel-status");
-  if (!el) return;
-  el.textContent = text || "";
-  el.style.color = isError ? "#b42318" : "#1f8a52";
-}
-function formatReelScript(script) {
-  if (!script || !Array.isArray(script.segments)) return "";
-  const lines = script.segments.map((s) => [
-    `[${s.start_sec}–${s.end_sec} วิ] ${s.shot} (${s.capture_type})`,
-    s.voiceover ? `  พากย์: ${s.voiceover}` : "",
-    s.on_screen_text ? `  ตัวหนังสือ: ${s.on_screen_text}` : "",
-  ].filter(Boolean).join("\n"));
-  if (script.caption) lines.push(`\nแคปชัน: ${script.caption}`);
-  if (Array.isArray(script.hashtags) && script.hashtags.length) lines.push(script.hashtags.join(" "));
-  return lines.join("\n");
-}
-function renderReelScript(data, { force = false } = {}) {
-  const script = data?.reel_script?.script_json || null;
-  const preview = document.getElementById("fp-reel-preview");
-  const json = document.getElementById("fp-reel-json");
-  if (preview) preview.value = formatReelScript(script);
-  const keepEdits = reelJsonDirty && !force;
-  if (json && !keepEdits) {
-    json.value = script ? JSON.stringify(script, null, 2) : "";
-    reelJsonDirty = false;
-  }
-  const src = data?.reel_script?.source_field_pack_id ?? null;
-  const cur = data?.current_field_pack_id ?? null;
-  if (keepEdits) setReelStatus("มีบทที่แก้ค้างไว้ ยังไม่ได้กดบันทึกบท", true);
-  else if (script && src && cur && src !== cur) setReelStatus("บทนี้สร้างจาก field pack เวอร์ชันเก่า", true);
-  else setReelStatus("");
-}
-async function loadReelScript() {
-  if (!state.itemId) return;
-  try { renderReelScript(await api(`/api/items/${state.itemId}/reel-script`)); }
-  catch (err) { setReelStatus(err.message, true); }
-}
 async function withButtonLoading(btn, pendingLabel, action) {
   if (!btn) return action();
   if (btn.dataset.loading === "1") return null;
@@ -4147,7 +4108,7 @@ function fillFieldPackForm(fieldPack = null) {
   if (qs("fp-editor-summary")) qs("fp-editor-summary").value = String(pack.editor_summary || "");
   if (qs("fp-story-angle")) qs("fp-story-angle").value = String(pack.story_angle || defaults.story_angle || "");
   if (qs("fp-field-notes")) qs("fp-field-notes").value = String(pack.field_notes || "");
-  if (qs("fp-social-hook")) qs("fp-social-hook").value = String(pack.social_hook || defaults.social_hook || "");
+  if (qs("fp-social-hook")) qs("fp-social-hook").value = String(pack.social_hook || "");
   if (qs("fp-social-caption-angle")) qs("fp-social-caption-angle").value = String(pack.social_caption_angle || defaults.social_caption_angle || "");
   setLineListValue("fp-ai-highlights", pack.ai_highlights_json || defaults.ai_highlights || []);
   setLineListValue("fp-ai-unknowns", pack.ai_unknowns_json || defaults.ai_unknowns || []);
@@ -4158,7 +4119,7 @@ function fillFieldPackForm(fieldPack = null) {
   renderMustCaptureEditor(mustCaptureItems);
   setLineListValue("fp-must-ask-questions", mustAskQuestions.length ? mustAskQuestions : (defaults.must_ask_questions || []));
   setLineListValue("fp-social-shot-emphasis", pack.social_shot_emphasis_json || defaults.social_shot_emphasis || []);
-  setLineListValue("fp-social-on-camera-points", pack.social_on_camera_points_json || defaults.social_on_camera_points || []);
+  setLineListValue("fp-social-on-camera-points", pack.social_on_camera_points_json || []);
   setLineListValue("fp-references", formatReferenceLines(pack.references, "general"));
   setLineListValue("fp-writer-references", formatReferenceLines(pack.references, "writer"));
   setLineListValue("fp-external-media-hints", formatExternalMediaHintLines(pack.media_hints));
@@ -4176,7 +4137,6 @@ function fillFieldPackForm(fieldPack = null) {
   renderFieldPackMediaHintEditor(pack);
   autosizeFieldPackTextareas();
   renderFieldProgressControl();
-  loadReelScript();
 }
 
 function readFieldPackFormState() {
@@ -5112,7 +5072,7 @@ function buildFieldPackCards() {
         { label: "แนว Caption", value: fieldPack.social_caption_angle || buildPlatformDirection("facebook", data, data.primarySignals.slice(0, 3)) },
       ],
       listTitle: "ประเด็นพูดหน้ากล้อง",
-      items: fieldPack.social_on_camera_points.length ? fieldPack.social_on_camera_points : (fallbackCards[3]?.items || []),
+      items: fieldPack.social_on_camera_points,
     },
   ];
 }
@@ -5805,36 +5765,6 @@ function wire() {
       setStatus(`ส่งกลับไป Clean ไม่สำเร็จ: ${err.message}`, true);
     }
   });
-
-  document.getElementById("fp-reel-json")?.addEventListener("input", () => { reelJsonDirty = true; });
-  document.getElementById("btn-reel-generate")?.addEventListener("click", (e) => withButtonLoading(e.currentTarget, "กำลังสร้างบท...", async () => {
-    const editGuard = getEditPermissionGuard();
-    if (!editGuard.allowed) {
-      applyEditorActionGuards();
-      setReelStatus(editGuard.reason, true);
-      return;
-    }
-    if (reelJsonDirty && !window.confirm("บทที่แก้ค้างไว้จะถูกแทนที่ ต่อไหม?")) return;
-    try {
-      const data = await api(`/api/items/${state.itemId}/reel-script/generate`, { method: "POST", body: "{}" });
-      renderReelScript(data, { force: true }); setReelStatus("สร้างบทแล้ว");
-    } catch (err) { setReelStatus(err.message, true); }
-  }));
-  document.getElementById("btn-reel-save")?.addEventListener("click", (e) => withButtonLoading(e.currentTarget, "กำลังบันทึก...", async () => {
-    const editGuard = getEditPermissionGuard();
-    if (!editGuard.allowed) {
-      applyEditorActionGuards();
-      setReelStatus(editGuard.reason, true);
-      return;
-    }
-    let script;
-    try { script = JSON.parse(document.getElementById("fp-reel-json")?.value || "null"); }
-    catch { setReelStatus("JSON ไม่ถูกต้อง", true); return; }
-    try {
-      const data = await api(`/api/items/${state.itemId}/reel-script`, { method: "PUT", body: JSON.stringify({ script }) });
-      renderReelScript(data, { force: true }); setReelStatus("บันทึกแล้ว");
-    } catch (err) { setReelStatus(err.message, true); }
-  }));
 
   qs("btn-next-ai")?.addEventListener("click", async () => {
     try {

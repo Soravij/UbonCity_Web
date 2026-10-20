@@ -108,6 +108,15 @@ function normalizeChecklistGroup(value, checklistType, limit = 10) {
   }));
 }
 
+function orderVideoFirst(items) {
+  const list = Array.isArray(items) ? items : [];
+  const rank = (t) => (t === "video" || t === "both" ? 0 : 1);
+  return list
+    .map((it, i) => ({ it, i }))
+    .sort((a, b) => rank(a.it.capture_type) - rank(b.it.capture_type) || a.i - b.i)
+    .map(({ it }, idx) => ({ ...it, item_order: idx }));
+}
+
 function normalizeCaptureChecklistGroup(value, limit = 30) {
   const out = [];
   const seen = new Set();
@@ -190,7 +199,7 @@ export function normalizeFieldPack(input, options = {}) {
     field_pack_checklists: [
       ...normalizeChecklistGroup(root.must_verify_fact || root.must_verify_facts || root.must_verify || checklists.must_verify_fact || checklists.must_verify_facts, "must_verify_fact"),
 
-      ...normalizeCaptureChecklistGroup(root.must_capture || checklists.must_capture),
+      ...orderVideoFirst(normalizeCaptureChecklistGroup(root.must_capture || checklists.must_capture)),
       ...normalizeChecklistGroup(root.must_ask_question || root.must_ask_questions || root.must_ask || checklists.must_ask_question || checklists.must_ask_questions, "must_ask_question"),
     ],
     field_pack_references: Array.isArray(root.field_pack_references) ? root.field_pack_references : [],
@@ -608,6 +617,14 @@ export const REEL_SHOT_RULES = [
   "Each video shot should be filmed vertically (9:16), steady, 5-10 seconds long, so an editor who was not on site can cut it.",
 ];
 
+export const REEL_DRAFT_RULES = [
+  "Reel draft first: before writing must_capture, plan a 20-30s vertical Reel. Write that draft into social_on_camera_points as 5-7 lines, one line per segment, in order. Each line in Thai, formatted exactly: ช็อต N · ~X วิ · <what the shot shows> · พากย์: \"<short voiceover draft>\" · จอ: \"<short on-screen text>\"",
+  "The video items of must_capture are exactly the draft's shots: list them first in must_capture, in the same order as the draft, so the Nth item of must_capture is ช็อต N. List all photo items after the video items.",
+  "Do not include item_order in must_capture items; the list order is the order.",
+  "social_hook is the spoken line of ช็อต 1.",
+  "Voiceover and on-screen text are drafts that set tone and pacing for the shooter: keep them short and relaxed, use only facts present in the pack, and never state prices, parking, or facilities that are still to be verified. Do not use hype labels or claims the pack does not support, such as ร้านลับ, ที่สุด, อันดับ 1, or ต้องมา.",
+];
+
 function buildFieldPackPrompt(item) {
   const agentProfile = normalizeAgentProfileText(getAgentProfileInputText(item));
   return [
@@ -639,6 +656,7 @@ function buildFieldPackPrompt(item) {
     "If capture_type is video, item_text must be an executable video shot instruction (for example pan, walk-through, push-in, tilt, tracking).",
     "Do not output broad topic-style video items. Every video item must be directly shootable by a field team.",
     ...REEL_SHOT_RULES,
+    ...REEL_DRAFT_RULES,
     "must_ask_question should contain questions to ask staff/local people/visitors where appropriate.",
     "social_hook and social_caption_angle are directional notes, not final copy.",
     "Keep each list item short and directly usable.",
@@ -679,6 +697,7 @@ function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote
     "For capture_type=video, ensure each item is an executable video shot, not a broad topic.",
     "Do not output broad topic-style video items. Every video item must be directly shootable by a field team.",
     ...REEL_SHOT_RULES,
+    ...REEL_DRAFT_RULES,
     "If revision_note conflicts with approved_context, keep approved_context and put the conflict into ai_unknowns or must_verify_fact.",
     "Treat any reference_media_context as reference-only, not rights-verified, not publish media, and not cover/gallery approval.",
     "Keep the revised pack action-oriented and directly usable in Place Step 4 and Handoff.",
