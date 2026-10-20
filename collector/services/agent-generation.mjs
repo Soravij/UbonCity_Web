@@ -108,6 +108,15 @@ function normalizeChecklistGroup(value, checklistType, limit = 10) {
   }));
 }
 
+function orderVideoFirst(items) {
+  const list = Array.isArray(items) ? items : [];
+  const rank = (t) => (t === "video" || t === "both" ? 0 : 1);
+  return list
+    .map((it, i) => ({ it, i }))
+    .sort((a, b) => rank(a.it.capture_type) - rank(b.it.capture_type) || a.i - b.i)
+    .map(({ it }, idx) => ({ ...it, item_order: idx }));
+}
+
 function normalizeCaptureChecklistGroup(value, limit = 30) {
   const out = [];
   const seen = new Set();
@@ -190,7 +199,7 @@ export function normalizeFieldPack(input, options = {}) {
     field_pack_checklists: [
       ...normalizeChecklistGroup(root.must_verify_fact || root.must_verify_facts || root.must_verify || checklists.must_verify_fact || checklists.must_verify_facts, "must_verify_fact"),
 
-      ...normalizeCaptureChecklistGroup(root.must_capture || checklists.must_capture),
+      ...orderVideoFirst(normalizeCaptureChecklistGroup(root.must_capture || checklists.must_capture)),
       ...normalizeChecklistGroup(root.must_ask_question || root.must_ask_questions || root.must_ask || checklists.must_ask_question || checklists.must_ask_questions, "must_ask_question"),
     ],
     field_pack_references: Array.isArray(root.field_pack_references) ? root.field_pack_references : [],
@@ -613,7 +622,7 @@ export const REEL_DRAFT_RULES = [
   "The video items of must_capture are exactly the draft's shots: list them first in must_capture, in the same order as the draft, so the Nth item of must_capture is ช็อต N. List all photo items after the video items.",
   "Do not include item_order in must_capture items; the list order is the order.",
   "social_hook is the spoken line of ช็อต 1.",
-  "Voiceover and on-screen text are drafts that set tone and pacing for the shooter: keep them short and relaxed, use only facts present in the pack, and never state prices, parking, or facilities that are still to be verified.",
+  "Voiceover and on-screen text are drafts that set tone and pacing for the shooter: keep them short and relaxed, use only facts present in the pack, and never state prices, parking, or facilities that are still to be verified. Do not use hype labels or claims the pack does not support, such as ร้านลับ, ที่สุด, อันดับ 1, or ต้องมา.",
 ];
 
 function buildFieldPackPrompt(item) {
