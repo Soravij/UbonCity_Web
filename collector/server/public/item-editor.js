@@ -4147,7 +4147,7 @@ function fillFieldPackForm(fieldPack = null) {
   if (qs("fp-editor-summary")) qs("fp-editor-summary").value = String(pack.editor_summary || "");
   if (qs("fp-story-angle")) qs("fp-story-angle").value = String(pack.story_angle || defaults.story_angle || "");
   if (qs("fp-field-notes")) qs("fp-field-notes").value = String(pack.field_notes || "");
-  if (qs("fp-social-hook")) qs("fp-social-hook").value = String(pack.social_hook || defaults.social_hook || "");
+  if (qs("fp-social-hook")) qs("fp-social-hook").value = String(pack.social_hook || "");
   if (qs("fp-social-caption-angle")) qs("fp-social-caption-angle").value = String(pack.social_caption_angle || defaults.social_caption_angle || "");
   setLineListValue("fp-ai-highlights", pack.ai_highlights_json || defaults.ai_highlights || []);
   setLineListValue("fp-ai-unknowns", pack.ai_unknowns_json || defaults.ai_unknowns || []);
@@ -4158,7 +4158,7 @@ function fillFieldPackForm(fieldPack = null) {
   renderMustCaptureEditor(mustCaptureItems);
   setLineListValue("fp-must-ask-questions", mustAskQuestions.length ? mustAskQuestions : (defaults.must_ask_questions || []));
   setLineListValue("fp-social-shot-emphasis", pack.social_shot_emphasis_json || defaults.social_shot_emphasis || []);
-  setLineListValue("fp-social-on-camera-points", pack.social_on_camera_points_json || defaults.social_on_camera_points || []);
+  setLineListValue("fp-social-on-camera-points", pack.social_on_camera_points_json || []);
   setLineListValue("fp-references", formatReferenceLines(pack.references, "general"));
   setLineListValue("fp-writer-references", formatReferenceLines(pack.references, "writer"));
   setLineListValue("fp-external-media-hints", formatExternalMediaHintLines(pack.media_hints));
@@ -5112,7 +5112,7 @@ function buildFieldPackCards() {
         { label: "แนว Caption", value: fieldPack.social_caption_angle || buildPlatformDirection("facebook", data, data.primarySignals.slice(0, 3)) },
       ],
       listTitle: "ประเด็นพูดหน้ากล้อง",
-      items: fieldPack.social_on_camera_points.length ? fieldPack.social_on_camera_points : (fallbackCards[3]?.items || []),
+      items: fieldPack.social_on_camera_points,
     },
   ];
 }
