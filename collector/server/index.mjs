@@ -13070,18 +13070,15 @@ app.post("/api/assignments/:id/reel-script/generate", requireRole("owner", "admi
   if (!assignmentId) { res.status(400).json({ error: "Invalid assignment id" }); return; }
   const assignment = repo.getAssignmentById(assignmentId);
   if (!assignment) { res.status(404).json({ error: "Assignment not found" }); return; }
-  // same gate as PATCH /api/assignments/:id/state: whoever cannot set "accepted" cannot generate
-  if (actorPolicyRole(req) === "user" && !["revision_requested", "in_progress", "accepted"].includes("accepted")) {
-    res.status(403).json({ error: "user cannot review this assignment" });
-    return;
-  }
   if (!["submitted", "resubmitted", "accepted"].includes(String(assignment.state))) { res.status(400).json({ error: "ต้องมีงานหน้างานที่ส่งมาแล้วก่อน" }); return; }
   const itemId = Number(assignment.content_item_id) || 0;
   const item = itemId ? repo.getItem(itemId) : null;
   if (!item) { res.status(404).json({ error: "Item not found" }); return; }
+  if (!ensureItemMutationAccess(req, res, item)) return;
   const fieldPack = repo.getCurrentFieldPackByItem(itemId);
   if (!fieldPack) { res.status(400).json({ error: "ยังไม่มี field pack" }); return; }
-  const clips = (repo.listAssignmentRoundAssetsByType(assignmentId, assignment.revision_round, "video") || []).map((a) => {
+  const round = resolveAssignmentCurrentRound(assignment);
+  const clips = (repo.listAssignmentRoundAssetsByType(assignmentId, round, "video") || []).map((a) => {
     const file = path.basename(String(a.storage_path || a.file_name || ""));
     const m = /^shot-(\d+)/.exec(parseCaptureShotSlugFromFileName(file));
     return { file, shot_no: m ? Number(m[1]) : null };
@@ -13096,18 +13093,24 @@ app.post("/api/assignments/:id/reel-script/generate", requireRole("owner", "admi
     const agentInput = { ...item, agent_profile: getEffectiveAgentProfile(FIELD_PACK_AGENT_KEY) };
     const subs = repo.listAssignmentSubmissions(assignmentId) || [];
     const submission = subs.reduce((best, s) => (!best || Number(s?.id) > Number(best?.id) ? s : best), null);
+    const submissionForPrompt = submission ? {
+      article_payload: submission.article_payload_json,
+      field_return_payload: submission.field_return_payload_json,
+      contributor_note: submission.contributor_note,
+      reviewer_note: submission.reviewer_note,
+    } : null;
     const evidence = repo.buildFieldReturnEvidenceByItem(itemId);
-    const raw = await agentEngine.generateReelFinal(agentInput, { fieldPack, evidence, submission, clips }, actorEmail(req));
+    const raw = await agentEngine.generateReelFinal(agentInput, { fieldPack, evidence, submission: submissionForPrompt, clips }, actorEmail(req));
     const allowed = new Set(clips.map((c) => c.file));
     const used = new Set();
     const segments = raw.segments.filter((s) => allowed.has(s.file) && !used.has(s.file) && used.add(s.file));
     if (!segments.length) { res.status(400).json({ error: "AI ไม่ได้อ้างคลิปที่มีอยู่จริง" }); return; }
     const script = { ...raw, segments, duration_sec: segments[segments.length - 1].end_sec };
-    const saved = repo.upsertReelScript(itemId, { sourceFieldPackId: fieldPack.id, script, generatedBy: actorEmail(req), updatedBy: actorEmail(req) });
     const dir = itemAssetDir(dirs.mediaDir, itemId);
     await fs.mkdir(dir, { recursive: true });
     const filePath = path.join(dir, "reel-script.txt");
     await fs.writeFile(filePath, formatReelScriptText(item, script), "utf8");
+    const saved = repo.upsertReelScript(itemId, { sourceFieldPackId: fieldPack.id, script, generatedBy: actorEmail(req), updatedBy: actorEmail(req) });
     res.json({ ok: true, item_id: itemId, file: path.relative(dirs.mediaDir, filePath), segments: segments.length, reel_script: saved });
   } catch (err) {
     res.status(400).json({ error: String(err?.message || err) });
