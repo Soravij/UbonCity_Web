@@ -13,6 +13,7 @@ import { createTransportV2Router } from "./transport-v2-router.mjs";
 import { allocateAssignmentAssetSequence, formatAssignmentAssetFileName } from "./assignment-asset-naming.mjs";
 import { COLLECTOR_HEAD_PARTIAL, COLLECTOR_BRAND_PARTIAL, COLLECTOR_HEAD_CSS_PARTIAL, COLLECTOR_AUTH_PARTIAL } from "./header-partials.mjs";
 import { itemAssetDir, placeIntoItemAssetDir } from "./item-asset-dir.mjs";
+import { formatReelScriptText } from "../services/reel-script-text.mjs";
 import {
   assertCollectorIntegrationReadiness,
   getCollectorIntegrationReadiness,
@@ -13061,6 +13062,57 @@ app.post("/api/items/:id/reel-script/generate", requireRole("owner", "admin", "u
     res.status(400).json({ error: String(err?.message || err) });
   } finally {
     reelScriptInFlight.delete(id);
+  }
+});
+
+app.post("/api/assignments/:id/reel-script/generate", requireRole("owner", "admin", "user"), workflowRateLimit, async (req, res) => {
+  const assignmentId = Number(req.params.id) || 0;
+  if (!assignmentId) { res.status(400).json({ error: "Invalid assignment id" }); return; }
+  const assignment = repo.getAssignmentById(assignmentId);
+  if (!assignment) { res.status(404).json({ error: "Assignment not found" }); return; }
+  // same gate as PATCH /api/assignments/:id/state: whoever cannot set "accepted" cannot generate
+  if (actorPolicyRole(req) === "user" && !["revision_requested", "in_progress", "accepted"].includes("accepted")) {
+    res.status(403).json({ error: "user cannot review this assignment" });
+    return;
+  }
+  if (!["submitted", "resubmitted", "accepted"].includes(String(assignment.state))) { res.status(400).json({ error: "ต้องมีงานหน้างานที่ส่งมาแล้วก่อน" }); return; }
+  const itemId = Number(assignment.content_item_id) || 0;
+  const item = itemId ? repo.getItem(itemId) : null;
+  if (!item) { res.status(404).json({ error: "Item not found" }); return; }
+  const fieldPack = repo.getCurrentFieldPackByItem(itemId);
+  if (!fieldPack) { res.status(400).json({ error: "ยังไม่มี field pack" }); return; }
+  const clips = (repo.listAssignmentRoundAssetsByType(assignmentId, assignment.revision_round, "video") || []).map((a) => {
+    const file = path.basename(String(a.storage_path || a.file_name || ""));
+    const m = /^shot-(\d+)/.exec(parseCaptureShotSlugFromFileName(file));
+    return { file, shot_no: m ? Number(m[1]) : null };
+  }).filter((c) => c.file);
+  if (!clips.length) { res.status(400).json({ error: "ยังไม่มีคลิปวิดีโอในรอบนี้" }); return; }
+  if (reelScriptInFlight.has(itemId)) { res.status(409).json({ error: "กำลังสร้างบทอยู่" }); return; }
+  reelScriptInFlight.add(itemId);
+  try {
+    const aiConfig = getEffectiveAiConfig();
+    const agentEngine = createAgentGenerationEngine(aiConfig);
+    if (typeof agentEngine?.generateReelFinal !== "function") { res.status(400).json({ error: "engine ปัจจุบัน (external) ยังไม่รองรับการสร้างบท Reel" }); return; }
+    const agentInput = { ...item, agent_profile: getEffectiveAgentProfile(FIELD_PACK_AGENT_KEY) };
+    const subs = repo.listAssignmentSubmissions(assignmentId) || [];
+    const submission = subs.reduce((best, s) => (!best || Number(s?.id) > Number(best?.id) ? s : best), null);
+    const evidence = repo.buildFieldReturnEvidenceByItem(itemId);
+    const raw = await agentEngine.generateReelFinal(agentInput, { fieldPack, evidence, submission, clips }, actorEmail(req));
+    const allowed = new Set(clips.map((c) => c.file));
+    const used = new Set();
+    const segments = raw.segments.filter((s) => allowed.has(s.file) && !used.has(s.file) && used.add(s.file));
+    if (!segments.length) { res.status(400).json({ error: "AI ไม่ได้อ้างคลิปที่มีอยู่จริง" }); return; }
+    const script = { ...raw, segments, duration_sec: segments[segments.length - 1].end_sec };
+    const saved = repo.upsertReelScript(itemId, { sourceFieldPackId: fieldPack.id, script, generatedBy: actorEmail(req), updatedBy: actorEmail(req) });
+    const dir = itemAssetDir(dirs.mediaDir, itemId);
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = path.join(dir, "reel-script.txt");
+    await fs.writeFile(filePath, formatReelScriptText(item, script), "utf8");
+    res.json({ ok: true, item_id: itemId, file: path.relative(dirs.mediaDir, filePath), segments: segments.length, reel_script: saved });
+  } catch (err) {
+    res.status(400).json({ error: String(err?.message || err) });
+  } finally {
+    reelScriptInFlight.delete(itemId);
   }
 });
 

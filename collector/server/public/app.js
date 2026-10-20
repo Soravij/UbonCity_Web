@@ -11953,6 +11953,22 @@ function wireAssignments() {
     }
   });
 
+  qs("btn-assignment-reel-script")?.addEventListener("click", async (event) => {
+    const btn = event.currentTarget;
+    try {
+      if (isAssignmentWorkOnlyUser()) {
+        throw new Error("role นี้ตรวจงานไม่ได้");
+      }
+      await withButtonLoading(btn, "กำลังสร้างบท...", async () => {
+        const assignmentId = ensureSelectedAssignmentId();
+        const data = await api(`/api/assignments/${assignmentId}/reel-script/generate`, { method: "POST", body: "{}" });
+        setStatus("assignment-status", `สร้างบทแล้ว ${data.segments} ช่วง → ${data.file}`);
+      });
+    } catch (err) {
+      setStatus("assignment-status", err.message, true);
+    }
+  });
+
   qs("btn-assignment-return-to-field")?.addEventListener("click", async (event) => {
     const btn = event.currentTarget;
     try {

@@ -966,6 +966,28 @@ export function buildReelScriptPrompt(item, fieldPack) {
   ].filter(Boolean).join("\n\n");
 }
 
+export function buildReelFinalPrompt(item, { fieldPack, evidence, submission, clips } = {}) {
+  const profile = String(item?.agent_profile?.profile_text || "").trim();
+  const draft = Array.isArray(fieldPack?.social_on_camera_points_json) ? fieldPack.social_on_camera_points_json.join("\n") : "";
+  const clipLines = (Array.isArray(clips) ? clips : []).map((c) => `ช็อต ${c.shot_no ?? "?"} · file: ${c.file}`).join("\n");
+  return [
+    profile ? `AGENT PROFILE:\n${profile}` : "",
+    "TASK: Write the FINAL vertical (9:16) Reel script in Thai, 20-30 seconds, for an editor who was not on site and will cut from the clip files listed in CLIPS.",
+    "Tone: relaxed, casual travel recommendation. Keep history/background to a minimum.",
+    "Facts: use only what FIELD EVIDENCE and LATEST SUBMISSION confirm. Use FIELD PACK only as background. If they disagree, follow the evidence. Never state anything still unverified.",
+    "Start from DRAFT, but change it to match what was actually filmed.",
+    "Every segment must use exactly one clip from CLIPS: copy its file name exactly into \"file\" and its shot number into \"shot_no\". Never invent clips. Use each clip at most once.",
+    "On-screen text in Thai, except the place name. Do not use hype labels or claims the evidence does not support, such as ร้านลับ, ที่สุด, อันดับ 1, or ต้องมา.",
+    `PLACE: ${String(item?.title || "").trim()}`,
+    `DRAFT:\n${draft || "-"}`,
+    `CLIPS:\n${clipLines || "-"}`,
+    `FIELD EVIDENCE JSON:\n${JSON.stringify(evidence ?? {})}`,
+    `LATEST SUBMISSION JSON:\n${JSON.stringify(submission ?? {})}`,
+    `FIELD PACK JSON:\n${JSON.stringify(fieldPack ?? {})}`,
+    'Return JSON only: {"duration_sec":number,"segments":[{"start_sec":number,"end_sec":number,"shot_no":number,"file":string,"shot":string,"capture_type":"video","voiceover":string,"on_screen_text":string}],"caption":string,"hashtags":[string]}',
+  ].filter(Boolean).join("\n\n");
+}
+
 export function normalizeReelScript(raw) {
   if (!raw || typeof raw !== "object") return null;
   const segs = Array.isArray(raw.segments) ? raw.segments.slice(0, 30) : [];
@@ -979,6 +1001,8 @@ export function normalizeReelScript(raw) {
       start_sec: Math.round(start * 10) / 10,
       end_sec: Math.round(end * 10) / 10,
       shot,
+      shot_no: Number.isFinite(Number(s?.shot_no)) && Number(s?.shot_no) > 0 ? Number(s.shot_no) : null,
+      file: String(s?.file || "").trim(),
       capture_type: REEL_CAPTURE_TYPES.has(ct) ? ct : "video",
       voiceover: String(s?.voiceover || "").trim(),
       on_screen_text: String(s?.on_screen_text || "").trim(),
@@ -1070,6 +1094,16 @@ export function createAgentGenerationEngine(aiConfig) {
       const fullPrompt = buildReelScriptPrompt(item, fieldPack);
       debugPrompt('reel_script', fullPrompt, { itemId: item?.id, title: String(item?.title || '').trim() });
       const result = await executeBackendAiJson({ aiConfig, featureKey: "fieldPack", task: "reel_script", prompt: fullPrompt, actorEmail });
+      const parsed = normalizeReelScript(result.parsed || parseJsonLike(result.outputText));
+      if (!parsed) throw new Error("AI response is not valid reel script JSON");
+      return parsed;
+    },
+
+    async generateReelFinal(item, context, actorEmail) {
+      if (!aiConfig?.enabled) throw new Error("backend AI proxy is not enabled");
+      const fullPrompt = buildReelFinalPrompt(item, context);
+      debugPrompt('reel_final', fullPrompt, { itemId: item?.id, title: String(item?.title || '').trim() });
+      const result = await executeBackendAiJson({ aiConfig, featureKey: "fieldPack", task: "reel_final", prompt: fullPrompt, actorEmail });
       const parsed = normalizeReelScript(result.parsed || parseJsonLike(result.outputText));
       if (!parsed) throw new Error("AI response is not valid reel script JSON");
       return parsed;
