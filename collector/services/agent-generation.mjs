@@ -108,7 +108,7 @@ function normalizeChecklistGroup(value, checklistType, limit = 10) {
   }));
 }
 
-function normalizeCaptureChecklistGroup(value, limit = 10) {
+function normalizeCaptureChecklistGroup(value, limit = 30) {
   const out = [];
   const seen = new Set();
   const list = Array.isArray(value) ? value : [];
@@ -600,6 +600,14 @@ function buildVisualPrompt(item, imageCount) {
   ].join("\n");
 }
 
+export const REEL_SHOT_RULES = [
+  "Shot coverage: must_capture must include 5-7 items with capture_type video for a Reel, plus as many capture_type photo items as the website needs (at least 6). Do not cap the number of photo items.",
+  "Together the video items must cover what a 20-30s vertical Reel needs: an opening shot with visible action, the entrance or exterior, a texture/detail close-up, people or interaction, the signature product or highlight up close, and the seating area or overall atmosphere.",
+  "The photo items must cover what the website needs: exterior or entrance, interior wide, seating, the signature product, the menu or price board, a detail/texture shot, and any highlight of the place.",
+  "Write each item_text in Thai as: shot size or camera move + what is happening + the detail that must be visible (example: Close-up บาริสต้ากำลังดริปกาแฟอย่างตั้งใจ เห็นไอร้อนและน้ำค่อยๆ ไหลผ่านฟิลเตอร์).",
+  "Each video shot should be filmed vertically (9:16), steady, 5-10 seconds long, so an editor who was not on site can cut it.",
+];
+
 function buildFieldPackPrompt(item) {
   const agentProfile = normalizeAgentProfileText(getAgentProfileInputText(item));
   return [
@@ -630,6 +638,7 @@ function buildFieldPackPrompt(item) {
     "For must_capture: each item must describe exactly one concrete shot. Do not combine multiple shots, angles, or locations in one item.",
     "If capture_type is video, item_text must be an executable video shot instruction (for example pan, walk-through, push-in, tilt, tracking).",
     "Do not output broad topic-style video items. Every video item must be directly shootable by a field team.",
+    ...REEL_SHOT_RULES,
     "must_ask_question should contain questions to ask staff/local people/visitors where appropriate.",
     "social_hook and social_caption_angle are directional notes, not final copy.",
     "Keep each list item short and directly usable.",
@@ -669,6 +678,7 @@ function buildFieldPackRevisionPrompt(item, previousFieldPack = {}, revisionNote
     "Do not combine multiple shots, angles, or locations in one must_capture item.",
     "For capture_type=video, ensure each item is an executable video shot, not a broad topic.",
     "Do not output broad topic-style video items. Every video item must be directly shootable by a field team.",
+    ...REEL_SHOT_RULES,
     "If revision_note conflicts with approved_context, keep approved_context and put the conflict into ai_unknowns or must_verify_fact.",
     "Treat any reference_media_context as reference-only, not rights-verified, not publish media, and not cover/gallery approval.",
     "Keep the revised pack action-oriented and directly usable in Place Step 4 and Handoff.",
