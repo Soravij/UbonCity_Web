@@ -8615,7 +8615,7 @@ export function createRepository(db) {
       ...(Array.isArray(fieldPack?.ai_unknowns_json) ? fieldPack.ai_unknowns_json : []),
     ], 12);
     const mustVerifyFacts = listFieldPackChecklistTexts(fieldPack, "must_verify_fact", 12);
-    const mustCaptureShots = listFieldPackChecklistTexts(fieldPack, "must_capture", 12);
+    const mustCaptureShots = listFieldPackChecklistTexts(fieldPack, "must_capture", 40);
     const mustAskQuestions = listFieldPackChecklistTexts(fieldPack, "must_ask_question", 12);
     const socialShotEmphasis = uniqueTextList(fieldPack?.social_shot_emphasis_json || [], 12);
     const socialOnCameraPoints = uniqueTextList(fieldPack?.social_on_camera_points_json || [], 12);
@@ -8645,7 +8645,7 @@ export function createRepository(db) {
       recommended_hook: recommendedHook,
       script_suggestions: socialOnCameraPoints,
       caption_suggestions: socialCaptionAngle ? [socialCaptionAngle] : [],
-      shot_list_suggestions: uniqueTextList([...mustCaptureShots, ...socialShotEmphasis], 12),
+      shot_list_suggestions: uniqueTextList([...mustCaptureShots, ...socialShotEmphasis], 40),
       field_notes: fieldNotes,
       references: generalReferences,
       writer_references: writerReferences,
