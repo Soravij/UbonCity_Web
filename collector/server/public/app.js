@@ -7932,17 +7932,15 @@ function renderAssignmentSubmissionGatePanel(gateState) {
   if (!node) return;
   const state = gateState && typeof gateState === "object" ? gateState : null;
   if (!state) {
+    node.hidden = false;
     node.textContent = "";
     return;
   }
-  if (state.blockingReasons.length) {
-    node.className = "assignment-brief-card";
-    node.hidden = false;
-    node.innerHTML = `<div class="assignment-brief-text"><strong>${escapeHtml(state.blockingReasons[0])}</strong></div>`;
-  } else {
-    node.hidden = true;
-    node.innerHTML = "";
-  }
+  node.className = "assignment-brief-card";
+  node.hidden = false;
+  node.innerHTML = state.blockingReasons.length
+    ? `<div class="assignment-brief-text"><strong>${escapeHtml(state.blockingReasons[0])}</strong></div>`
+    : `<div class="assignment-brief-text"><strong>พร้อมส่งงานกลับ</strong></div>`;
 }
 
 function focusFirstAssignmentSubmissionGateIssue(gateState) {

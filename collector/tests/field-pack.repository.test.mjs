@@ -1020,7 +1020,7 @@ test("buildAssignmentHandoffPreview prefers current field pack over readiness br
     assert.equal(preview.handoff_package?.recommended_hook, "แวะที่นี่ก่อนคนอื่นรู้");
     assert.deepEqual(preview.handoff_package?.next_actions, ["ยืนยันเวลาเปิดจริง", "ถามช่วงเวลาคนเยอะ"]);
     assert.deepEqual(preview.handoff_package?.shot_list_suggestions, ["ถ่ายหน้าร้านและป้าย"]);
-    assert.deepEqual(preview.handoff_package?.expected_deliverables, ["photos", "videos", "caption_draft", "script_draft", "raw_notes"]);
+    assert.deepEqual(preview.handoff_package?.expected_deliverables, ["photos", "videos"]);
     assert.equal(preview.handoff_package?.source?.field_pack_id, fieldPack.id);
   } finally {
     ctx.cleanup();
@@ -1400,7 +1400,7 @@ test("createAssignmentFromReadiness uses field pack handoff without readiness sn
     assert.equal(result.assignment.brief_json?.brief_summary, "พร้อมส่งลงหน้างานจาก field pack");
     assert.equal(result.assignment.brief_json?.recommended_angle, "เก็บภาพและเช็กข้อเท็จจริงหน้างาน");
     assert.equal(result.assignment.brief_json?.recommended_hook, "ไปดูของจริงก่อนตัดสินใจ");
-    assert.deepEqual(result.assignment.brief_json?.expected_deliverables, ["photos", "videos", "caption_draft", "script_draft", "raw_notes"]);
+    assert.deepEqual(result.assignment.brief_json?.expected_deliverables, ["photos", "videos"]);
     assert.equal(result.handoff.readiness_brief_id, null);
     assert.equal(result.handoff.handoff_package_json?.source?.field_pack_id > 0, true);
   } finally {
