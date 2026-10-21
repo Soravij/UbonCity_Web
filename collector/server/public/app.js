@@ -6673,20 +6673,11 @@ function deriveExpectedDeliverablesFromFieldPack(fieldPack) {
   if (hasChecklist("must_capture")) {
     derived.push("photos", "videos");
   }
-  if (hasChecklist("must_verify_fact") || hasChecklist("must_ask_question")) {
-    derived.push("raw_notes");
-  }
   if (
     Array.isArray(source.social_on_camera_points_json) && source.social_on_camera_points_json.some((value) => String(value || "").trim())
     || String(source.social_hook || "").trim()
   ) {
-    derived.push("videos", "script_draft");
-  }
-  if (String(source.social_caption_angle || "").trim()) {
-    derived.push("caption_draft");
-  }
-  if (String(source.editor_summary || source.ai_summary || "").trim()) {
-    derived.push("raw_notes");
+    derived.push("videos");
   }
 
   return Array.from(new Set(derived));
@@ -7941,18 +7932,15 @@ function renderAssignmentSubmissionGatePanel(gateState) {
   if (!node) return;
   const state = gateState && typeof gateState === "object" ? gateState : null;
   if (!state) {
+    node.hidden = false;
     node.textContent = "";
     return;
   }
   node.className = "assignment-brief-card";
-  node.innerHTML = `
-    <div class="assignment-brief-text"><strong>${escapeHtml(state.canSubmit ? "พร้อมส่งงานกลับ" : "ยังส่งงานไม่ได้")}</strong></div>
-    <ul class="assignment-brief-list" style="margin-top:8px;">
-      ${state.checklist.map((item) => `<li>${item.status ? "ผ่าน" : "ค้าง"} | ${escapeHtml(item.label)} | ${escapeHtml(item.detail)}</li>`).join("")}
-    </ul>
-    ${state.blockingReasons.length ? `<div class="assignment-brief-text" style="margin-top:8px;"><strong>${escapeHtml(state.blockingReasons[0])}</strong></div>` : ""}
-    ${state.warnings.length ? `<div class="assignment-brief-text" style="margin-top:8px;">${escapeHtml(state.warnings.join(" | "))}</div>` : ""}
-  `;
+  node.hidden = false;
+  node.innerHTML = state.blockingReasons.length
+    ? `<div class="assignment-brief-text"><strong>${escapeHtml(state.blockingReasons[0])}</strong></div>`
+    : `<div class="assignment-brief-text"><strong>พร้อมส่งงานกลับ</strong></div>`;
 }
 
 function focusFirstAssignmentSubmissionGateIssue(gateState) {

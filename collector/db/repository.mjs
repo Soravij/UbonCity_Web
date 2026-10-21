@@ -13193,15 +13193,6 @@ function deriveExpectedDeliverablesFromHandoff(handoffPackage) {
   if (Array.isArray(handoffPackage.shot_list_suggestions) && handoffPackage.shot_list_suggestions.length > 0) {
     derived.push("photos", "videos");
   }
-  if (Array.isArray(handoffPackage.caption_suggestions) && handoffPackage.caption_suggestions.length > 0) {
-    derived.push("caption_draft");
-  }
-  if (Array.isArray(handoffPackage.script_suggestions) && handoffPackage.script_suggestions.length > 0) {
-    derived.push("script_draft");
-  }
-  if (String(handoffPackage.brief_summary || "").trim()) {
-    derived.push("raw_notes");
-  }
   return normalizeAssignmentDeliverableTypeList(derived);
 }
 
