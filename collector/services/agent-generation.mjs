@@ -978,7 +978,6 @@ export function buildReelFinalPrompt(item, { fieldPack, evidence, submission, cl
     "Start from DRAFT, but change it to match what was actually filmed.",
     "Every segment must use exactly one clip from CLIPS: copy its file name exactly into \"file\" and its shot number into \"shot_no\". Never invent clips. Use each clip at most once.",
     "Describe each segment's \"shot\" from its CLIPS description, not from the file name.",
-    "Write on_screen_text in Thai. Do not copy English on-screen text from DRAFT.",
     "Do not put hashtags inside caption; put them only in hashtags.",
     "On-screen text in Thai, except the place name. Do not use hype labels or claims the evidence does not support, such as ร้านลับ, ที่สุด, อันดับ 1, or ต้องมา.",
     `PLACE: ${String(item?.title || "").trim()}`,

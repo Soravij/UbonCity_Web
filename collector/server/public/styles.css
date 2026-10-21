@@ -7186,7 +7186,7 @@ body {
 :root[data-theme="dark"] .as-scope .assignment-deliverables-card,
 :root[data-theme="dark"] .as-scope .assignment-review-submission-section,
 :root[data-theme="dark"] .as-scope .table-wrap {
-  background: color-mix(in srgb, #12161d 84%, #0c1016 16%) !important;
+  background: var(--card) !important;
 }
 
 :root[data-theme="dark"] .as-scope .assignment-brief-section,
@@ -7194,7 +7194,7 @@ body {
 :root[data-theme="dark"] .as-scope .assignment-review-photo-thumb,
 :root[data-theme="dark"] .as-scope .assignment-review-video-item,
 :root[data-theme="dark"] .as-scope #assignment-review-summary-content .assignment-brief-section {
-  background: color-mix(in srgb, #171c24 86%, #0f1319 14%) !important;
+  background: var(--theme-surface-soft) !important;
 }
 
 /* Targeted cleanup: remove "railway" separators in latest-submission answers */
