@@ -7944,15 +7944,14 @@ function renderAssignmentSubmissionGatePanel(gateState) {
     node.textContent = "";
     return;
   }
-  node.className = "assignment-brief-card";
-  node.innerHTML = `
-    <div class="assignment-brief-text"><strong>${escapeHtml(state.canSubmit ? "พร้อมส่งงานกลับ" : "ยังส่งงานไม่ได้")}</strong></div>
-    <ul class="assignment-brief-list" style="margin-top:8px;">
-      ${state.checklist.map((item) => `<li>${item.status ? "ผ่าน" : "ค้าง"} | ${escapeHtml(item.label)} | ${escapeHtml(item.detail)}</li>`).join("")}
-    </ul>
-    ${state.blockingReasons.length ? `<div class="assignment-brief-text" style="margin-top:8px;"><strong>${escapeHtml(state.blockingReasons[0])}</strong></div>` : ""}
-    ${state.warnings.length ? `<div class="assignment-brief-text" style="margin-top:8px;">${escapeHtml(state.warnings.join(" | "))}</div>` : ""}
-  `;
+  if (state.blockingReasons.length) {
+    node.className = "assignment-brief-card";
+    node.hidden = false;
+    node.innerHTML = `<div class="assignment-brief-text"><strong>${escapeHtml(state.blockingReasons[0])}</strong></div>`;
+  } else {
+    node.hidden = true;
+    node.innerHTML = "";
+  }
 }
 
 function focusFirstAssignmentSubmissionGateIssue(gateState) {
