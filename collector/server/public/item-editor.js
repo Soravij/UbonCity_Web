@@ -730,15 +730,15 @@ function renderMustCaptureEditor(items = []) {
   root.innerHTML = `
     <div class="must-capture-grid">
       <div class="must-capture-column">
-        <h4>Photo</h4>
-        <div class="must-capture-list" data-capture-group="photo">
-          ${photoRows.map((row, index) => renderRow(row, index, "photo")).join("") || '<p class="muted">ยังไม่มีรายการภาพ</p>'}
-        </div>
-      </div>
-      <div class="must-capture-column">
         <h4>Video</h4>
         <div class="must-capture-list" data-capture-group="video">
           ${videoRows.map((row, index) => renderRow(row, index, "video")).join("") || '<p class="muted">ยังไม่มีรายการวิดีโอ</p>'}
+        </div>
+      </div>
+      <div class="must-capture-column">
+        <h4>Photo</h4>
+        <div class="must-capture-list" data-capture-group="photo">
+          ${photoRows.map((row, index) => renderRow(row, index, "photo")).join("") || '<p class="muted">ยังไม่มีรายการภาพ</p>'}
         </div>
       </div>
     </div>

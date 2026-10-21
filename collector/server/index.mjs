@@ -13078,10 +13078,12 @@ app.post("/api/assignments/:id/reel-script/generate", requireRole("owner", "admi
   const fieldPack = repo.getCurrentFieldPackByItem(itemId);
   if (!fieldPack) { res.status(400).json({ error: "ยังไม่มี field pack" }); return; }
   const round = resolveAssignmentCurrentRound(assignment);
+  const captureRows = (fieldPack.checklists || []).filter((r) => r.checklist_type === "must_capture");
+  const textByShot = new Map(captureRows.map((r) => [Number(r.item_order) + 1, String(r.item_text || "").trim()]));
   const clips = (repo.listAssignmentRoundAssetsByType(assignmentId, round, "video") || []).map((a) => {
     const file = path.basename(String(a.storage_path || a.file_name || ""));
     const m = /^shot-(\d+)/.exec(parseCaptureShotSlugFromFileName(file));
-    return { file, shot_no: m ? Number(m[1]) : null };
+    return { file, shot_no: m ? Number(m[1]) : null, shot_text: m ? (textByShot.get(Number(m[1])) || "") : "" };
   }).filter((c) => c.file);
   if (!clips.length) { res.status(400).json({ error: "ยังไม่มีคลิปวิดีโอในรอบนี้" }); return; }
   if (reelScriptInFlight.has(itemId)) { res.status(409).json({ error: "กำลังสร้างบทอยู่" }); return; }

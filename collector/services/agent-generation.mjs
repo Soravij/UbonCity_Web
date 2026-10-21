@@ -969,7 +969,7 @@ export function buildReelScriptPrompt(item, fieldPack) {
 export function buildReelFinalPrompt(item, { fieldPack, evidence, submission, clips } = {}) {
   const profile = String(item?.agent_profile?.profile_text || "").trim();
   const draft = Array.isArray(fieldPack?.social_on_camera_points_json) ? fieldPack.social_on_camera_points_json.join("\n") : "";
-  const clipLines = (Array.isArray(clips) ? clips : []).map((c) => `ช็อต ${c.shot_no ?? "?"} · file: ${c.file}`).join("\n");
+  const clipLines = (Array.isArray(clips) ? clips : []).map((c) => `ช็อต ${c.shot_no ?? "?"} · ${c.shot_text || "-"} · file: ${c.file}`).join("\n");
   return [
     profile ? `AGENT PROFILE:\n${profile}` : "",
     "TASK: Write the FINAL vertical (9:16) Reel script in Thai, 20-30 seconds, for an editor who was not on site and will cut from the clip files listed in CLIPS.",
@@ -977,7 +977,9 @@ export function buildReelFinalPrompt(item, { fieldPack, evidence, submission, cl
     "Facts: use only what FIELD EVIDENCE and LATEST SUBMISSION confirm. Use FIELD PACK only as background. If they disagree, follow the evidence. Never state anything still unverified.",
     "Start from DRAFT, but change it to match what was actually filmed.",
     "Every segment must use exactly one clip from CLIPS: copy its file name exactly into \"file\" and its shot number into \"shot_no\". Never invent clips. Use each clip at most once.",
-    "On-screen text in Thai, except the place name. Do not use hype labels or claims the evidence does not support, such as ร้านลับ, ที่สุด, อันดับ 1, or ต้องมา.",
+    "Describe each segment's \"shot\" from its CLIPS description, not from the file name.",
+    "Do not put hashtags inside caption; put them only in hashtags.",
+    "Do not use hype labels or claims the evidence does not support, such as ร้านลับ, ที่สุด, อันดับ 1, or ต้องมา.",
     `PLACE: ${String(item?.title || "").trim()}`,
     `DRAFT:\n${draft || "-"}`,
     `CLIPS:\n${clipLines || "-"}`,
@@ -1019,7 +1021,7 @@ export function normalizeReelScript(raw) {
   const hashtags = (Array.isArray(raw.hashtags) ? raw.hashtags : [])
     .map((h) => String(h || "").trim()).filter(Boolean)
     .map((h) => (h.startsWith("#") ? h : `#${h}`)).slice(0, 10);
-  return { duration_sec: segments[segments.length - 1].end_sec, segments, caption: String(raw.caption || "").trim(), hashtags };
+  return { duration_sec: segments[segments.length - 1].end_sec, segments, caption: String(raw.caption || "").replace(/#\S+/g, "").replace(/\s{2,}/g, " ").trim(), hashtags };
 }
 
 export function createAgentGenerationEngine(aiConfig) {
