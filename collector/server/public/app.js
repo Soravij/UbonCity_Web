@@ -6838,9 +6838,6 @@ function renderAssignmentSubmissionContext(assignment = null, fieldPack = null) 
       : [];
   const socialHook = String(fieldPack?.social_hook || brief?.recommended_hook || "").trim();
   const socialCaptionAngle = String(fieldPack?.social_caption_angle || (Array.isArray(brief?.caption_suggestions) ? brief.caption_suggestions[0] : "") || "").trim();
-  const onCameraPoints = Array.isArray(fieldPack?.social_on_camera_points_json)
-    ? fieldPack.social_on_camera_points_json.map((value) => String(value || "").trim()).filter(Boolean)
-    : uniqueAssignmentBriefStrings(brief?.script_suggestions);
 
   node.className = "assignment-brief-grid";
   node.innerHTML = `
@@ -6856,8 +6853,6 @@ function renderAssignmentSubmissionContext(assignment = null, fieldPack = null) 
       <div class="assignment-brief-label">แนวเล่า / ทิศทางงาน</div>
       <div class="assignment-brief-text"><strong>Hook:</strong> ${socialHook ? escapeHtml(socialHook) : '<span class="muted">-</span>'}</div>
       <div class="assignment-brief-text"><strong>Caption angle:</strong> ${socialCaptionAngle ? escapeHtml(socialCaptionAngle) : '<span class="muted">-</span>'}</div>
-      <div class="assignment-brief-label" style="margin-top:8px;">ประเด็นพูดหน้ากล้อง</div>
-      ${renderAssignmentBriefList(onCameraPoints, "ยังไม่ได้ระบุ")}
     </div>
     <div class="assignment-brief-section">
       <div class="assignment-brief-label">ข้อมูลอ้างอิง</div>
@@ -6870,11 +6865,23 @@ function renderAssignmentSubmissionContext(assignment = null, fieldPack = null) 
   `;
 }
 
+function getReelDraftLineByShot() {
+  const pack = state?.assignments?.contextFieldPack || null;
+  const lines = Array.isArray(pack?.social_on_camera_points_json) ? pack.social_on_camera_points_json : [];
+  const map = new Map();
+  for (const line of lines) {
+    const m = /^\s*ช็อต\s*(\d+)\s*·\s*(.+)$/.exec(String(line || ""));
+    if (m) map.set(Number(m[1]), m[2].trim());
+  }
+  return map;
+}
+
 function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
   const normalizedItems = normalizeAssignmentCaptureUploadItems(capturePrompts);
   if (!normalizedItems.length) {
     return '<div class="assignment-brief-empty">ไม่มีหัวข้อที่ต้องถ่ายในงานนี้</div>';
   }
+  const draftByShot = getReelDraftLineByShot();
   const renderPromptCards = (items, mode, sectionTitle, emptyText) => {
     const rows = Array.isArray(items) ? items : [];
     const cards = rows.map((item) => {
@@ -6896,6 +6903,7 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
         <div class="assignment-brief-section full-span assignment-capture-card" data-capture-upload-key="${escapeHtml(uploadKey)}" data-capture-prompt="${escapeHtml(prompt)}" data-capture-media-type="${escapeHtml(mode)}">
           <div class="assignment-capture-row">
             <div class="assignment-capture-title"><strong>${Number(item?.displayIndex || 0) || 1}.</strong> ${escapeHtml(prompt)}</div>
+            ${mode === "video" && draftByShot.has(Number(item?.displayIndex || 0) || 1) ? `<div class="assignment-brief-text">${escapeHtml(draftByShot.get(Number(item?.displayIndex || 0) || 1))}</div>` : ""}
             <div class="assignment-capture-actions">
               <label class="assignment-capture-upload-button${isLoading ? " is-loading" : ""}">
                 <span>${isLoading ? "กำลังเพิ่ม..." : `เลือก${acceptedLabel}`}</span>
@@ -6918,8 +6926,8 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
   const imagePrompts = normalizedItems.filter((item) => item.mediaType === "image");
   const videoPrompts = normalizedItems.filter((item) => item.mediaType === "video");
   return [
-    renderPromptCards(imagePrompts, "image", "กล่องอัปโหลดรูป", "ไม่มีหัวข้อสำหรับอัปโหลดรูป"),
     renderPromptCards(videoPrompts, "video", "กล่องอัปโหลดวิดีโอ", "ไม่มีหัวข้อที่ระบุว่าต้องใช้วิดีโอ"),
+    renderPromptCards(imagePrompts, "image", "กล่องอัปโหลดรูป", "ไม่มีหัวข้อสำหรับอัปโหลดรูป"),
   ].join("");
 }
 
@@ -8175,7 +8183,7 @@ function getAssignmentSubmissionFormConfig(assignment = null, fieldPack = null) 
     verifiedLabel: "สิ่งที่ต้องยืนยัน",
     questionLabel: "คำตอบจากหน้างาน",
     captureLabel: "สิ่งที่ต้องถ่าย",
-    additionalLabel: "ข้อความเพิ่มเติม",
+    additionalLabel: "เนื้อหาเพิ่มเติมเกี่ยวกับสถานที่",
     filesLabel: "สรุปไฟล์ที่จะส่ง",
     emptyVerified: "เลือกงานก่อนเพื่อกรอกคำตอบจากหน้างาน",
     emptyQuestion: "เลือกงานก่อนเพื่อกรอกคำตอบจากหน้างาน",

@@ -18,3 +18,11 @@ test("formatReelScriptText writes file names and voiceover", () => {
   assert.match(t, /ช็อต 1 → shot-1-__v\.mp4/);
   assert.match(t, /พากย์: "สวัสดี"/);
 });
+test("normalizeReelScript strips hashtags from caption", () => {
+  const out = normalizeReelScript({ segments: [{ start_sec: 0, end_sec: 3, shot: "a" }], caption: "ร้านดี #a #b", hashtags: ["#a"] });
+  assert.equal(out.caption, "ร้านดี");
+});
+test("buildReelFinalPrompt includes shot text", () => {
+  const p = buildReelFinalPrompt({ title: "X" }, { clips: [{ shot_no: 1, shot_text: "ดริปกาแฟ", file: "shot-1-__v.mp4" }] });
+  assert.match(p, /ช็อต 1 · ดริปกาแฟ · file: shot-1-__v\.mp4/);
+});
