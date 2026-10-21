@@ -6876,6 +6876,17 @@ function getReelDraftLineByShot() {
   return map;
 }
 
+function formatReelDraftLineHtml(text) {
+  const parts = String(text || "").split(/\s*·\s*/).map((p) => p.trim()).filter(Boolean);
+  const head = [];
+  const tail = [];
+  for (const p of parts) {
+    if (/^(พากย์|จอ)\s*:/.test(p)) tail.push(escapeHtml(p));
+    else head.push(escapeHtml(p));
+  }
+  return [head.join(" · "), ...tail].filter(Boolean).join("<br>");
+}
+
 function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
   const normalizedItems = normalizeAssignmentCaptureUploadItems(capturePrompts);
   if (!normalizedItems.length) {
@@ -6903,7 +6914,6 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
         <div class="assignment-brief-section full-span assignment-capture-card" data-capture-upload-key="${escapeHtml(uploadKey)}" data-capture-prompt="${escapeHtml(prompt)}" data-capture-media-type="${escapeHtml(mode)}">
           <div class="assignment-capture-row">
             <div class="assignment-capture-title"><strong>${Number(item?.displayIndex || 0) || 1}.</strong> ${escapeHtml(prompt)}</div>
-            ${mode === "video" && draftByShot.has(Number(item?.displayIndex || 0) || 1) ? `<div class="assignment-brief-text">${escapeHtml(draftByShot.get(Number(item?.displayIndex || 0) || 1))}</div>` : ""}
             <div class="assignment-capture-actions">
               <label class="assignment-capture-upload-button${isLoading ? " is-loading" : ""}">
                 <span>${isLoading ? "กำลังเพิ่ม..." : `เลือก${acceptedLabel}`}</span>
@@ -6912,6 +6922,7 @@ function buildAssignmentCaptureUploadCards(assignmentId, capturePrompts = []) {
               <span class="assignment-capture-count-badge">${escapeHtml(countLabel)}</span>
             </div>
           </div>
+          ${mode === "video" && draftByShot.has(Number(item?.displayIndex || 0) || 1) ? `<div class="assignment-brief-text">${formatReelDraftLineHtml(draftByShot.get(Number(item?.displayIndex || 0) || 1))}</div>` : ""}
           ${fileRows ? `<div class="assignment-brief-list-wrap assignment-capture-files">${fileRows}</div>` : ""}
         </div>
       `;
