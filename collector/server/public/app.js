@@ -6673,20 +6673,11 @@ function deriveExpectedDeliverablesFromFieldPack(fieldPack) {
   if (hasChecklist("must_capture")) {
     derived.push("photos", "videos");
   }
-  if (hasChecklist("must_verify_fact") || hasChecklist("must_ask_question")) {
-    derived.push("raw_notes");
-  }
   if (
     Array.isArray(source.social_on_camera_points_json) && source.social_on_camera_points_json.some((value) => String(value || "").trim())
     || String(source.social_hook || "").trim()
   ) {
-    derived.push("videos", "script_draft");
-  }
-  if (String(source.social_caption_angle || "").trim()) {
-    derived.push("caption_draft");
-  }
-  if (String(source.editor_summary || source.ai_summary || "").trim()) {
-    derived.push("raw_notes");
+    derived.push("videos");
   }
 
   return Array.from(new Set(derived));
