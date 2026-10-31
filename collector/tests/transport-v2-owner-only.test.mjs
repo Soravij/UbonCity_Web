@@ -21,3 +21,10 @@ test("v2 pages: owner-only", () => {
     assert.ok(!src.includes("redirectFor"), f);
   }
 });
+
+test("transport hub: v2 button owner-only", () => {
+  const html = read("../server/public/transport.html");
+  assert.match(html, /id="btn-open-transport-map-manager" class="primary hidden"/);
+  const js = read("../server/public/transport-page.js");
+  assert.match(js, /if \(role === "owner"\) \{[^}]*btn-open-transport-map-manager[^}]*\}/s);
+});

@@ -26,6 +26,7 @@ async function init() {
   if (!user) return;
   const role = currentRole(user);
   if (role === "owner") {
+    qs("btn-open-transport-map-manager")?.classList.remove("hidden");
     qs("btn-open-transport-base-maps")?.classList.remove("hidden");
   }
 }

@@ -166,7 +166,7 @@ function renderRoutes() {
           <button type="button" data-action="open-path" data-id="${item.id}">Edit Path</button>
         </td>
       </tr>`).join("")
-    : '<tr><td colspan="6" class="muted">No routes yet</td></tr>';
+    : '<tr><td colspan="5" class="muted">No routes yet</td></tr>';
   syncActionState();
 }
 
