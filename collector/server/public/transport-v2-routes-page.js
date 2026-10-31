@@ -161,7 +161,6 @@ function renderRoutes() {
           <div class="muted">${escapeHtml(item.route_number)} | ${escapeHtml(item.vehicle_type)}</div>
         </td>
         <td>${escapeHtml(item.routing_status)}<div class="muted">r${Number(item.resolved_revision || 0)}/${Number(item.route_revision || 0)}</div></td>
-        <td>${escapeHtml(item.poster_status)}<div class="muted">p${Number(item.poster_revision || 0)}/${Number(item.route_revision || 0)}</div></td>
         <td class="table-actions">
           <button type="button" data-action="open-review" data-id="${item.id}">Review</button>
           <button type="button" data-action="open-path" data-id="${item.id}">Edit Path</button>
@@ -248,7 +247,7 @@ function openPathEditor(routeId = 0) {
 
 async function init() {
   if (handleLegacyModeRedirect()) return;
-  const user = await initAuthBox({ allowRoles: ["owner", "admin", "user"] });
+  const user = await initAuthBox({ allowRoles: ["owner"] });
   if (!user) return;
   state.role = String(user.role || "").trim().toLowerCase();
   try {

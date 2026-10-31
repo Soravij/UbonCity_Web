@@ -21,7 +21,7 @@ async function render() {
 
 async function init() {
   const user = await initAuthBox({
-    allowRoles: ["owner", "admin", "user"],
+    allowRoles: ["owner"],
     statusId: "path-editor-status",
     bannerId: "path-editor-status",
   });

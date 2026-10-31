@@ -2525,7 +2525,6 @@ function syncGeneratedBaseMapSummaryToggle() {
 async function init() {
   const user = await initAuthBox({
     allowRoles: ["owner"],
-    redirectFor: (role) => (role === "admin" || role === "user" ? "/transport-v2-routes.html" : ""),
   });
   if (!user) return;
   try {
