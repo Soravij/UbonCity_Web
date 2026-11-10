@@ -309,12 +309,6 @@ async function main() {
     }
     assert(routeResolve.response.ok, `transport v2 resolve failed: ${JSON.stringify(routeResolve.payload)}`);
 
-    const routePoster = await requestJson(`${collectorBaseUrl}${TRANSPORT_V2_BASE}/routes/${collectorRouteId}/render-poster`, {
-      method: "POST",
-      token: collectorOwnerToken,
-    });
-    assert(routePoster.response.ok, `transport v2 render poster failed: ${JSON.stringify(routePoster.payload)}`);
-
     const routeReadiness = await requestJson(`${collectorBaseUrl}${TRANSPORT_V2_BASE}/routes/${collectorRouteId}/review-readiness`, {
       token: collectorOwnerToken,
     });

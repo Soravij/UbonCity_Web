@@ -24,7 +24,7 @@ async function load() {
 }
 
 async function init() {
-  const user = await initAuthBox({ allowRoles: ["owner", "admin", "user"] });
+  const user = await initAuthBox({ allowRoles: ["owner"] });
   if (!user) return;
   try {
     await load();

@@ -1128,7 +1128,7 @@ const collectorIntegrationConfig = () => ({
     ],
   });
 
-  router.get("/base-maps", allow("owner", "admin", "editor", "user"), (_req, res) => {
+  router.get("/base-maps", allow("owner"), (_req, res) => {
     res.json({
       items: db.prepare("SELECT * FROM transport_base_maps_v2 ORDER BY created_at DESC, id DESC").all().map((row) => {
         const source = resolveBaseMapLabelSource(row);
@@ -1141,7 +1141,7 @@ const collectorIntegrationConfig = () => ({
     });
   });
 
-  router.post("/base-maps", allow("owner", "admin"), async (req, res) => {
+  router.post("/base-maps", allow("owner"), async (req, res) => {
     try {
       const body = req.body || {};
       const bounds = body.bounds && typeof body.bounds === "object" ? body.bounds : {};
@@ -1220,7 +1220,7 @@ const collectorIntegrationConfig = () => ({
     }
   });
 
-  router.put("/base-maps/:id", allow("owner", "admin"), async (req, res) => {
+  router.put("/base-maps/:id", allow("owner"), async (req, res) => {
     try {
       const baseMapId = Number(req.params.id || 0) || 0;
       const current = getBaseMapRow(baseMapId);
@@ -1326,7 +1326,7 @@ const collectorIntegrationConfig = () => ({
     }
   });
 
-  router.post("/base-maps/:id/render-annotation", allow("owner", "admin"), wrap(async (req, res) => {
+  router.post("/base-maps/:id/render-annotation", allow("owner"), wrap(async (req, res) => {
     const baseMapId = Number(req.params.id || 0) || 0;
     const current = getBaseMapRow(baseMapId);
     if (!current) return res.status(404).json({ error: "Base map not found" });
@@ -1341,7 +1341,7 @@ const collectorIntegrationConfig = () => ({
     }
   }));
 
-  router.post("/base-maps/:id/render-published", allow("owner", "admin"), wrap(async (req, res) => {
+  router.post("/base-maps/:id/render-published", allow("owner"), wrap(async (req, res) => {
     const baseMapId = Number(req.params.id || 0) || 0;
     const current = getBaseMapRow(baseMapId);
     if (!current) return res.status(404).json({ error: "Base map not found" });
@@ -1356,7 +1356,7 @@ const collectorIntegrationConfig = () => ({
     }
   }));
 
-  router.get("/label-layouts", allow("owner", "admin", "editor", "user"), (_req, res) => {
+  router.get("/label-layouts", allow("owner"), (_req, res) => {
     res.json({
       items: db.prepare("SELECT * FROM transport_label_layouts_v2 ORDER BY created_at DESC, id DESC").all().map((row) => ({
         ...serializeLabelLayout(row),
@@ -1365,7 +1365,7 @@ const collectorIntegrationConfig = () => ({
     });
   });
 
-  router.get("/label-layouts/:id", allow("owner", "admin", "editor", "user"), (req, res) => {
+  router.get("/label-layouts/:id", allow("owner"), (req, res) => {
     const layout = serializeLabelLayout(getLabelLayoutRow(req.params.id));
     if (!layout) return res.status(404).json({ error: "Label layout not found" });
     res.json({
@@ -1374,7 +1374,7 @@ const collectorIntegrationConfig = () => ({
     });
   });
 
-  router.post("/label-layouts", allow("owner", "admin"), (req, res) => {
+  router.post("/label-layouts", allow("owner"), (req, res) => {
     try {
       const body = req.body || {};
       const key = String(body.key || body.layout_key || "").trim();
@@ -1403,7 +1403,7 @@ const collectorIntegrationConfig = () => ({
     }
   });
 
-  router.put("/label-layouts/:id", allow("owner", "admin"), (req, res) => {
+  router.put("/label-layouts/:id", allow("owner"), (req, res) => {
     try {
       const layoutId = Number(req.params.id || 0) || 0;
       const current = getLabelLayoutRow(layoutId);
@@ -1444,13 +1444,13 @@ const collectorIntegrationConfig = () => ({
     }
   });
 
-  router.get("/label-layouts/:id/labels", allow("owner", "admin", "editor", "user"), (req, res) => {
+  router.get("/label-layouts/:id/labels", allow("owner"), (req, res) => {
     const layout = getLabelLayoutRow(req.params.id);
     if (!layout) return res.status(404).json({ error: "Label layout not found" });
     res.json({ items: listLabelLayoutItems(req.params.id) });
   });
 
-  router.put("/label-layouts/:id/labels", allow("owner", "admin"), wrap(async (req, res) => {
+  router.put("/label-layouts/:id/labels", allow("owner"), wrap(async (req, res) => {
     const layout = getLabelLayoutRow(req.params.id);
     if (!layout) return res.status(404).json({ error: "Label layout not found" });
     const layoutId = Number(req.params.id || 0) || 0;
@@ -1491,7 +1491,7 @@ const collectorIntegrationConfig = () => ({
     res.json({ items: listLabelLayoutItems(layoutId) });
   }));
 
-  router.post("/label-layouts/:id/labels/translate", allow("owner", "admin"), wrap(async (req, res) => {
+  router.post("/label-layouts/:id/labels/translate", allow("owner"), wrap(async (req, res) => {
     const layout = getLabelLayoutRow(req.params.id);
     if (!layout) return res.status(404).json({ error: "Label layout not found" });
     const layoutMeta = normalizeLabelLayoutMetadata(asJson(layout.metadata_json, {}));
@@ -1579,13 +1579,13 @@ const collectorIntegrationConfig = () => ({
     });
   }));
 
-  router.get("/base-maps/:id/labels", allow("owner", "admin", "editor", "user"), (req, res) => {
+  router.get("/base-maps/:id/labels", allow("owner"), (req, res) => {
     const baseMap = getBaseMapRow(req.params.id);
     if (!baseMap) return res.status(404).json({ error: "Base map not found" });
     res.json({ items: resolveBaseMapLabelSource(baseMap).labels });
   });
 
-  router.put("/base-maps/:id/labels", allow("owner", "admin"), wrap(async (req, res) => {
+  router.put("/base-maps/:id/labels", allow("owner"), wrap(async (req, res) => {
     const baseMap = getBaseMapRow(req.params.id);
     if (!baseMap) return res.status(404).json({ error: "Base map not found" });
     if (Number(baseMap.active_label_layout_id || 0)) {
@@ -1652,7 +1652,7 @@ const collectorIntegrationConfig = () => ({
     res.json({ items: listBaseMapLabels(baseMapId) });
   }));
 
-  router.post("/base-maps/:id/labels/translate", allow("owner", "admin"), wrap(async (req, res) => {
+  router.post("/base-maps/:id/labels/translate", allow("owner"), wrap(async (req, res) => {
     const baseMap = getBaseMapRow(req.params.id);
     if (!baseMap) return res.status(404).json({ error: "Base map not found" });
     const source = resolveBaseMapLabelSource(baseMap);
@@ -1727,7 +1727,7 @@ const collectorIntegrationConfig = () => ({
     });
   }));
 
-  router.post("/base-maps/:id/overlays/image", allow("owner", "admin"), upload.single("file"), wrap(async (req, res) => {
+  router.post("/base-maps/:id/overlays/image", allow("owner"), upload.single("file"), wrap(async (req, res) => {
     const baseMap = getBaseMapRow(req.params.id);
     if (!baseMap) return res.status(404).json({ error: "Base map not found" });
     const file = req.file;
@@ -1765,11 +1765,11 @@ const collectorIntegrationConfig = () => ({
     });
   }));
 
-  router.get("/routes", allow("owner", "admin", "editor", "user"), (_req, res) => {
+  router.get("/routes", allow("owner"), (_req, res) => {
     res.json({ items: db.prepare("SELECT id FROM transport_routes_v2 ORDER BY updated_at DESC, id DESC").all().map((row) => getRoute(row.id)).filter(Boolean) });
   });
 
-  router.post("/routes", allow("owner", "admin"), (req, res) => {
+  router.post("/routes", allow("owner"), (req, res) => {
     try {
       const body = req.body || {};
       if (!String(body.route_name || "").trim()) throw new Error("route_name is required");
@@ -1802,13 +1802,13 @@ const collectorIntegrationConfig = () => ({
     }
   });
 
-  router.get("/routes/:id", allow("owner", "admin", "editor", "user"), (req, res) => {
+  router.get("/routes/:id", allow("owner"), (req, res) => {
     const item = getRoute(req.params.id);
     if (!item) return res.status(404).json({ error: "Route not found" });
     res.json(item);
   });
 
-  router.put("/routes/:id", allow("owner", "admin", "editor", "user"), (req, res) => {
+  router.put("/routes/:id", allow("owner"), (req, res) => {
     try {
       const current = getRoute(req.params.id);
       if (!current) return res.status(404).json({ error: "Route not found" });
@@ -1858,7 +1858,7 @@ const collectorIntegrationConfig = () => ({
     }
   });
 
-  router.post("/routes/:id/thumbnail", allow("owner", "admin", "editor", "user"), upload.single("file"), wrap(async (req, res) => {
+  router.post("/routes/:id/thumbnail", allow("owner"), upload.single("file"), wrap(async (req, res) => {
     const current = getRoute(req.params.id);
     if (!current) return res.status(404).json({ error: "Route not found" });
     const file = req.file || null;
@@ -1915,7 +1915,7 @@ const collectorIntegrationConfig = () => ({
     res.json(next);
   }));
 
-  router.put("/routes/:id/control-points", allow("owner", "admin", "editor", "user"), (req, res) => {
+  router.put("/routes/:id/control-points", allow("owner"), (req, res) => {
     const current = getRoute(req.params.id);
     if (!current) return res.status(404).json({ error: "Route not found" });
     const points = normalizePoints(req.body?.control_points || req.body?.items || []);
@@ -1935,7 +1935,7 @@ const collectorIntegrationConfig = () => ({
     res.json(next);
   });
 
-  router.put("/routes/:id/stops", allow("owner", "admin", "editor", "user"), (req, res) => {
+  router.put("/routes/:id/stops", allow("owner"), (req, res) => {
     const current = getRoute(req.params.id);
     if (!current) return res.status(404).json({ error: "Route not found" });
     const stops = normalizeStops(req.body?.stops || req.body?.items || []);
@@ -1955,7 +1955,7 @@ const collectorIntegrationConfig = () => ({
     res.json(next);
   });
 
-  router.post("/routes/:id/resolve", allow("owner", "admin", "editor", "user"), wrap(async (req, res) => {
+  router.post("/routes/:id/resolve", allow("owner"), wrap(async (req, res) => {
     const item = getRoute(req.params.id);
     if (!item) return res.status(404).json({ error: "Route not found" });
     if (!osrmBaseUrl) {
@@ -1987,27 +1987,6 @@ const collectorIntegrationConfig = () => ({
     const next = getRoute(item.id);
     logAudit(actorEmail(req), "transport_v2.route.resolve", "transport_route_v2", String(next.id), { route_revision: next.route_revision, resolved_revision: next.resolved_revision, point_count: next.resolved_path.length });
     res.json(next);
-  }));
-
-  router.post("/routes/:id/render-poster", allow("owner", "admin", "editor", "user"), wrap(async (req, res) => {
-    const item = getRoute(req.params.id);
-    if (!item) return res.status(404).json({ error: "Route not found" });
-    if (item.routing_status !== "fresh" || item.resolved_revision !== item.route_revision) return res.status(409).json({ error: "Route must be resolved before poster render", route: item });
-    const baseMap = getBaseMapRow(item.base_map_id);
-    if (!baseMap) {
-      db.prepare("UPDATE transport_routes_v2 SET poster_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
-      return res.status(409).json({ error: "base_map_id is required before poster render" });
-    }
-    const serializedBaseMap = serializeBaseMapResolved(baseMap);
-    const annotationAssetId = Number(baseMap.annotation_map_asset_id || 0) || null;
-    // Use annotation map asset for poster rendering
-    const posterUrl = assetUrl(db, annotationAssetId);
-    if (!posterUrl) {
-      return res.status(500).json({ error: "poster asset not found" });
-    }
-    // Update route with poster status
-    db.prepare("UPDATE transport_routes_v2 SET poster_status='done', poster_url=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(posterUrl, Number(item.id));
-    res.json({ poster_url: posterUrl, status: "done" });
   }));
 
   return router;
