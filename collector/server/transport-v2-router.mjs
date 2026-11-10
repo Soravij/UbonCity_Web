@@ -6,6 +6,7 @@ import multer from "multer";
 import { resolveAiConfig, resolveAiFeatureConfig } from "../config/ai.mjs";
 import { assertCollectorIntegrationReadiness } from "./integration-readiness.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
+import { buildTransportBundle } from "./transport-v2-publish.mjs";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
 const DEFAULT_COLOR = "#ff6600";
 const DEFAULT_LABEL_STYLE = {
@@ -654,7 +655,7 @@ function annotationRenderPayload(db, row, labelSource = null) {
     ? labelSource
     : { metadata: serialized?.metadata || {}, labels: [] };
   return {
-    revision: Number(row.updated_at ? Date.parse(row.updated_at) : 0) || nullmber(row.id || 0) || 0,
+    revision: Number(row.updated_at ? Date.parse(row.updated_at) : 0) || Number(row.id || 0) || 0,
     base_layer_url: String(serialized?.candidate_map_url || serialized?.base_svg_url || "").trim(),
     bounds: serialized?.bounds || mapShape(row).bounds,
     viewbox: serialized?.viewbox || mapShape(row).viewbox,
@@ -1339,6 +1340,68 @@ const collectorIntegrationConfig = () => ({
       await Promise.allSettled(cleanupPaths.map((fullPath) => fs.rm(fullPath, { force: true })));
       throw error;
     }
+  }));
+
+  const collectPublishInput = (id) => {
+    const row = getBaseMapRow(id);
+    if (!row) return null;
+    const render = annotationRenderPayload(db, row, resolveBaseMapLabelSource(row));
+    const routeIds = db.prepare("SELECT id FROM transport_routes_v2 WHERE base_map_id=? ORDER BY route_number ASC")
+      .all(Number(row.id)).map((r) => Number(r.id));
+    return {
+      row,
+      input: {
+        baseMap: { id: Number(row.id), map_key: row.map_key, title: row.title, ...mapShape(row) },
+        baseSvgStoragePath: assetStoragePath(db, row.candidate_map_asset_id || row.base_svg_asset_id),
+        labelLayer: render.label_layer,
+        overlayLayers: render.overlay_layers.map((o) => ({ ...o, storagePath: assetStoragePath(db, o.asset_id) })),
+        routes: routeIds.map((rid) => getRoute(rid)).filter(Boolean),
+      },
+    };
+  };
+
+  router.get("/base-maps/:id/publish-preview", allow("owner"), wrap(async (req, res) => {
+    const collected = collectPublishInput(req.params.id);
+    if (!collected) return res.status(404).json({ error: "base map not found" });
+    const { bundle, files, skipped, problems } = buildTransportBundle({ ...collected.input, revision: Date.now() });
+    let live = null;
+    try {
+      const response = await fetch(`${backendApiBase}/transport-v2/maps/${encodeURIComponent(bundle.map_key)}`);
+      if (response.ok) {
+        const data = await response.json();
+        live = { publication_id: data.publication_id, published_at: data.published_at, revision: data.bundle?.revision || null, route_count: data.bundle?.routes?.length || 0 };
+      }
+    } catch {
+      live = null;
+    }
+    return res.json({
+      map_key: bundle.map_key, route_count: bundle.routes.length, label_count: bundle.labels.length,
+      overlay_count: bundle.overlays.length, file_count: files.length, skipped, problems, live,
+    });
+  }));
+
+  router.post("/base-maps/:id/publish", allow("owner"), wrap(async (req, res) => {
+    if (!backendSyncToken) return res.status(503).json({ error: "LIFECYCLE_SYNC_TOKEN is not configured" });
+    const collected = collectPublishInput(req.params.id);
+    if (!collected) return res.status(404).json({ error: "base map not found" });
+    const { bundle, files, skipped, problems } = buildTransportBundle({ ...collected.input, revision: Date.now() });
+    if (problems.length) return res.status(409).json({ error: "not ready to publish", problems, skipped });
+    const form = new FormData();
+    form.append("bundle", JSON.stringify(bundle));
+    form.append("published_by", actorEmail(req));
+    for (const file of files) {
+      const buffer = await fs.readFile(path.join(dirs.mediaDir, file.storagePath));
+      form.append(file.name, new Blob([buffer]), file.name);
+    }
+    const response = await fetch(`${backendApiBase}/transport-v2/publish`, {
+      method: "POST", headers: { "x-lifecycle-token": backendSyncToken }, body: form,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(502).json({ error: "backend publish failed", backend_status: response.status, backend: payload });
+    logAudit(actorEmail(req), "transport_v2.base_map.publish", "transport_base_map_v2", String(collected.row.id), {
+      map_key: bundle.map_key, revision: bundle.revision, route_count: bundle.routes.length, skipped_count: skipped.length,
+    });
+    return res.json({ ok: true, ...payload, skipped });
   }));
 
   router.post("/base-maps/:id/render-published", allow("owner"), wrap(async (req, res) => {

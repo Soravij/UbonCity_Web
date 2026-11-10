@@ -6,7 +6,7 @@ const router = read("../server/transport-v2-router.mjs");
 test("v2 router: every endpoint is owner-only", () => {
   const all = [...router.matchAll(/router\.(get|post|put|patch|delete)\(/g)];
   const calls = [...router.matchAll(/router\.(get|post|put|patch|delete)\([^,]+,\s*allow\(([^)]*)\)/g)];
-  assert.equal(all.length, 24);
+  assert.equal(all.length, 26);
   assert.equal(calls.length, all.length);
   for (const m of calls) assert.equal(m[2].trim(), '"owner"', m[0]);
 });
