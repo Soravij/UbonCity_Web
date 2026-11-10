@@ -37,10 +37,19 @@ test("bundle: routes, skipped, labels, overlays, files", () => {
   assert.equal(bundle.labels.length, 1);
   assert.deepEqual(bundle.labels[0].texts, { th: "ก", en: "A" });
   assert.equal(bundle.labels[0].x, 10);
-  assert.deepEqual(bundle.overlays[0], { id: "Logo 1", file: "overlay-logo-1.png", x: 1, y: 2, width: 30, height: 40, scale_with_zoom: true });
-  assert.deepEqual(files.map((f) => f.name), ["base.svg", "overlay-logo-1.png"]);
+  assert.deepEqual(bundle.overlays[0], { id: "Logo 1", file: "overlay-1.png", x: 1, y: 2, width: 30, height: 40, scale_with_zoom: true });
+  assert.deepEqual(files.map((f) => f.name), ["base.svg", "overlay-1.png"]);
 });
 test("bundle: problems when nothing publishable", () => {
   const i = input(); i.baseSvgStoragePath = ""; i.routes = [];
   assert.deepEqual(buildTransportBundle(i).problems, ["base map has no SVG asset", "no route ready to publish"]);
+});
+test("bundle: invalid route number/name goes to skipped, overlay names never collide", () => {
+  const i = input();
+  i.routes.push({ id: 9, route_number: "", route_name: "x", vehicle_type: "bus", color: "#000000", routing_status: "fresh",
+    resolved_path: [{ lat: 15, lng: 104 }, { lat: 16, lng: 105 }] });
+  i.overlayLayers.push({ overlay_id: "logo-1", storagePath: "y/logo.png", anchor_x: 0, anchor_y: 0, width: 1, height: 1 });
+  const { bundle, skipped } = buildTransportBundle(i);
+  assert.ok(skipped.some((s) => s.id === 9 && s.reason === "invalid number or name"));
+  assert.deepEqual(bundle.overlays.map((o) => o.file), ["overlay-1.png", "overlay-2.png"]);
 });

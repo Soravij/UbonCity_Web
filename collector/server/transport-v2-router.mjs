@@ -1366,7 +1366,7 @@ const collectorIntegrationConfig = () => ({
     const { bundle, files, skipped, problems } = buildTransportBundle({ ...collected.input, revision: Date.now() });
     let live = null;
     try {
-      const response = await fetch(`${backendApiBase}/transport-v2/maps/${encodeURIComponent(bundle.map_key)}`);
+      const response = await fetch(`${backendApiBase}/transport-v2/maps/${encodeURIComponent(bundle.map_key)}`, { signal: AbortSignal.timeout(5000) });
       if (response.ok) {
         const data = await response.json();
         live = { publication_id: data.publication_id, published_at: data.published_at, revision: data.bundle?.revision || null, route_count: data.bundle?.routes?.length || 0 };
@@ -1389,13 +1389,24 @@ const collectorIntegrationConfig = () => ({
     const form = new FormData();
     form.append("bundle", JSON.stringify(bundle));
     form.append("published_by", actorEmail(req));
+    const missingFiles = [];
     for (const file of files) {
-      const buffer = await fs.readFile(path.join(dirs.mediaDir, file.storagePath));
-      form.append(file.name, new Blob([buffer]), file.name);
+      try {
+        const buffer = await fs.readFile(path.join(dirs.mediaDir, file.storagePath));
+        form.append(file.name, new Blob([buffer]), file.name);
+      } catch {
+        missingFiles.push(file.name);
+      }
     }
-    const response = await fetch(`${backendApiBase}/transport-v2/publish`, {
-      method: "POST", headers: { "x-lifecycle-token": backendSyncToken }, body: form,
-    });
+    if (missingFiles.length) return res.status(409).json({ error: "asset files missing", problems: missingFiles.map((n) => `file missing: ${n}`), skipped });
+    let response;
+    try {
+      response = await fetch(`${backendApiBase}/transport-v2/publish`, {
+        method: "POST", headers: { "x-lifecycle-token": backendSyncToken }, body: form, signal: AbortSignal.timeout(60000),
+      });
+    } catch (err) {
+      return res.status(502).json({ error: "backend unreachable", detail: String(err?.name || err?.message || err) });
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) return res.status(502).json({ error: "backend publish failed", backend_status: response.status, backend: payload });
     logAudit(actorEmail(req), "transport_v2.base_map.publish", "transport_base_map_v2", String(collected.row.id), {
