@@ -42,10 +42,17 @@ export async function publishTransportMap(req, res) {
   await fs.mkdir(path.join(UPLOADS_DIR, relDir), { recursive: true });
   for (const name of names) await fs.writeFile(path.join(UPLOADS_DIR, relDir, name), files.get(name).buffer);
   const stored = attachBundleFileUrls(bundle, (name) => publicUploadUrl(`${relDir}/${name}`));
-  const [result] = await pool.query(
-    "INSERT INTO transport_map_publications (map_key, revision, bundle_json, published_by) VALUES (?,?,?,?)",
-    [bundle.map_key, bundle.revision, JSON.stringify(stored), String(req.body?.published_by || "").slice(0, 255) || null]
-  );
+  let result;
+  try {
+    [result] = await pool.query(
+      "INSERT INTO transport_map_publications (map_key, revision, bundle_json, published_by) VALUES (?,?,?,?)",
+      [bundle.map_key, bundle.revision, JSON.stringify(stored), String(req.body?.published_by || "").slice(0, 255) || null]
+    );
+  } catch (err) {
+    if (err?.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "revision already published" });
+    await fs.rm(path.join(UPLOADS_DIR, relDir), { recursive: true, force: true });
+    throw err;
+  }
   return res.status(201).json({
     ok: true, publication_id: Number(result.insertId), map_key: bundle.map_key,
     revision: bundle.revision, route_count: bundle.routes.length, label_count: bundle.labels.length,
