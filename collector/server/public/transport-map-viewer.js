@@ -48,10 +48,37 @@ export function pathBounds(points) {
   return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
 }
 
+export function viewForBounds(b, full) {
+  const pad = Math.max(b.maxX - b.minX, b.maxY - b.minY) * 0.15 + 40;
+  const aspect = full.height / full.width;
+  const rawW = Math.max(b.maxX - b.minX, (b.maxY - b.minY) / aspect) + pad * 2;
+  const w = Math.min(full.width, Math.max(full.width / MAX_ZOOM, rawW));
+  const h = w * aspect;
+  return clampView({ x: (b.minX + b.maxX) / 2 - w / 2, y: (b.minY + b.maxY) / 2 - h / 2, w, h }, full);
+}
+
 function el(name, attrs = {}) {
   const node = document.createElementNS(SVG_NS, name);
   for (const [k, v] of Object.entries(attrs)) if (v != null) node.setAttribute(k, String(v));
   return node;
+}
+
+const BASE_TAGS = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "title", "desc"]);
+const BASE_ATTRS = new Set(["xmlns", "viewBox", "preserveAspectRatio", "role", "id", "d", "x", "y", "width", "height",
+  "cx", "cy", "r", "rx", "ry", "x1", "y1", "x2", "y2", "points", "transform", "opacity",
+  "fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray",
+  "stroke-linecap", "stroke-linejoin", "stroke-miterlimit"]);
+
+function sanitizeBaseSvg(root) {
+  for (const node of [root, ...root.querySelectorAll("*")]) {
+    if (!BASE_TAGS.has(node.localName)) {
+      node.remove();
+      continue;
+    }
+    for (const a of [...node.attributes]) {
+      if (!BASE_ATTRS.has(a.name) || /url\(|javascript:/i.test(a.value)) node.removeAttribute(a.name);
+    }
+  }
 }
 
 async function loadBaseSvg(url) {
@@ -59,11 +86,8 @@ async function loadBaseSvg(url) {
   if (!res.ok) throw new Error(`base map ${res.status}`);
   const doc = new DOMParser().parseFromString(await res.text(), "image/svg+xml");
   const root = doc.documentElement;
-  if (!root || root.nodeName.toLowerCase() !== "svg") throw new Error("base map is not svg");
-  root.querySelectorAll("script, foreignObject").forEach((n) => n.remove());
-  root.querySelectorAll("*").forEach((n) => {
-    for (const a of [...n.attributes]) if (/^on/i.test(a.name)) n.removeAttribute(a.name);
-  });
+  if (!root || root.localName !== "svg" || doc.getElementsByTagName("parsererror").length) throw new Error("base map is not svg");
+  sanitizeBaseSvg(root);
   return document.importNode(root, true);
 }
 
@@ -74,6 +98,7 @@ export function createTransportMapViewer(container, options = {}) {
   let lang = options.lang === "en" ? "en" : "th";
   let selectedId = null;
   let draft = null;
+  let destroyed = false;
 
   const svg = el("svg", { viewBox: `${full.x} ${full.y} ${full.width} ${full.height}`, preserveAspectRatio: "xMidYMid meet", width: "100%", height: "100%" });
   svg.style.display = "block";
@@ -90,6 +115,7 @@ export function createTransportMapViewer(container, options = {}) {
 
   const ready = bundle.base_svg_url
     ? loadBaseSvg(bundle.base_svg_url).then((node) => {
+      if (destroyed) return;
       node.setAttribute("x", String(full.x));
       node.setAttribute("y", String(full.y));
       node.setAttribute("width", String(full.width));
@@ -222,11 +248,12 @@ export function createTransportMapViewer(container, options = {}) {
       const other = [...pointers.entries()].find(([id]) => id !== e.pointerId)[1];
       const before = Math.hypot(prev.x - other.x, prev.y - other.y);
       const after = Math.hypot(cur.x - other.x, cur.y - other.y);
-      if (before > 0) {
-        const [px, py] = toViewbox((cur.x + other.x) / 2, (cur.y + other.y) / 2);
-        view = zoomAt(view, full, after / before, px, py);
-        render();
-      }
+      const [ax, ay] = toViewbox((prev.x + other.x) / 2, (prev.y + other.y) / 2);
+      view = zoomAt(view, full, before > 0 ? after / before : 1, ax, ay);
+      render();
+      const [bx, by] = toViewbox((cur.x + other.x) / 2, (cur.y + other.y) / 2);
+      view = clampView({ ...view, x: view.x + ax - bx, y: view.y + ay - by }, full);
+      render();
     }
     pointers.set(e.pointerId, cur);
   });
@@ -267,10 +294,7 @@ export function createTransportMapViewer(container, options = {}) {
     focusRoute(id) {
       const route = routesById.get(Number(id));
       if (!route || route.path.length < 2) return;
-      const b = pathBounds(route.path);
-      const pad = Math.max(b.maxX - b.minX, b.maxY - b.minY) * 0.15 + 40;
-      const w = Math.max(b.maxX - b.minX, (b.maxY - b.minY) * (full.width / full.height)) + pad * 2;
-      view = clampView({ x: (b.minX + b.maxX) / 2 - w / 2, y: (b.minY + b.maxY) / 2 - (w * full.height / full.width) / 2, w, h: w * full.height / full.width }, full);
+      view = viewForBounds(pathBounds(route.path), full);
       render();
     },
     setLang(next) {
@@ -287,6 +311,7 @@ export function createTransportMapViewer(container, options = {}) {
       render();
     },
     destroy() {
+      destroyed = true;
       resizeObserver?.disconnect();
       svg.remove();
     },

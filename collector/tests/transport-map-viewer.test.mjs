@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
-import { clampView, latLngToViewbox, viewboxToLatLng, zoomAt, zoomLevel } from "../server/public/transport-map-viewer.js";
+import { clampView, latLngToViewbox, viewboxToLatLng, viewForBounds, zoomAt, zoomLevel } from "../server/public/transport-map-viewer.js";
 import { projectToViewbox } from "../server/transport-v2-publish.mjs";
 
 const bounds = { min_lat: 15.1083, min_lng: 104.8068, max_lat: 15.3117, max_lng: 104.972 };
@@ -28,6 +28,13 @@ test("clampView limits zoom range and keeps the view inside the map", () => {
   assert.equal(v.x, 0);
   assert.ok(Math.abs(v.y + v.h - 5600) < 1e-9);
   assert.deepEqual(clampView({ x: 10, y: 10, w: 99999, h: 1 }, full), fullView);
+});
+
+test("viewForBounds centers a short route after clamping to max zoom", () => {
+  const v = viewForBounds({ minX: 1990, minY: 2790, maxX: 2010, maxY: 2810 }, full);
+  assert.ok(Math.abs(v.w - 4000 / 12) < 1e-9);
+  assert.ok(Math.abs(v.x + v.w / 2 - 2000) < 1e-9);
+  assert.ok(Math.abs(v.y + v.h / 2 - 2800) < 1e-9);
 });
 
 test("frontend copy is byte-identical", () => {
