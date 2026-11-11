@@ -12,28 +12,28 @@ const DB_PATH = process.env.DB_PATH || path.join(collectorRoot, "data", "collect
 const db = new DatabaseSync(DB_PATH);
 
 const BASE_MAP = {
-  key: "ubon-city-base-map-v1",
-  title: "Ubon City Base Map V1",
+  key: "ubon-city-v2",
+  title: "Ubon City Transport Map",
   status: "active",
   version: 1,
   bounds: {
-    min_lat: 15.1083,
-    min_lng: 104.8068,
-    max_lat: 15.3117,
-    max_lng: 104.9720,
+    min_lat: 15.0743,
+    min_lng: 104.7632,
+    max_lat: 15.3054,
+    max_lng: 105.0056,
   },
   viewbox: {
     x: 0,
     y: 0,
-    width: 4000,
-    height: 5600,
+    width: 6000,
+    height: 5927,
   },
   projection_type: "linear-bbox-fit",
 };
 
-const svgFullPath = path.join(collectorRoot, "media", "generated", "transport-v2", "base-maps", "ubon-city-base-map-v1-r1.svg");
-const metaFullPath = path.join(collectorRoot, "media", "generated", "transport-v2", "base-maps", "ubon-city-base-map-v1-r1.meta.json");
-const storagePath = "generated/transport-v2/base-maps/ubon-city-base-map-v1-r1.svg";
+const svgFullPath = path.join(collectorRoot, "media", "generated", "transport-v2", "base-maps", "ubon-city-v2-r1.svg");
+const metaFullPath = path.join(collectorRoot, "media", "generated", "transport-v2", "base-maps", "ubon-city-v2-r1.meta.json");
+const storagePath = "generated/transport-v2/base-maps/ubon-city-v2-r1.svg";
 
 const svgBuffer = readFileSync(svgFullPath);
 const meta = JSON.parse(readFileSync(metaFullPath, "utf8"));

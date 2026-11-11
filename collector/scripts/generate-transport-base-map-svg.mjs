@@ -2,65 +2,65 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const BOUNDS = {
-  min_lat: 15.1083,
-  min_lng: 104.8068,
-  max_lat: 15.3117,
-  max_lng: 104.9720,
+  min_lat: 15.0743,
+  min_lng: 104.7632,
+  max_lat: 15.3054,
+  max_lng: 105.0056,
 };
 
 const VIEWBOX = {
   x: 0,
   y: 0,
-  width: 4000,
-  height: 5600,
+  width: 6000,
+  height: 5927,
 };
 
-const INPUT_PATH = path.resolve("collector", "tmp", "ubon-city-base-map-v1-overpass.json");
-const AREA_INPUT_PATH = path.resolve("collector", "tmp", "ubon-city-base-map-v1-areas.json");
+const INPUT_PATH = path.resolve("collector", "tmp", "ubon-city-v2-overpass.json");
+const AREA_INPUT_PATH = path.resolve("collector", "tmp", "ubon-city-v2-areas.json");
 const OUTPUT_DIR = path.resolve("collector", "media", "generated", "transport-v2", "base-maps");
-const OUTPUT_BASENAME = "ubon-city-base-map-v1-r1";
+const OUTPUT_BASENAME = "ubon-city-v2-r1";
 
 const ROAD_GROUPS = [
   {
     id: "roads-motorway",
     highway: new Set(["motorway", "motorway_link", "trunk", "trunk_link"]),
-    casing: { stroke: "#cdb385", width: 18, opacity: 0.92 },
-    stroke: { stroke: "#f4e3bb", width: 11.5, opacity: 0.98 },
+    casing: { stroke: "#c4bfb5", width: 16, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 11, opacity: 1 },
     simplifyTolerance: 1.2,
   },
   {
     id: "roads-primary",
     highway: new Set(["primary", "primary_link"]),
-    casing: { stroke: "#ceb181", width: 14, opacity: 0.9 },
-    stroke: { stroke: "#f2dfb3", width: 9, opacity: 0.96 },
+    casing: { stroke: "#cbc6bd", width: 13, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 9, opacity: 1 },
     simplifyTolerance: 1.6,
   },
   {
     id: "roads-secondary",
     highway: new Set(["secondary", "secondary_link"]),
-    casing: { stroke: "#d8c4a0", width: 11, opacity: 0.86 },
-    stroke: { stroke: "#f6e7c5", width: 7, opacity: 0.92 },
+    casing: { stroke: "#d3cfc7", width: 10, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 7, opacity: 1 },
     simplifyTolerance: 2.1,
   },
   {
     id: "roads-tertiary",
     highway: new Set(["tertiary", "tertiary_link"]),
-    casing: { stroke: "#dfd2bc", width: 11, opacity: 0.78 },
-    stroke: { stroke: "#fbf1dd", width: 7, opacity: 0.87 },
+    casing: { stroke: "#dad6cf", width: 8, opacity: 1 },
+    stroke: { stroke: "#fdfcfa", width: 5.5, opacity: 1 },
     simplifyTolerance: 2.8,
   },
   {
     id: "roads-local",
     highway: new Set(["unclassified", "residential", "living_street", "road"]),
-    casing: { stroke: "#cfc6b8", width: 6, opacity: 0.62 },
-    stroke: { stroke: "#f3eee4", width: 3.2, opacity: 0.9 },
+    casing: { stroke: "#e1ded8", width: 4.5, opacity: 1 },
+    stroke: { stroke: "#fbfaf7", width: 2.8, opacity: 1 },
     simplifyTolerance: 3.8,
   },
   {
     id: "roads-service",
     highway: new Set(["service"]),
-    casing: { stroke: "#ddd5c8", width: 4, opacity: 0.42 },
-    stroke: { stroke: "#f7f2e9", width: 2.2, opacity: 0.68 },
+    casing: { stroke: "#e8e6e1", width: 2.4, opacity: 1 },
+    stroke: { stroke: "#f7f6f2", width: 1.4, opacity: 1 },
     simplifyTolerance: 4.5,
   },
 ];
@@ -75,17 +75,17 @@ const DRAW_ORDER = [
 ];
 
 const AREA_STYLES = {
-  water: { fill: "#b9dbe8", opacity: 0.9 },
-  green: { fill: "#d7e5c8", opacity: 0.78 },
-  military: { fill: "#e6ddd2", opacity: 0.72 },
-  aeroway: { fill: "#ddd5ca", opacity: 0.8 },
-  education: { fill: "#dbe7cf", opacity: 0.72 },
-  health: { fill: "#ead6d2", opacity: 0.74 },
+  water: { fill: "#c6dbe4", opacity: 1 },
+  green: { fill: "#dde7d3", opacity: 1 },
+  military: { fill: "#ebe9e3", opacity: 1 },
+  aeroway: { fill: "#e7e5df", opacity: 1 },
+  education: { fill: "#ecebe4", opacity: 1 },
+  health: { fill: "#efe9e6", opacity: 1 },
 };
 
 const RAIL_STYLE = {
-  casing: { stroke: "#b8aea1", width: 2.6, opacity: 0.75 },
-  stroke: { stroke: "#f3efe7", width: 1.2, opacity: 0.9, dasharray: "10 6" },
+  casing: { stroke: "#a7a299", width: 3, opacity: 1 },
+  stroke: { stroke: "#ffffff", width: 1.6, opacity: 1, dasharray: "10 6" },
 };
 
 const AREA_FILTERS = {
@@ -552,7 +552,7 @@ function collectGroupedPaths(elements, profile) {
 function buildSvg(grouped, areaLayers, railways, stats, profile) {
   const generatedAt = new Date().toISOString();
   const metadata = {
-    base_map_key: "ubon-city-base-map-v1",
+    base_map_key: "ubon-city-v2",
     asset_revision: "r1",
     generated_at: generatedAt,
     source: "OpenStreetMap Overpass highways",
@@ -601,15 +601,9 @@ function buildSvg(grouped, areaLayers, railways, stats, profile) {
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
     `<!-- ${escapeXml(JSON.stringify(metadata))} -->`,
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${VIEWBOX.x} ${VIEWBOX.y} ${VIEWBOX.width} ${VIEWBOX.height}" role="img" aria-labelledby="title desc">`,
-    "  <title id=\"title\">Ubon City Base Map V1</title>",
+    "  <title id=\"title\">Ubon City Transport Base Map</title>",
     "  <desc id=\"desc\">Road hierarchy base map generated from OpenStreetMap within the locked Ubon bbox.</desc>",
-    "  <defs>",
-    "    <style>",
-      "      .map-bg { fill: #f6f1e7; }",
-      "      .map-frame { fill: none; stroke: #d5ccbc; stroke-width: 10; }",
-    "    </style>",
-    "  </defs>",
-    `  <rect class="map-bg" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
+    `  <rect fill="#f4f3ef" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
     "  <g id=\"area-layers\">",
     areasMarkup,
     "  </g>",
@@ -617,7 +611,7 @@ function buildSvg(grouped, areaLayers, railways, stats, profile) {
     "  <g id=\"road-network\">",
     groupsMarkup,
     "  </g>",
-    `  <rect class="map-frame" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
+    `  <rect fill="none" stroke="#d9d6cf" stroke-width="10" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
     "</svg>",
     "",
   ].join("\n");
@@ -643,7 +637,7 @@ async function main() {
 
   await fs.writeFile(svgPath, svg, "utf8");
   await fs.writeFile(metaPath, JSON.stringify({
-    key: "ubon-city-base-map-v1",
+    key: "ubon-city-v2",
     revision: "r1",
     source_file: path.relative(process.cwd(), INPUT_PATH),
     visual_profile: OVERVIEW_PROFILE.id,
