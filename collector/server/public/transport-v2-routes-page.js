@@ -50,7 +50,7 @@ function isReadyBaseMap(item) {
 }
 
 function hasRenderableMapAsset(item) {
-  return Boolean(String(item?.annotation_map_url || "").trim());
+  return Boolean(Number(item?.base_svg_asset_id || 0));
 }
 
 function latestWorkspaceBaseMap() {
@@ -104,19 +104,9 @@ function syncSelectionStatus() {
 }
 
 function syncActionState() {
-  const reviewButton = qs("btn-open-selected-review");
-  const pathButton = qs("btn-open-selected-path");
   const pathTopButton = qs("btn-open-selected-path-top");
-  const openReviewButton = qs("btn-open-routes-review");
-  const renderPublishedButton = qs("btn-render-published-map");
   const count = state.selectedRouteIds.length;
-  if (reviewButton) reviewButton.disabled = !canOpenReview();
-  if (openReviewButton) openReviewButton.disabled = !canOpenReview();
-  if (pathButton) pathButton.disabled = !canOpenPathEditor() || count !== 1;
   if (pathTopButton) pathTopButton.disabled = !canOpenPathEditor() || count !== 1;
-  if (renderPublishedButton) {
-    renderPublishedButton.disabled = !canRenderPublishedMap() || !hasRenderableMapAsset(latestWorkspaceBaseMap());
-  }
   syncSelectionStatus();
 }
 
@@ -133,14 +123,14 @@ function renderBaseMaps() {
   if (createSection) createSection.classList.toggle("hidden", !manageEnabled);
   if (contextNode) {
     contextNode.textContent = latest
-      ? `Using the latest annotation map from Base Map Annotation Workspace: ${latest.title || `#${latest.id}`}`
-      : "No annotation map is available from Base Map Annotation Workspace yet.";
+      ? `Base map: ${latest.title || `#${latest.id}`}`
+      : "No base map yet.";
   }
   if (createButton) createButton.disabled = !manageEnabled || items.length === 0 || !hasAnnotationMap;
   if (statusNode && items.length === 0) {
     statusNode.textContent = "Complete the base map workflow before creating routes.";
   } else if (statusNode && latest && !hasAnnotationMap) {
-    statusNode.textContent = "Render Annotation Map in Base Map Annotation Workspace before creating routes.";
+    statusNode.textContent = "The base map has no SVG yet.";
   } else if (statusNode) {
     statusNode.textContent = "";
   }
@@ -162,7 +152,6 @@ function renderRoutes() {
         </td>
         <td>${escapeHtml(item.routing_status)}<div class="muted">r${Number(item.resolved_revision || 0)}/${Number(item.route_revision || 0)}</div></td>
         <td class="table-actions">
-          <button type="button" data-action="open-review" data-id="${item.id}">Review</button>
           <button type="button" data-action="open-path" data-id="${item.id}">Edit Path</button>
         </td>
       </tr>`).join("")
@@ -186,9 +175,9 @@ async function refresh() {
 
 async function createRoute() {
   const latest = latestWorkspaceBaseMap();
-  if (!latest) throw new Error("A base map from Base Map Annotation Workspace is required before creating a route.");
+  if (!latest) throw new Error("A base map is required before creating a route.");
   if (!hasRenderableMapAsset(latest)) {
-    throw new Error("Render Annotation Map in Base Map Annotation Workspace before creating a route.");
+    throw new Error("The base map has no SVG yet.");
   }
   return api("/api/v2/transport/routes", {
     method: "POST",
@@ -200,17 +189,6 @@ async function createRoute() {
       color: String(qs("create-route-color")?.value || "#ff6600").trim(),
       description: String(qs("create-route-description")?.value || "").trim(),
     }),
-  });
-}
-
-async function renderPublishedMap() {
-  const latest = latestWorkspaceBaseMap();
-  if (!latest) throw new Error("A base map is required before rendering the published map.");
-  if (!hasRenderableMapAsset(latest)) {
-    throw new Error("Render Annotation Map in Base Map Annotation Workspace before rendering the published map.");
-  }
-  return api(`/api/v2/transport/base-maps/${Number(latest.id || 0) || 0}/render-published`, {
-    method: "POST",
   });
 }
 
@@ -228,11 +206,6 @@ function toggleRouteSelection(routeId, checked) {
   else set.delete(id);
   state.selectedRouteIds = Array.from(set);
   syncActionState();
-}
-
-function openRoutesReview() {
-  if (!canOpenReview()) return;
-  window.location.href = selectedReviewUrl();
 }
 
 function openPathEditor(routeId = 0) {
@@ -260,25 +233,8 @@ async function init() {
   qs("btn-back-home")?.addEventListener("click", () => { window.location.href = "/"; });
   qs("btn-process-home")?.addEventListener("click", () => { window.location.href = "/transport.html"; });
   qs("btn-open-base-maps")?.addEventListener("click", () => { window.location.href = "/transport-v2-base-maps.html"; });
-  qs("btn-open-routes-review")?.addEventListener("click", () => { openRoutesReview(); });
-  qs("btn-open-selected-review")?.addEventListener("click", () => { openRoutesReview(); });
-  qs("btn-open-selected-path")?.addEventListener("click", () => { openPathEditor(); });
   qs("btn-open-selected-path-top")?.addEventListener("click", () => { openPathEditor(); });
-  qs("btn-render-published-map")?.addEventListener("click", async () => {
-    if (!canRenderPublishedMap()) return;
-    if (!window.confirm("Render Published Map now? This updates the published output.")) return;
-    try {
-      setBanner("published-map-status", "Rendering published map...");
-      const updated = await renderPublishedMap();
-      await refresh();
-      setBanner(
-        "published-map-status",
-        updated?.published_map_url ? `Published map ready: ${updated.published_map_url}` : "Published map rendered"
-      );
-    } catch (error) {
-      setBanner("published-map-status", error.message || "Render published map failed", true);
-    }
-  });
+  qs("btn-open-preview")?.addEventListener("click", () => { window.location.href = "/transport-v2-preview.html"; });
 
   qs("btn-create-route")?.addEventListener("click", async () => {
     if (!canManageRoutes()) return;
@@ -303,11 +259,6 @@ async function init() {
     if (!button) return;
     const routeId = Number(button.dataset.id || 0) || 0;
     if (!routeId) return;
-    if (button.dataset.action === "open-review") {
-      selectOnlyRoute(routeId);
-      openRoutesReview();
-      return;
-    }
     if (button.dataset.action === "open-path") openPathEditor(routeId);
   });
 
