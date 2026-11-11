@@ -1,12 +1,12 @@
 // transport-map-viewer.js — shared by collector admin (collector/server/public) and frontend (frontend/lib/transportMapViewer.js).
 // Both copies must stay byte-identical (checked by collector/tests/transport-map-viewer.test.mjs). No imports, no CSS classes.
 const SVG_NS = "http://www.w3.org/2000/svg";
-const MAX_ZOOM = 12;
+const MAX_ZOOM = 40;
 const LABEL_PX = { s: 11, m: 13, l: 15 };
 const BASE_MIN_ZOOM = [["roads-service", 4], ["roads-local", 2]];
 
 export function baseStrokeScale(z) {
-  return Math.pow(Math.min(Math.max(z, 1), 8), 0.6);
+  return Math.pow(Math.min(Math.max(z, 1), 32), 0.6);
 }
 
 export function latLngToViewbox(lat, lng, bounds, viewbox) {
@@ -68,7 +68,7 @@ function el(name, attrs = {}) {
   return node;
 }
 
-const BASE_TAGS = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "title", "desc"]);
+const BASE_TAGS = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon"]);
 const BASE_ATTRS = new Set(["xmlns", "viewBox", "preserveAspectRatio", "role", "id", "d", "x", "y", "width", "height",
   "cx", "cy", "r", "rx", "ry", "x1", "y1", "x2", "y2", "points", "transform", "opacity",
   "fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray",

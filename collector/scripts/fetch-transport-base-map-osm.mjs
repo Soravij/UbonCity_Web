@@ -4,7 +4,7 @@ import path from "node:path";
 const KEY = "ubon-city-v2";
 const BBOX = "15.0743,104.7632,15.3054,105.0056"; // south,west,north,east
 const OUT_DIR = path.resolve("collector", "tmp");
-const ENDPOINT = "https://overpass-api.de/api/interpreter";
+const ENDPOINT = process.env.OVERPASS_URL || "https://overpass-api.de/api/interpreter";
 
 const ROADS = `[out:json][timeout:180];
 way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|road|service)$"](${BBOX});
@@ -25,7 +25,7 @@ const AREAS = `[out:json][timeout:180];
   relation["amenity"~"^(university|hospital)$"](${BBOX});
   way["railway"~"^(rail|light_rail|tram|narrow_gauge)$"](${BBOX});
 );
-out tags geom;`;
+out geom;`;
 
 async function fetchQuery(query) {
   const res = await fetch(ENDPOINT, {
@@ -39,8 +39,10 @@ async function fetchQuery(query) {
 }
 
 await fs.mkdir(OUT_DIR, { recursive: true });
-const roads = await fetchQuery(ROADS);
-await fs.writeFile(path.join(OUT_DIR, `${KEY}-overpass.json`), roads, "utf8");
+const roadsPath = path.join(OUT_DIR, `${KEY}-overpass.json`);
+const skipRoads = !process.argv.includes("--roads") && await fs.access(roadsPath).then(() => true, () => false);
+const roads = skipRoads ? await fs.readFile(roadsPath, "utf8") : await fetchQuery(ROADS);
+if (!skipRoads) await fs.writeFile(roadsPath, roads, "utf8");
 const areas = await fetchQuery(AREAS);
 await fs.writeFile(path.join(OUT_DIR, `${KEY}-areas.json`), areas, "utf8");
 process.stdout.write(JSON.stringify({

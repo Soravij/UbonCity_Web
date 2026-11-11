@@ -24,43 +24,43 @@ const ROAD_GROUPS = [
   {
     id: "roads-motorway",
     highway: new Set(["motorway", "motorway_link", "trunk", "trunk_link"]),
-    casing: { stroke: "#b5afa4", width: 4.5, opacity: 1 },
-    stroke: { stroke: "#ffffff", width: 3, opacity: 1 },
+    casing: { stroke: "#a8a296", width: 4.6, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 3.4, opacity: 1 },
     simplifyTolerance: 0.6,
   },
   {
     id: "roads-primary",
     highway: new Set(["primary", "primary_link"]),
-    casing: { stroke: "#bdb7ad", width: 3.6, opacity: 1 },
-    stroke: { stroke: "#ffffff", width: 2.4, opacity: 1 },
+    casing: { stroke: "#b3ada2", width: 3.8, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 2.8, opacity: 1 },
     simplifyTolerance: 0.8,
   },
   {
     id: "roads-secondary",
     highway: new Set(["secondary", "secondary_link"]),
-    casing: { stroke: "#c8c3ba", width: 3, opacity: 1 },
-    stroke: { stroke: "#ffffff", width: 2, opacity: 1 },
+    casing: { stroke: "#c2bcb2", width: 3, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 2.2, opacity: 1 },
     simplifyTolerance: 1.2,
   },
   {
     id: "roads-tertiary",
     highway: new Set(["tertiary", "tertiary_link"]),
-    casing: { stroke: "#d2cec6", width: 2.4, opacity: 1 },
-    stroke: { stroke: "#fdfcfa", width: 1.5, opacity: 1 },
+    casing: { stroke: "#cdc8bf", width: 2.4, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 1.7, opacity: 1 },
     simplifyTolerance: 1.6,
   },
   {
     id: "roads-local",
     highway: new Set(["unclassified", "residential", "living_street", "road"]),
-    casing: { stroke: "#dcd9d2", width: 1.4, opacity: 1 },
-    stroke: { stroke: "#fbfaf7", width: 0.8, opacity: 1 },
+    casing: { stroke: "#fcfbf9", width: 1.3, opacity: 1 },
+    stroke: { stroke: "#fcfbf9", width: 1.3, opacity: 1 },
     simplifyTolerance: 3.8,
   },
   {
     id: "roads-service",
     highway: new Set(["service"]),
-    casing: { stroke: "#e3e0da", width: 1, opacity: 1 },
-    stroke: { stroke: "#f7f6f2", width: 0.6, opacity: 1 },
+    casing: { stroke: "#f6f5f2", width: 0.9, opacity: 1 },
+    stroke: { stroke: "#f6f5f2", width: 0.9, opacity: 1 },
     simplifyTolerance: 4.5,
   },
 ];
@@ -75,12 +75,12 @@ const DRAW_ORDER = [
 ];
 
 const AREA_STYLES = {
-  water: { fill: "#c6dbe4", opacity: 1 },
-  green: { fill: "#dde7d3", opacity: 1 },
-  military: { fill: "#ebe9e3", opacity: 1 },
-  aeroway: { fill: "#e7e5df", opacity: 1 },
-  education: { fill: "#ecebe4", opacity: 1 },
-  health: { fill: "#efe9e6", opacity: 1 },
+  water: { fill: "#b9d3df", opacity: 1 },
+  green: { fill: "#d5e2c9", opacity: 1 },
+  military: { fill: "#e4e1da", opacity: 1 },
+  aeroway: { fill: "#e1ded7", opacity: 1 },
+  education: { fill: "#e5e2da", opacity: 1 },
+  health: { fill: "#e8e1dd", opacity: 1 },
 };
 
 const RAIL_STYLE = {
@@ -346,6 +346,39 @@ function normalizeRailElement(element) {
   };
 }
 
+const CLIP_MARGIN = 50;
+const lerpAtX = (a, b, x) => { const t = (x - a.x) / (b.x - a.x); return { x, y: a.y + t * (b.y - a.y) }; };
+const lerpAtY = (a, b, y) => { const t = (y - a.y) / (b.y - a.y); return { x: a.x + t * (b.x - a.x), y }; };
+
+function clipRingToViewbox(points) {
+  const box = { minX: VIEWBOX.x - CLIP_MARGIN, minY: VIEWBOX.y - CLIP_MARGIN, maxX: VIEWBOX.x + VIEWBOX.width + CLIP_MARGIN, maxY: VIEWBOX.y + VIEWBOX.height + CLIP_MARGIN };
+  const planes = [
+    { inside: (p) => p.x >= box.minX, at: (a, b) => lerpAtX(a, b, box.minX) },
+    { inside: (p) => p.x <= box.maxX, at: (a, b) => lerpAtX(a, b, box.maxX) },
+    { inside: (p) => p.y >= box.minY, at: (a, b) => lerpAtY(a, b, box.minY) },
+    { inside: (p) => p.y <= box.maxY, at: (a, b) => lerpAtY(a, b, box.maxY) },
+  ];
+  let out = points;
+  for (const plane of planes) {
+    const input = out;
+    out = [];
+    for (let i = 0; i < input.length; i += 1) {
+      const cur = input[i];
+      const prev = input[(i + input.length - 1) % input.length];
+      const curIn = plane.inside(cur);
+      const prevIn = plane.inside(prev);
+      if (curIn) {
+        if (!prevIn) out.push(plane.at(prev, cur));
+        out.push(cur);
+      } else if (prevIn) {
+        out.push(plane.at(prev, cur));
+      }
+    }
+    if (!out.length) return [];
+  }
+  return out;
+}
+
 function normalizeAreaRing(geometry) {
   const points = (Array.isArray(geometry) ? geometry : [])
     .map((point) => ({
@@ -355,12 +388,12 @@ function normalizeAreaRing(geometry) {
     }))
     .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
   if (points.length < 3) return [];
-  const first = points[0];
-  const last = points[points.length - 1];
-  if (distance(first, last) > 0.01) {
-    points.push({ ...first });
-  }
-  return simplifyPoints(points, 2.2);
+  const clipped = clipRingToViewbox(points);
+  if (clipped.length < 3) return [];
+  const first = clipped[0];
+  const last = clipped[clipped.length - 1];
+  if (distance(first, last) > 0.01) clipped.push({ ...first });
+  return simplifyPoints(clipped, 2.2);
 }
 
 function assembleRings(members, role) {
@@ -621,7 +654,7 @@ function buildSvg(grouped, areaLayers, railways, stats, profile) {
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${VIEWBOX.x} ${VIEWBOX.y} ${VIEWBOX.width} ${VIEWBOX.height}" role="img" aria-labelledby="title desc">`,
     "  <title id=\"title\">Ubon City Transport Base Map</title>",
     "  <desc id=\"desc\">Road hierarchy base map generated from OpenStreetMap within the locked Ubon bbox.</desc>",
-    `  <rect fill="#f4f3ef" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
+    `  <rect fill="#e9e6e0" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
     "  <g id=\"area-layers\">",
     areasMarkup,
     "  </g>",
