@@ -1380,6 +1380,22 @@ const collectorIntegrationConfig = () => ({
     });
   }));
 
+  router.get("/base-maps/:id/preview-bundle", allow("owner"), wrap(async (req, res) => {
+    const collected = collectPublishInput(req.params.id);
+    if (!collected) return res.status(404).json({ error: "base map not found" });
+    const { bundle, files, skipped, problems } = buildTransportBundle({ ...collected.input, revision: Date.now() });
+    const urlFor = new Map(files.map((f) => [f.name, `/media/${String(f.storagePath).replace(/\\/g, "/")}`]));
+    return res.json({
+      bundle: {
+        ...bundle,
+        base_svg_url: urlFor.get(bundle.base_svg) || "",
+        overlays: bundle.overlays.map((o) => ({ ...o, url: urlFor.get(o.file) || "" })),
+      },
+      skipped,
+      problems,
+    });
+  }));
+
   router.post("/base-maps/:id/publish", allow("owner"), wrap(async (req, res) => {
     if (!backendSyncToken) return res.status(503).json({ error: "LIFECYCLE_SYNC_TOKEN is not configured" });
     const collected = collectPublishInput(req.params.id);
