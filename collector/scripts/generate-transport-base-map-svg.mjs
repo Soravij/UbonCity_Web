@@ -24,43 +24,43 @@ const ROAD_GROUPS = [
   {
     id: "roads-motorway",
     highway: new Set(["motorway", "motorway_link", "trunk", "trunk_link"]),
-    casing: { stroke: "#c4bfb5", width: 16, opacity: 1 },
-    stroke: { stroke: "#ffffff", width: 11, opacity: 1 },
-    simplifyTolerance: 1.2,
+    casing: { stroke: "#b5afa4", width: 4.5, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 3, opacity: 1 },
+    simplifyTolerance: 0.6,
   },
   {
     id: "roads-primary",
     highway: new Set(["primary", "primary_link"]),
-    casing: { stroke: "#cbc6bd", width: 13, opacity: 1 },
-    stroke: { stroke: "#ffffff", width: 9, opacity: 1 },
-    simplifyTolerance: 1.6,
+    casing: { stroke: "#bdb7ad", width: 3.6, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 2.4, opacity: 1 },
+    simplifyTolerance: 0.8,
   },
   {
     id: "roads-secondary",
     highway: new Set(["secondary", "secondary_link"]),
-    casing: { stroke: "#d3cfc7", width: 10, opacity: 1 },
-    stroke: { stroke: "#ffffff", width: 7, opacity: 1 },
-    simplifyTolerance: 2.1,
+    casing: { stroke: "#c8c3ba", width: 3, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 2, opacity: 1 },
+    simplifyTolerance: 1.2,
   },
   {
     id: "roads-tertiary",
     highway: new Set(["tertiary", "tertiary_link"]),
-    casing: { stroke: "#dad6cf", width: 8, opacity: 1 },
-    stroke: { stroke: "#fdfcfa", width: 5.5, opacity: 1 },
-    simplifyTolerance: 2.8,
+    casing: { stroke: "#d2cec6", width: 2.4, opacity: 1 },
+    stroke: { stroke: "#fdfcfa", width: 1.5, opacity: 1 },
+    simplifyTolerance: 1.6,
   },
   {
     id: "roads-local",
     highway: new Set(["unclassified", "residential", "living_street", "road"]),
-    casing: { stroke: "#e1ded8", width: 4.5, opacity: 1 },
-    stroke: { stroke: "#fbfaf7", width: 2.8, opacity: 1 },
+    casing: { stroke: "#dcd9d2", width: 1.4, opacity: 1 },
+    stroke: { stroke: "#fbfaf7", width: 0.8, opacity: 1 },
     simplifyTolerance: 3.8,
   },
   {
     id: "roads-service",
     highway: new Set(["service"]),
-    casing: { stroke: "#e8e6e1", width: 2.4, opacity: 1 },
-    stroke: { stroke: "#f7f6f2", width: 1.4, opacity: 1 },
+    casing: { stroke: "#e3e0da", width: 1, opacity: 1 },
+    stroke: { stroke: "#f7f6f2", width: 0.6, opacity: 1 },
     simplifyTolerance: 4.5,
   },
 ];
@@ -363,6 +363,28 @@ function normalizeAreaRing(geometry) {
   return simplifyPoints(points, 2.2);
 }
 
+function assembleRings(members, role) {
+  const segs = (Array.isArray(members) ? members : [])
+    .filter((m) => String(m?.role || "").trim().toLowerCase() === role && Array.isArray(m?.geometry) && m.geometry.length >= 2)
+    .map((m) => m.geometry.map((p) => ({ lat: Number(p?.lat), lon: Number(p?.lon) })));
+  const key = (p) => `${p.lat.toFixed(7)},${p.lon.toFixed(7)}`;
+  const rings = [];
+  while (segs.length) {
+    let ring = segs.shift();
+    let guard = 0;
+    while (key(ring[0]) !== key(ring[ring.length - 1]) && guard < 10000) {
+      guard += 1;
+      const tail = key(ring[ring.length - 1]);
+      const index = segs.findIndex((s) => key(s[0]) === tail || key(s[s.length - 1]) === tail);
+      if (index < 0) break;
+      const [seg] = segs.splice(index, 1);
+      ring = ring.concat((key(seg[0]) === tail ? seg : seg.slice().reverse()).slice(1));
+    }
+    rings.push(ring);
+  }
+  return rings;
+}
+
 function normalizeAreaElement(element) {
   const category = classifyArea(element?.tags || {});
   if (!category) return [];
@@ -379,19 +401,15 @@ function normalizeAreaElement(element) {
   }
 
   if (element?.type === "relation") {
-    return (Array.isArray(element?.members) ? element.members : [])
-      .filter((member) => String(member?.role || "").trim().toLowerCase() === "outer")
-      .map((member, index) => {
-        const ring = normalizeAreaRing(member?.geometry);
-        if (ring.length < 4) return null;
-        if (!shouldKeepArea(category, ring)) return null;
-        return {
-          id: `${element.type}-${element.id}-${index}`,
-          category,
-          path: toPolygonPath(ring),
-        };
-      })
-      .filter(Boolean);
+    const outers = assembleRings(element?.members, "outer").map((g) => normalizeAreaRing(g)).filter((r) => r.length >= 4);
+    const kept = outers.filter((ring) => shouldKeepArea(category, ring));
+    if (!kept.length) return [];
+    const inners = assembleRings(element?.members, "inner").map((g) => normalizeAreaRing(g)).filter((r) => r.length >= 4);
+    return [{
+      id: `${element.type}-${element.id}`,
+      category,
+      path: [...kept, ...inners].map((ring) => toPolygonPath(ring)).join(" "),
+    }];
   }
 
   return [];
@@ -567,16 +585,16 @@ function buildSvg(grouped, areaLayers, railways, stats, profile) {
     .map((id) => grouped.find((group) => group.id === id))
     .filter(Boolean);
 
-  const groupsMarkup = orderedGroups.map((group) => {
-    const joinedPaths = group.ways.map((way) => toPath(way.points)).filter(Boolean).join(" ");
-    if (!joinedPaths) return `  <g id="${group.id}" />`;
-    return [
-      `  <g id="${group.id}">`,
-      `    <path d="${joinedPaths}" fill="none" stroke="${group.casing.stroke}" stroke-width="${group.casing.width}" stroke-opacity="${group.casing.opacity ?? 1}" stroke-linecap="round" stroke-linejoin="round" />`,
-      `    <path d="${joinedPaths}" fill="none" stroke="${group.stroke.stroke}" stroke-width="${group.stroke.width}" stroke-opacity="${group.stroke.opacity ?? 1}" stroke-linecap="round" stroke-linejoin="round" />`,
-      "  </g>",
-    ].join("\n");
-  }).join("\n");
+  const roadStroke = (style) => `fill="none" stroke="${style.stroke}" stroke-width="${style.width}" stroke-opacity="${style.opacity ?? 1}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"`;
+  const roadPaths = new Map(orderedGroups.map((group) => [group.id, group.ways.map((way) => toPath(way.points)).filter(Boolean).join(" ")]));
+  const roadLayer = (suffix, pick) => orderedGroups
+    .filter((group) => roadPaths.get(group.id))
+    .map((group) => `    <g id="${group.id}${suffix}"><path d="${roadPaths.get(group.id)}" ${roadStroke(pick(group))} /></g>`)
+    .join("\n");
+  const groupsMarkup = [
+    "  <g id=\"road-casings\">", roadLayer("-casing", (g) => g.casing), "  </g>",
+    "  <g id=\"road-network\">", roadLayer("", (g) => g.stroke), "  </g>",
+  ].join("\n");
 
   const areasMarkup = areaLayers.map((layer) => {
     const joinedPaths = layer.shapes.map((shape) => shape.path).filter(Boolean).join(" ");
@@ -608,9 +626,7 @@ function buildSvg(grouped, areaLayers, railways, stats, profile) {
     areasMarkup,
     "  </g>",
     railMarkup,
-    "  <g id=\"road-network\">",
     groupsMarkup,
-    "  </g>",
     `  <rect fill="none" stroke="#d9d6cf" stroke-width="10" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
     "</svg>",
     "",

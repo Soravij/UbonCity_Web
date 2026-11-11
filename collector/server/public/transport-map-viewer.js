@@ -3,6 +3,11 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MAX_ZOOM = 12;
 const LABEL_PX = { s: 11, m: 13, l: 15 };
+const BASE_MIN_ZOOM = [["roads-service", 4], ["roads-local", 2]];
+
+export function baseStrokeScale(z) {
+  return Math.pow(Math.min(Math.max(z, 1), 8), 0.6);
+}
 
 export function latLngToViewbox(lat, lng, bounds, viewbox) {
   const lngSpan = bounds.max_lng - bounds.min_lng || 1;
@@ -67,7 +72,7 @@ const BASE_TAGS = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "lin
 const BASE_ATTRS = new Set(["xmlns", "viewBox", "preserveAspectRatio", "role", "id", "d", "x", "y", "width", "height",
   "cx", "cy", "r", "rx", "ry", "x1", "y1", "x2", "y2", "points", "transform", "opacity",
   "fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray",
-  "stroke-linecap", "stroke-linejoin", "stroke-miterlimit"]);
+  "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "vector-effect"]);
 
 function sanitizeBaseSvg(root) {
   for (const node of [root, ...root.querySelectorAll("*")]) {
@@ -99,6 +104,8 @@ export function createTransportMapViewer(container, options = {}) {
   let selectedId = null;
   let draft = null;
   let destroyed = false;
+  let baseStrokes = [];
+  let baseGated = [];
 
   const svg = el("svg", { viewBox: `${full.x} ${full.y} ${full.width} ${full.height}`, preserveAspectRatio: "xMidYMid meet", width: "100%", height: "100%" });
   svg.style.display = "block";
@@ -121,6 +128,9 @@ export function createTransportMapViewer(container, options = {}) {
       node.setAttribute("width", String(full.width));
       node.setAttribute("height", String(full.height));
       gBase.append(node);
+      baseStrokes = [...node.querySelectorAll("[vector-effect]")].map((n) => [n, Number(n.getAttribute("stroke-width")) || 1]);
+      baseGated = BASE_MIN_ZOOM.flatMap(([prefix, minZoom]) => [...node.querySelectorAll(`[id^="${prefix}"]`)].map((n) => [n, minZoom]));
+      render();
     }).catch((err) => options.onError?.(err))
     : Promise.resolve();
 
@@ -181,6 +191,9 @@ export function createTransportMapViewer(container, options = {}) {
     svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
     const u = unitsPerPx();
     const z = zoomLevel(view, full);
+    const strokeScale = baseStrokeScale(z);
+    for (const [n, w] of baseStrokes) n.setAttribute("stroke-width", String(w * strokeScale));
+    for (const [n, minZoom] of baseGated) n.style.display = z >= minZoom ? "" : "none";
     for (const c of gStops.children) c.setAttribute("r", String(4 * u));
     for (const c of gDraft.querySelectorAll("circle")) c.setAttribute("r", String(6 * u));
     for (const t of gLabels.children) {

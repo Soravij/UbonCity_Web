@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
-import { clampView, latLngToViewbox, viewboxToLatLng, viewForBounds, zoomAt, zoomLevel } from "../server/public/transport-map-viewer.js";
+import { baseStrokeScale, clampView, latLngToViewbox, viewboxToLatLng, viewForBounds, zoomAt, zoomLevel } from "../server/public/transport-map-viewer.js";
 import { projectToViewbox } from "../server/transport-v2-publish.mjs";
 
 const bounds = { min_lat: 15.1083, min_lng: 104.8068, max_lat: 15.3117, max_lng: 104.972 };
@@ -41,4 +41,11 @@ test("frontend copy is byte-identical", () => {
   const a = fs.readFileSync(new URL("../server/public/transport-map-viewer.js", import.meta.url));
   const b = fs.readFileSync(new URL("../../frontend/lib/transportMapViewer.js", import.meta.url));
   assert.ok(a.equals(b));
+});
+
+test("baseStrokeScale grows with zoom and caps at 8x", () => {
+  assert.equal(baseStrokeScale(1), 1);
+  assert.equal(baseStrokeScale(0.5), 1);
+  assert.equal(baseStrokeScale(20), baseStrokeScale(8));
+  assert.ok(baseStrokeScale(4) > 1 && baseStrokeScale(4) < 4);
 });
