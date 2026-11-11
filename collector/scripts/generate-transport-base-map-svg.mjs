@@ -24,43 +24,43 @@ const ROAD_GROUPS = [
   {
     id: "roads-motorway",
     highway: new Set(["motorway", "motorway_link", "trunk", "trunk_link"]),
-    casing: { stroke: "#a8a296", width: 4.6, opacity: 1 },
-    stroke: { stroke: "#ffffff", width: 3.4, opacity: 1 },
+    casing: { stroke: "#cdb385", width: 4.6, opacity: 0.92 },
+    stroke: { stroke: "#f4e3bb", width: 3.2, opacity: 0.98 },
     simplifyTolerance: 0.6,
   },
   {
     id: "roads-primary",
     highway: new Set(["primary", "primary_link"]),
-    casing: { stroke: "#b3ada2", width: 3.8, opacity: 1 },
-    stroke: { stroke: "#ffffff", width: 2.8, opacity: 1 },
+    casing: { stroke: "#ceb181", width: 3.8, opacity: 0.9 },
+    stroke: { stroke: "#f2dfb3", width: 2.6, opacity: 0.96 },
     simplifyTolerance: 0.8,
   },
   {
     id: "roads-secondary",
     highway: new Set(["secondary", "secondary_link"]),
-    casing: { stroke: "#c2bcb2", width: 3, opacity: 1 },
-    stroke: { stroke: "#ffffff", width: 2.2, opacity: 1 },
+    casing: { stroke: "#d8c4a0", width: 3, opacity: 0.86 },
+    stroke: { stroke: "#f6e7c5", width: 2, opacity: 0.92 },
     simplifyTolerance: 1.2,
   },
   {
     id: "roads-tertiary",
     highway: new Set(["tertiary", "tertiary_link"]),
-    casing: { stroke: "#cdc8bf", width: 2.4, opacity: 1 },
-    stroke: { stroke: "#ffffff", width: 1.7, opacity: 1 },
+    casing: { stroke: "#dfd2bc", width: 2.4, opacity: 0.78 },
+    stroke: { stroke: "#fbf1dd", width: 1.6, opacity: 0.87 },
     simplifyTolerance: 1.6,
   },
   {
     id: "roads-local",
     highway: new Set(["unclassified", "residential", "living_street", "road"]),
-    casing: { stroke: "#fcfbf9", width: 1.3, opacity: 1 },
-    stroke: { stroke: "#fcfbf9", width: 1.3, opacity: 1 },
+    casing: { stroke: "#cfc6b8", width: 1.6, opacity: 0.62 },
+    stroke: { stroke: "#f3eee4", width: 0.9, opacity: 0.9 },
     simplifyTolerance: 3.8,
   },
   {
     id: "roads-service",
     highway: new Set(["service"]),
-    casing: { stroke: "#f6f5f2", width: 0.9, opacity: 1 },
-    stroke: { stroke: "#f6f5f2", width: 0.9, opacity: 1 },
+    casing: { stroke: "#ddd5c8", width: 1.1, opacity: 0.42 },
+    stroke: { stroke: "#f7f2e9", width: 0.6, opacity: 0.68 },
     simplifyTolerance: 4.5,
   },
 ];
@@ -75,17 +75,17 @@ const DRAW_ORDER = [
 ];
 
 const AREA_STYLES = {
-  water: { fill: "#b9d3df", opacity: 1 },
-  green: { fill: "#d5e2c9", opacity: 1 },
-  military: { fill: "#e4e1da", opacity: 1 },
-  aeroway: { fill: "#e1ded7", opacity: 1 },
-  education: { fill: "#e5e2da", opacity: 1 },
-  health: { fill: "#e8e1dd", opacity: 1 },
+  water: { fill: "#b9dbe8", opacity: 0.9 },
+  green: { fill: "#d7e5c8", opacity: 0.78 },
+  military: { fill: "#e6ddd2", opacity: 0.72 },
+  aeroway: { fill: "#ddd5ca", opacity: 0.8 },
+  education: { fill: "#dbe7cf", opacity: 0.72 },
+  health: { fill: "#ead6d2", opacity: 0.74 },
 };
 
 const RAIL_STYLE = {
-  casing: { stroke: "#a7a299", width: 3, opacity: 1 },
-  stroke: { stroke: "#ffffff", width: 1.6, opacity: 1, dasharray: "10 6" },
+  casing: { stroke: "#b8aea1", width: 2.6, opacity: 0.75 },
+  stroke: { stroke: "#f3efe7", width: 1.2, opacity: 0.9, dasharray: "10 6" },
 };
 
 const AREA_FILTERS = {
@@ -654,13 +654,13 @@ function buildSvg(grouped, areaLayers, railways, stats, profile) {
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${VIEWBOX.x} ${VIEWBOX.y} ${VIEWBOX.width} ${VIEWBOX.height}" role="img" aria-labelledby="title desc">`,
     "  <title id=\"title\">Ubon City Transport Base Map</title>",
     "  <desc id=\"desc\">Road hierarchy base map generated from OpenStreetMap within the locked Ubon bbox.</desc>",
-    `  <rect fill="#e9e6e0" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
+    `  <rect fill="#f6f1e7" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
     "  <g id=\"area-layers\">",
     areasMarkup,
     "  </g>",
     railMarkup,
     groupsMarkup,
-    `  <rect fill="none" stroke="#d9d6cf" stroke-width="10" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
+    `  <rect fill="none" stroke="#d5ccbc" stroke-width="10" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
     "</svg>",
     "",
   ].join("\n");

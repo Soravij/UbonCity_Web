@@ -106,6 +106,9 @@ export function createTransportMapViewer(container, options = {}) {
   let destroyed = false;
   let baseStrokes = [];
   let baseGated = [];
+  let committed = { ...view };
+  let frame = 0;
+  let commitTimer = 0;
 
   const svg = el("svg", { viewBox: `${full.x} ${full.y} ${full.width} ${full.height}`, preserveAspectRatio: "xMidYMid meet", width: "100%", height: "100%" });
   svg.style.display = "block";
@@ -157,9 +160,9 @@ export function createTransportMapViewer(container, options = {}) {
     if (overlay.url) gOverlays.append(el("image", { href: overlay.url, x: overlay.x, y: overlay.y, width: overlay.width, height: overlay.height }));
   }
 
-  function unitsPerPx() {
-    const r = svg.getBoundingClientRect();
-    return r.width > 0 && r.height > 0 ? Math.max(view.w / r.width, view.h / r.height) : 1;
+  function unitsPerPx(v = view) {
+    const r = container.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? Math.max(v.w / r.width, v.h / r.height) : 1;
   }
 
   function writeLabelText() {
@@ -188,6 +191,8 @@ export function createTransportMapViewer(container, options = {}) {
   }
 
   function render() {
+    committed = { ...view };
+    svg.style.transform = "";
     svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
     const u = unitsPerPx();
     const z = zoomLevel(view, full);
@@ -218,10 +223,37 @@ export function createTransportMapViewer(container, options = {}) {
   }
 
   function toViewbox(clientX, clientY) {
-    const m = svg.getScreenCTM();
-    if (!m) return [view.x, view.y];
-    const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse());
-    return [p.x, p.y];
+    const r = container.getBoundingClientRect();
+    const upp = unitsPerPx(view);
+    const offX = (r.width - view.w / upp) / 2;
+    const offY = (r.height - view.h / upp) / 2;
+    return [view.x + (clientX - r.left - offX) * upp, view.y + (clientY - r.top - offY) * upp];
+  }
+
+  function applyGestureTransform() {
+    frame = 0;
+    const r = container.getBoundingClientRect();
+    const upp = unitsPerPx(committed);
+    const s = committed.w / view.w;
+    const offX = (r.width - committed.w / upp) / 2;
+    const offY = (r.height - committed.h / upp) / 2;
+    const tx = offX * (1 - s) + ((committed.x - view.x) * s) / upp;
+    const ty = offY * (1 - s) + ((committed.y - view.y) * s) / upp;
+    svg.style.transformOrigin = "0 0";
+    svg.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+  }
+
+  function commitView() {
+    clearTimeout(commitTimer);
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+    render();
+  }
+
+  function scheduleGesture() {
+    if (!frame) frame = requestAnimationFrame(applyGestureTransform);
+    clearTimeout(commitTimer);
+    commitTimer = setTimeout(commitView, 160);
   }
 
   const pointers = new Map();
@@ -232,7 +264,7 @@ export function createTransportMapViewer(container, options = {}) {
     e.preventDefault();
     const [px, py] = toViewbox(e.clientX, e.clientY);
     view = zoomAt(view, full, e.deltaY < 0 ? 1.2 : 1 / 1.2, px, py);
-    render();
+    scheduleGesture();
   }, { passive: false });
 
   svg.addEventListener("pointerdown", (e) => {
@@ -255,7 +287,7 @@ export function createTransportMapViewer(container, options = {}) {
       if (dragged) {
         const u = unitsPerPx();
         view = clampView({ ...view, x: view.x - (cur.x - prev.x) * u, y: view.y - (cur.y - prev.y) * u }, full);
-        render();
+        scheduleGesture();
       }
     } else if (pointers.size === 2) {
       const other = [...pointers.entries()].find(([id]) => id !== e.pointerId)[1];
@@ -263,10 +295,9 @@ export function createTransportMapViewer(container, options = {}) {
       const after = Math.hypot(cur.x - other.x, cur.y - other.y);
       const [ax, ay] = toViewbox((prev.x + other.x) / 2, (prev.y + other.y) / 2);
       view = zoomAt(view, full, before > 0 ? after / before : 1, ax, ay);
-      render();
       const [bx, by] = toViewbox((cur.x + other.x) / 2, (cur.y + other.y) / 2);
       view = clampView({ ...view, x: view.x + ax - bx, y: view.y + ay - by }, full);
-      render();
+      scheduleGesture();
     }
     pointers.set(e.pointerId, cur);
   });
@@ -274,6 +305,7 @@ export function createTransportMapViewer(container, options = {}) {
   function endPointer(e) {
     if (!pointers.has(e.pointerId)) return;
     pointers.delete(e.pointerId);
+    if (pointers.size === 0 && dragged) commitView();
     if (pointers.size > 0 || dragged || !down) return;
     const routeId = down.target?.getAttribute?.("data-route-id");
     const pointIndex = down.target?.getAttribute?.("data-point-index");
@@ -290,7 +322,7 @@ export function createTransportMapViewer(container, options = {}) {
     down = null;
   }
   svg.addEventListener("pointerup", endPointer);
-  svg.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); down = null; });
+  svg.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); down = null; if (pointers.size === 0) commitView(); });
 
   const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => render()) : null;
   resizeObserver?.observe(container);
@@ -325,6 +357,8 @@ export function createTransportMapViewer(container, options = {}) {
     },
     destroy() {
       destroyed = true;
+      clearTimeout(commitTimer);
+      if (frame) cancelAnimationFrame(frame);
       resizeObserver?.disconnect();
       svg.remove();
     },
