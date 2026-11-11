@@ -3,10 +3,27 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MAX_ZOOM = 40;
 const LABEL_PX = { s: 11, m: 13, l: 15 };
-const BASE_MIN_ZOOM = [["roads-service", 4], ["roads-local", 2]];
+// [zoom, widthMultiplier, opacity] — below the first stop the class is hidden.
+const BASE_RAMPS = {
+  "roads-motorway": [[1, 1, 1], [4, 1.6, 1], [12, 3, 1], [40, 6, 1]],
+  "roads-primary": [[1, 1, 1], [4, 1.6, 1], [12, 3, 1], [40, 6, 1]],
+  "roads-secondary": [[1, 0.9, 1], [4, 1.6, 1], [12, 3.2, 1], [40, 6.5, 1]],
+  "roads-tertiary": [[1, 0.7, 0.8], [4, 1.5, 1], [12, 3.4, 1], [40, 7, 1]],
+  "roads-local": [[2, 0.5, 0.35], [4, 0.9, 0.8], [8, 1.8, 1], [16, 3.5, 1], [40, 7, 1]],
+  "roads-service": [[5, 0.5, 0.3], [10, 1, 0.8], [20, 2.4, 1], [40, 4.5, 1]],
+};
 
-export function baseStrokeScale(z) {
-  return Math.pow(Math.min(Math.max(z, 1), 32), 0.6);
+export function rampValue(ramp, z) {
+  if (z <= ramp[0][0]) return ramp[0].slice(1);
+  for (let i = 1; i < ramp.length; i += 1) {
+    const [z1, ...a] = ramp[i - 1];
+    const [z2, ...b] = ramp[i];
+    if (z <= z2) {
+      const t = (Math.log2(z) - Math.log2(z1)) / (Math.log2(z2) - Math.log2(z1));
+      return a.map((v, k) => v + (b[k] - v) * t);
+    }
+  }
+  return ramp[ramp.length - 1].slice(1);
 }
 
 export function latLngToViewbox(lat, lng, bounds, viewbox) {
@@ -105,7 +122,6 @@ export function createTransportMapViewer(container, options = {}) {
   let draft = null;
   let destroyed = false;
   let baseStrokes = [];
-  let baseGated = [];
   let committed = { ...view };
   let frame = 0;
   let commitTimer = 0;
@@ -131,8 +147,10 @@ export function createTransportMapViewer(container, options = {}) {
       node.setAttribute("width", String(full.width));
       node.setAttribute("height", String(full.height));
       gBase.append(node);
-      baseStrokes = [...node.querySelectorAll("[vector-effect]")].map((n) => [n, Number(n.getAttribute("stroke-width")) || 1]);
-      baseGated = BASE_MIN_ZOOM.flatMap(([prefix, minZoom]) => [...node.querySelectorAll(`[id^="${prefix}"]`)].map((n) => [n, minZoom]));
+      baseStrokes = [...node.querySelectorAll("path[vector-effect]")].map((n) => {
+        const groupId = String(n.parentNode?.getAttribute?.("id") || "").replace(/-casing$/, "");
+        return [n, Number(n.getAttribute("stroke-width")) || 1, BASE_RAMPS[groupId] || null];
+      });
       render();
     }).catch((err) => options.onError?.(err))
     : Promise.resolve();
@@ -196,9 +214,15 @@ export function createTransportMapViewer(container, options = {}) {
     svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
     const u = unitsPerPx();
     const z = zoomLevel(view, full);
-    const strokeScale = baseStrokeScale(z);
-    for (const [n, w] of baseStrokes) n.setAttribute("stroke-width", String(w * strokeScale));
-    for (const [n, minZoom] of baseGated) n.style.display = z >= minZoom ? "" : "none";
+    for (const [n, w, ramp] of baseStrokes) {
+      if (!ramp) continue;
+      const hidden = z < ramp[0][0];
+      n.style.display = hidden ? "none" : "";
+      if (hidden) continue;
+      const [mul, opacity] = rampValue(ramp, z);
+      n.setAttribute("stroke-width", String(w * mul));
+      n.style.opacity = String(opacity);
+    }
     for (const c of gStops.children) c.setAttribute("r", String(4 * u));
     for (const c of gDraft.querySelectorAll("circle")) c.setAttribute("r", String(6 * u));
     for (const t of gLabels.children) {

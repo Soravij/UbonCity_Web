@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
-import { baseStrokeScale, clampView, latLngToViewbox, viewboxToLatLng, viewForBounds, zoomAt, zoomLevel } from "../server/public/transport-map-viewer.js";
+import { clampView, latLngToViewbox, rampValue, viewboxToLatLng, viewForBounds, zoomAt, zoomLevel } from "../server/public/transport-map-viewer.js";
 import { projectToViewbox } from "../server/transport-v2-publish.mjs";
 
 const bounds = { min_lat: 15.1083, min_lng: 104.8068, max_lat: 15.3117, max_lng: 104.972 };
@@ -43,9 +43,10 @@ test("frontend copy is byte-identical", () => {
   assert.ok(a.equals(b));
 });
 
-test("baseStrokeScale grows with zoom and caps at 8x", () => {
-  assert.equal(baseStrokeScale(1), 1);
-  assert.equal(baseStrokeScale(0.5), 1);
-  assert.equal(baseStrokeScale(100), baseStrokeScale(32));
-  assert.ok(baseStrokeScale(4) > 1 && baseStrokeScale(4) < 4);
+test("rampValue interpolates in log-zoom and clamps at the ends", () => {
+  const ramp = [[2, 0.5, 0.4], [8, 2, 1]];
+  assert.deepEqual(rampValue(ramp, 1), [0.5, 0.4]);
+  assert.deepEqual(rampValue(ramp, 16), [2, 1]);
+  const [mul, opacity] = rampValue(ramp, 4);
+  assert.ok(Math.abs(mul - 1.25) < 1e-9 && Math.abs(opacity - 0.7) < 1e-9);
 });
