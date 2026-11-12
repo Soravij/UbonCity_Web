@@ -2034,7 +2034,7 @@ const collectorIntegrationConfig = () => ({
       db.prepare("DELETE FROM transport_route_stops_v2 WHERE route_id=?").run(Number(req.params.id));
       const insert = db.prepare("INSERT INTO transport_route_stops_v2 (route_id, stop_order, name, lat, lng, stop_type, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
       for (const stop of stops) insert.run(Number(req.params.id), stop.order, stop.name, stop.lat, stop.lng, stop.stop_type, stop.note);
-      bumpRoute(req.params.id, actorEmail(req));
+      db.prepare("UPDATE transport_routes_v2 SET updated_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(actorEmail(req), Number(req.params.id));
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
@@ -2056,7 +2056,7 @@ const collectorIntegrationConfig = () => ({
     const coords = item.control_points.map((point) => `${point.lng},${point.lat}`).join(";");
     let response;
     try {
-      response = await fetch(`${osrmBaseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`, { signal: AbortSignal.timeout(20000) });
+      response = await fetch(`${osrmBaseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&continue_straight=false`, { signal: AbortSignal.timeout(20000) });
     } catch (err) {
       db.prepare("UPDATE transport_routes_v2 SET routing_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
       return res.status(502).json({ error: "OSRM unreachable", detail: String(err?.name || err?.message || err) });

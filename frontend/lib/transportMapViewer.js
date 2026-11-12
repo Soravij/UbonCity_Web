@@ -197,17 +197,24 @@ export function createTransportMapViewer(container, options = {}) {
     gDraft.replaceChildren();
     if (!draft) return;
     const color = draft.color || "#ff6600";
-    if ((draft.path || []).length >= 2) {
-      gDraft.append(el("polyline", { points: draft.path.map((p) => p.join(",")).join(" "), fill: "none", stroke: color, "stroke-width": 5, "stroke-linecap": "round", "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke" }));
-    }
-    if ((draft.points || []).length >= 2) {
-      gDraft.append(el("polyline", { points: draft.points.map((p) => p.join(",")).join(" "), fill: "none", stroke: color, "stroke-width": 2, "stroke-dasharray": "6 6", "vector-effect": "non-scaling-stroke" }));
-    }
+    const pointOpacity = String(draft.pointOpacity ?? 1);
+    const stopOpacity = String(draft.stopOpacity ?? 1);
+    const addLine = (pts, attrs) => {
+      const points = pts.map((p) => p.join(",")).join(" ");
+      gDraft.append(el("polyline", { points, fill: "none", stroke: color, "stroke-linecap": "round", "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke", ...attrs }));
+      const hit = el("polyline", { points, fill: "none", stroke: "transparent", "stroke-width": 16, "vector-effect": "non-scaling-stroke", "data-draft-line": "1" });
+      hit.style.cursor = "copy";
+      gDraft.append(hit);
+    };
+    if ((draft.path || []).length >= 2) addLine(draft.path, { "stroke-width": 5 });
+    if ((draft.points || []).length >= 2) addLine(draft.points, { "stroke-width": 2, "stroke-dasharray": "6 6", opacity: pointOpacity });
     (draft.points || []).forEach((p, index) => {
-      gDraft.append(el("circle", { cx: p[0], cy: p[1], r: 6, fill: color, stroke: "#ffffff", "stroke-width": 2, "vector-effect": "non-scaling-stroke", "data-point-index": index }));
+      const c = el("circle", { cx: p[0], cy: p[1], r: 6, fill: color, stroke: "#ffffff", "stroke-width": 2, "vector-effect": "non-scaling-stroke", "data-point-index": index, opacity: pointOpacity });
+      c.style.cursor = "grab";
+      gDraft.append(c);
     });
     (draft.stops || []).forEach((p, index) => {
-      gDraft.append(el("circle", { cx: p[0], cy: p[1], r: 6, fill: "#ffffff", stroke: color, "stroke-width": 3, "vector-effect": "non-scaling-stroke", "data-stop-index": index }));
+      gDraft.append(el("circle", { cx: p[0], cy: p[1], r: 6, fill: "#1f3a5f", stroke: "#ffffff", "stroke-width": 2.5, "vector-effect": "non-scaling-stroke", "data-stop-index": index, opacity: stopOpacity }));
     });
   }
 
@@ -286,6 +293,7 @@ export function createTransportMapViewer(container, options = {}) {
   const pointers = new Map();
   let down = null;
   let dragged = false;
+  let dragPoint = null;
 
   svg.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -299,8 +307,11 @@ export function createTransportMapViewer(container, options = {}) {
     if (pointers.size === 1) {
       down = { x: e.clientX, y: e.clientY, target: e.target };
       dragged = false;
+      const pointAttr = e.target?.getAttribute?.("data-point-index");
+      dragPoint = pointAttr != null && options.onPointDragEnd ? { index: Number(pointAttr), node: e.target } : null;
     } else {
       dragged = true;
+      dragPoint = null;
     }
     svg.setPointerCapture(e.pointerId);
   });
@@ -311,7 +322,11 @@ export function createTransportMapViewer(container, options = {}) {
     const cur = { x: e.clientX, y: e.clientY };
     if (pointers.size === 1) {
       if (down && Math.hypot(cur.x - down.x, cur.y - down.y) > 4) dragged = true;
-      if (dragged) {
+      if (dragged && dragPoint) {
+        const [x, y] = toViewbox(cur.x, cur.y);
+        dragPoint.node.setAttribute("cx", String(x));
+        dragPoint.node.setAttribute("cy", String(y));
+      } else if (dragged) {
         const u = unitsPerPx();
         view = clampView({ ...view, x: view.x - (cur.x - prev.x) * u, y: view.y - (cur.y - prev.y) * u }, full);
         scheduleGesture();
@@ -332,27 +347,43 @@ export function createTransportMapViewer(container, options = {}) {
   function endPointer(e) {
     if (!pointers.has(e.pointerId)) return;
     pointers.delete(e.pointerId);
+    if (pointers.size === 0 && dragPoint && dragged) {
+      const [x, y] = toViewbox(e.clientX, e.clientY);
+      const index = dragPoint.index;
+      dragPoint = null;
+      down = null;
+      options.onPointDragEnd(index, { x, y, ...viewboxToLatLng(x, y, bundle.bounds, full) });
+      return;
+    }
     if (pointers.size === 0 && dragged) commitView();
-    if (pointers.size > 0 || dragged || !down) return;
+    if (pointers.size > 0 || dragged || !down) {
+      if (pointers.size === 0) dragPoint = null;
+      return;
+    }
+    const [x, y] = toViewbox(e.clientX, e.clientY);
+    const at = { x, y, ...viewboxToLatLng(x, y, bundle.bounds, full) };
     const routeId = down.target?.getAttribute?.("data-route-id");
     const pointIndex = down.target?.getAttribute?.("data-point-index");
     const stopIndex = down.target?.getAttribute?.("data-stop-index");
+    const lineHit = down.target?.getAttribute?.("data-draft-line");
     if (pointIndex != null && options.onPointClick) {
       options.onPointClick(Number(pointIndex));
     } else if (stopIndex != null && options.onStopClick) {
       options.onStopClick(Number(stopIndex));
+    } else if (lineHit != null && options.onLineClick) {
+      options.onLineClick(at);
     } else if (routeId != null && options.onRouteSelect) {
       options.onRouteSelect(Number(routeId));
     } else if (options.onMapClick) {
-      const [x, y] = toViewbox(e.clientX, e.clientY);
-      options.onMapClick({ x, y, ...viewboxToLatLng(x, y, bundle.bounds, full) });
+      options.onMapClick(at);
     } else if (options.onRouteSelect) {
       options.onRouteSelect(null);
     }
+    dragPoint = null;
     down = null;
   }
   svg.addEventListener("pointerup", endPointer);
-  svg.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); down = null; if (pointers.size === 0) commitView(); });
+  svg.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); down = null; dragPoint = null; if (pointers.size === 0) commitView(); });
 
   const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => render()) : null;
   resizeObserver?.observe(container);
