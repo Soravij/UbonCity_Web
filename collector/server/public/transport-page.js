@@ -18,6 +18,9 @@ async function init() {
   qs("btn-open-transport-base-maps")?.addEventListener("click", () => {
     window.location.href = "/transport-v2-base-maps.html";
   });
+  qs("btn-open-transport-preview")?.addEventListener("click", () => {
+    window.location.href = "/transport-v2-preview.html";
+  });
   qs("btn-open-other-transport-manager")?.addEventListener("click", () => {
     window.location.href = "/other-transport.html";
   });
@@ -28,6 +31,7 @@ async function init() {
   if (role === "owner") {
     qs("btn-open-transport-map-manager")?.classList.remove("hidden");
     qs("btn-open-transport-base-maps")?.classList.remove("hidden");
+    qs("btn-open-transport-preview")?.classList.remove("hidden");
   }
 }
 

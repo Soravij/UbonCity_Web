@@ -2,66 +2,66 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const BOUNDS = {
-  min_lat: 15.1083,
-  min_lng: 104.8068,
-  max_lat: 15.3117,
-  max_lng: 104.9720,
+  min_lat: 15.0743,
+  min_lng: 104.7632,
+  max_lat: 15.3054,
+  max_lng: 105.0056,
 };
 
 const VIEWBOX = {
   x: 0,
   y: 0,
-  width: 4000,
-  height: 5600,
+  width: 6000,
+  height: 5927,
 };
 
-const INPUT_PATH = path.resolve("collector", "tmp", "ubon-city-base-map-v1-overpass.json");
-const AREA_INPUT_PATH = path.resolve("collector", "tmp", "ubon-city-base-map-v1-areas.json");
+const INPUT_PATH = path.resolve("collector", "tmp", "ubon-city-v2-overpass.json");
+const AREA_INPUT_PATH = path.resolve("collector", "tmp", "ubon-city-v2-areas.json");
 const OUTPUT_DIR = path.resolve("collector", "media", "generated", "transport-v2", "base-maps");
-const OUTPUT_BASENAME = "ubon-city-base-map-v1-r1";
+const OUTPUT_BASENAME = "ubon-city-v2-r1";
 
 const ROAD_GROUPS = [
   {
     id: "roads-motorway",
     highway: new Set(["motorway", "motorway_link", "trunk", "trunk_link"]),
-    casing: { stroke: "#cdb385", width: 18, opacity: 0.92 },
-    stroke: { stroke: "#f4e3bb", width: 11.5, opacity: 0.98 },
-    simplifyTolerance: 1.2,
+    casing: { stroke: "#c4a56e", width: 4.6, opacity: 1 },
+    stroke: { stroke: "#f3dfae", width: 3.2, opacity: 1 },
+    simplifyTolerance: 0.4,
   },
   {
     id: "roads-primary",
     highway: new Set(["primary", "primary_link"]),
-    casing: { stroke: "#ceb181", width: 14, opacity: 0.9 },
-    stroke: { stroke: "#f2dfb3", width: 9, opacity: 0.96 },
-    simplifyTolerance: 1.6,
+    casing: { stroke: "#c8aa75", width: 3.8, opacity: 1 },
+    stroke: { stroke: "#f4e2b6", width: 2.6, opacity: 1 },
+    simplifyTolerance: 0.5,
   },
   {
     id: "roads-secondary",
     highway: new Set(["secondary", "secondary_link"]),
-    casing: { stroke: "#d8c4a0", width: 11, opacity: 0.86 },
-    stroke: { stroke: "#f6e7c5", width: 7, opacity: 0.92 },
-    simplifyTolerance: 2.1,
+    casing: { stroke: "#cdb78c", width: 3, opacity: 1 },
+    stroke: { stroke: "#f8ebc8", width: 2, opacity: 1 },
+    simplifyTolerance: 0.6,
   },
   {
     id: "roads-tertiary",
     highway: new Set(["tertiary", "tertiary_link"]),
-    casing: { stroke: "#dfd2bc", width: 11, opacity: 0.78 },
-    stroke: { stroke: "#fbf1dd", width: 7, opacity: 0.87 },
-    simplifyTolerance: 2.8,
+    casing: { stroke: "#d0c5b3", width: 2.4, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 1.6, opacity: 1 },
+    simplifyTolerance: 0.8,
   },
   {
     id: "roads-local",
     highway: new Set(["unclassified", "residential", "living_street", "road"]),
-    casing: { stroke: "#cfc6b8", width: 6, opacity: 0.62 },
-    stroke: { stroke: "#f3eee4", width: 3.2, opacity: 0.9 },
-    simplifyTolerance: 3.8,
+    casing: { stroke: "#d9cfbf", width: 2.2, opacity: 1 },
+    stroke: { stroke: "#ffffff", width: 1.6, opacity: 1 },
+    simplifyTolerance: 1.0,
   },
   {
     id: "roads-service",
     highway: new Set(["service"]),
-    casing: { stroke: "#ddd5c8", width: 4, opacity: 0.42 },
-    stroke: { stroke: "#f7f2e9", width: 2.2, opacity: 0.68 },
-    simplifyTolerance: 4.5,
+    casing: { stroke: "#fbf8f2", width: 1, opacity: 1 },
+    stroke: { stroke: "#fbf8f2", width: 1, opacity: 1 },
+    simplifyTolerance: 1.2,
   },
 ];
 
@@ -346,6 +346,39 @@ function normalizeRailElement(element) {
   };
 }
 
+const CLIP_MARGIN = 50;
+const lerpAtX = (a, b, x) => { const t = (x - a.x) / (b.x - a.x); return { x, y: a.y + t * (b.y - a.y) }; };
+const lerpAtY = (a, b, y) => { const t = (y - a.y) / (b.y - a.y); return { x: a.x + t * (b.x - a.x), y }; };
+
+function clipRingToViewbox(points) {
+  const box = { minX: VIEWBOX.x - CLIP_MARGIN, minY: VIEWBOX.y - CLIP_MARGIN, maxX: VIEWBOX.x + VIEWBOX.width + CLIP_MARGIN, maxY: VIEWBOX.y + VIEWBOX.height + CLIP_MARGIN };
+  const planes = [
+    { inside: (p) => p.x >= box.minX, at: (a, b) => lerpAtX(a, b, box.minX) },
+    { inside: (p) => p.x <= box.maxX, at: (a, b) => lerpAtX(a, b, box.maxX) },
+    { inside: (p) => p.y >= box.minY, at: (a, b) => lerpAtY(a, b, box.minY) },
+    { inside: (p) => p.y <= box.maxY, at: (a, b) => lerpAtY(a, b, box.maxY) },
+  ];
+  let out = points;
+  for (const plane of planes) {
+    const input = out;
+    out = [];
+    for (let i = 0; i < input.length; i += 1) {
+      const cur = input[i];
+      const prev = input[(i + input.length - 1) % input.length];
+      const curIn = plane.inside(cur);
+      const prevIn = plane.inside(prev);
+      if (curIn) {
+        if (!prevIn) out.push(plane.at(prev, cur));
+        out.push(cur);
+      } else if (prevIn) {
+        out.push(plane.at(prev, cur));
+      }
+    }
+    if (!out.length) return [];
+  }
+  return out;
+}
+
 function normalizeAreaRing(geometry) {
   const points = (Array.isArray(geometry) ? geometry : [])
     .map((point) => ({
@@ -355,12 +388,34 @@ function normalizeAreaRing(geometry) {
     }))
     .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
   if (points.length < 3) return [];
-  const first = points[0];
-  const last = points[points.length - 1];
-  if (distance(first, last) > 0.01) {
-    points.push({ ...first });
+  const clipped = clipRingToViewbox(points);
+  if (clipped.length < 3) return [];
+  const first = clipped[0];
+  const last = clipped[clipped.length - 1];
+  if (distance(first, last) > 0.01) clipped.push({ ...first });
+  return simplifyPoints(clipped, 2.2);
+}
+
+function assembleRings(members, role) {
+  const segs = (Array.isArray(members) ? members : [])
+    .filter((m) => String(m?.role || "").trim().toLowerCase() === role && Array.isArray(m?.geometry) && m.geometry.length >= 2)
+    .map((m) => m.geometry.map((p) => ({ lat: Number(p?.lat), lon: Number(p?.lon) })));
+  const key = (p) => `${p.lat.toFixed(7)},${p.lon.toFixed(7)}`;
+  const rings = [];
+  while (segs.length) {
+    let ring = segs.shift();
+    let guard = 0;
+    while (key(ring[0]) !== key(ring[ring.length - 1]) && guard < 10000) {
+      guard += 1;
+      const tail = key(ring[ring.length - 1]);
+      const index = segs.findIndex((s) => key(s[0]) === tail || key(s[s.length - 1]) === tail);
+      if (index < 0) break;
+      const [seg] = segs.splice(index, 1);
+      ring = ring.concat((key(seg[0]) === tail ? seg : seg.slice().reverse()).slice(1));
+    }
+    rings.push(ring);
   }
-  return simplifyPoints(points, 2.2);
+  return rings;
 }
 
 function normalizeAreaElement(element) {
@@ -379,19 +434,15 @@ function normalizeAreaElement(element) {
   }
 
   if (element?.type === "relation") {
-    return (Array.isArray(element?.members) ? element.members : [])
-      .filter((member) => String(member?.role || "").trim().toLowerCase() === "outer")
-      .map((member, index) => {
-        const ring = normalizeAreaRing(member?.geometry);
-        if (ring.length < 4) return null;
-        if (!shouldKeepArea(category, ring)) return null;
-        return {
-          id: `${element.type}-${element.id}-${index}`,
-          category,
-          path: toPolygonPath(ring),
-        };
-      })
-      .filter(Boolean);
+    const outers = assembleRings(element?.members, "outer").map((g) => normalizeAreaRing(g)).filter((r) => r.length >= 4);
+    const kept = outers.filter((ring) => shouldKeepArea(category, ring));
+    if (!kept.length) return [];
+    const inners = assembleRings(element?.members, "inner").map((g) => normalizeAreaRing(g)).filter((r) => r.length >= 4);
+    return [{
+      id: `${element.type}-${element.id}`,
+      category,
+      path: [...kept, ...inners].map((ring) => toPolygonPath(ring)).join(" "),
+    }];
   }
 
   return [];
@@ -552,7 +603,7 @@ function collectGroupedPaths(elements, profile) {
 function buildSvg(grouped, areaLayers, railways, stats, profile) {
   const generatedAt = new Date().toISOString();
   const metadata = {
-    base_map_key: "ubon-city-base-map-v1",
+    base_map_key: "ubon-city-v2",
     asset_revision: "r1",
     generated_at: generatedAt,
     source: "OpenStreetMap Overpass highways",
@@ -567,16 +618,16 @@ function buildSvg(grouped, areaLayers, railways, stats, profile) {
     .map((id) => grouped.find((group) => group.id === id))
     .filter(Boolean);
 
-  const groupsMarkup = orderedGroups.map((group) => {
-    const joinedPaths = group.ways.map((way) => toPath(way.points)).filter(Boolean).join(" ");
-    if (!joinedPaths) return `  <g id="${group.id}" />`;
-    return [
-      `  <g id="${group.id}">`,
-      `    <path d="${joinedPaths}" fill="none" stroke="${group.casing.stroke}" stroke-width="${group.casing.width}" stroke-opacity="${group.casing.opacity ?? 1}" stroke-linecap="round" stroke-linejoin="round" />`,
-      `    <path d="${joinedPaths}" fill="none" stroke="${group.stroke.stroke}" stroke-width="${group.stroke.width}" stroke-opacity="${group.stroke.opacity ?? 1}" stroke-linecap="round" stroke-linejoin="round" />`,
-      "  </g>",
-    ].join("\n");
-  }).join("\n");
+  const roadStroke = (style) => `fill="none" stroke="${style.stroke}" stroke-width="${style.width}" stroke-opacity="${style.opacity ?? 1}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"`;
+  const roadPaths = new Map(orderedGroups.map((group) => [group.id, group.ways.map((way) => toPath(way.points)).filter(Boolean).join(" ")]));
+  const roadLayer = (suffix, pick) => orderedGroups
+    .filter((group) => roadPaths.get(group.id))
+    .map((group) => `    <g id="${group.id}${suffix}"><path d="${roadPaths.get(group.id)}" ${roadStroke(pick(group))} /></g>`)
+    .join("\n");
+  const groupsMarkup = [
+    "  <g id=\"road-casings\">", roadLayer("-casing", (g) => g.casing), "  </g>",
+    "  <g id=\"road-network\">", roadLayer("", (g) => g.stroke), "  </g>",
+  ].join("\n");
 
   const areasMarkup = areaLayers.map((layer) => {
     const joinedPaths = layer.shapes.map((shape) => shape.path).filter(Boolean).join(" ");
@@ -601,23 +652,15 @@ function buildSvg(grouped, areaLayers, railways, stats, profile) {
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
     `<!-- ${escapeXml(JSON.stringify(metadata))} -->`,
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${VIEWBOX.x} ${VIEWBOX.y} ${VIEWBOX.width} ${VIEWBOX.height}" role="img" aria-labelledby="title desc">`,
-    "  <title id=\"title\">Ubon City Base Map V1</title>",
+    "  <title id=\"title\">Ubon City Transport Base Map</title>",
     "  <desc id=\"desc\">Road hierarchy base map generated from OpenStreetMap within the locked Ubon bbox.</desc>",
-    "  <defs>",
-    "    <style>",
-      "      .map-bg { fill: #f6f1e7; }",
-      "      .map-frame { fill: none; stroke: #d5ccbc; stroke-width: 10; }",
-    "    </style>",
-    "  </defs>",
-    `  <rect class="map-bg" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
+    `  <rect fill="#f6f1e7" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
     "  <g id=\"area-layers\">",
     areasMarkup,
     "  </g>",
     railMarkup,
-    "  <g id=\"road-network\">",
     groupsMarkup,
-    "  </g>",
-    `  <rect class="map-frame" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
+    `  <rect fill="none" stroke="#d5ccbc" stroke-width="10" x="${VIEWBOX.x}" y="${VIEWBOX.y}" width="${VIEWBOX.width}" height="${VIEWBOX.height}" />`,
     "</svg>",
     "",
   ].join("\n");
@@ -643,7 +686,7 @@ async function main() {
 
   await fs.writeFile(svgPath, svg, "utf8");
   await fs.writeFile(metaPath, JSON.stringify({
-    key: "ubon-city-base-map-v1",
+    key: "ubon-city-v2",
     revision: "r1",
     source_file: path.relative(process.cwd(), INPUT_PATH),
     visual_profile: OVERVIEW_PROFILE.id,

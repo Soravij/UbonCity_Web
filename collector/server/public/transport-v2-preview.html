@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <!--CH_HEAD-->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Transport V2 Preview</title>
+    <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <!--CH_HEAD_CSS-->
+    <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <!--CH_BRAND-->
+          <div class="auth-intro">
+            <h1>ระบบจัดการคอนเทนต์</h1>
+            <p id="page-subtitle">Preview &amp; Publish — วางทุกสายทับบน base map แล้ว publish ขึ้นเว็บ</p>
+            <!--CH_AUTH-->
+            <p class="muted" id="workspace-auth-status"></p>
+          </div>
+        </div>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+
+      <div class="card page-actions-strip">
+        <div class="toolbar">
+          <button id="btn-back-home" class="utility-action btn-home" type="button">Home</button>
+          <button id="btn-process-home" class="utility-action" type="button">Transport</button>
+          <button id="btn-open-base-maps" class="utility-action" type="button">Base Maps</button>
+          <button id="btn-open-routes" class="utility-action" type="button">Routes</button>
+          <select id="preview-base-map" aria-label="Base map"></select>
+          <button id="btn-lang-th" class="utility-action" type="button">TH</button>
+          <button id="btn-lang-en" class="utility-action" type="button">EN</button>
+          <button id="btn-fit" class="utility-action" type="button">Fit</button>
+        </div>
+      </div>
+      <div class="stack-lg">
+        <section class="card article-work-card">
+          <div class="toolbar" id="preview-route-chips"></div>
+          <div id="preview-map" style="height: 70vh; min-height: 360px; border-radius: 12px; overflow: hidden; background: #f6f1e7;"></div>
+          <p id="preview-route-detail" class="muted"></p>
+        </section>
+        <section class="card article-work-card">
+          <div class="article-section-head">
+            <div>
+              <h2 class="section-title">Publish</h2>
+              <p class="muted" id="publish-live"></p>
+            </div>
+          </div>
+          <ul id="publish-problems"></ul>
+          <ul id="publish-skipped"></ul>
+          <div class="toolbar">
+            <button id="btn-publish" class="primary" type="button">Publish to website</button>
+            <span id="publish-status" class="status"></span>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/transport-v2-preview-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </body>
+</html>

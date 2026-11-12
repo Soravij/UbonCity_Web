@@ -28,12 +28,10 @@
       <div class="card page-actions-strip">
         <div class="toolbar">
           <button id="btn-back-home" class="utility-action btn-home" type="button">Home</button>
-          <button id="btn-process-home" class="utility-action btn-home" type="button">Home</button>
+          <button id="btn-process-home" class="utility-action" type="button">Transport</button>
           <button id="btn-open-base-maps" class="utility-action" type="button">Base Maps</button>
-          <button id="btn-open-routes-review" class="utility-action" type="button">Open Routes Review</button>
           <button id="btn-open-selected-path-top" class="utility-action" type="button">Edit Path</button>
-          <button id="btn-render-published-map" class="warn" type="button">Render Published Map</button>
-          <span id="published-map-status" class="status"></span>
+          <button id="btn-open-preview" class="utility-action" type="button">Preview &amp; Publish</button>
         </div>
       </div>
 
@@ -42,7 +40,7 @@
           <div class="article-section-head">
             <div>
               <h2 class="section-title">Create Route</h2>
-              <p class="muted">Create a route dataset on the latest annotation map, then open the route in a dedicated workspace.</p>
+              <p class="muted">Create a route on the active base map, then open it in the Path Editor.</p>
             </div>
           </div>
           <p id="create-route-map-context" class="muted"></p>
@@ -85,10 +83,6 @@
               <h2 class="section-title">Routes</h2>
               <p class="muted">Select one or more routes, then open the dedicated review page or path editor.</p>
             </div>
-          </div>
-          <div class="toolbar">
-            <button id="btn-open-selected-review" type="button">Review Selected</button>
-            <span id="route-selection-status" class="status"></span>
           </div>
           <div class="table-wrap">
             <table class="basic-table" id="route-table">

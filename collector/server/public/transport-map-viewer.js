@@ -1,8 +1,30 @@
 // transport-map-viewer.js — shared by collector admin (collector/server/public) and frontend (frontend/lib/transportMapViewer.js).
 // Both copies must stay byte-identical (checked by collector/tests/transport-map-viewer.test.mjs). No imports, no CSS classes.
 const SVG_NS = "http://www.w3.org/2000/svg";
-const MAX_ZOOM = 12;
+const MAX_ZOOM = 40;
 const LABEL_PX = { s: 11, m: 13, l: 15 };
+// [zoom, widthMultiplier, opacity] — below the first stop the class is hidden.
+const BASE_RAMPS = {
+  "roads-motorway": [[1, 1, 1], [4, 1.6, 1], [12, 3, 1], [40, 6, 1]],
+  "roads-primary": [[1, 1, 1], [4, 1.6, 1], [12, 3, 1], [40, 6, 1]],
+  "roads-secondary": [[1, 0.9, 1], [4, 1.6, 1], [12, 3.2, 1], [40, 6.5, 1]],
+  "roads-tertiary": [[1, 0.7, 1], [4, 1.5, 1], [12, 3.2, 1], [40, 6, 1]],
+  "roads-local": [[2, 0.5, 0.35], [4, 0.9, 0.8], [8, 1.4, 1], [16, 2.4, 1], [40, 4, 1]],
+  "roads-service": [[5, 0.5, 0.3], [10, 1, 0.8], [20, 1.8, 1], [40, 3, 1]],
+};
+
+export function rampValue(ramp, z) {
+  if (z <= ramp[0][0]) return ramp[0].slice(1);
+  for (let i = 1; i < ramp.length; i += 1) {
+    const [z1, ...a] = ramp[i - 1];
+    const [z2, ...b] = ramp[i];
+    if (z <= z2) {
+      const t = (Math.log2(z) - Math.log2(z1)) / (Math.log2(z2) - Math.log2(z1));
+      return a.map((v, k) => v + (b[k] - v) * t);
+    }
+  }
+  return ramp[ramp.length - 1].slice(1);
+}
 
 export function latLngToViewbox(lat, lng, bounds, viewbox) {
   const lngSpan = bounds.max_lng - bounds.min_lng || 1;
@@ -63,11 +85,11 @@ function el(name, attrs = {}) {
   return node;
 }
 
-const BASE_TAGS = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "title", "desc"]);
+const BASE_TAGS = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon"]);
 const BASE_ATTRS = new Set(["xmlns", "viewBox", "preserveAspectRatio", "role", "id", "d", "x", "y", "width", "height",
   "cx", "cy", "r", "rx", "ry", "x1", "y1", "x2", "y2", "points", "transform", "opacity",
   "fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray",
-  "stroke-linecap", "stroke-linejoin", "stroke-miterlimit"]);
+  "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "vector-effect"]);
 
 function sanitizeBaseSvg(root) {
   for (const node of [root, ...root.querySelectorAll("*")]) {
@@ -99,6 +121,10 @@ export function createTransportMapViewer(container, options = {}) {
   let selectedId = null;
   let draft = null;
   let destroyed = false;
+  let baseStrokes = [];
+  let committed = { ...view };
+  let frame = 0;
+  let commitTimer = 0;
 
   const svg = el("svg", { viewBox: `${full.x} ${full.y} ${full.width} ${full.height}`, preserveAspectRatio: "xMidYMid meet", width: "100%", height: "100%" });
   svg.style.display = "block";
@@ -121,6 +147,11 @@ export function createTransportMapViewer(container, options = {}) {
       node.setAttribute("width", String(full.width));
       node.setAttribute("height", String(full.height));
       gBase.append(node);
+      baseStrokes = [...node.querySelectorAll("path[vector-effect]")].map((n) => {
+        const groupId = String(n.parentNode?.getAttribute?.("id") || "").replace(/-casing$/, "");
+        return [n, Number(n.getAttribute("stroke-width")) || 1, BASE_RAMPS[groupId] || null];
+      });
+      render();
     }).catch((err) => options.onError?.(err))
     : Promise.resolve();
 
@@ -147,9 +178,9 @@ export function createTransportMapViewer(container, options = {}) {
     if (overlay.url) gOverlays.append(el("image", { href: overlay.url, x: overlay.x, y: overlay.y, width: overlay.width, height: overlay.height }));
   }
 
-  function unitsPerPx() {
-    const r = svg.getBoundingClientRect();
-    return r.width > 0 && r.height > 0 ? Math.max(view.w / r.width, view.h / r.height) : 1;
+  function unitsPerPx(v = view) {
+    const r = container.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? Math.max(v.w / r.width, v.h / r.height) : 1;
   }
 
   function writeLabelText() {
@@ -178,9 +209,20 @@ export function createTransportMapViewer(container, options = {}) {
   }
 
   function render() {
+    committed = { ...view };
+    svg.style.transform = "";
     svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
     const u = unitsPerPx();
     const z = zoomLevel(view, full);
+    for (const [n, w, ramp] of baseStrokes) {
+      if (!ramp) continue;
+      const hidden = z < ramp[0][0];
+      n.style.display = hidden ? "none" : "";
+      if (hidden) continue;
+      const [mul, opacity] = rampValue(ramp, z);
+      n.setAttribute("stroke-width", String(w * mul));
+      n.style.opacity = String(opacity);
+    }
     for (const c of gStops.children) c.setAttribute("r", String(4 * u));
     for (const c of gDraft.querySelectorAll("circle")) c.setAttribute("r", String(6 * u));
     for (const t of gLabels.children) {
@@ -205,10 +247,37 @@ export function createTransportMapViewer(container, options = {}) {
   }
 
   function toViewbox(clientX, clientY) {
-    const m = svg.getScreenCTM();
-    if (!m) return [view.x, view.y];
-    const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse());
-    return [p.x, p.y];
+    const r = container.getBoundingClientRect();
+    const upp = unitsPerPx(view);
+    const offX = (r.width - view.w / upp) / 2;
+    const offY = (r.height - view.h / upp) / 2;
+    return [view.x + (clientX - r.left - offX) * upp, view.y + (clientY - r.top - offY) * upp];
+  }
+
+  function applyGestureTransform() {
+    frame = 0;
+    const r = container.getBoundingClientRect();
+    const upp = unitsPerPx(committed);
+    const s = committed.w / view.w;
+    const offX = (r.width - committed.w / upp) / 2;
+    const offY = (r.height - committed.h / upp) / 2;
+    const tx = offX * (1 - s) + ((committed.x - view.x) * s) / upp;
+    const ty = offY * (1 - s) + ((committed.y - view.y) * s) / upp;
+    svg.style.transformOrigin = "0 0";
+    svg.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+  }
+
+  function commitView() {
+    clearTimeout(commitTimer);
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+    render();
+  }
+
+  function scheduleGesture() {
+    if (!frame) frame = requestAnimationFrame(applyGestureTransform);
+    clearTimeout(commitTimer);
+    commitTimer = setTimeout(commitView, 160);
   }
 
   const pointers = new Map();
@@ -219,7 +288,7 @@ export function createTransportMapViewer(container, options = {}) {
     e.preventDefault();
     const [px, py] = toViewbox(e.clientX, e.clientY);
     view = zoomAt(view, full, e.deltaY < 0 ? 1.2 : 1 / 1.2, px, py);
-    render();
+    scheduleGesture();
   }, { passive: false });
 
   svg.addEventListener("pointerdown", (e) => {
@@ -242,7 +311,7 @@ export function createTransportMapViewer(container, options = {}) {
       if (dragged) {
         const u = unitsPerPx();
         view = clampView({ ...view, x: view.x - (cur.x - prev.x) * u, y: view.y - (cur.y - prev.y) * u }, full);
-        render();
+        scheduleGesture();
       }
     } else if (pointers.size === 2) {
       const other = [...pointers.entries()].find(([id]) => id !== e.pointerId)[1];
@@ -250,10 +319,9 @@ export function createTransportMapViewer(container, options = {}) {
       const after = Math.hypot(cur.x - other.x, cur.y - other.y);
       const [ax, ay] = toViewbox((prev.x + other.x) / 2, (prev.y + other.y) / 2);
       view = zoomAt(view, full, before > 0 ? after / before : 1, ax, ay);
-      render();
       const [bx, by] = toViewbox((cur.x + other.x) / 2, (cur.y + other.y) / 2);
       view = clampView({ ...view, x: view.x + ax - bx, y: view.y + ay - by }, full);
-      render();
+      scheduleGesture();
     }
     pointers.set(e.pointerId, cur);
   });
@@ -261,6 +329,7 @@ export function createTransportMapViewer(container, options = {}) {
   function endPointer(e) {
     if (!pointers.has(e.pointerId)) return;
     pointers.delete(e.pointerId);
+    if (pointers.size === 0 && dragged) commitView();
     if (pointers.size > 0 || dragged || !down) return;
     const routeId = down.target?.getAttribute?.("data-route-id");
     const pointIndex = down.target?.getAttribute?.("data-point-index");
@@ -277,7 +346,7 @@ export function createTransportMapViewer(container, options = {}) {
     down = null;
   }
   svg.addEventListener("pointerup", endPointer);
-  svg.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); down = null; });
+  svg.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); down = null; if (pointers.size === 0) commitView(); });
 
   const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => render()) : null;
   resizeObserver?.observe(container);
@@ -312,6 +381,8 @@ export function createTransportMapViewer(container, options = {}) {
     },
     destroy() {
       destroyed = true;
+      clearTimeout(commitTimer);
+      if (frame) cancelAnimationFrame(frame);
       resizeObserver?.disconnect();
       svg.remove();
     },
