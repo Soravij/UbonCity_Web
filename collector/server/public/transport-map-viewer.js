@@ -206,6 +206,9 @@ export function createTransportMapViewer(container, options = {}) {
     (draft.points || []).forEach((p, index) => {
       gDraft.append(el("circle", { cx: p[0], cy: p[1], r: 6, fill: color, stroke: "#ffffff", "stroke-width": 2, "vector-effect": "non-scaling-stroke", "data-point-index": index }));
     });
+    (draft.stops || []).forEach((p, index) => {
+      gDraft.append(el("circle", { cx: p[0], cy: p[1], r: 6, fill: "#ffffff", stroke: color, "stroke-width": 3, "vector-effect": "non-scaling-stroke", "data-stop-index": index }));
+    });
   }
 
   function render() {
@@ -333,8 +336,11 @@ export function createTransportMapViewer(container, options = {}) {
     if (pointers.size > 0 || dragged || !down) return;
     const routeId = down.target?.getAttribute?.("data-route-id");
     const pointIndex = down.target?.getAttribute?.("data-point-index");
+    const stopIndex = down.target?.getAttribute?.("data-stop-index");
     if (pointIndex != null && options.onPointClick) {
       options.onPointClick(Number(pointIndex));
+    } else if (stopIndex != null && options.onStopClick) {
+      options.onStopClick(Number(stopIndex));
     } else if (routeId != null && options.onRouteSelect) {
       options.onRouteSelect(Number(routeId));
     } else if (options.onMapClick) {
@@ -364,6 +370,11 @@ export function createTransportMapViewer(container, options = {}) {
       const route = routesById.get(Number(id));
       if (!route || route.path.length < 2) return;
       view = viewForBounds(pathBounds(route.path), full);
+      render();
+    },
+    focusPoints(points) {
+      if (!Array.isArray(points) || points.length < 2) return;
+      view = viewForBounds(pathBounds(points), full);
       render();
     },
     setLang(next) {

@@ -45,3 +45,11 @@ test("home transport button enabled", () => {
   assert.match(html, /<button id="btn-home-transport" class="primary" type="button">/);
   assert.ok(!html.includes("ยังไม่เปิดใช้ในเวอร์ชันนี้"));
 });
+
+test("path editor page uses the shared viewer, not the old editor module", () => {
+  const js = read("../server/public/transport-v2-path-editor-page.js");
+  assert.match(js, /from "\.\/transport-map-viewer\.js"/);
+  assert.ok(!js.includes("transport-v2-path-editor.js"));
+  const html = read("../server/public/transport-v2-path-editor.html");
+  assert.equal((html.match(/btn-home/g) || []).length, 1);
+});

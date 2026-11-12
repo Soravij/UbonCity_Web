@@ -2054,7 +2054,13 @@ const collectorIntegrationConfig = () => ({
     }
     if (item.control_points.length < 2) return res.status(409).json({ error: "At least 2 control points are required before resolve" });
     const coords = item.control_points.map((point) => `${point.lng},${point.lat}`).join(";");
-    const response = await fetch(`${osrmBaseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`);
+    let response;
+    try {
+      response = await fetch(`${osrmBaseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`, { signal: AbortSignal.timeout(20000) });
+    } catch (err) {
+      db.prepare("UPDATE transport_routes_v2 SET routing_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
+      return res.status(502).json({ error: "OSRM unreachable", detail: String(err?.name || err?.message || err) });
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload?.code !== "Ok") {
       db.prepare("UPDATE transport_routes_v2 SET routing_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
