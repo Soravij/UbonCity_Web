@@ -44,20 +44,25 @@ tools: Bash, Read
 
 ## 3. คำสั่งที่รันได้
 
-ทำงานที่ **repo root** เท่านั้น: `D:\UbonRuntime\repos\UbonCity_Web` (Sor เป็นคนจัดการ git เอง agent ห้าม fetch/checkout/pull)
+ทำงานที่ **repo root** เท่านั้น — อย่างใดอย่างหนึ่ง:
+- Runtime: `D:\UbonRuntime\repos\UbonCity_Web`
+- dev: `D:\UbonCity_Web`
+
+ใช้ตามที่คำสั่งระบุ ถ้าไม่ระบุให้ใช้ working directory ปัจจุบันถ้าเป็นหนึ่งในสองที่นี้ ถ้าไม่ใช่ให้หยุดและรายงาน
+(Sor เป็นคนจัดการ git เอง agent ห้าม fetch/checkout/pull)
 
 ```
 git status --short
 git log -1 --oneline
 npm run test:all
-node --test collector/tests/<file>.test.mjs
+node --test <file> [<file> ...]
 ```
 
 **ไม่มีคำสั่งอื่น**
 
 - `npm run test:all` ใช้รันชุดเต็ม เฉพาะเมื่อได้รับคำสั่งชัดเจนเท่านั้น
-- `node --test collector/tests/<file>.test.mjs` ใช้รันไฟล์เดียว ชื่อไฟล์ต้องขึ้นต้นด้วย `collector/tests/` และลงท้ายด้วย `.test.mjs` ห้ามใช้ wildcard ถ้าไม่ตรงรูปแบบนี้ให้หยุดและรายงาน
-- กรณีรันไฟล์เดียว ให้รายงานบรรทัด `# pass` / `# fail` จาก output พร้อมชื่อเทสที่ fail
+- `node --test <file> [<file> ...]` รันได้ 1–5 ไฟล์ในคำสั่งเดียว ทุกไฟล์ต้องขึ้นต้นด้วย `collector/tests/` หรือ `backend/tests/` และลงท้ายด้วย `.test.mjs` ห้ามใช้ wildcard ถ้าไม่ตรงรูปแบบนี้ให้หยุดและรายงาน
+- ให้รายงานบรรทัด `# pass` / `# fail` จาก output พร้อมชื่อเทสที่ fail
 
 ---
 
@@ -68,6 +73,7 @@ node --test collector/tests/<file>.test.mjs
 ```
 BRANCH: <ชื่อ branch>
 COMMIT: <hash สั้น>
+DIRTY: <ไฟล์จาก git status --short คั่นด้วย comma หรือ (none)>
 TOTAL: <จำนวน test ทั้งหมด>
 PASS: <จำนวนที่ผ่าน>
 FAIL: <จำนวนที่ไม่ผ่าน>
@@ -108,7 +114,8 @@ ERRORS:
 | สถานการณ์ | ทำอะไร |
 |---|---|
 | คำสั่งใดล้มเหลว | หยุด · รายงาน exit code + output ดิบ |
-| `git status --short` ไม่ว่าง | หยุด · รายงานรายการไฟล์ |
+| `git status --short` ไม่ว่าง + จะรัน `node --test` | รันต่อได้ · ใส่รายการไฟล์ในบรรทัด DIRTY (เป็นไฟล์ที่ implementer เพิ่งแก้ในรอบนั้น) |
+| `git status --short` ไม่ว่าง + จะรัน `npm run test:all` | หยุด · รายงานรายการไฟล์ |
 | branch ที่สั่งไม่มีอยู่ | หยุด · รายงาน |
 | `npm run test:all` ไม่มีอยู่ | หยุด · รายงาน |
 | ผลลัพธ์อ่านตัวเลขไม่ได้ | หยุด · รายงาน output ดิบ |
