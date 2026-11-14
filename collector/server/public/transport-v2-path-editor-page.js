@@ -12,6 +12,7 @@ const state = {
   stops: [],
   warnings: [],
   bearingsUsed: true,
+  history: [],
   dirty: false,
   pending: false,
   timer: 0,
@@ -20,8 +21,8 @@ const state = {
 };
 
 const STEP_HELP = {
-  1: "ขั้น 1 ปักจุด: แตะแผนที่ = เพิ่มจุดตามลำดับ · แตะจุด = ลบ · แตะจุดแรก = วนกลับจุดเริ่ม · เสร็จแล้วกด \"คำนวณเส้นทาง\"",
-  2: "ขั้น 2 ปรับเส้นทาง: ลากจุด = ย้าย · ลากเส้นสีส้ม = ดึงเส้นผ่านจุดใหม่ · แตะบนเส้น = แทรกจุด · แตะจุด = ลบ · ระบบคำนวณใหม่ให้อัตโนมัติ",
+  1: "ขั้น 1 ปักจุด: แตะแผนที่ = เพิ่มจุดตามลำดับ · แตะจุด = ลบ · กด เลิกทำ เพื่อย้อน · แตะจุดแรก = วนกลับจุดเริ่ม · เสร็จแล้วกด \"คำนวณเส้นทาง\"",
+  2: "ขั้น 2 ปรับเส้นทาง: ลากจุด = ย้าย · ลากเส้นสีส้ม = ดึงเส้นผ่านจุดใหม่ · แตะบนเส้น = แทรกจุด · แตะจุด = ลบ · กด เลิกทำ เพื่อย้อน · ระบบคำนวณใหม่ให้อัตโนมัติ",
   3: "ขั้น 3 ปักป้าย: แตะแผนที่หรือเส้น = เพิ่มป้าย (เกาะเส้นทางอัตโนมัติ) · แตะป้าย = แก้ชื่อหรือลบ",
 };
 const STEP_LABELS = { 1: "1 · ปักจุด", 2: "2 · ปรับเส้นทาง", 3: "3 · ปักป้าย" };
@@ -54,9 +55,21 @@ function drawDraft() {
   });
 }
 
+const HISTORY_MAX = 50;
+function pushHistory() {
+  state.history.push(JSON.stringify(state.points));
+  if (state.history.length > HISTORY_MAX) state.history.shift();
+}
+function undo() {
+  const s = state.history.pop();
+  if (!s) return;
+  state.points = JSON.parse(s);
+  pointsChanged();
+}
+
 function stepActionButtons(s) {
   if (s === 1) return [qs("btn-undo-point"), qs("btn-clear"), qs("btn-compute")];
-  if (s === 2) return [qs("btn-resolve")];
+  if (s === 2) return [qs("btn-undo-point"), qs("btn-resolve")];
   if (s === 3) return [qs("btn-undo-stop")];
   return [];
 }
@@ -69,6 +82,9 @@ function renderStepList() {
   const list = qs("step-list");
   const pool = qs("step-actions-pool");
   for (const b of allStepActionButtons()) pool.append(b);
+  const undoBtn = qs("btn-undo-point");
+  undoBtn.textContent = "เลิกทำ";
+  undoBtn.disabled = state.history.length === 0;
   const nodes = [];
   for (const s of [1, 2, 3]) {
     const btn = document.createElement("button");
@@ -127,11 +143,27 @@ function stageStatus(text, isError = false) {
   node.style.color = isError ? "#dc2626" : "";
 }
 
-function warningsText() {
-  const lines = (state.warnings || []).map((w) =>
-    `⚠ ช่วงจุด ${w.from + 1}→${w.to + 1} อ้อม ${w.ratio} เท่า (+${w.extra_m} ม.) — ตรวจว่าจุดอยู่ถูกฝั่งถนน`);
-  if (state.bearingsUsed === false) lines.push("ⓘ คำนวณแบบไม่ใช้ทิศทาง (OSRM หาเส้นตามทิศไม่ได้)");
-  return lines.join("\n");
+function renderWarningsStatus() {
+  const node = qs("stage-status");
+  node.replaceChildren();
+  node.style.color = "";
+  for (const w of state.warnings || []) {
+    const row = document.createElement("div");
+    row.textContent = `⚠ จุด ${w.from + 1}→${w.to + 1} อ้อม ${w.ratio}× (+${w.extra_m} ม.)`;
+    node.append(row);
+  }
+  if ((state.warnings || []).length) {
+    const hint = document.createElement("div");
+    hint.className = "muted";
+    hint.textContent = "ตรวจว่าจุดอยู่บนถนนเส้นที่ถูก แล้วลากแก้";
+    node.append(hint);
+  }
+  if (state.bearingsUsed === false) {
+    const info = document.createElement("div");
+    info.className = "muted";
+    info.textContent = "ⓘ คำนวณแบบไม่ใช้ทิศทาง";
+    node.append(info);
+  }
 }
 
 function isFull() {
@@ -259,31 +291,40 @@ async function loadRoute() {
   state.points = state.route.control_points.map((p) => ({ lat: p.lat, lng: p.lng }));
   state.stops = state.route.stops.map((s) => ({ name: s.name, lat: s.lat, lng: s.lng, stop_type: s.stop_type }));
   state.dirty = false;
+  state.history = [];
 }
 
 const savePoints = () => api(`/api/v2/transport/routes/${state.routeId}/control-points`, { method: "PUT", body: JSON.stringify({ control_points: state.points }) });
 const saveStops = () => api(`/api/v2/transport/routes/${state.routeId}/stops`, { method: "PUT", body: JSON.stringify({ stops: state.stops }) });
 
+let resolveSeq = 0;
+
 async function resolveNow() {
   clearTimeout(state.timer);
   state.pending = true;
   refresh();
+  const seq = ++resolveSeq;
   let resolved = false;
   await run("กำลังคำนวณเส้นทาง...", async () => {
     try {
       await savePoints();
       if (state.points.length >= 2) {
         const result = await api(`/api/v2/transport/routes/${state.routeId}/resolve`, { method: "POST" });
-        state.warnings = Array.isArray(result?.warnings) ? result.warnings : [];
-        state.bearingsUsed = result?.bearings_used;
-        resolved = true;
+        if (seq === resolveSeq) {
+          state.warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+          state.bearingsUsed = result?.bearings_used;
+          resolved = true;
+        }
       }
+    } catch (err) {
+      state.warnings = [];
+      throw err;
     } finally {
       state.pending = false;
       await loadRoute();
     }
   });
-  if (resolved && (state.warnings.length || state.bearingsUsed === false)) stageStatus(warningsText());
+  if (seq === resolveSeq && resolved && (state.warnings.length || state.bearingsUsed === false)) renderWarningsStatus();
   refresh();
 }
 
@@ -295,6 +336,7 @@ function scheduleResolve() {
 }
 
 function pointsChanged() {
+  state.warnings = [];
   if (state.step === 2) {
     scheduleResolve();
     return;
@@ -382,6 +424,7 @@ function addStopAt(at) {
 function onMapClick(at) {
   if (state.step === 3) return addStopAt(at);
   if (state.step !== 1) return;
+  pushHistory();
   const point = { lat: at.lat, lng: at.lng };
   if (isClosed()) state.points.splice(state.points.length - 1, 0, point);
   else state.points.push(point);
@@ -391,6 +434,7 @@ function onMapClick(at) {
 function onLineClick(at) {
   if (state.step === 3) return addStopAt(at);
   if (state.points.length < 2) return onMapClick(at);
+  pushHistory();
   state.points.splice(insertIndexFor(at), 0, { lat: at.lat, lng: at.lng });
   pointsChanged();
 }
@@ -400,14 +444,21 @@ function onLineDragEnd(from, to) {
     refresh();
     return;
   }
+  pushHistory();
   state.points.splice(insertIndexFor(from), 0, { lat: to.lat, lng: to.lng });
   pointsChanged();
 }
 
-function onPointClick(index) {
+function onPointTap(index) {
+  if (state.step === 1 && index === 0 && state.points.length >= 3 && !isClosed()) {
+    pushHistory();
+    state.points.push({ ...state.points[0] });
+    pointsChanged();
+    return;
+  }
   if (state.step === 3) return;
-  if (index === 0 && state.points.length >= 3 && !isClosed()) state.points.push({ ...state.points[0] });
-  else state.points.splice(index, 1);
+  pushHistory();
+  state.points.splice(index, 1);
   pointsChanged();
 }
 
@@ -416,6 +467,7 @@ function onPointDragEnd(index, at) {
     refresh();
     return;
   }
+  pushHistory();
   const closed = isClosed();
   const last = state.points.length - 1;
   state.points[index] = { lat: at.lat, lng: at.lng };
@@ -444,15 +496,21 @@ function bindControls() {
   qs("btn-fullscreen").addEventListener("click", () => toggleFullscreen());
   document.addEventListener("fullscreenchange", applyStageLayout);
   document.addEventListener("webkitfullscreenchange", applyStageLayout);
-  qs("btn-undo-point").addEventListener("click", () => {
+  qs("btn-undo-point").addEventListener("click", () => undo());
+  let clearArmed = null;
+  const btnClear = qs("btn-clear");
+  btnClear.addEventListener("click", () => {
+    if (!clearArmed) {
+      btnClear.textContent = "กดอีกครั้งเพื่อล้าง";
+      clearArmed = setTimeout(() => { clearArmed = null; btnClear.textContent = "ล้างจุดทั้งหมด"; }, 3000);
+      return;
+    }
+    clearTimeout(clearArmed);
+    clearArmed = null;
+    btnClear.textContent = "ล้างจุดทั้งหมด";
     if (!state.points.length) return;
-    state.points.pop();
-    pointsChanged();
-  });
-  qs("btn-clear").addEventListener("click", () => {
-    if (!state.points.length || !window.confirm("ล้างจุดเส้นทางทั้งหมด?")) return;
+    pushHistory();
     state.points = [];
-    state.warnings = [];
     pointsChanged();
   });
   qs("btn-compute").addEventListener("click", async () => {
@@ -494,7 +552,7 @@ async function init() {
       onMapClick,
       onLineClick,
       onLineDragEnd,
-      onPointClick,
+      onPointClick: onPointTap,
       onPointDragEnd,
       onStopClick,
       onError: (err) => setBanner("workspace-status", `โหลด base map ไม่ได้: ${err.message}`, true),

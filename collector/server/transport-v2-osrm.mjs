@@ -3,7 +3,7 @@ export function bearingOf(a, b) {
   const p1 = r(a.lat), p2 = r(b.lat), dl = r(b.lng - a.lng);
   const y = Math.sin(dl) * Math.cos(p2);
   const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
-  return Math.round(((Math.atan2(y, x) * 180) / Math.PI + 360) % 360);
+  return Math.round((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 export function haversineM(a, b) {
   const r = (d) => (d * Math.PI) / 180;
@@ -33,4 +33,23 @@ export function detourWarnings(legs, waypoints, { ratio = 2.5, minExtraM = 150 }
     }
   });
   return out;
+}
+export function hasBearings(bearings) {
+  return typeof bearings === "string" && bearings.split(";").some(Boolean);
+}
+export async function fetchRouteWithFallback(urlBase, bearings, { fetchImpl = fetch, timeoutMs = 20000 } = {}) {
+  const attempt = async (url) => {
+    const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
+    let body = null, parseError = false;
+    try { body = await res.json(); } catch { parseError = true; }
+    return { res, body, parseError, ok: Boolean(res.ok && body && body.code === "Ok") };
+  };
+  if (hasBearings(bearings)) {
+    try {
+      const r = await attempt(`${urlBase}&bearings=${bearings}`);
+      if (r.ok) return { ...r, bearingsUsed: true };
+    } catch { /* timeout/network → fallback */ }
+  }
+  const r = await attempt(urlBase);   // throw ได้ → error path เดิมของ router
+  return { ...r, bearingsUsed: false };
 }
