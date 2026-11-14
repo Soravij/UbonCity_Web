@@ -81,14 +81,27 @@ function applyStageLayout() {
   const full = isFull();
   const stage = qs("path-editor-stage");
   const map = qs("path-editor-map");
+  const controls = qs("stage-controls");
   Object.assign(stage.style, full
-    ? { display: "flex", flexDirection: "column", gap: "8px", padding: "8px", height: state.pseudoFull ? "100dvh" : "100%",
-      position: state.pseudoFull ? "fixed" : "", inset: state.pseudoFull ? "0" : "", zIndex: state.pseudoFull ? "1000" : "",
-      overflow: "auto" }
-    : { display: "", flexDirection: "", gap: "", padding: "", height: "", position: "", inset: "", zIndex: "", overflow: "" });
+    ? { position: state.pseudoFull ? "fixed" : "relative", inset: "0", width: "100vw", height: "100dvh",
+      padding: "0", margin: "0", overflow: "hidden", zIndex: state.pseudoFull ? "1000" : "" }
+    : { position: "", inset: "", width: "", height: "", padding: "", margin: "", overflow: "", zIndex: "" });
   stage.style.background = full ? "var(--theme-bg-gradient)" : "";
-  Object.assign(map.style, full ? { height: "auto", flex: "1 1 auto", minHeight: "0" } : { height: "70vh", flex: "", minHeight: "360px" });
+  Object.assign(map.style, full
+    ? { position: "absolute", inset: "0", width: "100%", height: "100%", margin: "0", minHeight: "0", borderRadius: "0" }
+    : { position: "", inset: "", width: "", height: "70vh", margin: "", minHeight: "360px", borderRadius: "12px" });
+  Object.assign(controls.style, full
+    ? { position: "absolute", top: "12px", left: "12px", zIndex: "10", maxWidth: "min(560px, calc(100% - 24px))",
+      maxHeight: "calc(100% - 24px)", overflow: "auto", padding: "10px 12px", borderRadius: "12px" }
+    : { position: "", top: "", left: "", zIndex: "", maxWidth: "", maxHeight: "", overflow: "", padding: "", borderRadius: "" });
+  if (controls.dataset.hadCard === undefined) controls.dataset.hadCard = controls.classList.contains("card") ? "1" : "0";
+  if (controls.dataset.hadCard === "0") controls.classList.toggle("card", full);
   qs("btn-fullscreen").textContent = full ? "ออกจากเต็มจอ" : "เต็มจอ";
+}
+
+function enterPseudo() {
+  state.pseudoFull = true;
+  applyStageLayout();
 }
 
 async function toggleFullscreen() {
@@ -99,11 +112,17 @@ async function toggleFullscreen() {
     state.wakeLock = null;
   } else {
     const stage = qs("path-editor-stage");
-    const request = stage.requestFullscreen || stage.webkitRequestFullscreen;
-    if (request) {
-      try { await request.call(stage); } catch { state.pseudoFull = true; }
+    const canNative = document.fullscreenEnabled || document.webkitFullscreenEnabled;
+    const req = stage.requestFullscreen || stage.webkitRequestFullscreen;
+    if (!canNative || !req) {
+      enterPseudo();
     } else {
-      state.pseudoFull = true;
+      try {
+        const p = req.call(stage);
+        if (p && typeof p.catch === "function") p.catch(() => enterPseudo());
+      } catch {
+        enterPseudo();
+      }
     }
     try { state.wakeLock = await navigator.wakeLock?.request("screen"); } catch { state.wakeLock = null; }
   }

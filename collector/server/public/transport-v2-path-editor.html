@@ -35,32 +35,34 @@
       <div class="stack-lg">
         <section class="card article-work-card">
           <div id="path-editor-stage">
-            <div class="article-section-head">
-              <div>
-                <h2 class="section-title" id="route-title"></h2>
-                <p class="muted" id="route-meta"></p>
+            <div id="stage-controls">
+              <div class="article-section-head">
+                <div>
+                  <h2 class="section-title" id="route-title"></h2>
+                  <p class="muted" id="route-meta"></p>
+                </div>
               </div>
+              <div class="toolbar">
+                <button id="btn-step-1" class="utility-action" type="button">1 · ปักจุด</button>
+                <button id="btn-step-2" class="utility-action" type="button">2 · ปรับเส้นทาง</button>
+                <button id="btn-step-3" class="utility-action" type="button">3 · ปักป้าย</button>
+                <button id="btn-fit" class="utility-action" type="button">Fit</button>
+                <button id="btn-fullscreen" class="utility-action" type="button">เต็มจอ</button>
+              </div>
+              <div class="toolbar" id="step-tools-1">
+                <button id="btn-undo-point" class="utility-action" type="button">ย้อนจุดล่าสุด</button>
+                <button id="btn-clear" class="utility-action" type="button">ล้างจุดทั้งหมด</button>
+                <button id="btn-compute" class="primary" type="button">คำนวณเส้นทาง</button>
+              </div>
+              <div class="toolbar hidden" id="step-tools-2">
+                <button id="btn-resolve" class="utility-action" type="button">คำนวณใหม่</button>
+              </div>
+              <div class="toolbar hidden" id="step-tools-3">
+                <button id="btn-undo-stop" class="utility-action" type="button">ลบป้ายล่าสุด</button>
+              </div>
+              <p class="muted" id="step-help"></p>
+              <p class="muted" id="stage-status" role="status" aria-live="polite"></p>
             </div>
-            <div class="toolbar">
-              <button id="btn-step-1" class="utility-action" type="button">1 · ปักจุด</button>
-              <button id="btn-step-2" class="utility-action" type="button">2 · ปรับเส้นทาง</button>
-              <button id="btn-step-3" class="utility-action" type="button">3 · ปักป้าย</button>
-              <button id="btn-fit" class="utility-action" type="button">Fit</button>
-              <button id="btn-fullscreen" class="utility-action" type="button">เต็มจอ</button>
-            </div>
-            <div class="toolbar" id="step-tools-1">
-              <button id="btn-undo-point" class="utility-action" type="button">ย้อนจุดล่าสุด</button>
-              <button id="btn-clear" class="utility-action" type="button">ล้างจุดทั้งหมด</button>
-              <button id="btn-compute" class="primary" type="button">คำนวณเส้นทาง</button>
-            </div>
-            <div class="toolbar hidden" id="step-tools-2">
-              <button id="btn-resolve" class="utility-action" type="button">คำนวณใหม่</button>
-            </div>
-            <div class="toolbar hidden" id="step-tools-3">
-              <button id="btn-undo-stop" class="utility-action" type="button">ลบป้ายล่าสุด</button>
-            </div>
-            <p class="muted" id="step-help"></p>
-            <p class="muted" id="stage-status" role="status" aria-live="polite"></p>
             <div id="path-editor-map" style="height: 70vh; min-height: 360px; border-radius: 12px; overflow: hidden; background: #f6f1e7;"></div>
           </div>
         </section>
