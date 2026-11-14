@@ -9,7 +9,15 @@ import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildTransportBundle } from "./transport-v2-publish.mjs";
 import { buildBearings, detourWarnings, fetchRouteWithFallback } from "./transport-v2-osrm.mjs";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
+const ROUTE_LEGS = new Set(["out", "back"]);
+const ROUTE_KINDS = new Set(["loop", "out_back"]);
 const DEFAULT_COLOR = "#ff6600";
+
+export function normalizeLeg(v) {
+  if (v == null || v === "") return null;
+  if (!ROUTE_LEGS.has(v)) throw new Error("leg is invalid");
+  return v;
+}
 const DEFAULT_LABEL_STYLE = {
   global: {
     font_family: "Noto Sans Thai",
@@ -177,7 +185,7 @@ function stripLegacyLabelMetadata(value) {
   return raw;
 }
 
-function normalizePoint(row, index = 0) {
+export function normalizePoint(row, index = 0) {
   const lat = num(row?.lat);
   const lng = num(row?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -188,6 +196,7 @@ function normalizePoint(row, index = 0) {
     lng,
     label: String(row?.label || "").trim(),
     note: String(row?.note || "").trim(),
+    leg: normalizeLeg(row?.leg),
   };
 }
 
@@ -195,7 +204,7 @@ function normalizePoints(rows = []) {
   return (Array.isArray(rows) ? rows : []).map(normalizePoint).filter(Boolean).map((row, index) => ({ ...row, order: index }));
 }
 
-function normalizeStops(rows = []) {
+export function normalizeStops(rows = []) {
   return (Array.isArray(rows) ? rows : [])
     .map((row, index) => {
       const point = normalizePoint(row, index);
@@ -204,6 +213,7 @@ function normalizeStops(rows = []) {
         ...point,
         name: String(row?.name || `Stop ${index + 1}`).trim() || `Stop ${index + 1}`,
         stop_type: String(row?.stop_type || "stop").trim().toLowerCase() || "stop",
+        leg: normalizeLeg(row?.leg),
       };
     })
     .filter(Boolean)
@@ -1070,8 +1080,9 @@ export function createTransportV2Router({ db, dirs, logAudit = () => {}, getAiCo
       resolved_bbox: asJson(row.resolved_bbox_json, null),
       last_routed_at: row.last_routed_at || null,
       last_poster_generated_at: row.last_poster_generated_at || null,
-      control_points: db.prepare("SELECT point_order, lat, lng, label, note FROM transport_route_control_points_v2 WHERE route_id=? ORDER BY point_order ASC").all(routeId).map((entry) => ({ order: Number(entry.point_order || 0), lat: Number(entry.lat), lng: Number(entry.lng), label: entry.label || '', note: entry.note || '' })),
-      stops: db.prepare("SELECT stop_order, name, lat, lng, stop_type, note FROM transport_route_stops_v2 WHERE route_id=? ORDER BY stop_order ASC").all(routeId).map((entry) => ({ order: Number(entry.stop_order || 0), name: entry.name, lat: Number(entry.lat), lng: Number(entry.lng), stop_type: entry.stop_type || 'stop', note: entry.note || '' })),
+      route_kind: row.route_kind || 'loop',
+      control_points: db.prepare("SELECT point_order, lat, lng, label, note, leg FROM transport_route_control_points_v2 WHERE route_id=? ORDER BY point_order ASC").all(routeId).map((entry) => ({ order: Number(entry.point_order || 0), lat: Number(entry.lat), lng: Number(entry.lng), label: entry.label || '', note: entry.note || '', leg: entry.leg ?? null })),
+      stops: db.prepare("SELECT stop_order, name, lat, lng, stop_type, note, leg FROM transport_route_stops_v2 WHERE route_id=? ORDER BY stop_order ASC").all(routeId).map((entry) => ({ order: Number(entry.stop_order || 0), name: entry.name, lat: Number(entry.lat), lng: Number(entry.lng), stop_type: entry.stop_type || 'stop', note: entry.note || '', leg: entry.leg ?? null })),
       resolved_path: resolved ? asJson(resolved.geometry_json, []) : [],
       resolved_path_meta: resolved ? { id: Number(resolved.id || 0), route_revision: Number(resolved.route_revision || 0), point_count: Number(resolved.point_count || 0), bbox: asJson(resolved.bbox_json, null), summary: asJson(resolved.osrm_summary_json, {}), created_at: resolved.created_at } : null,
       poster_path_simplified: poster ? asJson(poster.geometry_json, []) : [],
@@ -1868,16 +1879,19 @@ const collectorIntegrationConfig = () => ({
       const baseMapId = Number(body.base_map_id || 0) || null;
       if (!baseMapId) throw new Error("base_map_id is required");
       if (baseMapId && !getBaseMapRow(baseMapId)) throw new Error("base_map_id is invalid");
+      const routeKind = body.route_kind == null ? "loop" : String(body.route_kind).trim().toLowerCase();
+      if (!ROUTE_KINDS.has(routeKind)) throw new Error("route_kind is invalid");
       db.prepare(`
         INSERT INTO transport_routes_v2 (
-          base_map_id, route_name, route_number, vehicle_type, color, description, workflow_status, assignee_user_id,
+          base_map_id, route_name, route_number, vehicle_type, route_kind, color, description, workflow_status, assignee_user_id,
           route_revision, resolved_revision, poster_revision, routing_status, poster_status, created_by, updated_by, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 'missing', 'missing', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 'missing', 'missing', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `).run(
         baseMapId,
         String(body.route_name).trim(),
         String(body.route_number).trim(),
         vehicle(body.vehicle_type),
+        routeKind,
         color(body.color),
         String(body.description || "").trim(),
         String(body.workflow_status || "draft").trim().toLowerCase() || "draft",
@@ -1909,6 +1923,8 @@ const collectorIntegrationConfig = () => ({
       const nextRouteName = String((body.route_name ?? current.route_name) || "").trim() || current.route_name;
       const nextRouteNumber = String((body.route_number ?? current.route_number) || "").trim() || current.route_number;
       const nextVehicleType = vehicle(body.vehicle_type ?? current.vehicle_type);
+      const nextRouteKind = String((body.route_kind ?? current.route_kind) || "loop").trim().toLowerCase() || current.route_kind;
+      if (!ROUTE_KINDS.has(nextRouteKind)) throw new Error("route_kind is invalid");
       const nextColor = color(body.color ?? current.color, current.color);
       const nextDescription = String((body.description ?? current.description) || "").trim();
       const nextWorkflowStatus = String((body.workflow_status ?? current.workflow_status) || "draft").trim().toLowerCase() || current.workflow_status;
@@ -1922,7 +1938,7 @@ const collectorIntegrationConfig = () => ({
         || nextDescription !== current.description;
       db.prepare(`
         UPDATE transport_routes_v2
-        SET base_map_id=?, route_name=?, route_number=?, vehicle_type=?, color=?, description=?, workflow_status=?, assignee_user_id=?,
+        SET base_map_id=?, route_name=?, route_number=?, vehicle_type=?, route_kind=?, color=?, description=?, workflow_status=?, assignee_user_id=?,
             route_revision=CASE WHEN ? THEN route_revision + 1 ELSE route_revision END,
             routing_status=CASE WHEN ? THEN 'stale' ELSE routing_status END,
             poster_status=CASE WHEN ? THEN 'stale' ELSE poster_status END,
@@ -1933,6 +1949,7 @@ const collectorIntegrationConfig = () => ({
         nextRouteName,
         nextRouteNumber,
         nextVehicleType,
+        nextRouteKind,
         nextColor,
         nextDescription,
         nextWorkflowStatus,
@@ -2013,8 +2030,8 @@ const collectorIntegrationConfig = () => ({
     db.exec("BEGIN");
     try {
       db.prepare("DELETE FROM transport_route_control_points_v2 WHERE route_id=?").run(Number(req.params.id));
-      const insert = db.prepare("INSERT INTO transport_route_control_points_v2 (route_id, point_order, lat, lng, label, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
-      for (const point of points) insert.run(Number(req.params.id), point.order, point.lat, point.lng, point.label, point.note);
+      const insert = db.prepare("INSERT INTO transport_route_control_points_v2 (route_id, point_order, lat, lng, label, note, leg, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+      for (const point of points) insert.run(Number(req.params.id), point.order, point.lat, point.lng, point.label, point.note, point.leg);
       bumpRoute(req.params.id, actorEmail(req));
       db.exec("COMMIT");
     } catch (error) {
@@ -2033,8 +2050,8 @@ const collectorIntegrationConfig = () => ({
     db.exec("BEGIN");
     try {
       db.prepare("DELETE FROM transport_route_stops_v2 WHERE route_id=?").run(Number(req.params.id));
-      const insert = db.prepare("INSERT INTO transport_route_stops_v2 (route_id, stop_order, name, lat, lng, stop_type, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
-      for (const stop of stops) insert.run(Number(req.params.id), stop.order, stop.name, stop.lat, stop.lng, stop.stop_type, stop.note);
+      const insert = db.prepare("INSERT INTO transport_route_stops_v2 (route_id, stop_order, name, lat, lng, stop_type, note, leg, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+      for (const stop of stops) insert.run(Number(req.params.id), stop.order, stop.name, stop.lat, stop.lng, stop.stop_type, stop.note, stop.leg);
       db.prepare("UPDATE transport_routes_v2 SET updated_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(actorEmail(req), Number(req.params.id));
       db.exec("COMMIT");
     } catch (error) {
