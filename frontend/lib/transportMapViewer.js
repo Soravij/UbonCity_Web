@@ -216,7 +216,7 @@ export function createTransportMapViewer(container, options = {}) {
       c.style.cursor = "grab";
       gDraft.append(c);
       if (warnPoints.has(index)) {
-        gDraft.append(el("circle", { cx: p[0], cy: p[1], r: DRAFT_R * 1.7, fill: "none", stroke: "#dc2626", "stroke-width": 3, "vector-effect": "non-scaling-stroke", "pointer-events": "none", "data-warn-ring": "1" }));
+        gDraft.append(el("circle", { cx: p[0], cy: p[1], r: DRAFT_R * 2, fill: "none", stroke: "#dc2626", "stroke-width": 4, "vector-effect": "non-scaling-stroke", "pointer-events": "none", "data-warn-ring": "1" }));
       }
     });
     (draft.stops || []).forEach((p, index) => {
@@ -241,7 +241,7 @@ export function createTransportMapViewer(container, options = {}) {
     }
     for (const c of gStops.children) c.setAttribute("r", String(4 * u));
     for (const c of gDraft.querySelectorAll("circle:not([data-warn-ring])")) c.setAttribute("r", String(DRAFT_R * u));
-    for (const c of gDraft.querySelectorAll("circle[data-warn-ring]")) c.setAttribute("r", String(DRAFT_R * 1.7 * u));
+    for (const c of gDraft.querySelectorAll("circle[data-warn-ring]")) c.setAttribute("r", String(DRAFT_R * 2 * u));
     for (const t of gLabels.children) {
       const label = labelsByKey.get(t.getAttribute("data-key"));
       t.style.display = label.min_zoom == null || z >= label.min_zoom ? "" : "none";

@@ -21,7 +21,7 @@ const state = {
 };
 
 const STEP_HELP = {
-  1: "ขั้น 1 ปักจุด: แตะแผนที่ = เพิ่มจุดตามลำดับ · แตะจุด = ลบ · กด เลิกทำ เพื่อย้อน · แตะจุดแรก = วนกลับจุดเริ่ม · เสร็จแล้วกด \"คำนวณเส้นทาง\"",
+  1: "ขั้น 1 ปักจุด: แตะแผนที่ = เพิ่มจุดตามลำดับ · แตะจุด = ลบ · กด เลิกทำ เพื่อย้อน · แตะจุดแรก = วนกลับจุดเริ่ม · เสร็จแล้วกด \"คำนวณเส้นทาง\" · วางจุดกลางช่วงถนนตรง เลี่ยงมุมเลี้ยว/ทางแยก",
   2: "ขั้น 2 ปรับเส้นทาง: ลากจุด = ย้าย · ลากเส้นสีส้ม = ดึงเส้นผ่านจุดใหม่ · แตะบนเส้น = แทรกจุด · แตะจุด = ลบ · กด เลิกทำ เพื่อย้อน · ระบบคำนวณใหม่ให้อัตโนมัติ",
   3: "ขั้น 3 ปักป้าย: แตะแผนที่หรือเส้น = เพิ่มป้าย (เกาะเส้นทางอัตโนมัติ) · แตะป้าย = แก้ชื่อหรือลบ",
 };
@@ -68,7 +68,7 @@ function undo() {
 }
 
 function stepActionButtons(s) {
-  if (s === 1) return [qs("btn-undo-point"), qs("btn-clear"), qs("btn-compute")];
+  if (s === 1) return [qs("tip-placement"), qs("btn-undo-point"), qs("btn-clear"), qs("btn-compute")];
   if (s === 2) return [qs("btn-undo-point"), qs("btn-resolve")];
   if (s === 3) return [qs("btn-undo-stop")];
   return [];
@@ -100,7 +100,7 @@ function renderStepList() {
       Object.assign(box.style, { display: "flex", flexDirection: "column", gap: "4px",
         margin: "0 0 4px 12px", paddingLeft: "8px", borderLeft: "2px solid var(--line)" });
       for (const b of stepActionButtons(s)) {
-        Object.assign(b.style, { width: "100%", textAlign: "left", fontSize: "0.88em", padding: "6px 10px" });
+        if (b.tagName === "BUTTON") Object.assign(b.style, { width: "100%", textAlign: "left", fontSize: "0.88em", padding: "6px 10px" });
         box.append(b);
       }
       if (box.childElementCount) nodes.push(box);
@@ -166,6 +166,22 @@ function renderWarningsStatus() {
   }
 }
 
+let warnIdx = -1;
+function renderWarnBanner() {
+  const b = qs("warn-banner");
+  const n = state.warnings.length;
+  b.hidden = n === 0;
+  if (n) b.textContent = `⚠ พบ ${n} ช่วงที่เส้นอ้อม · แตะเพื่อดู`;
+  else warnIdx = -1;
+}
+qs("warn-banner").addEventListener("click", () => {
+  const n = state.warnings.length;
+  if (!n) return;
+  warnIdx = (warnIdx + 1) % n;
+  const w = state.warnings[warnIdx];
+  state.viewer?.focusPoints([project(state.points[w.from]), project(state.points[w.to])]);
+});
+
 function isFull() {
   return Boolean(document.fullscreenElement || document.webkitFullscreenElement) || state.pseudoFull;
 }
@@ -180,6 +196,8 @@ const compactEls = ["route-title", "route-meta", "step-help", "stage-status"]
   .map((id) => qs(id)).filter(Boolean);
 let collapsed = false;
 let helpTimer = null;
+let clearArmed = null;
+const btnClear = qs("btn-clear");
 
 function routeLabel() {
   return (qs("route-title")?.textContent || "").trim();
@@ -324,11 +342,13 @@ async function resolveNow() {
       state.warnings = [];
       throw err;
     } finally {
-      state.pending = false;
-      await loadRoute();
+      if (seq === resolveSeq) {
+        state.pending = false;
+        await loadRoute();
+      }
     }
   });
-  if (seq === resolveSeq && resolved && (state.warnings.length || state.bearingsUsed === false)) renderWarningsStatus();
+  if (seq === resolveSeq && resolved && (state.warnings.length || state.bearingsUsed === false)) { renderWarningsStatus(); renderWarnBanner(); }
   refresh();
 }
 
@@ -341,6 +361,8 @@ function scheduleResolve() {
 
 function pointsChanged() {
   state.warnings = [];
+  renderWarningsStatus();
+  renderWarnBanner();
   if (state.step === 2) {
     scheduleResolve();
     return;
@@ -351,6 +373,7 @@ function pointsChanged() {
 
 function setStep(step) {
   if (step > 1 && !hasPath()) return;
+  if (clearArmed) { clearTimeout(clearArmed); clearArmed = null; btnClear.textContent = "ล้างจุดทั้งหมด"; }
   state.step = step;
   refresh();
 }
@@ -501,8 +524,6 @@ function bindControls() {
   document.addEventListener("fullscreenchange", applyStageLayout);
   document.addEventListener("webkitfullscreenchange", applyStageLayout);
   qs("btn-undo-point").addEventListener("click", () => undo());
-  let clearArmed = null;
-  const btnClear = qs("btn-clear");
   btnClear.addEventListener("click", () => {
     if (!clearArmed) {
       btnClear.textContent = "กดอีกครั้งเพื่อล้าง";

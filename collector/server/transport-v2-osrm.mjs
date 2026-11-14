@@ -19,7 +19,7 @@ export function buildBearings(points, range = 60) {
     return haversineM(a, b) < 1 ? "" : `${bearingOf(a, b)},${range}`;
   }).join(";");
 }
-export function detourWarnings(legs, waypoints, { ratio = 2.5, minExtraM = 150 } = {}) {
+export function detourWarnings(legs, waypoints, { ratio = 2.5, minExtraM = 50 } = {}) {
   // legs = OSRM routes[0].legs, waypoints = OSRM waypoints (location = [lng, lat])
   const out = [];
   if (!Array.isArray(legs) || !Array.isArray(waypoints)) return out;
