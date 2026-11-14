@@ -207,7 +207,7 @@ export function createTransportMapViewer(container, options = {}) {
       gDraft.append(hit);
     };
     if ((draft.path || []).length >= 2) addLine(draft.path, { "stroke-width": 5 });
-    if ((draft.points || []).length >= 2) addLine(draft.points, { "stroke-width": 2, "stroke-dasharray": "6 6", opacity: pointOpacity });
+    if ((draft.points || []).length >= 2 && (draft.path || []).length < 2) addLine(draft.points, { "stroke-width": 2, "stroke-dasharray": "6 6", opacity: pointOpacity });
     (draft.points || []).forEach((p, index) => {
       const c = el("circle", { cx: p[0], cy: p[1], r: 6, fill: color, stroke: "#ffffff", "stroke-width": 2, "vector-effect": "non-scaling-stroke", "data-point-index": index, opacity: pointOpacity });
       c.style.cursor = "grab";
@@ -294,6 +294,7 @@ export function createTransportMapViewer(container, options = {}) {
   let down = null;
   let dragged = false;
   let dragPoint = null;
+  let dragLine = null;
 
   svg.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -309,9 +310,12 @@ export function createTransportMapViewer(container, options = {}) {
       dragged = false;
       const pointAttr = e.target?.getAttribute?.("data-point-index");
       dragPoint = pointAttr != null && options.onPointDragEnd ? { index: Number(pointAttr), node: e.target } : null;
+      const lineAttr = e.target?.getAttribute?.("data-draft-line");
+      dragLine = !dragPoint && lineAttr != null && options.onLineDragEnd ? { ghost: null } : null;
     } else {
       dragged = true;
       dragPoint = null;
+      dragLine = null;
     }
     svg.setPointerCapture(e.pointerId);
   });
@@ -326,6 +330,14 @@ export function createTransportMapViewer(container, options = {}) {
         const [x, y] = toViewbox(cur.x, cur.y);
         dragPoint.node.setAttribute("cx", String(x));
         dragPoint.node.setAttribute("cy", String(y));
+      } else if (dragged && dragLine) {
+        const [x, y] = toViewbox(cur.x, cur.y);
+        if (!dragLine.ghost) {
+          dragLine.ghost = el("circle", { r: 6 * unitsPerPx(), fill: draft?.color || "#ff6600", stroke: "#ffffff", "stroke-width": 2, "vector-effect": "non-scaling-stroke" });
+          gDraft.append(dragLine.ghost);
+        }
+        dragLine.ghost.setAttribute("cx", String(x));
+        dragLine.ghost.setAttribute("cy", String(y));
       } else if (dragged) {
         const u = unitsPerPx();
         view = clampView({ ...view, x: view.x - (cur.x - prev.x) * u, y: view.y - (cur.y - prev.y) * u }, full);
@@ -351,13 +363,29 @@ export function createTransportMapViewer(container, options = {}) {
       const [x, y] = toViewbox(e.clientX, e.clientY);
       const index = dragPoint.index;
       dragPoint = null;
+      dragLine = null;
       down = null;
       options.onPointDragEnd(index, { x, y, ...viewboxToLatLng(x, y, bundle.bounds, full) });
       return;
     }
+    if (pointers.size === 0 && dragLine && dragged) {
+      const [sx, sy] = toViewbox(down.x, down.y);
+      const [x, y] = toViewbox(e.clientX, e.clientY);
+      dragLine.ghost?.remove();
+      dragLine = null;
+      down = null;
+      options.onLineDragEnd(
+        { x: sx, y: sy, ...viewboxToLatLng(sx, sy, bundle.bounds, full) },
+        { x, y, ...viewboxToLatLng(x, y, bundle.bounds, full) },
+      );
+      return;
+    }
     if (pointers.size === 0 && dragged) commitView();
     if (pointers.size > 0 || dragged || !down) {
-      if (pointers.size === 0) dragPoint = null;
+      if (pointers.size === 0) {
+        dragPoint = null;
+        dragLine = null;
+      }
       return;
     }
     const [x, y] = toViewbox(e.clientX, e.clientY);
@@ -380,10 +408,11 @@ export function createTransportMapViewer(container, options = {}) {
       options.onRouteSelect(null);
     }
     dragPoint = null;
+    dragLine = null;
     down = null;
   }
   svg.addEventListener("pointerup", endPointer);
-  svg.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); down = null; dragPoint = null; if (pointers.size === 0) commitView(); });
+  svg.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); down = null; dragPoint = null; dragLine?.ghost?.remove(); dragLine = null; if (pointers.size === 0) commitView(); });
 
   const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => render()) : null;
   resizeObserver?.observe(container);

@@ -41,14 +41,23 @@
             </div>
           </div>
           <div class="toolbar">
-            <button id="btn-mode-points" class="utility-action" type="button">ปักจุดเส้นทาง</button>
-            <button id="btn-mode-stops" class="utility-action" type="button">ปักป้ายจอด</button>
-            <button id="btn-undo" class="utility-action" type="button">ย้อนจุดล่าสุด</button>
-            <button id="btn-clear" class="utility-action" type="button">ล้างจุดเส้นทาง</button>
+            <button id="btn-step-1" class="utility-action" type="button">1 · ปักจุด</button>
+            <button id="btn-step-2" class="utility-action" type="button">2 · ปรับเส้นทาง</button>
+            <button id="btn-step-3" class="utility-action" type="button">3 · ปักป้าย</button>
             <button id="btn-fit" class="utility-action" type="button">Fit</button>
-            <button id="btn-resolve" class="utility-action" type="button">คำนวณเส้นทางใหม่</button>
           </div>
-          <p class="muted">จุดเส้นทาง: แตะแผนที่ = เพิ่มจุด · ลากจุด = ย้าย · แตะบนเส้น = แทรกจุด · แตะจุด = ลบ · แตะจุดแรก = วนกลับจุดเริ่ม · ระบบคำนวณเส้นทางให้อัตโนมัติ<br />ป้ายจอด: แตะแผนที่หรือเส้น = เพิ่มป้าย (เกาะเส้นทางอัตโนมัติ) · แตะป้าย = แก้ชื่อหรือลบ</p>
+          <div class="toolbar" id="step-tools-1">
+            <button id="btn-undo-point" class="utility-action" type="button">ย้อนจุดล่าสุด</button>
+            <button id="btn-clear" class="utility-action" type="button">ล้างจุดทั้งหมด</button>
+            <button id="btn-compute" class="primary" type="button">คำนวณเส้นทาง</button>
+          </div>
+          <div class="toolbar hidden" id="step-tools-2">
+            <button id="btn-resolve" class="utility-action" type="button">คำนวณใหม่</button>
+          </div>
+          <div class="toolbar hidden" id="step-tools-3">
+            <button id="btn-undo-stop" class="utility-action" type="button">ลบป้ายล่าสุด</button>
+          </div>
+          <p class="muted" id="step-help"></p>
           <div id="path-editor-map" style="height: 70vh; min-height: 360px; border-radius: 12px; overflow: hidden; background: #f6f1e7;"></div>
         </section>
         <section class="card article-work-card">
