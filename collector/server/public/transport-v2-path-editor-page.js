@@ -286,12 +286,16 @@ async function run(label, task) {
   refresh();
 }
 
+let historyRouteId = null;
 async function loadRoute() {
   state.route = await api(`/api/v2/transport/routes/${state.routeId}`);
   state.points = state.route.control_points.map((p) => ({ lat: p.lat, lng: p.lng }));
   state.stops = state.route.stops.map((s) => ({ name: s.name, lat: s.lat, lng: s.lng, stop_type: s.stop_type }));
   state.dirty = false;
-  state.history = [];
+  if (historyRouteId !== state.routeId) {
+    state.history = [];
+    historyRouteId = state.routeId;
+  }
 }
 
 const savePoints = () => api(`/api/v2/transport/routes/${state.routeId}/control-points`, { method: "PUT", body: JSON.stringify({ control_points: state.points }) });
