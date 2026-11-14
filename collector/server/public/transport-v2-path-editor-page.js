@@ -60,6 +60,12 @@ function renderSide() {
     ? state.stops.map((s, i) => `<li>${i + 1}. ${escapeHtml(s.name)}</li>`).join("")
     : `<li class="muted">ยังไม่มีป้ายจอด</li>`;
   qs("share-link").value = window.location.href;
+  const helpEl = qs("step-help");
+  if (isFull() && helpEl && !collapsed) {
+    helpEl.style.display = "";
+    clearTimeout(helpTimer);
+    helpTimer = setTimeout(() => { if (isFull()) helpEl.style.display = "none"; }, 2000);
+  }
 }
 
 function refresh() {
@@ -77,11 +83,43 @@ function isFull() {
   return Boolean(document.fullscreenElement || document.webkitFullscreenElement) || state.pseudoFull;
 }
 
+const controls = qs("stage-controls");
+const btnCollapse = qs("btn-collapse");
+const compactEls = ["route-title", "route-meta", "step-help", "stage-status"]
+  .map((id) => qs(id)).filter(Boolean);
+let collapsed = false;
+let helpTimer = null;
+
+function routeLabel() {
+  return (qs("route-title")?.textContent || "").trim();
+}
+
+function renderControls() {
+  const full = isFull();
+  btnCollapse.hidden = !full;
+  btnCollapse.textContent = collapsed ? "☰ " + routeLabel() : "– " + routeLabel();
+  for (const el of controls.children) {
+    if (el === btnCollapse) continue;
+    const hide = full && (collapsed || compactEls.includes(el));
+    el.style.display = hide ? "none" : "";
+  }
+  for (const el of compactEls) if (!controls.contains(el) || el.parentElement !== controls) el.style.display = full ? "none" : "";
+  Object.assign(controls.style, full
+    ? { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px", padding: collapsed ? "4px" : "6px 8px" }
+    : { display: "", flexWrap: "", alignItems: "", gap: "", padding: "" });
+}
+
+function applyCompact(full) {
+  if (!full) collapsed = false;
+  renderControls();
+}
+
+btnCollapse.addEventListener("click", () => { collapsed = !collapsed; renderControls(); });
+
 function applyStageLayout() {
   const full = isFull();
   const stage = qs("path-editor-stage");
   const map = qs("path-editor-map");
-  const controls = qs("stage-controls");
   Object.assign(stage.style, full
     ? { position: state.pseudoFull ? "fixed" : "relative", inset: "0", width: "100vw", height: "100dvh",
       padding: "0", margin: "0", overflow: "hidden", zIndex: state.pseudoFull ? "1000" : "" }
@@ -92,11 +130,12 @@ function applyStageLayout() {
     : { position: "", inset: "", width: "", height: "70vh", margin: "", minHeight: "360px", borderRadius: "12px" });
   Object.assign(controls.style, full
     ? { position: "absolute", top: "12px", left: "12px", zIndex: "10", maxWidth: "min(560px, calc(100% - 24px))",
-      maxHeight: "calc(100% - 24px)", overflow: "auto", padding: "10px 12px", borderRadius: "12px" }
-    : { position: "", top: "", left: "", zIndex: "", maxWidth: "", maxHeight: "", overflow: "", padding: "", borderRadius: "" });
+      maxHeight: "calc(100% - 24px)", overflow: "auto", borderRadius: "12px" }
+    : { position: "", top: "", left: "", zIndex: "", maxWidth: "", maxHeight: "", overflow: "", borderRadius: "" });
   if (controls.dataset.hadCard === undefined) controls.dataset.hadCard = controls.classList.contains("card") ? "1" : "0";
   if (controls.dataset.hadCard === "0") controls.classList.toggle("card", full);
   qs("btn-fullscreen").textContent = full ? "ออกจากเต็มจอ" : "เต็มจอ";
+  applyCompact(full);
 }
 
 function enterPseudo() {
