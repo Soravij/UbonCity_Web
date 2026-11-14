@@ -3,6 +3,8 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MAX_ZOOM = 40;
 const LABEL_PX = { s: 11, m: 13, l: 15 };
+const COARSE = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+const DRAFT_R = COARSE ? 10 : 6;
 // [zoom, widthMultiplier, opacity] — below the first stop the class is hidden.
 const BASE_RAMPS = {
   "roads-motorway": [[1, 1, 1], [4, 1.6, 1], [12, 3, 1], [40, 6, 1]],
@@ -202,19 +204,19 @@ export function createTransportMapViewer(container, options = {}) {
     const addLine = (pts, attrs) => {
       const points = pts.map((p) => p.join(",")).join(" ");
       gDraft.append(el("polyline", { points, fill: "none", stroke: color, "stroke-linecap": "round", "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke", ...attrs }));
-      const hit = el("polyline", { points, fill: "none", stroke: "transparent", "stroke-width": 16, "vector-effect": "non-scaling-stroke", "data-draft-line": "1" });
+      const hit = el("polyline", { points, fill: "none", stroke: "transparent", "stroke-width": COARSE ? 28 : 16, "vector-effect": "non-scaling-stroke", "data-draft-line": "1" });
       hit.style.cursor = "copy";
       gDraft.append(hit);
     };
     if ((draft.path || []).length >= 2) addLine(draft.path, { "stroke-width": 5 });
     if ((draft.points || []).length >= 2 && (draft.path || []).length < 2) addLine(draft.points, { "stroke-width": 2, "stroke-dasharray": "6 6", opacity: pointOpacity });
     (draft.points || []).forEach((p, index) => {
-      const c = el("circle", { cx: p[0], cy: p[1], r: 6, fill: color, stroke: "#ffffff", "stroke-width": 2, "vector-effect": "non-scaling-stroke", "data-point-index": index, opacity: pointOpacity });
+      const c = el("circle", { cx: p[0], cy: p[1], r: DRAFT_R, fill: color, stroke: "#ffffff", "stroke-width": 2, "vector-effect": "non-scaling-stroke", "data-point-index": index, opacity: pointOpacity });
       c.style.cursor = "grab";
       gDraft.append(c);
     });
     (draft.stops || []).forEach((p, index) => {
-      gDraft.append(el("circle", { cx: p[0], cy: p[1], r: 6, fill: "#1f3a5f", stroke: "#ffffff", "stroke-width": 2.5, "vector-effect": "non-scaling-stroke", "data-stop-index": index, opacity: stopOpacity }));
+      gDraft.append(el("circle", { cx: p[0], cy: p[1], r: DRAFT_R, fill: "#1f3a5f", stroke: "#ffffff", "stroke-width": 2.5, "vector-effect": "non-scaling-stroke", "data-stop-index": index, opacity: stopOpacity }));
     });
   }
 
@@ -234,7 +236,7 @@ export function createTransportMapViewer(container, options = {}) {
       n.style.opacity = String(opacity);
     }
     for (const c of gStops.children) c.setAttribute("r", String(4 * u));
-    for (const c of gDraft.querySelectorAll("circle")) c.setAttribute("r", String(6 * u));
+    for (const c of gDraft.querySelectorAll("circle")) c.setAttribute("r", String(DRAFT_R * u));
     for (const t of gLabels.children) {
       const label = labelsByKey.get(t.getAttribute("data-key"));
       t.style.display = label.min_zoom == null || z >= label.min_zoom ? "" : "none";

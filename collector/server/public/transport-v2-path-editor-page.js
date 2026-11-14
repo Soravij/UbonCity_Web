@@ -13,6 +13,8 @@ const state = {
   dirty: false,
   pending: false,
   timer: 0,
+  pseudoFull: false,
+  wakeLock: null,
 };
 
 const STEP_HELP = {
@@ -65,13 +67,58 @@ function refresh() {
   renderSide();
 }
 
+function stageStatus(text, isError = false) {
+  const node = qs("stage-status");
+  node.textContent = text || "";
+  node.style.color = isError ? "#dc2626" : "";
+}
+
+function isFull() {
+  return Boolean(document.fullscreenElement || document.webkitFullscreenElement) || state.pseudoFull;
+}
+
+function applyStageLayout() {
+  const full = isFull();
+  const stage = qs("path-editor-stage");
+  const map = qs("path-editor-map");
+  Object.assign(stage.style, full
+    ? { display: "flex", flexDirection: "column", gap: "8px", padding: "8px", height: state.pseudoFull ? "100dvh" : "100%",
+      position: state.pseudoFull ? "fixed" : "", inset: state.pseudoFull ? "0" : "", zIndex: state.pseudoFull ? "1000" : "",
+      background: getComputedStyle(document.body).backgroundColor, overflow: "auto" }
+    : { display: "", flexDirection: "", gap: "", padding: "", height: "", position: "", inset: "", zIndex: "", background: "", overflow: "" });
+  Object.assign(map.style, full ? { height: "auto", flex: "1 1 auto", minHeight: "0" } : { height: "70vh", flex: "", minHeight: "360px" });
+  qs("btn-fullscreen").textContent = full ? "ออกจากเต็มจอ" : "เต็มจอ";
+}
+
+async function toggleFullscreen() {
+  if (isFull()) {
+    if (state.pseudoFull) state.pseudoFull = false;
+    else await (document.exitFullscreen?.call(document) || document.webkitExitFullscreen?.call(document));
+    try { await state.wakeLock?.release(); } catch { /* ignore */ }
+    state.wakeLock = null;
+  } else {
+    const stage = qs("path-editor-stage");
+    const request = stage.requestFullscreen || stage.webkitRequestFullscreen;
+    if (request) {
+      try { await request.call(stage); } catch { state.pseudoFull = true; }
+    } else {
+      state.pseudoFull = true;
+    }
+    try { state.wakeLock = await navigator.wakeLock?.request("screen"); } catch { state.wakeLock = null; }
+  }
+  applyStageLayout();
+}
+
 async function run(label, task) {
   setBanner("workspace-status", label);
+  stageStatus(label);
   try {
     await task();
     setBanner("workspace-status", "");
+    stageStatus("");
   } catch (err) {
     setBanner("workspace-status", err.message || "ทำไม่สำเร็จ", true);
+    stageStatus(err.message || "ทำไม่สำเร็จ", true);
   }
   refresh();
 }
@@ -256,6 +303,9 @@ function bindControls() {
   qs("btn-open-preview").addEventListener("click", () => { window.location.href = "/transport-v2-preview.html"; });
   for (const s of [1, 2, 3]) qs(`btn-step-${s}`).addEventListener("click", () => setStep(s));
   qs("btn-fit").addEventListener("click", () => state.viewer?.fitAll());
+  qs("btn-fullscreen").addEventListener("click", () => toggleFullscreen());
+  document.addEventListener("fullscreenchange", applyStageLayout);
+  document.addEventListener("webkitfullscreenchange", applyStageLayout);
   qs("btn-undo-point").addEventListener("click", () => {
     if (!state.points.length) return;
     state.points.pop();
