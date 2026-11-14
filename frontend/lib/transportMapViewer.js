@@ -3,6 +3,8 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MAX_ZOOM = 40;
 const LABEL_PX = { s: 11, m: 13, l: 15 };
+const COARSE = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+const DRAFT_R = COARSE ? 10 : 6;
 // [zoom, widthMultiplier, opacity] — below the first stop the class is hidden.
 const BASE_RAMPS = {
   "roads-motorway": [[1, 1, 1], [4, 1.6, 1], [12, 3, 1], [40, 6, 1]],
@@ -197,14 +199,24 @@ export function createTransportMapViewer(container, options = {}) {
     gDraft.replaceChildren();
     if (!draft) return;
     const color = draft.color || "#ff6600";
-    if ((draft.path || []).length >= 2) {
-      gDraft.append(el("polyline", { points: draft.path.map((p) => p.join(",")).join(" "), fill: "none", stroke: color, "stroke-width": 5, "stroke-linecap": "round", "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke" }));
-    }
-    if ((draft.points || []).length >= 2) {
-      gDraft.append(el("polyline", { points: draft.points.map((p) => p.join(",")).join(" "), fill: "none", stroke: color, "stroke-width": 2, "stroke-dasharray": "6 6", "vector-effect": "non-scaling-stroke" }));
-    }
+    const pointOpacity = String(draft.pointOpacity ?? 1);
+    const stopOpacity = String(draft.stopOpacity ?? 1);
+    const addLine = (pts, attrs) => {
+      const points = pts.map((p) => p.join(",")).join(" ");
+      gDraft.append(el("polyline", { points, fill: "none", stroke: color, "stroke-linecap": "round", "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke", ...attrs }));
+      const hit = el("polyline", { points, fill: "none", stroke: "transparent", "stroke-width": COARSE ? 28 : 16, "vector-effect": "non-scaling-stroke", "data-draft-line": "1" });
+      hit.style.cursor = "copy";
+      gDraft.append(hit);
+    };
+    if ((draft.path || []).length >= 2) addLine(draft.path, { "stroke-width": 5 });
+    if ((draft.points || []).length >= 2 && (draft.path || []).length < 2) addLine(draft.points, { "stroke-width": 2, "stroke-dasharray": "6 6", opacity: pointOpacity });
     (draft.points || []).forEach((p, index) => {
-      gDraft.append(el("circle", { cx: p[0], cy: p[1], r: 6, fill: color, stroke: "#ffffff", "stroke-width": 2, "vector-effect": "non-scaling-stroke", "data-point-index": index }));
+      const c = el("circle", { cx: p[0], cy: p[1], r: DRAFT_R, fill: color, stroke: "#ffffff", "stroke-width": 2, "vector-effect": "non-scaling-stroke", "data-point-index": index, opacity: pointOpacity });
+      c.style.cursor = "grab";
+      gDraft.append(c);
+    });
+    (draft.stops || []).forEach((p, index) => {
+      gDraft.append(el("circle", { cx: p[0], cy: p[1], r: DRAFT_R, fill: "#1f3a5f", stroke: "#ffffff", "stroke-width": 2.5, "vector-effect": "non-scaling-stroke", "data-stop-index": index, opacity: stopOpacity }));
     });
   }
 
@@ -224,7 +236,7 @@ export function createTransportMapViewer(container, options = {}) {
       n.style.opacity = String(opacity);
     }
     for (const c of gStops.children) c.setAttribute("r", String(4 * u));
-    for (const c of gDraft.querySelectorAll("circle")) c.setAttribute("r", String(6 * u));
+    for (const c of gDraft.querySelectorAll("circle")) c.setAttribute("r", String(DRAFT_R * u));
     for (const t of gLabels.children) {
       const label = labelsByKey.get(t.getAttribute("data-key"));
       t.style.display = label.min_zoom == null || z >= label.min_zoom ? "" : "none";
@@ -283,6 +295,8 @@ export function createTransportMapViewer(container, options = {}) {
   const pointers = new Map();
   let down = null;
   let dragged = false;
+  let dragPoint = null;
+  let dragLine = null;
 
   svg.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -296,8 +310,14 @@ export function createTransportMapViewer(container, options = {}) {
     if (pointers.size === 1) {
       down = { x: e.clientX, y: e.clientY, target: e.target };
       dragged = false;
+      const pointAttr = e.target?.getAttribute?.("data-point-index");
+      dragPoint = pointAttr != null && options.onPointDragEnd ? { index: Number(pointAttr), node: e.target } : null;
+      const lineAttr = e.target?.getAttribute?.("data-draft-line");
+      dragLine = !dragPoint && lineAttr != null && options.onLineDragEnd ? { ghost: null } : null;
     } else {
       dragged = true;
+      dragPoint = null;
+      dragLine = null;
     }
     svg.setPointerCapture(e.pointerId);
   });
@@ -308,7 +328,19 @@ export function createTransportMapViewer(container, options = {}) {
     const cur = { x: e.clientX, y: e.clientY };
     if (pointers.size === 1) {
       if (down && Math.hypot(cur.x - down.x, cur.y - down.y) > 4) dragged = true;
-      if (dragged) {
+      if (dragged && dragPoint) {
+        const [x, y] = toViewbox(cur.x, cur.y);
+        dragPoint.node.setAttribute("cx", String(x));
+        dragPoint.node.setAttribute("cy", String(y));
+      } else if (dragged && dragLine) {
+        const [x, y] = toViewbox(cur.x, cur.y);
+        if (!dragLine.ghost) {
+          dragLine.ghost = el("circle", { r: 6 * unitsPerPx(), fill: draft?.color || "#ff6600", stroke: "#ffffff", "stroke-width": 2, "vector-effect": "non-scaling-stroke" });
+          gDraft.append(dragLine.ghost);
+        }
+        dragLine.ghost.setAttribute("cx", String(x));
+        dragLine.ghost.setAttribute("cy", String(y));
+      } else if (dragged) {
         const u = unitsPerPx();
         view = clampView({ ...view, x: view.x - (cur.x - prev.x) * u, y: view.y - (cur.y - prev.y) * u }, full);
         scheduleGesture();
@@ -329,24 +361,60 @@ export function createTransportMapViewer(container, options = {}) {
   function endPointer(e) {
     if (!pointers.has(e.pointerId)) return;
     pointers.delete(e.pointerId);
+    if (pointers.size === 0 && dragPoint && dragged) {
+      const [x, y] = toViewbox(e.clientX, e.clientY);
+      const index = dragPoint.index;
+      dragPoint = null;
+      dragLine = null;
+      down = null;
+      options.onPointDragEnd(index, { x, y, ...viewboxToLatLng(x, y, bundle.bounds, full) });
+      return;
+    }
+    if (pointers.size === 0 && dragLine && dragged) {
+      const [sx, sy] = toViewbox(down.x, down.y);
+      const [x, y] = toViewbox(e.clientX, e.clientY);
+      dragLine.ghost?.remove();
+      dragLine = null;
+      down = null;
+      options.onLineDragEnd(
+        { x: sx, y: sy, ...viewboxToLatLng(sx, sy, bundle.bounds, full) },
+        { x, y, ...viewboxToLatLng(x, y, bundle.bounds, full) },
+      );
+      return;
+    }
     if (pointers.size === 0 && dragged) commitView();
-    if (pointers.size > 0 || dragged || !down) return;
+    if (pointers.size > 0 || dragged || !down) {
+      if (pointers.size === 0) {
+        dragPoint = null;
+        dragLine = null;
+      }
+      return;
+    }
+    const [x, y] = toViewbox(e.clientX, e.clientY);
+    const at = { x, y, ...viewboxToLatLng(x, y, bundle.bounds, full) };
     const routeId = down.target?.getAttribute?.("data-route-id");
     const pointIndex = down.target?.getAttribute?.("data-point-index");
+    const stopIndex = down.target?.getAttribute?.("data-stop-index");
+    const lineHit = down.target?.getAttribute?.("data-draft-line");
     if (pointIndex != null && options.onPointClick) {
       options.onPointClick(Number(pointIndex));
+    } else if (stopIndex != null && options.onStopClick) {
+      options.onStopClick(Number(stopIndex));
+    } else if (lineHit != null && options.onLineClick) {
+      options.onLineClick(at);
     } else if (routeId != null && options.onRouteSelect) {
       options.onRouteSelect(Number(routeId));
     } else if (options.onMapClick) {
-      const [x, y] = toViewbox(e.clientX, e.clientY);
-      options.onMapClick({ x, y, ...viewboxToLatLng(x, y, bundle.bounds, full) });
+      options.onMapClick(at);
     } else if (options.onRouteSelect) {
       options.onRouteSelect(null);
     }
+    dragPoint = null;
+    dragLine = null;
     down = null;
   }
   svg.addEventListener("pointerup", endPointer);
-  svg.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); down = null; if (pointers.size === 0) commitView(); });
+  svg.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); down = null; dragPoint = null; dragLine?.ghost?.remove(); dragLine = null; if (pointers.size === 0) commitView(); });
 
   const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => render()) : null;
   resizeObserver?.observe(container);
@@ -364,6 +432,11 @@ export function createTransportMapViewer(container, options = {}) {
       const route = routesById.get(Number(id));
       if (!route || route.path.length < 2) return;
       view = viewForBounds(pathBounds(route.path), full);
+      render();
+    },
+    focusPoints(points) {
+      if (!Array.isArray(points) || points.length < 2) return;
+      view = viewForBounds(pathBounds(points), full);
       render();
     },
     setLang(next) {

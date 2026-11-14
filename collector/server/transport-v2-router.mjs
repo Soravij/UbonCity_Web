@@ -2034,7 +2034,7 @@ const collectorIntegrationConfig = () => ({
       db.prepare("DELETE FROM transport_route_stops_v2 WHERE route_id=?").run(Number(req.params.id));
       const insert = db.prepare("INSERT INTO transport_route_stops_v2 (route_id, stop_order, name, lat, lng, stop_type, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
       for (const stop of stops) insert.run(Number(req.params.id), stop.order, stop.name, stop.lat, stop.lng, stop.stop_type, stop.note);
-      bumpRoute(req.params.id, actorEmail(req));
+      db.prepare("UPDATE transport_routes_v2 SET updated_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(actorEmail(req), Number(req.params.id));
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
@@ -2054,7 +2054,13 @@ const collectorIntegrationConfig = () => ({
     }
     if (item.control_points.length < 2) return res.status(409).json({ error: "At least 2 control points are required before resolve" });
     const coords = item.control_points.map((point) => `${point.lng},${point.lat}`).join(";");
-    const response = await fetch(`${osrmBaseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`);
+    let response;
+    try {
+      response = await fetch(`${osrmBaseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&continue_straight=false`, { signal: AbortSignal.timeout(20000) });
+    } catch (err) {
+      db.prepare("UPDATE transport_routes_v2 SET routing_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
+      return res.status(502).json({ error: "OSRM unreachable", detail: String(err?.name || err?.message || err) });
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload?.code !== "Ok") {
       db.prepare("UPDATE transport_routes_v2 SET routing_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
@@ -2069,6 +2075,13 @@ const collectorIntegrationConfig = () => ({
       INSERT INTO transport_route_resolved_paths_v2 (route_id, route_revision, routing_engine, routing_profile, geometry_json, distance_km, bbox_json, point_count, osrm_summary_json, created_at)
       VALUES (?, ?, 'osrm', 'driving', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `).run(Number(item.id), Number(item.route_revision), json(geometry), distanceKm, json(nextBbox, "null"), geometry.length, json({ code: payload.code, duration_seconds: Number(route?.duration || 0), route_count: Array.isArray(payload.routes) ? payload.routes.length : 0 }, "{}"));
+    const snapPoint = db.prepare("UPDATE transport_route_control_points_v2 SET lat=?, lng=?, updated_at=CURRENT_TIMESTAMP WHERE route_id=? AND point_order=?");
+    (Array.isArray(payload.waypoints) ? payload.waypoints : []).forEach((wp, index) => {
+      const [lng, lat] = Array.isArray(wp?.location) ? wp.location.map(Number) : [];
+      if (Number.isFinite(lat) && Number.isFinite(lng) && index < item.control_points.length) {
+        snapPoint.run(lat, lng, Number(item.id), Number(item.control_points[index].order));
+      }
+    });
     db.prepare(`
       UPDATE transport_routes_v2
       SET resolved_revision=?, routing_status='fresh', poster_status='stale', resolved_distance_km=?, resolved_bbox_json=?, last_routed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
