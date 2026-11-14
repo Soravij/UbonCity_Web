@@ -83,6 +83,10 @@ function isFull() {
   return Boolean(document.fullscreenElement || document.webkitFullscreenElement) || state.pseudoFull;
 }
 
+const LIGHT_VARS = {
+  "--card": "#ffffff", "--line": "#cbd5e1", "--text": "#0f172a", "--muted": "#64748b",
+  "--accent": "#3b82f6", "--accent-2": "#2563eb", "--theme-surface-soft": "#f8fafc",
+};
 const controls = qs("stage-controls");
 const btnCollapse = qs("btn-collapse");
 const compactEls = ["route-title", "route-meta", "step-help", "stage-status"]
@@ -105,8 +109,23 @@ function renderControls() {
   }
   for (const el of compactEls) if (!controls.contains(el) || el.parentElement !== controls) el.style.display = full ? "none" : "";
   Object.assign(controls.style, full
-    ? { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px", padding: collapsed ? "4px" : "6px 8px" }
-    : { display: "", flexWrap: "", alignItems: "", gap: "", padding: "" });
+    ? { display: "flex", flexDirection: "column", alignItems: "stretch", gap: "6px",
+      width: "220px", maxWidth: "none", padding: collapsed ? "4px" : "8px" }
+    : { display: "", flexDirection: "", alignItems: "", gap: "", width: "", maxWidth: "", padding: "" });
+  for (const el of controls.children) {
+    if (el === btnCollapse || el.tagName === "BUTTON" || !el.querySelector("button")) continue;
+    Object.assign(el.style, full
+      ? { display: el.style.display === "none" ? "none" : "flex", flexDirection: "column", alignItems: "stretch", gap: "6px", margin: "0" }
+      : { flexDirection: "", alignItems: "", gap: "", margin: "" });
+  }
+  for (const b of controls.querySelectorAll("button")) {
+    Object.assign(b.style, full ? { width: "100%", textAlign: "left", margin: "0" } : { width: "", textAlign: "", margin: "" });
+  }
+  for (const [k, v] of Object.entries(LIGHT_VARS)) {
+    if (full) controls.style.setProperty(k, v); else controls.style.removeProperty(k);
+  }
+  controls.style.color = full ? "var(--text)" : "";
+  controls.style.boxShadow = full ? "0 4px 16px rgba(15, 23, 42, 0.18)" : "";
 }
 
 function applyCompact(full) {
@@ -129,9 +148,9 @@ function applyStageLayout() {
     ? { position: "absolute", inset: "0", width: "100%", height: "100%", margin: "0", minHeight: "0", borderRadius: "0" }
     : { position: "", inset: "", width: "", height: "70vh", margin: "", minHeight: "360px", borderRadius: "12px" });
   Object.assign(controls.style, full
-    ? { position: "absolute", top: "12px", left: "12px", zIndex: "10", maxWidth: "min(560px, calc(100% - 24px))",
+    ? { position: "absolute", top: "12px", left: "12px", zIndex: "10",
       maxHeight: "calc(100% - 24px)", overflow: "auto", borderRadius: "12px" }
-    : { position: "", top: "", left: "", zIndex: "", maxWidth: "", maxHeight: "", overflow: "", borderRadius: "" });
+    : { position: "", top: "", left: "", zIndex: "", maxHeight: "", overflow: "", borderRadius: "" });
   if (controls.dataset.hadCard === undefined) controls.dataset.hadCard = controls.classList.contains("card") ? "1" : "0";
   if (controls.dataset.hadCard === "0") controls.classList.toggle("card", full);
   qs("btn-fullscreen").textContent = full ? "ออกจากเต็มจอ" : "เต็มจอ";
