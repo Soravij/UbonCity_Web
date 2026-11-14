@@ -1,6 +1,7 @@
 import { api, escapeHtml, qs, setBanner } from "./transport-v2-common.js";
 import { initAuthBox } from "./auth-box.js";
-import { createTransportMapViewer, latLngToViewbox } from "./transport-map-viewer.js";
+import { createTransportMapViewer, latLngToViewbox, viewboxToLatLng } from "./transport-map-viewer.js";
+import { SNAP_ROAD_GROUPS, parsePathD, buildRoadIndex, nearestOnRoads } from "./transport-v2-road-snap.js";
 
 const state = {
   routeId: Number(new URLSearchParams(window.location.search).get("id") || 0) || 0,
@@ -27,6 +28,55 @@ const STEP_HELP = {
 };
 const STEP_LABELS = { 1: "1 · ปักจุด", 2: "2 · ปรับเส้นทาง", 3: "3 · ปักป้าย" };
 const SNAP_UNITS = 60;
+const SNAP_MAX_M = 12;
+const SNAP_CELL_M = 50;
+const SNAP_PX = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches ? 28 : 16;
+let roadIndex = null;
+
+function metersPerUnit() {
+  const b = state.bundle.bounds;
+  return ((b.max_lat - b.min_lat) * 111320) / state.bundle.viewbox.height;
+}
+
+function buildRoadSnap() {
+  try {
+    const outer = qs("path-editor-map").querySelector("svg");
+    const base = outer?.querySelector("svg");
+    if (!base) return;
+    const full = state.bundle.viewbox;
+    const vb = base.viewBox?.baseVal;
+    const sx = vb && vb.width ? full.width / vb.width : 1;
+    const sy = vb && vb.height ? full.height / vb.height : 1;
+    const ox = vb ? vb.x : 0, oy = vb ? vb.y : 0;
+    const lines = [];
+    for (const id of SNAP_ROAD_GROUPS) {
+      const g = base.querySelector(`[id="${id}"]`);
+      if (!g) continue;
+      for (const p of g.querySelectorAll("path")) {
+        for (const line of parsePathD(p.getAttribute("d"))) {
+          lines.push(line.map(([x, y]) => [full.x + (x - ox) * sx, full.y + (y - oy) * sy]));
+        }
+      }
+    }
+    roadIndex = buildRoadIndex(lines, SNAP_CELL_M / metersPerUnit());
+    console.info(`[road-snap] segments=${roadIndex.segs.length}`);
+  } catch (err) {
+    roadIndex = null;
+    console.warn("[road-snap] disabled", err);
+  }
+}
+
+function snapToRoad(at) {
+  const plain = { lat: at.lat, lng: at.lng };
+  if (!roadIndex) return plain;
+  const outer = qs("path-editor-map").querySelector("svg");
+  const r = qs("path-editor-map").getBoundingClientRect();
+  const v = outer?.viewBox?.baseVal;
+  const upp = v && r.width > 0 && r.height > 0 ? Math.max(v.width / r.width, v.height / r.height) : 1;
+  const maxDist = Math.min(SNAP_MAX_M / metersPerUnit(), SNAP_PX * upp);
+  const hit = nearestOnRoads(roadIndex, at.x, at.y, maxDist);
+  return hit ? viewboxToLatLng(hit.x, hit.y, state.bundle.bounds, state.bundle.viewbox) : plain;
+}
 const project = (p) => latLngToViewbox(p.lat, p.lng, state.bundle.bounds, state.bundle.viewbox);
 const sameLatLng = (a, b) => Boolean(a && b) && Math.abs(a.lat - b.lat) < 1e-9 && Math.abs(a.lng - b.lng) < 1e-9;
 const isClosed = () => state.points.length >= 3 && sameLatLng(state.points[0], state.points[state.points.length - 1]);
@@ -452,7 +502,7 @@ function onMapClick(at) {
   if (state.step === 3) return addStopAt(at);
   if (state.step !== 1) return;
   pushHistory();
-  const point = { lat: at.lat, lng: at.lng };
+  const point = snapToRoad(at);
   if (isClosed()) state.points.splice(state.points.length - 1, 0, point);
   else state.points.push(point);
   pointsChanged();
@@ -462,7 +512,7 @@ function onLineClick(at) {
   if (state.step === 3) return addStopAt(at);
   if (state.points.length < 2) return onMapClick(at);
   pushHistory();
-  state.points.splice(insertIndexFor(at), 0, { lat: at.lat, lng: at.lng });
+  state.points.splice(insertIndexFor(at), 0, snapToRoad(at));
   pointsChanged();
 }
 
@@ -472,7 +522,7 @@ function onLineDragEnd(from, to) {
     return;
   }
   pushHistory();
-  state.points.splice(insertIndexFor(from), 0, { lat: to.lat, lng: to.lng });
+  state.points.splice(insertIndexFor(from), 0, snapToRoad(to));
   pointsChanged();
 }
 
@@ -497,7 +547,7 @@ function onPointDragEnd(index, at) {
   pushHistory();
   const closed = isClosed();
   const last = state.points.length - 1;
-  state.points[index] = { lat: at.lat, lng: at.lng };
+  state.points[index] = snapToRoad(at);
   if (closed && index === 0) state.points[last] = { ...state.points[0] };
   if (closed && index === last) state.points[0] = { ...state.points[last] };
   pointsChanged();
@@ -582,6 +632,7 @@ async function init() {
       onStopClick,
       onError: (err) => setBanner("workspace-status", `โหลด base map ไม่ได้: ${err.message}`, true),
     });
+    state.viewer.ready.then(buildRoadSnap);
     state.step = hasPath() ? 2 : 1;
     refresh();
     const focus = (state.route.resolved_path.length >= 2 ? state.route.resolved_path : state.points).map(project);
