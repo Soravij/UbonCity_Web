@@ -84,8 +84,9 @@ function applyStageLayout() {
   Object.assign(stage.style, full
     ? { display: "flex", flexDirection: "column", gap: "8px", padding: "8px", height: state.pseudoFull ? "100dvh" : "100%",
       position: state.pseudoFull ? "fixed" : "", inset: state.pseudoFull ? "0" : "", zIndex: state.pseudoFull ? "1000" : "",
-      background: getComputedStyle(document.body).backgroundColor, overflow: "auto" }
-    : { display: "", flexDirection: "", gap: "", padding: "", height: "", position: "", inset: "", zIndex: "", background: "", overflow: "" });
+      overflow: "auto" }
+    : { display: "", flexDirection: "", gap: "", padding: "", height: "", position: "", inset: "", zIndex: "", overflow: "" });
+  stage.style.background = full ? "var(--theme-bg-gradient)" : "";
   Object.assign(map.style, full ? { height: "auto", flex: "1 1 auto", minHeight: "0" } : { height: "70vh", flex: "", minHeight: "360px" });
   qs("btn-fullscreen").textContent = full ? "ออกจากเต็มจอ" : "เต็มจอ";
 }
