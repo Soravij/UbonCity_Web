@@ -34,7 +34,7 @@
       </div>
       <div class="stack-lg">
         <section class="card article-work-card">
-          <div id="path-editor-stage" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+          <div id="path-editor-stage" style="position:relative;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
             <div id="stage-controls" class="card" style="flex:0 0 220px;width:220px;display:flex;flex-direction:column;gap:6px;padding:8px">
               <button type="button" id="btn-collapse" class="utility-action" style="width:100%;text-align:left" hidden>–</button>
               <div class="article-section-head">
@@ -53,6 +53,9 @@
               <p class="muted" id="step-help"></p>
               <p class="muted" id="stage-status" role="status" aria-live="polite"></p>
               <div id="step-actions-pool" hidden>
+                <div id="tip-placement" class="muted" style="font-size:.85em;line-height:1.4;padding:6px 8px;border:1px dashed var(--line);border-radius:8px">
+                  💡 วางจุด<b>กลางช่วงถนนตรง</b> ไม่ต้องวางที่มุมเลี้ยว — ระบบเลี้ยวตามถนนให้เอง ใช้จุดเฉพาะบอกว่าไปถนนเส้นไหน
+                </div>
                 <button id="btn-undo-point" class="utility-action" type="button" style="width:100%;text-align:left">ย้อนจุดล่าสุด</button>
                 <button id="btn-clear" class="utility-action" type="button" style="width:100%;text-align:left">ล้างจุดทั้งหมด</button>
                 <button id="btn-compute" class="primary" type="button" style="width:100%;text-align:left">คำนวณเส้นทาง</button>
@@ -61,6 +64,7 @@
               </div>
             </div>
             <div id="path-editor-map" style="flex:1 1 320px;min-width:0;height:70vh;min-height:360px;border-radius:12px;overflow:hidden;background:#f6f1e7"></div>
+            <button type="button" id="warn-banner" hidden style="position:absolute;top:12px;right:12px;z-index:11;background:#dc2626;color:#fff;border:0;border-radius:999px;padding:8px 14px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.25);cursor:pointer"></button>
           </div>
         </section>
         <section class="card article-work-card">

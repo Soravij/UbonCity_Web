@@ -7,6 +7,7 @@ import { resolveAiConfig, resolveAiFeatureConfig } from "../config/ai.mjs";
 import { assertCollectorIntegrationReadiness } from "./integration-readiness.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildTransportBundle } from "./transport-v2-publish.mjs";
+import { buildBearings, detourWarnings, fetchRouteWithFallback } from "./transport-v2-osrm.mjs";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
 const DEFAULT_COLOR = "#ff6600";
 const DEFAULT_LABEL_STYLE = {
@@ -2054,18 +2055,21 @@ const collectorIntegrationConfig = () => ({
     }
     if (item.control_points.length < 2) return res.status(409).json({ error: "At least 2 control points are required before resolve" });
     const coords = item.control_points.map((point) => `${point.lng},${point.lat}`).join(";");
-    let response;
+    const urlBase = `${osrmBaseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&continue_straight=false`;
+    const bearings = buildBearings(item.control_points);
+    let r;
     try {
-      response = await fetch(`${osrmBaseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&continue_straight=false`, { signal: AbortSignal.timeout(20000) });
+      r = await fetchRouteWithFallback(urlBase, bearings);
     } catch (err) {
       db.prepare("UPDATE transport_routes_v2 SET routing_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
       return res.status(502).json({ error: "OSRM unreachable", detail: String(err?.name || err?.message || err) });
     }
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload?.code !== "Ok") {
+    if (!r.ok) {
       db.prepare("UPDATE transport_routes_v2 SET routing_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
-      return res.status(502).json({ error: payload?.message || "OSRM route resolve failed", osrm: payload });
+      return res.status(502).json({ error: r.parseError ? "OSRM ตอบกลับอ่านไม่ได้" : (r.body?.message || "OSRM route resolve failed"), osrm: r.body });
     }
+    const bearingsUsed = r.bearingsUsed;
+    const payload = r.body;
     const route = Array.isArray(payload.routes) ? payload.routes[0] : null;
     const geometry = Array.isArray(route?.geometry?.coordinates) ? route.geometry.coordinates.map((entry) => ({ lng: num(entry?.[0]), lat: num(entry?.[1]) })).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng)) : [];
     if (geometry.length < 2) return res.status(502).json({ error: "OSRM returned invalid geometry", osrm: payload });
@@ -2089,7 +2093,7 @@ const collectorIntegrationConfig = () => ({
     `).run(Number(item.route_revision), distanceKm, json(nextBbox, "null"), Number(item.id));
     const next = getRoute(item.id);
     logAudit(actorEmail(req), "transport_v2.route.resolve", "transport_route_v2", String(next.id), { route_revision: next.route_revision, resolved_revision: next.resolved_revision, point_count: next.resolved_path.length });
-    res.json(next);
+    res.json({ ...next, bearings_used: bearingsUsed, warnings: detourWarnings(route?.legs, payload.waypoints) });
   }));
 
   return router;
