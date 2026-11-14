@@ -7,6 +7,7 @@ import { resolveAiConfig, resolveAiFeatureConfig } from "../config/ai.mjs";
 import { assertCollectorIntegrationReadiness } from "./integration-readiness.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildTransportBundle } from "./transport-v2-publish.mjs";
+import { buildBearings, detourWarnings } from "./transport-v2-osrm.mjs";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
 const DEFAULT_COLOR = "#ff6600";
 const DEFAULT_LABEL_STYLE = {
@@ -2054,14 +2055,27 @@ const collectorIntegrationConfig = () => ({
     }
     if (item.control_points.length < 2) return res.status(409).json({ error: "At least 2 control points are required before resolve" });
     const coords = item.control_points.map((point) => `${point.lng},${point.lat}`).join(";");
+    const resolveUrl = `${osrmBaseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&continue_straight=false`;
+    const bearings = buildBearings(item.control_points);
+    let bearingsUsed = Boolean(bearings);
     let response;
     try {
-      response = await fetch(`${osrmBaseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&continue_straight=false`, { signal: AbortSignal.timeout(20000) });
+      response = await fetch(bearingsUsed ? `${resolveUrl}&bearings=${bearings}` : resolveUrl, { signal: AbortSignal.timeout(20000) });
     } catch (err) {
       db.prepare("UPDATE transport_routes_v2 SET routing_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
       return res.status(502).json({ error: "OSRM unreachable", detail: String(err?.name || err?.message || err) });
     }
-    const payload = await response.json().catch(() => ({}));
+    let payload = await response.json().catch(() => ({}));
+    if (bearingsUsed && (!response.ok || payload?.code !== "Ok")) {
+      bearingsUsed = false;
+      try {
+        response = await fetch(resolveUrl, { signal: AbortSignal.timeout(20000) });
+      } catch (err) {
+        db.prepare("UPDATE transport_routes_v2 SET routing_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
+        return res.status(502).json({ error: "OSRM unreachable", detail: String(err?.name || err?.message || err) });
+      }
+      payload = await response.json().catch(() => ({}));
+    }
     if (!response.ok || payload?.code !== "Ok") {
       db.prepare("UPDATE transport_routes_v2 SET routing_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
       return res.status(502).json({ error: payload?.message || "OSRM route resolve failed", osrm: payload });
@@ -2089,7 +2103,7 @@ const collectorIntegrationConfig = () => ({
     `).run(Number(item.route_revision), distanceKm, json(nextBbox, "null"), Number(item.id));
     const next = getRoute(item.id);
     logAudit(actorEmail(req), "transport_v2.route.resolve", "transport_route_v2", String(next.id), { route_revision: next.route_revision, resolved_revision: next.resolved_revision, point_count: next.resolved_path.length });
-    res.json(next);
+    res.json({ ...next, bearings_used: bearingsUsed, warnings: detourWarnings(route?.legs, payload.waypoints) });
   }));
 
   return router;

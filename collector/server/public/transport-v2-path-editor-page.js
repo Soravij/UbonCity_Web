@@ -10,6 +10,8 @@ const state = {
   step: 1,
   points: [],
   stops: [],
+  warnings: [],
+  bearingsUsed: true,
   dirty: false,
   pending: false,
   timer: 0,
@@ -29,6 +31,15 @@ const sameLatLng = (a, b) => Boolean(a && b) && Math.abs(a.lat - b.lat) < 1e-9 &
 const isClosed = () => state.points.length >= 3 && sameLatLng(state.points[0], state.points[state.points.length - 1]);
 const hasPath = () => !state.dirty && !state.pending && (state.route?.resolved_path || []).length >= 2 && state.route?.routing_status === "fresh";
 
+function warnPointIndexes() {
+  const idx = new Set();
+  for (const w of state.warnings || []) {
+    idx.add(w.from);
+    idx.add(w.to);
+  }
+  return [...idx];
+}
+
 function drawDraft() {
   if (!state.viewer) return;
   const showPath = !state.dirty && !state.pending;
@@ -39,6 +50,7 @@ function drawDraft() {
     stops: state.stops.map(project),
     pointOpacity: state.step === 3 ? 0.3 : 1,
     stopOpacity: state.step === 3 ? 1 : 0.45,
+    warnPoints: warnPointIndexes(),
   });
 }
 
@@ -106,12 +118,20 @@ function renderSide() {
 function refresh() {
   drawDraft();
   renderSide();
+  renderControls();
 }
 
 function stageStatus(text, isError = false) {
   const node = qs("stage-status");
   node.textContent = text || "";
   node.style.color = isError ? "#dc2626" : "";
+}
+
+function warningsText() {
+  const lines = (state.warnings || []).map((w) =>
+    `⚠ ช่วงจุด ${w.from + 1}→${w.to + 1} อ้อม ${w.ratio} เท่า (+${w.extra_m} ม.) — ตรวจว่าจุดอยู่ถูกฝั่งถนน`);
+  if (state.bearingsUsed === false) lines.push("ⓘ คำนวณแบบไม่ใช้ทิศทาง (OSRM หาเส้นตามทิศไม่ได้)");
+  return lines.join("\n");
 }
 
 function isFull() {
@@ -137,12 +157,18 @@ function renderControls() {
   const full = isFull();
   btnCollapse.hidden = !full;
   btnCollapse.textContent = collapsed ? "☰ " + routeLabel() : "– " + routeLabel();
+  const statusEl = qs("stage-status");
+  const keepStatus = (state.warnings || []).length > 0;
   for (const el of controls.children) {
     if (el === btnCollapse || el.id === "step-actions-pool") continue;
-    const hide = full && (collapsed || compactEls.includes(el));
+    const exempt = el === statusEl && keepStatus;
+    const hide = full && (collapsed || (compactEls.includes(el) && !exempt));
     el.style.display = hide ? "none" : "";
   }
-  for (const el of compactEls) if (!controls.contains(el) || el.parentElement !== controls) el.style.display = full ? "none" : "";
+  for (const el of compactEls) {
+    const exempt = el === statusEl && keepStatus;
+    if ((!controls.contains(el) || el.parentElement !== controls) && !exempt) el.style.display = full ? "none" : "";
+  }
 }
 
 function applyCompact(full) {
@@ -242,15 +268,23 @@ async function resolveNow() {
   clearTimeout(state.timer);
   state.pending = true;
   refresh();
+  let resolved = false;
   await run("กำลังคำนวณเส้นทาง...", async () => {
     try {
       await savePoints();
-      if (state.points.length >= 2) await api(`/api/v2/transport/routes/${state.routeId}/resolve`, { method: "POST" });
+      if (state.points.length >= 2) {
+        const result = await api(`/api/v2/transport/routes/${state.routeId}/resolve`, { method: "POST" });
+        state.warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+        state.bearingsUsed = result?.bearings_used;
+        resolved = true;
+      }
     } finally {
       state.pending = false;
       await loadRoute();
     }
   });
+  if (resolved && (state.warnings.length || state.bearingsUsed === false)) stageStatus(warningsText());
+  refresh();
 }
 
 function scheduleResolve() {
@@ -418,6 +452,7 @@ function bindControls() {
   qs("btn-clear").addEventListener("click", () => {
     if (!state.points.length || !window.confirm("ล้างจุดเส้นทางทั้งหมด?")) return;
     state.points = [];
+    state.warnings = [];
     pointsChanged();
   });
   qs("btn-compute").addEventListener("click", async () => {
