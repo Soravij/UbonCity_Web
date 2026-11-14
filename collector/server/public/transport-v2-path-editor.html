@@ -34,37 +34,33 @@
       </div>
       <div class="stack-lg">
         <section class="card article-work-card">
-          <div id="path-editor-stage">
-            <div id="stage-controls">
-              <button type="button" id="btn-collapse" class="utility-action" hidden>–</button>
+          <div id="path-editor-stage" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
+            <div id="stage-controls" class="card" style="flex:0 0 220px;width:220px;display:flex;flex-direction:column;gap:6px;padding:8px">
+              <button type="button" id="btn-collapse" class="utility-action" style="width:100%;text-align:left" hidden>–</button>
               <div class="article-section-head">
                 <div>
                   <h2 class="section-title" id="route-title"></h2>
                   <p class="muted" id="route-meta"></p>
                 </div>
               </div>
-              <div class="toolbar">
-                <button id="btn-step-1" class="utility-action" type="button">1 · ปักจุด</button>
-                <button id="btn-step-2" class="utility-action" type="button">2 · ปรับเส้นทาง</button>
-                <button id="btn-step-3" class="utility-action" type="button">3 · ปักป้าย</button>
-                <button id="btn-fit" class="utility-action" type="button">Fit</button>
-                <button id="btn-fullscreen" class="utility-action" type="button">เต็มจอ</button>
-              </div>
-              <div class="toolbar" id="step-tools-1">
-                <button id="btn-undo-point" class="utility-action" type="button">ย้อนจุดล่าสุด</button>
-                <button id="btn-clear" class="utility-action" type="button">ล้างจุดทั้งหมด</button>
-                <button id="btn-compute" class="primary" type="button">คำนวณเส้นทาง</button>
-              </div>
-              <div class="toolbar hidden" id="step-tools-2">
-                <button id="btn-resolve" class="utility-action" type="button">คำนวณใหม่</button>
-              </div>
-              <div class="toolbar hidden" id="step-tools-3">
-                <button id="btn-undo-stop" class="utility-action" type="button">ลบป้ายล่าสุด</button>
+              <div id="step-list" style="display:flex;flex-direction:column;gap:6px"></div>
+              <hr style="border:0;border-top:1px solid var(--line);margin:4px 0;width:100%" />
+              <div id="view-group" style="display:flex;flex-direction:column;gap:6px">
+                <span class="muted" style="font-size:.85em">มุมมอง</span>
+                <button id="btn-fit" class="utility-action" type="button" style="width:100%;text-align:left">Fit</button>
+                <button id="btn-fullscreen" class="utility-action" type="button" style="width:100%;text-align:left">เต็มจอ</button>
               </div>
               <p class="muted" id="step-help"></p>
               <p class="muted" id="stage-status" role="status" aria-live="polite"></p>
+              <div id="step-actions-pool" hidden>
+                <button id="btn-undo-point" class="utility-action" type="button" style="width:100%;text-align:left">ย้อนจุดล่าสุด</button>
+                <button id="btn-clear" class="utility-action" type="button" style="width:100%;text-align:left">ล้างจุดทั้งหมด</button>
+                <button id="btn-compute" class="primary" type="button" style="width:100%;text-align:left">คำนวณเส้นทาง</button>
+                <button id="btn-resolve" class="utility-action" type="button" style="width:100%;text-align:left">คำนวณใหม่</button>
+                <button id="btn-undo-stop" class="utility-action" type="button" style="width:100%;text-align:left">ลบป้ายล่าสุด</button>
+              </div>
             </div>
-            <div id="path-editor-map" style="height: 70vh; min-height: 360px; border-radius: 12px; overflow: hidden; background: #f6f1e7;"></div>
+            <div id="path-editor-map" style="flex:1 1 320px;min-width:0;height:70vh;min-height:360px;border-radius:12px;overflow:hidden;background:#f6f1e7"></div>
           </div>
         </section>
         <section class="card article-work-card">
