@@ -347,6 +347,7 @@ CREATE TABLE IF NOT EXISTS transport_routes_v2 (
   route_name TEXT NOT NULL,
   route_number TEXT NOT NULL,
   vehicle_type TEXT NOT NULL DEFAULT 'songthaew',
+  route_kind TEXT NOT NULL DEFAULT 'loop' CHECK (route_kind IN ('loop','out_back')),
   vehicle_thumbnail_asset_id INTEGER,
   color TEXT NOT NULL DEFAULT '#ff6600',
   description TEXT NOT NULL DEFAULT '',
@@ -387,6 +388,7 @@ CREATE TABLE IF NOT EXISTS transport_route_control_points_v2 (
   lng REAL NOT NULL,
   label TEXT,
   note TEXT,
+  leg TEXT CHECK (leg IN ('out','back')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(route_id) REFERENCES transport_routes_v2(id) ON DELETE CASCADE
@@ -404,6 +406,7 @@ CREATE TABLE IF NOT EXISTS transport_route_stops_v2 (
   lng REAL NOT NULL,
   stop_type TEXT NOT NULL DEFAULT 'stop',
   note TEXT,
+  leg TEXT CHECK (leg IN ('out','back')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(route_id) REFERENCES transport_routes_v2(id) ON DELETE CASCADE

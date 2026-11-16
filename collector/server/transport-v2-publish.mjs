@@ -84,7 +84,7 @@ export function buildTransportBundle({ baseMap, baseSvgStoragePath, labelLayer, 
       path,
       stops: (r.stops || []).filter((s) => validLatLng(s) && String(s?.name || "").trim() && String(s.name).trim().length <= 200).map((s) => {
         const [x, y] = projectToViewbox(s.lat, s.lng, bounds, viewbox);
-        return { order: s.order, name: String(s.name).trim(), type: s.stop_type || "stop", x, y };
+        return { order: s.order, name: String(s.name).trim(), type: s.stop_type || "stop", x, y, ...(s.leg ? { leg: s.leg } : {}) };
       }),
     });
   }

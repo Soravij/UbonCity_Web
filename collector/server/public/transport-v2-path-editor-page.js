@@ -357,8 +357,8 @@ async function run(label, task) {
 let historyRouteId = null;
 async function loadRoute() {
   state.route = await api(`/api/v2/transport/routes/${state.routeId}`);
-  state.points = state.route.control_points.map((p) => ({ lat: p.lat, lng: p.lng }));
-  state.stops = state.route.stops.map((s) => ({ name: s.name, lat: s.lat, lng: s.lng, stop_type: s.stop_type }));
+  state.points = state.route.control_points.map((p) => ({ lat: p.lat, lng: p.lng, ...(p.leg ? { leg: p.leg } : {}), ...(p.label ? { label: p.label } : {}), ...(p.note ? { note: p.note } : {}) }));
+  state.stops = state.route.stops.map((s) => ({ name: s.name, lat: s.lat, lng: s.lng, stop_type: s.stop_type, ...(s.leg ? { leg: s.leg } : {}), ...(s.note ? { note: s.note } : {}) }));
   state.dirty = false;
   if (historyRouteId !== state.routeId) {
     state.history = [];
