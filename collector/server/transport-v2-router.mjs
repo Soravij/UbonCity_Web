@@ -1923,8 +1923,9 @@ const collectorIntegrationConfig = () => ({
       const nextRouteName = String((body.route_name ?? current.route_name) || "").trim() || current.route_name;
       const nextRouteNumber = String((body.route_number ?? current.route_number) || "").trim() || current.route_number;
       const nextVehicleType = vehicle(body.vehicle_type ?? current.vehicle_type);
-      const nextRouteKind = String((body.route_kind ?? current.route_kind) || "loop").trim().toLowerCase() || current.route_kind;
-      if (!ROUTE_KINDS.has(nextRouteKind)) throw new Error("route_kind is invalid");
+      const hasRouteKind = Object.prototype.hasOwnProperty.call(body, "route_kind");
+      const nextRouteKind = hasRouteKind ? String(body.route_kind).trim().toLowerCase() : current.route_kind;
+      if (hasRouteKind && !ROUTE_KINDS.has(nextRouteKind)) throw new Error("route_kind is invalid");
       const nextColor = color(body.color ?? current.color, current.color);
       const nextDescription = String((body.description ?? current.description) || "").trim();
       const nextWorkflowStatus = String((body.workflow_status ?? current.workflow_status) || "draft").trim().toLowerCase() || current.workflow_status;
@@ -2026,7 +2027,9 @@ const collectorIntegrationConfig = () => ({
   router.put("/routes/:id/control-points", allow("owner"), (req, res) => {
     const current = getRoute(req.params.id);
     if (!current) return res.status(404).json({ error: "Route not found" });
-    const points = normalizePoints(req.body?.control_points || req.body?.items || []);
+    let points;
+    try { points = normalizePoints(req.body?.control_points || req.body?.items || []); }
+    catch (error) { return res.status(400).json({ error: String(error?.message || error) }); }
     db.exec("BEGIN");
     try {
       db.prepare("DELETE FROM transport_route_control_points_v2 WHERE route_id=?").run(Number(req.params.id));
@@ -2046,7 +2049,9 @@ const collectorIntegrationConfig = () => ({
   router.put("/routes/:id/stops", allow("owner"), (req, res) => {
     const current = getRoute(req.params.id);
     if (!current) return res.status(404).json({ error: "Route not found" });
-    const stops = normalizeStops(req.body?.stops || req.body?.items || []);
+    let stops;
+    try { stops = normalizeStops(req.body?.stops || req.body?.items || []); }
+    catch (error) { return res.status(400).json({ error: String(error?.message || error) }); }
     db.exec("BEGIN");
     try {
       db.prepare("DELETE FROM transport_route_stops_v2 WHERE route_id=?").run(Number(req.params.id));
