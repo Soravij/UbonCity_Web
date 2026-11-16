@@ -2,6 +2,7 @@ import { api, escapeHtml, qs, setBanner } from "./transport-v2-common.js";
 import { initAuthBox } from "./auth-box.js";
 import { createTransportMapViewer, latLngToViewbox, viewboxToLatLng } from "./transport-map-viewer.js";
 import { SNAP_ROAD_GROUPS, parsePathD, buildRoadIndex, nearestOnRoads } from "./transport-v2-road-snap.js";
+import { normalizeLegPoints, legRange, nearestIndex, splitPathAtTurn, buildBackFromOut, activeStopIndexes } from "./transport-v2-legs-editor.js";
 
 const state = {
   routeId: Number(new URLSearchParams(window.location.search).get("id") || 0) || 0,
@@ -9,6 +10,8 @@ const state = {
   bundle: null,
   viewer: null,
   step: 1,
+  routeKind: "loop",
+  leg: "out",
   points: [],
   stops: [],
   warnings: [],
@@ -79,7 +82,18 @@ function snapToRoad(at) {
 }
 const project = (p) => latLngToViewbox(p.lat, p.lng, state.bundle.bounds, state.bundle.viewbox);
 const sameLatLng = (a, b) => Boolean(a && b) && Math.abs(a.lat - b.lat) < 1e-9 && Math.abs(a.lng - b.lng) < 1e-9;
-const isClosed = () => state.points.length >= 3 && sameLatLng(state.points[0], state.points[state.points.length - 1]);
+const isOutBack = () => state.routeKind === "out_back";
+const isClosed = () => !isOutBack() && state.points.length >= 3 && sameLatLng(state.points[0], state.points[state.points.length - 1]);
+const range = () => legRange(state.points, state.routeKind, state.leg);
+const withLeg = (p) => (isOutBack() ? { ...p, leg: state.leg } : p);
+const activeStops = () => activeStopIndexes(state.stops, state.routeKind, state.leg);
+function legPaths() {
+  const path = (state.route?.resolved_path || []).map(project);
+  if (!isOutBack()) return { active: path, ghost: [] };
+  const outEnd = legRange(state.points, "out_back", "out").end;
+  const { out, back } = splitPathAtTurn(path, outEnd > 0 ? project(state.points[outEnd - 1]) : null);
+  return state.leg === "back" ? { active: back, ghost: out } : { active: out, ghost: back };
+}
 const hasPath = () => !state.dirty && !state.pending && (state.route?.resolved_path || []).length >= 2 && state.route?.routing_status === "fresh";
 
 function warnPointIndexes() {
@@ -94,14 +108,22 @@ function warnPointIndexes() {
 function drawDraft() {
   if (!state.viewer) return;
   const showPath = !state.dirty && !state.pending;
+  const { start, end } = range();
+  const all = state.points.map(project);
+  const lp = showPath ? legPaths() : { active: [], ghost: [] };
+  const stopIdx = activeStops();
+  const stopSet = new Set(stopIdx);
   state.viewer.setDraft({
     color: state.route?.color || "#ff6600",
-    path: showPath ? (state.route?.resolved_path || []).map(project) : [],
-    points: state.points.map(project),
-    stops: state.stops.map(project),
+    path: lp.active,
+    points: all.slice(start, end),
+    stops: stopIdx.map((i) => project(state.stops[i])),
+    ghostPath: lp.ghost,
+    ghostPoints: [...all.slice(0, start), ...all.slice(end)],
+    ghostStops: state.stops.filter((_, i) => !stopSet.has(i)).map(project),
     pointOpacity: state.step === 3 ? 0.3 : 1,
     stopOpacity: state.step === 3 ? 1 : 0.45,
-    warnPoints: warnPointIndexes(),
+    warnPoints: warnPointIndexes().filter((i) => i >= start && i < end).map((i) => i - start),
   });
 }
 
@@ -159,18 +181,30 @@ function renderStepList() {
   list.replaceChildren(...nodes);
 }
 
+function renderKind() {
+  const ob = isOutBack();
+  qs("btn-kind-loop").className = ob ? "utility-action" : "primary";
+  qs("btn-kind-outback").className = ob ? "primary" : "utility-action";
+  qs("leg-switch").style.display = ob ? "flex" : "none";
+  qs("btn-leg-out").className = state.leg === "out" ? "primary" : "utility-action";
+  qs("btn-leg-back").className = state.leg === "back" ? "primary" : "utility-action";
+  qs("btn-build-back").style.display = ob && state.step !== 3 ? "" : "none";
+  for (const id of ["btn-kind-loop", "btn-kind-outback", "btn-build-back"]) qs(id).disabled = state.pending;
+}
+
 function renderSide() {
+  renderKind();
   const r = state.route;
   qs("route-title").textContent = r ? `สาย ${r.route_number} · ${r.route_name}` : "";
   const distance = r?.resolved_distance_km ? ` · ${Number(r.resolved_distance_km).toFixed(1)} กม.` : "";
   qs("route-meta").textContent = r
-    ? `routing: ${r.routing_status}${distance}${isClosed() ? " · เส้นทางวน" : ""}${state.dirty ? " · ยังไม่ได้คำนวณเส้นทาง" : ""}${state.pending ? " · กำลังคำนวณ..." : ""}`
+    ? `routing: ${r.routing_status}${distance}${isClosed() ? " · เส้นทางวน" : ""}${isOutBack() ? " · ไป-กลับ" : ""}${state.dirty ? " · ยังไม่ได้คำนวณเส้นทาง" : ""}${state.pending ? " · กำลังคำนวณ..." : ""}`
     : "";
   qs("step-help").textContent = STEP_HELP[state.step];
   renderStepList();
   qs("point-count").textContent = `จุดเส้นทาง ${state.points.length} จุด`;
   qs("stop-list").innerHTML = state.stops.length
-    ? state.stops.map((s, i) => `<li>${i + 1}. ${escapeHtml(s.name)}</li>`).join("")
+    ? state.stops.map((s, i) => `<li>${i + 1}. ${escapeHtml(s.name)}${s.leg === "back" ? " (ขากลับ)" : s.leg === "out" ? " (ขาไป)" : ""}</li>`).join("")
     : `<li class="muted">ยังไม่มีป้ายจอด</li>`;
   qs("share-link").value = window.location.href;
   const helpEl = qs("step-help");
@@ -359,6 +393,9 @@ async function loadRoute() {
   state.route = await api(`/api/v2/transport/routes/${state.routeId}`);
   state.points = state.route.control_points.map((p) => ({ lat: p.lat, lng: p.lng, ...(p.leg ? { leg: p.leg } : {}), ...(p.label ? { label: p.label } : {}), ...(p.note ? { note: p.note } : {}) }));
   state.stops = state.route.stops.map((s) => ({ name: s.name, lat: s.lat, lng: s.lng, stop_type: s.stop_type, ...(s.leg ? { leg: s.leg } : {}), ...(s.note ? { note: s.note } : {}) }));
+  state.routeKind = state.route.route_kind || "loop";
+  state.points = normalizeLegPoints(state.points, state.routeKind);
+  if (!isOutBack()) state.leg = "out";
   state.dirty = false;
   if (historyRouteId !== state.routeId) {
     state.history = [];
@@ -436,23 +473,12 @@ function distToSegment(p, a, b) {
   return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
 }
 
-function nearestIndex(pathPts, p, from = 0) {
-  let best = from;
-  let bestDist = Infinity;
-  for (let i = from; i < pathPts.length; i += 1) {
-    const d = Math.hypot(pathPts[i][0] - p[0], pathPts[i][1] - p[1]);
-    if (d < bestDist) {
-      bestDist = d;
-      best = i;
-    }
-  }
-  return best;
-}
-
 function insertIndexFor(at) {
-  const path = hasPath() ? state.route.resolved_path.map(project) : [];
+  const { start, end } = range();
+  const pts = state.points.slice(start, end).map(project);
+  const path = hasPath() ? legPaths().active : [];
   if (path.length < 2) {
-    const pts = state.points.map(project);
+    if (pts.length < 2) return end;
     let best = 0;
     let bestDist = Infinity;
     for (let i = 0; i < pts.length - 1; i += 1) {
@@ -462,38 +488,37 @@ function insertIndexFor(at) {
         best = i;
       }
     }
-    return best + 1;
+    return start + best + 1;
   }
   const target = nearestIndex(path, [at.x, at.y]);
+  const minLocal = isOutBack() && state.leg === "back" ? 0 : 1;
   let from = 0;
-  for (let i = 0; i < state.points.length; i += 1) {
-    const idx = nearestIndex(path, project(state.points[i]), from);
-    if (idx > target) return Math.max(1, i);
+  for (let i = 0; i < pts.length; i += 1) {
+    const idx = nearestIndex(path, pts[i], from);
+    if (idx > target) return start + Math.max(minLocal, i);
     from = idx;
   }
-  return isClosed() ? state.points.length - 1 : state.points.length;
+  return isClosed() ? state.points.length - 1 : end;
 }
 
 function snapToPath(at) {
-  const path = state.route?.resolved_path || [];
   let best = null;
   let bestDist = Infinity;
-  for (const q of path) {
-    const [x, y] = project(q);
-    const d = Math.hypot(x - at.x, y - at.y);
+  for (const q of legPaths().active) {
+    const d = Math.hypot(q[0] - at.x, q[1] - at.y);
     if (d < bestDist) {
       bestDist = d;
       best = q;
     }
   }
-  return best && bestDist <= SNAP_UNITS ? { lat: best.lat, lng: best.lng } : { lat: at.lat, lng: at.lng };
+  return best && bestDist <= SNAP_UNITS ? viewboxToLatLng(best[0], best[1], state.bundle.bounds, state.bundle.viewbox) : { lat: at.lat, lng: at.lng };
 }
 
 function addStopAt(at) {
   const where = snapToPath(at);
   const name = window.prompt("ชื่อป้ายจอด", `ป้าย ${state.stops.length + 1}`);
   if (name == null || !name.trim()) return;
-  state.stops.push({ name: name.trim(), lat: where.lat, lng: where.lng, stop_type: "stop" });
+  state.stops.push({ name: name.trim(), lat: where.lat, lng: where.lng, stop_type: "stop", ...(isOutBack() ? { leg: state.leg } : {}) });
   refresh();
   run("กำลังบันทึกป้ายจอด...", saveStops);
 }
@@ -502,9 +527,9 @@ function onMapClick(at) {
   if (state.step === 3) return addStopAt(at);
   if (state.step !== 1) return;
   pushHistory();
-  const point = snapToRoad(at);
+  const point = withLeg(snapToRoad(at));
   if (isClosed()) state.points.splice(state.points.length - 1, 0, point);
-  else state.points.push(point);
+  else state.points.splice(range().end, 0, point);
   pointsChanged();
 }
 
@@ -512,7 +537,7 @@ function onLineClick(at) {
   if (state.step === 3) return addStopAt(at);
   if (state.points.length < 2) return onMapClick(at);
   pushHistory();
-  state.points.splice(insertIndexFor(at), 0, snapToRoad(at));
+  state.points.splice(insertIndexFor(at), 0, withLeg(snapToRoad(at)));
   pointsChanged();
 }
 
@@ -522,12 +547,13 @@ function onLineDragEnd(from, to) {
     return;
   }
   pushHistory();
-  state.points.splice(insertIndexFor(from), 0, snapToRoad(to));
+  state.points.splice(insertIndexFor(from), 0, withLeg(snapToRoad(to)));
   pointsChanged();
 }
 
-function onPointTap(index) {
-  if (state.step === 1 && index === 0 && state.points.length >= 3 && !isClosed()) {
+function onPointTap(localIndex) {
+  const index = range().start + localIndex;
+  if (state.step === 1 && !isOutBack() && index === 0 && state.points.length >= 3 && !isClosed()) {
     pushHistory();
     state.points.push({ ...state.points[0] });
     pointsChanged();
@@ -539,22 +565,25 @@ function onPointTap(index) {
   pointsChanged();
 }
 
-function onPointDragEnd(index, at) {
+function onPointDragEnd(localIndex, at) {
   if (state.step === 3) {
     refresh();
     return;
   }
+  const index = range().start + localIndex;
   pushHistory();
   const closed = isClosed();
   const last = state.points.length - 1;
-  state.points[index] = snapToRoad(at);
+  state.points[index] = { ...state.points[index], ...snapToRoad(at) };
   if (closed && index === 0) state.points[last] = { ...state.points[0] };
   if (closed && index === last) state.points[0] = { ...state.points[last] };
   pointsChanged();
 }
 
-function onStopClick(index) {
+function onStopClick(localIndex) {
   if (state.step !== 3) return;
+  const index = activeStops()[localIndex];
+  if (index == null) return;
   const current = state.stops[index];
   const name = window.prompt("แก้ชื่อป้ายจอด (ลบข้อความทั้งหมดเพื่อลบป้าย)", current.name);
   if (name == null) return;
@@ -562,6 +591,51 @@ function onStopClick(index) {
   else current.name = name.trim();
   refresh();
   run("กำลังบันทึกป้ายจอด...", saveStops);
+}
+
+async function setKind(kind) {
+  const next = kind === "out_back" ? "out_back" : "loop";
+  if (next === state.routeKind || state.pending) return;
+  let pts = state.points.map(({ leg, ...p }) => p);
+  if (next === "out_back") {
+    if (isClosed()) pts = pts.slice(0, -1);
+    pts = pts.map((p) => ({ ...p, leg: "out" }));
+  }
+  const stops = next === "loop" ? state.stops.map(({ leg, ...s }) => s) : state.stops;
+  await run("กำลังเปลี่ยนรูปแบบสาย...", async () => {
+    await api(`/api/v2/transport/routes/${state.routeId}`, { method: "PUT", body: JSON.stringify({ route_kind: next }) });
+    state.routeKind = next;
+    state.route.route_kind = next;
+    state.points = pts;
+    state.stops = stops;
+    state.leg = "out";
+    state.history = [];
+    await saveStops();
+  });
+  if (state.routeKind !== next) return;
+  if (state.points.length >= 2) await resolveNow();
+  else await run("กำลังบันทึกจุด...", savePoints);
+}
+
+function setLeg(leg) {
+  if (!isOutBack() || state.leg === leg) return;
+  state.leg = leg;
+  refresh();
+}
+
+function buildBackLeg() {
+  if (!isOutBack()) return;
+  const back = buildBackFromOut(state.points);
+  if (!back.length) {
+    setBanner("workspace-status", "ขาไปต้องมีอย่างน้อย 2 จุด", true);
+    return;
+  }
+  const { start } = legRange(state.points, "out_back", "back");
+  if (start < state.points.length && !window.confirm("แทนที่ขากลับเดิมทั้งหมด?")) return;
+  pushHistory();
+  state.points = [...state.points.slice(0, start), ...back];
+  state.leg = "back";
+  pointsChanged();
 }
 
 function bindControls() {
@@ -583,9 +657,10 @@ function bindControls() {
     clearTimeout(clearArmed);
     clearArmed = null;
     btnClear.textContent = "ล้างจุดทั้งหมด";
-    if (!state.points.length) return;
+    const { start, end } = range();
+    if (end <= start) return;
     pushHistory();
-    state.points = [];
+    state.points.splice(start, end - start);
     pointsChanged();
   });
   qs("btn-compute").addEventListener("click", async () => {
@@ -598,11 +673,17 @@ function bindControls() {
   });
   qs("btn-resolve").addEventListener("click", () => resolveNow());
   qs("btn-undo-stop").addEventListener("click", () => {
-    if (!state.stops.length) return;
-    state.stops.pop();
+    const idx = activeStops();
+    if (!idx.length) return;
+    state.stops.splice(idx[idx.length - 1], 1);
     refresh();
     run("กำลังบันทึกป้ายจอด...", saveStops);
   });
+  qs("btn-kind-loop").addEventListener("click", () => setKind("loop"));
+  qs("btn-kind-outback").addEventListener("click", () => setKind("out_back"));
+  qs("btn-leg-out").addEventListener("click", () => setLeg("out"));
+  qs("btn-leg-back").addEventListener("click", () => setLeg("back"));
+  qs("btn-build-back").addEventListener("click", () => buildBackLeg());
   window.addEventListener("beforeunload", (e) => {
     if (!state.dirty && !state.pending) return;
     e.preventDefault();
