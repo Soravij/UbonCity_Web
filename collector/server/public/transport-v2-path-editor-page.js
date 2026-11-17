@@ -392,7 +392,8 @@ let historyRouteId = null;
 async function loadRoute() {
   state.route = await api(`/api/v2/transport/routes/${state.routeId}`);
   state.points = state.route.control_points.map((p) => ({ lat: p.lat, lng: p.lng, ...(p.leg ? { leg: p.leg } : {}), ...(p.label ? { label: p.label } : {}), ...(p.note ? { note: p.note } : {}) }));
-  state.stops = state.route.stops.map((s) => ({ name: s.name, lat: s.lat, lng: s.lng, stop_type: s.stop_type, ...(s.leg ? { leg: s.leg } : {}), ...(s.note ? { note: s.note } : {}) }));
+  const kind = state.route.route_kind || "loop";
+  state.stops = state.route.stops.map((s) => ({ name: s.name, lat: s.lat, lng: s.lng, stop_type: s.stop_type, ...(kind === "out_back" && s.leg ? { leg: s.leg } : {}), ...(s.note ? { note: s.note } : {}) }));
   state.routeKind = state.route.route_kind || "loop";
   state.points = normalizeLegPoints(state.points, state.routeKind);
   if (!isOutBack()) state.leg = "out";
@@ -596,22 +597,30 @@ function onStopClick(localIndex) {
 async function setKind(kind) {
   const next = kind === "out_back" ? "out_back" : "loop";
   if (next === state.routeKind || state.pending) return;
-  let pts = state.points.map(({ leg, ...p }) => p);
-  if (next === "out_back") {
-    if (isClosed()) pts = pts.slice(0, -1);
-    pts = pts.map((p) => ({ ...p, leg: "out" }));
+  state.pending = true;
+  refresh();
+  try {
+    await run("กำลังเปลี่ยนรูปแบบสาย...", async () => {
+      await api(`/api/v2/transport/routes/${state.routeId}`, { method: "PUT", body: JSON.stringify({ route_kind: next }) });
+      let pts = state.points.map(({ leg, ...p }) => p);
+      if (next === "out_back") {
+        if (isClosed()) pts = pts.slice(0, -1);
+        pts = pts.map((p) => ({ ...p, leg: "out" }));
+      }
+      state.stops = next === "loop" ? state.stops.map(({ leg, ...s }) => s) : state.stops;
+      state.routeKind = next;
+      state.route.route_kind = next;
+      state.points = pts;
+      state.leg = "out";
+      state.history = [];
+      state.warnings = [];
+      renderWarningsStatus();
+      renderWarnBanner();
+      await saveStops();
+    });
+  } finally {
+    state.pending = false;
   }
-  const stops = next === "loop" ? state.stops.map(({ leg, ...s }) => s) : state.stops;
-  await run("กำลังเปลี่ยนรูปแบบสาย...", async () => {
-    await api(`/api/v2/transport/routes/${state.routeId}`, { method: "PUT", body: JSON.stringify({ route_kind: next }) });
-    state.routeKind = next;
-    state.route.route_kind = next;
-    state.points = pts;
-    state.stops = stops;
-    state.leg = "out";
-    state.history = [];
-    await saveStops();
-  });
   if (state.routeKind !== next) return;
   if (state.points.length >= 2) await resolveNow();
   else await run("กำลังบันทึกจุด...", savePoints);

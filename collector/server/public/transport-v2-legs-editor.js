@@ -35,7 +35,11 @@ export function splitPathAtTurn(pathXY, turnXY) {
 
 export function buildBackFromOut(points) {
   const out = points.filter((p) => p.leg !== "back");
-  return out.slice(0, -1).reverse().map((p) => ({ lat: p.lat, lng: p.lng, leg: "back" }));
+  return out.slice(0, -1).reverse().map((p) => ({
+    lat: p.lat, lng: p.lng, leg: "back",
+    ...(p.label ? { label: p.label } : {}),
+    ...(p.note ? { note: p.note } : {}),
+  }));
 }
 
 export function activeStopIndexes(stops, kind, leg) {

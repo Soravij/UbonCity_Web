@@ -27,6 +27,7 @@ test("splitPathAtTurn: cuts at turnaround, shared vertex; no turn -> all out", (
 test("buildBackFromOut: reverse out without turnaround, ignores old back", () => {
   assert.deepEqual(buildBackFromOut([P(1, "out"), P(2, "out"), P(3, "out"), P(9, "back")]).map((p) => [p.lat, p.leg]), [[2, "back"], [1, "back"]]);
   assert.deepEqual(buildBackFromOut([P(1, "out")]), []);
+  assert.deepEqual(buildBackFromOut([P(1, "out", { label: "A", note: "n" }), P(2, "out")]), [{ lat: 1, lng: 0, leg: "back", label: "A", note: "n" }]);
 });
 
 test("activeStopIndexes: null-leg stop active in both legs; loop = all", () => {
