@@ -19,6 +19,18 @@ export function buildBearings(points, range = 60) {
     return haversineM(a, b) < 1 ? "" : `${bearingOf(a, b)},${range}`;
   }).join(";");
 }
+export function buildLegBearings(points) {
+  const segs = [];
+  let start = 0;
+  for (let i = 1; i <= points.length; i += 1) {
+    if (i === points.length || (points[i].leg || null) !== (points[start].leg || null)) {
+      segs.push(buildBearings(points.slice(start, i)));
+      start = i;
+    }
+  }
+  const joined = segs.join(";");
+  return joined.split(";").length === points.length ? joined : buildBearings(points);
+}
 export function detourWarnings(legs, waypoints, { ratio = 2.5, minExtraM = 50 } = {}) {
   // legs = OSRM routes[0].legs, waypoints = OSRM waypoints (location = [lng, lat])
   const out = [];

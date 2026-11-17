@@ -17,6 +17,7 @@ const state = {
   warnings: [],
   bearingsUsed: true,
   history: [],
+  legCache: null,
   dirty: false,
   pending: false,
   timer: 0,
@@ -94,6 +95,11 @@ function legPaths() {
   const { out, back } = splitPathAtTurn(path, outEnd > 0 ? project(state.points[outEnd - 1]) : null);
   return state.leg === "back" ? { active: back, ghost: out } : { active: out, ghost: back };
 }
+function updateLegCache() {
+  if (!state.bundle || !isOutBack() || !hasPath()) return;
+  const { active, ghost } = legPaths();
+  state.legCache = state.leg === "back" ? { out: ghost, back: active } : { out: active, back: ghost };
+}
 const hasPath = () => !state.dirty && !state.pending && (state.route?.resolved_path || []).length >= 2 && state.route?.routing_status === "fresh";
 
 function warnPointIndexes() {
@@ -110,7 +116,7 @@ function drawDraft() {
   const showPath = !state.dirty && !state.pending;
   const { start, end } = range();
   const all = state.points.map(project);
-  const lp = showPath ? legPaths() : { active: [], ghost: [] };
+  const lp = showPath ? legPaths() : { active: [], ghost: (isOutBack() && state.legCache?.[state.leg === "back" ? "out" : "back"]) || [] };
   const stopIdx = activeStops();
   const stopSet = new Set(stopIdx);
   state.viewer.setDraft({
@@ -402,6 +408,7 @@ async function loadRoute() {
     state.history = [];
     historyRouteId = state.routeId;
   }
+  updateLegCache();
 }
 
 const savePoints = () => api(`/api/v2/transport/routes/${state.routeId}/control-points`, { method: "PUT", body: JSON.stringify({ control_points: state.points }) });
@@ -613,6 +620,7 @@ async function setKind(kind) {
       state.points = pts;
       state.leg = "out";
       state.history = [];
+      state.legCache = null;
       state.warnings = [];
       renderWarningsStatus();
       renderWarnBanner();
@@ -670,6 +678,7 @@ function bindControls() {
     if (end <= start) return;
     pushHistory();
     state.points.splice(start, end - start);
+    if (state.legCache) state.legCache[state.leg] = [];
     pointsChanged();
   });
   qs("btn-compute").addEventListener("click", async () => {
@@ -712,6 +721,7 @@ async function init() {
     await loadRoute();
     const preview = await api(`/api/v2/transport/base-maps/${state.route.base_map_id}/preview-bundle`);
     state.bundle = { ...preview.bundle, routes: [] };
+    updateLegCache();
     state.viewer = createTransportMapViewer(qs("path-editor-map"), {
       bundle: state.bundle,
       onMapClick,

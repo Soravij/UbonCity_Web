@@ -7,7 +7,7 @@ import { resolveAiConfig, resolveAiFeatureConfig } from "../config/ai.mjs";
 import { assertCollectorIntegrationReadiness } from "./integration-readiness.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildTransportBundle } from "./transport-v2-publish.mjs";
-import { buildBearings, detourWarnings, fetchRouteWithFallback } from "./transport-v2-osrm.mjs";
+import { buildBearings, buildLegBearings, detourWarnings, fetchRouteWithFallback } from "./transport-v2-osrm.mjs";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
 const ROUTE_LEGS = new Set(["out", "back"]);
 const ROUTE_KINDS = new Set(["loop", "out_back"]);
@@ -2078,7 +2078,7 @@ const collectorIntegrationConfig = () => ({
     if (item.control_points.length < 2) return res.status(409).json({ error: "At least 2 control points are required before resolve" });
     const coords = item.control_points.map((point) => `${point.lng},${point.lat}`).join(";");
     const urlBase = `${osrmBaseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&continue_straight=false`;
-    const bearings = buildBearings(item.control_points);
+    const bearings = buildLegBearings(item.control_points);
     let r;
     try {
       r = await fetchRouteWithFallback(urlBase, bearings);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bearingOf, buildBearings, detourWarnings, hasBearings, fetchRouteWithFallback } from "../server/transport-v2-osrm.mjs";
+import { bearingOf, buildBearings, buildLegBearings, detourWarnings, hasBearings, fetchRouteWithFallback } from "../server/transport-v2-osrm.mjs";
 
 function fakeFetch(responses) {
   const calls = [];
@@ -33,6 +33,15 @@ test("buildBearings: joins per-point bearing,range strings", () => {
 
 test("buildBearings: identical consecutive points yield empty segments", () => {
   assert.equal(buildBearings([{ lat: 0, lng: 0 }, { lat: 0, lng: 0 }]), ";");
+});
+
+test("buildLegBearings: loop = buildBearings; leg boundary uses own leg only", () => {
+  const P = (lat, lng, leg) => ({ lat, lng, ...(leg ? { leg } : {}) });
+  const loop = [P(15, 104), P(15.001, 104), P(15.001, 104.001)];
+  assert.equal(buildLegBearings(loop), buildBearings(loop));
+  const out = [P(15, 104, "out"), P(15.001, 104, "out"), P(15.002, 104, "out")];
+  const back = [P(15.002, 104.001, "back"), P(15.001, 104.001, "back")];
+  assert.equal(buildLegBearings([...out, ...back]), `${buildBearings(out)};${buildBearings(back)}`);
 });
 
 test("detourWarnings: flags a leg far longer than the straight-line distance", () => {
