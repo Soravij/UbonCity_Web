@@ -7,7 +7,7 @@ import { resolveAiConfig, resolveAiFeatureConfig } from "../config/ai.mjs";
 import { assertCollectorIntegrationReadiness } from "./integration-readiness.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildTransportBundle } from "./transport-v2-publish.mjs";
-import { buildBearings, buildLegBearings, detourWarnings, fetchRouteWithFallback } from "./transport-v2-osrm.mjs";
+import { buildBearings, buildLegBearings, detourWarnings, fetchRouteWithFallback, findSpurWaypoints } from "./transport-v2-osrm.mjs";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
 const ROUTE_LEGS = new Set(["out", "back"]);
 const ROUTE_KINDS = new Set(["loop", "out_back"]);
@@ -2090,6 +2090,19 @@ const collectorIntegrationConfig = () => ({
       db.prepare("UPDATE transport_routes_v2 SET routing_status='error', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(item.id));
       return res.status(502).json({ error: r.parseError ? "OSRM ตอบกลับอ่านไม่ได้" : (r.body?.message || "OSRM route resolve failed"), osrm: r.body });
     }
+    const firstRoute = Array.isArray(r.body?.routes) ? r.body.routes[0] : null;
+    const spurFixes = findSpurWaypoints(firstRoute?.geometry?.coordinates, r.body?.waypoints, firstRoute?.legs);
+    if (spurFixes.length) {
+      const pts = item.control_points.map((point) => ({ lat: point.lat, lng: point.lng }));
+      for (const fix of spurFixes) pts[fix.index] = { lat: fix.lat, lng: fix.lng };
+      const retryUrl = `${osrmBaseUrl}/route/v1/driving/${pts.map((p) => `${p.lng},${p.lat}`).join(";")}?overview=full&geometries=geojson&steps=false&continue_straight=false`;
+      try {
+        const r2 = await fetchRouteWithFallback(retryUrl, bearings);
+        if (r2.ok && Array.isArray(r2.body?.routes) && r2.body.routes[0]) r = r2;
+      } catch {
+        // keep first result
+      }
+    }
     const bearingsUsed = r.bearingsUsed;
     const payload = r.body;
     const route = Array.isArray(payload.routes) ? payload.routes[0] : null;
@@ -2101,13 +2114,6 @@ const collectorIntegrationConfig = () => ({
       INSERT INTO transport_route_resolved_paths_v2 (route_id, route_revision, routing_engine, routing_profile, geometry_json, distance_km, bbox_json, point_count, osrm_summary_json, created_at)
       VALUES (?, ?, 'osrm', 'driving', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `).run(Number(item.id), Number(item.route_revision), json(geometry), distanceKm, json(nextBbox, "null"), geometry.length, json({ code: payload.code, duration_seconds: Number(route?.duration || 0), route_count: Array.isArray(payload.routes) ? payload.routes.length : 0 }, "{}"));
-    const snapPoint = db.prepare("UPDATE transport_route_control_points_v2 SET lat=?, lng=?, updated_at=CURRENT_TIMESTAMP WHERE route_id=? AND point_order=?");
-    (Array.isArray(payload.waypoints) ? payload.waypoints : []).forEach((wp, index) => {
-      const [lng, lat] = Array.isArray(wp?.location) ? wp.location.map(Number) : [];
-      if (Number.isFinite(lat) && Number.isFinite(lng) && index < item.control_points.length) {
-        snapPoint.run(lat, lng, Number(item.id), Number(item.control_points[index].order));
-      }
-    });
     db.prepare(`
       UPDATE transport_routes_v2
       SET resolved_revision=?, routing_status='fresh', poster_status='stale', resolved_distance_km=?, resolved_bbox_json=?, last_routed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP

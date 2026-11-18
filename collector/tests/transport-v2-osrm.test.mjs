@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bearingOf, buildBearings, buildLegBearings, detourWarnings, hasBearings, fetchRouteWithFallback } from "../server/transport-v2-osrm.mjs";
+import { bearingOf, buildBearings, buildLegBearings, detourWarnings, hasBearings, fetchRouteWithFallback, findSpurWaypoints } from "../server/transport-v2-osrm.mjs";
 
 function fakeFetch(responses) {
   const calls = [];
@@ -112,4 +112,18 @@ test("fetchRouteWithFallback: all-empty bearings string skips the bearings attem
   const r = await fetchRouteWithFallback("http://osrm/route", ";", { fetchImpl });
   assert.equal(calls.length, 1);
   assert.ok(!calls[0].includes("bearings="));
+});
+
+test("findSpurWaypoints: retraced spur into differently named road is moved to branch point", () => {
+  const coords = [[104.000, 15], [104.0005, 15], [104.001, 15], [104.001, 15.00025], [104.001, 15.0005], [104.001, 15.00025], [104.001, 15], [104.0015, 15], [104.002, 15]];
+  const legs = [{ distance: 200 }, { distance: 200 }];
+  const wp = (lng, lat, name) => ({ location: [lng, lat], name });
+  assert.deepEqual(
+    findSpurWaypoints(coords, [wp(104, 15, "A"), wp(104.001, 15.0005, "Soi"), wp(104.002, 15, "A")], legs),
+    [{ index: 1, lng: 104.001, lat: 15 }],
+  );
+  assert.deepEqual(findSpurWaypoints(coords, [wp(104, 15, "A"), wp(104.001, 15.0005, "A"), wp(104.002, 15, "A")], legs), []);
+  assert.deepEqual(findSpurWaypoints(coords, [wp(104, 15, "A"), wp(104.001, 15.0005, ""), wp(104.002, 15, "B")], legs), []);
+  const straight = [[104.000, 15], [104.001, 15], [104.002, 15]];
+  assert.deepEqual(findSpurWaypoints(straight, [wp(104, 15, "A"), wp(104.001, 15, "Soi"), wp(104.002, 15, "B")], legs), []);
 });

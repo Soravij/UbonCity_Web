@@ -71,3 +71,49 @@ export async function fetchRouteWithFallback(urlBase, bearings, { fetchImpl = fe
   const r = await attempt(urlBase);   // throw ได้ → error path เดิมของ router
   return { ...r, bearingsUsed: false };
 }
+
+function spurDistM(a, b) {
+  const toR = Math.PI / 180;
+  const dLat = (b[1] - a[1]) * toR;
+  const dLng = (b[0] - a[0]) * toR * Math.cos(((a[1] + b[1]) / 2) * toR);
+  return 6371000 * Math.hypot(dLng, dLat);
+}
+
+export function findSpurWaypoints(coords, waypoints, legs, { maxGapM = 10, minOutM = 8, maxOutM = 300 } = {}) {
+  const fixes = [];
+  if (!Array.isArray(coords) || coords.length < 3 || !Array.isArray(waypoints) || waypoints.length < 3) return fixes;
+  const at = [];
+  let from = 0;
+  for (let k = 0; k < waypoints.length; k += 1) {
+    const loc = waypoints[k]?.location;
+    const limit = k === 0 ? 50 : Number(legs?.[k - 1]?.distance || 0) + 50;
+    let best = from;
+    let bestD = Infinity;
+    let run = 0;
+    for (let i = from; i < coords.length && Array.isArray(loc); i += 1) {
+      if (i > from) run += spurDistM(coords[i - 1], coords[i]);
+      if (run > limit) break;
+      const d = spurDistM(coords[i], loc);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    at.push(best);
+    from = best;
+  }
+  for (let k = 1; k < waypoints.length - 1; k += 1) {
+    const name = waypoints[k]?.name || "";
+    if (!name || name === (waypoints[k - 1]?.name || "") || name === (waypoints[k + 1]?.name || "")) continue;
+    const w = at[k];
+    let a = w;
+    let b = w;
+    while (a > 0 && b < coords.length - 1 && spurDistM(coords[a - 1], coords[b + 1]) <= maxGapM) {
+      a -= 1;
+      b += 1;
+    }
+    const out = spurDistM(coords[a], coords[w]);
+    if (out >= minOutM && out <= maxOutM) fixes.push({ index: k, lng: coords[a][0], lat: coords[a][1] });
+  }
+  return fixes;
+}
