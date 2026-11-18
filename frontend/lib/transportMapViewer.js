@@ -202,6 +202,12 @@ export function createTransportMapViewer(container, options = {}) {
     const pointOpacity = String(draft.pointOpacity ?? 1);
     const stopOpacity = String(draft.stopOpacity ?? 1);
     const warnPoints = new Set(draft.warnPoints || []);
+    const ghostOpacity = String(draft.ghostOpacity ?? 0.3);
+    if ((draft.ghostPath || []).length >= 2) {
+      gDraft.append(el("polyline", { points: draft.ghostPath.map((p) => p.join(",")).join(" "), fill: "none", stroke: color, "stroke-width": 5, "stroke-linecap": "round", "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke", opacity: ghostOpacity, "pointer-events": "none" }));
+    }
+    (draft.ghostPoints || []).forEach((p) => gDraft.append(el("circle", { cx: p[0], cy: p[1], r: DRAFT_R, fill: color, stroke: "#ffffff", "stroke-width": 2, "vector-effect": "non-scaling-stroke", opacity: ghostOpacity, "pointer-events": "none" })));
+    (draft.ghostStops || []).forEach((p) => gDraft.append(el("circle", { cx: p[0], cy: p[1], r: DRAFT_R, fill: "#1f3a5f", stroke: "#ffffff", "stroke-width": 2.5, "vector-effect": "non-scaling-stroke", opacity: ghostOpacity, "pointer-events": "none" })));
     const addLine = (pts, attrs) => {
       const points = pts.map((p) => p.join(",")).join(" ");
       gDraft.append(el("polyline", { points, fill: "none", stroke: color, "stroke-linecap": "round", "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke", ...attrs }));

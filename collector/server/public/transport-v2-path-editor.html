@@ -43,6 +43,18 @@
                   <p class="muted" id="route-meta"></p>
                 </div>
               </div>
+              <div id="kind-group" style="display:flex;flex-direction:column;gap:6px">
+                <span class="muted" style="font-size:.85em">รูปแบบสาย</span>
+                <div style="display:flex;gap:6px">
+                  <button id="btn-kind-loop" class="utility-action" type="button" style="flex:1">วน</button>
+                  <button id="btn-kind-outback" class="utility-action" type="button" style="flex:1">ไป-กลับ</button>
+                </div>
+                <div id="leg-switch" style="display:none;gap:6px">
+                  <button id="btn-leg-out" class="utility-action" type="button" style="flex:1">ขาไป</button>
+                  <button id="btn-leg-back" class="utility-action" type="button" style="flex:1">ขากลับ</button>
+                </div>
+                <button id="btn-build-back" class="utility-action" type="button" style="width:100%;text-align:left;display:none">สร้างขากลับจากขาไป</button>
+              </div>
               <div id="step-list" style="display:flex;flex-direction:column;gap:6px"></div>
               <hr style="border:0;border-top:1px solid var(--line);margin:4px 0;width:100%" />
               <div id="view-group" style="display:flex;flex-direction:column;gap:6px">
