@@ -126,4 +126,8 @@ test("findSpurWaypoints: retraced spur into differently named road is moved to b
   assert.deepEqual(findSpurWaypoints(coords, [wp(104, 15, "A"), wp(104.001, 15.0005, ""), wp(104.002, 15, "B")], legs), []);
   const straight = [[104.000, 15], [104.001, 15], [104.002, 15]];
   assert.deepEqual(findSpurWaypoints(straight, [wp(104, 15, "A"), wp(104.001, 15, "Soi"), wp(104.002, 15, "B")], legs), []);
+  assert.deepEqual(
+    findSpurWaypoints(coords, [wp(104, 15, "A"), wp(104.001, 15.0005, "Soi"), wp(104.002, 15, "A")], legs, { skip: new Set([1]) }),
+    [],
+  );
 });

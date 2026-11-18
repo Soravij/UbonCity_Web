@@ -2091,14 +2091,22 @@ const collectorIntegrationConfig = () => ({
       return res.status(502).json({ error: r.parseError ? "OSRM ตอบกลับอ่านไม่ได้" : (r.body?.message || "OSRM route resolve failed"), osrm: r.body });
     }
     const firstRoute = Array.isArray(r.body?.routes) ? r.body.routes[0] : null;
-    const spurFixes = findSpurWaypoints(firstRoute?.geometry?.coordinates, r.body?.waypoints, firstRoute?.legs);
+    const legEdges = new Set();
+    item.control_points.forEach((point, i, arr) => {
+      if (i > 0 && (point.leg || null) !== (arr[i - 1].leg || null)) {
+        legEdges.add(i - 1);
+        legEdges.add(i);
+      }
+    });
+    const spurFixes = findSpurWaypoints(firstRoute?.geometry?.coordinates, r.body?.waypoints, firstRoute?.legs, { skip: legEdges });
     if (spurFixes.length) {
       const pts = item.control_points.map((point) => ({ lat: point.lat, lng: point.lng }));
       for (const fix of spurFixes) pts[fix.index] = { lat: fix.lat, lng: fix.lng };
       const retryUrl = `${osrmBaseUrl}/route/v1/driving/${pts.map((p) => `${p.lng},${p.lat}`).join(";")}?overview=full&geometries=geojson&steps=false&continue_straight=false`;
       try {
         const r2 = await fetchRouteWithFallback(retryUrl, bearings);
-        if (r2.ok && Array.isArray(r2.body?.routes) && r2.body.routes[0]) r = r2;
+        if (r2.ok && Array.isArray(r2.body?.routes) && r2.body.routes[0]
+          && Number(r2.body.routes[0].distance || 0) < Number(firstRoute?.distance ?? Infinity)) r = r2;
       } catch {
         // keep first result
       }

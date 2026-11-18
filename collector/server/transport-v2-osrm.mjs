@@ -79,7 +79,7 @@ function spurDistM(a, b) {
   return 6371000 * Math.hypot(dLng, dLat);
 }
 
-export function findSpurWaypoints(coords, waypoints, legs, { maxGapM = 10, minOutM = 8, maxOutM = 300 } = {}) {
+export function findSpurWaypoints(coords, waypoints, legs, { maxGapM = 10, minOutM = 8, maxOutM = 300, skip = null } = {}) {
   const fixes = [];
   if (!Array.isArray(coords) || coords.length < 3 || !Array.isArray(waypoints) || waypoints.length < 3) return fixes;
   const at = [];
@@ -103,6 +103,7 @@ export function findSpurWaypoints(coords, waypoints, legs, { maxGapM = 10, minOu
     from = best;
   }
   for (let k = 1; k < waypoints.length - 1; k += 1) {
+    if (skip?.has(k)) continue;
     const name = waypoints[k]?.name || "";
     if (!name || name === (waypoints[k - 1]?.name || "") || name === (waypoints[k + 1]?.name || "")) continue;
     const w = at[k];
