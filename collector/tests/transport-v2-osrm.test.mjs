@@ -35,16 +35,18 @@ test("buildBearings: identical consecutive points yield empty segments", () => {
   assert.equal(buildBearings([{ lat: 0, lng: 0 }, { lat: 0, lng: 0 }]), ";");
 });
 
-test("buildLegBearings: loop = buildBearings; leg boundary entries are blank", () => {
+test("buildLegBearings: blank at leg boundary and at turns > 30°", () => {
   const P = (lat, lng, leg) => ({ lat, lng, ...(leg ? { leg } : {}) });
-  const loop = [P(15, 104), P(15.001, 104), P(15.001, 104.001)];
-  assert.equal(buildLegBearings(loop), buildBearings(loop));
+  const straight = [P(15, 104), P(15.001, 104), P(15.002, 104)];
+  assert.equal(buildLegBearings(straight), buildBearings(straight));
+  const corner = [P(15, 104), P(15.001, 104), P(15.001, 104.001)];
+  const c = buildBearings(corner).split(";");
+  assert.deepEqual(buildLegBearings(corner).split(";"), [c[0], "", c[2]]);
   const out = [P(15, 104, "out"), P(15.001, 104, "out"), P(15.002, 104, "out")];
   const back = [P(15.002, 104.001, "back"), P(15.001, 104.001, "back")];
   const parts = buildLegBearings([...out, ...back]).split(";");
   const o = buildBearings(out).split(";");
   const b = buildBearings(back).split(";");
-  assert.equal(parts.length, 5);
   assert.deepEqual(parts, [o[0], o[1], "", "", b[1]]);
 });
 

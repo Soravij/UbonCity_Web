@@ -19,6 +19,7 @@ export function buildBearings(points, range = 60) {
     return haversineM(a, b) < 1 ? "" : `${bearingOf(a, b)},${range}`;
   }).join(";");
 }
+const TURN_BLANK_DEG = 30;
 export function buildLegBearings(points) {
   const segs = [];
   let start = 0;
@@ -34,6 +35,14 @@ export function buildLegBearings(points) {
   for (let k = 1; k < segs.length; k += 1) {
     parts[segs[k - 1].end - 1] = "";
     parts[segs[k].start] = "";
+  }
+  for (let k = 1; k < points.length - 1; k += 1) {
+    const leg = points[k].leg || null;
+    if ((points[k - 1].leg || null) !== leg || (points[k + 1].leg || null) !== leg) continue;
+    const inn = bearingOf(points[k - 1], points[k]);
+    const out = bearingOf(points[k], points[k + 1]);
+    const diff = Math.abs(((out - inn + 540) % 360) - 180);
+    if (diff > TURN_BLANK_DEG) parts[k] = "";
   }
   return parts.join(";");
 }
