@@ -24,12 +24,18 @@ export function buildLegBearings(points) {
   let start = 0;
   for (let i = 1; i <= points.length; i += 1) {
     if (i === points.length || (points[i].leg || null) !== (points[start].leg || null)) {
-      segs.push(buildBearings(points.slice(start, i)));
+      segs.push({ start, end: i, str: buildBearings(points.slice(start, i)) });
       start = i;
     }
   }
-  const joined = segs.join(";");
-  return joined.split(";").length === points.length ? joined : buildBearings(points);
+  const joined = segs.map((s) => s.str).join(";");
+  const parts = joined.split(";");
+  if (parts.length !== points.length) return buildBearings(points);
+  for (let k = 1; k < segs.length; k += 1) {
+    parts[segs[k - 1].end - 1] = "";
+    parts[segs[k].start] = "";
+  }
+  return parts.join(";");
 }
 export function detourWarnings(legs, waypoints, { ratio = 2.5, minExtraM = 50 } = {}) {
   // legs = OSRM routes[0].legs, waypoints = OSRM waypoints (location = [lng, lat])
