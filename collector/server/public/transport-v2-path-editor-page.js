@@ -3,7 +3,7 @@ import { initAuthBox } from "./auth-box.js";
 import { createTransportMapViewer, latLngToViewbox, viewboxToLatLng } from "./transport-map-viewer.js";
 import { SNAP_ROAD_GROUPS, parsePathD, buildRoadIndex, nearestOnRoads } from "./transport-v2-road-snap.js";
 import { normalizeLegPoints, legRange, nearestIndex, splitPathAtTurn, buildBackFromOut, activeStopIndexes } from "./transport-v2-legs-editor.js";
-import { offsetPolylineLeft, arrowPositions, chevronPolylinePoints } from "./transport-v2-leg-decor.js";
+import { offsetPolylineLeft, arrowPositionsInRect, chevronPolylinePoints } from "./transport-v2-leg-decor.js";
 
 const state = {
   routeId: Number(new URLSearchParams(window.location.search).get("id") || 0) || 0,
@@ -117,7 +117,7 @@ const DECOR = {
   minBandPx: 3, maxBandPx: 8, bandK: 2, gapRatio: 0.25,
   bandOpacity: 0.85, chevronOpacity: 0.6, ghostMul: 0.35,
   chevronW: 0.7, chevronD: 0.35, chevronStroke: 0.18,
-  maxPositions: 20000, maxChevronNodes: 1000,
+  maxChevronNodes: 1000,
 };
 let legDecorG = null;
 let lastLegPaths = null;
@@ -158,6 +158,14 @@ function viewRect(svg) {
   return { x: vb[0], y: vb[1], w: vb[2], h: vb[3] };
 }
 
+function visibleRect(svg, upp) {
+  const r = viewRect(svg);
+  const b = svg.getBoundingClientRect();
+  if (!r || !(b.width > 0) || !(b.height > 0)) return r;
+  const w = b.width * upp, h = b.height * upp;
+  return { x: r.x + r.w / 2 - w / 2, y: r.y + r.h / 2 - h / 2, w, h };
+}
+
 function bandPx(rect) {
   const fullH = state.bundle?.viewbox?.height;
   const zoom = rect && fullH > 0 && rect.h > 0 ? fullH / rect.h : 1;
@@ -186,12 +194,8 @@ function addBand(pts, color, upp, rect, bp, outBack, mul) {
   band.setAttribute("opacity", String(DECOR.bandOpacity * mul));
   legDecorG.appendChild(band);
   const pad = bandU;
-  const x0 = rect.x - pad, x1 = rect.x + rect.w + pad, y0 = rect.y - pad, y1 = rect.y + rect.h + pad;
-  let left = DECOR.maxChevronNodes;
-  for (const a of arrowPositions(center, bandU, DECOR.maxPositions)) {
-    if (a.x < x0 || a.x > x1 || a.y < y0 || a.y > y1) continue;
-    if (left <= 0) break;
-    left -= 1;
+  const cullRect = { x: rect.x - pad, y: rect.y - pad, w: rect.w + 2 * pad, h: rect.h + 2 * pad };
+  for (const a of arrowPositionsInRect(center, bandU, cullRect, DECOR.maxChevronNodes)) {
     const ch = document.createElementNS(SVG_NS, "polyline");
     ch.setAttribute("points", chevronPolylinePoints(a.x, a.y, a.angleDeg, bandU * DECOR.chevronW, bandU * DECOR.chevronD));
     ch.setAttribute("fill", "none");
@@ -209,18 +213,19 @@ function drawLegDecor(lp, color) {
   lastLegColor = color;
   const svg = ensureLegDecor();
   if (!svg) return;
-  hideViewerDraftLines(svg);
+  if ((lp?.active || []).length >= 2) hideViewerDraftLines(svg);
   legDecorG.replaceChildren();
   if (!lp) return;
   const upp = editorUnitsPerPx(svg);
   const rect = viewRect(svg);
   if (!(upp > 0) || !rect) return;
   const bp = bandPx(rect);
+  const cull = visibleRect(svg, upp);
   const outBack = state.route?.route_kind === "out_back";
   const ghost = lp.ghost || [];
   const ghostPaths = Array.isArray(ghost[0]?.[0]) ? ghost : (ghost.length ? [ghost] : []);
-  for (const g of ghostPaths) addBand(g, color, upp, rect, bp, outBack, DECOR.ghostMul);
-  addBand(lp.active, color, upp, rect, bp, outBack, 1);
+  for (const g of ghostPaths) addBand(g, color, upp, cull, bp, outBack, DECOR.ghostMul);
+  addBand(lp.active, color, upp, cull, bp, outBack, 1);
 }
 
 function drawDraft() {
@@ -846,8 +851,13 @@ async function init() {
       onError: (err) => setBanner("workspace-status", `โหลด base map ไม่ได้: ${err.message}`, true),
     });
     const decorSvg = ensureLegDecor();
-    if (decorSvg) new MutationObserver(() => drawLegDecor(lastLegPaths, lastLegColor))
-      .observe(decorSvg, { attributes: true, attributeFilter: ["viewBox"] });
+    let lastViewBox = "";
+    if (decorSvg) new MutationObserver(() => {
+      const vb = decorSvg.getAttribute("viewBox") || "";
+      if (vb === lastViewBox) return;
+      lastViewBox = vb;
+      drawLegDecor(lastLegPaths, lastLegColor);
+    }).observe(decorSvg, { attributes: true, attributeFilter: ["viewBox"] });
     state.viewer.ready.then(buildRoadSnap);
     state.step = hasPath() ? 2 : 1;
     refresh();

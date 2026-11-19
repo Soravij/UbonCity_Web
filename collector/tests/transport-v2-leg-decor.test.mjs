@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { offsetPolylineLeft, arrowPositions, arrowPolygonPoints, chevronPolylinePoints } from "../server/public/transport-v2-leg-decor.js";
+import { offsetPolylineLeft, arrowPositions, arrowPolygonPoints, chevronPolylinePoints, arrowPositionsInRect } from "../server/public/transport-v2-leg-decor.js";
 
+const BIG = { x: -1e9, y: -1e9, w: 2e9, h: 2e9 };
 const closeTo = (a, b, eps) => Math.abs(a - b) <= eps;
 const pointsClose = (pts, expected, eps) => {
   assert.equal(pts.length, expected.length);
@@ -85,4 +86,35 @@ test("offsetPolylineLeft: zero offset returns a new array, not the original", ()
   assert.deepEqual(out, [[0, 0], [10, 0]]);
   assert.notEqual(out, input);
   assert.notEqual(out[0], input[0]);
+});
+
+test("arrowPositionsInRect: unculled straight horizontal line matches arrowPositions", () => {
+  const arrows = arrowPositionsInRect([[0, 0], [100, 0]], 22, BIG);
+  const expectedX = [11, 33, 55, 77, 99];
+  assert.equal(arrows.length, expectedX.length);
+  arrows.forEach((a, i) => assert.ok(closeTo(a.x, expectedX[i], 1e-9), `x[${i}]: ${a.x} != ${expectedX[i]}`));
+  for (const a of arrows) assert.ok(closeTo(a.angleDeg, 0, 1e-9));
+});
+
+test("arrowPositionsInRect: narrow rect keeps only the node inside it", () => {
+  const arrows = arrowPositionsInRect([[0, 0], [100, 0]], 22, { x: 40, y: -1, w: 30, h: 2 });
+  const expectedX = [55];
+  assert.equal(arrows.length, expectedX.length);
+  arrows.forEach((a, i) => assert.ok(closeTo(a.x, expectedX[i], 1e-9), `x[${i}]: ${a.x} != ${expectedX[i]}`));
+});
+
+test("arrowPositionsInRect: L-shaped polyline reports per-segment angles in order", () => {
+  const arrows = arrowPositionsInRect([[0, 0], [10, 0], [10, 30]], 10, BIG);
+  pointsClose(arrows.map((a) => [a.x, a.y]), [[5, 0], [10, 5], [10, 15], [10, 25]], 1e-9);
+  assert.deepEqual(arrows.map((a) => a.angleDeg), [0, 90, 90, 90]);
+});
+
+test("arrowPositionsInRect: rect culls the first leg entirely, keeps matching nodes on the second", () => {
+  const arrows = arrowPositionsInRect([[0, 0], [10, 0], [10, 30]], 10, { x: 9, y: 10, w: 2, h: 30 });
+  pointsClose(arrows.map((a) => [a.x, a.y]), [[10, 15], [10, 25]], 1e-9);
+});
+
+test("arrowPositionsInRect: maxNodes caps output even with a tiny spacing", () => {
+  const arrows = arrowPositionsInRect([[0, 0], [1000, 0]], 1, BIG, 3);
+  assert.deepEqual(arrows.map((a) => a.x), [0.5, 1.5, 2.5]);
 });

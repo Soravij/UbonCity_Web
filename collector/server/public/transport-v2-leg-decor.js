@@ -82,3 +82,32 @@ export function chevronPolylinePoints(x, y, angleDeg, widthUnits, depthUnits) {
   const backX = x - dx * hd, backY = y - dy * hd;
   return `${backX + px * hw},${backY + py * hw} ${tipX},${tipY} ${backX - px * hw},${backY - py * hw}`;
 }
+export function arrowPositionsInRect(points, spacingUnits, rect, maxNodes = 1000) {
+  if (!Array.isArray(points) || points.length < 2 || !(spacingUnits > 0) || !rect) return [];
+  const x0 = rect.x, x1 = rect.x + rect.w, y0 = rect.y, y1 = rect.y + rect.h;
+  const out = [];
+  let acc = 0;
+  let next = spacingUnits / 2;
+  for (let i = 1; i < points.length && out.length < maxNodes; i += 1) {
+    const a = points[i - 1], b = points[i];
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const segLen = Math.hypot(dx, dy);
+    if (segLen <= EPS) continue;
+    const end = acc + segLen;
+    const outside = Math.max(a[0], b[0]) < x0 || Math.min(a[0], b[0]) > x1
+      || Math.max(a[1], b[1]) < y0 || Math.min(a[1], b[1]) > y1;
+    if (outside) {
+      if (next <= end) next += (Math.floor((end - next) / spacingUnits) + 1) * spacingUnits;
+    } else {
+      const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+      while (next <= end && out.length < maxNodes) {
+        const t = (next - acc) / segLen;
+        const x = a[0] + dx * t, y = a[1] + dy * t;
+        if (x >= x0 && x <= x1 && y >= y0 && y <= y1) out.push({ x, y, angleDeg });
+        next += spacingUnits;
+      }
+    }
+    acc = end;
+  }
+  return out;
+}
