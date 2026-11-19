@@ -3,6 +3,7 @@ import { initAuthBox } from "./auth-box.js";
 import { createTransportMapViewer, latLngToViewbox, viewboxToLatLng } from "./transport-map-viewer.js";
 import { SNAP_ROAD_GROUPS, parsePathD, buildRoadIndex, nearestOnRoads } from "./transport-v2-road-snap.js";
 import { normalizeLegPoints, legRange, nearestIndex, splitPathAtTurn, buildBackFromOut, activeStopIndexes } from "./transport-v2-legs-editor.js";
+import { offsetPolylineLeft, arrowPositions, arrowPolygonPoints } from "./transport-v2-leg-decor.js";
 
 const state = {
   routeId: Number(new URLSearchParams(window.location.search).get("id") || 0) || 0,
@@ -111,6 +112,78 @@ function warnPointIndexes() {
   return [...idx];
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+const DECOR = { offsetPx: 4, spacingPx: 22, arrowLenPx: 7, arrowHalfPx: 3.5, guidePx: 1.5, ghostOpacity: 0.3 };
+let legDecorG = null;
+let lastLegPaths = null;
+let lastLegColor = null;
+
+function viewerSvg() {
+  return qs("path-editor-map").querySelector("svg");
+}
+
+function editorUnitsPerPx(svg) {
+  const vb = (svg.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+  const rect = svg.getBoundingClientRect();
+  if (vb.length !== 4 || !(rect.width > 0) || !(rect.height > 0)) return 0;
+  return Math.max(vb[2] / rect.width, vb[3] / rect.height);
+}
+
+function ensureLegDecor() {
+  const svg = viewerSvg();
+  if (!svg) return null;
+  if (!legDecorG) {
+    legDecorG = document.createElementNS(SVG_NS, "g");
+    legDecorG.setAttribute("data-leg-decor", "1");
+    legDecorG.setAttribute("pointer-events", "none");
+  }
+  const draftLine = svg.querySelector('[data-draft-line="1"]');
+  const draftG = draftLine ? draftLine.parentNode : null;
+  if (draftG && draftG.parentNode) {
+    if (legDecorG.nextSibling !== draftG) draftG.parentNode.insertBefore(legDecorG, draftG);
+  } else if (!legDecorG.isConnected) {
+    svg.appendChild(legDecorG);
+  }
+  return svg;
+}
+
+function addDecorPath(pts, color, upp, withArrows, opacity) {
+  if (!Array.isArray(pts) || pts.length < 2) return;
+  const off = offsetPolylineLeft(pts, DECOR.offsetPx * upp);
+  const line = document.createElementNS(SVG_NS, "polyline");
+  line.setAttribute("points", off.map((p) => `${p[0]},${p[1]}`).join(" "));
+  line.setAttribute("fill", "none");
+  line.setAttribute("stroke", color);
+  line.setAttribute("stroke-width", String(DECOR.guidePx));
+  line.setAttribute("vector-effect", "non-scaling-stroke");
+  line.setAttribute("stroke-linejoin", "round");
+  line.setAttribute("opacity", String(opacity));
+  legDecorG.appendChild(line);
+  if (!withArrows) return;
+  for (const a of arrowPositions(off, DECOR.spacingPx * upp)) {
+    const poly = document.createElementNS(SVG_NS, "polygon");
+    poly.setAttribute("points", arrowPolygonPoints(a.x, a.y, a.angleDeg, DECOR.arrowLenPx * upp, DECOR.arrowHalfPx * upp));
+    poly.setAttribute("fill", color);
+    poly.setAttribute("opacity", String(opacity));
+    legDecorG.appendChild(poly);
+  }
+}
+
+function drawLegDecor(lp, color) {
+  lastLegPaths = lp;
+  lastLegColor = color;
+  const svg = ensureLegDecor();
+  if (!svg) return;
+  legDecorG.replaceChildren();
+  if (!lp) return;
+  const upp = editorUnitsPerPx(svg);
+  if (!(upp > 0)) return;
+  const ghost = lp.ghost || [];
+  const ghostPaths = Array.isArray(ghost[0]?.[0]) ? ghost : (ghost.length ? [ghost] : []);
+  for (const g of ghostPaths) addDecorPath(g, color, upp, false, DECOR.ghostOpacity);
+  addDecorPath(lp.active, color, upp, true, 1);
+}
+
 function drawDraft() {
   if (!state.viewer) return;
   const showPath = !state.dirty && !state.pending;
@@ -131,6 +204,7 @@ function drawDraft() {
     stopOpacity: state.step === 3 ? 1 : 0.45,
     warnPoints: warnPointIndexes().filter((i) => i >= start && i < end).map((i) => i - start),
   });
+  drawLegDecor(lp, state.route?.color || "#ff6600");
 }
 
 const HISTORY_MAX = 50;
@@ -732,6 +806,9 @@ async function init() {
       onStopClick,
       onError: (err) => setBanner("workspace-status", `โหลด base map ไม่ได้: ${err.message}`, true),
     });
+    const decorSvg = ensureLegDecor();
+    if (decorSvg) new MutationObserver(() => drawLegDecor(lastLegPaths, lastLegColor))
+      .observe(decorSvg, { attributes: true, attributeFilter: ["viewBox"] });
     state.viewer.ready.then(buildRoadSnap);
     state.step = hasPath() ? 2 : 1;
     refresh();
