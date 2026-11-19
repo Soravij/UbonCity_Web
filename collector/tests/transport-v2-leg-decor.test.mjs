@@ -116,5 +116,14 @@ test("arrowPositionsInRect: rect culls the first leg entirely, keeps matching no
 
 test("arrowPositionsInRect: maxNodes caps output even with a tiny spacing", () => {
   const arrows = arrowPositionsInRect([[0, 0], [1000, 0]], 1, BIG, 3);
-  assert.deepEqual(arrows.map((a) => a.x), [0.5, 1.5, 2.5]);
+  const expectedX = [0.5, 334.5, 668.5];
+  assert.equal(arrows.length, expectedX.length);
+  arrows.forEach((a, i) => assert.ok(closeTo(a.x, expectedX[i], 1e-9), `x[${i}]: ${a.x} != ${expectedX[i]}`));
+});
+
+test("arrowPositionsInRect: widens spacing to fit exactly maxNodes within budget", () => {
+  const arrows = arrowPositionsInRect([[0, 0], [100, 0]], 1, BIG, 10);
+  const expectedX = [0.5, 10.5, 20.5, 30.5, 40.5, 50.5, 60.5, 70.5, 80.5, 90.5];
+  assert.equal(arrows.length, expectedX.length);
+  arrows.forEach((a, i) => assert.ok(closeTo(a.x, expectedX[i], 1e-9), `x[${i}]: ${a.x} != ${expectedX[i]}`));
 });
