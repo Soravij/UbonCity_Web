@@ -178,7 +178,7 @@ function hideViewerDraftLines(svg) {
   const g = hit ? hit.parentNode : draftGRef;
   if (!g) return;
   draftGRef = g;
-  for (const el of g.querySelectorAll("polyline:not([data-draft-line])")) el.setAttribute("stroke-opacity", "0");
+  for (const el of g.querySelectorAll("polyline:not([data-draft-line]):not([stroke-dasharray])")) el.setAttribute("stroke-opacity", "0");
 }
 
 function addBand(pts, color, upp, rect, bp, outBack, mul) {
