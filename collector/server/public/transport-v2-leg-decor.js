@@ -73,3 +73,12 @@ export function arrowPolygonPoints(x, y, angleDeg, lengthUnits, halfWidthUnits) 
   const local = [[lengthUnits, 0], [-lengthUnits * 0.4, halfWidthUnits], [-lengthUnits * 0.4, -halfWidthUnits]];
   return local.map(([lx, ly]) => `${x + lx * cos - ly * sin},${y + lx * sin + ly * cos}`).join(" ");
 }
+export function chevronPolylinePoints(x, y, angleDeg, widthUnits, depthUnits) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const dx = Math.cos(rad), dy = Math.sin(rad);
+  const px = -dy, py = dx;
+  const hw = widthUnits / 2, hd = depthUnits / 2;
+  const tipX = x + dx * hd, tipY = y + dy * hd;
+  const backX = x - dx * hd, backY = y - dy * hd;
+  return `${backX + px * hw},${backY + py * hw} ${tipX},${tipY} ${backX - px * hw},${backY - py * hw}`;
+}

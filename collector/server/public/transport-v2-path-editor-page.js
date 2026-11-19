@@ -3,7 +3,7 @@ import { initAuthBox } from "./auth-box.js";
 import { createTransportMapViewer, latLngToViewbox, viewboxToLatLng } from "./transport-map-viewer.js";
 import { SNAP_ROAD_GROUPS, parsePathD, buildRoadIndex, nearestOnRoads } from "./transport-v2-road-snap.js";
 import { normalizeLegPoints, legRange, nearestIndex, splitPathAtTurn, buildBackFromOut, activeStopIndexes } from "./transport-v2-legs-editor.js";
-import { offsetPolylineLeft, arrowPositions, arrowPolygonPoints } from "./transport-v2-leg-decor.js";
+import { offsetPolylineLeft, arrowPositions, chevronPolylinePoints } from "./transport-v2-leg-decor.js";
 
 const state = {
   routeId: Number(new URLSearchParams(window.location.search).get("id") || 0) || 0,
@@ -113,7 +113,12 @@ function warnPointIndexes() {
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const DECOR = { offsetPx: 4, spacingPx: 22, arrowLenPx: 7, arrowHalfPx: 3.5, guidePx: 1.5, ghostOpacity: 0.3 };
+const DECOR = {
+  minBandPx: 3, maxBandPx: 8, bandK: 2, gapRatio: 0.25,
+  bandOpacity: 0.85, chevronOpacity: 0.6, ghostMul: 0.35,
+  chevronW: 0.7, chevronD: 0.35, chevronStroke: 0.18,
+  maxPositions: 20000, maxChevronNodes: 1000,
+};
 let legDecorG = null;
 let lastLegPaths = null;
 let lastLegColor = null;
@@ -147,25 +152,55 @@ function ensureLegDecor() {
   return svg;
 }
 
-function addDecorPath(pts, color, upp, withArrows, opacity) {
+function viewRect(svg) {
+  const vb = (svg.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+  if (vb.length !== 4 || !vb.every(Number.isFinite)) return null;
+  return { x: vb[0], y: vb[1], w: vb[2], h: vb[3] };
+}
+
+function bandPx(rect) {
+  const fullH = state.bundle?.viewbox?.height;
+  const zoom = rect && fullH > 0 && rect.h > 0 ? fullH / rect.h : 1;
+  return Math.min(DECOR.maxBandPx, Math.max(DECOR.minBandPx, DECOR.bandK * Math.sqrt(Math.max(1, zoom))));
+}
+
+function hideViewerDraftLines(svg) {
+  const hit = svg.querySelector('[data-draft-line="1"]');
+  const g = hit ? hit.parentNode : null;
+  if (!g) return;
+  for (const el of g.querySelectorAll("polyline:not([data-draft-line])")) el.setAttribute("stroke-opacity", "0");
+}
+
+function addBand(pts, color, upp, rect, bp, outBack, mul) {
   if (!Array.isArray(pts) || pts.length < 2) return;
-  const off = offsetPolylineLeft(pts, DECOR.offsetPx * upp);
-  const line = document.createElementNS(SVG_NS, "polyline");
-  line.setAttribute("points", off.map((p) => `${p[0]},${p[1]}`).join(" "));
-  line.setAttribute("fill", "none");
-  line.setAttribute("stroke", color);
-  line.setAttribute("stroke-width", String(DECOR.guidePx));
-  line.setAttribute("vector-effect", "non-scaling-stroke");
-  line.setAttribute("stroke-linejoin", "round");
-  line.setAttribute("opacity", String(opacity));
-  legDecorG.appendChild(line);
-  if (!withArrows) return;
-  for (const a of arrowPositions(off, DECOR.spacingPx * upp)) {
-    const poly = document.createElementNS(SVG_NS, "polygon");
-    poly.setAttribute("points", arrowPolygonPoints(a.x, a.y, a.angleDeg, DECOR.arrowLenPx * upp, DECOR.arrowHalfPx * upp));
-    poly.setAttribute("fill", color);
-    poly.setAttribute("opacity", String(opacity));
-    legDecorG.appendChild(poly);
+  const bandU = bp * upp;
+  const gapU = Math.max(1, bp * DECOR.gapRatio) * upp;
+  const center = offsetPolylineLeft(pts, outBack ? bandU / 2 + gapU / 2 : 0);
+  const band = document.createElementNS(SVG_NS, "polyline");
+  band.setAttribute("points", center.map((p) => `${p[0]},${p[1]}`).join(" "));
+  band.setAttribute("fill", "none");
+  band.setAttribute("stroke", color);
+  band.setAttribute("stroke-width", String(bandU));
+  band.setAttribute("stroke-linejoin", "round");
+  band.setAttribute("stroke-linecap", "butt");
+  band.setAttribute("opacity", String(DECOR.bandOpacity * mul));
+  legDecorG.appendChild(band);
+  const pad = bandU;
+  const x0 = rect.x - pad, x1 = rect.x + rect.w + pad, y0 = rect.y - pad, y1 = rect.y + rect.h + pad;
+  let left = DECOR.maxChevronNodes;
+  for (const a of arrowPositions(center, bandU, DECOR.maxPositions)) {
+    if (a.x < x0 || a.x > x1 || a.y < y0 || a.y > y1) continue;
+    if (left <= 0) break;
+    left -= 1;
+    const ch = document.createElementNS(SVG_NS, "polyline");
+    ch.setAttribute("points", chevronPolylinePoints(a.x, a.y, a.angleDeg, bandU * DECOR.chevronW, bandU * DECOR.chevronD));
+    ch.setAttribute("fill", "none");
+    ch.setAttribute("stroke", "#fff");
+    ch.setAttribute("stroke-width", String(bandU * DECOR.chevronStroke));
+    ch.setAttribute("stroke-linecap", "round");
+    ch.setAttribute("stroke-linejoin", "round");
+    ch.setAttribute("opacity", String(DECOR.chevronOpacity * mul));
+    legDecorG.appendChild(ch);
   }
 }
 
@@ -174,14 +209,18 @@ function drawLegDecor(lp, color) {
   lastLegColor = color;
   const svg = ensureLegDecor();
   if (!svg) return;
+  hideViewerDraftLines(svg);
   legDecorG.replaceChildren();
   if (!lp) return;
   const upp = editorUnitsPerPx(svg);
-  if (!(upp > 0)) return;
+  const rect = viewRect(svg);
+  if (!(upp > 0) || !rect) return;
+  const bp = bandPx(rect);
+  const outBack = state.route?.route_kind === "out_back";
   const ghost = lp.ghost || [];
   const ghostPaths = Array.isArray(ghost[0]?.[0]) ? ghost : (ghost.length ? [ghost] : []);
-  for (const g of ghostPaths) addDecorPath(g, color, upp, false, DECOR.ghostOpacity);
-  addDecorPath(lp.active, color, upp, true, 1);
+  for (const g of ghostPaths) addBand(g, color, upp, rect, bp, outBack, DECOR.ghostMul);
+  addBand(lp.active, color, upp, rect, bp, outBack, 1);
 }
 
 function drawDraft() {

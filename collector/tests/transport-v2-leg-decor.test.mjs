@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { offsetPolylineLeft, arrowPositions, arrowPolygonPoints } from "../server/public/transport-v2-leg-decor.js";
+import { offsetPolylineLeft, arrowPositions, arrowPolygonPoints, chevronPolylinePoints } from "../server/public/transport-v2-leg-decor.js";
 
 const closeTo = (a, b, eps) => Math.abs(a - b) <= eps;
 const pointsClose = (pts, expected, eps) => {
@@ -67,4 +67,22 @@ test("arrowPositions: path shorter than spacing yields no arrows", () => {
 test("arrowPolygonPoints: tip and back corners for angle 0", () => {
   const pts = arrowPolygonPoints(0, 0, 0, 7, 3.5).split(" ").map((s) => s.split(",").map(Number));
   pointsClose(pts, [[7, 0], [-2.8, 3.5], [-2.8, -3.5]], 1e-9);
+});
+
+test("chevronPolylinePoints: angle 0 back/tip/back corners", () => {
+  const pts = chevronPolylinePoints(0, 0, 0, 10, 5).split(" ").map((s) => s.split(",").map(Number));
+  pointsClose(pts, [[-2.5, 5], [2.5, 0], [-2.5, -5]], 1e-9);
+});
+
+test("chevronPolylinePoints: angle 90 tip point", () => {
+  const pts = chevronPolylinePoints(0, 0, 90, 10, 5).split(" ").map((s) => s.split(",").map(Number));
+  pointsClose([pts[1]], [[0, 2.5]], 1e-9);
+});
+
+test("offsetPolylineLeft: zero offset returns a new array, not the original", () => {
+  const input = [[0, 0], [10, 0]];
+  const out = offsetPolylineLeft(input, 0);
+  assert.deepEqual(out, [[0, 0], [10, 0]]);
+  assert.notEqual(out, input);
+  assert.notEqual(out[0], input[0]);
 });
