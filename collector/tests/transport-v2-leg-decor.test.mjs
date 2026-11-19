@@ -35,6 +35,11 @@ test("offsetPolylineLeft: single point and empty input pass through unchanged", 
   assert.deepEqual(offsetPolylineLeft([], 4), []);
 });
 
+test("offsetPolylineLeft: near-180 turn falls back to outgoing normal", () => {
+  const out = offsetPolylineLeft([[0, 0], [10, 0], [0, 1e-5]], 4);
+  pointsClose([out[1]], [[10, 4]], 1e-3);
+});
+
 test("arrowPositions: evenly spaced along a straight horizontal line", () => {
   const arrows = arrowPositions([[0, 0], [100, 0]], 22);
   const expectedX = [11, 33, 55, 77, 99];
@@ -46,11 +51,17 @@ test("arrowPositions: evenly spaced along a straight horizontal line", () => {
 test("arrowPositions: count is capped for pathologically small spacing", () => {
   const arrows = arrowPositions([[0, 0], [10000, 0]], 1);
   assert.equal(arrows.length, 400);
+  assert.ok(closeTo(arrows[0].x, 12.5, 1e-9), `first x: ${arrows[0].x} != 12.5`);
+  assert.ok(closeTo(arrows[arrows.length - 1].x, 9987.5, 1e-9), `last x: ${arrows[arrows.length - 1].x} != 9987.5`);
 });
 
 test("arrowPositions: vertical direction reports 90 degrees", () => {
-  const arrows = arrowPositions([[0, 0], [0, 10]], 22);
+  const arrows = arrowPositions([[0, 0], [0, 100]], 22);
   assert.ok(closeTo(arrows[0].angleDeg, 90, 1e-9));
+});
+
+test("arrowPositions: path shorter than spacing yields no arrows", () => {
+  assert.deepEqual(arrowPositions([[0, 0], [10, 0]], 22), []);
 });
 
 test("arrowPolygonPoints: tip and back corners for angle 0", () => {
