@@ -172,10 +172,12 @@ function bandPx(rect) {
   return Math.min(DECOR.maxBandPx, Math.max(DECOR.minBandPx, DECOR.bandK * Math.sqrt(Math.max(1, zoom))));
 }
 
+let draftGRef = null;
 function hideViewerDraftLines(svg) {
   const hit = svg.querySelector('[data-draft-line="1"]');
-  const g = hit ? hit.parentNode : null;
+  const g = hit ? hit.parentNode : draftGRef;
   if (!g) return;
+  draftGRef = g;
   for (const el of g.querySelectorAll("polyline:not([data-draft-line])")) el.setAttribute("stroke-opacity", "0");
 }
 
@@ -213,7 +215,7 @@ function drawLegDecor(lp, color) {
   lastLegColor = color;
   const svg = ensureLegDecor();
   if (!svg) return;
-  if ((lp?.active || []).length >= 2) hideViewerDraftLines(svg);
+  if ((lp?.active || []).length >= 2 || (lp?.ghost || []).length) hideViewerDraftLines(svg);
   legDecorG.replaceChildren();
   if (!lp) return;
   const upp = editorUnitsPerPx(svg);
@@ -853,9 +855,10 @@ async function init() {
     const decorSvg = ensureLegDecor();
     let lastViewBox = "";
     if (decorSvg) new MutationObserver(() => {
-      const vb = decorSvg.getAttribute("viewBox") || "";
-      if (vb === lastViewBox) return;
-      lastViewBox = vb;
+      const r = decorSvg.getBoundingClientRect();
+      const key = `${decorSvg.getAttribute("viewBox") || ""}|${r.width}x${r.height}`;
+      if (key === lastViewBox) return;
+      lastViewBox = key;
       drawLegDecor(lastLegPaths, lastLegColor);
     }).observe(decorSvg, { attributes: true, attributeFilter: ["viewBox"] });
     state.viewer.ready.then(buildRoadSnap);
