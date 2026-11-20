@@ -32,6 +32,8 @@ test("bundle: routes, skipped, labels, overlays, files", () => {
   assert.equal(bundle.map_key, "ubon-city-v1");
   assert.deepEqual(bundle.routes.map((r) => r.id), [1]);
   assert.deepEqual(bundle.routes[0].path, [[0, 0], [4000, 5600]]);
+  assert.equal(bundle.routes[0].route_kind, "loop");
+  assert.equal(bundle.routes[0].segments, undefined);
   assert.deepEqual(bundle.routes[0].stops, [{ order: 1, name: "ตลาด", type: "stop", x: 2000, y: 2800 }]);
   assert.deepEqual(skipped, [{ id: 2, number: "3", reason: "routing_status=stale" }, { id: 4, number: "5", reason: "no resolved path" }]);
   assert.equal(bundle.labels.length, 1);
@@ -52,4 +54,22 @@ test("bundle: invalid route number/name goes to skipped, overlay names never col
   const { bundle, skipped } = buildTransportBundle(i);
   assert.ok(skipped.some((s) => s.id === 9 && s.reason === "invalid number or name"));
   assert.deepEqual(bundle.overlays.map((o) => o.file), ["overlay-1.png", "overlay-2.png"]);
+});
+test("bundle: out_back route gets route_kind and segments", () => {
+  const i = input();
+  i.routes = [{
+    id: 5, route_number: "7", route_name: "สาย 7", vehicle_type: "bus", color: "#00ff00", routing_status: "fresh",
+    route_kind: "out_back",
+    control_points: [
+      { order: 1, lat: 15, lng: 104, leg: "out" },
+      { order: 2, lat: 15, lng: 104.5, leg: "out" },
+      { order: 3, lat: 15, lng: 104.5, leg: "back" },
+      { order: 4, lat: 15, lng: 104, leg: "back" },
+    ],
+    resolved_path: [{ lat: 15, lng: 104 }, { lat: 15, lng: 104.5 }, { lat: 15, lng: 104.5 }, { lat: 15, lng: 104 }],
+  }];
+  const { bundle } = buildTransportBundle(i);
+  assert.equal(bundle.routes[0].route_kind, "out_back");
+  assert.ok(bundle.routes[0].segments.length >= 1);
+  assert.ok(bundle.routes[0].segments.every((s) => ["both", "out", "back"].includes(s.leg)));
 });
