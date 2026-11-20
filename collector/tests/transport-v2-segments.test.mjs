@@ -41,3 +41,15 @@ test("short divergence below minRun is smoothed into shared", () => {
   const segs = buildLegSegments(out, back, TOL, MIN_RUN);
   assert.deepEqual(legs(segs), ["both"]);
 });
+
+test("minRun larger than every run keeps the original split unsmoothed", () => {
+  const back = [
+    ...line(300, 0, 200, 0),
+    ...line(200, 10, 200, 100),
+    ...line(190, 100, 100, 100),
+    ...line(100, 90, 100, 0),
+    ...line(90, 0, 0, 0),
+  ];
+  const segs = buildLegSegments(out, back, TOL, 1000);
+  assert.deepEqual(legs(segs), ["both", "out", "both", "back"]);
+});

@@ -46,6 +46,7 @@ export function buildTransportBundle({ baseMap, baseSvgStoragePath, labelLayer, 
   const files = [];
   const { bounds, viewbox } = baseMap;
   const mPerUnit = ((bounds.max_lat - bounds.min_lat) * 111320) / viewbox.height;
+  const scaleOk = Number.isFinite(mPerUnit) && mPerUnit > 0;
   if (!baseSvgStoragePath) problems.push("base map has no SVG asset");
   else files.push({ name: "base.svg", storagePath: baseSvgStoragePath });
 
@@ -98,7 +99,7 @@ export function buildTransportBundle({ baseMap, baseSvgStoragePath, labelLayer, 
       distance_km: Number(r.resolved_distance_km || 0),
       path,
       route_kind: kind,
-      ...(kind === "out_back" ? (() => {
+      ...(kind === "out_back" && scaleOk ? (() => {
         const sp = splitPathAtTurn(path, turnXYOf(r, bounds, viewbox));
         return { segments: buildLegSegments(sp.out, sp.back, SHARED_TOL_M / mPerUnit, MIN_RUN_M / mPerUnit) };
       })() : {}),

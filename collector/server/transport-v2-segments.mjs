@@ -27,7 +27,7 @@ function runs(pts, flags) {
 function smooth(pts, flags, minRun) {
   const f = flags.slice();
   const rs = runs(pts, f);
-  if (rs.length < 2) return f;
+  if (rs.length < 2 || !rs.some(r => r.len >= minRun)) return f;
   for (const r of rs) if (r.len < minRun) for (let i = r.from; i <= r.to; i++) f[i] = !r.shared;
   return f;
 }
