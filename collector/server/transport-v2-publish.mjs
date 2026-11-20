@@ -1,4 +1,9 @@
+import { splitPathAtTurn } from "./public/transport-v2-legs-editor.js";
+import { buildLegSegments } from "./transport-v2-segments.mjs";
+
 const LANGS = ["th", "en"];
+const SHARED_TOL_M = 20;
+const MIN_RUN_M = 30;
 const round1 = (v) => Math.round(Number(v) * 10) / 10;
 const extOf = (p) => { const m = /\.([a-z0-9]{2,5})$/i.exec(String(p || "")); return m ? `.${m[1].toLowerCase()}` : ""; };
 
@@ -27,11 +32,21 @@ function pickTexts(texts) {
 
 const validLatLng = (p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lng);
 
+function turnXYOf(r, bounds, viewbox) {
+  const cps = r.control_points || [];
+  if (!cps.some((c) => c.leg === "back")) return null;
+  const outs = cps.filter((c) => c.leg !== "back").sort((a, b) => a.order - b.order);
+  const t = outs[outs.length - 1];
+  return t ? projectToViewbox(t.lat, t.lng, bounds, viewbox) : null;
+}
+
 export function buildTransportBundle({ baseMap, baseSvgStoragePath, labelLayer, overlayLayers, routes, revision }) {
   const problems = [];
   const skipped = [];
   const files = [];
   const { bounds, viewbox } = baseMap;
+  const mPerUnit = ((bounds.max_lat - bounds.min_lat) * 111320) / viewbox.height;
+  const scaleOk = Number.isFinite(mPerUnit) && mPerUnit > 0;
   if (!baseSvgStoragePath) problems.push("base map has no SVG asset");
   else files.push({ name: "base.svg", storagePath: baseSvgStoragePath });
 
@@ -73,6 +88,7 @@ export function buildTransportBundle({ baseMap, baseSvgStoragePath, labelLayer, 
     if (r.routing_status !== "fresh") { skipped.push({ ...ref, reason: `routing_status=${r.routing_status}` }); continue; }
     const path = (r.resolved_path || []).filter(validLatLng).map((p) => projectToViewbox(p.lat, p.lng, bounds, viewbox));
     if (path.length < 2) { skipped.push({ ...ref, reason: "no resolved path" }); continue; }
+    const kind = r.route_kind === "out_back" ? "out_back" : "loop";
     outRoutes.push({
       id: r.id,
       number,
@@ -82,6 +98,11 @@ export function buildTransportBundle({ baseMap, baseSvgStoragePath, labelLayer, 
       description: String(r.description || ""),
       distance_km: Number(r.resolved_distance_km || 0),
       path,
+      route_kind: kind,
+      ...(kind === "out_back" && scaleOk ? (() => {
+        const sp = splitPathAtTurn(path, turnXYOf(r, bounds, viewbox));
+        return { segments: buildLegSegments(sp.out, sp.back, SHARED_TOL_M / mPerUnit, MIN_RUN_M / mPerUnit) };
+      })() : {}),
       stops: (r.stops || []).filter((s) => validLatLng(s) && String(s?.name || "").trim() && String(s.name).trim().length <= 200).map((s) => {
         const [x, y] = projectToViewbox(s.lat, s.lng, bounds, viewbox);
         return { order: s.order, name: String(s.name).trim(), type: s.stop_type || "stop", x, y, ...(s.leg ? { leg: s.leg } : {}) };
