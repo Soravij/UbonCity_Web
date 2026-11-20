@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { offsetPolylineLeft, arrowPositions, arrowPolygonPoints, chevronPolylinePoints, arrowPositionsInRect } from "../server/public/transport-v2-leg-decor.js";
+import { offsetPolylineLeft, arrowPositions, arrowPolygonPoints, chevronPolylinePoints, arrowPositionsInRect, legEndpointLabels } from "../server/public/transport-v2-leg-decor.js";
 
 const BIG = { x: -1e9, y: -1e9, w: 2e9, h: 2e9 };
 const closeTo = (a, b, eps) => Math.abs(a - b) <= eps;
@@ -119,6 +119,29 @@ test("arrowPositionsInRect: maxNodes caps output even with a tiny spacing", () =
   const expectedX = [0.5, 334.5, 668.5];
   assert.equal(arrows.length, expectedX.length);
   arrows.forEach((a, i) => assert.ok(closeTo(a.x, expectedX[i], 1e-9), `x[${i}]: ${a.x} != ${expectedX[i]}`));
+});
+
+test("legEndpointLabels: non-loop distinct endpoints returns start and end labels", () => {
+  assert.deepEqual(legEndpointLabels([0, 0], [10, 10], false), [
+    { x: 0, y: 0, text: "เริ่ม" },
+    { x: 10, y: 10, text: "สุด" },
+  ]);
+});
+
+test("legEndpointLabels: loop returns only start label", () => {
+  assert.deepEqual(legEndpointLabels([5, 5], [10, 10], true), [{ x: 5, y: 5, text: "เริ่ม" }]);
+});
+
+test("legEndpointLabels: coincident endpoints returns only start label", () => {
+  assert.deepEqual(legEndpointLabels([5, 5], [5, 5], false), [{ x: 5, y: 5, text: "เริ่ม" }]);
+});
+
+test("legEndpointLabels: missing lastXY returns only start label", () => {
+  assert.deepEqual(legEndpointLabels([5, 5], null, false), [{ x: 5, y: 5, text: "เริ่ม" }]);
+});
+
+test("legEndpointLabels: missing firstXY returns empty array", () => {
+  assert.deepEqual(legEndpointLabels(null, [1, 1], false), []);
 });
 
 test("arrowPositionsInRect: widens spacing to fit exactly maxNodes within budget", () => {

@@ -118,3 +118,13 @@ export function arrowPositionsInRect(points, spacingUnits, rect, maxNodes = 1000
   }
   return out;
 }
+export function legEndpointLabels(firstXY, lastXY, isLoop) {
+  if (!firstXY) return [];
+  const coincident = !lastXY
+    || (Math.abs(firstXY[0] - lastXY[0]) < 1e-6 && Math.abs(firstXY[1] - lastXY[1]) < 1e-6);
+  if (isLoop || coincident) return [{ x: firstXY[0], y: firstXY[1], text: "เริ่ม" }];
+  return [
+    { x: firstXY[0], y: firstXY[1], text: "เริ่ม" },
+    { x: lastXY[0], y: lastXY[1], text: "สุด" },
+  ];
+}
