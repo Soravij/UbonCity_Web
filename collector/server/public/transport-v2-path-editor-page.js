@@ -3,7 +3,7 @@ import { initAuthBox } from "./auth-box.js";
 import { createTransportMapViewer, latLngToViewbox, viewboxToLatLng } from "./transport-map-viewer.js";
 import { SNAP_ROAD_GROUPS, parsePathD, buildRoadIndex, nearestOnRoads } from "./transport-v2-road-snap.js";
 import { normalizeLegPoints, legRange, nearestIndex, splitPathAtTurn, buildBackFromOut, activeStopIndexes } from "./transport-v2-legs-editor.js";
-import { offsetPolylineLeft, arrowPositionsInRect, chevronPolylinePoints } from "./transport-v2-leg-decor.js";
+import { offsetPolylineLeft, arrowPositionsInRect, chevronPolylinePoints, legEndpointLabels } from "./transport-v2-leg-decor.js";
 
 const state = {
   routeId: Number(new URLSearchParams(window.location.search).get("id") || 0) || 0,
@@ -118,6 +118,7 @@ const DECOR = {
   bandOpacity: 0.85, chevronOpacity: 0.6, ghostMul: 0.35,
   chevronW: 0.7, chevronD: 0.35, chevronStroke: 0.18,
   maxChevronNodes: 1000,
+  labelFontPx: 11, labelPadXPx: 6, labelPadYPx: 3, labelGapPx: 4,
 };
 let legDecorG = null;
 let lastLegPaths = null;
@@ -210,6 +211,46 @@ function addBand(pts, color, upp, rect, bp, outBack, mul) {
   }
 }
 
+function drawLegEndpointLabels(color, upp) {
+  const { start, end } = range();
+  if (end - start < 1) return;
+  const first = project(state.points[start]);
+  const last = project(state.points[end - 1]);
+  const isLoop = state.routeKind !== "out_back";
+  const rPx = window.matchMedia && window.matchMedia("(pointer: coarse)").matches ? 10 : 6;
+  for (const lbl of legEndpointLabels(first, last, isLoop)) {
+    const g = document.createElementNS(SVG_NS, "g");
+    const rectEl = document.createElementNS(SVG_NS, "rect");
+    const text = document.createElementNS(SVG_NS, "text");
+    text.textContent = lbl.text;
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("dominant-baseline", "middle");
+    text.setAttribute("fill", "#fff");
+    text.setAttribute("font-weight", "600");
+    text.setAttribute("font-size", String(DECOR.labelFontPx * upp));
+    text.setAttribute("x", String(lbl.x));
+    text.setAttribute("y", String(lbl.y));
+    rectEl.setAttribute("fill", color);
+    rectEl.setAttribute("stroke", "#fff");
+    rectEl.setAttribute("stroke-width", String(1.5 * upp));
+    rectEl.setAttribute("rx", String(DECOR.labelFontPx * 0.6 * upp));
+    g.append(rectEl, text);
+    legDecorG.appendChild(g);
+    let bbox = null;
+    try { bbox = text.getBBox(); } catch { bbox = null; }
+    if (!bbox || !(bbox.width > 0) || !(bbox.height > 0)) { g.remove(); continue; }
+    const padX = DECOR.labelPadXPx * upp;
+    const padY = DECOR.labelPadYPx * upp;
+    const h = bbox.height + 2 * padY;
+    const dy = (rPx + DECOR.labelGapPx) * upp + h / 2;
+    text.setAttribute("y", String(lbl.y - dy));
+    rectEl.setAttribute("x", String(bbox.x - padX));
+    rectEl.setAttribute("y", String(bbox.y - dy - padY));
+    rectEl.setAttribute("width", String(bbox.width + 2 * padX));
+    rectEl.setAttribute("height", String(h));
+  }
+}
+
 function drawLegDecor(lp, color) {
   lastLegPaths = lp;
   lastLegColor = color;
@@ -228,6 +269,7 @@ function drawLegDecor(lp, color) {
   const ghostPaths = Array.isArray(ghost[0]?.[0]) ? ghost : (ghost.length ? [ghost] : []);
   for (const g of ghostPaths) addBand(g, color, upp, cull, bp, outBack, DECOR.ghostMul);
   addBand(lp.active, color, upp, cull, bp, outBack, 1);
+  drawLegEndpointLabels(color, upp);
 }
 
 function drawDraft() {
