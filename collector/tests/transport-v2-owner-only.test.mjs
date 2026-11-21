@@ -22,11 +22,14 @@ test("v2 pages: owner-only", () => {
   }
 });
 
-test("transport hub: v2 button owner-only", () => {
+test("transport hub: v2 steps owner-only", () => {
   const html = read("../server/public/transport.html");
-  assert.match(html, /id="btn-open-transport-map-manager" class="primary hidden"/);
   const js = read("../server/public/transport-page.js");
-  assert.match(js, /if \(role === "owner"\) \{[^}]*btn-open-transport-map-manager[^}]*\}/s);
+  assert.match(html, /<ol class="transport-steps hidden" id="transport-steps">/);
+  for (const href of ["/transport-v2-base-maps.html", "/transport-v2-routes.html", "/transport-v2-preview.html"]) {
+    assert.ok(html.includes(`href="${href}"`), href);
+  }
+  assert.match(js, /currentRole\(user\) === "owner"[\s\S]*transport-steps/);
 });
 
 test("routes page: no render-published / routes-review entry points; preview reachable", () => {
