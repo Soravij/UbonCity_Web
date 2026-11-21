@@ -6,6 +6,7 @@ import {
   mapPointToStagePercent as mapPointToStagePercentShared,
   mapSizeToStagePercent as mapSizeToStagePercentShared,
 } from "./transport-v2-map-geometry.js";
+import { LANDMARK_ICONS } from "./transport-map-viewer.js";
 
 const DEFAULT_BOUNDS = {
   min_lat: 15.1083,
@@ -1627,7 +1628,9 @@ function renderPlacementStage(options = {}) {
       ? `Selected ${state.selectedLabelKey}. Drag label to move, or drag map to pan.`
       : "Drag a label to move it, or drag empty map space to pan.";
   }
-  textLayer.innerHTML = items.map((item) => {
+  const svgNs = "http://www.w3.org/2000/svg";
+  textLayer.innerHTML = "";
+  for (const item of items) {
     const localeOffset = labelLocaleOffset(item);
     const position = mapPointToStagePercent(
       Number(item.anchor_x) + Number(localeOffset.dx || 0),
@@ -1637,17 +1640,36 @@ function renderPlacementStage(options = {}) {
     const labelText = labelDisplayText(item);
     const style = resolveLabelStyle(item);
     const previewScale = labelPreviewScale(style);
-    return `
-      <div
-        class="base-map-text-label${item.label_key === state.selectedLabelKey ? " is-selected" : ""}"
-        data-label-key="${escapeHtml(item.label_key)}"
-        data-action="select-label"
-        style="left:${position.left}%;top:${position.top}%;font-family:${escapeHtml(style.font_family)};font-size:${labelFontSizePx(style)}px;color:${escapeHtml(style.text_color)};--base-map-label-scale:${previewScale}"
-      >
-        <span class="base-map-text-label-text">${escapeHtml(labelText)}</span>
-      </div>
-    `;
-  }).join("");
+    const category = String(item.label_category || "").trim().toLowerCase();
+    const icon = LANDMARK_ICONS[category] || null;
+
+    const div = document.createElement("div");
+    div.className = `base-map-text-label${item.label_key === state.selectedLabelKey ? " is-selected" : ""}`;
+    div.setAttribute("data-label-key", item.label_key);
+    div.setAttribute("data-action", "select-label");
+    div.style.left = `${position.left}%`;
+    div.style.top = `${position.top}%`;
+    div.style.fontFamily = style.font_family;
+    div.style.fontSize = `${labelFontSizePx(style)}px`;
+    div.style.color = style.text_color;
+    div.style.setProperty("--base-map-label-scale", previewScale);
+    div.style.transform = category === "area" ? "translate(-50%, -50%)" : "translate(-0.6em, -50%)";
+
+    const span = document.createElement("span");
+    span.className = "base-map-text-label-text";
+    if (icon) {
+      const svg = document.createElementNS(svgNs, "svg");
+      svg.setAttribute("viewBox", `0 0 ${icon.w} ${icon.h}`);
+      svg.setAttribute("style", `height:1em;width:auto;vertical-align:-0.125em;fill:${icon.color}`);
+      const path = document.createElementNS(svgNs, "path");
+      path.setAttribute("d", icon.d);
+      svg.append(path);
+      span.append(svg, document.createTextNode(" "));
+    }
+    span.append(document.createTextNode(labelText));
+    div.append(span);
+    textLayer.append(div);
+  }
   renderOverlayLayer(map);
   markers.innerHTML = "";
   renderLabelList();

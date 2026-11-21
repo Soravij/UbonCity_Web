@@ -474,7 +474,6 @@
       .base-map-text-label {
         position: absolute;
         transform: translateY(-100%) scale(var(--base-map-label-scale, 1));
-        transform-origin: left bottom;
         display: inline-flex;
         align-items: center;
         max-width: 220px;
@@ -1115,13 +1114,16 @@
                   <div>
                     <label>Category</label>
                     <select id="placement-label-category">
-                      <option value="landmark">landmark</option>
-                      <option value="district">district</option>
-                      <option value="terminal">terminal</option>
-                      <option value="stop">stop</option>
-                      <option value="pier">pier</option>
-                      <option value="warning">warning</option>
-                      <option value="custom">custom</option>
+                      <option value="hospital">โรงพยาบาล</option>
+                      <option value="market">ตลาด</option>
+                      <option value="temple">วัด</option>
+                      <option value="school">สถานศึกษา</option>
+                      <option value="transit">สถานีขนส่ง/รถไฟ</option>
+                      <option value="airport">สนามบิน</option>
+                      <option value="mall">ห้าง</option>
+                      <option value="government">สถานที่ราชการ</option>
+                      <option value="area">ชื่อย่าน (ไม่มีไอคอน)</option>
+                      <option value="other" selected>อื่น ๆ (จุด)</option>
                     </select>
                   </div>
                   <div>
