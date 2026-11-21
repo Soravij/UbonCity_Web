@@ -640,7 +640,7 @@ function annotationRenderLabelLayer(labelSource) {
       const style = resolveLabelStyleForCategory(labelStyle, label?.label_category);
       return {
         label_key: String(label?.label_key || "").trim(),
-        label_category: String(label?.label_category || "landmark").trim().toLowerCase() || "landmark",
+        label_category: String(label?.label_category || "other").trim().toLowerCase() || "other",
         anchor_x: Number(label?.anchor_x || 0),
         anchor_y: Number(label?.anchor_y || 0),
         priority: Number(label?.priority || 0),
@@ -869,7 +869,7 @@ export function createTransportV2Router({ db, dirs, logAudit = () => {}, getAiCo
   const normalizeLabelLayoutItemsInput = (items = []) => (Array.isArray(items) ? items : [])
     .map((row, index) => ({
       label_key: String(row?.label_key || "").trim(),
-      label_category: String(row?.label_category || "landmark").trim().toLowerCase() || "landmark",
+      label_category: String(row?.label_category || "other").trim().toLowerCase() || "other",
       anchor_x: num(row?.anchor_x),
       anchor_y: num(row?.anchor_y),
       priority: Number(row?.priority ?? index) || 0,

@@ -303,7 +303,7 @@ function normalizeLabelItems(value) {
   return (Array.isArray(value) ? value : [])
     .map((row, index) => ({
       label_key: String(row?.label_key || "").trim(),
-      label_category: String(row?.label_category || "landmark").trim().toLowerCase() || "landmark",
+      label_category: String(row?.label_category || "other").trim().toLowerCase() || "other",
       anchor_x: Number(row?.anchor_x),
       anchor_y: Number(row?.anchor_y),
       priority: Number(row?.priority ?? index) || 0,
@@ -1657,10 +1657,8 @@ function renderPlacementStage(options = {}) {
     div.style.fontSize = `${labelFontSizePx(style)}px`;
     div.style.color = style.text_color;
     div.style.setProperty("--base-map-label-scale", previewScale);
-    div.style.transform = category === "area" ? "translate(-50%, -50%)" : "translate(-0.6em, -50%)";
 
-    const span = document.createElement("span");
-    span.className = "base-map-text-label-text";
+    const mark = document.createElement("span");
     if (icon) {
       const svg = document.createElementNS(svgNs, "svg");
       svg.setAttribute("viewBox", `0 0 ${icon.w} ${icon.h}`);
@@ -1668,11 +1666,23 @@ function renderPlacementStage(options = {}) {
       const path = document.createElementNS(svgNs, "path");
       path.setAttribute("d", icon.d);
       svg.append(path);
-      span.append(svg, document.createTextNode(" "));
+      mark.append(svg);
     }
-    span.append(document.createTextNode(labelText));
-    div.append(span);
+    div.append(mark);
+    if (icon) div.append(document.createTextNode(" "));
+
+    const textSpan = document.createElement("span");
+    textSpan.className = "base-map-text-label-text";
+    textSpan.append(document.createTextNode(labelText));
+    div.append(textSpan);
     textLayer.append(div);
+
+    if (category !== "area" && div.offsetWidth !== 0) {
+      const ox = icon ? div.clientLeft + mark.offsetLeft + mark.offsetWidth / 2 : div.clientLeft;
+      const oy = icon ? div.clientTop + mark.offsetTop + mark.offsetHeight / 2 : div.clientTop + div.clientHeight / 2;
+      div.style.transformOrigin = `${ox}px ${oy}px`;
+      div.style.transform = `translate(${-ox}px, ${-oy}px) scale(var(--base-map-label-scale, 1))`;
+    }
   }
   renderOverlayLayer(map);
   markers.innerHTML = "";
@@ -2123,7 +2133,7 @@ function addPlacementLabel() {
   const viewHeight = Number(map?.viewbox?.height || DEFAULT_VIEWBOX.height) || DEFAULT_VIEWBOX.height;
   const next = {
     label_key: key,
-    label_category: String(qs("placement-label-category")?.value || "landmark").trim().toLowerCase() || "landmark",
+    label_category: String(qs("placement-label-category")?.value || "other").trim().toLowerCase() || "other",
     anchor_x: Math.round(viewWidth * 0.5),
     anchor_y: Math.round(viewHeight * 0.5),
     priority: Number(qs("placement-label-priority")?.value || 3) || 3,
