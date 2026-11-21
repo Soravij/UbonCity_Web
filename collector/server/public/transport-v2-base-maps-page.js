@@ -42,12 +42,16 @@ const GENERATED_BASE_MAP_R1 = {
 };
 
 const KNOWN_LABEL_CATEGORIES = [
-  "landmark",
-  "district",
-  "terminal",
-  "stop",
-  "pier",
-  "warning",
+  "hospital",
+  "market",
+  "temple",
+  "school",
+  "transit",
+  "airport",
+  "mall",
+  "government",
+  "area",
+  "other",
 ];
 
 const DEFAULT_LABEL_TARGET_LOCALES = ["en", "zh", "lo"];
@@ -246,7 +250,7 @@ function preferredBaseMapSelection(items = state.baseMaps) {
 function deriveLabelCategoryFromKey(value) {
   const key = String(value || "").trim().toLowerCase();
   const prefix = key.split(".")[0] || "";
-  return KNOWN_LABEL_CATEGORIES.includes(prefix) ? prefix : "custom";
+  return KNOWN_LABEL_CATEGORIES.includes(prefix) ? prefix : "other";
 }
 
 function syncPlacementCategoryFromKey() {
@@ -262,7 +266,7 @@ function rewritePlacementKeyFromCategory() {
   if (!keyInput || !categorySelect) return;
   const category = String(categorySelect.value || "").trim().toLowerCase();
   const rawKey = String(keyInput.value || "").trim();
-  if (!rawKey || !category || category === "custom") return;
+  if (!rawKey || !category || category === "other") return;
   const parts = rawKey.split(".");
   const suffix = parts.length > 1 ? parts.slice(1).join(".").trim() : rawKey;
   if (!suffix) return;
