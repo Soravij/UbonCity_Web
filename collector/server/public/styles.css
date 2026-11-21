@@ -10669,7 +10669,7 @@ select:focus-visible {
 .transport-hub-card p { margin: 0; }
 .transport-hub-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .transport-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.transport-step { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; color: inherit; text-decoration: none; }
+.transport-step { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; color: inherit; text-decoration: none; background: var(--theme-surface-soft); }
 a.transport-step:hover, a.transport-step:focus-visible { border-color: var(--accent); }
 .transport-step.is-disabled { opacity: 0.55; cursor: not-allowed; }
 .transport-step-num { flex: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: #fff; font-weight: 700; }
