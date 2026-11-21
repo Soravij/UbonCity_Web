@@ -10836,9 +10836,6 @@ function wireProcessTransitions() {
     qs("btn-open-events-manager")?.addEventListener("click", () => {
       window.location.href = "/events-manager.html";
     });
-  qs("btn-open-transport-map-manager")?.addEventListener("click", () => {
-    window.location.href = "/transport-map-routes.html";
-  });
   qs("btn-open-other-transport-manager")?.addEventListener("click", () => {
     window.location.href = "/other-transport.html";
   });

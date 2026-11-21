@@ -1108,39 +1108,6 @@ const collectorIntegrationConfig = () => ({
   collectorPublicBaseUrl: String(process.env.COLLECTOR_PUBLIC_BASE_URL || process.env.COLLECTOR_PUBLIC_URL || "").trim(),
 });
 
-  const buildReleasePayload = (item) => ({
-    source_system: "collector-app",
-    source_base_url: "",
-    routes: [
-      {
-        collector_item_id: Number(item?.id || 0) || 0,
-        source_content_item_id: Number(item?.id || 0) || 0,
-        route_name: String(item?.route_name || "").trim(),
-        route_number: String(item?.route_number || "").trim(),
-        vehicle_type: vehicle(item?.vehicle_type),
-        vehicle_image: "",
-        color: color(item?.color),
-        description: String(item?.description || "").trim(),
-        raw_points: (Array.isArray(item?.control_points) ? item.control_points : []).map((point, index) => ({
-          lat: num(point?.lat),
-          lng: num(point?.lng),
-          point_order: index,
-        })).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng)),
-        path: (Array.isArray(item?.resolved_path) ? item.resolved_path : []).map((point, index) => ({
-          lat: num(point?.lat),
-          lng: num(point?.lng),
-          point_order: index,
-        })).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng)),
-        stops: (Array.isArray(item?.stops) ? item.stops : []).map((stop, index) => ({
-          name: String(stop?.name || `Stop ${index + 1}`).trim() || `Stop ${index + 1}`,
-          lat: num(stop?.lat),
-          lng: num(stop?.lng),
-          stop_order: index,
-        })).filter((stop) => stop.name && Number.isFinite(stop.lat) && Number.isFinite(stop.lng)),
-      },
-    ],
-  });
-
   router.get("/base-maps", allow("owner"), (_req, res) => {
     res.json({
       items: db.prepare("SELECT * FROM transport_base_maps_v2 ORDER BY created_at DESC, id DESC").all().map((row) => {

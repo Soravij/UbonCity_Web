@@ -9,12 +9,6 @@
     <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
     <!--CH_HEAD_CSS-->
     <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
-    <style>
-      .transport-hub-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-      .transport-hub-card { display: grid; gap: 14px; }
-      .transport-hub-card p { margin: 0; }
-      .transport-hub-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-    </style>
   </head>
   <body>
     <main class="container article-page-shell">
@@ -42,14 +36,15 @@
           <div class="article-section-head">
             <div>
               <h2 class="section-title">Transport Map</h2>
-              <p class="muted">จัดการสายรถ เส้นทาง การมอบหมายงาน และ review ของ public transport map</p>
+              <p class="muted">ทำตามลำดับ layer: Base Map → Landmarks → Routes → Preview &amp; Publish</p>
             </div>
           </div>
-          <div class="transport-hub-actions">
-            <button id="btn-open-transport-map-manager" class="primary hidden">เปิด Transport Map</button>
-            <button id="btn-open-transport-base-maps" class="utility-action hidden">Base Maps</button>
-            <button id="btn-open-transport-preview" class="utility-action hidden">Preview &amp; Publish</button>
-          </div>
+          <ol class="transport-steps hidden" id="transport-steps">
+            <li><a class="transport-step" href="/transport-v2-base-maps.html"><span class="transport-step-num">1</span><span class="transport-step-body"><strong>Base Map</strong><span class="muted" id="step-base-map-status">กำลังโหลด…</span></span></a></li>
+            <li><span class="transport-step is-disabled" aria-disabled="true"><span class="transport-step-num">2</span><span class="transport-step-body"><strong>Landmarks</strong><span class="muted" id="step-landmarks-status">กำลังโหลด…</span></span></span></li>
+            <li><a class="transport-step" href="/transport-v2-routes.html"><span class="transport-step-num">3</span><span class="transport-step-body"><strong>Routes</strong><span class="muted" id="step-routes-status">กำลังโหลด…</span></span></a></li>
+            <li><a class="transport-step" href="/transport-v2-preview.html"><span class="transport-step-num">4</span><span class="transport-step-body"><strong>Preview &amp; Publish</strong><span class="muted" id="step-publish-status">กำลังโหลด…</span></span></a></li>
+          </ol>
         </article>
 
         <article class="card article-work-card transport-hub-card">
