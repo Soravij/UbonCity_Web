@@ -209,7 +209,7 @@ export function createTransportMapViewer(container, options = {}) {
       g.append(el("circle", { "data-ring": "1", fill: "none", stroke: "#2563eb", visibility: "hidden" }));
       if (cat !== "area") g.append(el("circle", { fill: icon ? icon.color : "#616161", stroke: "#ffffff" }));
       if (icon) g.append(el("path", { "data-icon": "1", fill: "#ffffff", d: icon.d }));
-      g.append(el("text", { "text-anchor": "middle", "dominant-baseline": "middle", fill: label.style?.color || "#243041", stroke: "#ffffff", "paint-order": "stroke", "font-family": "Noto Sans Thai, sans-serif" }));
+      g.append(el("text", { "text-anchor": "middle", "dominant-baseline": "middle", fill: cat === "area" ? "#6b7280" : (label.style?.color || "#243041"), stroke: "#ffffff", "paint-order": "stroke", "font-family": "Noto Sans Thai, sans-serif" }));
       gLabels.append(g);
     }
     writeLabelText();
@@ -313,6 +313,7 @@ export function createTransportMapViewer(container, options = {}) {
       text.setAttribute("font-size", String(L.font));
       text.setAttribute("text-anchor", L.anchor);
       text.setAttribute("stroke-width", String(L.stroke));
+      text.setAttribute("letter-spacing", String(label.category) === "area" ? String(L.font * 0.15) : "0");
     }
   }
 
