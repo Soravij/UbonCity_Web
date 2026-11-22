@@ -197,6 +197,7 @@ export function createTransportMapViewer(container, options = {}) {
   }
 
   const labelsByKey = new Map();
+  let selectedLabelKey = null;
   function buildLabels(list) {
     labelsByKey.clear();
     gLabels.replaceChildren();
@@ -205,6 +206,7 @@ export function createTransportMapViewer(container, options = {}) {
       const cat = String(label.category || "other");
       const icon = cat === "area" ? null : LANDMARK_ICONS[cat] || null;
       const g = el("g", { "data-landmark": "1", "data-key": label.key });
+      g.append(el("circle", { "data-ring": "1", fill: "none", stroke: "#2563eb", visibility: "hidden" }));
       if (cat !== "area") g.append(el("circle", { fill: icon ? icon.color : "#616161", stroke: "#ffffff" }));
       if (icon) g.append(el("path", { "data-icon": "1", fill: "#ffffff", d: icon.d }));
       g.append(el("text", { "text-anchor": "middle", "dominant-baseline": "middle", fill: label.style?.color || "#243041", stroke: "#ffffff", "paint-order": "stroke", "font-family": "Noto Sans Thai, sans-serif" }));
@@ -287,12 +289,21 @@ export function createTransportMapViewer(container, options = {}) {
       const label = labelsByKey.get(g.getAttribute("data-key"));
       const L = landmarkLayout(label, u, z);
       g.style.display = label.min_zoom == null || z >= label.min_zoom ? "" : "none";
-      const circle = g.querySelector("circle");
+      const circle = g.querySelector("circle:not([data-ring])");
       if (circle) {
         circle.setAttribute("cx", String(label.x));
         circle.setAttribute("cy", String(label.y));
         circle.setAttribute("r", String(L.r));
         circle.setAttribute("stroke-width", String(L.ring));
+      }
+      const ring = g.querySelector("circle[data-ring]");
+      const on = label.key === selectedLabelKey;
+      ring.setAttribute("visibility", on ? "visible" : "hidden");
+      if (on) {
+        ring.setAttribute("cx", String(label.x));
+        ring.setAttribute("cy", String(label.y));
+        ring.setAttribute("r", String(L.r > 0 ? L.r * 1.6 : L.font * 1.2));
+        ring.setAttribute("stroke-width", String(L.stroke));
       }
       const path = g.querySelector("path[data-icon]");
       if (path && L.icon) path.setAttribute("transform", glyphTransform(L.icon, label.x, label.y, L.glyph));
@@ -509,6 +520,7 @@ export function createTransportMapViewer(container, options = {}) {
       render();
     },
     setLabels(next) { buildLabels(Array.isArray(next) ? next : []); render(); },
+    selectLabel(key) { selectedLabelKey = key == null ? null : String(key); render(); },
     fitAll() {
       view = { x: full.x, y: full.y, w: full.width, h: full.height };
       render();

@@ -10706,3 +10706,9 @@ a.transport-step:hover, a.transport-step:focus-visible { border-color: var(--acc
 .tv2-stage button.tv2-warn-banner { position: absolute; top: 12px; right: 12px; z-index: 11; background: #dc2626 !important; color: #fff !important; border: 0 !important; border-radius: 999px; padding: 8px 14px; font-weight: 600; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25); cursor: pointer; }
 .tv2-stage button.tv2-warn-banner:hover { background: #b91c1c !important; }
 .tv2-stage-panel input, .tv2-stage-panel select { width: 100%; box-sizing: border-box; }
+:root[data-theme="dark"] .tv2-stage.is-full .tv2-stage-panel input,
+:root[data-theme="dark"] .tv2-stage.is-full .tv2-stage-panel select {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}

@@ -67,6 +67,7 @@ function renderForm() {
 
 function refresh() {
   state.viewer?.setLabels(toViewerLabels(state.items));
+  state.viewer?.selectLabel(state.selectedKey);
   renderList();
   renderForm();
   qs("lm-meta").textContent = `${state.baseMap?.title || ""} · ${state.saved.length} จุด`;
@@ -117,15 +118,23 @@ function unitsPerPx() {
   return vb && svg.clientWidth && svg.clientHeight ? Math.max(vb.width / svg.clientWidth, vb.height / svg.clientHeight) : 1;
 }
 
-function nearest(at) {
-  const limit = 18 * unitsPerPx();
+function hitTest(at) {
+  const svg = qs("landmarks-map").querySelector("svg");
+  if (!svg) return null;
+  const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+  const pad = (coarse ? 12 : 6) * unitsPerPx();
   let best = null;
   let bestD = Infinity;
-  for (const it of state.items) {
+  for (const g of svg.querySelectorAll("g[data-landmark]")) {
+    if (g.style.display === "none") continue;
+    const b = g.getBBox();
+    if (at.x < b.x - pad || at.x > b.x + b.width + pad || at.y < b.y - pad || at.y > b.y + b.height + pad) continue;
+    const it = state.items.find((i) => i.key === g.getAttribute("data-key"));
+    if (!it) continue;
     const d = Math.hypot(it.x - at.x, it.y - at.y);
     if (d < bestD) { bestD = d; best = it; }
   }
-  return bestD <= limit ? best : null;
+  return best;
 }
 
 function onMapClick(at) {
@@ -150,7 +159,7 @@ function onMapClick(at) {
     qs("lm-th").focus();
     return;
   }
-  const hit = nearest(at);
+  const hit = hitTest(at);
   select(hit ? hit.key : null);
 }
 

@@ -1679,14 +1679,16 @@ const collectorIntegrationConfig = () => ({
   router.put("/landmarks", allow("owner"), (req, res) => {
     const baseMap = getBaseMapRow(req.query.base_map_id);
     if (!baseMap) return res.status(404).json({ error: "Base map not found" });
-    const input = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!Array.isArray(req.body?.items)) return res.status(400).json({ error: "items ต้องเป็น array" });
+    const input = req.body.items;
     const items = normalizeLabelLayoutItemsInput(input.map((r, i) => ({
       label_key: r?.key, label_category: r?.category, anchor_x: r?.x, anchor_y: r?.y,
-      priority: input.length - i, min_zoom_hint: r?.min_zoom,
+      priority: input.length - i, min_zoom_hint: r?.min_zoom === "" || r?.min_zoom == null ? null : r.min_zoom,
     })));
     if (items.length !== input.length) return res.status(400).json({ error: "landmark ต้องมี key และพิกัด x/y" });
     if (new Set(items.map((it) => it.label_key)).size !== items.length) return res.status(400).json({ error: "key ซ้ำ" });
     if (input.some((r) => !String(r?.th || "").trim())) return res.status(400).json({ error: "ต้องมีชื่อภาษาไทยทุกจุด" });
+    if (items.some((it) => it.min_zoom_hint != null && !Number.isFinite(it.min_zoom_hint))) return res.status(400).json({ error: "min_zoom ต้องเป็นตัวเลข" });
     let layoutId = Number(baseMap.active_label_layout_id || 0) || 0;
     db.exec("BEGIN");
     try {
