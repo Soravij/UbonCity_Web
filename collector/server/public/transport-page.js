@@ -25,7 +25,7 @@ async function loadStepStatus() {
     const maps = Array.isArray(baseMaps?.items) ? baseMaps.items : [];
     const bm = maps.find((m) => READY_BASE_MAP_STATUSES.has(String(m.status || ""))) || maps[0] || null;
     setText("step-base-map-status", bm ? `${bm.title || `#${bm.id}`} · ${bm.status || "draft"}` : "ยังไม่มี base map");
-    setText("step-landmarks-status", bm ? `${Array.isArray(bm.labels) ? bm.labels.length : 0} จุด · หน้าแก้กำลังทำ` : "ต้องมี base map ก่อน");
+    setText("step-landmarks-status", bm ? `${Array.isArray(bm.labels) ? bm.labels.length : 0} จุด` : "ต้องมี base map ก่อน");
     const list = Array.isArray(routes?.items) ? routes.items : [];
     const pending = list.filter((r) => r.routing_status !== "fresh").length;
     setText("step-routes-status", pending ? `${list.length} สาย · ยังไม่คำนวณ ${pending}` : `${list.length} สาย`);

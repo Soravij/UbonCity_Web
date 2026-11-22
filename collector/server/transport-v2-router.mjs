@@ -1654,6 +1654,80 @@ const collectorIntegrationConfig = () => ({
     res.json({ items: resolveBaseMapLabelSource(baseMap).labels });
   });
 
+  const landmarkOut = (it, dict) => ({
+    key: it.label_key,
+    category: it.label_category,
+    x: it.anchor_x,
+    y: it.anchor_y,
+    min_zoom: it.min_zoom_hint,
+    th: String(dict?.th?.[it.label_key] || ""),
+    en: String(dict?.en?.[it.label_key] || ""),
+  });
+  const landmarksResponse = (layoutId) => {
+    const row = layoutId ? getLabelLayoutRow(layoutId) : null;
+    if (!row) return { layout_id: null, items: [] };
+    const dict = normalizeLabelLayoutMetadata(asJson(row.metadata_json, {})).label_dictionary;
+    return { layout_id: Number(row.id), items: listLabelLayoutItems(row.id).map((it) => landmarkOut(it, dict)) };
+  };
+
+  router.get("/landmarks", allow("owner"), (req, res) => {
+    const baseMap = getBaseMapRow(req.query.base_map_id);
+    if (!baseMap) return res.status(404).json({ error: "Base map not found" });
+    res.json(landmarksResponse(Number(baseMap.active_label_layout_id || 0) || 0));
+  });
+
+  router.put("/landmarks", allow("owner"), (req, res) => {
+    const baseMap = getBaseMapRow(req.query.base_map_id);
+    if (!baseMap) return res.status(404).json({ error: "Base map not found" });
+    const input = Array.isArray(req.body?.items) ? req.body.items : [];
+    const items = normalizeLabelLayoutItemsInput(input.map((r, i) => ({
+      label_key: r?.key, label_category: r?.category, anchor_x: r?.x, anchor_y: r?.y,
+      priority: input.length - i, min_zoom_hint: r?.min_zoom,
+    })));
+    if (items.length !== input.length) return res.status(400).json({ error: "landmark ต้องมี key และพิกัด x/y" });
+    if (new Set(items.map((it) => it.label_key)).size !== items.length) return res.status(400).json({ error: "key ซ้ำ" });
+    if (input.some((r) => !String(r?.th || "").trim())) return res.status(400).json({ error: "ต้องมีชื่อภาษาไทยทุกจุด" });
+    let layoutId = Number(baseMap.active_label_layout_id || 0) || 0;
+    db.exec("BEGIN");
+    try {
+      let layoutRow = layoutId ? getLabelLayoutRow(layoutId) : null;
+      if (!layoutRow) {
+        db.prepare(`INSERT INTO transport_label_layouts_v2 (layout_key, title, status, metadata_json, created_at, updated_at)
+          VALUES (?, ?, 'draft', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+          .run(`base-map-${baseMap.id}-landmarks-${Date.now()}`, `${baseMap.title || `Base map ${baseMap.id}`} Landmarks`, json(normalizeLabelLayoutMetadata({}), "{}"));
+        layoutId = Number(db.prepare("SELECT last_insert_rowid() AS id").get()?.id || 0) || 0;
+        db.prepare("UPDATE transport_base_maps_v2 SET active_label_layout_id=? WHERE id=?").run(layoutId, Number(baseMap.id));
+        layoutRow = getLabelLayoutRow(layoutId);
+      }
+      const meta = normalizeLabelLayoutMetadata(asJson(layoutRow.metadata_json, {}));
+      const keys = new Set(items.map((it) => it.label_key));
+      const dict = {};
+      for (const [loc, entries] of Object.entries(meta.label_dictionary || {})) {
+        if (loc === "th" || loc === "en") continue;
+        dict[loc] = Object.fromEntries(Object.entries(entries || {}).filter(([k]) => keys.has(k)));
+      }
+      dict.th = {};
+      dict.en = {};
+      for (const r of input) {
+        dict.th[String(r.key).trim()] = String(r.th).trim();
+        if (String(r.en || "").trim()) dict.en[String(r.key).trim()] = String(r.en).trim();
+      }
+      db.prepare("UPDATE transport_label_layouts_v2 SET metadata_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(json(normalizeLabelLayoutMetadata({ ...meta, label_dictionary: dict }), "{}"), layoutId);
+      db.prepare("DELETE FROM transport_label_layout_items_v2 WHERE label_layout_id=?").run(layoutId);
+      const insert = db.prepare(`INSERT INTO transport_label_layout_items_v2 (
+        label_layout_id, label_key, label_category, anchor_x, anchor_y, priority, min_zoom_hint, locale_offsets_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`);
+      for (const it of items) insert.run(layoutId, it.label_key, it.label_category, it.anchor_x, it.anchor_y, it.priority, it.min_zoom_hint);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      return res.status(400).json({ error: String(error?.message || error) });
+    }
+    logAudit(actorEmail(req), "transport_v2.landmarks.save", "transport_label_layout_v2", String(layoutId), { count: items.length });
+    res.json(landmarksResponse(layoutId));
+  });
+
   router.put("/base-maps/:id/labels", allow("owner"), wrap(async (req, res) => {
     const baseMap = getBaseMapRow(req.params.id);
     if (!baseMap) return res.status(404).json({ error: "Base map not found" });

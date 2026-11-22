@@ -197,16 +197,22 @@ export function createTransportMapViewer(container, options = {}) {
   }
 
   const labelsByKey = new Map();
-  for (const label of bundle.labels || []) {
-    labelsByKey.set(label.key, label);
-    const cat = String(label.category || "other");
-    const icon = cat === "area" ? null : LANDMARK_ICONS[cat] || null;
-    const g = el("g", { "data-landmark": "1", "data-key": label.key });
-    if (cat !== "area") g.append(el("circle", { fill: icon ? icon.color : "#616161", stroke: "#ffffff" }));
-    if (icon) g.append(el("path", { "data-icon": "1", fill: "#ffffff", d: icon.d }));
-    g.append(el("text", { "text-anchor": "middle", "dominant-baseline": "middle", fill: label.style?.color || "#243041", stroke: "#ffffff", "paint-order": "stroke", "font-family": "Noto Sans Thai, sans-serif" }));
-    gLabels.append(g);
+  function buildLabels(list) {
+    labelsByKey.clear();
+    gLabels.replaceChildren();
+    for (const label of list) {
+      labelsByKey.set(label.key, label);
+      const cat = String(label.category || "other");
+      const icon = cat === "area" ? null : LANDMARK_ICONS[cat] || null;
+      const g = el("g", { "data-landmark": "1", "data-key": label.key });
+      if (cat !== "area") g.append(el("circle", { fill: icon ? icon.color : "#616161", stroke: "#ffffff" }));
+      if (icon) g.append(el("path", { "data-icon": "1", fill: "#ffffff", d: icon.d }));
+      g.append(el("text", { "text-anchor": "middle", "dominant-baseline": "middle", fill: label.style?.color || "#243041", stroke: "#ffffff", "paint-order": "stroke", "font-family": "Noto Sans Thai, sans-serif" }));
+      gLabels.append(g);
+    }
+    writeLabelText();
   }
+  buildLabels(bundle.labels || []);
 
   for (const overlay of bundle.overlays || []) {
     if (overlay.url) gOverlays.append(el("image", { href: overlay.url, x: overlay.x, y: overlay.y, width: overlay.width, height: overlay.height }));
@@ -502,6 +508,7 @@ export function createTransportMapViewer(container, options = {}) {
       drawDraft();
       render();
     },
+    setLabels(next) { buildLabels(Array.isArray(next) ? next : []); render(); },
     fitAll() {
       view = { x: full.x, y: full.y, w: full.width, h: full.height };
       render();
