@@ -8,6 +8,7 @@ import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildTransportBundle } from "./transport-v2-publish.mjs";
 import { buildLegBearings, detourWarnings, fetchRouteWithFallback } from "./transport-v2-osrm.mjs";
 import { pickLeastUsed, pickForPath } from "./public/transport-v2-palette.js";
+import { processRoutePhoto } from "./transport-v2-photo.mjs";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
 const ROUTE_LEGS = new Set(["out", "back"]);
 const ROUTE_KINDS = new Set(["loop", "out_back"]);
@@ -1196,12 +1197,12 @@ const collectorIntegrationConfig = () => ({
     if (!detectedMimeType || detectedMimeType !== mimeType) {
       return res.status(400).json({ error: "file content does not match declared image type" });
     }
-    const extension = mimeType === "image/png" ? ".png" : mimeType === "image/webp" ? ".webp" : ".jpg";
-    const relPath = path.join("uploads", "transport-v2", "routes", `route-${current.id}`, `vehicle-thumbnail-${Date.now()}${extension}`);
+    const photo = await processRoutePhoto(file.buffer);
+    const relPath = path.join("uploads", "transport-v2", "routes", `route-${current.id}`, `vehicle-thumbnail-${Date.now()}${photo.ext}`);
     const fullPath = path.join(dirs.mediaDir, relPath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
-    await fs.writeFile(fullPath, file.buffer);
-    const checksum = crypto.createHash("sha256").update(file.buffer).digest("hex");
+    await fs.writeFile(fullPath, photo.buffer);
+    const checksum = crypto.createHash("sha256").update(photo.buffer).digest("hex");
     const assetUid = crypto.randomUUID();
     db.exec("BEGIN");
     try {
@@ -1212,8 +1213,8 @@ const collectorIntegrationConfig = () => ({
         assetUid,
         relPath.replace(/\\/g, "/"),
         path.basename(fullPath),
-        mimeType,
-        Number(file.size || file.buffer.length || 0),
+        photo.mime,
+        Number(photo.buffer.length || 0),
         checksum
       );
       const assetId = Number(db.prepare("SELECT id FROM assets WHERE asset_uid=? LIMIT 1").get(assetUid)?.id || 0) || 0;
@@ -1231,8 +1232,8 @@ const collectorIntegrationConfig = () => ({
     const next = getRoute(current.id);
     logAudit(actorEmail(req), "transport_v2.route.upload_thumbnail", "transport_route_v2", String(current.id), {
       vehicle_thumbnail_asset_id: next?.vehicle_thumbnail_asset_id || null,
-      mime_type: mimeType,
-      size_bytes: Number(file.size || file.buffer.length || 0),
+      mime_type: photo.mime,
+      size_bytes: Number(photo.buffer.length || 0),
     });
     res.json(next);
   }));
