@@ -1146,13 +1146,7 @@ const collectorIntegrationConfig = () => ({
       const nextColorLocked = hasColor ? 1 : (current.color_locked ? 1 : 0);
       const nextWorkflowStatus = String((body.workflow_status ?? current.workflow_status) || "draft").trim().toLowerCase() || current.workflow_status;
       const nextAssigneeUserId = Number((body.assignee_user_id ?? current.assignee_user_id) || 0) || null;
-      const affectsPoster =
-        baseMapId !== current.base_map_id
-        || nextRouteName !== current.route_name
-        || nextRouteNumber !== current.route_number
-        || nextVehicleType !== current.vehicle_type
-        || nextColor !== current.color
-        || nextDescription !== current.description;
+      const affectsRouting = baseMapId !== current.base_map_id;
       db.prepare(`
         UPDATE transport_routes_v2
         SET base_map_id=?, route_name=?, route_number=?, vehicle_type=?, route_kind=?, color=?, description=?, description_en=?, fare_baht=?, color_locked=?, workflow_status=?, assignee_user_id=?,
@@ -1174,9 +1168,9 @@ const collectorIntegrationConfig = () => ({
         nextColorLocked,
         nextWorkflowStatus,
         nextAssigneeUserId,
-        affectsPoster ? 1 : 0,
-        affectsPoster ? 1 : 0,
-        affectsPoster ? 1 : 0,
+        affectsRouting ? 1 : 0,
+        affectsRouting ? 1 : 0,
+        affectsRouting ? 1 : 0,
         actorEmail(req),
         Number(req.params.id)
       );
