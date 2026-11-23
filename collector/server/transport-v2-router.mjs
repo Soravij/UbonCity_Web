@@ -4,10 +4,9 @@ import path from "path";
 import express from "express";
 import multer from "multer";
 import { resolveAiConfig, resolveAiFeatureConfig } from "../config/ai.mjs";
-import { assertCollectorIntegrationReadiness } from "./integration-readiness.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildTransportBundle } from "./transport-v2-publish.mjs";
-import { buildBearings, buildLegBearings, detourWarnings, fetchRouteWithFallback } from "./transport-v2-osrm.mjs";
+import { buildLegBearings, detourWarnings, fetchRouteWithFallback } from "./transport-v2-osrm.mjs";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
 const ROUTE_LEGS = new Set(["out", "back"]);
 const ROUTE_KINDS = new Set(["loop", "out_back"]);
@@ -464,53 +463,6 @@ function extractResponseText(data) {
   return "";
 }
 
-async function translateLabelEntries(aiConfig, entries, targetLang, actorEmail) {
-  const translationConfig = resolveAiFeatureConfig(aiConfig, "translation");
-  if (!translationConfig?.enabled) {
-    throw new Error("translation AI is not configured");
-  }
-  const sourceEntries = Object.fromEntries(
-    Object.entries(entries || {}).map(([key, value]) => [String(key || "").trim(), String(value || "").trim()]).filter(([key, value]) => key && value)
-  );
-  if (!Object.keys(sourceEntries).length) {
-    throw new Error("thai source text is required");
-  }
-  const prompt = [
-    "Return ONLY valid JSON.",
-    "Translate Thai map labels into the target language.",
-    "Keep the EXACT same JSON keys.",
-    "Each value must be short UI label text only, with no explanations.",
-    "Preserve proper nouns and place names naturally for the target locale.",
-    `Target locale: ${String(targetLang || "").trim().toLowerCase()}`,
-    "Input JSON:",
-    JSON.stringify(sourceEntries, null, 2),
-  ].join("\n");
-  const result = await executeBackendAiJson({
-    aiConfig: translationConfig,
-    featureKey: "translation",
-    task: "transport_label_translation",
-    prompt,
-    actorEmail,
-  });
-  const parsed = result?.parsed || parseJsonLike(String(result?.outputText || ""));
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("translation response is not valid JSON");
-  }
-  const translated = Object.fromEntries(
-    Object.keys(sourceEntries)
-      .map((key) => [key, String(parsed?.[key] || "").trim()])
-      .filter(([, value]) => value)
-  );
-  const missingKeys = Object.keys(sourceEntries).filter((key) => !String(translated?.[key] || "").trim());
-  if (missingKeys.length) {
-    throw new Error(`translation returned incomplete content for ${missingKeys.length} label(s)`);
-  }
-  if (!Object.keys(translated).length) {
-    throw new Error("translation returned empty content");
-  }
-  return translated;
-}
-
 function assetExists(db, assetId) {
   const id = Number(assetId || 0) || 0;
   if (!id) return false;
@@ -521,47 +473,6 @@ function assetRecord(db, assetId) {
   const id = Number(assetId || 0) || 0;
   if (!id) return null;
   return db.prepare("SELECT id, storage_path, mime_type, file_name FROM assets WHERE id=? LIMIT 1").get(id) || null;
-}
-
-function assetIsSvg(db, assetId) {
-  const asset = assetRecord(db, assetId);
-  if (!asset) return false;
-  const mimeType = String(asset.mime_type || "").trim().toLowerCase();
-  const fileName = String(asset.file_name || asset.storage_path || "").trim().toLowerCase();
-  return mimeType === "image/svg+xml" || fileName.endsWith(".svg");
-}
-
-function guessMimeType(fileName = "") {
-  const lower = String(fileName || "").trim().toLowerCase();
-  if (lower.endsWith(".svg")) return "image/svg+xml";
-  if (lower.endsWith(".png")) return "image/png";
-  if (lower.endsWith(".webp")) return "image/webp";
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  if (lower.endsWith(".gif")) return "image/gif";
-  return "application/octet-stream";
-}
-
-async function assetDataUri(db, mediaDir, assetId) {
-  const asset = assetRecord(db, assetId);
-  const storagePath = String(asset?.storage_path || "").trim();
-  if (!storagePath) return "";
-  if (!assetIsSvg(db, assetId)) {
-    throw new Error("base_svg_asset_id must reference an SVG asset");
-  }
-  const mimeType = String(asset?.mime_type || "").trim() || guessMimeType(asset?.file_name || storagePath);
-  const fullPath = path.join(mediaDir, storagePath);
-  const buffer = await fs.readFile(fullPath);
-  return `data:${mimeType};base64,${buffer.toString("base64")}`;
-}
-
-async function assetDataUriAny(db, mediaDir, assetId) {
-  const asset = assetRecord(db, assetId);
-  const storagePath = String(asset?.storage_path || "").trim();
-  if (!storagePath) return "";
-  const mimeType = String(asset?.mime_type || "").trim() || guessMimeType(asset?.file_name || storagePath);
-  const fullPath = path.join(mediaDir, storagePath);
-  const buffer = await fs.readFile(fullPath);
-  return `data:${mimeType};base64,${buffer.toString("base64")}`;
 }
 
 function pathToSvg(points, baseMap) {
@@ -877,27 +788,6 @@ export function createTransportV2Router({ db, dirs, logAudit = () => {}, getAiCo
       locale_offsets: normalizeLocaleOffsets(row?.locale_offsets),
     }))
     .filter((row) => row.label_key && Number.isFinite(row.anchor_x) && Number.isFinite(row.anchor_y));
-  const markRoutesStaleForLayout = (layoutId) => {
-    const resolvedLayoutId = Number(layoutId || 0) || 0;
-    if (!resolvedLayoutId) return;
-    const affectedBaseMapIds = db.prepare("SELECT id FROM transport_base_maps_v2 WHERE active_label_layout_id=?").all(resolvedLayoutId)
-      .map((row) => Number(row.id || 0))
-      .filter(Boolean);
-    if (!affectedBaseMapIds.length) return;
-    const placeholders = affectedBaseMapIds.map(() => "?").join(", ");
-    db.prepare(`
-      UPDATE transport_routes_v2
-      SET poster_status='stale', updated_at=CURRENT_TIMESTAMP
-      WHERE base_map_id IN (${placeholders})
-    `).run(...affectedBaseMapIds);
-  };
-  const baseMapIdsForLayout = (layoutId) => {
-    const resolvedLayoutId = Number(layoutId || 0) || 0;
-    if (!resolvedLayoutId) return [];
-    return db.prepare("SELECT id FROM transport_base_maps_v2 WHERE active_label_layout_id=?").all(resolvedLayoutId)
-      .map((row) => Number(row.id || 0))
-      .filter(Boolean);
-  };
   const resolveBaseMapLabelSource = (baseMap) => {
     const activeLayoutId = Number(baseMap?.active_label_layout_id || 0) || 0;
     if (activeLayoutId) {
@@ -923,33 +813,6 @@ export function createTransportV2Router({ db, dirs, logAudit = () => {}, getAiCo
   const serializeBaseMapResolved = (row) => {
     if (!row) return null;
     return serializeBaseMap(db, row, resolveBaseMapLabelSource(row));
-  };
-  const saveGeneratedSvgAsset = async (relPath, svgText, cleanupPaths = null) => {
-    const fullPath = path.join(dirs.mediaDir, relPath);
-    await fs.mkdir(path.dirname(fullPath), { recursive: true });
-    await fs.writeFile(fullPath, svgText, "utf8");
-    if (Array.isArray(cleanupPaths)) {
-      cleanupPaths.push(fullPath);
-    }
-    const stat = await fs.stat(fullPath);
-    const assetUid = crypto.randomUUID();
-    db.prepare("INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum, created_at, updated_at) VALUES (?, 'local', ?, ?, 'image/svg+xml', ?, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").run(
-      assetUid,
-      relPath.replace(/\\/g, "/"),
-      path.basename(fullPath),
-      Number(stat.size || 0)
-    );
-    return Number(db.prepare("SELECT id FROM assets WHERE asset_uid=? LIMIT 1").get(assetUid)?.id || 0) || 0;
-  };
-  const baseMapArtifactPath = (stage, baseMapRow, fileName) => {
-    const key = String(baseMapRow?.map_key || `base-map-${Number(baseMapRow?.id || 0) || 0}`).trim() || `base-map-${Number(baseMapRow?.id || 0) || 0}`;
-    const safeKey = key.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || `base-map-${Number(baseMapRow?.id || 0) || 0}`;
-    const stageDir = stage === "published"
-      ? path.join("published", "transport-v2", "base-maps")
-      : stage === "annotation"
-        ? path.join("generated", "transport-v2", "base-map-annotation")
-        : path.join("generated", "transport-v2", "base-map-candidates");
-    return path.join(stageDir, safeKey, fileName);
   };
   const getRouteRow = (id) => db.prepare(`
     SELECT r.*, u.display_name AS assignee_display_name, u.email AS assignee_email
