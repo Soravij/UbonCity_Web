@@ -36,9 +36,8 @@ async function init() {
     qs("bm-title").textContent = bm.title || `#${bm.id}`;
     qs("bm-status").textContent = bm.status || "draft";
     qs("bm-bounds").textContent = `S ${fmt(b.min_lat)} · W ${fmt(b.min_lng)} · N ${fmt(b.max_lat)} · E ${fmt(b.max_lng)}`;
-    qs("bm-landmarks").textContent = `${Array.isArray(bm.labels) ? bm.labels.length : 0} จุด`;
     state.viewer = createTransportMapViewer(qs("basemap-map"), {
-      bundle: { ...preview.bundle, routes: [] },
+      bundle: { ...preview.bundle, routes: [], labels: [] },
       onError: (err) => setBanner("workspace-status", `โหลด base map ไม่ได้: ${err.message}`, true),
     });
   } catch (err) {
