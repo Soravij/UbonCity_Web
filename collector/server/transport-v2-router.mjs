@@ -951,44 +951,6 @@ export function createTransportV2Router({ db, dirs, logAudit = () => {}, getAiCo
         : path.join("generated", "transport-v2", "base-map-candidates");
     return path.join(stageDir, safeKey, fileName);
   };
-  const renderPublishedBaseMapAsset = async (baseMapId, options = {}) => {
-    const { cleanupPaths = null } = options || {};
-    const baseMapRow = getBaseMapRow(baseMapId);
-    if (!baseMapRow) throw new Error("Base map not found");
-    const serializedBaseMap = serializeBaseMapResolved(baseMapRow);
-    const annotationAssetId = Number(baseMapRow.annotation_map_asset_id || 0) || Number(baseMapRow.preview_asset_id || 0) || null;
-    if (!annotationAssetId) {
-      throw new Error("Annotation map is required before published render");
-    }
-    const annotationLayerUri = await assetDataUriAny(db, dirs.mediaDir, annotationAssetId).catch(() => "");
-    if (!annotationLayerUri) {
-      throw new Error("Annotation map asset is missing");
-    }
-    const routeRows = db.prepare(`
-      SELECT id
-      FROM transport_routes_v2
-      WHERE routing_status='fresh'
-        AND resolved_revision=route_revision
-        AND COALESCE(workflow_status, 'draft') <> 'archived'
-      ORDER BY route_number COLLATE NOCASE ASC, id ASC
-    `).all();
-    const routeLayers = routeRows
-      .map((row) => getRoute(row.id))
-      .filter((route) => route && Array.isArray(route.resolved_path) && route.resolved_path.length >= 2)
-      .map((route) => `<path d="${pathToSvg(route.resolved_path, serializedBaseMap)}" fill="none" stroke="${color(route.color)}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />`)
-      .join("\n  ");
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="${serializedBaseMap.viewbox.x} ${serializedBaseMap.viewbox.y} ${serializedBaseMap.viewbox.width} ${serializedBaseMap.viewbox.height}" role="img" aria-labelledby="title desc">
-  <title id="title">${escapeSvgText(serializedBaseMap.title || "Published Transport Map")}</title>
-  <desc id="desc">Published transport map with route overlays</desc>
-  <image href="${annotationLayerUri}" x="${serializedBaseMap.viewbox.x}" y="${serializedBaseMap.viewbox.y}" width="${serializedBaseMap.viewbox.width}" height="${serializedBaseMap.viewbox.height}" preserveAspectRatio="none" />
-  ${routeLayers}
-</svg>`;
-    const relPath = baseMapArtifactPath("published", baseMapRow, `published-r${Date.now()}.svg`);
-    const assetId = await saveGeneratedSvgAsset(relPath, svg, cleanupPaths);
-    db.prepare("UPDATE transport_base_maps_v2 SET published_map_asset_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(assetId, Number(baseMapId || 0));
-    return serializeBaseMapResolved(getBaseMapRow(baseMapId));
-  };
   const getRouteRow = (id) => db.prepare(`
     SELECT r.*, u.display_name AS assignee_display_name, u.email AS assignee_email
     FROM transport_routes_v2 r
