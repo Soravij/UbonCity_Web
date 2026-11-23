@@ -7,6 +7,7 @@ import { resolveAiConfig, resolveAiFeatureConfig } from "../config/ai.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildTransportBundle } from "./transport-v2-publish.mjs";
 import { buildLegBearings, detourWarnings, fetchRouteWithFallback } from "./transport-v2-osrm.mjs";
+import { pickLeastUsed, pickForPath } from "./public/transport-v2-palette.js";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
 const ROUTE_LEGS = new Set(["out", "back"]);
 const ROUTE_KINDS = new Set(["loop", "out_back"]);
@@ -65,6 +66,13 @@ function color(value, fallback = DEFAULT_COLOR) {
 function vehicle(value) {
   const raw = String(value || "").trim().toLowerCase();
   return VEHICLES.has(raw) ? raw : "songthaew";
+}
+
+function fare(value) {
+  if (value === "" || value == null) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 1000) throw new Error("fare_baht ไม่ถูกต้อง");
+  return Math.round(n * 100) / 100;
 }
 
 function asJson(value, fallback) {
@@ -838,6 +846,9 @@ export function createTransportV2Router({ db, dirs, logAudit = () => {}, getAiCo
       vehicle_thumbnail_url: assetUrl(db, row.vehicle_thumbnail_asset_id),
       color: row.color,
       description: row.description,
+      description_en: row.description_en || "",
+      fare_baht: row.fare_baht == null ? null : Number(row.fare_baht),
+      color_locked: Boolean(row.color_locked),
       workflow_status: row.workflow_status,
       assignee_user_id: Number(row.assignee_user_id || 0) || null,
       assignee_display_name: row.assignee_display_name || null,
@@ -944,6 +955,7 @@ const collectorIntegrationConfig = () => ({
         ...bundle,
         base_svg_url: urlFor.get(bundle.base_svg) || "",
         overlays: bundle.overlays.map((o) => ({ ...o, url: urlFor.get(o.file) || "" })),
+        routes: bundle.routes.map((r) => (r.photo ? { ...r, photo_url: urlFor.get(r.photo) || "" } : r)),
       },
       skipped,
       problems,
@@ -1075,19 +1087,25 @@ const collectorIntegrationConfig = () => ({
       if (baseMapId && !getBaseMapRow(baseMapId)) throw new Error("base_map_id is invalid");
       const routeKind = body.route_kind == null ? "loop" : String(body.route_kind).trim().toLowerCase();
       if (!ROUTE_KINDS.has(routeKind)) throw new Error("route_kind is invalid");
+      const hasColor = String(body.color || "").trim() !== "";
+      const usedColors = db.prepare("SELECT color FROM transport_routes_v2").all().map((r) => r.color);
+      const routeColor = hasColor ? color(body.color) : pickLeastUsed(usedColors);
       db.prepare(`
         INSERT INTO transport_routes_v2 (
-          base_map_id, route_name, route_number, vehicle_type, route_kind, color, description, workflow_status, assignee_user_id,
+          base_map_id, route_name, route_number, vehicle_type, route_kind, color, description, description_en, fare_baht, color_locked, workflow_status, assignee_user_id,
           route_revision, resolved_revision, poster_revision, routing_status, poster_status, created_by, updated_by, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 'missing', 'missing', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 'missing', 'missing', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `).run(
         baseMapId,
         String(body.route_name).trim(),
         String(body.route_number).trim(),
         vehicle(body.vehicle_type),
         routeKind,
-        color(body.color),
+        routeColor,
         String(body.description || "").trim(),
+        String(body.description_en || "").trim(),
+        fare(body.fare_baht),
+        hasColor ? 1 : 0,
         String(body.workflow_status || "draft").trim().toLowerCase() || "draft",
         Number(body.assignee_user_id || 0) || null,
         actorEmail(req),
@@ -1122,6 +1140,10 @@ const collectorIntegrationConfig = () => ({
       if (hasRouteKind && !ROUTE_KINDS.has(nextRouteKind)) throw new Error("route_kind is invalid");
       const nextColor = color(body.color ?? current.color, current.color);
       const nextDescription = String((body.description ?? current.description) || "").trim();
+      const hasColor = Object.prototype.hasOwnProperty.call(body, "color");
+      const nextDescriptionEn = String((body.description_en ?? current.description_en) || "").trim();
+      const nextFare = Object.prototype.hasOwnProperty.call(body, "fare_baht") ? fare(body.fare_baht) : current.fare_baht;
+      const nextColorLocked = hasColor ? 1 : (current.color_locked ? 1 : 0);
       const nextWorkflowStatus = String((body.workflow_status ?? current.workflow_status) || "draft").trim().toLowerCase() || current.workflow_status;
       const nextAssigneeUserId = Number((body.assignee_user_id ?? current.assignee_user_id) || 0) || null;
       const affectsPoster =
@@ -1133,7 +1155,7 @@ const collectorIntegrationConfig = () => ({
         || nextDescription !== current.description;
       db.prepare(`
         UPDATE transport_routes_v2
-        SET base_map_id=?, route_name=?, route_number=?, vehicle_type=?, route_kind=?, color=?, description=?, workflow_status=?, assignee_user_id=?,
+        SET base_map_id=?, route_name=?, route_number=?, vehicle_type=?, route_kind=?, color=?, description=?, description_en=?, fare_baht=?, color_locked=?, workflow_status=?, assignee_user_id=?,
             route_revision=CASE WHEN ? THEN route_revision + 1 ELSE route_revision END,
             routing_status=CASE WHEN ? THEN 'stale' ELSE routing_status END,
             poster_status=CASE WHEN ? THEN 'stale' ELSE poster_status END,
@@ -1147,6 +1169,9 @@ const collectorIntegrationConfig = () => ({
         nextRouteKind,
         nextColor,
         nextDescription,
+        nextDescriptionEn,
+        nextFare,
+        nextColorLocked,
         nextWorkflowStatus,
         nextAssigneeUserId,
         affectsPoster ? 1 : 0,
@@ -1300,6 +1325,13 @@ const collectorIntegrationConfig = () => ({
       SET resolved_revision=?, routing_status='fresh', poster_status='stale', resolved_distance_km=?, resolved_bbox_json=?, last_routed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
       WHERE id=?
     `).run(Number(item.route_revision), distanceKm, json(nextBbox, "null"), Number(item.id));
+    if (!item.color_locked && Number(item.resolved_revision || 0) === 0) {
+      const others = db.prepare("SELECT id FROM transport_routes_v2 WHERE id<>? AND base_map_id IS ?").all(Number(item.id), item.base_map_id)
+        .map((row) => getRoute(row.id))
+        .filter((r) => r && Array.isArray(r.resolved_path) && r.resolved_path.length >= 2)
+        .map((r) => ({ color: r.color, path: r.resolved_path }));
+      db.prepare("UPDATE transport_routes_v2 SET color=?, color_locked=1 WHERE id=?").run(pickForPath(geometry, others), Number(item.id));
+    }
     const next = getRoute(item.id);
     logAudit(actorEmail(req), "transport_v2.route.resolve", "transport_route_v2", String(next.id), { route_revision: next.route_revision, resolved_revision: next.resolved_revision, point_count: next.resolved_path.length });
     res.json({ ...next, bearings_used: bearingsUsed, warnings: detourWarnings(route?.legs, payload.waypoints) });
