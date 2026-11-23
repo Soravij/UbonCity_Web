@@ -36,7 +36,11 @@
         <section class="card article-work-card">
           <div id="routes-stage" class="tv2-stage">
             <div id="stage-controls" class="card tv2-stage-panel is-wide">
-              <button type="button" id="btn-collapse" class="utility-action tv2-collapse" hidden>–</button>
+              <div class="tv2-row">
+                <button type="button" id="btn-collapse" class="utility-action tv2-collapse" hidden>–</button>
+                <button id="btn-fit" class="utility-action tv2-panel-btn" type="button">Fit</button>
+                <button id="btn-fullscreen" class="utility-action tv2-panel-btn" type="button">เต็มจอ</button>
+              </div>
               <div class="article-section-head">
                 <div>
                   <h2 class="section-title" data-compact>Routes</h2>
@@ -45,40 +49,43 @@
               </div>
               <button id="btn-new" class="utility-action tv2-panel-btn" type="button">+ สร้างสายใหม่</button>
               <div id="rt-list" class="tv2-group"></div>
-              <form id="rt-form" class="tv2-group" hidden>
-                <hr class="tv2-sep" />
-                <strong id="rt-form-title"></strong>
-                <div class="tv2-row">
-                  <div class="tv2-group"><label class="muted tv2-label" for="rt-number">เลขสาย</label><input id="rt-number" type="text" /></div>
-                  <div class="tv2-group"><label class="muted tv2-label" for="rt-vehicle">ประเภทรถ</label>
-                    <select id="rt-vehicle"><option value="songthaew">สองแถว</option><option value="minibus">มินิบัส</option><option value="van">รถตู้</option><option value="bus">รถเมล์</option></select></div>
+              <div id="rt-detail" hidden>
+                <div id="rt-tabs" class="tabs">
+                  <button type="button" class="tab active" data-tab="info">ข้อมูลสาย</button>
+                  <button type="button" class="tab" data-tab="path">เส้นทาง</button>
                 </div>
-                <label class="muted tv2-label" for="rt-name">ชื่อสาย</label>
-                <input id="rt-name" type="text" />
-                <label class="muted tv2-label" for="rt-kind">รูปแบบสาย</label>
-                <select id="rt-kind"><option value="loop">วน</option><option value="out_back">ไป-กลับ</option></select>
-                <span class="muted tv2-label">สีสาย <span id="rt-color-note"></span></span>
-                <div id="rt-swatches" class="tv2-swatches"></div>
-                <label class="muted tv2-label" for="rt-fare">ค่าโดยสาร (บาท, ว่างได้)</label>
-                <input id="rt-fare" type="number" min="0" step="1" />
-                <label class="muted tv2-label" for="rt-desc">ข้อมูลเพิ่มเติม (TH) เช่น โบกได้ตลอดทาง</label>
-                <textarea id="rt-desc" rows="2"></textarea>
-                <label class="muted tv2-label" for="rt-desc-en">ข้อมูลเพิ่มเติม (EN)</label>
-                <textarea id="rt-desc-en" rows="2"></textarea>
-                <span class="muted tv2-label">รูปรถ</span>
-                <img id="rt-thumb" class="tv2-thumb" alt="รูปรถของสายนี้" hidden />
-                <input id="rt-photo" type="file" accept="image/jpeg,image/png,image/webp" />
-                <div class="tv2-row">
-                  <button id="btn-save" class="primary" type="submit">บันทึก</button>
-                  <button id="btn-close" class="utility-action" type="button">ปิด</button>
+                <form id="rt-form" class="tv2-group" data-pane="info">
+                  <hr class="tv2-sep" />
+                  <strong id="rt-form-title"></strong>
+                  <div class="tv2-row">
+                    <div class="tv2-group"><label class="muted tv2-label" for="rt-number">เลขสาย</label><input id="rt-number" type="text" /></div>
+                    <div class="tv2-group"><label class="muted tv2-label" for="rt-vehicle">ประเภทรถ</label>
+                      <select id="rt-vehicle"><option value="songthaew">สองแถว</option><option value="minibus">มินิบัส</option><option value="van">รถตู้</option><option value="bus">รถเมล์</option></select></div>
+                  </div>
+                  <label class="muted tv2-label" for="rt-name">ชื่อสาย</label>
+                  <input id="rt-name" type="text" />
+                  <label class="muted tv2-label" for="rt-kind">รูปแบบสาย</label>
+                  <select id="rt-kind"><option value="loop">วน</option><option value="out_back">ไป-กลับ</option></select>
+                  <span class="muted tv2-label">สีสาย <span id="rt-color-note"></span></span>
+                  <div id="rt-swatches" class="tv2-swatches"></div>
+                  <label class="muted tv2-label" for="rt-fare">ค่าโดยสาร (บาท, ว่างได้)</label>
+                  <input id="rt-fare" type="number" min="0" step="1" />
+                  <label class="muted tv2-label" for="rt-desc">ข้อมูลเพิ่มเติม (TH) เช่น โบกได้ตลอดทาง</label>
+                  <textarea id="rt-desc" rows="2"></textarea>
+                  <label class="muted tv2-label" for="rt-desc-en">ข้อมูลเพิ่มเติม (EN)</label>
+                  <textarea id="rt-desc-en" rows="2"></textarea>
+                  <span class="muted tv2-label">รูปรถ</span>
+                  <img id="rt-thumb" class="tv2-thumb" alt="รูปรถของสายนี้" hidden />
+                  <input id="rt-photo" type="file" accept="image/jpeg,image/png,image/webp" />
+                  <div class="tv2-row">
+                    <button id="btn-save" class="primary" type="submit">บันทึก</button>
+                    <button id="btn-close" class="utility-action" type="button">ปิด</button>
+                  </div>
+                </form>
+                <div id="rt-path" class="tv2-group" data-pane="path" hidden>
+                  <p id="rt-path-status" class="tv2-info"></p>
+                  <button id="btn-open-path" class="utility-action tv2-panel-btn" type="button">เปิด Path Editor →</button>
                 </div>
-                <button id="btn-open-path" class="utility-action tv2-panel-btn" type="button">เปิด Path Editor →</button>
-              </form>
-              <hr class="tv2-sep" />
-              <div class="tv2-group">
-                <span class="muted tv2-label">มุมมอง</span>
-                <button id="btn-fit" class="utility-action tv2-panel-btn" type="button">Fit</button>
-                <button id="btn-fullscreen" class="utility-action tv2-panel-btn" type="button">เต็มจอ</button>
               </div>
               <p class="muted" id="stage-status" role="status" aria-live="polite" data-compact></p>
             </div>

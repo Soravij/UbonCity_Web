@@ -6,7 +6,7 @@ import { ROUTE_PALETTE } from "./transport-v2-palette.js";
 
 const READY_BASE_MAP_STATUSES = new Set(["ready", "active", "published", "reviewed"]);
 const SVG_NS = "http://www.w3.org/2000/svg";
-const state = { baseMap: null, routes: [], viewer: null, selectedId: null, isNew: false, pickedColor: null, saving: false };
+const state = { baseMap: null, routes: [], viewer: null, selectedId: null, isNew: false, pickedColor: null, saving: false, tab: "info" };
 const stage = createStage({ stage: qs("routes-stage"), collapseBtn: qs("btn-collapse"), fullscreenBtn: qs("btn-fullscreen"), title: () => "Routes" });
 
 function status(text, isError = false) {
@@ -34,6 +34,21 @@ function current() {
   return state.routes.find((r) => r.id === state.selectedId) || null;
 }
 
+function routingStatusText(r) {
+  return r?.routing_status === "fresh" ? "✓" : "ยังไม่คำนวณ";
+}
+
+function showTab(name) {
+  state.tab = name;
+  document.querySelectorAll("#rt-tabs .tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll("#rt-detail [data-pane]").forEach((p) => { p.hidden = p.dataset.pane !== name; });
+}
+
+function setPathTabEnabled(enabled) {
+  const tab = document.querySelector('#rt-tabs .tab[data-tab="path"]');
+  if (tab) tab.disabled = !enabled;
+}
+
 function renderList() {
   const nodes = state.routes.map((r) => {
     const b = document.createElement("button");
@@ -43,7 +58,7 @@ function renderList() {
     label.textContent = `${r.route_number} · ${r.route_name}`;
     const st = document.createElement("span");
     st.className = "muted";
-    st.textContent = r.routing_status === "fresh" ? "✓" : "ยังไม่คำนวณ";
+    st.textContent = routingStatusText(r);
     b.append(dot(r.color), label, st);
     b.addEventListener("click", () => select(r.id));
     return b;
@@ -80,7 +95,7 @@ function renderSwatches() {
 function renderForm() {
   const r = current();
   const show = state.isNew || Boolean(r);
-  qs("rt-form").hidden = !show;
+  qs("rt-detail").hidden = !show;
   if (!show) return;
   qs("rt-form-title").textContent = state.isNew ? "สร้างสายใหม่" : `แก้สาย ${r.route_number}`;
   qs("rt-number").value = state.isNew ? "" : r.route_number || "";
@@ -94,7 +109,7 @@ function renderForm() {
   qs("rt-thumb").hidden = !thumb;
   if (thumb) qs("rt-thumb").src = thumb;
   qs("rt-photo").value = "";
-  qs("btn-open-path").hidden = state.isNew;
+  qs("rt-path-status").textContent = state.isNew ? "" : routingStatusText(r);
   renderSwatches();
 }
 
@@ -105,6 +120,10 @@ function select(id) {
   status("");
   renderList();
   renderForm();
+  if (id) {
+    setPathTabEnabled(true);
+    showTab(state.tab || "info");
+  }
   state.viewer?.selectRoute(id);
   if (id) state.viewer?.focusRoute(id);
 }
@@ -116,6 +135,8 @@ function startNew() {
   status("");
   renderList();
   renderForm();
+  setPathTabEnabled(false);
+  showTab("info");
   state.viewer?.selectRoute(null);
 }
 
@@ -189,6 +210,10 @@ function bind() {
   });
   qs("btn-fit").addEventListener("click", () => state.viewer?.fitAll());
   qs("rt-form").addEventListener("submit", (e) => { e.preventDefault(); save(); });
+  qs("rt-tabs")?.addEventListener("click", (e) => {
+    const b = e.target.closest(".tab");
+    if (b && !b.disabled) showTab(b.dataset.tab);
+  });
 }
 
 async function init() {
