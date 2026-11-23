@@ -10712,3 +10712,6 @@ a.transport-step:hover, a.transport-step:focus-visible { border-color: var(--acc
   color: #0f172a !important;
   border-color: #cbd5e1 !important;
 }
+.tv2-info { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; margin: 0; font-size: 0.9em; }
+.tv2-info dt { color: var(--muted); }
+.tv2-info dd { margin: 0; overflow-wrap: anywhere; }
