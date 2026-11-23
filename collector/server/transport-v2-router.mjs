@@ -1138,9 +1138,9 @@ const collectorIntegrationConfig = () => ({
       const hasRouteKind = Object.prototype.hasOwnProperty.call(body, "route_kind");
       const nextRouteKind = hasRouteKind ? String(body.route_kind).trim().toLowerCase() : current.route_kind;
       if (hasRouteKind && !ROUTE_KINDS.has(nextRouteKind)) throw new Error("route_kind is invalid");
-      const nextColor = color(body.color ?? current.color, current.color);
+      const hasColor = String(body.color ?? "").trim() !== "";
+      const nextColor = hasColor ? color(body.color, current.color) : current.color;
       const nextDescription = String((body.description ?? current.description) || "").trim();
-      const hasColor = Object.prototype.hasOwnProperty.call(body, "color");
       const nextDescriptionEn = String((body.description_en ?? current.description_en) || "").trim();
       const nextFare = Object.prototype.hasOwnProperty.call(body, "fare_baht") ? fare(body.fare_baht) : current.fare_baht;
       const nextColorLocked = hasColor ? 1 : (current.color_locked ? 1 : 0);
