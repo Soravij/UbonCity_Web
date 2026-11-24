@@ -59,7 +59,16 @@ function renderList() {
     st.textContent = routingStatusText(r);
     b.append(dot(r.color), label, st);
     b.addEventListener("click", () => select(r.id));
-    return b;
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "utility-action tv2-panel-btn tv2-route-path";
+    go.textContent = "✎ เส้นทาง";
+    go.title = "วาดเส้นทางใน Path Editor";
+    go.addEventListener("click", () => { window.location.href = pathEditorUrl(r.id); });
+    const row = document.createElement("div");
+    row.className = "tv2-route-row";
+    row.append(b, go);
+    return row;
   });
   if (!nodes.length) {
     const p = document.createElement("p");
@@ -118,8 +127,7 @@ function select(id) {
   renderList();
   renderForm();
   qs("rt-detail").hidden = !id;
-  qs("rt-actions").hidden = false;
-  qs("rt-form").hidden = true;
+  qs("rt-form").hidden = !id;
   document.getElementById("rt-empty").hidden = !!id;
   state.viewer?.selectRoute(id);
   if (id) state.viewer?.focusRoute(id);
@@ -133,7 +141,6 @@ function startNew() {
   renderList();
   renderForm();
   qs("rt-detail").hidden = false;
-  qs("rt-actions").hidden = true;
   qs("rt-form").hidden = false;
   document.getElementById("rt-empty").hidden = true;
   state.viewer?.selectRoute(null);
@@ -205,16 +212,9 @@ function bind() {
   qs("btn-open-routes")?.addEventListener("click", () => { window.location.href = "/transport-v2-routes.html"; });
   qs("btn-open-preview")?.addEventListener("click", () => { window.location.href = "/transport-v2-preview.html"; });
   qs("btn-new").addEventListener("click", startNew);
-  qs("btn-close").addEventListener("click", () => {
-    if (state.isNew) select(null);
-    else qs("rt-form").hidden = true;
-  });
+  qs("btn-close").addEventListener("click", () => select(null));
   qs("btn-fit").addEventListener("click", () => state.viewer?.fitAll());
   qs("rt-form").addEventListener("submit", (e) => { e.preventDefault(); save(); });
-  qs("btn-edit-info").addEventListener("click", () => { qs("rt-form").hidden = false; });
-  qs("btn-draw-path").addEventListener("click", () => {
-    if (state.selectedId) window.location.href = pathEditorUrl(state.selectedId);
-  });
 }
 
 async function init() {

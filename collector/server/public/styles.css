@@ -10727,7 +10727,17 @@ a.transport-step:hover, a.transport-step:focus-visible { border-color: var(--acc
 .tv2-thumb { width: 100%; max-height: 140px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
 .tv2-stage:not(.is-full) .tv2-stage-panel { max-height: max(70vh, 360px); overflow: auto; }
 .tv2-stage:not(.is-full) .tv2-stage-panel.tv2-wide { width: auto; max-width: none; flex: 1 1 auto; }
-.tv2-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.tv2-split { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .tv2-stage.is-full .tv2-split { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 760px) { .tv2-split { grid-template-columns: minmax(0, 1fr); } }
 .tv2-stage:not(.is-full) .tv2-stage-panel.tv2-wide { max-height: none; overflow: visible; }
+.tv2-head-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.tv2-head-actions > button { width: auto; flex: 0 0 auto; }
+.tv2-route-row { display: flex; gap: 6px; align-items: stretch; }
+.tv2-route-row > .tv2-route-btn { flex: 1 1 auto; min-width: 0; }
+.tv2-route-row > .tv2-route-path { flex: 0 0 auto; width: auto; padding-inline: 10px; font-size: 13px; }
+.tv2-form-grid { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 16px; align-items: start; }
+.tv2-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.tv2-form-actions > button { width: auto; flex: 0 0 auto; min-width: 96px; }
+.tv2-stage.is-full .tv2-form-grid { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 1000px) { .tv2-form-grid { grid-template-columns: minmax(0, 1fr); } }
