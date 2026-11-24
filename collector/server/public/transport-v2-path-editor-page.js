@@ -719,6 +719,7 @@ function bindControls() {
   qs("btn-process-home").addEventListener("click", () => { window.location.href = "/transport.html"; });
   qs("btn-open-routes").addEventListener("click", () => { window.location.href = "/transport-v2-routes.html"; });
   qs("btn-open-preview").addEventListener("click", () => { window.location.href = "/transport-v2-preview.html"; });
+  qs("btn-back-routes").addEventListener("click", () => { window.location.href = "/transport-v2-routes.html?route=" + state.routeId; });
   qs("btn-fit").addEventListener("click", () => state.viewer?.fitAll());
   qs("btn-undo-point").addEventListener("click", () => undo());
   btnClear.addEventListener("click", () => {

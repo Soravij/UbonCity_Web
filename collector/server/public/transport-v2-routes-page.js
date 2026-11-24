@@ -6,8 +6,17 @@ import { ROUTE_PALETTE } from "./transport-v2-palette.js";
 
 const READY_BASE_MAP_STATUSES = new Set(["ready", "active", "published", "reviewed"]);
 const SVG_NS = "http://www.w3.org/2000/svg";
-const state = { baseMap: null, routes: [], viewer: null, selectedId: null, isNew: false, pickedColor: null, saving: false, tab: "info" };
+const state = { baseMap: null, routes: [], viewer: null, selectedId: null, isNew: false, pickedColor: null, saving: false };
 const stage = createStage({ stage: qs("routes-stage"), collapseBtn: qs("btn-collapse"), fullscreenBtn: qs("btn-fullscreen"), title: () => "Routes" });
+stage.onChange(() => {
+  const full = stage.isFull();
+  document.getElementById("routes-map").hidden = !full;
+  document.getElementById("btn-fit").hidden = !full;
+  if (full) requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (state.selectedId) state.viewer?.focusRoute(state.selectedId); else state.viewer?.fitAll();
+  }));
+});
+const pathEditorUrl = (id) => "transport-v2-path-editor.html?id=" + id;
 
 function status(text, isError = false) {
   const node = qs("stage-status");
@@ -36,17 +45,6 @@ function current() {
 
 function routingStatusText(r) {
   return r?.routing_status === "fresh" ? "✓" : "ยังไม่คำนวณ";
-}
-
-function showTab(name) {
-  state.tab = name;
-  document.querySelectorAll("#rt-tabs .tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  document.querySelectorAll("#rt-detail [data-pane]").forEach((p) => { p.hidden = p.dataset.pane !== name; });
-}
-
-function setPathTabEnabled(enabled) {
-  const tab = document.querySelector('#rt-tabs .tab[data-tab="path"]');
-  if (tab) tab.disabled = !enabled;
 }
 
 function renderList() {
@@ -119,12 +117,9 @@ function select(id) {
   status("");
   renderList();
   renderForm();
-  if (id) {
-    setPathTabEnabled(true);
-    showTab(state.tab || "info");
-  } else {
-    state.tab = "info";
-  }
+  qs("rt-detail").hidden = !id;
+  qs("rt-actions").hidden = false;
+  qs("rt-form").hidden = true;
   state.viewer?.selectRoute(id);
   if (id) state.viewer?.focusRoute(id);
 }
@@ -136,8 +131,9 @@ function startNew() {
   status("");
   renderList();
   renderForm();
-  setPathTabEnabled(false);
-  showTab("info");
+  qs("rt-detail").hidden = false;
+  qs("rt-actions").hidden = true;
+  qs("rt-form").hidden = false;
   state.viewer?.selectRoute(null);
 }
 
@@ -192,6 +188,7 @@ async function save() {
     }
     await load();
     select(saved.id);
+    qs("rt-actions").hidden = false;
     status("บันทึกแล้ว");
   } catch (err) {
     status(err.message || "บันทึกไม่สำเร็จ", true);
@@ -207,17 +204,15 @@ function bind() {
   qs("btn-open-routes")?.addEventListener("click", () => { window.location.href = "/transport-v2-routes.html"; });
   qs("btn-open-preview")?.addEventListener("click", () => { window.location.href = "/transport-v2-preview.html"; });
   qs("btn-new").addEventListener("click", startNew);
-  qs("btn-close").addEventListener("click", () => select(null));
+  qs("btn-close").addEventListener("click", () => {
+    if (state.isNew) select(null);
+    else qs("rt-form").hidden = true;
+  });
   qs("btn-fit").addEventListener("click", () => state.viewer?.fitAll());
   qs("rt-form").addEventListener("submit", (e) => { e.preventDefault(); save(); });
-  qs("rt-tabs")?.addEventListener("click", (e) => {
-    const b = e.target.closest(".tab");
-    if (!b || b.disabled) return;
-    if (b.dataset.tab === "path") {
-      window.location.href = `/transport-v2-path-editor.html?id=${state.selectedId}`;
-      return;
-    }
-    showTab(b.dataset.tab);
+  qs("btn-edit-info").addEventListener("click", () => { qs("rt-form").hidden = false; });
+  qs("btn-draw-path").addEventListener("click", () => {
+    if (state.selectedId) window.location.href = pathEditorUrl(state.selectedId);
   });
 }
 
@@ -227,8 +222,11 @@ async function init() {
   bind();
   try {
     await load();
-    const wanted = Number(new URLSearchParams(window.location.search).get("id") || 0) || 0;
-    if (wanted && state.routes.some((r) => r.id === wanted)) select(wanted);
+    const want = Number(new URLSearchParams(location.search).get("route"));
+    if (want) {
+      const r = state.routes.find((x) => x.id === want);
+      if (r) select(r.id);
+    }
     stage.render();
   } catch (err) {
     setBanner("workspace-status", err.message || "โหลดหน้าไม่ได้", true);
