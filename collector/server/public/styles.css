@@ -10707,7 +10707,8 @@ a.transport-step:hover, a.transport-step:focus-visible { border-color: var(--acc
 .tv2-stage button.tv2-warn-banner:hover { background: #b91c1c !important; }
 .tv2-stage-panel input, .tv2-stage-panel select { width: 100%; box-sizing: border-box; }
 :root[data-theme="dark"] .tv2-stage.is-full .tv2-stage-panel input,
-:root[data-theme="dark"] .tv2-stage.is-full .tv2-stage-panel select {
+:root[data-theme="dark"] .tv2-stage.is-full .tv2-stage-panel select,
+:root[data-theme="dark"] .tv2-stage.is-full .tv2-stage-panel textarea {
   background: #ffffff !important;
   color: #0f172a !important;
   border-color: #cbd5e1 !important;
@@ -10716,7 +10717,7 @@ a.transport-step:hover, a.transport-step:focus-visible { border-color: var(--acc
 .tv2-info dt { color: var(--muted); }
 .tv2-info dd { margin: 0; overflow-wrap: anywhere; }
 
-.tv2-stage-panel.is-wide { flex-basis: 300px; width: 300px; }
+.tv2-stage-panel.tv2-wide { flex-basis: 300px; width: 300px; }
 .tv2-stage-panel textarea { width: 100%; box-sizing: border-box; }
 .tv2-route-btn { display: flex; align-items: center; gap: 8px; }
 .tv2-route-btn > span:first-of-type { flex: 1; }
@@ -10724,3 +10725,4 @@ a.transport-step:hover, a.transport-step:focus-visible { border-color: var(--acc
 .tv2-swatch { width: 36px; height: 36px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
 .tv2-swatch[aria-pressed="true"] { outline: 3px solid var(--accent); outline-offset: 2px; }
 .tv2-thumb { width: 100%; max-height: 140px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+.tv2-stage:not(.is-full) .tv2-stage-panel { max-height: max(70vh, 360px); overflow: auto; }

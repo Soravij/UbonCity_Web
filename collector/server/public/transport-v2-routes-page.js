@@ -109,7 +109,6 @@ function renderForm() {
   qs("rt-thumb").hidden = !thumb;
   if (thumb) qs("rt-thumb").src = thumb;
   qs("rt-photo").value = "";
-  qs("rt-path-status").textContent = state.isNew ? "" : routingStatusText(r);
   renderSwatches();
 }
 
@@ -123,6 +122,8 @@ function select(id) {
   if (id) {
     setPathTabEnabled(true);
     showTab(state.tab || "info");
+  } else {
+    state.tab = "info";
   }
   state.viewer?.selectRoute(id);
   if (id) state.viewer?.focusRoute(id);
@@ -181,6 +182,8 @@ async function save() {
     let saved = state.isNew
       ? await api("/api/v2/transport/routes", { method: "POST", body: JSON.stringify({ ...body, base_map_id: state.baseMap.id }) })
       : await api(`/api/v2/transport/routes/${state.selectedId}`, { method: "PUT", body: JSON.stringify(body) });
+    state.isNew = false;
+    state.selectedId = saved.id;
     const file = qs("rt-photo").files?.[0] || null;
     if (file) {
       const fd = new FormData();
@@ -205,14 +208,16 @@ function bind() {
   qs("btn-open-preview")?.addEventListener("click", () => { window.location.href = "/transport-v2-preview.html"; });
   qs("btn-new").addEventListener("click", startNew);
   qs("btn-close").addEventListener("click", () => select(null));
-  qs("btn-open-path").addEventListener("click", () => {
-    if (state.selectedId) window.location.href = `/transport-v2-path-editor.html?id=${state.selectedId}`;
-  });
   qs("btn-fit").addEventListener("click", () => state.viewer?.fitAll());
   qs("rt-form").addEventListener("submit", (e) => { e.preventDefault(); save(); });
   qs("rt-tabs")?.addEventListener("click", (e) => {
     const b = e.target.closest(".tab");
-    if (b && !b.disabled) showTab(b.dataset.tab);
+    if (!b || b.disabled) return;
+    if (b.dataset.tab === "path") {
+      window.location.href = `/transport-v2-path-editor.html?id=${state.selectedId}`;
+      return;
+    }
+    showTab(b.dataset.tab);
   });
 }
 
