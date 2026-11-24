@@ -1,4 +1,5 @@
 export function createStage({ stage, collapseBtn = null, fullscreenBtn = null, title = () => "" }) {
+  const fsLabel = (fullscreenBtn?.textContent || "").trim() || "เต็มจอ";
   let pseudo = false;
   let collapsed = false;
   let wakeLock = null;
@@ -16,7 +17,7 @@ export function createStage({ stage, collapseBtn = null, fullscreenBtn = null, t
       collapseBtn.hidden = !full;
       collapseBtn.textContent = `${collapsed ? "☰" : "–"} ${title()}`.trim();
     }
-    if (fullscreenBtn) fullscreenBtn.textContent = full ? "ออกจากเต็มจอ" : "เต็มจอ";
+    if (fullscreenBtn) fullscreenBtn.textContent = full ? "ออกจากเต็มจอ" : fsLabel;
     for (const fn of listeners) fn(full);
   }
 
@@ -53,6 +54,9 @@ export function createStage({ stage, collapseBtn = null, fullscreenBtn = null, t
   fullscreenBtn?.addEventListener("click", toggle);
   document.addEventListener("fullscreenchange", render);
   document.addEventListener("webkitfullscreenchange", render);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && stage.classList.contains("is-pseudo")) toggle();
+  });
 
   return { isFull, isCollapsed: () => collapsed, render, toggle, flash, onChange: (fn) => listeners.add(fn) };
 }
