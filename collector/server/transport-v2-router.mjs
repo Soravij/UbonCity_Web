@@ -1147,7 +1147,7 @@ const collectorIntegrationConfig = () => ({
       const nextColorLocked = hasColor ? 1 : (current.color_locked ? 1 : 0);
       const nextWorkflowStatus = String((body.workflow_status ?? current.workflow_status) || "draft").trim().toLowerCase() || current.workflow_status;
       const nextAssigneeUserId = Number((body.assignee_user_id ?? current.assignee_user_id) || 0) || null;
-      const affectsRouting = baseMapId !== current.base_map_id;
+      const affectsRouting = baseMapId !== current.base_map_id || nextRouteKind !== current.route_kind;
       db.prepare(`
         UPDATE transport_routes_v2
         SET base_map_id=?, route_name=?, route_number=?, vehicle_type=?, route_kind=?, color=?, description=?, description_en=?, fare_baht=?, color_locked=?, workflow_status=?, assignee_user_id=?,
@@ -1201,7 +1201,12 @@ const collectorIntegrationConfig = () => ({
     const relPath = path.join("uploads", "transport-v2", "routes", `route-${current.id}`, `vehicle-thumbnail-${Date.now()}${photo.ext}`);
     const fullPath = path.join(dirs.mediaDir, relPath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
-    await fs.writeFile(fullPath, photo.buffer);
+    try {
+      await fs.writeFile(fullPath, photo.buffer);
+    } catch (err) {
+      await fs.rm(fullPath, { force: true }).catch(() => {});
+      throw err;
+    }
     const checksum = crypto.createHash("sha256").update(photo.buffer).digest("hex");
     const assetUid = crypto.randomUUID();
     db.exec("BEGIN");

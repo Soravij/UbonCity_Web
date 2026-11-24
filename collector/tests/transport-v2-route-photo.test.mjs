@@ -3,7 +3,7 @@ import test from "node:test";
 import sharp from "sharp";
 import { processRoutePhoto, ROUTE_PHOTO_W, ROUTE_PHOTO_H } from "../server/transport-v2-photo.mjs";
 
-test("processRoutePhoto crops+compresses to 800x600 webp", async () => {
+test("processRoutePhoto crops+compresses to 640x480 webp", async () => {
   const input = await sharp({
     create: { width: 2000, height: 1000, channels: 3, background: { r: 120, g: 80, b: 40 } },
   }).png().toBuffer();
@@ -16,6 +16,6 @@ test("processRoutePhoto crops+compresses to 800x600 webp", async () => {
 
   const metadata = await sharp(result.buffer).metadata();
   assert.equal(metadata.format, "webp");
-  assert.equal(metadata.width, 800);
-  assert.equal(metadata.height, 600);
+  assert.equal(metadata.width, 640);
+  assert.equal(metadata.height, 480);
 });
