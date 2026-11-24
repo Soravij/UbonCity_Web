@@ -28,6 +28,105 @@ export function rampValue(ramp, z) {
   return ramp[ramp.length - 1].slice(1);
 }
 
+// Route band + chevron geometry (moved from transport-v2-leg-decor.js, which re-exports these).
+const LEG_EPS = 1e-9;
+const legLen = (v) => Math.hypot(v[0], v[1]);
+const legUnit = (v) => { const l = legLen(v); return l > LEG_EPS ? [v[0] / l, v[1] / l] : [0, 0]; };
+const legLeftNormal = (t) => [t[1], -t[0]];
+function legTangents(points) {
+  const out = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const d = [points[i + 1][0] - points[i][0], points[i + 1][1] - points[i][1]];
+    out.push(legLen(d) > LEG_EPS ? legUnit(d) : null);
+  }
+  return out;
+}
+function legNextNonNull(segs, from, dir) {
+  let i = from;
+  while (i >= 0 && i < segs.length) { if (segs[i]) return segs[i]; i += dir; }
+  return null;
+}
+export function offsetPolylineLeft(points, offsetUnits) {
+  if (!Array.isArray(points) || points.length < 2 || !offsetUnits) return (points || []).map((p) => [p[0], p[1]]);
+  const segs = legTangents(points);
+  const result = new Array(points.length);
+  for (let i = 0; i < points.length; i += 1) {
+    const inTan = i > 0 ? legNextNonNull(segs, i - 1, -1) : null;
+    const outTan = i < points.length - 1 ? legNextNonNull(segs, i, 1) : null;
+    let normal;
+    if (inTan && outTan) {
+      const nIn = legLeftNormal(inTan), nOut = legLeftNormal(outTan);
+      const sum = [nIn[0] + nOut[0], nIn[1] + nOut[1]];
+      normal = legLen(sum) > 1e-3 ? legUnit(sum) : nOut;
+    } else if (outTan) normal = legLeftNormal(outTan);
+    else if (inTan) normal = legLeftNormal(inTan);
+    else normal = [0, 0];
+    result[i] = [points[i][0] + normal[0] * offsetUnits, points[i][1] + normal[1] * offsetUnits];
+  }
+  return result;
+}
+export function chevronPolylinePoints(x, y, angleDeg, widthUnits, depthUnits) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const dx = Math.cos(rad), dy = Math.sin(rad);
+  const px = -dy, py = dx;
+  const hw = widthUnits / 2, hd = depthUnits / 2;
+  const tipX = x + dx * hd, tipY = y + dy * hd;
+  const backX = x - dx * hd, backY = y - dy * hd;
+  return `${backX + px * hw},${backY + py * hw} ${tipX},${tipY} ${backX - px * hw},${backY - py * hw}`;
+}
+export function arrowPositionsInRect(points, spacingUnits, rect, maxNodes = 1000) {
+  if (!Array.isArray(points) || points.length < 2 || !(spacingUnits > 0) || !rect) return [];
+  const x0 = rect.x, x1 = rect.x + rect.w, y0 = rect.y, y1 = rect.y + rect.h;
+  const isOutside = (a, b) => Math.max(a[0], b[0]) < x0 || Math.min(a[0], b[0]) > x1
+    || Math.max(a[1], b[1]) < y0 || Math.min(a[1], b[1]) > y1;
+  let visLen = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1], b = points[i];
+    if (!isOutside(a, b)) visLen += Math.hypot(b[0] - a[0], b[1] - a[1]);
+  }
+  const k = Math.max(1, Math.ceil(visLen / (maxNodes * spacingUnits)));
+  const step = spacingUnits * k;
+  const out = [];
+  let acc = 0;
+  let next = spacingUnits / 2;
+  for (let i = 1; i < points.length && out.length < maxNodes; i += 1) {
+    const a = points[i - 1], b = points[i];
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const segLen = Math.hypot(dx, dy);
+    if (segLen <= LEG_EPS) continue;
+    const end = acc + segLen;
+    if (isOutside(a, b)) {
+      if (next <= end) next += (Math.floor((end - next) / step) + 1) * step;
+    } else {
+      const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+      while (next <= end && out.length < maxNodes) {
+        const t = (next - acc) / segLen;
+        const x = a[0] + dx * t, y = a[1] + dy * t;
+        if (x >= x0 && x <= x1 && y >= y0 && y <= y1) out.push({ x, y, angleDeg });
+        next += step;
+      }
+    }
+    acc = end;
+  }
+  return out;
+}
+export const ROUTE_DECOR = {
+  minBandPx: 3, maxBandPx: 8, bandK: 2, gapRatio: 0.25,
+  bandOpacity: 0.85, chevronOpacity: 0.6,
+  chevronW: 0.7, chevronD: 0.35, chevronStroke: 0.18,
+  maxChevronNodes: 300,
+};
+export function routeBandPx(z) {
+  return Math.min(ROUTE_DECOR.maxBandPx, Math.max(ROUTE_DECOR.minBandPx, ROUTE_DECOR.bandK * Math.sqrt(Math.max(1, z))));
+}
+// segments (out_back): both = centred, no chevrons; out/back = offset left + chevrons.
+// no segments (loop, or out_back without segments): route.path centred + chevrons.
+export function routeBandSpecs(route) {
+  const segs = Array.isArray(route?.segments) ? route.segments.filter((s) => Array.isArray(s?.path) && s.path.length >= 2) : [];
+  if (segs.length) return segs.map((s) => ({ path: s.path, offset: s.leg !== "both", chevrons: s.leg !== "both" }));
+  return Array.isArray(route?.path) && route.path.length >= 2 ? [{ path: route.path, offset: false, chevrons: true }] : [];
+}
+
 // Icons: Font Awesome Free 6 (solid) — https://fontawesome.com — License CC BY 4.0
 export const LANDMARK_ICONS = {
   hospital: { w: 640, h: 512, d: 'M192 48c0-26.5 21.5-48 48-48L400 0c26.5 0 48 21.5 48 48l0 464-80 0 0-80c0-26.5-21.5-48-48-48s-48 21.5-48 48l0 80-80 0 0-464zM48 96l112 0 0 416L48 512c-26.5 0-48-21.5-48-48L0 320l80 0c8.8 0 16-7.2 16-16s-7.2-16-16-16L0 288l0-64 80 0c8.8 0 16-7.2 16-16s-7.2-16-16-16L0 192l0-48c0-26.5 21.5-48 48-48zm544 0c26.5 0 48 21.5 48 48l0 48-80 0c-8.8 0-16 7.2-16 16s7.2 16 16 16l80 0 0 64-80 0c-8.8 0-16 7.2-16 16s7.2 16 16 16l80 0 0 144c0 26.5-21.5 48-48 48l-112 0 0-416 112 0zM312 64c-8.8 0-16 7.2-16 16l0 24-24 0c-8.8 0-16 7.2-16 16l0 16c0 8.8 7.2 16 16 16l24 0 0 24c0 8.8 7.2 16 16 16l16 0c8.8 0 16-7.2 16-16l0-24 24 0c8.8 0 16-7.2 16-16l0-16c0-8.8-7.2-16-16-16l-24 0 0-24c0-8.8-7.2-16-16-16l-16 0z', color: '#d32f2f' },
@@ -184,15 +283,39 @@ export function createTransportMapViewer(container, options = {}) {
     : Promise.resolve();
 
   const routesById = new Map();
+  const routeBands = [];
   for (const route of bundle.routes || []) {
     routesById.set(Number(route.id), route);
     const points = route.path.map((p) => p.join(",")).join(" ");
-    const line = el("polyline", { points, fill: "none", stroke: route.color, "stroke-width": 5, "stroke-linecap": "round", "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke", "data-route-id": route.id });
+    const band = el("g", { "data-route-id": route.id, "data-band": "1", "pointer-events": "none" });
+    routeBands.push([band, route.color, routeBandSpecs(route)]);
     const hit = el("polyline", { points, fill: "none", stroke: "transparent", "stroke-width": 18, "vector-effect": "non-scaling-stroke", "data-route-id": route.id, "data-hit": "1" });
     hit.style.cursor = "pointer";
-    gRoutes.append(line, hit);
+    gRoutes.append(band, hit);
     for (const stop of route.stops || []) {
       gStops.append(el("circle", { cx: stop.x, cy: stop.y, r: 4, fill: "#ffffff", stroke: route.color, "stroke-width": 2, "vector-effect": "non-scaling-stroke", "data-route-id": route.id }));
+    }
+  }
+
+  function drawRouteBands(u, z) {
+    if (!routeBands.length) return;
+    const bp = routeBandPx(z);
+    const bandU = bp * u;
+    const gapU = Math.max(1, bp * ROUTE_DECOR.gapRatio) * u;
+    const r = container.getBoundingClientRect();
+    const vw = r.width > 0 ? r.width * u : view.w;
+    const vh = r.height > 0 ? r.height * u : view.h;
+    const cull = { x: view.x + view.w / 2 - vw / 2 - bandU, y: view.y + view.h / 2 - vh / 2 - bandU, w: vw + 2 * bandU, h: vh + 2 * bandU };
+    for (const [g, color, specs] of routeBands) {
+      g.replaceChildren();
+      for (const s of specs) {
+        const center = s.offset ? offsetPolylineLeft(s.path, bandU / 2 + gapU / 2) : s.path;
+        g.append(el("polyline", { points: center.map((p) => `${p[0]},${p[1]}`).join(" "), fill: "none", stroke: color, "stroke-width": bandU, "stroke-linejoin": "round", "stroke-linecap": "butt", opacity: ROUTE_DECOR.bandOpacity }));
+        if (!s.chevrons) continue;
+        for (const a of arrowPositionsInRect(center, bandU, cull, ROUTE_DECOR.maxChevronNodes)) {
+          g.append(el("polyline", { points: chevronPolylinePoints(a.x, a.y, a.angleDeg, bandU * ROUTE_DECOR.chevronW, bandU * ROUTE_DECOR.chevronD), fill: "none", stroke: "#fff", "stroke-width": bandU * ROUTE_DECOR.chevronStroke, "stroke-linecap": "round", "stroke-linejoin": "round", opacity: ROUTE_DECOR.chevronOpacity }));
+        }
+      }
     }
   }
 
@@ -273,6 +396,7 @@ export function createTransportMapViewer(container, options = {}) {
     svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
     const u = unitsPerPx();
     const z = zoomLevel(view, full);
+    drawRouteBands(u, z);
     for (const [n, w, ramp] of baseStrokes) {
       if (!ramp) continue;
       const hidden = z < ramp[0][0];
