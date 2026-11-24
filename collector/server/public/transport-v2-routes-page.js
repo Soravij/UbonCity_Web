@@ -120,6 +120,7 @@ function select(id) {
   qs("rt-detail").hidden = !id;
   qs("rt-actions").hidden = false;
   qs("rt-form").hidden = true;
+  document.getElementById("rt-empty").hidden = !!id;
   state.viewer?.selectRoute(id);
   if (id) state.viewer?.focusRoute(id);
 }
@@ -134,6 +135,7 @@ function startNew() {
   qs("rt-detail").hidden = false;
   qs("rt-actions").hidden = true;
   qs("rt-form").hidden = false;
+  document.getElementById("rt-empty").hidden = true;
   state.viewer?.selectRoute(null);
 }
 
@@ -188,7 +190,6 @@ async function save() {
     }
     await load();
     select(saved.id);
-    qs("rt-actions").hidden = false;
     status("บันทึกแล้ว");
   } catch (err) {
     status(err.message || "บันทึกไม่สำเร็จ", true);
