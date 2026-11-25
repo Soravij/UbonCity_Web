@@ -88,6 +88,8 @@ const isClosed = () => !isOutBack() && state.points.length >= 3 && sameLatLng(st
 const range = () => legRange(state.points, state.routeKind, state.leg);
 const withLeg = (p) => (isOutBack() ? { ...p, leg: state.leg } : p);
 const activeStops = () => activeStopIndexes(state.stops, state.routeKind, state.leg);
+const loopGuide = () => (state.step === 1 && !isOutBack() && !isClosed() && state.points.length >= 3
+  ? [project(state.points[state.points.length - 1]), project(state.points[0])] : null);
 function legPaths() {
   const path = (state.route?.resolved_path || []).map(project);
   if (!isOutBack()) return { active: path, ghost: [] };
@@ -284,7 +286,7 @@ function drawDraft() {
     path: lp.active,
     points: all.slice(start, end),
     stops: stopIdx.map((i) => project(state.stops[i])),
-    ghostPath: lp.ghost,
+    ghostPath: loopGuide() || lp.ghost,
     ghostPoints: [...all.slice(0, start), ...all.slice(end)],
     ghostStops: state.stops.filter((_, i) => !stopSet.has(i)).map(project),
     pointOpacity: state.step === 3 ? 0.3 : 1,
@@ -477,6 +479,10 @@ let resolveSeq = 0;
 
 async function resolveNow() {
   clearTimeout(state.timer);
+  if (!isOutBack() && state.points.length >= 3 && !isClosed()) {
+    pushHistory();
+    state.points.push({ ...state.points[0] }); // auto-close loop
+  }
   state.pending = true;
   refresh();
   const seq = ++resolveSeq;

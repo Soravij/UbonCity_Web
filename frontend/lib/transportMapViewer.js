@@ -111,9 +111,9 @@ export function arrowPositionsInRect(points, spacingUnits, rect, maxNodes = 1000
   return out;
 }
 export const ROUTE_DECOR = {
-  minBandPx: 5, maxBandPx: 14, bandK: 3.5, gapRatio: 0.25,
+  minBandPx: 3, maxBandPx: 8, bandK: 2, gapRatio: 0.25,
   bandOpacity: 0.85, chevronOpacity: 0.6,
-  chevronW: 0.7, chevronD: 0.35, chevronStroke: 0.18,
+  chevronW: 0.7, chevronD: 0.9, chevronStroke: 0.22, chevronSpacing: 2.5,
   maxChevronNodes: 300,
 };
 export function routeBandPx(z) {
@@ -311,9 +311,9 @@ export function createTransportMapViewer(container, options = {}) {
       g.replaceChildren();
       for (const s of specs) {
         const center = s.offset ? offsetPolylineLeft(s.path, bandU / 2 + gapU / 2) : s.path;
-        g.append(el("polyline", { points: center.map((p) => `${p[0]},${p[1]}`).join(" "), fill: "none", stroke: color, "stroke-width": bandU, "stroke-linejoin": "round", "stroke-linecap": "butt", opacity: ROUTE_DECOR.bandOpacity }));
+        g.append(el("polyline", { points: center.map((p) => `${p[0]},${p[1]}`).join(" "), fill: "none", stroke: color, "stroke-width": bandU, "stroke-linejoin": "round", "stroke-linecap": "round", opacity: ROUTE_DECOR.bandOpacity }));
         if (!s.chevrons) continue;
-        for (const a of arrowPositionsInRect(center, bandU, cull, ROUTE_DECOR.maxChevronNodes)) {
+        for (const a of arrowPositionsInRect(center, bandU * ROUTE_DECOR.chevronSpacing, cull, ROUTE_DECOR.maxChevronNodes)) {
           g.append(el("polyline", { points: chevronPolylinePoints(a.x, a.y, a.angleDeg, bandU * ROUTE_DECOR.chevronW, bandU * ROUTE_DECOR.chevronD), fill: "none", stroke: "#fff", "stroke-width": bandU * ROUTE_DECOR.chevronStroke, "stroke-linecap": "round", "stroke-linejoin": "round", opacity: ROUTE_DECOR.chevronOpacity }));
         }
       }

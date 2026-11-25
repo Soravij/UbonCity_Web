@@ -26,11 +26,11 @@ test("no drawable path → []", () => {
   assert.deepEqual(routeBandSpecs(null), []);
 });
 
-test("routeBandPx clamps 5..14 and scales with sqrt(zoom)", () => {
-  assert.equal(routeBandPx(0.5), 5);
-  assert.equal(routeBandPx(1), 5);
-  assert.equal(routeBandPx(4), 7);
-  assert.equal(routeBandPx(100), 14);
+test("routeBandPx clamps 3..8 and scales with sqrt(zoom)", () => {
+  assert.equal(routeBandPx(0.5), 3);
+  assert.equal(routeBandPx(1), 3);
+  assert.equal(routeBandPx(4), 4);
+  assert.equal(routeBandPx(100), 8);
 });
 
 test("leg-decor re-exports the viewer's geometry", () => {
