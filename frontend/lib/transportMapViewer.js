@@ -111,7 +111,7 @@ export function arrowPositionsInRect(points, spacingUnits, rect, maxNodes = 1000
   return out;
 }
 export const ROUTE_DECOR = {
-  minBandPx: 3, maxBandPx: 8, bandK: 2, gapRatio: 0.25,
+  minBandPx: 5, maxBandPx: 14, bandK: 3.5, gapRatio: 0.25,
   bandOpacity: 0.85, chevronOpacity: 0.6,
   chevronW: 0.7, chevronD: 0.35, chevronStroke: 0.18,
   maxChevronNodes: 300,
@@ -120,11 +120,12 @@ export function routeBandPx(z) {
   return Math.min(ROUTE_DECOR.maxBandPx, Math.max(ROUTE_DECOR.minBandPx, ROUTE_DECOR.bandK * Math.sqrt(Math.max(1, z))));
 }
 // segments (out_back): both = centred, no chevrons; out/back = offset left + chevrons.
-// no segments (loop, or out_back without segments): route.path centred + chevrons.
+// no segments (loop, or out_back without segments): route.path offset left + chevrons,
+// so an in-and-back spur inside one path splits into two opposite bands instead of overlapping.
 export function routeBandSpecs(route) {
   const segs = Array.isArray(route?.segments) ? route.segments.filter((s) => Array.isArray(s?.path) && s.path.length >= 2) : [];
   if (segs.length) return segs.map((s) => ({ path: s.path, offset: s.leg !== "both", chevrons: s.leg !== "both" }));
-  return Array.isArray(route?.path) && route.path.length >= 2 ? [{ path: route.path, offset: false, chevrons: true }] : [];
+  return Array.isArray(route?.path) && route.path.length >= 2 ? [{ path: route.path, offset: true, chevrons: true }] : [];
 }
 
 // Icons: Font Awesome Free 6 (solid) — https://fontawesome.com — License CC BY 4.0

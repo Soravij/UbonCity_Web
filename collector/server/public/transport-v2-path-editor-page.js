@@ -263,7 +263,7 @@ function drawLegDecor(lp, color) {
   if (!(upp > 0) || !rect) return;
   const bp = bandPx(rect);
   const cull = visibleRect(svg, upp);
-  const outBack = state.route?.route_kind === "out_back";
+  const outBack = true; // offset every leg left (loop too) so in-and-back spurs don't overlap — 4b
   const ghost = lp.ghost || [];
   const ghostPaths = Array.isArray(ghost[0]?.[0]) ? ghost : (ghost.length ? [ghost] : []);
   for (const g of ghostPaths) addBand(g, color, upp, cull, bp, outBack, DECOR.ghostMul);
