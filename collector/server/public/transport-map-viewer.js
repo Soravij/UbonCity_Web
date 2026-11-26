@@ -74,6 +74,17 @@ export function chevronPolylinePoints(x, y, angleDeg, widthUnits, depthUnits) {
   const backX = x - dx * hd, backY = y - dy * hd;
   return `${backX + px * hw},${backY + py * hw} ${tipX},${tipY} ${backX - px * hw},${backY - py * hw}`;
 }
+// Solid chevron stripe: thickUnits is its thickness along the path.
+export function chevronPolygonPoints(x, y, angleDeg, widthUnits, depthUnits, thickUnits) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const dx = Math.cos(rad), dy = Math.sin(rad);
+  const px = -dy, py = dx, hw = widthUnits / 2;
+  const tip = [x + dx * (depthUnits / 2 + thickUnits / 2), y + dy * (depthUnits / 2 + thickUnits / 2)];
+  const bl = [tip[0] - dx * depthUnits + px * hw, tip[1] - dy * depthUnits + py * hw];
+  const br = [tip[0] - dx * depthUnits - px * hw, tip[1] - dy * depthUnits - py * hw];
+  const back = (q) => [q[0] - dx * thickUnits, q[1] - dy * thickUnits];
+  return [bl, tip, br, back(br), back(tip), back(bl)].map((q) => `${q[0]},${q[1]}`).join(" ");
+}
 export function arrowPositionsInRect(points, spacingUnits, rect, maxNodes = 1000) {
   if (!Array.isArray(points) || points.length < 2 || !(spacingUnits > 0) || !rect) return [];
   const x0 = rect.x, x1 = rect.x + rect.w, y0 = rect.y, y1 = rect.y + rect.h;
@@ -111,9 +122,9 @@ export function arrowPositionsInRect(points, spacingUnits, rect, maxNodes = 1000
   return out;
 }
 export const ROUTE_DECOR = {
-  minBandPx: 3, maxBandPx: 8, bandK: 2, gapRatio: 0.25,
-  bandOpacity: 0.85, chevronOpacity: 0.6,
-  chevronW: 0.95, chevronD: 0.9, chevronStroke: 0.35, chevronSpacing: 2.5,
+  minBandPx: 3, maxBandPx: 14, bandK: 3.5, gapRatio: 0.1,
+  bandOpacity: 0.6, chevronOpacity: 0.85,
+  chevronW: 1, chevronD: 0.6, chevronSpacing: 1, chevronFill: 0.5,
   maxChevronNodes: 300,
 };
 export function routeBandPx(z) {
@@ -303,20 +314,25 @@ export function createTransportMapViewer(container, options = {}) {
     const bp = routeBandPx(z);
     const bandU = bp * u;
     const gapU = Math.max(1, bp * ROUTE_DECOR.gapRatio) * u;
+    const spacingU = bandU * ROUTE_DECOR.chevronSpacing;
+    const thickU = spacingU * ROUTE_DECOR.chevronFill;
     const r = container.getBoundingClientRect();
     const vw = r.width > 0 ? r.width * u : view.w;
     const vh = r.height > 0 ? r.height * u : view.h;
     const cull = { x: view.x + view.w / 2 - vw / 2 - bandU, y: view.y + view.h / 2 - vh / 2 - bandU, w: vw + 2 * bandU, h: vh + 2 * bandU };
     for (const [g, color, specs] of routeBands) {
       g.replaceChildren();
+      const gBand = el("g", { opacity: ROUTE_DECOR.bandOpacity });
+      const gChev = el("g", { opacity: ROUTE_DECOR.chevronOpacity });
       for (const s of specs) {
         const center = s.offset ? offsetPolylineLeft(s.path, bandU / 2 + gapU / 2) : s.path;
-        g.append(el("polyline", { points: center.map((p) => `${p[0]},${p[1]}`).join(" "), fill: "none", stroke: color, "stroke-width": bandU, "stroke-linejoin": "round", "stroke-linecap": "round", opacity: ROUTE_DECOR.bandOpacity }));
+        gBand.append(el("polyline", { points: center.map((p) => `${p[0]},${p[1]}`).join(" "), fill: "none", stroke: color, "stroke-width": bandU, "stroke-linejoin": "round", "stroke-linecap": "round" }));
         if (!s.chevrons) continue;
-        for (const a of arrowPositionsInRect(center, bandU * ROUTE_DECOR.chevronSpacing, cull, ROUTE_DECOR.maxChevronNodes)) {
-          g.append(el("polyline", { points: chevronPolylinePoints(a.x, a.y, a.angleDeg, bandU * ROUTE_DECOR.chevronW, bandU * ROUTE_DECOR.chevronD), fill: "none", stroke: "#fff", "stroke-width": bandU * ROUTE_DECOR.chevronStroke, "stroke-linecap": "round", "stroke-linejoin": "round", opacity: ROUTE_DECOR.chevronOpacity }));
+        for (const a of arrowPositionsInRect(center, spacingU, cull, ROUTE_DECOR.maxChevronNodes)) {
+          gChev.append(el("polygon", { points: chevronPolygonPoints(a.x, a.y, a.angleDeg, bandU * ROUTE_DECOR.chevronW, bandU * ROUTE_DECOR.chevronD, thickU), fill: "#fff" }));
         }
       }
+      g.append(gBand, gChev);
     }
   }
 

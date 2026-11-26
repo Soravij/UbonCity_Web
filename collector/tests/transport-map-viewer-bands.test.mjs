@@ -26,11 +26,11 @@ test("no drawable path → []", () => {
   assert.deepEqual(routeBandSpecs(null), []);
 });
 
-test("routeBandPx clamps 3..8 and scales with sqrt(zoom)", () => {
-  assert.equal(routeBandPx(0.5), 3);
-  assert.equal(routeBandPx(1), 3);
-  assert.equal(routeBandPx(4), 4);
-  assert.equal(routeBandPx(100), 8);
+test("routeBandPx clamps 3..14 and scales with sqrt(zoom)", () => {
+  assert.equal(routeBandPx(0.5), 3.5);
+  assert.equal(routeBandPx(1), 3.5);
+  assert.equal(routeBandPx(4), 7);
+  assert.equal(routeBandPx(100), 14);
 });
 
 test("leg-decor re-exports the viewer's geometry", () => {
@@ -41,4 +41,8 @@ test("leg-decor re-exports the viewer's geometry", () => {
 
 test("offsetPolylineLeft splits an in-and-back spur onto opposite sides", () => {
   assert.deepEqual(viewer.offsetPolylineLeft([[0, 0], [0, 10], [0, 0]], 2), [[2, 0], [-2, 10], [-2, 0]]);
+});
+
+test("chevronPolygonPoints builds a solid chevron stripe", () => {
+  assert.equal(viewer.chevronPolygonPoints(0, 0, 0, 2, 1, 0.5), "-0.25,1 0.75,0 -0.25,-1 -0.75,-1 0.25,0 -0.75,1");
 });
