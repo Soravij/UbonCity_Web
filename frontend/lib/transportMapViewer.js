@@ -113,7 +113,7 @@ export function arrowPositionsInRect(points, spacingUnits, rect, maxNodes = 1000
 export const ROUTE_DECOR = {
   minBandPx: 3, maxBandPx: 8, bandK: 2, gapRatio: 0.25,
   bandOpacity: 0.85, chevronOpacity: 0.6,
-  chevronW: 0.7, chevronD: 0.9, chevronStroke: 0.22, chevronSpacing: 2.5,
+  chevronW: 0.95, chevronD: 0.9, chevronStroke: 0.35, chevronSpacing: 2.5,
   maxChevronNodes: 300,
 };
 export function routeBandPx(z) {
