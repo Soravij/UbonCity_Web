@@ -477,9 +477,9 @@ const saveStops = () => api(`/api/v2/transport/routes/${state.routeId}/stops`, {
 
 let resolveSeq = 0;
 
-async function resolveNow() {
+async function resolveNow({ autoClose = false } = {}) {
   clearTimeout(state.timer);
-  if (!isOutBack() && state.points.length >= 3 && !isClosed()) {
+  if (autoClose && !isOutBack() && state.points.length >= 3 && !isClosed()) {
     pushHistory();
     state.points.push({ ...state.points[0] }); // auto-close loop
   }
@@ -752,7 +752,7 @@ function bindControls() {
     await resolveNow();
     if (hasPath()) setStep(2);
   });
-  qs("btn-resolve").addEventListener("click", () => resolveNow());
+  qs("btn-resolve").addEventListener("click", () => resolveNow({ autoClose: true }));
   qs("btn-undo-stop").addEventListener("click", () => {
     const idx = activeStops();
     if (!idx.length) return;
