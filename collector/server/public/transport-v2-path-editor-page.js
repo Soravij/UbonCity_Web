@@ -88,6 +88,8 @@ const isClosed = () => !isOutBack() && state.points.length >= 3 && sameLatLng(st
 const range = () => legRange(state.points, state.routeKind, state.leg);
 const withLeg = (p) => (isOutBack() ? { ...p, leg: state.leg } : p);
 const activeStops = () => activeStopIndexes(state.stops, state.routeKind, state.leg);
+const loopGuide = () => (state.step === 1 && !isOutBack() && !isClosed() && state.points.length >= 3
+  ? [project(state.points[state.points.length - 1]), project(state.points[0])] : null);
 function legPaths() {
   const path = (state.route?.resolved_path || []).map(project);
   if (!isOutBack()) return { active: path, ghost: [] };
@@ -263,7 +265,7 @@ function drawLegDecor(lp, color) {
   if (!(upp > 0) || !rect) return;
   const bp = bandPx(rect);
   const cull = visibleRect(svg, upp);
-  const outBack = state.route?.route_kind === "out_back";
+  const outBack = true; // offset every leg left (loop too) so in-and-back spurs don't overlap — 4b
   const ghost = lp.ghost || [];
   const ghostPaths = Array.isArray(ghost[0]?.[0]) ? ghost : (ghost.length ? [ghost] : []);
   for (const g of ghostPaths) addBand(g, color, upp, cull, bp, outBack, DECOR.ghostMul);
@@ -284,7 +286,7 @@ function drawDraft() {
     path: lp.active,
     points: all.slice(start, end),
     stops: stopIdx.map((i) => project(state.stops[i])),
-    ghostPath: lp.ghost,
+    ghostPath: loopGuide() || lp.ghost,
     ghostPoints: [...all.slice(0, start), ...all.slice(end)],
     ghostStops: state.stops.filter((_, i) => !stopSet.has(i)).map(project),
     pointOpacity: state.step === 3 ? 0.3 : 1,
@@ -475,8 +477,12 @@ const saveStops = () => api(`/api/v2/transport/routes/${state.routeId}/stops`, {
 
 let resolveSeq = 0;
 
-async function resolveNow() {
+async function resolveNow({ autoClose = false } = {}) {
   clearTimeout(state.timer);
+  if (autoClose && !isOutBack() && state.points.length >= 3 && !isClosed()) {
+    pushHistory();
+    state.points.push({ ...state.points[0] }); // auto-close loop
+  }
   state.pending = true;
   refresh();
   const seq = ++resolveSeq;
@@ -746,7 +752,7 @@ function bindControls() {
     await resolveNow();
     if (hasPath()) setStep(2);
   });
-  qs("btn-resolve").addEventListener("click", () => resolveNow());
+  qs("btn-resolve").addEventListener("click", () => resolveNow({ autoClose: true }));
   qs("btn-undo-stop").addEventListener("click", () => {
     const idx = activeStops();
     if (!idx.length) return;
