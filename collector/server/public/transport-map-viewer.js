@@ -121,14 +121,17 @@ export function arrowPositionsInRect(points, spacingUnits, rect, maxNodes = 1000
   }
   return out;
 }
+// Band width follows the base map's secondary-road fill (stroke px × BASE_RAMPS ramp),
+// so an out/back pair (2 bands + gap) fills that road at every zoom.
 export const ROUTE_DECOR = {
-  minBandPx: 3, maxBandPx: 7, bandK: 1.75, gapRatio: 0.1,
-  bandOpacity: 0.6, chevronOpacity: 0.85,
+  roadGroup: "roads-secondary", roadPx: 2, minBandPx: 2, gapRatio: 0.1,
+  bandOpacity: 0.6, chevronOpacity: 0.85, chevronMinBandPx: 3,
   chevronW: 1, chevronD: 0.6, chevronSpacing: 1, chevronFill: 0.5,
   maxChevronNodes: 300,
 };
 export function routeBandPx(z) {
-  return Math.min(ROUTE_DECOR.maxBandPx, Math.max(ROUTE_DECOR.minBandPx, ROUTE_DECOR.bandK * Math.sqrt(Math.max(1, z))));
+  const [mul] = rampValue(BASE_RAMPS[ROUTE_DECOR.roadGroup], z);
+  return Math.max(ROUTE_DECOR.minBandPx, (ROUTE_DECOR.roadPx * mul) / (2 + ROUTE_DECOR.gapRatio));
 }
 // segments (out_back): both = centred, no chevrons; out/back = offset left + chevrons.
 // no segments (loop, or out_back without segments): route.path offset left + chevrons,
@@ -313,7 +316,7 @@ export function createTransportMapViewer(container, options = {}) {
     if (!routeBands.length) return;
     const bp = routeBandPx(z);
     const bandU = bp * u;
-    const gapU = Math.max(1, bp * ROUTE_DECOR.gapRatio) * u;
+    const gapU = bp * ROUTE_DECOR.gapRatio * u;
     const spacingU = bandU * ROUTE_DECOR.chevronSpacing;
     const thickU = spacingU * ROUTE_DECOR.chevronFill;
     const r = container.getBoundingClientRect();
@@ -327,7 +330,7 @@ export function createTransportMapViewer(container, options = {}) {
       for (const s of specs) {
         const center = s.offset ? offsetPolylineLeft(s.path, bandU / 2 + gapU / 2) : s.path;
         gBand.append(el("polyline", { points: center.map((p) => `${p[0]},${p[1]}`).join(" "), fill: "none", stroke: color, "stroke-width": bandU, "stroke-linejoin": "round", "stroke-linecap": "round" }));
-        if (!s.chevrons) continue;
+        if (!s.chevrons || bp < ROUTE_DECOR.chevronMinBandPx) continue;
         for (const a of arrowPositionsInRect(center, spacingU, cull, ROUTE_DECOR.maxChevronNodes)) {
           gChev.append(el("polygon", { points: chevronPolygonPoints(a.x, a.y, a.angleDeg, bandU * ROUTE_DECOR.chevronW, bandU * ROUTE_DECOR.chevronD, thickU), fill: "#fff" }));
         }

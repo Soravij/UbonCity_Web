@@ -26,11 +26,12 @@ test("no drawable path → []", () => {
   assert.deepEqual(routeBandSpecs(null), []);
 });
 
-test("routeBandPx clamps 3..7 and scales with sqrt(zoom)", () => {
-  assert.equal(routeBandPx(0.5), 3);
-  assert.equal(routeBandPx(1), 3);
-  assert.equal(routeBandPx(4), 3.5);
-  assert.equal(routeBandPx(100), 7);
+test("routeBandPx follows the secondary-road fill width, floor 2px", () => {
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  assert.equal(routeBandPx(0.5), 2);
+  assert.equal(routeBandPx(1), 2);
+  assert.ok(near(routeBandPx(12), (2 * 3.2) / 2.1));
+  assert.ok(near(routeBandPx(100), (2 * 6.5) / 2.1));
 });
 
 test("leg-decor re-exports the viewer's geometry", () => {
