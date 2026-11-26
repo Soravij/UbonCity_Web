@@ -32,29 +32,40 @@
           <button id="btn-open-base-maps" class="utility-action" type="button">Base Maps</button>
           <button id="btn-open-routes" class="utility-action" type="button">Routes</button>
           <select id="preview-base-map" aria-label="Base map"></select>
-          <button id="btn-lang-th" class="utility-action" type="button">TH</button>
-          <button id="btn-lang-en" class="utility-action" type="button">EN</button>
-          <button id="btn-fit" class="utility-action" type="button">Fit</button>
         </div>
       </div>
       <div class="stack-lg">
         <section class="card article-work-card">
-          <div class="toolbar" id="preview-route-chips"></div>
-          <div id="preview-map" style="height: 70vh; min-height: 360px; border-radius: 12px; overflow: hidden; background: #f6f1e7;"></div>
-          <p id="preview-route-detail" class="muted"></p>
-        </section>
-        <section class="card article-work-card">
-          <div class="article-section-head">
-            <div>
-              <h2 class="section-title">Publish</h2>
-              <p class="muted" id="publish-live"></p>
+          <div id="preview-stage" class="tv2-stage">
+            <div id="stage-controls" class="card tv2-stage-panel">
+              <button type="button" id="btn-collapse" class="utility-action tv2-collapse" hidden>–</button>
+              <h2 class="section-title" data-compact>Preview</h2>
+              <div class="tv2-row">
+                <button id="btn-lang-th" class="utility-action" type="button" aria-pressed="true">TH</button>
+                <button id="btn-lang-en" class="utility-action" type="button" aria-pressed="false">EN</button>
+                <button id="btn-fit" class="utility-action" type="button">Fit</button>
+              </div>
+              <button id="btn-fullscreen" class="primary tv2-panel-btn" type="button">⛶ เต็มจอ</button>
+              <div id="preview-route-list" class="tv2-group"></div>
+              <hr class="tv2-sep" />
+              <div id="route-card" class="tv2-group" hidden>
+                <strong id="route-card-title"></strong>
+                <img id="route-card-photo" class="tv2-thumb" alt="" hidden />
+                <dl id="route-card-info" class="tv2-info"></dl>
+              </div>
+              <p id="route-card-empty" class="tv2-tip">แตะเส้นหรือเลือกสายเพื่อดูการ์ด</p>
+              <div id="publish-block" class="tv2-group" data-compact>
+                <hr class="tv2-sep" />
+                <strong>Publish</strong>
+                <p class="muted tv2-label" id="publish-live"></p>
+                <ul id="publish-problems" class="tv2-text-error"></ul>
+                <ul id="publish-warnings"></ul>
+                <ul id="publish-skipped" class="muted"></ul>
+                <button id="btn-publish" class="primary tv2-panel-btn" type="button">Publish to website</button>
+                <span id="publish-status" class="status"></span>
+              </div>
             </div>
-          </div>
-          <ul id="publish-problems"></ul>
-          <ul id="publish-skipped"></ul>
-          <div class="toolbar">
-            <button id="btn-publish" class="primary" type="button">Publish to website</button>
-            <span id="publish-status" class="status"></span>
+            <div id="preview-map" class="tv2-stage-map"></div>
           </div>
         </section>
       </div>
