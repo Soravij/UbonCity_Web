@@ -55,6 +55,14 @@ test("bundle: invalid route number/name goes to skipped, overlay names never col
   assert.ok(skipped.some((s) => s.id === 9 && s.reason === "invalid number or name"));
   assert.deepEqual(bundle.overlays.map((o) => o.file), ["overlay-1.png", "overlay-2.png"]);
 });
+test("bundle: route with vehicle_thumbnail_url gets photo + file; route without thumbnail has no photo key", () => {
+  const i = input();
+  i.routes[0].vehicle_thumbnail_url = "/media/uploads/transport-v2/routes/a.jpg";
+  const { bundle, files } = buildTransportBundle(i);
+  assert.equal(bundle.routes[0].photo, "route-1.jpg");
+  assert.ok(files.some((f) => f.name === "route-1.jpg" && f.storagePath === "uploads/transport-v2/routes/a.jpg"));
+  assert.ok(!("photo" in buildTransportBundle(input()).bundle.routes[0]));
+});
 test("bundle: out_back route gets route_kind and segments", () => {
   const i = input();
   i.routes = [{

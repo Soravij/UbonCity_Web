@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <!--CH_HEAD-->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collector - Transport V2 Landmarks</title>
+    <script src="/theme-bootstrap.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+    <link rel="stylesheet" href="/styles.css?v=__COLLECTOR_ASSET_VERSION__" />
+    <!--CH_HEAD_CSS-->
+    <script defer src="/theme-control.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </head>
+  <body>
+    <main class="container article-page-shell">
+      <header class="header">
+        <div class="auth-row">
+          <!--CH_BRAND-->
+          <div class="auth-intro">
+            <h1>ระบบจัดการคอนเทนต์</h1>
+            <p id="page-subtitle">Landmarks — วางจุดสำคัญบน base map</p>
+            <!--CH_AUTH-->
+            <p class="muted" id="workspace-auth-status"></p>
+          </div>
+        </div>
+        <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
+      </header>
+      <div class="card page-actions-strip">
+        <div class="toolbar">
+          <button id="btn-back-home" class="utility-action btn-home" type="button">Home</button>
+          <button id="btn-process-home" class="utility-action" type="button">Transport</button>
+          <button id="btn-open-routes" class="utility-action" type="button">Routes</button>
+          <button id="btn-open-preview" class="utility-action" type="button">Preview &amp; Publish</button>
+        </div>
+      </div>
+      <div class="stack-lg">
+        <section class="card article-work-card">
+          <div id="landmarks-stage" class="tv2-stage">
+            <div id="stage-controls" class="card tv2-stage-panel">
+              <button type="button" id="btn-collapse" class="utility-action tv2-collapse" hidden>–</button>
+              <div class="article-section-head">
+                <div>
+                  <h2 class="section-title" data-compact>Landmarks</h2>
+                  <p class="muted" id="lm-meta" data-compact></p>
+                </div>
+              </div>
+              <button id="btn-add-mode" class="utility-action tv2-panel-btn" type="button">+ เพิ่ม (แตะบนแผนที่)</button>
+              <label class="muted tv2-label" for="lm-search">ค้นหา</label>
+              <input id="lm-search" type="search" placeholder="ชื่อ TH / EN" />
+              <div id="lm-list" class="tv2-group"></div>
+              <form id="lm-form" class="tv2-group" hidden>
+                <hr class="tv2-sep" />
+                <label class="muted tv2-label" for="lm-category">ประเภท</label>
+                <select id="lm-category">
+                  <option value="hospital">โรงพยาบาล</option>
+                  <option value="market">ตลาด</option>
+                  <option value="temple">วัด</option>
+                  <option value="school">สถานศึกษา</option>
+                  <option value="transit">สถานีขนส่ง/รถไฟ</option>
+                  <option value="airport">สนามบิน</option>
+                  <option value="mall">ห้าง</option>
+                  <option value="government">สถานที่ราชการ</option>
+                  <option value="area">ชื่อย่าน (ไม่มีไอคอน)</option>
+                  <option value="other" selected>อื่น ๆ (จุด)</option>
+                </select>
+                <label class="muted tv2-label" for="lm-th">ชื่อ TH</label>
+                <input id="lm-th" type="text" />
+                <label class="muted tv2-label" for="lm-en">ชื่อ EN</label>
+                <input id="lm-en" type="text" />
+                <label class="muted tv2-label" for="lm-minzoom">แสดงตั้งแต่ซูม (ว่าง = ทุกระดับ)</label>
+                <input id="lm-minzoom" type="number" min="0" step="0.5" />
+                <button id="btn-move" class="utility-action tv2-panel-btn" type="button">ย้ายตำแหน่ง (แตะบนแผนที่)</button>
+                <div class="tv2-row">
+                  <button id="btn-save" class="primary" type="submit">บันทึก</button>
+                  <button id="btn-delete" class="utility-action" type="button">ลบ</button>
+                </div>
+                <button id="btn-cancel" class="utility-action tv2-panel-btn" type="button">ปิด</button>
+              </form>
+              <hr class="tv2-sep" />
+              <div class="tv2-group">
+                <span class="muted tv2-label">มุมมอง</span>
+                <button id="btn-fit" class="utility-action tv2-panel-btn" type="button">Fit</button>
+                <button id="btn-fullscreen" class="utility-action tv2-panel-btn" type="button">เต็มจอ</button>
+              </div>
+              <p class="muted" id="stage-status" role="status" aria-live="polite" data-compact></p>
+            </div>
+            <div id="landmarks-map" class="tv2-stage-map"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/transport-v2-landmarks-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
+  </body>
+</html>

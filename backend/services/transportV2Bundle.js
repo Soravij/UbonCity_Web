@@ -39,8 +39,9 @@ export function validateTransportBundle(input) {
     const okPath = Array.isArray(r?.path) && r.path.length >= 2
       && r.path.every((p) => Array.isArray(p) && p.length === 2 && finite(p[0]) && finite(p[1]));
     const okStops = Array.isArray(r?.stops) && r.stops.every((s) => str(s?.name, 200) && finite(s?.x) && finite(s?.y));
+    const okPhoto = r?.photo === undefined || FILE_RE.test(String(r.photo || ""));
     if (!Number.isInteger(r?.id) || ids.has(r.id) || !str(r?.number, 40) || !str(r?.name, 200)
-      || !COLOR_RE.test(String(r?.color || "")) || !str(r?.vehicle_type, 40) || !okPath || !okStops) {
+      || !COLOR_RE.test(String(r?.color || "")) || !str(r?.vehicle_type, 40) || !okPath || !okStops || !okPhoto) {
       errors.push(`routes[${i}] invalid`);
     }
     if (Number.isInteger(r?.id)) ids.add(r.id);
@@ -49,7 +50,7 @@ export function validateTransportBundle(input) {
 }
 
 export function requiredBundleFiles(bundle) {
-  return [bundle.base_svg, ...bundle.overlays.map((o) => o.file)];
+  return [bundle.base_svg, ...bundle.overlays.map((o) => o.file), ...(Array.isArray(bundle.routes) ? bundle.routes : []).map((r) => r?.photo).filter(Boolean)];
 }
 
 export function attachBundleFileUrls(bundle, toUrl) {
@@ -57,5 +58,6 @@ export function attachBundleFileUrls(bundle, toUrl) {
     ...bundle,
     base_svg_url: toUrl(bundle.base_svg),
     overlays: bundle.overlays.map((o) => ({ ...o, url: toUrl(o.file) })),
+    routes: bundle.routes.map((r) => (r?.photo ? { ...r, photo_url: toUrl(r.photo) } : r)),
   };
 }

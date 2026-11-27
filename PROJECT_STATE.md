@@ -1,12 +1,40 @@
 ﻿# UbonCity Project State
 
-Last Updated: 2026-10-13
+Last Updated: 2026-11-22
 
 ## Current Branch
 
 - `main`
 - CTA/contact baseline is present on main
 - CTA documentation baseline inherited from `1d08fb1`
+
+## Transport v2 (กำลังทำ — dev เท่านั้น, 22 พ.ย. 2026)
+
+ทำบนเครื่อง dev (`D:\UbonCity_Web`) อย่างเดียว ยังไม่ deploy Runtime/VPS จนจบทั้งก้อน; ข้อมูลสายใน DB dev เป็นข้อมูลทดสอบ
+
+Branch:
+- `feat/transport-v2` = `6180d09` (R6 merged) — branch ยาวของงานนี้ merge เข้า `main` ตอนจบเท่านั้น
+- `tv2/a2-landmarks` (`4499eb0`) และ `tv2/steps-hub` (`a8ad067`, แตกจาก a2) ยังไม่ merge — merge ทั้งคู่เข้า `feat/transport-v2` เมื่อจบรอบ 4
+
+ทำแล้ว:
+- R6 segments ตอน publish — `collector/server/transport-v2-segments.mjs` (`buildLegSegments`: tol 20 ม., ช่วงสั้น < 30 ม. รวมกับข้างเคียง, ไม่ smooth ถ้าไม่มีช่วงไหนยาวถึง 30 ม.); bundle ส่ง `route_kind` ทุกสาย + `segments` (both/out/back) เฉพาะ `out_back`; loop ไม่มี segments; `schema_version` คง 1
+- ไม่มีระยะทางสาย/ระยะทางแยกขา ทั้งใน bundle และหน้า public
+- Landmark icons ใน viewer (`transport-map-viewer.js` = `frontend/lib/transportMapViewer.js` byte-identical): ไอคอน Font Awesome Free 6 solid (CC BY 4.0 — ต้องใส่เครดิตบนหน้า public ตอนทำ C); ประเภท hospital / market / temple / school / transit / airport / mall / government + `area` (ชื่อย่าน: ตัวหนังสือเทา เว้นระยะ ไม่มีไอคอน) + `other` (จุด); x/y = ศูนย์กลางไอคอน; ขนาดคูณ clamp(√zoom, 1, 2.5); เลิกใช้ locale offsets
+- Process hub: `transport.html` การ์ด Transport Map = 4 ขั้น ① Base Map ② Landmarks ③ Routes ④ Preview & Publish พร้อมสถานะ (owner เท่านั้น)
+- Layout กลาง: `collector/server/public/transport-v2-stage.js` (`createStage`: เต็มจอ native/pseudo, ย่อแผง, flash help) + class `.tv2-*` ใน `styles.css`; Path Editor ย้ายมาใช้แล้ว ไม่มี style ผ่าน JS
+- หน้า ② Landmarks: `transport-v2-landmarks.html` / `-page.js` + `GET/PUT /api/v2/transport/landmarks?base_map_id=` (สร้าง label layout ให้อัตโนมัติ, ไม่ regenerate preview SVG, ไม่ mark routes stale); viewer เพิ่ม `setLabels()`, `selectLabel()` (วงแหวนจุดที่เลือก); แตะเลือกด้วย `getBBox()`
+- ลบไฟล์ตาย: `transport-v2-workspace.html`, `transport-v2-path-editor.js` (v1), `transport-map-routes.html` / `-page.js`, `buildReleasePayload`
+- `collector/tests/transport-v2-owner-only.test.mjs` นับ endpoint = 29
+
+กติกาที่ตกลงแล้ว:
+- CSS: ใช้ `styles.css` (global) เท่านั้น — ไม่มี `<style>`, inline style หรือ style ผ่าน JS; เพิ่ม rule ลงไฟล์นี้
+- ① Base map ทำครั้งเดียวแล้วล็อก; สร้างใหม่/ปลดล็อกได้เฉพาะตอนรันบนเครื่อง dev (env flag ฝั่ง server — ยังไม่ได้ทำ)
+- ไม่ย้ายหน้า Base Maps ไปใช้ viewer; landmark เป็น layer แยกทับ base map เดิม
+
+ถัดไป:
+- รอบ 3: ① Base Map หน้าดูอย่างเดียวบน layout กลาง + ปุ่มสร้างใหม่เฉพาะ dev; ลบ placement stage เก่า (`base-maps-page.js` renderPlacementStage ฯลฯ), `render-annotation` / `renderBaseMapPreviewSvg` / `regenerateBaseMapPreviewAsset`, `render-published`
+- รอบ 4: ③ Routes และ ④ Preview & Publish บน layout กลาง; ลบ `transport-v2-review.*`, `transport-v2-routes-review.*`; แก้เลข owner-only test ทุกครั้งที่ลบ endpoint
+- แล้ว B1 export/import → B2 หน้าเก็บสายภาคสนาม → C หน้า public + deploy (รัน `collector/scripts/migrate-transport-route-legs.mjs` บน Runtime, แก้ migration 032 fresh install)
 
 ## Docker Deploy (local server)
 

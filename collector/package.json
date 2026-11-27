@@ -14,7 +14,6 @@
     "backend:smoke:local-auth": "node scripts/smoke-local-auth-routing.mjs",
     "backend:smoke:auth-routing": "node scripts/smoke-local-auth-routing.mjs",
     "backend:smoke:lifecycle-authority:live": "node scripts/smoke-lifecycle-authority-live.mjs",
-    "backend:smoke:transport-workflow:live": "node scripts/smoke-transport-workflow-live.mjs",
     "backend:smoke:article-flow-e2e": "node scripts/smoke-article-flow-e2e-browser.mjs",
     "backend:smoke:article-revision-loop": "node scripts/smoke-article-revision-loop-browser.mjs",
     "backend:smoke:article-preview-sanitization": "node scripts/smoke-article-preview-sanitization-browser.mjs",

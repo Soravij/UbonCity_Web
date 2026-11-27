@@ -4,6 +4,7 @@ import { createTransportMapViewer, latLngToViewbox, viewboxToLatLng } from "./tr
 import { SNAP_ROAD_GROUPS, parsePathD, buildRoadIndex, nearestOnRoads } from "./transport-v2-road-snap.js";
 import { normalizeLegPoints, legRange, nearestIndex, splitPathAtTurn, buildBackFromOut, activeStopIndexes } from "./transport-v2-legs-editor.js";
 import { offsetPolylineLeft, arrowPositionsInRect, chevronPolylinePoints, legEndpointLabels } from "./transport-v2-leg-decor.js";
+import { createStage } from "./transport-v2-stage.js";
 
 const state = {
   routeId: Number(new URLSearchParams(window.location.search).get("id") || 0) || 0,
@@ -22,8 +23,6 @@ const state = {
   dirty: false,
   pending: false,
   timer: 0,
-  pseudoFull: false,
-  wakeLock: null,
 };
 
 const STEP_HELP = {
@@ -89,6 +88,8 @@ const isClosed = () => !isOutBack() && state.points.length >= 3 && sameLatLng(st
 const range = () => legRange(state.points, state.routeKind, state.leg);
 const withLeg = (p) => (isOutBack() ? { ...p, leg: state.leg } : p);
 const activeStops = () => activeStopIndexes(state.stops, state.routeKind, state.leg);
+const loopGuide = () => (state.step === 1 && !isOutBack() && !isClosed() && state.points.length >= 3
+  ? [project(state.points[state.points.length - 1]), project(state.points[0])] : null);
 function legPaths() {
   const path = (state.route?.resolved_path || []).map(project);
   if (!isOutBack()) return { active: path, ghost: [] };
@@ -264,7 +265,7 @@ function drawLegDecor(lp, color) {
   if (!(upp > 0) || !rect) return;
   const bp = bandPx(rect);
   const cull = visibleRect(svg, upp);
-  const outBack = state.route?.route_kind === "out_back";
+  const outBack = true; // offset every leg left (loop too) so in-and-back spurs don't overlap — 4b
   const ghost = lp.ghost || [];
   const ghostPaths = Array.isArray(ghost[0]?.[0]) ? ghost : (ghost.length ? [ghost] : []);
   for (const g of ghostPaths) addBand(g, color, upp, cull, bp, outBack, DECOR.ghostMul);
@@ -285,7 +286,7 @@ function drawDraft() {
     path: lp.active,
     points: all.slice(start, end),
     stops: stopIdx.map((i) => project(state.stops[i])),
-    ghostPath: lp.ghost,
+    ghostPath: loopGuide() || lp.ghost,
     ghostPoints: [...all.slice(0, start), ...all.slice(end)],
     ghostStops: state.stops.filter((_, i) => !stopSet.has(i)).map(project),
     pointOpacity: state.step === 3 ? 0.3 : 1,
@@ -330,17 +331,14 @@ function renderStepList() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = STEP_LABELS[s];
-    btn.className = state.step === s ? "primary" : "utility-action";
+    btn.className = (state.step === s ? "primary" : "utility-action") + " tv2-panel-btn";
     btn.disabled = s > 1 && state.step !== s && !hasPath();
     btn.addEventListener("click", () => setStep(s));
-    Object.assign(btn.style, { width: "100%", textAlign: "left" });
     nodes.push(btn);
     if (s === state.step) {
       const box = document.createElement("div");
-      Object.assign(box.style, { display: "flex", flexDirection: "column", gap: "4px",
-        margin: "0 0 4px 12px", paddingLeft: "8px", borderLeft: "2px solid var(--line)" });
+      box.className = "tv2-step-actions";
       for (const b of stepActionButtons(s)) {
-        if (b.tagName === "BUTTON") Object.assign(b.style, { width: "100%", textAlign: "left", fontSize: "0.88em", padding: "6px 10px" });
         box.append(b);
       }
       if (box.childElementCount) nodes.push(box);
@@ -353,10 +351,10 @@ function renderKind() {
   const ob = isOutBack();
   qs("btn-kind-loop").className = ob ? "utility-action" : "primary";
   qs("btn-kind-outback").className = ob ? "primary" : "utility-action";
-  qs("leg-switch").style.display = ob ? "flex" : "none";
+  qs("leg-switch").hidden = !ob;
   qs("btn-leg-out").className = state.leg === "out" ? "primary" : "utility-action";
   qs("btn-leg-back").className = state.leg === "back" ? "primary" : "utility-action";
-  qs("btn-build-back").style.display = ob && state.step !== 3 ? "" : "none";
+  qs("btn-build-back").hidden = !(ob && state.step !== 3);
   for (const id of ["btn-kind-loop", "btn-kind-outback", "btn-build-back"]) qs(id).disabled = state.pending;
 }
 
@@ -375,12 +373,7 @@ function renderSide() {
     ? state.stops.map((s, i) => `<li>${i + 1}. ${escapeHtml(s.name)}${s.leg === "back" ? " (ขากลับ)" : s.leg === "out" ? " (ขาไป)" : ""}</li>`).join("")
     : `<li class="muted">ยังไม่มีป้ายจอด</li>`;
   qs("share-link").value = window.location.href;
-  const helpEl = qs("step-help");
-  if (isFull() && helpEl && !collapsed) {
-    helpEl.style.display = "";
-    clearTimeout(helpTimer);
-    helpTimer = setTimeout(() => { if (isFull()) helpEl.style.display = "none"; }, 2000);
-  }
+  stage.flash(qs("step-help"));
 }
 
 function refresh() {
@@ -392,13 +385,13 @@ function refresh() {
 function stageStatus(text, isError = false) {
   const node = qs("stage-status");
   node.textContent = text || "";
-  node.style.color = isError ? "#dc2626" : "";
+  node.classList.toggle("tv2-text-error", Boolean(isError));
 }
 
 function renderWarningsStatus() {
   const node = qs("stage-status");
   node.replaceChildren();
-  node.style.color = "";
+  node.classList.remove("tv2-text-error");
   for (const w of state.warnings || []) {
     const row = document.createElement("div");
     row.textContent = `⚠ จุด ${w.from + 1}→${w.to + 1} อ้อม ${w.ratio}× (+${w.extra_m} ม.)`;
@@ -434,20 +427,6 @@ qs("warn-banner").addEventListener("click", () => {
   state.viewer?.focusPoints([project(state.points[w.from]), project(state.points[w.to])]);
 });
 
-function isFull() {
-  return Boolean(document.fullscreenElement || document.webkitFullscreenElement) || state.pseudoFull;
-}
-
-const LIGHT_VARS = {
-  "--card": "#ffffff", "--line": "#cbd5e1", "--text": "#0f172a", "--muted": "#64748b",
-  "--accent": "#3b82f6", "--accent-2": "#2563eb", "--theme-surface-soft": "#f8fafc",
-};
-const controls = qs("stage-controls");
-const btnCollapse = qs("btn-collapse");
-const compactEls = ["route-title", "route-meta", "step-help", "stage-status"]
-  .map((id) => qs(id)).filter(Boolean);
-let collapsed = false;
-let helpTimer = null;
 let clearArmed = null;
 const btnClear = qs("btn-clear");
 
@@ -455,91 +434,11 @@ function routeLabel() {
   return (qs("route-title")?.textContent || "").trim();
 }
 
+const stage = createStage({ stage: qs("path-editor-stage"), collapseBtn: qs("btn-collapse"), fullscreenBtn: qs("btn-fullscreen"), title: routeLabel });
+
 function renderControls() {
-  const full = isFull();
-  btnCollapse.hidden = !full;
-  btnCollapse.textContent = collapsed ? "☰ " + routeLabel() : "– " + routeLabel();
-  const statusEl = qs("stage-status");
-  const keepStatus = (state.warnings || []).length > 0;
-  for (const el of controls.children) {
-    if (el === btnCollapse || el.id === "step-actions-pool") continue;
-    const exempt = el === statusEl && keepStatus;
-    const hide = full && (collapsed || (compactEls.includes(el) && !exempt));
-    el.style.display = hide ? "none" : "";
-  }
-  for (const el of compactEls) {
-    const exempt = el === statusEl && keepStatus;
-    if ((!controls.contains(el) || el.parentElement !== controls) && !exempt) el.style.display = full ? "none" : "";
-  }
-}
-
-function applyCompact(full) {
-  if (!full) collapsed = false;
-  renderControls();
-}
-
-btnCollapse.addEventListener("click", () => { collapsed = !collapsed; renderControls(); });
-
-let savedStyles = null;
-
-function applyStageLayout() {
-  const full = isFull();
-  const stage = qs("path-editor-stage");
-  const map = qs("path-editor-map");
-  if (full) {
-    if (!savedStyles) savedStyles = { stage: stage.style.cssText, map: map.style.cssText, controls: controls.style.cssText };
-    Object.assign(stage.style, {
-      position: state.pseudoFull ? "fixed" : "relative", inset: "0", width: "100vw", height: "100dvh",
-      margin: "0", padding: "0", overflow: "hidden", display: "block", zIndex: state.pseudoFull ? "1000" : "",
-    });
-    stage.style.background = "var(--theme-bg-gradient)";
-    Object.assign(map.style, {
-      position: "absolute", inset: "0", width: "100%", height: "100%", minHeight: "0", borderRadius: "0", margin: "0",
-    });
-    Object.assign(controls.style, {
-      position: "absolute", top: "12px", left: "12px", zIndex: "10",
-      maxHeight: "calc(100% - 24px)", overflow: "auto",
-      boxShadow: "0 4px 16px rgba(15, 23, 42, 0.18)", color: "var(--text)",
-    });
-    for (const [k, v] of Object.entries(LIGHT_VARS)) controls.style.setProperty(k, v);
-  } else if (savedStyles) {
-    stage.style.cssText = savedStyles.stage;
-    map.style.cssText = savedStyles.map;
-    controls.style.cssText = savedStyles.controls;
-    savedStyles = null;
-  }
-  qs("btn-fullscreen").textContent = full ? "ออกจากเต็มจอ" : "เต็มจอ";
-  applyCompact(full);
-}
-
-function enterPseudo() {
-  state.pseudoFull = true;
-  applyStageLayout();
-}
-
-async function toggleFullscreen() {
-  if (isFull()) {
-    if (state.pseudoFull) state.pseudoFull = false;
-    else await (document.exitFullscreen?.call(document) || document.webkitExitFullscreen?.call(document));
-    try { await state.wakeLock?.release(); } catch { /* ignore */ }
-    state.wakeLock = null;
-  } else {
-    const stage = qs("path-editor-stage");
-    const canNative = document.fullscreenEnabled || document.webkitFullscreenEnabled;
-    const req = stage.requestFullscreen || stage.webkitRequestFullscreen;
-    if (!canNative || !req) {
-      enterPseudo();
-    } else {
-      try {
-        const p = req.call(stage);
-        if (p && typeof p.catch === "function") p.catch(() => enterPseudo());
-      } catch {
-        enterPseudo();
-      }
-    }
-    try { state.wakeLock = await navigator.wakeLock?.request("screen"); } catch { state.wakeLock = null; }
-  }
-  applyStageLayout();
+  qs("stage-status").classList.toggle("is-keep", (state.warnings || []).length > 0);
+  stage.render();
 }
 
 async function run(label, task) {
@@ -578,8 +477,12 @@ const saveStops = () => api(`/api/v2/transport/routes/${state.routeId}/stops`, {
 
 let resolveSeq = 0;
 
-async function resolveNow() {
+async function resolveNow({ autoClose = false } = {}) {
   clearTimeout(state.timer);
+  if (autoClose && !isOutBack() && state.points.length >= 3 && !isClosed()) {
+    pushHistory();
+    state.points.push({ ...state.points[0] }); // auto-close loop
+  }
   state.pending = true;
   refresh();
   const seq = ++resolveSeq;
@@ -822,10 +725,8 @@ function bindControls() {
   qs("btn-process-home").addEventListener("click", () => { window.location.href = "/transport.html"; });
   qs("btn-open-routes").addEventListener("click", () => { window.location.href = "/transport-v2-routes.html"; });
   qs("btn-open-preview").addEventListener("click", () => { window.location.href = "/transport-v2-preview.html"; });
+  qs("btn-back-routes").addEventListener("click", () => { window.location.href = "/transport-v2-routes.html?route=" + state.routeId; });
   qs("btn-fit").addEventListener("click", () => state.viewer?.fitAll());
-  qs("btn-fullscreen").addEventListener("click", () => toggleFullscreen());
-  document.addEventListener("fullscreenchange", applyStageLayout);
-  document.addEventListener("webkitfullscreenchange", applyStageLayout);
   qs("btn-undo-point").addEventListener("click", () => undo());
   btnClear.addEventListener("click", () => {
     if (!clearArmed) {
@@ -851,7 +752,7 @@ function bindControls() {
     await resolveNow();
     if (hasPath()) setStep(2);
   });
-  qs("btn-resolve").addEventListener("click", () => resolveNow());
+  qs("btn-resolve").addEventListener("click", () => resolveNow({ autoClose: true }));
   qs("btn-undo-stop").addEventListener("click", () => {
     const idx = activeStops();
     if (!idx.length) return;

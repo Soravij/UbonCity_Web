@@ -35,3 +35,13 @@ test("required files and url attach", () => {
   assert.equal(out.base_svg_url, "/uploads/x/base.svg");
   assert.equal(out.overlays[0].url, "/uploads/x/overlay-o1.png");
 });
+test("route photo: required files + url attach; route without photo has no photo_url", () => {
+  const b = valid();
+  b.routes[0].photo = "route-1.jpg";
+  assert.ok(requiredBundleFiles(b).includes("route-1.jpg"));
+  const out = attachBundleFileUrls(b, (n) => `/uploads/x/${n}`);
+  assert.ok(out.routes[0].photo_url);
+  const c = valid();
+  const outNoPhoto = attachBundleFileUrls(c, (n) => `/uploads/x/${n}`);
+  assert.ok(!("photo_url" in outNoPhoto.routes[0]));
+});

@@ -4,10 +4,11 @@ import path from "path";
 import express from "express";
 import multer from "multer";
 import { resolveAiConfig, resolveAiFeatureConfig } from "../config/ai.mjs";
-import { assertCollectorIntegrationReadiness } from "./integration-readiness.mjs";
 import { executeBackendAiJson } from "../services/backend-ai-client.mjs";
 import { buildTransportBundle } from "./transport-v2-publish.mjs";
-import { buildBearings, buildLegBearings, detourWarnings, fetchRouteWithFallback } from "./transport-v2-osrm.mjs";
+import { buildLegBearings, detourWarnings, fetchRouteWithFallback } from "./transport-v2-osrm.mjs";
+import { pickLeastUsed, pickForPath } from "./public/transport-v2-palette.js";
+import { processRoutePhoto } from "./transport-v2-photo.mjs";
 const VEHICLES = new Set(["songthaew", "minibus", "van", "bus"]);
 const ROUTE_LEGS = new Set(["out", "back"]);
 const ROUTE_KINDS = new Set(["loop", "out_back"]);
@@ -66,6 +67,13 @@ function color(value, fallback = DEFAULT_COLOR) {
 function vehicle(value) {
   const raw = String(value || "").trim().toLowerCase();
   return VEHICLES.has(raw) ? raw : "songthaew";
+}
+
+function fare(value) {
+  if (value === "" || value == null) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 1000) throw new Error("fare_baht ไม่ถูกต้อง");
+  return Math.round(n * 100) / 100;
 }
 
 function asJson(value, fallback) {
@@ -464,53 +472,6 @@ function extractResponseText(data) {
   return "";
 }
 
-async function translateLabelEntries(aiConfig, entries, targetLang, actorEmail) {
-  const translationConfig = resolveAiFeatureConfig(aiConfig, "translation");
-  if (!translationConfig?.enabled) {
-    throw new Error("translation AI is not configured");
-  }
-  const sourceEntries = Object.fromEntries(
-    Object.entries(entries || {}).map(([key, value]) => [String(key || "").trim(), String(value || "").trim()]).filter(([key, value]) => key && value)
-  );
-  if (!Object.keys(sourceEntries).length) {
-    throw new Error("thai source text is required");
-  }
-  const prompt = [
-    "Return ONLY valid JSON.",
-    "Translate Thai map labels into the target language.",
-    "Keep the EXACT same JSON keys.",
-    "Each value must be short UI label text only, with no explanations.",
-    "Preserve proper nouns and place names naturally for the target locale.",
-    `Target locale: ${String(targetLang || "").trim().toLowerCase()}`,
-    "Input JSON:",
-    JSON.stringify(sourceEntries, null, 2),
-  ].join("\n");
-  const result = await executeBackendAiJson({
-    aiConfig: translationConfig,
-    featureKey: "translation",
-    task: "transport_label_translation",
-    prompt,
-    actorEmail,
-  });
-  const parsed = result?.parsed || parseJsonLike(String(result?.outputText || ""));
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("translation response is not valid JSON");
-  }
-  const translated = Object.fromEntries(
-    Object.keys(sourceEntries)
-      .map((key) => [key, String(parsed?.[key] || "").trim()])
-      .filter(([, value]) => value)
-  );
-  const missingKeys = Object.keys(sourceEntries).filter((key) => !String(translated?.[key] || "").trim());
-  if (missingKeys.length) {
-    throw new Error(`translation returned incomplete content for ${missingKeys.length} label(s)`);
-  }
-  if (!Object.keys(translated).length) {
-    throw new Error("translation returned empty content");
-  }
-  return translated;
-}
-
 function assetExists(db, assetId) {
   const id = Number(assetId || 0) || 0;
   if (!id) return false;
@@ -521,47 +482,6 @@ function assetRecord(db, assetId) {
   const id = Number(assetId || 0) || 0;
   if (!id) return null;
   return db.prepare("SELECT id, storage_path, mime_type, file_name FROM assets WHERE id=? LIMIT 1").get(id) || null;
-}
-
-function assetIsSvg(db, assetId) {
-  const asset = assetRecord(db, assetId);
-  if (!asset) return false;
-  const mimeType = String(asset.mime_type || "").trim().toLowerCase();
-  const fileName = String(asset.file_name || asset.storage_path || "").trim().toLowerCase();
-  return mimeType === "image/svg+xml" || fileName.endsWith(".svg");
-}
-
-function guessMimeType(fileName = "") {
-  const lower = String(fileName || "").trim().toLowerCase();
-  if (lower.endsWith(".svg")) return "image/svg+xml";
-  if (lower.endsWith(".png")) return "image/png";
-  if (lower.endsWith(".webp")) return "image/webp";
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  if (lower.endsWith(".gif")) return "image/gif";
-  return "application/octet-stream";
-}
-
-async function assetDataUri(db, mediaDir, assetId) {
-  const asset = assetRecord(db, assetId);
-  const storagePath = String(asset?.storage_path || "").trim();
-  if (!storagePath) return "";
-  if (!assetIsSvg(db, assetId)) {
-    throw new Error("base_svg_asset_id must reference an SVG asset");
-  }
-  const mimeType = String(asset?.mime_type || "").trim() || guessMimeType(asset?.file_name || storagePath);
-  const fullPath = path.join(mediaDir, storagePath);
-  const buffer = await fs.readFile(fullPath);
-  return `data:${mimeType};base64,${buffer.toString("base64")}`;
-}
-
-async function assetDataUriAny(db, mediaDir, assetId) {
-  const asset = assetRecord(db, assetId);
-  const storagePath = String(asset?.storage_path || "").trim();
-  if (!storagePath) return "";
-  const mimeType = String(asset?.mime_type || "").trim() || guessMimeType(asset?.file_name || storagePath);
-  const fullPath = path.join(mediaDir, storagePath);
-  const buffer = await fs.readFile(fullPath);
-  return `data:${mimeType};base64,${buffer.toString("base64")}`;
 }
 
 function pathToSvg(points, baseMap) {
@@ -640,7 +560,7 @@ function annotationRenderLabelLayer(labelSource) {
       const style = resolveLabelStyleForCategory(labelStyle, label?.label_category);
       return {
         label_key: String(label?.label_key || "").trim(),
-        label_category: String(label?.label_category || "landmark").trim().toLowerCase() || "landmark",
+        label_category: String(label?.label_category || "other").trim().toLowerCase() || "other",
         anchor_x: Number(label?.anchor_x || 0),
         anchor_y: Number(label?.anchor_y || 0),
         priority: Number(label?.priority || 0),
@@ -869,7 +789,7 @@ export function createTransportV2Router({ db, dirs, logAudit = () => {}, getAiCo
   const normalizeLabelLayoutItemsInput = (items = []) => (Array.isArray(items) ? items : [])
     .map((row, index) => ({
       label_key: String(row?.label_key || "").trim(),
-      label_category: String(row?.label_category || "landmark").trim().toLowerCase() || "landmark",
+      label_category: String(row?.label_category || "other").trim().toLowerCase() || "other",
       anchor_x: num(row?.anchor_x),
       anchor_y: num(row?.anchor_y),
       priority: Number(row?.priority ?? index) || 0,
@@ -877,27 +797,6 @@ export function createTransportV2Router({ db, dirs, logAudit = () => {}, getAiCo
       locale_offsets: normalizeLocaleOffsets(row?.locale_offsets),
     }))
     .filter((row) => row.label_key && Number.isFinite(row.anchor_x) && Number.isFinite(row.anchor_y));
-  const markRoutesStaleForLayout = (layoutId) => {
-    const resolvedLayoutId = Number(layoutId || 0) || 0;
-    if (!resolvedLayoutId) return;
-    const affectedBaseMapIds = db.prepare("SELECT id FROM transport_base_maps_v2 WHERE active_label_layout_id=?").all(resolvedLayoutId)
-      .map((row) => Number(row.id || 0))
-      .filter(Boolean);
-    if (!affectedBaseMapIds.length) return;
-    const placeholders = affectedBaseMapIds.map(() => "?").join(", ");
-    db.prepare(`
-      UPDATE transport_routes_v2
-      SET poster_status='stale', updated_at=CURRENT_TIMESTAMP
-      WHERE base_map_id IN (${placeholders})
-    `).run(...affectedBaseMapIds);
-  };
-  const baseMapIdsForLayout = (layoutId) => {
-    const resolvedLayoutId = Number(layoutId || 0) || 0;
-    if (!resolvedLayoutId) return [];
-    return db.prepare("SELECT id FROM transport_base_maps_v2 WHERE active_label_layout_id=?").all(resolvedLayoutId)
-      .map((row) => Number(row.id || 0))
-      .filter(Boolean);
-  };
   const resolveBaseMapLabelSource = (baseMap) => {
     const activeLayoutId = Number(baseMap?.active_label_layout_id || 0) || 0;
     if (activeLayoutId) {
@@ -924,121 +823,6 @@ export function createTransportV2Router({ db, dirs, logAudit = () => {}, getAiCo
     if (!row) return null;
     return serializeBaseMap(db, row, resolveBaseMapLabelSource(row));
   };
-  const saveGeneratedSvgAsset = async (relPath, svgText, cleanupPaths = null) => {
-    const fullPath = path.join(dirs.mediaDir, relPath);
-    await fs.mkdir(path.dirname(fullPath), { recursive: true });
-    await fs.writeFile(fullPath, svgText, "utf8");
-    if (Array.isArray(cleanupPaths)) {
-      cleanupPaths.push(fullPath);
-    }
-    const stat = await fs.stat(fullPath);
-    const assetUid = crypto.randomUUID();
-    db.prepare("INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum, created_at, updated_at) VALUES (?, 'local', ?, ?, 'image/svg+xml', ?, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").run(
-      assetUid,
-      relPath.replace(/\\/g, "/"),
-      path.basename(fullPath),
-      Number(stat.size || 0)
-    );
-    return Number(db.prepare("SELECT id FROM assets WHERE asset_uid=? LIMIT 1").get(assetUid)?.id || 0) || 0;
-  };
-  const baseMapArtifactPath = (stage, baseMapRow, fileName) => {
-    const key = String(baseMapRow?.map_key || `base-map-${Number(baseMapRow?.id || 0) || 0}`).trim() || `base-map-${Number(baseMapRow?.id || 0) || 0}`;
-    const safeKey = key.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || `base-map-${Number(baseMapRow?.id || 0) || 0}`;
-    const stageDir = stage === "published"
-      ? path.join("published", "transport-v2", "base-maps")
-      : stage === "annotation"
-        ? path.join("generated", "transport-v2", "base-map-annotation")
-        : path.join("generated", "transport-v2", "base-map-candidates");
-    return path.join(stageDir, safeKey, fileName);
-  };
-  const renderBaseMapPreviewSvg = async (baseMapRow, locale = "th") => {
-    const baseMap = serializeBaseMapResolved(baseMapRow);
-    if (!baseMap?.base_svg_asset_id) return null;
-    const labelSource = resolveBaseMapLabelSource(baseMapRow);
-    const baseMeta = labelSource.metadata || {};
-    const dictionary = normalizeLabelDictionary(baseMeta?.label_dictionary || {})?.[locale] || {};
-    const labelStyle = normalizeLabelStyle(baseMeta?.label_style || DEFAULT_LABEL_STYLE);
-    const baseLayerUri = await assetDataUri(db, dirs.mediaDir, baseMap.base_svg_asset_id).catch(() => "");
-    if (!baseLayerUri) return null;
-    const overlayEntries = normalizeBaseMapOverlays(db, baseMap, baseMap.metadata?.overlays || [], { includeAssetUrl: false });
-    const overlayLayers = (await Promise.all(overlayEntries.map(async (item) => {
-      const href = await assetDataUriAny(db, dirs.mediaDir, item.asset_id).catch(() => "");
-      if (!href) return "";
-      const x = Number(item.anchor_x || 0);
-      const y = Number(item.anchor_y || 0) - Number(item.height || 0);
-      return `<image href="${href}" x="${x}" y="${y}" width="${Number(item.width || 0)}" height="${Number(item.height || 0)}" preserveAspectRatio="none" />`;
-    }))).filter(Boolean).join("\n  ");
-    const labelLayers = (Array.isArray(labelSource.labels) ? labelSource.labels : []).map((label) => {
-      const text = String(dictionary?.[label.label_key] || "").trim();
-      if (!text) return "";
-      const style = resolveLabelStyleForCategory(labelStyle, label.label_category);
-      const localeOffset = normalizeLocaleOffsetEntry(label?.locale_offsets?.[locale]) || { dx: 0, dy: 0 };
-      return `<text x="${Number(label.anchor_x) + Number(localeOffset.dx || 0)}" y="${Number(label.anchor_y) + Number(localeOffset.dy || 0)}" font-family="${escapeSvgText(String(style.font_family || DEFAULT_LABEL_STYLE.global.font_family))}" font-size="${labelStyleSvgFontSize(style)}" fill="${style.text_color || DEFAULT_LABEL_STYLE.global.text_color}">${escapeSvgText(text)}</text>`;
-    }).filter(Boolean).join("\n  ");
-    return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="${baseMap.viewbox.x} ${baseMap.viewbox.y} ${baseMap.viewbox.width} ${baseMap.viewbox.height}" role="img" aria-labelledby="title desc">
-  <title id="title">${escapeSvgText(baseMap.title || "Base Map Preview")}</title>
-  <desc id="desc">Base map preview for routes, Thai labels only</desc>
-  <image href="${baseLayerUri}" x="${baseMap.viewbox.x}" y="${baseMap.viewbox.y}" width="${baseMap.viewbox.width}" height="${baseMap.viewbox.height}" preserveAspectRatio="none" />
-  ${overlayLayers}
-  ${labelLayers}
-</svg>`;
-  };
-  const regenerateBaseMapPreviewAsset = async (baseMapId, options = {}) => {
-    const { cleanupPaths = null } = options || {};
-    const baseMapRow = getBaseMapRow(baseMapId);
-    if (!baseMapRow?.base_svg_asset_id) {
-      db.prepare("UPDATE transport_base_maps_v2 SET preview_asset_id=NULL, annotation_map_asset_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(baseMapId || 0));
-      return serializeBaseMapResolved(getBaseMapRow(baseMapId));
-    }
-    const svg = await renderBaseMapPreviewSvg(baseMapRow, "th");
-    if (!svg) {
-      db.prepare("UPDATE transport_base_maps_v2 SET preview_asset_id=NULL, annotation_map_asset_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(Number(baseMapId || 0));
-      return serializeBaseMapResolved(getBaseMapRow(baseMapId));
-    }
-    const relPath = baseMapArtifactPath("annotation", baseMapRow, `annotation-th-r${Date.now()}.svg`);
-    const assetId = await saveGeneratedSvgAsset(relPath, svg, cleanupPaths);
-    db.prepare("UPDATE transport_base_maps_v2 SET preview_asset_id=?, annotation_map_asset_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(assetId, assetId, Number(baseMapId || 0));
-    return serializeBaseMapResolved(getBaseMapRow(baseMapId));
-  };
-  const renderPublishedBaseMapAsset = async (baseMapId, options = {}) => {
-    const { cleanupPaths = null } = options || {};
-    const baseMapRow = getBaseMapRow(baseMapId);
-    if (!baseMapRow) throw new Error("Base map not found");
-    const serializedBaseMap = serializeBaseMapResolved(baseMapRow);
-    const annotationAssetId = Number(baseMapRow.annotation_map_asset_id || 0) || Number(baseMapRow.preview_asset_id || 0) || null;
-    if (!annotationAssetId) {
-      throw new Error("Annotation map is required before published render");
-    }
-    const annotationLayerUri = await assetDataUriAny(db, dirs.mediaDir, annotationAssetId).catch(() => "");
-    if (!annotationLayerUri) {
-      throw new Error("Annotation map asset is missing");
-    }
-    const routeRows = db.prepare(`
-      SELECT id
-      FROM transport_routes_v2
-      WHERE routing_status='fresh'
-        AND resolved_revision=route_revision
-        AND COALESCE(workflow_status, 'draft') <> 'archived'
-      ORDER BY route_number COLLATE NOCASE ASC, id ASC
-    `).all();
-    const routeLayers = routeRows
-      .map((row) => getRoute(row.id))
-      .filter((route) => route && Array.isArray(route.resolved_path) && route.resolved_path.length >= 2)
-      .map((route) => `<path d="${pathToSvg(route.resolved_path, serializedBaseMap)}" fill="none" stroke="${color(route.color)}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />`)
-      .join("\n  ");
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="${serializedBaseMap.viewbox.x} ${serializedBaseMap.viewbox.y} ${serializedBaseMap.viewbox.width} ${serializedBaseMap.viewbox.height}" role="img" aria-labelledby="title desc">
-  <title id="title">${escapeSvgText(serializedBaseMap.title || "Published Transport Map")}</title>
-  <desc id="desc">Published transport map with route overlays</desc>
-  <image href="${annotationLayerUri}" x="${serializedBaseMap.viewbox.x}" y="${serializedBaseMap.viewbox.y}" width="${serializedBaseMap.viewbox.width}" height="${serializedBaseMap.viewbox.height}" preserveAspectRatio="none" />
-  ${routeLayers}
-</svg>`;
-    const relPath = baseMapArtifactPath("published", baseMapRow, `published-r${Date.now()}.svg`);
-    const assetId = await saveGeneratedSvgAsset(relPath, svg, cleanupPaths);
-    db.prepare("UPDATE transport_base_maps_v2 SET published_map_asset_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").run(assetId, Number(baseMapId || 0));
-    return serializeBaseMapResolved(getBaseMapRow(baseMapId));
-  };
   const getRouteRow = (id) => db.prepare(`
     SELECT r.*, u.display_name AS assignee_display_name, u.email AS assignee_email
     FROM transport_routes_v2 r
@@ -1063,6 +847,9 @@ export function createTransportV2Router({ db, dirs, logAudit = () => {}, getAiCo
       vehicle_thumbnail_url: assetUrl(db, row.vehicle_thumbnail_asset_id),
       color: row.color,
       description: row.description,
+      description_en: row.description_en || "",
+      fare_baht: row.fare_baht == null ? null : Number(row.fare_baht),
+      color_locked: Boolean(row.color_locked),
       workflow_status: row.workflow_status,
       assignee_user_id: Number(row.assignee_user_id || 0) || null,
       assignee_display_name: row.assignee_display_name || null,
@@ -1108,39 +895,6 @@ const collectorIntegrationConfig = () => ({
   collectorPublicBaseUrl: String(process.env.COLLECTOR_PUBLIC_BASE_URL || process.env.COLLECTOR_PUBLIC_URL || "").trim(),
 });
 
-  const buildReleasePayload = (item) => ({
-    source_system: "collector-app",
-    source_base_url: "",
-    routes: [
-      {
-        collector_item_id: Number(item?.id || 0) || 0,
-        source_content_item_id: Number(item?.id || 0) || 0,
-        route_name: String(item?.route_name || "").trim(),
-        route_number: String(item?.route_number || "").trim(),
-        vehicle_type: vehicle(item?.vehicle_type),
-        vehicle_image: "",
-        color: color(item?.color),
-        description: String(item?.description || "").trim(),
-        raw_points: (Array.isArray(item?.control_points) ? item.control_points : []).map((point, index) => ({
-          lat: num(point?.lat),
-          lng: num(point?.lng),
-          point_order: index,
-        })).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng)),
-        path: (Array.isArray(item?.resolved_path) ? item.resolved_path : []).map((point, index) => ({
-          lat: num(point?.lat),
-          lng: num(point?.lng),
-          point_order: index,
-        })).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng)),
-        stops: (Array.isArray(item?.stops) ? item.stops : []).map((stop, index) => ({
-          name: String(stop?.name || `Stop ${index + 1}`).trim() || `Stop ${index + 1}`,
-          lat: num(stop?.lat),
-          lng: num(stop?.lng),
-          stop_order: index,
-        })).filter((stop) => stop.name && Number.isFinite(stop.lat) && Number.isFinite(stop.lng)),
-      },
-    ],
-  });
-
   router.get("/base-maps", allow("owner"), (_req, res) => {
     res.json({
       items: db.prepare("SELECT * FROM transport_base_maps_v2 ORDER BY created_at DESC, id DESC").all().map((row) => {
@@ -1153,206 +907,6 @@ const collectorIntegrationConfig = () => ({
       }),
     });
   });
-
-  router.post("/base-maps", allow("owner"), async (req, res) => {
-    try {
-      const body = req.body || {};
-      const bounds = body.bounds && typeof body.bounds === "object" ? body.bounds : {};
-      const viewbox = body.viewbox && typeof body.viewbox === "object" ? body.viewbox : {};
-      const minLat = num(bounds.min_lat);
-      const minLng = num(bounds.min_lng);
-      const maxLat = num(bounds.max_lat);
-      const maxLng = num(bounds.max_lng);
-      if (!String(body.key || "").trim()) throw new Error("key is required");
-      if (!String(body.title || "").trim()) throw new Error("title is required");
-      if (![minLat, minLng, maxLat, maxLng].every(Number.isFinite)) throw new Error("bounds are required and must be finite");
-      if (!(minLat < maxLat) || !(minLng < maxLng)) throw new Error("bounds are invalid");
-      const baseSvgAssetId = Number(body.base_svg_asset_id || 0) || null;
-      const previewAssetId = Number(body.preview_asset_id || 0) || null;
-      const candidateMapAssetId = Number(body.candidate_map_asset_id || baseSvgAssetId || 0) || null;
-      const annotationMapAssetId = Number(body.annotation_map_asset_id || previewAssetId || 0) || null;
-      const publishedMapAssetId = Number(body.published_map_asset_id || 0) || null;
-      const activeLabelLayoutId = Number(body.active_label_layout_id || 0) || null;
-      if (baseSvgAssetId && !assetExists(db, baseSvgAssetId)) throw new Error("base_svg_asset_id is invalid");
-      if (baseSvgAssetId && !assetIsSvg(db, baseSvgAssetId)) throw new Error("base_svg_asset_id must reference an SVG asset");
-      if (previewAssetId && !assetExists(db, previewAssetId)) throw new Error("preview_asset_id is invalid");
-      if (candidateMapAssetId && !assetExists(db, candidateMapAssetId)) throw new Error("candidate_map_asset_id is invalid");
-      if (annotationMapAssetId && !assetExists(db, annotationMapAssetId)) throw new Error("annotation_map_asset_id is invalid");
-      if (publishedMapAssetId && !assetExists(db, publishedMapAssetId)) throw new Error("published_map_asset_id is invalid");
-      if (activeLabelLayoutId && !getLabelLayoutRow(activeLabelLayoutId)) throw new Error("active_label_layout_id is invalid");
-      const rawMetadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
-      const nextMetadata = activeLabelLayoutId
-        ? stripLegacyLabelMetadata(rawMetadata)
-        : normalizeLabelLayoutMetadata(rawMetadata);
-      nextMetadata.overlays = normalizeBaseMapOverlays(db, { viewbox_width: num(viewbox.width, 4000), viewbox_height: num(viewbox.height, 5600) }, nextMetadata.overlays || []);
-      let createdId = 0;
-      const cleanupPaths = [];
-      db.exec("BEGIN");
-      try {
-        db.prepare(`
-          INSERT INTO transport_base_maps_v2 (
-            map_key, title, version, status, bounds_min_lat, bounds_min_lng, bounds_max_lat, bounds_max_lng,
-            viewbox_x, viewbox_y, viewbox_width, viewbox_height, projection_type, base_svg_asset_id, preview_asset_id,
-            candidate_map_asset_id, annotation_map_asset_id, published_map_asset_id, active_label_layout_id, metadata_json, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        `).run(
-          String(body.key).trim(),
-          String(body.title).trim(),
-          Number(body.version || 1) || 1,
-          String(body.status || "draft").trim().toLowerCase() || "draft",
-          minLat,
-          minLng,
-          maxLat,
-          maxLng,
-          num(viewbox.x, 0),
-          num(viewbox.y, 0),
-          num(viewbox.width, 4000),
-          num(viewbox.height, 5600),
-          String(body.projection_type || "linear-bbox-fit").trim() || "linear-bbox-fit",
-          baseSvgAssetId,
-          previewAssetId,
-          candidateMapAssetId,
-          annotationMapAssetId,
-          publishedMapAssetId,
-          activeLabelLayoutId,
-          json(nextMetadata, "{}")
-        );
-        createdId = Number(db.prepare("SELECT last_insert_rowid() AS id").get()?.id || 0) || 0;
-        await regenerateBaseMapPreviewAsset(createdId, { cleanupPaths });
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        await Promise.allSettled(cleanupPaths.map((fullPath) => fs.rm(fullPath, { force: true })));
-        throw error;
-      }
-      const created = serializeBaseMapResolved(getBaseMapRow(createdId));
-      logAudit(actorEmail(req), "transport_v2.base_map.create", "transport_base_map_v2", String(created?.id || ""), { key: created?.key || null });
-      res.status(201).json(created);
-    } catch (error) {
-      res.status(400).json({ error: String(error?.message || error) });
-    }
-  });
-
-  router.put("/base-maps/:id", allow("owner"), async (req, res) => {
-    try {
-      const baseMapId = Number(req.params.id || 0) || 0;
-      const current = getBaseMapRow(baseMapId);
-      if (!current) return res.status(404).json({ error: "Base map not found" });
-      const body = req.body || {};
-      const currentMeta = asJson(current.metadata_json, {});
-      const bodyBounds = body.bounds && typeof body.bounds === "object" ? body.bounds : {};
-      const bodyViewbox = body.viewbox && typeof body.viewbox === "object" ? body.viewbox : {};
-      const nextMinLat = bodyBounds.min_lat == null ? Number(current.bounds_min_lat) : num(bodyBounds.min_lat);
-      const nextMinLng = bodyBounds.min_lng == null ? Number(current.bounds_min_lng) : num(bodyBounds.min_lng);
-      const nextMaxLat = bodyBounds.max_lat == null ? Number(current.bounds_max_lat) : num(bodyBounds.max_lat);
-      const nextMaxLng = bodyBounds.max_lng == null ? Number(current.bounds_max_lng) : num(bodyBounds.max_lng);
-      if (![nextMinLat, nextMinLng, nextMaxLat, nextMaxLng].every(Number.isFinite)) throw new Error("bounds are required and must be finite");
-      if (!(nextMinLat < nextMaxLat) || !(nextMinLng < nextMaxLng)) throw new Error("bounds are invalid");
-      const nextKey = String(body.key ?? current.map_key ?? "").trim();
-      const nextTitle = String(body.title ?? current.title ?? "").trim();
-      if (!nextKey) throw new Error("key is required");
-      if (!nextTitle) throw new Error("title is required");
-      const nextBaseSvgAssetId = body.base_svg_asset_id === undefined
-        ? (Number(current.base_svg_asset_id || 0) || null)
-        : (Number(body.base_svg_asset_id || 0) || null);
-      const nextPreviewAssetId = body.preview_asset_id === undefined
-        ? (Number(current.preview_asset_id || 0) || null)
-        : (Number(body.preview_asset_id || 0) || null);
-      const nextCandidateMapAssetId = body.candidate_map_asset_id === undefined
-        ? (Number(current.candidate_map_asset_id || current.base_svg_asset_id || 0) || null)
-        : (Number(body.candidate_map_asset_id || 0) || null);
-      const nextAnnotationMapAssetId = body.annotation_map_asset_id === undefined
-        ? (Number(current.annotation_map_asset_id || current.preview_asset_id || 0) || null)
-        : (Number(body.annotation_map_asset_id || 0) || null);
-      const nextPublishedMapAssetId = body.published_map_asset_id === undefined
-        ? (Number(current.published_map_asset_id || 0) || null)
-        : (Number(body.published_map_asset_id || 0) || null);
-      const nextActiveLabelLayoutId = body.active_label_layout_id === undefined
-        ? (Number(current.active_label_layout_id || 0) || null)
-        : (Number(body.active_label_layout_id || 0) || null);
-      if (nextBaseSvgAssetId && !assetExists(db, nextBaseSvgAssetId)) throw new Error("base_svg_asset_id is invalid");
-      if (nextBaseSvgAssetId && !assetIsSvg(db, nextBaseSvgAssetId)) throw new Error("base_svg_asset_id must reference an SVG asset");
-      if (nextPreviewAssetId && !assetExists(db, nextPreviewAssetId)) throw new Error("preview_asset_id is invalid");
-      if (nextCandidateMapAssetId && !assetExists(db, nextCandidateMapAssetId)) throw new Error("candidate_map_asset_id is invalid");
-      if (nextAnnotationMapAssetId && !assetExists(db, nextAnnotationMapAssetId)) throw new Error("annotation_map_asset_id is invalid");
-      if (nextPublishedMapAssetId && !assetExists(db, nextPublishedMapAssetId)) throw new Error("published_map_asset_id is invalid");
-      if (nextActiveLabelLayoutId && !getLabelLayoutRow(nextActiveLabelLayoutId)) throw new Error("active_label_layout_id is invalid");
-      const mergedMetadata = body.metadata && typeof body.metadata === "object"
-        ? { ...currentMeta, ...body.metadata }
-        : currentMeta;
-      const nextMetadata = nextActiveLabelLayoutId
-        ? stripLegacyLabelMetadata(mergedMetadata)
-        : normalizeLabelLayoutMetadata(mergedMetadata);
-      nextMetadata.overlays = normalizeBaseMapOverlays(db, {
-        viewbox_width: bodyViewbox.width == null ? Number(current.viewbox_width) : num(bodyViewbox.width, Number(current.viewbox_width)),
-        viewbox_height: bodyViewbox.height == null ? Number(current.viewbox_height) : num(bodyViewbox.height, Number(current.viewbox_height)),
-      }, nextMetadata.overlays || []);
-      const cleanupPaths = [];
-      db.exec("BEGIN");
-      try {
-        db.prepare(`
-          UPDATE transport_base_maps_v2
-          SET map_key=?, title=?, version=?, status=?, bounds_min_lat=?, bounds_min_lng=?, bounds_max_lat=?, bounds_max_lng=?,
-              viewbox_x=?, viewbox_y=?, viewbox_width=?, viewbox_height=?, projection_type=?, base_svg_asset_id=?, preview_asset_id=?,
-              candidate_map_asset_id=?, annotation_map_asset_id=?, published_map_asset_id=?, active_label_layout_id=?, metadata_json=?, updated_at=CURRENT_TIMESTAMP
-          WHERE id=?
-        `).run(
-          nextKey,
-          nextTitle,
-          Number(body.version ?? current.version ?? 1) || 1,
-          String(body.status ?? current.status ?? "draft").trim().toLowerCase() || "draft",
-          nextMinLat,
-          nextMinLng,
-          nextMaxLat,
-          nextMaxLng,
-          bodyViewbox.x == null ? Number(current.viewbox_x) : num(bodyViewbox.x, Number(current.viewbox_x)),
-          bodyViewbox.y == null ? Number(current.viewbox_y) : num(bodyViewbox.y, Number(current.viewbox_y)),
-          bodyViewbox.width == null ? Number(current.viewbox_width) : num(bodyViewbox.width, Number(current.viewbox_width)),
-          bodyViewbox.height == null ? Number(current.viewbox_height) : num(bodyViewbox.height, Number(current.viewbox_height)),
-          String(body.projection_type ?? current.projection_type ?? "linear-bbox-fit").trim() || "linear-bbox-fit",
-          nextBaseSvgAssetId,
-          nextPreviewAssetId,
-          nextCandidateMapAssetId,
-          nextAnnotationMapAssetId,
-          nextPublishedMapAssetId,
-          nextActiveLabelLayoutId,
-          json(nextMetadata, "{}"),
-          baseMapId
-        );
-        db.prepare(`
-          UPDATE transport_routes_v2
-          SET poster_status='stale', updated_at=CURRENT_TIMESTAMP
-          WHERE base_map_id=?
-        `).run(baseMapId);
-        await regenerateBaseMapPreviewAsset(baseMapId, { cleanupPaths });
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        await Promise.allSettled(cleanupPaths.map((fullPath) => fs.rm(fullPath, { force: true })));
-        throw error;
-      }
-      const updated = serializeBaseMapResolved(getBaseMapRow(baseMapId));
-      logAudit(actorEmail(req), "transport_v2.base_map.update", "transport_base_map_v2", String(baseMapId), { key: updated?.key || null });
-      res.json(updated);
-    } catch (error) {
-      res.status(400).json({ error: String(error?.message || error) });
-    }
-  });
-
-  router.post("/base-maps/:id/render-annotation", allow("owner"), wrap(async (req, res) => {
-    const baseMapId = Number(req.params.id || 0) || 0;
-    const current = getBaseMapRow(baseMapId);
-    if (!current) return res.status(404).json({ error: "Base map not found" });
-    const cleanupPaths = [];
-    try {
-      const updated = await regenerateBaseMapPreviewAsset(baseMapId, { cleanupPaths });
-      logAudit(actorEmail(req), "transport_v2.base_map.render_annotation", "transport_base_map_v2", String(baseMapId), { key: updated?.key || current.map_key || null });
-      res.json(updated);
-    } catch (error) {
-      await Promise.allSettled(cleanupPaths.map((fullPath) => fs.rm(fullPath, { force: true })));
-      throw error;
-    }
-  }));
 
   const collectPublishInput = (id) => {
     const row = getBaseMapRow(id);
@@ -1402,6 +956,7 @@ const collectorIntegrationConfig = () => ({
         ...bundle,
         base_svg_url: urlFor.get(bundle.base_svg) || "",
         overlays: bundle.overlays.map((o) => ({ ...o, url: urlFor.get(o.file) || "" })),
+        routes: bundle.routes.map((r) => (r.photo ? { ...r, photo_url: urlFor.get(r.photo) || "" } : r)),
       },
       skipped,
       problems,
@@ -1443,429 +998,81 @@ const collectorIntegrationConfig = () => ({
     return res.json({ ok: true, ...payload, skipped });
   }));
 
-  router.post("/base-maps/:id/render-published", allow("owner"), wrap(async (req, res) => {
-    const baseMapId = Number(req.params.id || 0) || 0;
-    const current = getBaseMapRow(baseMapId);
-    if (!current) return res.status(404).json({ error: "Base map not found" });
-    const cleanupPaths = [];
-    try {
-      const updated = await renderPublishedBaseMapAsset(baseMapId, { cleanupPaths });
-      logAudit(actorEmail(req), "transport_v2.base_map.render_published", "transport_base_map_v2", String(baseMapId), { key: updated?.key || current.map_key || null });
-      res.json(updated);
-    } catch (error) {
-      await Promise.allSettled(cleanupPaths.map((fullPath) => fs.rm(fullPath, { force: true })));
-      throw error;
-    }
-  }));
+  const landmarkOut = (it, dict) => ({
+    key: it.label_key,
+    category: it.label_category,
+    x: it.anchor_x,
+    y: it.anchor_y,
+    min_zoom: it.min_zoom_hint,
+    th: String(dict?.th?.[it.label_key] || ""),
+    en: String(dict?.en?.[it.label_key] || ""),
+  });
+  const landmarksResponse = (layoutId) => {
+    const row = layoutId ? getLabelLayoutRow(layoutId) : null;
+    if (!row) return { layout_id: null, items: [] };
+    const dict = normalizeLabelLayoutMetadata(asJson(row.metadata_json, {})).label_dictionary;
+    return { layout_id: Number(row.id), items: listLabelLayoutItems(row.id).map((it) => landmarkOut(it, dict)) };
+  };
 
-  router.get("/label-layouts", allow("owner"), (_req, res) => {
-    res.json({
-      items: db.prepare("SELECT * FROM transport_label_layouts_v2 ORDER BY created_at DESC, id DESC").all().map((row) => ({
-        ...serializeLabelLayout(row),
-        labels: listLabelLayoutItems(row.id),
-      })),
-    });
+  router.get("/landmarks", allow("owner"), (req, res) => {
+    const baseMap = getBaseMapRow(req.query.base_map_id);
+    if (!baseMap) return res.status(404).json({ error: "Base map not found" });
+    res.json(landmarksResponse(Number(baseMap.active_label_layout_id || 0) || 0));
   });
 
-  router.get("/label-layouts/:id", allow("owner"), (req, res) => {
-    const layout = serializeLabelLayout(getLabelLayoutRow(req.params.id));
-    if (!layout) return res.status(404).json({ error: "Label layout not found" });
-    res.json({
-      ...layout,
-      labels: listLabelLayoutItems(req.params.id),
-    });
-  });
-
-  router.post("/label-layouts", allow("owner"), (req, res) => {
-    try {
-      const body = req.body || {};
-      const key = String(body.key || body.layout_key || "").trim();
-      const title = String(body.title || "").trim();
-      if (!key) throw new Error("key is required");
-      if (!title) throw new Error("title is required");
-      const metadata = body.metadata && typeof body.metadata === "object"
-        ? normalizeLabelLayoutMetadata(body.metadata)
-        : normalizeLabelLayoutMetadata({});
-      db.prepare(`
-        INSERT INTO transport_label_layouts_v2 (
-          layout_key, title, status, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `).run(
-        key,
-        title,
-        String(body.status || "draft").trim().toLowerCase() || "draft",
-        json(metadata, "{}")
-      );
-      const createdId = Number(db.prepare("SELECT last_insert_rowid() AS id").get()?.id || 0) || 0;
-      const created = serializeLabelLayout(getLabelLayoutRow(createdId));
-      logAudit(actorEmail(req), "transport_v2.label_layout.create", "transport_label_layout_v2", String(created?.id || ""), { key: created?.key || null });
-      res.status(201).json(created);
-    } catch (error) {
-      res.status(400).json({ error: String(error?.message || error) });
-    }
-  });
-
-  router.put("/label-layouts/:id", allow("owner"), (req, res) => {
-    try {
-      const layoutId = Number(req.params.id || 0) || 0;
-      const current = getLabelLayoutRow(layoutId);
-      if (!current) return res.status(404).json({ error: "Label layout not found" });
-      const body = req.body || {};
-      const currentMeta = asJson(current.metadata_json, {});
-      const nextKey = String(body.key ?? body.layout_key ?? current.layout_key ?? "").trim();
-      const nextTitle = String(body.title ?? current.title ?? "").trim();
-      if (!nextKey) throw new Error("key is required");
-      if (!nextTitle) throw new Error("title is required");
-      const metadata = body.metadata && typeof body.metadata === "object"
-        ? normalizeLabelLayoutMetadata({ ...currentMeta, ...body.metadata })
-        : normalizeLabelLayoutMetadata(currentMeta);
-      db.exec("BEGIN");
-      try {
-        db.prepare(`
-          UPDATE transport_label_layouts_v2
-          SET layout_key=?, title=?, status=?, metadata_json=?, updated_at=CURRENT_TIMESTAMP
-          WHERE id=?
-        `).run(
-          nextKey,
-          nextTitle,
-          String(body.status ?? current.status ?? "draft").trim().toLowerCase() || "draft",
-          json(metadata, "{}"),
-          layoutId
-        );
-        markRoutesStaleForLayout(layoutId);
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-      const updated = serializeLabelLayout(getLabelLayoutRow(layoutId));
-      logAudit(actorEmail(req), "transport_v2.label_layout.update", "transport_label_layout_v2", String(layoutId), { key: updated?.key || null });
-      res.json(updated);
-    } catch (error) {
-      res.status(400).json({ error: String(error?.message || error) });
-    }
-  });
-
-  router.get("/label-layouts/:id/labels", allow("owner"), (req, res) => {
-    const layout = getLabelLayoutRow(req.params.id);
-    if (!layout) return res.status(404).json({ error: "Label layout not found" });
-    res.json({ items: listLabelLayoutItems(req.params.id) });
-  });
-
-  router.put("/label-layouts/:id/labels", allow("owner"), wrap(async (req, res) => {
-    const layout = getLabelLayoutRow(req.params.id);
-    if (!layout) return res.status(404).json({ error: "Label layout not found" });
-    const layoutId = Number(req.params.id || 0) || 0;
-    const items = normalizeLabelLayoutItemsInput(req.body?.items);
-    const affectedBaseMapIds = baseMapIdsForLayout(layoutId);
-    const cleanupPaths = [];
+  router.put("/landmarks", allow("owner"), (req, res) => {
+    const baseMap = getBaseMapRow(req.query.base_map_id);
+    if (!baseMap) return res.status(404).json({ error: "Base map not found" });
+    if (!Array.isArray(req.body?.items)) return res.status(400).json({ error: "items ต้องเป็น array" });
+    const input = req.body.items;
+    const items = normalizeLabelLayoutItemsInput(input.map((r, i) => ({
+      label_key: r?.key, label_category: r?.category, anchor_x: r?.x, anchor_y: r?.y,
+      priority: input.length - i, min_zoom_hint: r?.min_zoom === "" || r?.min_zoom == null ? null : r.min_zoom,
+    })));
+    if (items.length !== input.length) return res.status(400).json({ error: "landmark ต้องมี key และพิกัด x/y" });
+    if (new Set(items.map((it) => it.label_key)).size !== items.length) return res.status(400).json({ error: "key ซ้ำ" });
+    if (input.some((r) => !String(r?.th || "").trim())) return res.status(400).json({ error: "ต้องมีชื่อภาษาไทยทุกจุด" });
+    if (items.some((it) => it.min_zoom_hint != null && !Number.isFinite(it.min_zoom_hint))) return res.status(400).json({ error: "min_zoom ต้องเป็นตัวเลข" });
+    let layoutId = Number(baseMap.active_label_layout_id || 0) || 0;
     db.exec("BEGIN");
     try {
+      let layoutRow = layoutId ? getLabelLayoutRow(layoutId) : null;
+      if (!layoutRow) {
+        db.prepare(`INSERT INTO transport_label_layouts_v2 (layout_key, title, status, metadata_json, created_at, updated_at)
+          VALUES (?, ?, 'draft', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+          .run(`base-map-${baseMap.id}-landmarks-${Date.now()}`, `${baseMap.title || `Base map ${baseMap.id}`} Landmarks`, json(normalizeLabelLayoutMetadata({}), "{}"));
+        layoutId = Number(db.prepare("SELECT last_insert_rowid() AS id").get()?.id || 0) || 0;
+        db.prepare("UPDATE transport_base_maps_v2 SET active_label_layout_id=? WHERE id=?").run(layoutId, Number(baseMap.id));
+        layoutRow = getLabelLayoutRow(layoutId);
+      }
+      const meta = normalizeLabelLayoutMetadata(asJson(layoutRow.metadata_json, {}));
+      const keys = new Set(items.map((it) => it.label_key));
+      const dict = {};
+      for (const [loc, entries] of Object.entries(meta.label_dictionary || {})) {
+        if (loc === "th" || loc === "en") continue;
+        dict[loc] = Object.fromEntries(Object.entries(entries || {}).filter(([k]) => keys.has(k)));
+      }
+      dict.th = {};
+      dict.en = {};
+      for (const r of input) {
+        dict.th[String(r.key).trim()] = String(r.th).trim();
+        if (String(r.en || "").trim()) dict.en[String(r.key).trim()] = String(r.en).trim();
+      }
+      db.prepare("UPDATE transport_label_layouts_v2 SET metadata_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(json(normalizeLabelLayoutMetadata({ ...meta, label_dictionary: dict }), "{}"), layoutId);
       db.prepare("DELETE FROM transport_label_layout_items_v2 WHERE label_layout_id=?").run(layoutId);
-      const insert = db.prepare(`
-        INSERT INTO transport_label_layout_items_v2 (
-          label_layout_id, label_key, label_category, anchor_x, anchor_y, priority, min_zoom_hint, locale_offsets_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `);
-      for (const row of items) {
-        insert.run(
-          layoutId,
-          row.label_key,
-          row.label_category,
-          row.anchor_x,
-          row.anchor_y,
-          row.priority,
-          row.min_zoom_hint,
-          row.locale_offsets ? json(row.locale_offsets, "{}") : null
-        );
-      }
-      markRoutesStaleForLayout(layoutId);
-      for (const baseMapId of affectedBaseMapIds) {
-        await regenerateBaseMapPreviewAsset(baseMapId, { cleanupPaths });
-      }
+      const insert = db.prepare(`INSERT INTO transport_label_layout_items_v2 (
+        label_layout_id, label_key, label_category, anchor_x, anchor_y, priority, min_zoom_hint, locale_offsets_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`);
+      for (const it of items) insert.run(layoutId, it.label_key, it.label_category, it.anchor_x, it.anchor_y, it.priority, it.min_zoom_hint);
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
-      await Promise.allSettled(cleanupPaths.map((fullPath) => fs.rm(fullPath, { force: true })));
-      throw error;
+      return res.status(400).json({ error: String(error?.message || error) });
     }
-    logAudit(actorEmail(req), "transport_v2.label_layout.update_labels", "transport_label_layout_v2", String(layoutId), { label_count: items.length });
-    res.json({ items: listLabelLayoutItems(layoutId) });
-  }));
-
-  router.post("/label-layouts/:id/labels/translate", allow("owner"), wrap(async (req, res) => {
-    const layout = getLabelLayoutRow(req.params.id);
-    if (!layout) return res.status(404).json({ error: "Label layout not found" });
-    const layoutMeta = normalizeLabelLayoutMetadata(asJson(layout.metadata_json, {}));
-    const dictionary = normalizeLabelDictionary(req.body?.dictionary || layoutMeta?.label_dictionary || {});
-    const translationMeta = normalizeLabelTranslationMeta(req.body?.label_translation || layoutMeta?.label_translation || {}, dictionary);
-    const labelKeys = [...new Set((Array.isArray(req.body?.label_keys) ? req.body.label_keys : listLabelLayoutItems(layout.id).map((item) => item.label_key))
-      .map((value) => String(value || "").trim())
-      .filter(Boolean))];
-    const thaiSource = Object.fromEntries(
-      labelKeys
-        .map((labelKey) => [labelKey, String(dictionary?.th?.[labelKey] || "").trim()])
-        .filter(([, text]) => text)
-    );
-    if (!Object.keys(thaiSource).length) {
-      return res.status(400).json({ error: "Thai source text is required before translate" });
-    }
-    const targetLocales = [...new Set((Array.isArray(req.body?.target_locales) ? req.body.target_locales : translationMeta.target_locales)
-      .map((value) => String(value || "").trim().toLowerCase())
-      .filter(Boolean)
-      .filter((value) => value !== "th"))];
-    if (!targetLocales.length) {
-      return res.status(400).json({ error: "target locales are required" });
-    }
-    const aiConfig = resolveEffectiveAiConfig();
-    if (!aiConfig?.enabled) {
-      return res.status(503).json({ error: "translation AI is not configured" });
-    }
-    const nextDictionary = normalizeLabelDictionary(dictionary);
-    const nextTranslationMeta = normalizeLabelTranslationMeta({
-      ...translationMeta,
-      target_locales: targetLocales,
-    }, nextDictionary);
-    let translatedLocaleCount = 0;
-    for (const locale of targetLocales) {
-      const missingSource = Object.fromEntries(
-        Object.entries(thaiSource).filter(([labelKey]) => !String(nextDictionary?.[locale]?.[labelKey] || "").trim())
-      );
-      if (!Object.keys(missingSource).length) continue;
-      const translated = await translateLabelEntries(aiConfig, missingSource, locale, actorEmail(req));
-      nextDictionary[locale] = {
-        ...(nextDictionary[locale] || {}),
-        ...translated,
-      };
-      const localeIsComplete = Object.keys(thaiSource).every((labelKey) => String(nextDictionary?.[locale]?.[labelKey] || "").trim());
-      nextTranslationMeta.locale_statuses[locale] = {
-        ...(nextTranslationMeta.locale_statuses?.[locale] || {}),
-        status: localeIsComplete ? "translated" : "missing",
-        reviewed: false,
-        translated_at: new Date().toISOString(),
-        translated_by: actorEmail(req),
-        reviewed_at: null,
-        reviewed_by: null,
-      };
-      translatedLocaleCount += 1;
-    }
-    const nextMetadata = normalizeLabelLayoutMetadata({
-      ...layoutMeta,
-      label_dictionary: nextDictionary,
-      label_translation: nextTranslationMeta,
-    });
-    const affectedBaseMapIds = baseMapIdsForLayout(layout.id);
-    const cleanupPaths = [];
-    db.exec("BEGIN");
-    try {
-      db.prepare(`
-        UPDATE transport_label_layouts_v2
-        SET metadata_json=?, updated_at=CURRENT_TIMESTAMP
-        WHERE id=?
-      `).run(json(nextMetadata, "{}"), Number(layout.id));
-      markRoutesStaleForLayout(layout.id);
-      for (const baseMapId of affectedBaseMapIds) {
-        await regenerateBaseMapPreviewAsset(baseMapId, { cleanupPaths });
-      }
-      db.exec("COMMIT");
-    } catch (error) {
-      db.exec("ROLLBACK");
-      await Promise.allSettled(cleanupPaths.map((fullPath) => fs.rm(fullPath, { force: true })));
-      throw error;
-    }
-    logAudit(actorEmail(req), "transport_v2.label_layout.translate_labels", "transport_label_layout_v2", String(layout.id), { translated_locale_count: translatedLocaleCount });
-    res.json({
-      label_dictionary: nextMetadata.label_dictionary,
-      label_translation: nextMetadata.label_translation,
-      translated_locale_count: translatedLocaleCount,
-    });
-  }));
-
-  router.get("/base-maps/:id/labels", allow("owner"), (req, res) => {
-    const baseMap = getBaseMapRow(req.params.id);
-    if (!baseMap) return res.status(404).json({ error: "Base map not found" });
-    res.json({ items: resolveBaseMapLabelSource(baseMap).labels });
+    logAudit(actorEmail(req), "transport_v2.landmarks.save", "transport_label_layout_v2", String(layoutId), { count: items.length });
+    res.json(landmarksResponse(layoutId));
   });
-
-  router.put("/base-maps/:id/labels", allow("owner"), wrap(async (req, res) => {
-    const baseMap = getBaseMapRow(req.params.id);
-    if (!baseMap) return res.status(404).json({ error: "Base map not found" });
-    if (Number(baseMap.active_label_layout_id || 0)) {
-      const layoutId = Number(baseMap.active_label_layout_id || 0) || 0;
-      const items = normalizeLabelLayoutItemsInput(req.body?.items);
-      const cleanupPaths = [];
-      db.exec("BEGIN");
-      try {
-        db.prepare("DELETE FROM transport_label_layout_items_v2 WHERE label_layout_id=?").run(layoutId);
-        const insert = db.prepare(`
-          INSERT INTO transport_label_layout_items_v2 (
-            label_layout_id, label_key, label_category, anchor_x, anchor_y, priority, min_zoom_hint, locale_offsets_json, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        `);
-        for (const row of items) {
-          insert.run(layoutId, row.label_key, row.label_category, row.anchor_x, row.anchor_y, row.priority, row.min_zoom_hint, row.locale_offsets ? json(row.locale_offsets, "{}") : null);
-        }
-        markRoutesStaleForLayout(layoutId);
-        await regenerateBaseMapPreviewAsset(Number(baseMap.id || 0), { cleanupPaths });
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        await Promise.allSettled(cleanupPaths.map((fullPath) => fs.rm(fullPath, { force: true })));
-        throw error;
-      }
-      logAudit(actorEmail(req), "transport_v2.base_map.update_labels", "transport_base_map_v2", String(baseMap.id), { label_count: items.length, delegated_to_layout_id: layoutId });
-      return res.json({ items: listLabelLayoutItems(layoutId) });
-    }
-    const baseMapId = Number(req.params.id || 0) || 0;
-    const items = (Array.isArray(req.body?.items) ? req.body.items : [])
-      .map((row, index) => ({
-        label_key: String(row?.label_key || "").trim(),
-        label_category: String(row?.label_category || "landmark").trim().toLowerCase() || "landmark",
-        anchor_x: num(row?.anchor_x),
-        anchor_y: num(row?.anchor_y),
-        priority: Number(row?.priority ?? index) || 0,
-        min_zoom_hint: row?.min_zoom_hint == null ? null : num(row?.min_zoom_hint),
-      }))
-      .filter((row) => row.label_key && Number.isFinite(row.anchor_x) && Number.isFinite(row.anchor_y));
-    const cleanupPaths = [];
-    db.exec("BEGIN");
-    try {
-      db.prepare("DELETE FROM transport_base_map_labels_v2 WHERE base_map_id=?").run(baseMapId);
-      const insert = db.prepare(`
-        INSERT INTO transport_base_map_labels_v2 (base_map_id, label_key, label_category, anchor_x, anchor_y, priority, min_zoom_hint, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `);
-      for (const row of items) {
-        insert.run(baseMapId, row.label_key, row.label_category, row.anchor_x, row.anchor_y, row.priority, row.min_zoom_hint);
-      }
-      db.prepare(`
-        UPDATE transport_routes_v2
-        SET poster_status='stale', updated_at=CURRENT_TIMESTAMP
-        WHERE base_map_id=?
-      `).run(baseMapId);
-      await regenerateBaseMapPreviewAsset(baseMapId, { cleanupPaths });
-      db.exec("COMMIT");
-    } catch (error) {
-      db.exec("ROLLBACK");
-      await Promise.allSettled(cleanupPaths.map((fullPath) => fs.rm(fullPath, { force: true })));
-      throw error;
-    }
-    logAudit(actorEmail(req), "transport_v2.base_map.update_labels", "transport_base_map_v2", String(baseMapId), { label_count: items.length });
-    res.json({ items: listBaseMapLabels(baseMapId) });
-  }));
-
-  router.post("/base-maps/:id/labels/translate", allow("owner"), wrap(async (req, res) => {
-    const baseMap = getBaseMapRow(req.params.id);
-    if (!baseMap) return res.status(404).json({ error: "Base map not found" });
-    const source = resolveBaseMapLabelSource(baseMap);
-    const baseMeta = source.metadata || {};
-    const dictionary = normalizeLabelDictionary(req.body?.dictionary || baseMeta?.label_dictionary || {});
-    const translationMeta = normalizeLabelTranslationMeta(req.body?.label_translation || baseMeta?.label_translation || {}, dictionary);
-    const labelKeys = [...new Set((Array.isArray(req.body?.label_keys) ? req.body.label_keys : source.labels.map((item) => item.label_key))
-      .map((value) => String(value || "").trim())
-      .filter(Boolean))];
-    const thaiSource = Object.fromEntries(
-      labelKeys
-        .map((labelKey) => [labelKey, String(dictionary?.th?.[labelKey] || "").trim()])
-        .filter(([, text]) => text)
-    );
-    if (!Object.keys(thaiSource).length) {
-      return res.status(400).json({ error: "Thai source text is required before translate" });
-    }
-    const targetLocales = [...new Set((Array.isArray(req.body?.target_locales) ? req.body.target_locales : translationMeta.target_locales)
-      .map((value) => String(value || "").trim().toLowerCase())
-      .filter(Boolean)
-      .filter((value) => value !== "th"))];
-    if (!targetLocales.length) {
-      return res.status(400).json({ error: "target locales are required" });
-    }
-    const aiConfig = resolveEffectiveAiConfig();
-    if (!aiConfig?.enabled) {
-      return res.status(503).json({ error: "translation AI is not configured" });
-    }
-    const nextDictionary = normalizeLabelDictionary(dictionary);
-    const nextTranslationMeta = normalizeLabelTranslationMeta({
-      ...translationMeta,
-      target_locales: targetLocales,
-    }, nextDictionary);
-    let translatedLocaleCount = 0;
-    for (const locale of targetLocales) {
-      const missingSource = Object.fromEntries(
-        Object.entries(thaiSource).filter(([labelKey]) => !String(nextDictionary?.[locale]?.[labelKey] || "").trim())
-      );
-      if (!Object.keys(missingSource).length) {
-        continue;
-      }
-      const translated = await translateLabelEntries(aiConfig, missingSource, locale, actorEmail(req));
-      translatedLocaleCount += 1;
-      nextDictionary[locale] = {
-        ...(nextDictionary[locale] || {}),
-        ...translated,
-      };
-      const localeIsComplete = Object.keys(thaiSource).every((labelKey) => String(nextDictionary?.[locale]?.[labelKey] || "").trim());
-      nextTranslationMeta.locale_statuses[locale] = {
-        ...(nextTranslationMeta.locale_statuses?.[locale] || {}),
-        status: localeIsComplete ? "translated" : "missing",
-        reviewed: false,
-        translated_at: new Date().toISOString(),
-        translated_by: actorEmail(req),
-        reviewed_at: null,
-        reviewed_by: null,
-      };
-    }
-    if (translatedLocaleCount > 0) {
-      nextTranslationMeta.last_translated_at = new Date().toISOString();
-      nextTranslationMeta.last_translated_by = actorEmail(req);
-    }
-    logAudit(actorEmail(req), "transport_v2.base_map.translate_labels", "transport_base_map_v2", String(baseMap.id), {
-      label_count: Object.keys(thaiSource).length,
-      target_locales: targetLocales,
-      translated_locale_count: translatedLocaleCount,
-    });
-    res.json({
-      label_dictionary: normalizeLabelDictionary(nextDictionary),
-      label_translation: normalizeLabelTranslationMeta(nextTranslationMeta, nextDictionary),
-      translated_locale_count: translatedLocaleCount,
-    });
-  }));
-
-  router.post("/base-maps/:id/overlays/image", allow("owner"), upload.single("file"), wrap(async (req, res) => {
-    const baseMap = getBaseMapRow(req.params.id);
-    if (!baseMap) return res.status(404).json({ error: "Base map not found" });
-    const file = req.file;
-    if (!file?.buffer?.length) return res.status(400).json({ error: "image file is required" });
-    const declaredMimeType = String(file.mimetype || "").trim().toLowerCase();
-    if (!["image/jpeg", "image/png", "image/webp"].includes(declaredMimeType)) {
-      return res.status(400).json({ error: "only jpeg, png, and webp images are supported" });
-    }
-    const detectedMimeType = detectImageMimeFromBuffer(file.buffer);
-    if (!detectedMimeType || detectedMimeType !== declaredMimeType) {
-      return res.status(400).json({ error: "file content does not match declared image type" });
-    }
-    try {
-      readImageDimensions(file.buffer, declaredMimeType);
-    } catch (error) {
-      return res.status(400).json({ error: String(error?.message || error) || "image payload is invalid" });
-    }
-    const extension = declaredMimeType === "image/png" ? ".png" : declaredMimeType === "image/webp" ? ".webp" : ".jpg";
-    const relPath = path.join("uploads", "transport-v2", "base-maps", `base-map-${Number(baseMap.id || 0)}`, `overlay-${Date.now()}${extension}`);
-    const fullPath = path.join(dirs.mediaDir, relPath);
-    await fs.mkdir(path.dirname(fullPath), { recursive: true });
-    await fs.writeFile(fullPath, file.buffer);
-    const stat = await fs.stat(fullPath);
-    const assetUid = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    db.prepare(`
-      INSERT INTO assets (asset_uid, storage_disk, storage_path, file_name, mime_type, size_bytes, checksum, created_at, updated_at)
-      VALUES (?, 'local', ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `).run(assetUid, relPath.replace(/\\/g, "/"), path.basename(fullPath), declaredMimeType, Number(stat.size || file.buffer.length || 0));
-    const assetId = Number(db.prepare("SELECT last_insert_rowid() AS id").get()?.id || 0) || 0;
-    logAudit(actorEmail(req), "transport_v2.base_map.upload_overlay_image", "transport_base_map_v2", String(baseMap.id), { asset_id: assetId });
-    res.status(201).json({
-      asset_id: assetId,
-      asset_url: assetUrl(db, assetId),
-      mime_type: declaredMimeType,
-    });
-  }));
 
   router.get("/routes", allow("owner"), (_req, res) => {
     res.json({ items: db.prepare("SELECT id FROM transport_routes_v2 ORDER BY updated_at DESC, id DESC").all().map((row) => getRoute(row.id)).filter(Boolean) });
@@ -1881,19 +1088,25 @@ const collectorIntegrationConfig = () => ({
       if (baseMapId && !getBaseMapRow(baseMapId)) throw new Error("base_map_id is invalid");
       const routeKind = body.route_kind == null ? "loop" : String(body.route_kind).trim().toLowerCase();
       if (!ROUTE_KINDS.has(routeKind)) throw new Error("route_kind is invalid");
+      const hasColor = String(body.color || "").trim() !== "";
+      const usedColors = db.prepare("SELECT color FROM transport_routes_v2").all().map((r) => r.color);
+      const routeColor = hasColor ? color(body.color) : pickLeastUsed(usedColors);
       db.prepare(`
         INSERT INTO transport_routes_v2 (
-          base_map_id, route_name, route_number, vehicle_type, route_kind, color, description, workflow_status, assignee_user_id,
+          base_map_id, route_name, route_number, vehicle_type, route_kind, color, description, description_en, fare_baht, color_locked, workflow_status, assignee_user_id,
           route_revision, resolved_revision, poster_revision, routing_status, poster_status, created_by, updated_by, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 'missing', 'missing', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 'missing', 'missing', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `).run(
         baseMapId,
         String(body.route_name).trim(),
         String(body.route_number).trim(),
         vehicle(body.vehicle_type),
         routeKind,
-        color(body.color),
+        routeColor,
         String(body.description || "").trim(),
+        String(body.description_en || "").trim(),
+        fare(body.fare_baht),
+        hasColor ? 1 : 0,
         String(body.workflow_status || "draft").trim().toLowerCase() || "draft",
         Number(body.assignee_user_id || 0) || null,
         actorEmail(req),
@@ -1926,20 +1139,18 @@ const collectorIntegrationConfig = () => ({
       const hasRouteKind = Object.prototype.hasOwnProperty.call(body, "route_kind");
       const nextRouteKind = hasRouteKind ? String(body.route_kind).trim().toLowerCase() : current.route_kind;
       if (hasRouteKind && !ROUTE_KINDS.has(nextRouteKind)) throw new Error("route_kind is invalid");
-      const nextColor = color(body.color ?? current.color, current.color);
+      const hasColor = String(body.color ?? "").trim() !== "";
+      const nextColor = hasColor ? color(body.color, current.color) : current.color;
       const nextDescription = String((body.description ?? current.description) || "").trim();
+      const nextDescriptionEn = String((body.description_en ?? current.description_en) || "").trim();
+      const nextFare = Object.prototype.hasOwnProperty.call(body, "fare_baht") ? fare(body.fare_baht) : current.fare_baht;
+      const nextColorLocked = hasColor ? 1 : (current.color_locked ? 1 : 0);
       const nextWorkflowStatus = String((body.workflow_status ?? current.workflow_status) || "draft").trim().toLowerCase() || current.workflow_status;
       const nextAssigneeUserId = Number((body.assignee_user_id ?? current.assignee_user_id) || 0) || null;
-      const affectsPoster =
-        baseMapId !== current.base_map_id
-        || nextRouteName !== current.route_name
-        || nextRouteNumber !== current.route_number
-        || nextVehicleType !== current.vehicle_type
-        || nextColor !== current.color
-        || nextDescription !== current.description;
+      const affectsRouting = baseMapId !== current.base_map_id || nextRouteKind !== current.route_kind;
       db.prepare(`
         UPDATE transport_routes_v2
-        SET base_map_id=?, route_name=?, route_number=?, vehicle_type=?, route_kind=?, color=?, description=?, workflow_status=?, assignee_user_id=?,
+        SET base_map_id=?, route_name=?, route_number=?, vehicle_type=?, route_kind=?, color=?, description=?, description_en=?, fare_baht=?, color_locked=?, workflow_status=?, assignee_user_id=?,
             route_revision=CASE WHEN ? THEN route_revision + 1 ELSE route_revision END,
             routing_status=CASE WHEN ? THEN 'stale' ELSE routing_status END,
             poster_status=CASE WHEN ? THEN 'stale' ELSE poster_status END,
@@ -1953,11 +1164,14 @@ const collectorIntegrationConfig = () => ({
         nextRouteKind,
         nextColor,
         nextDescription,
+        nextDescriptionEn,
+        nextFare,
+        nextColorLocked,
         nextWorkflowStatus,
         nextAssigneeUserId,
-        affectsPoster ? 1 : 0,
-        affectsPoster ? 1 : 0,
-        affectsPoster ? 1 : 0,
+        affectsRouting ? 1 : 0,
+        affectsRouting ? 1 : 0,
+        affectsRouting ? 1 : 0,
         actorEmail(req),
         Number(req.params.id)
       );
@@ -1983,12 +1197,17 @@ const collectorIntegrationConfig = () => ({
     if (!detectedMimeType || detectedMimeType !== mimeType) {
       return res.status(400).json({ error: "file content does not match declared image type" });
     }
-    const extension = mimeType === "image/png" ? ".png" : mimeType === "image/webp" ? ".webp" : ".jpg";
-    const relPath = path.join("uploads", "transport-v2", "routes", `route-${current.id}`, `vehicle-thumbnail-${Date.now()}${extension}`);
+    const photo = await processRoutePhoto(file.buffer);
+    const relPath = path.join("uploads", "transport-v2", "routes", `route-${current.id}`, `vehicle-thumbnail-${Date.now()}${photo.ext}`);
     const fullPath = path.join(dirs.mediaDir, relPath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
-    await fs.writeFile(fullPath, file.buffer);
-    const checksum = crypto.createHash("sha256").update(file.buffer).digest("hex");
+    try {
+      await fs.writeFile(fullPath, photo.buffer);
+    } catch (err) {
+      await fs.rm(fullPath, { force: true }).catch(() => {});
+      throw err;
+    }
+    const checksum = crypto.createHash("sha256").update(photo.buffer).digest("hex");
     const assetUid = crypto.randomUUID();
     db.exec("BEGIN");
     try {
@@ -1999,8 +1218,8 @@ const collectorIntegrationConfig = () => ({
         assetUid,
         relPath.replace(/\\/g, "/"),
         path.basename(fullPath),
-        mimeType,
-        Number(file.size || file.buffer.length || 0),
+        photo.mime,
+        Number(photo.buffer.length || 0),
         checksum
       );
       const assetId = Number(db.prepare("SELECT id FROM assets WHERE asset_uid=? LIMIT 1").get(assetUid)?.id || 0) || 0;
@@ -2018,8 +1237,8 @@ const collectorIntegrationConfig = () => ({
     const next = getRoute(current.id);
     logAudit(actorEmail(req), "transport_v2.route.upload_thumbnail", "transport_route_v2", String(current.id), {
       vehicle_thumbnail_asset_id: next?.vehicle_thumbnail_asset_id || null,
-      mime_type: mimeType,
-      size_bytes: Number(file.size || file.buffer.length || 0),
+      mime_type: photo.mime,
+      size_bytes: Number(photo.buffer.length || 0),
     });
     res.json(next);
   }));
@@ -2106,6 +1325,13 @@ const collectorIntegrationConfig = () => ({
       SET resolved_revision=?, routing_status='fresh', poster_status='stale', resolved_distance_km=?, resolved_bbox_json=?, last_routed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
       WHERE id=?
     `).run(Number(item.route_revision), distanceKm, json(nextBbox, "null"), Number(item.id));
+    if (!item.color_locked && Number(item.resolved_revision || 0) === 0) {
+      const others = db.prepare("SELECT id FROM transport_routes_v2 WHERE id<>? AND base_map_id IS ?").all(Number(item.id), item.base_map_id)
+        .map((row) => getRoute(row.id))
+        .filter((r) => r && Array.isArray(r.resolved_path) && r.resolved_path.length >= 2)
+        .map((r) => ({ color: r.color, path: r.resolved_path }));
+      db.prepare("UPDATE transport_routes_v2 SET color=?, color_locked=1 WHERE id=?").run(pickForPath(geometry, others), Number(item.id));
+    }
     const next = getRoute(item.id);
     logAudit(actorEmail(req), "transport_v2.route.resolve", "transport_route_v2", String(next.id), { route_revision: next.route_revision, resolved_revision: next.resolved_revision, point_count: next.resolved_path.length });
     res.json({ ...next, bearings_used: bearingsUsed, warnings: detourWarnings(route?.legs, payload.waypoints) });

@@ -6,7 +6,7 @@ const router = read("../server/transport-v2-router.mjs");
 test("v2 router: every endpoint is owner-only", () => {
   const all = [...router.matchAll(/router\.(get|post|put|patch|delete)\(/g)];
   const calls = [...router.matchAll(/router\.(get|post|put|patch|delete)\([^,]+,\s*allow\(([^)]*)\)/g)];
-  assert.equal(all.length, 27);
+  assert.equal(all.length, 14);
   assert.equal(calls.length, all.length);
   for (const m of calls) assert.equal(m[2].trim(), '"owner"', m[0]);
 });
@@ -14,7 +14,7 @@ test("v2 router: render-poster removed", () => {
   assert.ok(!router.includes("render-poster"));
 });
 test("v2 pages: owner-only", () => {
-  for (const f of ["path-editor-page", "routes-review-page", "review-page", "routes-page", "base-maps-page", "preview-page"]) {
+  for (const f of ["path-editor-page", "routes-page", "base-maps-page", "preview-page", "landmarks-page"]) {
     const src = read(`../server/public/transport-v2-${f}.js`);
     assert.match(src, /allowRoles:\s*\[\s*"owner"\s*\]/, f);
     assert.ok(!/allowRoles:\s*\[[^\]]*"admin"/.test(src), f);
@@ -22,11 +22,14 @@ test("v2 pages: owner-only", () => {
   }
 });
 
-test("transport hub: v2 button owner-only", () => {
+test("transport hub: v2 steps owner-only", () => {
   const html = read("../server/public/transport.html");
-  assert.match(html, /id="btn-open-transport-map-manager" class="primary hidden"/);
   const js = read("../server/public/transport-page.js");
-  assert.match(js, /if \(role === "owner"\) \{[^}]*btn-open-transport-map-manager[^}]*\}/s);
+  assert.match(html, /<ol class="transport-steps hidden" id="transport-steps">/);
+  for (const href of ["/transport-v2-base-maps.html", "/transport-v2-routes.html", "/transport-v2-preview.html"]) {
+    assert.ok(html.includes(`href="${href}"`), href);
+  }
+  assert.match(js, /currentRole\(user\) === "owner"[\s\S]*transport-steps/);
 });
 
 test("routes page: no render-published / routes-review entry points; preview reachable", () => {
@@ -52,4 +55,18 @@ test("path editor page uses the shared viewer, not the old editor module", () =>
   assert.ok(!js.includes("transport-v2-path-editor.js"));
   const html = read("../server/public/transport-v2-path-editor.html");
   assert.equal((html.match(/btn-home/g) || []).length, 1);
+});
+
+test("old review pages removed (4a-4)", () => {
+  for (const f of [
+    "transport-map-review-page.js", "transport-map-review.html",
+    "transport-v2-review-page.js", "transport-v2-review.html",
+    "transport-v2-routes-review-page.js", "transport-v2-routes-review.html", "transport-v2-routes-review.js",
+  ]) {
+    assert.ok(!fs.existsSync(new URL(`../server/public/${f}`, import.meta.url)), f);
+  }
+  const app = read("../server/public/app.js");
+  assert.ok(!app.includes("transport-map-review"));
+  assert.ok(!app.includes("transportMapReviewUrl"));
+  assert.ok(app.includes('return "/transport-v2-preview.html";'));
 });

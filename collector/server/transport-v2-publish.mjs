@@ -96,6 +96,15 @@ export function buildTransportBundle({ baseMap, baseSvgStoragePath, labelLayer, 
       vehicle_type: r.vehicle_type,
       color: r.color,
       description: String(r.description || ""),
+      description_en: String(r.description_en || ""),
+      fare_baht: r.fare_baht == null ? null : Number(r.fare_baht),
+      ...(() => {
+        const thumb = String(r.vehicle_thumbnail_url || "");
+        if (!thumb.startsWith("/media/")) return {};
+        const file = `route-${r.id}${extOf(thumb)}`;
+        files.push({ name: file, storagePath: decodeURIComponent(thumb.slice("/media/".length)) });
+        return { photo: file };
+      })(),
       distance_km: Number(r.resolved_distance_km || 0),
       path,
       route_kind: kind,

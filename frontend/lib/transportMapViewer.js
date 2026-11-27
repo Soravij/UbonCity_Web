@@ -28,6 +28,146 @@ export function rampValue(ramp, z) {
   return ramp[ramp.length - 1].slice(1);
 }
 
+// Route band + chevron geometry (moved from transport-v2-leg-decor.js, which re-exports these).
+const LEG_EPS = 1e-9;
+const legLen = (v) => Math.hypot(v[0], v[1]);
+const legUnit = (v) => { const l = legLen(v); return l > LEG_EPS ? [v[0] / l, v[1] / l] : [0, 0]; };
+const legLeftNormal = (t) => [t[1], -t[0]];
+function legTangents(points) {
+  const out = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const d = [points[i + 1][0] - points[i][0], points[i + 1][1] - points[i][1]];
+    out.push(legLen(d) > LEG_EPS ? legUnit(d) : null);
+  }
+  return out;
+}
+function legNextNonNull(segs, from, dir) {
+  let i = from;
+  while (i >= 0 && i < segs.length) { if (segs[i]) return segs[i]; i += dir; }
+  return null;
+}
+export function offsetPolylineLeft(points, offsetUnits) {
+  if (!Array.isArray(points) || points.length < 2 || !offsetUnits) return (points || []).map((p) => [p[0], p[1]]);
+  const segs = legTangents(points);
+  const result = new Array(points.length);
+  for (let i = 0; i < points.length; i += 1) {
+    const inTan = i > 0 ? legNextNonNull(segs, i - 1, -1) : null;
+    const outTan = i < points.length - 1 ? legNextNonNull(segs, i, 1) : null;
+    let normal;
+    if (inTan && outTan) {
+      const nIn = legLeftNormal(inTan), nOut = legLeftNormal(outTan);
+      const sum = [nIn[0] + nOut[0], nIn[1] + nOut[1]];
+      normal = legLen(sum) > 1e-3 ? legUnit(sum) : nOut;
+    } else if (outTan) normal = legLeftNormal(outTan);
+    else if (inTan) normal = legLeftNormal(inTan);
+    else normal = [0, 0];
+    result[i] = [points[i][0] + normal[0] * offsetUnits, points[i][1] + normal[1] * offsetUnits];
+  }
+  return result;
+}
+export function chevronPolylinePoints(x, y, angleDeg, widthUnits, depthUnits) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const dx = Math.cos(rad), dy = Math.sin(rad);
+  const px = -dy, py = dx;
+  const hw = widthUnits / 2, hd = depthUnits / 2;
+  const tipX = x + dx * hd, tipY = y + dy * hd;
+  const backX = x - dx * hd, backY = y - dy * hd;
+  return `${backX + px * hw},${backY + py * hw} ${tipX},${tipY} ${backX - px * hw},${backY - py * hw}`;
+}
+// Solid chevron stripe: thickUnits is its thickness along the path.
+export function chevronPolygonPoints(x, y, angleDeg, widthUnits, depthUnits, thickUnits) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const dx = Math.cos(rad), dy = Math.sin(rad);
+  const px = -dy, py = dx, hw = widthUnits / 2;
+  const tip = [x + dx * (depthUnits / 2 + thickUnits / 2), y + dy * (depthUnits / 2 + thickUnits / 2)];
+  const bl = [tip[0] - dx * depthUnits + px * hw, tip[1] - dy * depthUnits + py * hw];
+  const br = [tip[0] - dx * depthUnits - px * hw, tip[1] - dy * depthUnits - py * hw];
+  const back = (q) => [q[0] - dx * thickUnits, q[1] - dy * thickUnits];
+  return [bl, tip, br, back(br), back(tip), back(bl)].map((q) => `${q[0]},${q[1]}`).join(" ");
+}
+export function arrowPositionsInRect(points, spacingUnits, rect, maxNodes = 1000) {
+  if (!Array.isArray(points) || points.length < 2 || !(spacingUnits > 0) || !rect) return [];
+  const x0 = rect.x, x1 = rect.x + rect.w, y0 = rect.y, y1 = rect.y + rect.h;
+  const isOutside = (a, b) => Math.max(a[0], b[0]) < x0 || Math.min(a[0], b[0]) > x1
+    || Math.max(a[1], b[1]) < y0 || Math.min(a[1], b[1]) > y1;
+  let visLen = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1], b = points[i];
+    if (!isOutside(a, b)) visLen += Math.hypot(b[0] - a[0], b[1] - a[1]);
+  }
+  const k = Math.max(1, Math.ceil(visLen / (maxNodes * spacingUnits)));
+  const step = spacingUnits * k;
+  const out = [];
+  let acc = 0;
+  let next = spacingUnits / 2;
+  for (let i = 1; i < points.length && out.length < maxNodes; i += 1) {
+    const a = points[i - 1], b = points[i];
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const segLen = Math.hypot(dx, dy);
+    if (segLen <= LEG_EPS) continue;
+    const end = acc + segLen;
+    if (isOutside(a, b)) {
+      if (next <= end) next += (Math.floor((end - next) / step) + 1) * step;
+    } else {
+      const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+      while (next <= end && out.length < maxNodes) {
+        const t = (next - acc) / segLen;
+        const x = a[0] + dx * t, y = a[1] + dy * t;
+        if (x >= x0 && x <= x1 && y >= y0 && y <= y1) out.push({ x, y, angleDeg });
+        next += step;
+      }
+    }
+    acc = end;
+  }
+  return out;
+}
+// Band width follows the base map's secondary-road fill (stroke px × BASE_RAMPS ramp),
+// so an out/back pair (2 bands + gap) fills that road at every zoom.
+export const ROUTE_DECOR = {
+  roadGroup: "roads-secondary", roadPx: 2, minBandPx: 2, gapRatio: 0.1,
+  bandOpacity: 0.6, chevronOpacity: 0.85, chevronMinBandPx: 3,
+  chevronW: 1, chevronD: 0.6, chevronSpacing: 1, chevronFill: 0.5,
+  maxChevronNodes: 300,
+};
+export function routeBandPx(z) {
+  const [mul] = rampValue(BASE_RAMPS[ROUTE_DECOR.roadGroup], z);
+  return Math.max(ROUTE_DECOR.minBandPx, (ROUTE_DECOR.roadPx * mul) / (2 + ROUTE_DECOR.gapRatio));
+}
+// segments (out_back): both = centred, no chevrons; out/back = offset left + chevrons.
+// no segments (loop, or out_back without segments): route.path offset left + chevrons,
+// so an in-and-back spur inside one path splits into two opposite bands instead of overlapping.
+export function routeBandSpecs(route) {
+  const segs = Array.isArray(route?.segments) ? route.segments.filter((s) => Array.isArray(s?.path) && s.path.length >= 2) : [];
+  if (segs.length) return segs.map((s) => ({ path: s.path, offset: s.leg !== "both", chevrons: s.leg !== "both" }));
+  return Array.isArray(route?.path) && route.path.length >= 2 ? [{ path: route.path, offset: true, chevrons: true }] : [];
+}
+
+// Icons: Font Awesome Free 6 (solid) — https://fontawesome.com — License CC BY 4.0
+export const LANDMARK_ICONS = {
+  hospital: { w: 640, h: 512, d: 'M192 48c0-26.5 21.5-48 48-48L400 0c26.5 0 48 21.5 48 48l0 464-80 0 0-80c0-26.5-21.5-48-48-48s-48 21.5-48 48l0 80-80 0 0-464zM48 96l112 0 0 416L48 512c-26.5 0-48-21.5-48-48L0 320l80 0c8.8 0 16-7.2 16-16s-7.2-16-16-16L0 288l0-64 80 0c8.8 0 16-7.2 16-16s-7.2-16-16-16L0 192l0-48c0-26.5 21.5-48 48-48zm544 0c26.5 0 48 21.5 48 48l0 48-80 0c-8.8 0-16 7.2-16 16s7.2 16 16 16l80 0 0 64-80 0c-8.8 0-16 7.2-16 16s7.2 16 16 16l80 0 0 144c0 26.5-21.5 48-48 48l-112 0 0-416 112 0zM312 64c-8.8 0-16 7.2-16 16l0 24-24 0c-8.8 0-16 7.2-16 16l0 16c0 8.8 7.2 16 16 16l24 0 0 24c0 8.8 7.2 16 16 16l16 0c8.8 0 16-7.2 16-16l0-24 24 0c8.8 0 16-7.2 16-16l0-16c0-8.8-7.2-16-16-16l-24 0 0-24c0-8.8-7.2-16-16-16l-16 0z', color: '#d32f2f' },
+  market: { w: 576, h: 512, d: 'M253.3 35.1c6.1-11.8 1.5-26.3-10.2-32.4s-26.3-1.5-32.4 10.2L117.6 192 32 192c-17.7 0-32 14.3-32 32s14.3 32 32 32L83.9 463.5C91 492 116.6 512 146 512L430 512c29.4 0 55-20 62.1-48.5L544 256c17.7 0 32-14.3 32-32s-14.3-32-32-32l-85.6 0L365.3 12.9C359.2 1.2 344.7-3.4 332.9 2.7s-16.3 20.6-10.2 32.4L404.3 192l-232.6 0L253.3 35.1zM192 304l0 96c0 8.8-7.2 16-16 16s-16-7.2-16-16l0-96c0-8.8 7.2-16 16-16s16 7.2 16 16zm96-16c8.8 0 16 7.2 16 16l0 96c0 8.8-7.2 16-16 16s-16-7.2-16-16l0-96c0-8.8 7.2-16 16-16zm128 16l0 96c0 8.8-7.2 16-16 16s-16-7.2-16-16l0-96c0-8.8 7.2-16 16-16s16 7.2 16 16z', color: '#f57c00' },
+  temple: { w: 640, h: 512, d: 'M281 22L305.8 4.7c1.3-.9 2.7-1.8 4.1-2.4C313.1 .7 316.6 0 320 0s6.9 .7 10.1 2.2c1.4 .7 2.8 1.5 4.1 2.4L359 22C393 45.8 430.8 63.5 470.8 74.4l23 6.3c1.8 .5 3.6 1.1 5.2 2c3.2 1.7 5.9 4 8.1 6.8c3.8 4.9 5.6 11.3 4.7 17.8c-.4 2.8-1.2 5.4-2.5 7.8c-1.7 3.2-4 5.9-6.8 8.1c-4.3 3.2-9.6 5.1-15.1 4.9l-7.5 0 0 56.1 6.4 5.1 5.2 4.1c21.1 16.7 45 29.6 70.5 38.1l28.9 9.6c1.6 .5 3.2 1.2 4.6 2c3.1 1.7 5.8 4.1 7.8 6.9s3.5 6.1 4.1 9.6c.5 2.7 .6 5.5 .1 8.3s-1.4 5.4-2.7 7.8c-1.7 3.1-4.1 5.8-6.9 7.8s-6.1 3.5-9.6 4.1c-1.6 .3-3.3 .4-5 .4L544 288l0 65.9c20.5 22.8 47.4 39.2 77.4 46.7C632 403 640 412.6 640 424c0 13.3-10.7 24-24 24l-40 0 0 32c0 17.7-14.3 32-32 32s-32-14.3-32-32l0-32-160 0 0 32c0 17.7-14.3 32-32 32s-32-14.3-32-32l0-32-160 0 0 32c0 17.7-14.3 32-32 32s-32-14.3-32-32l0-32-40 0c-13.3 0-24-10.7-24-24c0-11.4 8-21 18.6-23.4c30-7.6 56.9-23.9 77.4-46.7L96 288l-39.4 0c-1.7 0-3.4-.1-5-.4c-3.5-.7-6.8-2.1-9.6-4.1s-5.2-4.7-7-7.8c-1.3-2.4-2.3-5-2.7-7.8s-.4-5.6 .1-8.3c.7-3.5 2.1-6.8 4.1-9.6s4.7-5.2 7.8-6.9c1.4-.8 3-1.5 4.6-2l28.9-9.6c25.5-8.5 49.4-21.4 70.5-38.1l5.2-4.1 6.4-5.1 0-8.1 0-48-7.5 0c-5.5 .1-10.8-1.7-15.1-4.9c-2.8-2.1-5.1-4.8-6.8-8.1c-1.2-2.4-2.1-5-2.5-7.8c-.9-6.5 .9-12.8 4.7-17.8c2.1-2.8 4.8-5.1 8.1-6.8c1.6-.8 3.4-1.5 5.2-2l23-6.3C209.2 63.5 247 45.8 281 22zM416 128l-96 0-96 0 0 64 72 0 48 0 72 0 0-64zM160 288l0 64 136 0 24 0 24 0 136 0 0-64-136 0-24 0s0 0 0 0l-24 0-136 0z', color: '#b8860b' },
+  school: { w: 640, h: 512, d: 'M337.8 5.4C327-1.8 313-1.8 302.2 5.4L166.3 96 48 96C21.5 96 0 117.5 0 144L0 464c0 26.5 21.5 48 48 48l208 0 0-96c0-35.3 28.7-64 64-64s64 28.7 64 64l0 96 208 0c26.5 0 48-21.5 48-48l0-320c0-26.5-21.5-48-48-48L473.7 96 337.8 5.4zM96 192l32 0c8.8 0 16 7.2 16 16l0 64c0 8.8-7.2 16-16 16l-32 0c-8.8 0-16-7.2-16-16l0-64c0-8.8 7.2-16 16-16zm400 16c0-8.8 7.2-16 16-16l32 0c8.8 0 16 7.2 16 16l0 64c0 8.8-7.2 16-16 16l-32 0c-8.8 0-16-7.2-16-16l0-64zM96 320l32 0c8.8 0 16 7.2 16 16l0 64c0 8.8-7.2 16-16 16l-32 0c-8.8 0-16-7.2-16-16l0-64c0-8.8 7.2-16 16-16zm400 16c0-8.8 7.2-16 16-16l32 0c8.8 0 16 7.2 16 16l0 64c0 8.8-7.2 16-16 16l-32 0c-8.8 0-16-7.2-16-16l0-64zM232 176a88 88 0 1 1 176 0 88 88 0 1 1 -176 0zm88-48c-8.8 0-16 7.2-16 16l0 32c0 8.8 7.2 16 16 16l32 0c8.8 0 16-7.2 16-16s-7.2-16-16-16l-16 0 0-16c0-8.8-7.2-16-16-16z', color: '#1976d2' },
+  transit: { w: 576, h: 512, d: 'M288 0C422.4 0 512 35.2 512 80l0 16 0 32c17.7 0 32 14.3 32 32l0 64c0 17.7-14.3 32-32 32l0 160c0 17.7-14.3 32-32 32l0 32c0 17.7-14.3 32-32 32l-32 0c-17.7 0-32-14.3-32-32l0-32-192 0 0 32c0 17.7-14.3 32-32 32l-32 0c-17.7 0-32-14.3-32-32l0-32c-17.7 0-32-14.3-32-32l0-160c-17.7 0-32-14.3-32-32l0-64c0-17.7 14.3-32 32-32c0 0 0 0 0 0l0-32s0 0 0 0l0-16C64 35.2 153.6 0 288 0zM128 160l0 96c0 17.7 14.3 32 32 32l112 0 0-160-112 0c-17.7 0-32 14.3-32 32zM304 288l112 0c17.7 0 32-14.3 32-32l0-96c0-17.7-14.3-32-32-32l-112 0 0 160zM144 400a32 32 0 1 0 0-64 32 32 0 1 0 0 64zm288 0a32 32 0 1 0 0-64 32 32 0 1 0 0 64zM384 80c0-8.8-7.2-16-16-16L208 64c-8.8 0-16 7.2-16 16s7.2 16 16 16l160 0c8.8 0 16-7.2 16-16z', color: '#388e3c' },
+  airport: { w: 576, h: 512, d: 'M482.3 192c34.2 0 93.7 29 93.7 64c0 36-59.5 64-93.7 64l-116.6 0L265.2 495.9c-5.7 10-16.3 16.1-27.8 16.1l-56.2 0c-10.6 0-18.3-10.2-15.4-20.4l49-171.6L112 320 68.8 377.6c-3 4-7.8 6.4-12.8 6.4l-42 0c-7.8 0-14-6.3-14-14c0-1.3 .2-2.6 .5-3.9L32 256 .5 145.9c-.4-1.3-.5-2.6-.5-3.9c0-7.8 6.3-14 14-14l42 0c5 0 9.8 2.4 12.8 6.4L112 192l102.9 0-49-171.6C162.9 10.2 170.6 0 181.2 0l56.2 0c11.5 0 22.1 6.2 27.8 16.1L365.7 192l116.6 0z', color: '#0288d1' },
+  mall: { w: 448, h: 512, d: 'M160 112c0-35.3 28.7-64 64-64s64 28.7 64 64l0 48-128 0 0-48zm-48 48l-64 0c-26.5 0-48 21.5-48 48L0 416c0 53 43 96 96 96l256 0c53 0 96-43 96-96l0-208c0-26.5-21.5-48-48-48l-64 0 0-48C336 50.1 285.9 0 224 0S112 50.1 112 112l0 48zm24 48a24 24 0 1 1 0 48 24 24 0 1 1 0-48zm152 24a24 24 0 1 1 48 0 24 24 0 1 1 -48 0z', color: '#8e24aa' },
+  government: { w: 512, h: 512, d: 'M240.1 4.2c9.8-5.6 21.9-5.6 31.8 0l171.8 98.1L448 104l0 .9 47.9 27.4c12.6 7.2 18.8 22 15.1 36s-16.4 23.8-30.9 23.8L32 192c-14.5 0-27.2-9.8-30.9-23.8s2.5-28.8 15.1-36L64 104.9l0-.9 4.4-1.6L240.1 4.2zM64 224l64 0 0 192 40 0 0-192 64 0 0 192 48 0 0-192 64 0 0 192 40 0 0-192 64 0 0 196.3c.6 .3 1.2 .7 1.8 1.1l48 32c11.7 7.8 17 22.4 12.9 35.9S494.1 512 480 512L32 512c-14.1 0-26.5-9.2-30.6-22.7s1.1-28.1 12.9-35.9l48-32c.6-.4 1.2-.7 1.8-1.1L64 224z', color: '#455a64' },
+};
+export function landmarkScale(z) { return Math.min(2.5, Math.max(1, Math.sqrt(z || 1))); }
+export function landmarkLayout(label, u, z) {
+  const k = landmarkScale(z) * u;
+  const base = LABEL_PX[label.style?.size] || LABEL_PX.m;
+  const cat = String(label.category || 'other');
+  if (cat === 'area') return { icon: null, r: 0, glyph: 0, tx: label.x, ty: label.y, font: base * 1.2 * k, anchor: 'middle', stroke: 3 * k, ring: 0 };
+  const icon = LANDMARK_ICONS[cat] || null;
+  const r = (icon ? 9 : 4) * k;
+  return { icon, r, glyph: 11 * k, tx: label.x + r + 4 * k, ty: label.y, font: base * k, anchor: 'start', stroke: 3 * k, ring: 1 * k };
+}
+export function glyphTransform(icon, cx, cy, size) {
+  const s = size / Math.max(icon.w, icon.h);
+  return `translate(${cx - (icon.w * s) / 2} ${cy - (icon.h * s) / 2}) scale(${s})`;
+}
+
 export function latLngToViewbox(lat, lng, bounds, viewbox) {
   const lngSpan = bounds.max_lng - bounds.min_lng || 1;
   const latSpan = bounds.max_lat - bounds.min_lat || 1;
@@ -158,23 +298,66 @@ export function createTransportMapViewer(container, options = {}) {
     : Promise.resolve();
 
   const routesById = new Map();
+  const routeBands = [];
   for (const route of bundle.routes || []) {
     routesById.set(Number(route.id), route);
     const points = route.path.map((p) => p.join(",")).join(" ");
-    const line = el("polyline", { points, fill: "none", stroke: route.color, "stroke-width": 5, "stroke-linecap": "round", "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke", "data-route-id": route.id });
+    const band = el("g", { "data-route-id": route.id, "data-band": "1", "pointer-events": "none" });
+    routeBands.push([band, route.color, routeBandSpecs(route)]);
     const hit = el("polyline", { points, fill: "none", stroke: "transparent", "stroke-width": 18, "vector-effect": "non-scaling-stroke", "data-route-id": route.id, "data-hit": "1" });
     hit.style.cursor = "pointer";
-    gRoutes.append(line, hit);
+    gRoutes.append(band, hit);
     for (const stop of route.stops || []) {
       gStops.append(el("circle", { cx: stop.x, cy: stop.y, r: 4, fill: "#ffffff", stroke: route.color, "stroke-width": 2, "vector-effect": "non-scaling-stroke", "data-route-id": route.id }));
     }
   }
 
-  const labelsByKey = new Map();
-  for (const label of bundle.labels || []) {
-    labelsByKey.set(label.key, label);
-    gLabels.append(el("text", { "data-key": label.key, "text-anchor": "middle", "dominant-baseline": "middle", fill: label.style?.color || "#243041", stroke: "#ffffff", "paint-order": "stroke", "font-family": "Noto Sans Thai, sans-serif" }));
+  function drawRouteBands(u, z) {
+    if (!routeBands.length) return;
+    const bp = routeBandPx(z);
+    const bandU = bp * u;
+    const gapU = bp * ROUTE_DECOR.gapRatio * u;
+    const spacingU = bandU * ROUTE_DECOR.chevronSpacing;
+    const thickU = spacingU * ROUTE_DECOR.chevronFill;
+    const r = container.getBoundingClientRect();
+    const vw = r.width > 0 ? r.width * u : view.w;
+    const vh = r.height > 0 ? r.height * u : view.h;
+    const cull = { x: view.x + view.w / 2 - vw / 2 - bandU, y: view.y + view.h / 2 - vh / 2 - bandU, w: vw + 2 * bandU, h: vh + 2 * bandU };
+    for (const [g, color, specs] of routeBands) {
+      g.replaceChildren();
+      const gBand = el("g", { opacity: ROUTE_DECOR.bandOpacity });
+      const gChev = el("g", { opacity: ROUTE_DECOR.chevronOpacity });
+      for (const s of specs) {
+        const center = s.offset ? offsetPolylineLeft(s.path, bandU / 2 + gapU / 2) : s.path;
+        gBand.append(el("polyline", { points: center.map((p) => `${p[0]},${p[1]}`).join(" "), fill: "none", stroke: color, "stroke-width": bandU, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+        if (!s.chevrons || bp < ROUTE_DECOR.chevronMinBandPx) continue;
+        for (const a of arrowPositionsInRect(center, spacingU, cull, ROUTE_DECOR.maxChevronNodes)) {
+          gChev.append(el("polygon", { points: chevronPolygonPoints(a.x, a.y, a.angleDeg, bandU * ROUTE_DECOR.chevronW, bandU * ROUTE_DECOR.chevronD, thickU), fill: "#fff" }));
+        }
+      }
+      g.append(gBand, gChev);
+    }
   }
+
+  const labelsByKey = new Map();
+  let selectedLabelKey = null;
+  function buildLabels(list) {
+    labelsByKey.clear();
+    gLabels.replaceChildren();
+    for (const label of list) {
+      labelsByKey.set(label.key, label);
+      const cat = String(label.category || "other");
+      const icon = cat === "area" ? null : LANDMARK_ICONS[cat] || null;
+      const g = el("g", { "data-landmark": "1", "data-key": label.key });
+      g.append(el("circle", { "data-ring": "1", fill: "none", stroke: "#2563eb", visibility: "hidden" }));
+      if (cat !== "area") g.append(el("circle", { fill: icon ? icon.color : "#616161", stroke: "#ffffff" }));
+      if (icon) g.append(el("path", { "data-icon": "1", fill: "#ffffff", d: icon.d }));
+      g.append(el("text", { "text-anchor": "middle", "dominant-baseline": "middle", fill: cat === "area" ? "#6b7280" : (label.style?.color || "#243041"), stroke: "#ffffff", "paint-order": "stroke", "font-family": "Noto Sans Thai, sans-serif" }));
+      gLabels.append(g);
+    }
+    writeLabelText();
+  }
+  buildLabels(bundle.labels || []);
 
   for (const overlay of bundle.overlays || []) {
     if (overlay.url) gOverlays.append(el("image", { href: overlay.url, x: overlay.x, y: overlay.y, width: overlay.width, height: overlay.height }));
@@ -186,12 +369,9 @@ export function createTransportMapViewer(container, options = {}) {
   }
 
   function writeLabelText() {
-    for (const t of gLabels.children) {
-      const label = labelsByKey.get(t.getAttribute("data-key"));
-      const offset = lang === "en" ? label.offsets?.en : null;
-      t.textContent = label.texts?.[lang] || label.texts?.th || "";
-      t.setAttribute("x", String(label.x + Number(offset?.dx || 0)));
-      t.setAttribute("y", String(label.y + Number(offset?.dy || 0)));
+    for (const g of gLabels.children) {
+      const label = labelsByKey.get(g.getAttribute("data-key"));
+      g.querySelector("text").textContent = label.texts?.[lang] || label.texts?.th || "";
     }
   }
 
@@ -236,6 +416,7 @@ export function createTransportMapViewer(container, options = {}) {
     svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
     const u = unitsPerPx();
     const z = zoomLevel(view, full);
+    drawRouteBands(u, z);
     for (const [n, w, ramp] of baseStrokes) {
       if (!ramp) continue;
       const hidden = z < ramp[0][0];
@@ -248,11 +429,35 @@ export function createTransportMapViewer(container, options = {}) {
     for (const c of gStops.children) c.setAttribute("r", String(4 * u));
     for (const c of gDraft.querySelectorAll("circle:not([data-warn-ring])")) c.setAttribute("r", String(DRAFT_R * u));
     for (const c of gDraft.querySelectorAll("circle[data-warn-ring]")) c.setAttribute("r", String(DRAFT_R * 2 * u));
-    for (const t of gLabels.children) {
-      const label = labelsByKey.get(t.getAttribute("data-key"));
-      t.style.display = label.min_zoom == null || z >= label.min_zoom ? "" : "none";
-      t.setAttribute("font-size", String((LABEL_PX[label.style?.size] || LABEL_PX.m) * u));
-      t.setAttribute("stroke-width", String(3 * u));
+    for (const g of gLabels.children) {
+      const label = labelsByKey.get(g.getAttribute("data-key"));
+      const L = landmarkLayout(label, u, z);
+      g.style.display = label.min_zoom == null || z >= label.min_zoom ? "" : "none";
+      const circle = g.querySelector("circle:not([data-ring])");
+      if (circle) {
+        circle.setAttribute("cx", String(label.x));
+        circle.setAttribute("cy", String(label.y));
+        circle.setAttribute("r", String(L.r));
+        circle.setAttribute("stroke-width", String(L.ring));
+      }
+      const ring = g.querySelector("circle[data-ring]");
+      const on = label.key === selectedLabelKey;
+      ring.setAttribute("visibility", on ? "visible" : "hidden");
+      if (on) {
+        ring.setAttribute("cx", String(label.x));
+        ring.setAttribute("cy", String(label.y));
+        ring.setAttribute("r", String(L.r > 0 ? L.r * 1.6 : L.font * 1.2));
+        ring.setAttribute("stroke-width", String(L.stroke));
+      }
+      const path = g.querySelector("path[data-icon]");
+      if (path && L.icon) path.setAttribute("transform", glyphTransform(L.icon, label.x, label.y, L.glyph));
+      const text = g.querySelector("text");
+      text.setAttribute("x", String(L.tx));
+      text.setAttribute("y", String(L.ty));
+      text.setAttribute("font-size", String(L.font));
+      text.setAttribute("text-anchor", L.anchor);
+      text.setAttribute("stroke-width", String(L.stroke));
+      text.setAttribute("letter-spacing", String(label.category) === "area" ? String(L.font * 0.15) : "0");
     }
   }
 
@@ -459,6 +664,8 @@ export function createTransportMapViewer(container, options = {}) {
       drawDraft();
       render();
     },
+    setLabels(next) { buildLabels(Array.isArray(next) ? next : []); render(); },
+    selectLabel(key) { selectedLabelKey = key == null ? null : String(key); render(); },
     fitAll() {
       view = { x: full.x, y: full.y, w: full.width, h: full.height };
       render();

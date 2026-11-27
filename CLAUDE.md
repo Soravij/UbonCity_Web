@@ -46,6 +46,15 @@ these, stop and say so before proceeding — do not silently fold it into an unr
 > renderer). This exception covers that migration only. See `audit/dom-split-plan.md`.
 > Once the split is complete, the freeze rules apply again in full.
 
+> Sanctioned exception (2026-11, branch `feat/transport-v2` and its `tv2/*` branches):
+> Sor asked for the transport v2 admin pages (Base Map / Landmarks / Routes / Preview &
+> Publish / Path Editor and the `transport.html` step hub) to share one layout. New
+> classes for this work are allowed only under these conditions: prefix `.tv2-` (plus the
+> existing `.transport-hub-*` / `.transport-step*` hub classes), added only to the global
+> `collector/server/public/styles.css`, never as `<style>` blocks, inline `style=""`, or
+> styles set from JS. Reuse existing classes first. This exception covers transport v2
+> only; every other area still follows the freeze rule above.
+
 ## Patch discipline
 One concern per patch/commit. Before starting, name which single behavior you're
 touching and which files that requires. If touching `app.js` for a UI fix also seems to

@@ -1,272 +1,237 @@
-import { api, escapeHtml, qs, setBanner } from "./transport-v2-common.js";
+import { api, qs, setBanner } from "./transport-v2-common.js";
 import { initAuthBox } from "./auth-box.js";
+import { createTransportMapViewer } from "./transport-map-viewer.js";
+import { createStage } from "./transport-v2-stage.js";
+import { ROUTE_PALETTE } from "./transport-v2-palette.js";
 
 const READY_BASE_MAP_STATUSES = new Set(["ready", "active", "published", "reviewed"]);
+const SVG_NS = "http://www.w3.org/2000/svg";
+const state = { baseMap: null, routes: [], viewer: null, selectedId: null, isNew: false, pickedColor: null, saving: false };
+const stage = createStage({ stage: qs("routes-stage"), collapseBtn: qs("btn-collapse"), fullscreenBtn: qs("btn-fullscreen"), title: () => "Routes" });
+stage.onChange(() => {
+  const full = stage.isFull();
+  document.getElementById("routes-map").hidden = !full;
+  document.getElementById("btn-fit").hidden = !full;
+  if (full) requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (state.selectedId) state.viewer?.focusRoute(state.selectedId); else state.viewer?.fitAll();
+  }));
+});
+const pathEditorUrl = (id) => "transport-v2-path-editor.html?id=" + id;
 
-const state = {
-  baseMaps: [],
-  routes: [],
-  role: "",
-  selectedRouteIds: [],
-};
-
-function handleLegacyModeRedirect() {
-  const params = new URLSearchParams(window.location.search || "");
-  const mode = String(params.get("mode") || "").trim().toLowerCase();
-  const routeId = Number(params.get("id") || 0) || 0;
-  if (mode === "review") {
-    const url = new URL("/transport-v2-routes-review.html", window.location.origin);
-    if (routeId) url.searchParams.set("ids", String(routeId));
-    window.location.replace(`${url.pathname}${url.search}`);
-    return true;
-  }
-  if (mode === "path") {
-    const url = new URL("/transport-v2-path-editor.html", window.location.origin);
-    if (routeId) url.searchParams.set("id", String(routeId));
-    window.location.replace(`${url.pathname}${url.search}`);
-    return true;
-  }
-  return false;
+function status(text, isError = false) {
+  const node = qs("stage-status");
+  node.textContent = text || "";
+  node.classList.toggle("tv2-text-error", Boolean(isError));
 }
 
-function canManageRoutes() {
-  return state.role === "owner" || state.role === "admin";
+function dot(color, size = 12) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 12 12");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("aria-hidden", "true");
+  const c = document.createElementNS(SVG_NS, "circle");
+  c.setAttribute("cx", "6");
+  c.setAttribute("cy", "6");
+  c.setAttribute("r", "6");
+  c.setAttribute("fill", color || "#999999");
+  svg.append(c);
+  return svg;
 }
 
-function canOpenReview() {
-  return ["owner", "admin", "user"].includes(state.role);
+function current() {
+  return state.routes.find((r) => r.id === state.selectedId) || null;
 }
 
-function canOpenPathEditor() {
-  return ["owner", "admin", "user"].includes(state.role);
+function routingStatusText(r) {
+  return r?.routing_status === "fresh" ? "✓" : "ยังไม่คำนวณ";
 }
 
-function canRenderPublishedMap() {
-  return canManageRoutes();
-}
-
-function isReadyBaseMap(item) {
-  return READY_BASE_MAP_STATUSES.has(String(item?.status || "").trim().toLowerCase());
-}
-
-function hasRenderableMapAsset(item) {
-  return Boolean(Number(item?.base_svg_asset_id || 0));
-}
-
-function latestWorkspaceBaseMap() {
-  const items = Array.isArray(state.baseMaps) ? state.baseMaps : [];
-  return items.find((item) => isReadyBaseMap(item)) || items[0] || null;
-}
-
-function selectedRoute() {
-  if (state.selectedRouteIds.length !== 1) return null;
-  const routeId = Number(state.selectedRouteIds[0] || 0) || 0;
-  return state.routes.find((item) => Number(item?.id || 0) === routeId) || null;
-}
-
-function selectedReviewUrl() {
-  const url = new URL("/transport-v2-routes-review.html", window.location.origin);
-  if (state.selectedRouteIds.length) {
-    url.searchParams.set("ids", state.selectedRouteIds.join(","));
-  }
-  return `${url.pathname}${url.search}`;
-}
-
-function selectedRouteIds() {
-  return state.selectedRouteIds
-    .map((item) => Number(item || 0) || 0)
-    .filter(Boolean);
-}
-
-function selectedPathUrl(routeId = 0) {
-  const activeId = Number(routeId || 0) || Number(selectedRouteIds()[0] || 0) || 0;
-  const url = new URL("/transport-v2-path-editor.html", window.location.origin);
-  if (activeId) url.searchParams.set("id", String(activeId));
-  return `${url.pathname}${url.search}`;
-}
-
-function syncSelectionStatus() {
-  const node = qs("route-selection-status");
-  if (!node) return;
-  const count = state.selectedRouteIds.length;
-  if (!count) {
-    node.textContent = "No route selected";
-    return;
-  }
-  if (count === 1) {
-    const route = selectedRoute();
-    node.textContent = route
-      ? `Selected 1 route: ${route.route_name || route.route_number || route.id}`
-      : "Selected 1 route";
-    return;
-  }
-  node.textContent = `Selected ${count} routes`;
-}
-
-function syncActionState() {
-  const pathTopButton = qs("btn-open-selected-path-top");
-  const count = state.selectedRouteIds.length;
-  if (pathTopButton) pathTopButton.disabled = !canOpenPathEditor() || count !== 1;
-  syncSelectionStatus();
-}
-
-function renderBaseMaps() {
-  const createButton = qs("btn-create-route");
-  const statusNode = qs("create-route-status");
-  const contextNode = qs("create-route-map-context");
-  const createSection = qs("route-create-section");
-  const items = Array.isArray(state.baseMaps) ? state.baseMaps : [];
-  const latest = latestWorkspaceBaseMap();
-  const manageEnabled = canManageRoutes();
-  const hasAnnotationMap = hasRenderableMapAsset(latest);
-
-  if (createSection) createSection.classList.toggle("hidden", !manageEnabled);
-  if (contextNode) {
-    contextNode.textContent = latest
-      ? `Base map: ${latest.title || `#${latest.id}`}`
-      : "No base map yet.";
-  }
-  if (createButton) createButton.disabled = !manageEnabled || items.length === 0 || !hasAnnotationMap;
-  if (statusNode && items.length === 0) {
-    statusNode.textContent = "Complete the base map workflow before creating routes.";
-  } else if (statusNode && latest && !hasAnnotationMap) {
-    statusNode.textContent = "The base map has no SVG yet.";
-  } else if (statusNode) {
-    statusNode.textContent = "";
-  }
-}
-
-function renderRoutes() {
-  const tbody = qs("route-table")?.querySelector("tbody");
-  if (!tbody) return;
-  const selectedIds = new Set(selectedRouteIds());
-  const items = Array.isArray(state.routes) ? state.routes : [];
-  tbody.innerHTML = items.length
-    ? items.map((item) => `
-      <tr>
-        <td><input type="checkbox" data-action="toggle-route" data-id="${item.id}" ${selectedIds.has(Number(item.id || 0)) ? "checked" : ""} /></td>
-        <td>${item.id}</td>
-        <td>
-          <strong>${escapeHtml(item.route_name)}</strong>
-          <div class="muted">${escapeHtml(item.route_number)} | ${escapeHtml(item.vehicle_type)}</div>
-        </td>
-        <td>${escapeHtml(item.routing_status)}<div class="muted">r${Number(item.resolved_revision || 0)}/${Number(item.route_revision || 0)}</div></td>
-        <td class="table-actions">
-          <button type="button" data-action="open-path" data-id="${item.id}">Edit Path</button>
-        </td>
-      </tr>`).join("")
-    : '<tr><td colspan="5" class="muted">No routes yet</td></tr>';
-  syncActionState();
-}
-
-async function refresh() {
-  const [baseMaps, routes] = await Promise.all([
-    api("/api/v2/transport/base-maps"),
-    api("/api/v2/transport/routes"),
-  ]);
-  state.baseMaps = Array.isArray(baseMaps?.items) ? baseMaps.items : [];
-  state.routes = Array.isArray(routes?.items) ? routes.items : [];
-  state.selectedRouteIds = state.selectedRouteIds.filter((selectedId) => (
-    state.routes.some((item) => Number(item?.id || 0) === Number(selectedId || 0))
-  ));
-  renderBaseMaps();
-  renderRoutes();
-}
-
-async function createRoute() {
-  const latest = latestWorkspaceBaseMap();
-  if (!latest) throw new Error("A base map is required before creating a route.");
-  if (!hasRenderableMapAsset(latest)) {
-    throw new Error("The base map has no SVG yet.");
-  }
-  return api("/api/v2/transport/routes", {
-    method: "POST",
-    body: JSON.stringify({
-      base_map_id: Number(latest.id || 0) || null,
-      route_name: String(qs("create-route-name")?.value || "").trim(),
-      route_number: String(qs("create-route-number")?.value || "").trim(),
-      vehicle_type: String(qs("create-route-vehicle")?.value || "songthaew").trim(),
-      color: String(qs("create-route-color")?.value || "#ff6600").trim(),
-      description: String(qs("create-route-description")?.value || "").trim(),
-    }),
+function renderList() {
+  const nodes = state.routes.map((r) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `${r.id === state.selectedId ? "primary" : "utility-action"} tv2-panel-btn tv2-route-btn`;
+    const label = document.createElement("span");
+    label.textContent = `${r.route_number} · ${r.route_name}`;
+    const st = document.createElement("span");
+    st.className = "muted";
+    st.textContent = routingStatusText(r);
+    b.append(dot(r.color), label, st);
+    b.addEventListener("click", () => select(r.id));
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "utility-action tv2-panel-btn tv2-route-path";
+    go.textContent = "✎ เส้นทาง";
+    go.title = "วาดเส้นทางใน Path Editor";
+    go.addEventListener("click", () => { window.location.href = pathEditorUrl(r.id); });
+    const row = document.createElement("div");
+    row.className = "tv2-route-row";
+    row.append(b, go);
+    return row;
   });
-}
-
-function selectOnlyRoute(routeId) {
-  const id = Number(routeId || 0) || 0;
-  state.selectedRouteIds = id ? [id] : [];
-  renderRoutes();
-}
-
-function toggleRouteSelection(routeId, checked) {
-  const id = Number(routeId || 0) || 0;
-  if (!id) return;
-  const set = new Set(selectedRouteIds());
-  if (checked) set.add(id);
-  else set.delete(id);
-  state.selectedRouteIds = Array.from(set);
-  syncActionState();
-}
-
-function openPathEditor(routeId = 0) {
-  if (!canOpenPathEditor()) return;
-  if (routeId) selectOnlyRoute(routeId);
-  if (state.selectedRouteIds.length !== 1) {
-    setBanner("workspace-status", "Path Editor requires exactly one route.", true);
-    return;
+  if (!nodes.length) {
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "ยังไม่มีสาย";
+    nodes.push(p);
   }
-  window.location.href = selectedPathUrl(routeId);
+  qs("rt-list").replaceChildren(...nodes);
+  qs("rt-meta").textContent = `${state.baseMap?.title || ""} · ${state.routes.length} สาย`;
+}
+
+function renderSwatches() {
+  const r = current();
+  const active = state.pickedColor || (state.isNew ? null : r?.color || null);
+  const nodes = ROUTE_PALETTE.map((c) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "utility-action tv2-swatch";
+    b.setAttribute("aria-label", `สี ${c}`);
+    b.setAttribute("aria-pressed", String(active === c));
+    b.append(dot(c, 22));
+    b.addEventListener("click", () => { state.pickedColor = c; renderSwatches(); });
+    return b;
+  });
+  qs("rt-swatches").replaceChildren(...nodes);
+  qs("rt-color-note").textContent = state.pickedColor ? "(เลือกเอง)"
+    : state.isNew ? "(ระบบเลือกให้)"
+    : r?.color_locked ? "(ล็อกแล้ว)" : "(ระบบจะเลือกให้ตอนคำนวณเส้นทางครั้งแรก)";
+}
+
+function renderForm() {
+  const r = current();
+  const show = state.isNew || Boolean(r);
+  qs("rt-detail").hidden = !show;
+  if (!show) return;
+  qs("rt-form-title").textContent = state.isNew ? "สร้างสายใหม่" : `แก้สาย ${r.route_number}`;
+  qs("rt-number").value = state.isNew ? "" : r.route_number || "";
+  qs("rt-name").value = state.isNew ? "" : r.route_name || "";
+  qs("rt-vehicle").value = state.isNew ? "songthaew" : r.vehicle_type || "songthaew";
+  qs("rt-kind").value = state.isNew ? "loop" : r.route_kind || "loop";
+  qs("rt-fare").value = state.isNew || r.fare_baht == null ? "" : String(r.fare_baht);
+  qs("rt-desc").value = state.isNew ? "" : r.description || "";
+  qs("rt-desc-en").value = state.isNew ? "" : r.description_en || "";
+  const thumb = state.isNew ? "" : r.vehicle_thumbnail_url || "";
+  qs("rt-thumb").hidden = !thumb;
+  if (thumb) qs("rt-thumb").src = thumb;
+  qs("rt-photo").value = "";
+  renderSwatches();
+}
+
+function select(id) {
+  state.selectedId = id;
+  state.isNew = false;
+  state.pickedColor = null;
+  status("");
+  renderList();
+  renderForm();
+  qs("rt-detail").hidden = !id;
+  qs("rt-form").hidden = !id;
+  document.getElementById("rt-empty").hidden = !!id;
+  state.viewer?.selectRoute(id);
+  if (id) state.viewer?.focusRoute(id);
+}
+
+function startNew() {
+  state.selectedId = null;
+  state.isNew = true;
+  state.pickedColor = null;
+  status("");
+  renderList();
+  renderForm();
+  qs("rt-detail").hidden = false;
+  qs("rt-form").hidden = false;
+  document.getElementById("rt-empty").hidden = true;
+  state.viewer?.selectRoute(null);
+}
+
+function readForm() {
+  const body = {
+    route_number: qs("rt-number").value.trim(),
+    route_name: qs("rt-name").value.trim(),
+    vehicle_type: qs("rt-vehicle").value,
+    route_kind: qs("rt-kind").value,
+    fare_baht: qs("rt-fare").value.trim(),
+    description: qs("rt-desc").value.trim(),
+    description_en: qs("rt-desc-en").value.trim(),
+  };
+  if (state.pickedColor) body.color = state.pickedColor;
+  return body;
+}
+
+async function load() {
+  const [baseMaps, routes] = await Promise.all([api("/api/v2/transport/base-maps"), api("/api/v2/transport/routes")]);
+  const maps = Array.isArray(baseMaps?.items) ? baseMaps.items : [];
+  state.baseMap = maps.find((m) => READY_BASE_MAP_STATUSES.has(String(m.status || ""))) || maps[0] || null;
+  if (!state.baseMap) throw new Error("ยังไม่มี base map — ทำขั้น 1 ก่อน");
+  state.routes = (Array.isArray(routes?.items) ? routes.items : []).filter((r) => r.base_map_id === state.baseMap.id);
+  const preview = await api(`/api/v2/transport/base-maps/${state.baseMap.id}/preview-bundle`);
+  state.viewer?.destroy();
+  state.viewer = createTransportMapViewer(qs("routes-map"), {
+    bundle: preview.bundle,
+    onRouteSelect: (id) => { if (id) select(id); },
+    onError: (err) => setBanner("workspace-status", `โหลด base map ไม่ได้: ${err.message}`, true),
+  });
+  renderList();
+}
+
+async function save() {
+  const body = readForm();
+  if (!body.route_number || !body.route_name) { status("ต้องใส่เลขสายและชื่อสาย", true); return; }
+  if (state.saving) return;
+  state.saving = true;
+  qs("btn-save").disabled = true;
+  status("กำลังบันทึก…");
+  try {
+    let saved = state.isNew
+      ? await api("/api/v2/transport/routes", { method: "POST", body: JSON.stringify({ ...body, base_map_id: state.baseMap.id }) })
+      : await api(`/api/v2/transport/routes/${state.selectedId}`, { method: "PUT", body: JSON.stringify(body) });
+    state.isNew = false;
+    state.selectedId = saved.id;
+    const file = qs("rt-photo").files?.[0] || null;
+    if (file) {
+      const fd = new FormData();
+      fd.append("file", file);
+      saved = await api(`/api/v2/transport/routes/${saved.id}/thumbnail`, { method: "POST", body: fd });
+    }
+    await load();
+    select(saved.id);
+    status("บันทึกแล้ว");
+  } catch (err) {
+    status(err.message || "บันทึกไม่สำเร็จ", true);
+  } finally {
+    state.saving = false;
+    qs("btn-save").disabled = false;
+  }
+}
+
+function bind() {
+  qs("btn-back-home")?.addEventListener("click", () => { window.location.href = "/"; });
+  qs("btn-process-home")?.addEventListener("click", () => { window.location.href = "/transport.html"; });
+  qs("btn-open-routes")?.addEventListener("click", () => { window.location.href = "/transport-v2-routes.html"; });
+  qs("btn-open-preview")?.addEventListener("click", () => { window.location.href = "/transport-v2-preview.html"; });
+  qs("btn-new").addEventListener("click", startNew);
+  qs("btn-close").addEventListener("click", () => select(null));
+  qs("btn-fit").addEventListener("click", () => state.viewer?.fitAll());
+  qs("rt-form").addEventListener("submit", (e) => { e.preventDefault(); save(); });
 }
 
 async function init() {
-  if (handleLegacyModeRedirect()) return;
   const user = await initAuthBox({ allowRoles: ["owner"] });
   if (!user) return;
-  state.role = String(user.role || "").trim().toLowerCase();
+  bind();
   try {
-    await refresh();
-  } catch (error) {
-    setBanner("workspace-status", error.message || "Failed to load page", true);
-    return;
-  }
-
-  qs("btn-back-home")?.addEventListener("click", () => { window.location.href = "/"; });
-  qs("btn-process-home")?.addEventListener("click", () => { window.location.href = "/transport.html"; });
-  qs("btn-open-base-maps")?.addEventListener("click", () => { window.location.href = "/transport-v2-base-maps.html"; });
-  qs("btn-open-selected-path-top")?.addEventListener("click", () => { openPathEditor(); });
-  qs("btn-open-preview")?.addEventListener("click", () => { window.location.href = "/transport-v2-preview.html"; });
-
-  qs("btn-create-route")?.addEventListener("click", async () => {
-    if (!canManageRoutes()) return;
-    try {
-      setBanner("create-route-status", "Creating route...");
-      const created = await createRoute();
-      await refresh();
-      setBanner("create-route-status", "Route created");
-      if (created?.id) {
-        state.selectedRouteIds = [created.id];
-        renderRoutes();
-      }
-    } catch (error) {
-      setBanner("create-route-status", error.message || "Failed to create route", true);
+    await load();
+    const want = Number(new URLSearchParams(location.search).get("route"));
+    if (want) {
+      const r = state.routes.find((x) => x.id === want);
+      if (r) select(r.id);
     }
-  });
-
-  qs("route-table")?.querySelector("tbody")?.addEventListener("click", (event) => {
-    const target = event.target;
-    if (target.matches('input[type="checkbox"][data-action="toggle-route"]')) return;
-    const button = target.closest("button[data-action]");
-    if (!button) return;
-    const routeId = Number(button.dataset.id || 0) || 0;
-    if (!routeId) return;
-    if (button.dataset.action === "open-path") openPathEditor(routeId);
-  });
-
-  qs("route-table")?.querySelector("tbody")?.addEventListener("change", (event) => {
-    const checkbox = event.target.closest('input[type="checkbox"][data-action="toggle-route"]');
-    if (!checkbox) return;
-    toggleRouteSelection(checkbox.dataset.id, checkbox.checked);
-  });
+    stage.render();
+  } catch (err) {
+    setBanner("workspace-status", err.message || "โหลดหน้าไม่ได้", true);
+  }
 }
 
 init();

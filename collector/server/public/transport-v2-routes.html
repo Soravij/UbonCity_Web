@@ -17,86 +17,81 @@
           <!--CH_BRAND-->
           <div class="auth-intro">
             <h1>ระบบจัดการคอนเทนต์</h1>
-            <p id="page-subtitle">Create route datasets, manage route inventory, and open the dedicated review or path workspace.</p>
+            <p id="page-subtitle">Routes — สายรถและข้อมูลการ์ด</p>
             <!--CH_AUTH-->
             <p class="muted" id="workspace-auth-status"></p>
           </div>
         </div>
         <div class="result-banner hidden" id="workspace-status" role="status" aria-live="polite"></div>
       </header>
-
       <div class="card page-actions-strip">
         <div class="toolbar">
           <button id="btn-back-home" class="utility-action btn-home" type="button">Home</button>
           <button id="btn-process-home" class="utility-action" type="button">Transport</button>
-          <button id="btn-open-base-maps" class="utility-action" type="button">Base Maps</button>
-          <button id="btn-open-selected-path-top" class="utility-action" type="button">Edit Path</button>
+          <button id="btn-open-routes" class="utility-action" type="button">Routes</button>
           <button id="btn-open-preview" class="utility-action" type="button">Preview &amp; Publish</button>
         </div>
       </div>
-
       <div class="stack-lg">
-        <section id="route-create-section" class="card article-work-card">
-          <div class="article-section-head">
-            <div>
-              <h2 class="section-title">Create Route</h2>
-              <p class="muted">Create a route on the active base map, then open it in the Path Editor.</p>
-            </div>
-          </div>
-          <p id="create-route-map-context" class="muted"></p>
-          <div class="grid">
-            <div>
-              <label>Route Name</label>
-              <input id="create-route-name" placeholder="Airport - Bus Terminal" />
-            </div>
-            <div>
-              <label>Route Number</label>
-              <input id="create-route-number" placeholder="A1" />
-            </div>
-            <div>
-              <label>Vehicle</label>
-              <select id="create-route-vehicle">
-                <option value="songthaew">songthaew</option>
-                <option value="minibus">minibus</option>
-                <option value="van">van</option>
-                <option value="bus">bus</option>
-              </select>
-            </div>
-            <div>
-              <label>Color</label>
-              <input id="create-route-color" type="color" value="#ff6600" style="min-height: 42px; padding: 4px; cursor: pointer;" />
-            </div>
-            <div class="full-span">
-              <label>Description</label>
-              <textarea id="create-route-description" rows="3"></textarea>
-            </div>
-          </div>
-          <div class="toolbar">
-            <button id="btn-create-route" class="primary" type="button">Create Route</button>
-            <span id="create-route-status" class="status"></span>
-          </div>
-        </section>
-
         <section class="card article-work-card">
-          <div class="article-section-head">
-            <div>
-              <h2 class="section-title">Routes</h2>
-              <p class="muted">Select a route, then open it in the Path Editor.</p>
+          <div id="routes-stage" class="tv2-stage">
+            <div id="stage-controls" class="card tv2-stage-panel tv2-wide">
+              <button type="button" id="btn-collapse" class="utility-action tv2-collapse" hidden>–</button>
+              <div class="article-section-head">
+                <div>
+                  <h2 class="section-title" data-compact>Routes</h2>
+                  <p class="muted" id="rt-meta" data-compact></p>
+                </div>
+                <div class="tv2-head-actions">
+                  <button id="btn-fit" class="utility-action tv2-panel-btn" type="button" hidden>Fit</button>
+                  <button id="btn-new" class="utility-action tv2-panel-btn" type="button">+ สร้างสายใหม่</button>
+                  <button id="btn-fullscreen" class="primary tv2-panel-btn" type="button">🗺 ดูแผนที่รวม</button>
+                </div>
+              </div>
+              <div class="tv2-split">
+                <div id="rt-list" class="tv2-group"></div>
+                <div>
+                  <p id="rt-empty" class="tv2-tip">เลือกสายทางซ้ายเพื่อแก้ข้อมูล หรือกด + สร้างสายใหม่</p>
+                  <div id="rt-detail" hidden>
+                    <form id="rt-form" class="tv2-group">
+                      <strong id="rt-form-title"></strong>
+                      <div class="tv2-form-grid">
+                        <div class="tv2-group">
+                          <div class="tv2-row">
+                            <div class="tv2-group"><label class="muted tv2-label" for="rt-number">เลขสาย</label><input id="rt-number" type="text" /></div>
+                            <div class="tv2-group"><label class="muted tv2-label" for="rt-vehicle">ประเภทรถ</label>
+                              <select id="rt-vehicle"><option value="songthaew">สองแถว</option><option value="minibus">มินิบัส</option><option value="van">รถตู้</option><option value="bus">รถเมล์</option></select></div>
+                            <div class="tv2-group"><label class="muted tv2-label" for="rt-kind">รูปแบบสาย</label>
+                              <select id="rt-kind"><option value="loop">วน</option><option value="out_back">ไป-กลับ</option></select></div>
+                          </div>
+                          <div class="tv2-row">
+                            <div class="tv2-group"><label class="muted tv2-label" for="rt-name">ชื่อสาย</label><input id="rt-name" type="text" /></div>
+                            <div class="tv2-group"><label class="muted tv2-label" for="rt-fare">ค่าโดยสาร (บาท, ว่างได้)</label><input id="rt-fare" type="number" min="0" step="1" /></div>
+                          </div>
+                          <span class="muted tv2-label">สีสาย <span id="rt-color-note"></span></span>
+                          <div id="rt-swatches" class="tv2-swatches"></div>
+                          <div class="tv2-row">
+                            <div class="tv2-group"><label class="muted tv2-label" for="rt-desc">ข้อมูลเพิ่มเติม (TH) เช่น โบกได้ตลอดทาง</label><textarea id="rt-desc" rows="3"></textarea></div>
+                            <div class="tv2-group"><label class="muted tv2-label" for="rt-desc-en">ข้อมูลเพิ่มเติม (EN)</label><textarea id="rt-desc-en" rows="3"></textarea></div>
+                          </div>
+                        </div>
+                        <div class="tv2-group">
+                          <span class="muted tv2-label">รูปรถ</span>
+                          <img id="rt-thumb" class="tv2-thumb" alt="รูปรถของสายนี้" hidden />
+                          <input id="rt-photo" type="file" accept="image/jpeg,image/png,image/webp" />
+                        </div>
+                      </div>
+                      <div class="tv2-form-actions">
+                        <button id="btn-close" class="utility-action" type="button">ปิด</button>
+                        <button id="btn-save" class="primary" type="submit">บันทึก</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
+              <p class="muted" id="stage-status" role="status" aria-live="polite" data-compact></p>
             </div>
-          </div>
-          <div class="table-wrap">
-            <table class="basic-table" id="route-table">
-              <thead>
-                <tr>
-                  <th>Select</th>
-                  <th>ID</th>
-                  <th>Route</th>
-                  <th>Routing</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
+            <div id="routes-map" class="tv2-stage-map" hidden></div>
           </div>
         </section>
       </div>
@@ -104,4 +99,3 @@
     <script type="module" src="/transport-v2-routes-page.js?v=__COLLECTOR_ASSET_VERSION__"></script>
   </body>
 </html>
-

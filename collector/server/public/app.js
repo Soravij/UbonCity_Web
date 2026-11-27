@@ -628,11 +628,6 @@ function transportMapWorkspaceUrl(itemId) {
   return normalizedItemId > 0 ? `/transport-map-workspace.html?id=${normalizedItemId}` : "";
 }
 
-function transportMapReviewUrl(itemId) {
-  const normalizedItemId = parsePositiveInt(itemId, 0);
-  return normalizedItemId > 0 ? `/transport-map-review.html?id=${normalizedItemId}` : "";
-}
-
 function editorIntakeUrl(itemId = 0) {
   const normalizedItemId = parsePositiveInt(itemId, 0);
   return normalizedItemId > 0 ? editorWorkspaceUrl(normalizedItemId) : "/";
@@ -832,7 +827,7 @@ function getEditorialSurfaceUrlForItem(item, preferredStatus = "") {
 
   if (isTransportMapContentItem(item)) {
     if (isReviewStage) {
-      return transportMapReviewUrl(normalizedItemId);
+      return "/transport-v2-preview.html";
     }
     return transportMapWorkspaceUrl(normalizedItemId);
   }
@@ -10836,9 +10831,6 @@ function wireProcessTransitions() {
     qs("btn-open-events-manager")?.addEventListener("click", () => {
       window.location.href = "/events-manager.html";
     });
-  qs("btn-open-transport-map-manager")?.addEventListener("click", () => {
-    window.location.href = "/transport-map-routes.html";
-  });
   qs("btn-open-other-transport-manager")?.addEventListener("click", () => {
     window.location.href = "/other-transport.html";
   });

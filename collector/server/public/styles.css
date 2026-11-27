@@ -10663,3 +10663,81 @@ select:focus-visible {
   color: #bfdbfe !important;
 }
 
+/* Transport hub */
+.transport-hub-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.transport-hub-card { display: grid; gap: 14px; align-content: start; }
+.transport-hub-card p { margin: 0; }
+.transport-hub-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+.transport-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.transport-step { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; color: inherit; text-decoration: none; background: var(--theme-surface-soft); }
+a.transport-step:hover, a.transport-step:focus-visible { border-color: var(--accent); }
+.transport-step.is-disabled { opacity: 0.55; cursor: not-allowed; }
+.transport-step-num { flex: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: #fff; font-weight: 700; }
+.transport-step-body { display: grid; gap: 2px; }
+.transport-step-body strong { font-size: 15px; }
+
+/* Transport v2 stage (panel + map + fullscreen) */
+.tv2-stage { position: relative; display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+.tv2-stage [hidden] { display: none; }
+.tv2-stage-panel { flex: 0 0 220px; width: 220px; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
+.tv2-stage-map { flex: 1 1 320px; min-width: 0; height: 70vh; min-height: 360px; border-radius: 12px; overflow: hidden; background: #f6f1e7; }
+.tv2-stage.is-full { inset: 0; width: 100vw; height: 100dvh; margin: 0; padding: 0; overflow: hidden; display: block; background: var(--theme-bg-gradient); }
+.tv2-stage.is-pseudo { position: fixed; z-index: 1000; }
+.tv2-stage.is-full .tv2-stage-map { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; border-radius: 0; margin: 0; }
+.tv2-stage.is-full .tv2-stage-panel {
+  position: absolute; top: 12px; left: 12px; z-index: 10; max-height: calc(100% - 24px); overflow: auto;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.18);
+  --card: #ffffff; --line: #cbd5e1; --text: #0f172a; --muted: #64748b;
+  --accent: #3b82f6; --accent-2: #2563eb; --theme-surface-soft: #f8fafc;
+  color: var(--text);
+}
+.tv2-stage.is-full [data-compact]:not(.is-keep):not(.is-flash) { display: none; }
+.tv2-stage.is-collapsed .tv2-stage-panel > :not(.tv2-collapse) { display: none; }
+.tv2-collapse, .tv2-panel-btn { width: 100%; text-align: left; }
+.tv2-group { display: flex; flex-direction: column; gap: 6px; }
+.tv2-row { display: flex; gap: 6px; }
+.tv2-row > * { flex: 1; }
+.tv2-label { font-size: 0.85em; }
+.tv2-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+.tv2-step-actions { display: flex; flex-direction: column; gap: 4px; margin: 0 0 4px 12px; padding-left: 8px; border-left: 2px solid var(--line); }
+.tv2-step-actions > button { width: 100%; text-align: left; font-size: 0.88em; padding: 6px 10px; }
+.tv2-tip { font-size: 0.85em; line-height: 1.4; padding: 6px 8px; border: 1px dashed var(--line); border-radius: 8px; }
+.tv2-text-error { color: #dc2626; }
+.tv2-stage button.tv2-warn-banner { position: absolute; top: 12px; right: 12px; z-index: 11; background: #dc2626 !important; color: #fff !important; border: 0 !important; border-radius: 999px; padding: 8px 14px; font-weight: 600; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25); cursor: pointer; }
+.tv2-stage button.tv2-warn-banner:hover { background: #b91c1c !important; }
+.tv2-stage-panel input, .tv2-stage-panel select { width: 100%; box-sizing: border-box; }
+:root[data-theme="dark"] .tv2-stage.is-full .tv2-stage-panel input,
+:root[data-theme="dark"] .tv2-stage.is-full .tv2-stage-panel select,
+:root[data-theme="dark"] .tv2-stage.is-full .tv2-stage-panel textarea {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+.tv2-info { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; margin: 0; font-size: 0.9em; }
+.tv2-info dt { color: var(--muted); }
+.tv2-info dd { margin: 0; overflow-wrap: anywhere; }
+
+.tv2-stage-panel.tv2-wide { flex-basis: 300px; width: 300px; }
+.tv2-stage-panel textarea { width: 100%; box-sizing: border-box; }
+.tv2-route-btn { display: flex; align-items: center; gap: 8px; }
+.tv2-route-btn > span:first-of-type { flex: 1; }
+.tv2-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.tv2-swatch { width: 36px; height: 36px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+.tv2-swatch[aria-pressed="true"] { outline: 3px solid var(--accent); outline-offset: 2px; }
+.tv2-thumb { width: 100%; max-height: 140px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+.tv2-stage:not(.is-full) .tv2-stage-panel { max-height: max(70vh, 360px); overflow: auto; }
+.tv2-stage:not(.is-full) .tv2-stage-panel.tv2-wide { width: auto; max-width: none; flex: 1 1 auto; }
+.tv2-split { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.tv2-stage.is-full .tv2-split { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 760px) { .tv2-split { grid-template-columns: minmax(0, 1fr); } }
+.tv2-stage:not(.is-full) .tv2-stage-panel.tv2-wide { max-height: none; overflow: visible; }
+.tv2-head-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.tv2-head-actions > button { width: auto; flex: 0 0 auto; }
+.tv2-route-row { display: flex; gap: 6px; align-items: stretch; }
+.tv2-route-row > .tv2-route-btn { flex: 1 1 auto; min-width: 0; }
+.tv2-route-row > .tv2-route-path { flex: 0 0 auto; width: auto; padding-inline: 10px; font-size: 13px; }
+.tv2-form-grid { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 16px; align-items: start; }
+.tv2-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.tv2-form-actions > button { width: auto; flex: 0 0 auto; min-width: 96px; }
+.tv2-stage.is-full .tv2-form-grid { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 1000px) { .tv2-form-grid { grid-template-columns: minmax(0, 1fr); } }
