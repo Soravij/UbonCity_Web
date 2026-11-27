@@ -14,7 +14,7 @@ test("v2 router: render-poster removed", () => {
   assert.ok(!router.includes("render-poster"));
 });
 test("v2 pages: owner-only", () => {
-  for (const f of ["path-editor-page", "routes-review-page", "review-page", "routes-page", "base-maps-page", "preview-page", "landmarks-page"]) {
+  for (const f of ["path-editor-page", "routes-page", "base-maps-page", "preview-page", "landmarks-page"]) {
     const src = read(`../server/public/transport-v2-${f}.js`);
     assert.match(src, /allowRoles:\s*\[\s*"owner"\s*\]/, f);
     assert.ok(!/allowRoles:\s*\[[^\]]*"admin"/.test(src), f);
@@ -55,4 +55,18 @@ test("path editor page uses the shared viewer, not the old editor module", () =>
   assert.ok(!js.includes("transport-v2-path-editor.js"));
   const html = read("../server/public/transport-v2-path-editor.html");
   assert.equal((html.match(/btn-home/g) || []).length, 1);
+});
+
+test("old review pages removed (4a-4)", () => {
+  for (const f of [
+    "transport-map-review-page.js", "transport-map-review.html",
+    "transport-v2-review-page.js", "transport-v2-review.html",
+    "transport-v2-routes-review-page.js", "transport-v2-routes-review.html", "transport-v2-routes-review.js",
+  ]) {
+    assert.ok(!fs.existsSync(new URL(`../server/public/${f}`, import.meta.url)), f);
+  }
+  const app = read("../server/public/app.js");
+  assert.ok(!app.includes("transport-map-review"));
+  assert.ok(!app.includes("transportMapReviewUrl"));
+  assert.ok(app.includes('return "/transport-v2-preview.html";'));
 });
