@@ -5,6 +5,7 @@ import { createStage } from "./transport-v2-stage.js";
 import { colorClashes, routeCardModel } from "./transport-v2-preview-checks.js";
 
 const state = { baseMaps: [], baseMapId: 0, viewer: null, bundle: null, selectedId: null, lang: "th" };
+const safeColor = (c) => (/^#[0-9a-f]{3,8}$/i.test(String(c || "")) ? String(c) : "#888888");
 const stage = createStage({ stage: qs("preview-stage"), collapseBtn: qs("btn-collapse"), fullscreenBtn: qs("btn-fullscreen"), title: () => "Preview" });
 stage.onChange(() => requestAnimationFrame(() => requestAnimationFrame(() => {
   if (state.selectedId != null) state.viewer?.focusRoute(state.selectedId); else state.viewer?.fitAll();
@@ -17,7 +18,7 @@ function routeById(id) {
 function renderRouteList() {
   const routes = state.bundle?.routes || [];
   qs("preview-route-list").innerHTML = routes.length
-    ? routes.map((r) => `<button type="button" class="utility-action tv2-route-btn" data-route-id="${r.id}" aria-pressed="${state.selectedId === r.id}"><span>${escapeHtml(r.number)} ${escapeHtml(r.name)}</span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${escapeHtml(r.color)}"></span></button>`).join("")
+    ? routes.map((r) => `<button type="button" class="utility-action tv2-panel-btn tv2-route-btn" data-route-id="${Number(r.id)}" aria-pressed="${state.selectedId === r.id}"><span>${escapeHtml(r.number)} ${escapeHtml(r.name)}</span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${safeColor(r.color)}"></span></button>`).join("")
     : `<span class="muted">ยังไม่มีสายที่พร้อมแสดง</span>`;
 }
 
@@ -50,7 +51,9 @@ function setLang(lang) {
 }
 
 function renderList(id, items, format) {
-  qs(id).innerHTML = (items || []).map((item) => `<li>${escapeHtml(format(item))}</li>`).join("");
+  const node = qs(id);
+  node.innerHTML = (items || []).map((item) => `<li>${escapeHtml(format(item))}</li>`).join("");
+  node.hidden = !node.innerHTML;
 }
 
 async function loadLive() {
@@ -134,7 +137,7 @@ async function init() {
     const requested = Number(new URLSearchParams(window.location.search).get("id") || 0);
     state.baseMapId = state.baseMaps.some((b) => b.id === requested) ? requested : state.baseMaps[0].id;
     qs("preview-base-map").innerHTML = state.baseMaps
-      .map((b) => `<option value="${b.id}"${b.id === state.baseMapId ? " selected" : ""}>${escapeHtml(b.title || `#${b.id}`)}</option>`).join("");
+      .map((b) => `<option value="${Number(b.id)}"${b.id === state.baseMapId ? " selected" : ""}>${escapeHtml(b.title || `#${b.id}`)}</option>`).join("");
     await loadPreview();
   } catch (err) {
     setBanner("workspace-status", err.message || "โหลดหน้าไม่ได้", true);

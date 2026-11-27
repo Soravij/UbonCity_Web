@@ -13,7 +13,7 @@ export function routeCardModel(route, lang) {
   const v = VEHICLE[route.vehicle_type];
   return {
     title: `${en ? "Route" : "สาย"} ${route.number} · ${route.name}`,
-    photo: route.photo_url || "",
+    photo: String(route.photo_url || "").startsWith("/media/") ? String(route.photo_url) : "",
     rows: [
       [en ? "Vehicle" : "ประเภทรถ", v ? v[en ? "en" : "th"] : String(route.vehicle_type || "")],
       [en ? "Fare" : "ค่าโดยสาร", route.fare_baht == null ? "" : `${route.fare_baht} ${en ? "THB" : "บาท"}`],

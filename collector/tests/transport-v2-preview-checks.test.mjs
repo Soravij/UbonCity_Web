@@ -105,6 +105,16 @@ test("routeCardModel: From-To uses out stops sorted by order, skipping leg back"
   assert.deepEqual(fromTo, ["ต้นทาง – ปลายทาง", "A – B"]);
 });
 
+test("routeCardModel: photo_url is sanitized to /media/ paths only", () => {
+  const base = { number: "1", name: "Test", vehicle_type: "bus", fare_baht: 20, description: "d", stops: [] };
+  const safe = routeCardModel({ ...base, photo_url: "/media/a.webp" }, "th");
+  assert.equal(safe.photo, "/media/a.webp");
+  const jsUrl = routeCardModel({ ...base, photo_url: "javascript:x" }, "th");
+  assert.equal(jsUrl.photo, "");
+  const externalUrl = routeCardModel({ ...base, photo_url: "https://x/a.jpg" }, "th");
+  assert.equal(externalUrl.photo, "");
+});
+
 test("routeCardModel: vehicle songthaew th label", () => {
   const route = {
     number: "1",
