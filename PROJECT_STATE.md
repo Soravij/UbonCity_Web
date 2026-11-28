@@ -8,12 +8,13 @@ Last Updated: 2026-11-22
 - CTA/contact baseline is present on main
 - CTA documentation baseline inherited from `1d08fb1`
 
-### Transport v2 — ⏸ พักไว้ (28 พ.ย. 2026)
+## Transport v2 — ⏸ พักไว้ (28 พ.ย. 2026)
 - branch: feat/transport-v2 = b8e7d91 (รวม a2-landmarks, steps-hub, 4a-3, 4a-4 แล้ว) — ยังไม่ merge main, ยังไม่ deploy
 - admin 4 ขั้น (hub transport.html): ① Base Map (ล็อก ดูอย่างเดียว) → ② Landmarks → ③ Routes + Path Editor → ④ Preview & Publish
 - จบแล้ว: R1–R6 (OSRM bearing, ขาไป/กลับ, offset + chevron, segments ตอน publish), A2 landmarks, 4a การ์ดสาย (สี palette, ค่าโดยสาร, รูปรถ, TH/EN), 4b แถบ/chevron ผูกความกว้างถนน, 4a-3 หน้า Preview (stage/fullscreen, การ์ดสาย, เตือนสีชน), 4a-4 ลบหน้า review เก่า 7 ไฟล์
 - ตัดสินใจ: ตัดงานเก็บสายภาคสนามโดยคนอื่น (B1/B2) ทั้งก้อน — ข้อมูลสายมาจากเจ้าของสาย/สนง.ขนส่ง แล้ว owner ปักเองใน Path Editor; หน้า public ไม่แสดงระยะทางสาย
-- งานถัดไปเมื่อกลับมา: C หน้า public แผนที่สาย + deploy (รัน migrate R3 + migrate-transport-route-card บน Runtime, เครดิต Font Awesome, กรอกชื่อ EN ของ landmarks)
+- กติกา: CSS ใช้ `styles.css` (global, class `.tv2-*`) เท่านั้น — ห้ามมี `<style>`, inline style และ style ผ่าน JS
+- งานถัดไปเมื่อกลับมา: C หน้า public แผนที่สาย + deploy — บน Runtime รัน `collector/scripts/migrate-transport-route-legs.mjs` และ `migrate-transport-route-card.mjs`, แก้ migration 032 ให้ใช้กับ fresh install ได้, ใส่เครดิต Font Awesome Free (CC BY 4.0) บนหน้า public, กรอกชื่อ EN ของ landmarks
 - ค้าง: Path Editor ยังวาดเส้นแบบเดิม (ยังไม่ตัดสินใจ), bearing ของจุดปิดวง (transport-v2-osrm.mjs:14-21), เอกสารเก่ายังอ้างหน้า review (TRANSPORT_V2_ROUTES_WORKSPACE_HANDOFF.md:9, docs/superpowers/plans/*)
 
 ## Docker Deploy (local server)
