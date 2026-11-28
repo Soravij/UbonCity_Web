@@ -1665,6 +1665,20 @@ function toDomainLabel(value) {
   return String(value || "").trim().replace(/^www\./i, "");
 }
 
+const GOOGLE_REDIRECT_HOST_RE = /^(?:www\.)?google\.[a-z.]+$/i;
+function unwrapGoogleRedirectUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return text;
+  let parsed;
+  try { parsed = new URL(text); } catch { return text; }
+  if (!GOOGLE_REDIRECT_HOST_RE.test(parsed.hostname) || parsed.pathname !== "/url") return text;
+  const target = parsed.searchParams.get("q") || parsed.searchParams.get("url") || "";
+  try {
+    const inner = new URL(target);
+    return /^https?:$/i.test(inner.protocol) ? inner.toString() : text;
+  } catch { return text; }
+}
+
 function toManualUrlRows(rawValue) {
   const rows = String(rawValue || "")
     .split(/\r?\n+/)
@@ -1676,9 +1690,10 @@ function toManualUrlRows(rawValue) {
   }
 
   return rows.map((line) => {
+    const url = unwrapGoogleRedirectUrl(line);
     let parsed;
     try {
-      parsed = new URL(line);
+      parsed = new URL(url);
     } catch {
       throw new Error(`URL ไม่ถูกต้อง: ${line}`);
     }
@@ -1693,10 +1708,10 @@ function toManualUrlRows(rawValue) {
       type: "place",
       lang: "th",
       source_name: host || "manual-url",
-      source_url: line,
-      website_url: line,
+      source_url: url,
+      website_url: url,
       tags: ["manual-url", host].filter(Boolean),
-      source_ref: line,
+      source_ref: url,
       payload_json: {
         submitted_url: line,
         hostname: host,

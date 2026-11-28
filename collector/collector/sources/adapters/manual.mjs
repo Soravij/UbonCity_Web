@@ -4,6 +4,21 @@ import path from "node:path";
 import { dedupeMediaUrls, normalizeMediaUrl } from "../media.mjs";
 import { normalizeRawItem } from "../normalize.mjs";
 import { resolvePaths } from "../../../config/paths.mjs";
+import { resolveMapsShortLink } from "./google-maps.mjs";
+
+const GOOGLE_REDIRECT_HOST_RE = /^(?:www\.)?google\.[a-z.]+$/i;
+export function unwrapGoogleRedirectUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return text;
+  let parsed;
+  try { parsed = new URL(text); } catch { return text; }
+  if (!GOOGLE_REDIRECT_HOST_RE.test(parsed.hostname) || parsed.pathname !== "/url") return text;
+  const target = parsed.searchParams.get("q") || parsed.searchParams.get("url") || "";
+  try {
+    const inner = new URL(target);
+    return /^https?:$/i.test(inner.protocol) ? inner.toString() : text;
+  } catch { return text; }
+}
 
 const FETCH_TIMEOUT_MS = 8000;
 const ENRICH_ROW_TIMEOUT_MS = Math.max(
@@ -1879,6 +1894,9 @@ function buildManualFallbackRow(row = {}, errorMessage = "", manualUrlDetails = 
 
 async function enrichManualRow(row = {}) {
   try {
+    for (const key of ["source_url", "url", "website_url"]) {
+      if (row[key]) row = { ...row, [key]: unwrapGoogleRedirectUrl(row[key]) };
+    }
     const sourceUrl = toText(row.source_url || row.url || row.website_url);
     if (!sourceUrl) {
       return normalizeRawItem(row, "manual");
@@ -1889,7 +1907,12 @@ async function enrichManualRow(row = {}) {
     let fetchResult = null;
     let fetchError = "";
     try {
-      fetchResult = await fetchUrlMetadata(sourceUrl);
+      let fetchTarget = sourceUrl;
+      try {
+        const h = new URL(sourceUrl).hostname.toLowerCase();
+        if (h === "maps.app.goo.gl" || h === "goo.gl") fetchTarget = await resolveMapsShortLink(sourceUrl);
+      } catch { fetchTarget = sourceUrl; }
+      fetchResult = await fetchUrlMetadata(fetchTarget);
     } catch (error) {
       fetchError = toText(error?.message || "metadata fetch failed");
     }
