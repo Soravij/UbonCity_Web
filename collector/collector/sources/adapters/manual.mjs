@@ -28,6 +28,30 @@ export function unwrapManualRowUrls(row = {}) {
   return next;
 }
 
+export function extractStaticMapCenter(imageUrl) {
+  const text = toText(imageUrl).replace(/&amp;/g, "&");
+  let parsed;
+  try { parsed = new URL(text); } catch { return null; }
+  const host = parsed.hostname.toLowerCase();
+  if (!(host === "maps.google.com" || host.endsWith(".google.com") || host === "google.com")) return null;
+  if (!/\/maps\/api\/staticmap/i.test(parsed.pathname)) return null;
+  const m = String(parsed.searchParams.get("center") || "").match(/^([-+]?\d+(?:\.\d+)?),\s*([-+]?\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const lat = Number(m[1]); const lng = Number(m[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
+}
+
+const PLUS_CODE_PREFIX_RE = /^[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{0,3}\s+/i;
+export function cleanGoogleMapsPlaceTitle(value) {
+  const text = toText(value);
+  if (!PLUS_CODE_PREFIX_RE.test(text)) return text;
+  const stripped = text.replace(PLUS_CODE_PREFIX_RE, "").trim();
+  const head = stripped.split(",")[0].trim();
+  return head || stripped || text;
+}
+
 const FETCH_TIMEOUT_MS = 8000;
 const ENRICH_ROW_TIMEOUT_MS = Math.max(
   FETCH_TIMEOUT_MS + 2000,
@@ -256,7 +280,7 @@ function extractGoogleMapsPlaceTitle(value) {
     if (!isRecognizedGoogleMapsUrl(parsed.toString())) return "";
     const match = String(parsed.pathname || "").match(/\/maps\/place\/([^/?#]+)/i);
     if (!match?.[1]) return "";
-    return safeDecodeURIComponent(String(match[1]).replace(/\+/g, " ")).trim();
+    return cleanGoogleMapsPlaceTitle(safeDecodeURIComponent(String(match[1]).replace(/\+/g, " ")).trim());
   } catch {
     return "";
   }
@@ -1926,6 +1950,10 @@ async function enrichManualRow(row = {}) {
     const finalUrl = toText(fetchResult?.finalUrl || fetchTarget || sourceUrl);
     const metadata = fetchResult?.metadata || {};
     const resolvedManualUrlDetails = selectManualGoogleMapsDetails(finalUrl, sourceUrl) || sourceManualUrlDetails;
+    const isMapsPage = Boolean(resolvedManualUrlDetails);
+    const needsOgCenter = isMapsPage
+      && (resolvedManualUrlDetails.latitude == null || resolvedManualUrlDetails.longitude == null);
+    const ogCenter = needsOgCenter ? extractStaticMapCenter(metadata.image) : null;
     const host = (() => {
       try {
         return toHostLabel(new URL(finalUrl).hostname);
@@ -1954,7 +1982,7 @@ async function enrichManualRow(row = {}) {
     const preferredCategory = rowCategory && rowCategory !== "attractions" ? rowCategory : "";
     const description = uniqueTextList([
       safeRowDescription,
-      metadata.description,
+      isMapsPage ? "" : metadata.description,
       addressText,
       openingHours[0] || "",
     ]).join(" | ") || (host ? `Imported from pasted URL: ${host}` : "Imported from pasted URL");
@@ -1985,8 +2013,8 @@ async function enrichManualRow(row = {}) {
         tags,
         source_ref: firstNonEmpty(row.source_ref, canonicalUrl, finalUrl),
         map_url: toText(resolvedManualUrlDetails?.mapUrl),
-        latitude: resolvedManualUrlDetails?.latitude ?? metadata.latitude,
-        longitude: resolvedManualUrlDetails?.longitude ?? metadata.longitude,
+        latitude: (resolvedManualUrlDetails?.latitude ?? metadata.latitude) ?? ogCenter?.lat ?? null,
+        longitude: (resolvedManualUrlDetails?.longitude ?? metadata.longitude) ?? ogCenter?.lng ?? null,
         rating: metadata.rating,
         user_rating_count: metadata.reviewCount,
         review_count: metadata.reviewCount,

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { unwrapGoogleRedirectUrl, unwrapManualRowUrls } from "../collector/sources/adapters/manual.mjs";
+import {
+  unwrapGoogleRedirectUrl,
+  unwrapManualRowUrls,
+  extractStaticMapCenter,
+  cleanGoogleMapsPlaceTitle,
+} from "../collector/sources/adapters/manual.mjs";
 
 test("unwraps a Google /url redirect with a q param", () => {
   const input =
@@ -50,4 +55,39 @@ test("unwrapManualRowUrls unwraps source_url and website_url, keeps other fields
 test("unwrapManualRowUrls is a no-op when no url-like keys are present", () => {
   const result = unwrapManualRowUrls({ title: "x" });
   assert.deepEqual(result, { title: "x" });
+});
+
+test("extractStaticMapCenter parses center from an HTML-entity-encoded staticmap URL", () => {
+  const input = "https://maps.google.com/maps/api/staticmap?center=15.28933565%2C104.88050065&amp;zoom=15";
+  assert.deepEqual(extractStaticMapCenter(input), { lat: 15.28933565, lng: 104.88050065 });
+});
+
+test("extractStaticMapCenter rejects a non-Google host", () => {
+  const input = "https://example.com/maps/api/staticmap?center=15.2%2C104.8";
+  assert.equal(extractStaticMapCenter(input), null);
+});
+
+test("extractStaticMapCenter returns null when center param is missing", () => {
+  const input = "https://maps.google.com/maps/api/staticmap?zoom=15";
+  assert.equal(extractStaticMapCenter(input), null);
+});
+
+test("extractStaticMapCenter rejects a 0,0 center", () => {
+  const input = "https://maps.google.com/maps/api/staticmap?center=0%2C0";
+  assert.equal(extractStaticMapCenter(input), null);
+});
+
+test("cleanGoogleMapsPlaceTitle strips a leading plus-code and keeps only the place name", () => {
+  const input = "7VRH+5P Chamrus Home Cafe, Rai Noi, Mueang Ubon Ratchathani District, Ubon Ratchathani 34000";
+  assert.equal(cleanGoogleMapsPlaceTitle(input), "Chamrus Home Cafe");
+});
+
+test("cleanGoogleMapsPlaceTitle leaves a normal title unchanged", () => {
+  const input = "ข้าวหอมบ้านปุณณ์ - Khao Hom, Ubon";
+  assert.equal(cleanGoogleMapsPlaceTitle(input), input);
+});
+
+test("cleanGoogleMapsPlaceTitle leaves a plus-code-free title unchanged", () => {
+  const input = "Chamrus Home Cafe";
+  assert.equal(cleanGoogleMapsPlaceTitle(input), input);
 });
