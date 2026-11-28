@@ -20,6 +20,14 @@ export function unwrapGoogleRedirectUrl(value) {
   } catch { return text; }
 }
 
+export function unwrapManualRowUrls(row = {}) {
+  let next = row;
+  for (const key of ["source_url", "url", "website_url"]) {
+    if (next[key]) next = { ...next, [key]: unwrapGoogleRedirectUrl(next[key]) };
+  }
+  return next;
+}
+
 const FETCH_TIMEOUT_MS = 8000;
 const ENRICH_ROW_TIMEOUT_MS = Math.max(
   FETCH_TIMEOUT_MS + 2000,
@@ -1894,9 +1902,7 @@ function buildManualFallbackRow(row = {}, errorMessage = "", manualUrlDetails = 
 
 async function enrichManualRow(row = {}) {
   try {
-    for (const key of ["source_url", "url", "website_url"]) {
-      if (row[key]) row = { ...row, [key]: unwrapGoogleRedirectUrl(row[key]) };
-    }
+    row = unwrapManualRowUrls(row);
     const sourceUrl = toText(row.source_url || row.url || row.website_url);
     if (!sourceUrl) {
       return normalizeRawItem(row, "manual");
@@ -1906,8 +1912,8 @@ async function enrichManualRow(row = {}) {
 
     let fetchResult = null;
     let fetchError = "";
+    let fetchTarget = sourceUrl;
     try {
-      let fetchTarget = sourceUrl;
       try {
         const h = new URL(sourceUrl).hostname.toLowerCase();
         if (h === "maps.app.goo.gl" || h === "goo.gl") fetchTarget = await resolveMapsShortLink(sourceUrl);
@@ -1917,7 +1923,7 @@ async function enrichManualRow(row = {}) {
       fetchError = toText(error?.message || "metadata fetch failed");
     }
 
-    const finalUrl = toText(fetchResult?.finalUrl || sourceUrl);
+    const finalUrl = toText(fetchResult?.finalUrl || fetchTarget || sourceUrl);
     const metadata = fetchResult?.metadata || {};
     const resolvedManualUrlDetails = selectManualGoogleMapsDetails(finalUrl, sourceUrl) || sourceManualUrlDetails;
     const host = (() => {
@@ -2063,6 +2069,7 @@ async function enrichManualRow(row = {}) {
 }
 
 async function enrichManualRowWithTimeout(row = {}) {
+  row = unwrapManualRowUrls(row);
   let timer = null;
   try {
     return await Promise.race([

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { unwrapGoogleRedirectUrl } from "../collector/sources/adapters/manual.mjs";
+import { unwrapGoogleRedirectUrl, unwrapManualRowUrls } from "../collector/sources/adapters/manual.mjs";
 
 test("unwraps a Google /url redirect with a q param", () => {
   const input =
@@ -35,4 +35,19 @@ test("leaves a /url redirect with a javascript: target unchanged", () => {
 test("leaves non-URL input unchanged", () => {
   const input = "ไม่ใช่ url";
   assert.equal(unwrapGoogleRedirectUrl(input), input);
+});
+
+test("unwrapManualRowUrls unwraps source_url and website_url, keeps other fields", () => {
+  const redirect =
+    "https://www.google.com/url?opi=89978449&q=https://www.facebook.com/p/Bigbang-Gallery-and-Cafe-61572082006157/&sa=U&usg=x";
+  const target = "https://www.facebook.com/p/Bigbang-Gallery-and-Cafe-61572082006157/";
+  const result = unwrapManualRowUrls({ source_url: redirect, website_url: redirect, title: "x" });
+  assert.equal(result.source_url, target);
+  assert.equal(result.website_url, target);
+  assert.equal(result.title, "x");
+});
+
+test("unwrapManualRowUrls is a no-op when no url-like keys are present", () => {
+  const result = unwrapManualRowUrls({ title: "x" });
+  assert.deepEqual(result, { title: "x" });
 });
